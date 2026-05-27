@@ -6,6 +6,9 @@ use rand::RngExt;
 use crate::render::draw_cmd::CameraParams;
 use crate::render::raycast;
 use crate::render::room_env_gltf::RoomCollisionMesh;
+use crate::render::scene_light_sample::{
+    SceneLightSampleCtx, shade_dielectric_rgb_at_world, shade_volumetric_rgb_at_world,
+};
 
 #[derive(Clone, Debug)]
 struct Particle {
@@ -92,7 +95,27 @@ impl RainSpawnVolume {
         self.random_pos()
     }
 
-    fn view_depth_range(self, cam: &CameraParams) -> (f32, f32) {
+    #[inline]
+    pub fn contains(self, p: Vec3) -> bool {
+        p.x >= self.min.x
+            && p.x <= self.max.x
+            && p.y >= self.min.y
+            && p.y <= self.max.y
+            && p.z >= self.min.z
+            && p.z <= self.max.z
+    }
+
+    /// Spawn acceptance weight at `pos` (1 = near camera, [`RAIN_SPAWN_FAR_FLOOR`] = far).
+    pub fn spawn_weight_at(self, cam: &CameraParams, pos: Vec3, near_bias: f32) -> f32 {
+        if near_bias <= 0.0 {
+            return 1.0;
+        }
+        let (d_min, d_max) = self.view_depth_range(cam);
+        Self::spawn_acceptance(cam, pos, d_min, d_max, near_bias)
+    }
+
+    /// View-depth span of this volume from `cam.eye` along the view forward axis.
+    pub fn view_depth_range(self, cam: &CameraParams) -> (f32, f32) {
         let mut d_min = f32::INFINITY;
         let mut d_max = f32::NEG_INFINITY;
         for xi in [self.min.x, self.max.x] {
@@ -141,17 +164,20 @@ fn segment_hit_rain_meshes(
     max_t: f32,
     model: Mat4,
     meshes: &[RoomCollisionMesh],
-) -> Option<Vec3> {
-    let mut best_t: Option<f32> = None;
+) -> Option<(Vec3, Vec3)> {
+    let mut best: Option<(f32, Vec3)> = None;
     for mesh in meshes {
         if let Some(hit) = raycast::ray_hit_trimesh(&mesh.triangles, model, origin, dir_unit)
             && hit.t > 1e-5
             && hit.t <= max_t
         {
-            best_t = Some(best_t.map_or(hit.t, |bt| bt.min(hit.t)));
+            match best {
+                Some((bt, _)) if bt <= hit.t => {}
+                _ => best = Some((hit.t, hit.normal)),
+            }
         }
     }
-    best_t.map(|t| origin + dir_unit * t)
+    best.map(|(t, normal)| (origin + dir_unit * t, normal))
 }
 
 impl ParticleSystem {
@@ -273,11 +299,12 @@ impl ParticleSystem {
         splash_color: [f32; 4],
         volume: RainSpawnVolume,
         spawn_near_bias: f32,
+        lighting: Option<&SceneLightSampleCtx<'_>>,
     ) {
         self.splashes_this_frame = 0;
         let mut rng = rand::rng();
         let wind = Vec3::new(wind[0], wind[1], 0.0);
-        let mut hits: Vec<(usize, Vec3)> = Vec::new();
+        let mut hits: Vec<(usize, Vec3, Vec3)> = Vec::new();
         for (i, drop) in self.world_drops.iter_mut().enumerate() {
             let m = drop.fall_speed_mul.clamp(0.72, 1.28);
             drop.vel.x = wind.x;
@@ -295,18 +322,42 @@ impl ParticleSystem {
             if let Some(ref c) = collider
                 && !c.meshes.is_empty()
                 && step_len > 1e-6
-                && let Some(hit_world) =
+                && let Some((hit_world, hit_normal)) =
                     segment_hit_rain_meshes(prev, dir, step_len, c.model, c.meshes)
             {
-                hits.push((i, hit_world));
+                hits.push((i, hit_world, hit_normal));
             } else if drop.pos.z < volume.min.z {
                 drop.pos = volume.random_pos_near_camera(cam, spawn_near_bias);
                 drop.fall_speed_mul = 0.88 + rng.random::<f32>() * 0.24;
             }
         }
-        for (i, hit_world) in hits {
+        for (i, hit_world, hit_normal) in hits {
             let (sx, sy) = cam.project_world_to_screen(window_w, window_h, hit_world);
-            self.emit_splash_at(sx, sy, splash_count, splash_color, splash_lifetime);
+            let splash_rgb = if let Some(ctx) = lighting {
+                shade_dielectric_rgb_at_world(
+                    hit_world,
+                    hit_normal,
+                    [
+                        splash_color[0],
+                        splash_color[1],
+                        splash_color[2],
+                    ],
+                    ctx,
+                )
+            } else {
+                [
+                    splash_color[0],
+                    splash_color[1],
+                    splash_color[2],
+                ]
+            };
+            let lit_splash = [
+                splash_rgb[0],
+                splash_rgb[1],
+                splash_rgb[2],
+                splash_color[3],
+            ];
+            self.emit_splash_at(sx, sy, splash_count, lit_splash, splash_lifetime);
             self.world_drops[i].pos = volume.random_pos_near_camera(cam, spawn_near_bias);
             self.world_drops[i].fall_speed_mul = 0.88 + rng.random::<f32>() * 0.24;
         }
@@ -345,13 +396,21 @@ impl ParticleSystem {
         window_w: f32,
         window_h: f32,
         streak_len_px: f32,
+        drop_color: [f32; 4],
+        lighting: Option<&SceneLightSampleCtx<'_>>,
     ) -> Vec<([f32; 4], [f32; 4])> {
+        let base_rgb = [drop_color[0], drop_color[1], drop_color[2]];
         let mut out = Vec::with_capacity(self.world_drops.len());
         for d in &self.world_drops {
             let (sx, sy) = cam.project_world_to_screen(window_w, window_h, d.pos);
             if sx < -80.0 || sy < -80.0 || sx > window_w + 80.0 || sy > window_h + 80.0 {
                 continue;
             }
+            let rgb = if let Some(ctx) = lighting {
+                shade_volumetric_rgb_at_world(d.pos, base_rgb, ctx)
+            } else {
+                base_rgb
+            };
             let v = d.vel;
             let v_len = v.length();
             let v_dir = if v_len > 1e-6 {
@@ -373,8 +432,8 @@ impl ParticleSystem {
             let cy = (sy + ty) * 0.5;
             // Axis-aligned quads: thin along X, long along Y (streaks read vertical on screen).
             let rect = [cx - half_w, cy - len * 0.5, half_w * 2.0, len];
-            let alpha = d.color[3];
-            out.push((rect, [d.color[0], d.color[1], d.color[2], alpha]));
+            let alpha = drop_color[3];
+            out.push((rect, [rgb[0], rgb[1], rgb[2], alpha]));
         }
         out
     }

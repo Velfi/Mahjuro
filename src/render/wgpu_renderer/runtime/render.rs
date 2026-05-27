@@ -1137,6 +1137,9 @@ impl WgpuRenderer {
                 (shadows_enabled && !room_uses_baked_shadow)
                     .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
+            if frame.scene_lighting.embedded_gltf_punctual {
+                self.write_main_menu_room_punctual_occluders(&camera);
+            }
         }
         if ops_flags.gameplay_env {
             self.write_gameplay_environment_uniforms(

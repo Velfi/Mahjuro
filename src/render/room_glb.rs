@@ -127,9 +127,9 @@ fn ensure_shop_glb_loaded() {
                     cpu.collision_meshes.len(),
                 );
                 log::info!(
-                    "shop.glb: eyeball bind pose={} eyeball_travel clip={}",
-                    cpu.shop_eyeball_bind_pose.is_some(),
-                    cpu.shop_eyeball_travel.is_some()
+                    "shop.glb: node bind poses={} glTF anim clips={}",
+                    cpu.node_bind_poses.len(),
+                    cpu.gltf_anim_library.clips.len()
                 );
                 if cpu.embedded_perspective_camera.is_some()
                     || !cpu.embedded_point_lights.is_empty()
@@ -429,6 +429,40 @@ pub fn room_world_bounds_corners_centered(
     renv::room_world_bounds_corners_centered(bounds, window_h, env_height_scale)
 }
 
+pub fn room_node_mesh_center_world(
+    cpu: &RoomGlbCpu,
+    window_h: f32,
+    height_scale: f32,
+    node_name: &str,
+) -> Option<Vec3> {
+    let room_center_doc = cpu
+        .environment_bounds_doc
+        .map(|b| b.center())
+        .unwrap_or(Vec3::ZERO);
+    let s = room_env_world_scale(window_h, height_scale);
+    let mut mn = Vec3::splat(f32::INFINITY);
+    let mut mx = Vec3::splat(f32::NEG_INFINITY);
+    let mut any = false;
+    for ep in &cpu.environment_primitives {
+        if ep.gltf_node_name.as_deref() != Some(node_name) {
+            continue;
+        }
+        for v in &ep.mesh.vertices {
+            let p = Vec3::from_array(v.position);
+            mn = mn.min(p);
+            mx = mx.max(p);
+            any = true;
+        }
+    }
+    if any {
+        let center_doc = (mn + mx) * 0.5;
+        return Some((center_doc - room_center_doc) * s);
+    }
+    cpu.node_bind_poses.get(node_name).map(|bind| {
+        (bind.bind_world_doc.transform_point3(Vec3::ZERO) - room_center_doc) * s
+    })
+}
+
 pub fn room_camera_fit_fovy_for_corners(
     window_w: f32,
     window_h: f32,
@@ -472,10 +506,10 @@ pub struct RoomGlbCpu {
     pub embedded_spot_lights: Vec<RoomGlbEmbeddedSpotLight>,
     /// Invisible `rain_hit_*` shells for CPU rain splashes (main menu, etc.).
     pub rain_surface_meshes: Vec<RoomCollisionMesh>,
-    /// Bind pose for `Eyeball` (shop walk only; consumed when building [`Self::shop_eyeball_travel`]).
-    pub shop_eyeball_bind_pose: Option<renv::ShopEyeballBindPose>,
-    /// `eyeball_travel` on the `Eyeball` mesh (shop only).
-    pub shop_eyeball_travel: Option<crate::render::room_gltf_anim::ShopEyeballTravelAnim>,
+    /// Named node bind poses captured during the glTF scene walk.
+    pub node_bind_poses: FxHashMap<String, renv::RoomNodeBindPose>,
+    /// Parsed glTF node TRS animation clips keyed by animation name.
+    pub gltf_anim_library: crate::render::room_gltf_anim::RoomGltfAnimLibrary,
 }
 
 impl RoomGlbCpu {
@@ -679,10 +713,11 @@ pub fn load_room_glb_from_bytes(
     let mut embedded_spot_lights = Vec::new();
     let mut rain_surface_meshes = Vec::new();
 
+    let mut node_bind_poses = FxHashMap::default();
     let mut walk_state = RoomEnvWalkState {
         candle_node_prefix: SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX,
         lantern_node_prefix: SHOP_GLTF_LANTERN_LIGHT_NODE_PREFIX,
-        shop_eyeball_bind: None,
+        node_bind_poses: &mut node_bind_poses,
         markers: &mut markers,
         env_primitives: &mut environment_primitives,
         marker_mesh_bounds_doc: &mut marker_mesh_bounds_doc,
@@ -698,10 +733,13 @@ pub fn load_room_glb_from_bytes(
         walk_room_env_node(node, Mat4::IDENTITY, hooks, &mut walk_state)?;
     }
 
-    let shop_eyeball_bind_pose = walk_state.shop_eyeball_bind;
-
     let (embedded_perspective_camera, embedded_cameras_by_name) = embedded_cameras.into_parts();
     let environment_bounds_doc = room_environment_bounds(&environment_primitives);
+    let gltf_anim_library = crate::render::room_gltf_anim::parse_gltf_anim_library(
+        data,
+        &node_bind_poses,
+        hooks.log_asset_label(),
+    );
 
     Ok(RoomGlbCpu {
         markers,
@@ -714,37 +752,18 @@ pub fn load_room_glb_from_bytes(
         embedded_point_lights,
         embedded_spot_lights,
         rain_surface_meshes,
-        shop_eyeball_bind_pose,
-        shop_eyeball_travel: None,
+        node_bind_poses,
+        gltf_anim_library,
     })
 }
 
 pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
-    let mut cpu = load_room_glb_from_bytes(
+    load_room_glb_from_bytes(
         data,
         "gltf::import_slice(shop.glb)",
         "shop.glb has no scenes",
         &RoomWalkHooks,
-    )?;
-    if let Some(bind) = cpu.shop_eyeball_bind_pose.take() {
-        match crate::render::room_gltf_anim::parse_shop_eyeball_travel(
-            data,
-            bind.bind_world_doc,
-            bind.parent_world_doc,
-        ) {
-            Ok(anim) => {
-                log::info!(
-                    "shop.glb: loaded eyeball_travel ({:.2}s)",
-                    anim.clip.duration_secs
-                );
-                cpu.shop_eyeball_travel = Some(anim);
-            }
-            Err(e) => log::warn!("shop.glb eyeball_travel: {e:#}"),
-        }
-    } else {
-        log::warn!("shop.glb: Eyeball node not found; eyeball_travel disabled");
-    }
-    Ok(cpu)
+    )
 }
 
 /// `true` when `shop.glb` carries `KHR_lights_punctual` lights.

@@ -819,8 +819,12 @@ pub struct UiFrame {
     pub gameplay_action_picks: Option<GameplayActionPickProxies>,
     /// When false, `btn_cash_in` / `label_cash_in` env meshes are not drawn or pickable.
     pub gameplay_cash_in_button_visible: bool,
-    /// Shop `eyeball_travel` playback time in seconds (`None` = bind pose).
-    pub shop_eyeball_travel_sec: Option<f32>,
+    /// Active shop glTF node TRS animation samples (clip name, playback time in seconds).
+    pub shop_gltf_anim_samples: Vec<(String, f32)>,
+    /// When true, shop room env draws only the `Eyeball` node mesh (animation lab).
+    pub shop_env_eyeball_only: bool,
+    /// Animation lab: flat albedo + simple N·L in `room_glb.wgsl` (no punctual PBR).
+    pub shop_env_unlit_debug: bool,
 }
 
 impl UiFrame {
@@ -850,7 +854,9 @@ impl UiFrame {
             procedural_flame_emitters: Vec::new(),
             gameplay_action_picks: None,
             gameplay_cash_in_button_visible: false,
-            shop_eyeball_travel_sec: None,
+            shop_gltf_anim_samples: Vec::new(),
+            shop_env_eyeball_only: false,
+            shop_env_unlit_debug: false,
         }
     }
 

@@ -214,19 +214,19 @@ impl App {
             DebugAction::StartShopEyeballTravel => match &mut self.scene {
                 Scene::Shop(s) => {
                     let clip_loaded = crate::render::room_glb::with_shop_glb_cpu(|opt| {
-                        opt.is_some_and(|cpu| cpu.shop_eyeball_travel.is_some())
+                        opt.is_some_and(|cpu| cpu.gltf_anim_library.has_clip("eyeball_travel"))
                     });
-                    let prim_index_loaded = self
+                    let gpu_clip_loaded = self
                         .renderer
                         .as_ref()
-                        .is_some_and(|r| r.shop_eyeball_primitive_index().is_some());
+                        .is_some_and(|r| r.shop_gltf_anim_has_clip("eyeball_travel"));
                     if s.debug_start_eyeball_travel() {
                         log::debug!(
-                            "Started shop eyeball_travel playback (gpu_eyeball_prim_index_loaded={prim_index_loaded})"
+                            "Started shop eyeball_travel playback (gpu_clip_loaded={gpu_clip_loaded})"
                         );
                     } else {
                         log::warn!(
-                            "Play Eyeball Travel failed: clip_loaded={clip_loaded}, gpu_eyeball_prim_index_loaded={prim_index_loaded}"
+                            "Play Eyeball Travel failed: clip_loaded={clip_loaded}, gpu_clip_loaded={gpu_clip_loaded}"
                         );
                     }
                 }
@@ -295,6 +295,7 @@ impl App {
                         Scene::TutorialCampaign(_) => "TutorialCampaign",
                         Scene::TutorialSummary(_) => "TutorialSummary",
                         Scene::TransitionPlayground(_) => "TransitionPlayground",
+                        Scene::AnimationLab(_) => "AnimationLab",
                         Scene::RumbleLab(_) => "RumbleLab",
                         Scene::Tixels(_) => "Tixels",
                         Scene::YakuJournal(_) => "YakuJournal",
@@ -336,6 +337,11 @@ impl App {
                     TransitionPlaygroundScene::new(true),
                 ));
                 log::debug!("Opened transition playground");
+            }
+            DebugAction::OpenAnimationLab => {
+                self.overlay_stack
+                    .push(Scene::AnimationLab(AnimationLabScene::new(true)));
+                log::debug!("Opened animation lab");
             }
             DebugAction::OpenRumbleLab => {
                 self.overlay_stack

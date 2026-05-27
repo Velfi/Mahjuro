@@ -60,7 +60,8 @@ use crate::render::lit_mesh::push_box;
 use crate::render::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
     SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_spot_ssr_layout,
-    create_room_env_shadow_gpu, create_shadow_caster_layout, create_shadow_sample_layout,
+    create_room_env_camera_uniform_buffers, create_room_env_shadow_gpu_batch,
+    create_shadow_caster_layout, create_shadow_sample_layout,
     create_shadow_warp_bind_group, create_shadow_warp_layout,
 };
 use crate::render::mirror_mesh::build_mirror_mesh;
@@ -203,16 +204,11 @@ pub struct WgpuRenderer {
     /// [`shop.glb`](../../assets/3d/shop.glb) environment primitives (tile vertex layout + materials).
     shop_env_primitives: Vec<TilePrimitiveGpu>,
     shop_environment: Option<ShopEnvironmentGpu>,
-    /// GPU index of the `Eyeball` primitive in [`Self::shop_env_primitives`].
-    shop_eyeball_prim_index: Option<usize>,
-    /// Cached at init from [`crate::render::room_glb::RoomGlbCpu::shop_eyeball_travel`].
-    shop_eyeball_travel: Option<crate::render::room_gltf_anim::ShopEyeballTravelAnim>,
-    shop_eyeball_missing_clip_warned: std::cell::Cell<bool>,
-    shop_eyeball_missing_prim_warned: std::cell::Cell<bool>,
-    /// Last shop room env camera uniform (for per-primitive model patches during `eyeball_travel`).
-    shop_env_last_camera_uniform: std::cell::Cell<uniforms::CameraUniform>,
-    shop_env_base_model: std::cell::Cell<glam::Mat4>,
-    shop_env_shadow_light_view_proj: std::cell::Cell<[f32; 16]>,
+    /// glTF node TRS animation bindings for [`shop.glb`](../../assets/3d/shop.glb).
+    shop_gltf_anim: crate::render::room_gltf_anim::RoomGltfAnimGpu,
+    shop_gltf_anim_missing_clip_warned: std::cell::Cell<bool>,
+    /// GPU primitive indices for the `Eyeball` node in [`Self::shop_env_primitives`].
+    shop_eyeball_prim_indices: Vec<usize>,
     /// [`hallway.glb`](../../assets/3d/hallway.glb) pick-blind room.
     hallway_env_primitives: Vec<TilePrimitiveGpu>,
     hallway_environment: Option<ShopEnvironmentGpu>,
@@ -249,6 +245,8 @@ pub struct WgpuRenderer {
     active_frame_env: crate::game::scene_look_tuning::RoomEnvFrameTune,
     /// CPU triangle soups from invisible marker meshes in [`shop.glb`](../../assets/3d/shop.glb).
     pub(super) shop_env_collision_meshes: Vec<crate::render::room_glb::RoomCollisionMesh>,
+    /// Roof shells in [`main_menu.glb`](../../assets/3d/main_menu.glb) for doorway punctual occlusion.
+    pub(super) main_menu_env_collision_meshes: Vec<crate::render::room_glb::RoomCollisionMesh>,
     /// CPU triangle soups from authored gameplay env buttons (`btn_cash_in`, …).
     pub(super) gameplay_env_collision_meshes: Vec<crate::render::room_glb::RoomCollisionMesh>,
     /// Identity factor used by every primitive (kept for the cam uniform).

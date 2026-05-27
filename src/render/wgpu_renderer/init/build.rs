@@ -2614,24 +2614,27 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         )
     };
 
-    let (shop_env_primitives, shop_environment, shop_eyeball_prim_index, shop_eyeball_travel) = {
+    let (shop_env_primitives, shop_environment, shop_gltf_anim, shop_eyeball_prim_indices) = {
         let _shop = crate::startup_profile::scope("wgpu.room.shop");
         crate::render::room_glb::with_shop_glb_cpu(|cpu_opt| {
             let mut prims = Vec::new();
             let mut gpu_wrap = None;
-            let mut shop_eyeball_prim_index = None;
-            let mut shop_eyeball_travel = None;
-            let mut eyeball_prim_indices: Vec<usize> = Vec::new();
+            let mut shop_gltf_anim = crate::render::room_gltf_anim::RoomGltfAnimGpu::default();
+            let mut shop_eyeball_prim_indices = Vec::new();
             let Some(cpu) = cpu_opt else {
-                return (prims, gpu_wrap, shop_eyeball_prim_index, shop_eyeball_travel);
+                return (prims, gpu_wrap, shop_gltf_anim, shop_eyeball_prim_indices);
             };
-            shop_eyeball_travel = cpu.shop_eyeball_travel.clone();
+            shop_gltf_anim = crate::render::room_gltf_anim::RoomGltfAnimGpu::from_room_cpu(
+                &cpu.gltf_anim_library,
+                &cpu.environment_primitives,
+                "shop.glb",
+            );
             if !cpu.environment_primitives.is_empty() {
                 let mut room_tex_cache = RoomEnvTextureCache::new();
                 let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
                 for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                     if env_prim.gltf_node_name.as_deref() == Some("Eyeball") {
-                        eyeball_prim_indices.push(i);
+                        shop_eyeball_prim_indices.push(i);
                     }
                     let prim = &env_prim.mesh;
                     let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2726,25 +2729,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     .as_ref()
                     .map(|(_, v)| v)
                     .unwrap_or(&shop_decal_view);
-                let identity = Mat4::IDENTITY;
-                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("shop-env-uniform"),
-                    contents: bytemuck::bytes_of(&CameraUniform {
-                        view_proj: identity.to_cols_array(),
-                        model: identity.to_cols_array(),
-                        base_color_factor: [
-                            1.0,
-                            0.0,
-                            0.0,
-                            crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
-                        ],
-                        cam_pos: [0.0; 3],
-                        tile_seed: 0.0,
-                        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
-                        hdr_tonemap: [0.0; 4],
-                    }),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
+                let uniform_buffers = create_room_env_camera_uniform_buffers(
+                    &device,
+                    prims.len(),
+                    "shop-env-uniform",
+                );
                 let distortion_buffer =
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("shop-env-distortion"),
@@ -2756,10 +2745,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
                     .enumerate()
-                    .map(|(i, p)| {
+                    .map(|(pi, p)| {
                         let is_candle = cpu
                             .environment_primitives
-                            .get(i)
+                            .get(pi)
                             .and_then(|ep| ep.gltf_node_name.as_deref())
                             .is_some_and(
                                 crate::render::room_env_gltf::is_shop_candle_wax_node_name,
@@ -2775,7 +2764,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                             entries: &[
                                 wgpu::BindGroupEntry {
                                     binding: 0,
-                                    resource: uniform_buffer.as_entire_binding(),
+                                    resource: uniform_buffers[pi].as_entire_binding(),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 1,
@@ -2815,8 +2804,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         })
                     })
                     .collect();
-                let (shadow_uniform_buffer, shadow_bind_group) =
-                    create_room_env_shadow_gpu(&device, &shadow_caster_layout, "shop-env-shadow");
+                let (shadow_uniform_buffers, shadow_bind_groups) =
+                    create_room_env_shadow_gpu_batch(
+                        &device,
+                        &shadow_caster_layout,
+                        prims.len(),
+                        "shop-env-shadow",
+                    );
                 let shadow_warp_bind_group = create_shadow_warp_bind_group(
                     &device,
                     &shadow_warp_layout,
@@ -2824,31 +2818,33 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     "shop-env-shadow-warp",
                 );
                 gpu_wrap = Some(ShopEnvironmentGpu {
-                    uniform_buffer,
+                    uniform_buffers,
                     distortion_buffer,
-                    shadow_uniform_buffer,
-                    shadow_bind_group,
+                    shadow_uniform_buffers,
+                    shadow_bind_groups,
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
                     shop_candle_sss_texture: shop_candle_sss_tex.map(|(t, _)| t),
                 });
-                shop_eyeball_prim_index = eyeball_prim_indices.first().copied();
-                if eyeball_prim_indices.len() > 1 {
-                    log::warn!(
-                        "shop.glb GPU: multiple Eyeball primitives {:?} — using first index {}",
-                        eyeball_prim_indices,
-                        shop_eyeball_prim_index.unwrap_or(0)
+                if shop_eyeball_prim_indices.is_empty() {
+                    if let Some(bindings) = shop_gltf_anim.clip_prim_bindings.get("eyeball_travel") {
+                        shop_eyeball_prim_indices =
+                            bindings.iter().map(|(pi, _)| *pi).collect();
+                        log::info!(
+                            "shop.glb GPU: Eyeball prims from eyeball_travel bindings {:?}",
+                            shop_eyeball_prim_indices
+                        );
+                    }
+                } else {
+                    log::info!(
+                        "shop.glb GPU: Eyeball primitive indices {:?}",
+                        shop_eyeball_prim_indices
                     );
-                } else if shop_eyeball_prim_index.is_none() {
-                    log::warn!("shop.glb GPU: Eyeball primitive not found");
-                }
-                if shop_eyeball_travel.is_none() {
-                    log::warn!("shop.glb GPU: eyeball_travel clip unavailable");
                 }
                 log::info!("shop.glb GPU: {} primitive draw(s)", prims.len());
             }
-            (prims, gpu_wrap, shop_eyeball_prim_index, shop_eyeball_travel)
+            (prims, gpu_wrap, shop_gltf_anim, shop_eyeball_prim_indices)
         })
     };
 
@@ -2948,25 +2944,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 }
                 let (_white_tex, hallway_decal_view) = white_albedo(&device, &queue);
-                let identity = Mat4::IDENTITY;
-                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("hallway-env-uniform"),
-                    contents: bytemuck::bytes_of(&CameraUniform {
-                        view_proj: identity.to_cols_array(),
-                        model: identity.to_cols_array(),
-                        base_color_factor: [
-                            1.0,
-                            0.0,
-                            0.0,
-                            crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
-                        ],
-                        cam_pos: [0.0; 3],
-                        tile_seed: 0.0,
-                        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
-                        hdr_tonemap: [0.0; 4],
-                    }),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
+                let uniform_buffers = create_room_env_camera_uniform_buffers(
+                    &device,
+                    prims.len(),
+                    "hallway-env-uniform",
+                );
                 let distortion_buffer =
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("hallway-env-distortion"),
@@ -2977,14 +2959,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
-                    .map(|p| {
+                    .enumerate()
+                    .map(|(pi, p)| {
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("hallway-env-bg"),
                             layout: &tile_material_layout,
                             entries: &[
                                 wgpu::BindGroupEntry {
                                     binding: 0,
-                                    resource: uniform_buffer.as_entire_binding(),
+                                    resource: uniform_buffers[pi].as_entire_binding(),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 1,
@@ -3026,11 +3009,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         })
                     })
                     .collect();
-                let (shadow_uniform_buffer, shadow_bind_group) = create_room_env_shadow_gpu(
-                    &device,
-                    &shadow_caster_layout,
-                    "hallway-env-shadow",
-                );
+                let (shadow_uniform_buffers, shadow_bind_groups) =
+                    create_room_env_shadow_gpu_batch(
+                        &device,
+                        &shadow_caster_layout,
+                        prims.len(),
+                        "hallway-env-shadow",
+                    );
                 let shadow_warp_bind_group = create_shadow_warp_bind_group(
                     &device,
                     &shadow_warp_layout,
@@ -3038,10 +3023,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     "hallway-env-shadow-warp",
                 );
                 gpu_wrap = Some(ShopEnvironmentGpu {
-                    uniform_buffer,
+                    uniform_buffers,
                     distortion_buffer,
-                    shadow_uniform_buffer,
-                    shadow_bind_group,
+                    shadow_uniform_buffers,
+                    shadow_bind_groups,
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
@@ -3149,25 +3134,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 }
                 let (_white_tex, staircase_decal_view) = white_albedo(&device, &queue);
-                let identity = Mat4::IDENTITY;
-                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("staircase-env-uniform"),
-                    contents: bytemuck::bytes_of(&CameraUniform {
-                        view_proj: identity.to_cols_array(),
-                        model: identity.to_cols_array(),
-                        base_color_factor: [
-                            1.0,
-                            0.0,
-                            0.0,
-                            crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
-                        ],
-                        cam_pos: [0.0; 3],
-                        tile_seed: 0.0,
-                        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
-                        hdr_tonemap: [0.0; 4],
-                    }),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
+                let uniform_buffers = create_room_env_camera_uniform_buffers(
+                    &device,
+                    prims.len(),
+                    "staircase-env-uniform",
+                );
                 let distortion_buffer =
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("staircase-env-distortion"),
@@ -3178,14 +3149,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
-                    .map(|p| {
+                    .enumerate()
+                    .map(|(pi, p)| {
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("staircase-env-bg"),
                             layout: &tile_material_layout,
                             entries: &[
                                 wgpu::BindGroupEntry {
                                     binding: 0,
-                                    resource: uniform_buffer.as_entire_binding(),
+                                    resource: uniform_buffers[pi].as_entire_binding(),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 1,
@@ -3227,11 +3199,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         })
                     })
                     .collect();
-                let (shadow_uniform_buffer, shadow_bind_group) = create_room_env_shadow_gpu(
-                    &device,
-                    &shadow_caster_layout,
-                    "staircase-env-shadow",
-                );
+                let (shadow_uniform_buffers, shadow_bind_groups) =
+                    create_room_env_shadow_gpu_batch(
+                        &device,
+                        &shadow_caster_layout,
+                        prims.len(),
+                        "staircase-env-shadow",
+                    );
                 let shadow_warp_bind_group = create_shadow_warp_bind_group(
                     &device,
                     &shadow_warp_layout,
@@ -3239,10 +3213,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     "staircase-env-shadow-warp",
                 );
                 gpu_wrap = Some(ShopEnvironmentGpu {
-                    uniform_buffer,
+                    uniform_buffers,
                     distortion_buffer,
-                    shadow_uniform_buffer,
-                    shadow_bind_group,
+                    shadow_uniform_buffers,
+                    shadow_bind_groups,
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
@@ -3428,25 +3402,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 );
                 let archive_decal_view =
                     archive_sign_decal_tex.create_view(&wgpu::TextureViewDescriptor::default());
-                let identity = Mat4::IDENTITY;
-                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("archive-env-uniform"),
-                    contents: bytemuck::bytes_of(&CameraUniform {
-                        view_proj: identity.to_cols_array(),
-                        model: identity.to_cols_array(),
-                        base_color_factor: [
-                            1.0,
-                            0.0,
-                            0.0,
-                            crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
-                        ],
-                        cam_pos: [0.0; 3],
-                        tile_seed: 0.0,
-                        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
-                        hdr_tonemap: [0.0; 4],
-                    }),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
+                let uniform_buffers = create_room_env_camera_uniform_buffers(
+                    &device,
+                    prims.len(),
+                    "archive-env-uniform",
+                );
                 let distortion_buffer =
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("archive-env-distortion"),
@@ -3472,7 +3432,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                             entries: &[
                                 wgpu::BindGroupEntry {
                                     binding: 0,
-                                    resource: uniform_buffer.as_entire_binding(),
+                                    resource: uniform_buffers[pi].as_entire_binding(),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 1,
@@ -3512,11 +3472,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         })
                     })
                     .collect();
-                let (shadow_uniform_buffer, shadow_bind_group) = create_room_env_shadow_gpu(
-                    &device,
-                    &shadow_caster_layout,
-                    "archive-env-shadow",
-                );
+                let (shadow_uniform_buffers, shadow_bind_groups) =
+                    create_room_env_shadow_gpu_batch(
+                        &device,
+                        &shadow_caster_layout,
+                        prims.len(),
+                        "archive-env-shadow",
+                    );
                 let shadow_warp_bind_group = create_shadow_warp_bind_group(
                     &device,
                     &shadow_warp_layout,
@@ -3524,10 +3486,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     "archive-env-shadow-warp",
                 );
                 gpu_wrap = Some(ShopEnvironmentGpu {
-                    uniform_buffer,
+                    uniform_buffers,
                     distortion_buffer,
-                    shadow_uniform_buffer,
-                    shadow_bind_group,
+                    shadow_uniform_buffers,
+                    shadow_bind_groups,
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: Some(archive_sign_decal_tex),
@@ -3643,25 +3605,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 }
                 let (_white_tex, main_menu_decal_view) = white_albedo(&device, &queue);
-                let identity = Mat4::IDENTITY;
-                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("main_menu-env-uniform"),
-                    contents: bytemuck::bytes_of(&CameraUniform {
-                        view_proj: identity.to_cols_array(),
-                        model: identity.to_cols_array(),
-                        base_color_factor: [
-                            1.0,
-                            0.0,
-                            0.0,
-                            crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
-                        ],
-                        cam_pos: [0.0; 3],
-                        tile_seed: 0.0,
-                        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
-                        hdr_tonemap: [0.0; 4],
-                    }),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
+                let uniform_buffers = create_room_env_camera_uniform_buffers(
+                    &device,
+                    prims.len(),
+                    "main_menu-env-uniform",
+                );
                 let distortion_buffer =
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("main_menu-env-distortion"),
@@ -3672,14 +3620,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
-                    .map(|p| {
+                    .enumerate()
+                    .map(|(pi, p)| {
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("main_menu-env-bg"),
                             layout: &tile_material_layout,
                             entries: &[
                                 wgpu::BindGroupEntry {
                                     binding: 0,
-                                    resource: uniform_buffer.as_entire_binding(),
+                                    resource: uniform_buffers[pi].as_entire_binding(),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 1,
@@ -3721,11 +3670,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         })
                     })
                     .collect();
-                let (shadow_uniform_buffer, shadow_bind_group) = create_room_env_shadow_gpu(
-                    &device,
-                    &shadow_caster_layout,
-                    "main_menu-env-shadow",
-                );
+                let (shadow_uniform_buffers, shadow_bind_groups) =
+                    create_room_env_shadow_gpu_batch(
+                        &device,
+                        &shadow_caster_layout,
+                        prims.len(),
+                        "main_menu-env-shadow",
+                    );
                 let shadow_warp_bind_group = create_shadow_warp_bind_group(
                     &device,
                     &shadow_warp_layout,
@@ -3733,10 +3684,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     "main_menu-env-shadow-warp",
                 );
                 gpu_wrap = Some(ShopEnvironmentGpu {
-                    uniform_buffer,
+                    uniform_buffers,
                     distortion_buffer,
-                    shadow_uniform_buffer,
-                    shadow_bind_group,
+                    shadow_uniform_buffers,
+                    shadow_bind_groups,
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
@@ -3749,6 +3700,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     };
 
     crate::render::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
+
+    let main_menu_env_collision_meshes =
+        crate::render::main_menu_glb::with_main_menu_glb_cpu(|opt| {
+            opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
+        });
 
     let (gameplay_env_primitives, gameplay_environment, gameplay_cash_in_prim_indices, gameplay_env_shadow_caster_mask) = {
         let _gameplay = crate::startup_profile::scope("wgpu.room.gameplay");
@@ -3876,25 +3832,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     .as_ref()
                     .map(|(_, v)| v)
                     .unwrap_or(&gameplay_decal_view);
-                let identity = Mat4::IDENTITY;
-                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("gameplay-env-uniform"),
-                    contents: bytemuck::bytes_of(&CameraUniform {
-                        view_proj: identity.to_cols_array(),
-                        model: identity.to_cols_array(),
-                        base_color_factor: [
-                            1.0,
-                            0.0,
-                            0.0,
-                            crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
-                        ],
-                        cam_pos: [0.0; 3],
-                        tile_seed: 0.0,
-                        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
-                        hdr_tonemap: [0.0; 4],
-                    }),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
+                let uniform_buffers = create_room_env_camera_uniform_buffers(
+                    &device,
+                    prims.len(),
+                    "gameplay-env-uniform",
+                );
                 let distortion_buffer =
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("gameplay-env-distortion"),
@@ -3906,10 +3848,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
                     .enumerate()
-                    .map(|(i, p)| {
+                    .map(|(pi, p)| {
                         let is_candle = cpu
                             .environment_primitives
-                            .get(i)
+                            .get(pi)
                             .and_then(|ep| ep.gltf_node_name.as_deref())
                             .is_some_and(
                                 crate::render::room_env_gltf::is_shop_candle_wax_node_name,
@@ -3925,7 +3867,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                             entries: &[
                                 wgpu::BindGroupEntry {
                                     binding: 0,
-                                    resource: uniform_buffer.as_entire_binding(),
+                                    resource: uniform_buffers[pi].as_entire_binding(),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 1,
@@ -3965,11 +3907,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         })
                     })
                     .collect();
-                let (shadow_uniform_buffer, shadow_bind_group) = create_room_env_shadow_gpu(
-                    &device,
-                    &shadow_caster_layout,
-                    "gameplay-env-shadow",
-                );
+                let (shadow_uniform_buffers, shadow_bind_groups) =
+                    create_room_env_shadow_gpu_batch(
+                        &device,
+                        &shadow_caster_layout,
+                        prims.len(),
+                        "gameplay-env-shadow",
+                    );
                 let shadow_warp_bind_group = create_shadow_warp_bind_group(
                     &device,
                     &shadow_warp_layout,
@@ -3977,10 +3921,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     "gameplay-env-shadow-warp",
                 );
                 gpu_wrap = Some(ShopEnvironmentGpu {
-                    uniform_buffer,
+                    uniform_buffers,
                     distortion_buffer,
-                    shadow_uniform_buffer,
-                    shadow_bind_group,
+                    shadow_uniform_buffers,
+                    shadow_bind_groups,
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
@@ -4561,26 +4505,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tile_outline_index_count,
         shop_env_primitives,
         shop_environment,
-        shop_eyeball_prim_index,
-        shop_eyeball_travel,
-        shop_eyeball_missing_clip_warned: std::cell::Cell::new(false),
-        shop_eyeball_missing_prim_warned: std::cell::Cell::new(false),
-        shop_env_last_camera_uniform: std::cell::Cell::new(CameraUniform {
-            view_proj: glam::Mat4::IDENTITY.to_cols_array(),
-            model: glam::Mat4::IDENTITY.to_cols_array(),
-            base_color_factor: [
-                1.0,
-                0.0,
-                0.0,
-                crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
-            ],
-            cam_pos: [0.0; 3],
-            tile_seed: 0.0,
-            decal_atlas_uv: [0.0; 4],
-            hdr_tonemap: [0.0; 4],
-        }),
-        shop_env_base_model: std::cell::Cell::new(glam::Mat4::IDENTITY),
-        shop_env_shadow_light_view_proj: std::cell::Cell::new(glam::Mat4::IDENTITY.to_cols_array()),
+        shop_gltf_anim,
+        shop_gltf_anim_missing_clip_warned: std::cell::Cell::new(false),
+        shop_eyeball_prim_indices,
         hallway_env_primitives,
         hallway_environment,
         staircase_env_primitives,
@@ -4602,6 +4529,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         frame_env_tunes: rustc_hash::FxHashMap::default(),
         active_frame_env: crate::game::scene_look_tuning::RoomEnvFrameTune::default(),
         shop_env_collision_meshes,
+        main_menu_env_collision_meshes,
         gameplay_env_collision_meshes,
         tile_base_color_factor,
         // Populated on first render() from RenderSettings.tileset_name.

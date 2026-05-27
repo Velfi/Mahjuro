@@ -1,6 +1,6 @@
 //! World-space rain volume for exterior scenes (main menu).
 //!
-//! Spawns drops in a thin band under the spawn ceiling of a padded room AABB, integrates in world −Z with wind,
+//! Spawns drops in a thin band under the spawn ceiling of a padded `rain_hit_*` AABB, integrates in world −Z with wind,
 //! raycasts against `rain_hit_*` collision shells, and emits screen-space splashes.
 
 use glam::Vec3;
@@ -12,6 +12,7 @@ use crate::render::particles::{ParticleSystem, RainCollider, RainSpawnVolume};
 use crate::render::rain_tuning::RainTuning;
 use crate::render::room_env_gltf::RoomCollisionMesh;
 use crate::render::room_glb;
+use crate::render::scene_light_sample::SceneLightSampleCtx;
 use crate::render::wgpu_renderer::GpuInstance;
 
 pub struct RainField {
@@ -46,9 +47,10 @@ impl RainField {
         window_h: f32,
         env_scale: f32,
         rain_meshes: &[RoomCollisionMesh],
+        lighting: Option<&SceneLightSampleCtx<'_>>,
     ) {
         let speed = tuning.speed_mul.max(0.0);
-        let volume = rain_spawn_volume(env_scale, window_h, tuning);
+        let volume = main_menu_rain_spawn_volume(env_scale, window_h, tuning);
         let density = tuning.field.density.max(0.0);
         let pool = (tuning.field.pool_size * density).round().max(0.0) as usize;
         let spawn_rate = tuning.field.spawn_rate.max(0.0) * density * speed.max(0.25);
@@ -93,6 +95,7 @@ impl RainField {
             tuning.field.drop_color,
             volume,
             tuning.field.spawn_near_bias,
+            lighting,
         );
         self.particles.update(dt);
     }
@@ -104,6 +107,8 @@ impl RainField {
         window_w: f32,
         window_h: f32,
         streak_len_px: f32,
+        drop_color: [f32; 4],
+        lighting: Option<&SceneLightSampleCtx<'_>>,
     ) {
         if !self.particles.is_active() {
             return;
@@ -111,7 +116,14 @@ impl RainField {
         let mut quads: Vec<GpuInstance> = Vec::new();
         for (rect, color) in self
             .particles
-            .instances_world(cam, window_w, window_h, streak_len_px)
+            .instances_world(
+                cam,
+                window_w,
+                window_h,
+                streak_len_px,
+                drop_color,
+                lighting,
+            )
             .into_iter()
             .chain(self.particles.instances())
         {
@@ -127,12 +139,22 @@ impl RainField {
     }
 }
 
-/// Padded spawn column covering the exterior air volume in front of the room.
+/// Padded spawn column over all main-menu `rain_hit_*` shells (falls back to full room AABB).
+pub fn main_menu_rain_spawn_volume(
+    env_scale: f32,
+    window_h: f32,
+    tuning: &RainTuning,
+) -> RainSpawnVolume {
+    rain_spawn_volume(env_scale, window_h, tuning)
+}
+
 fn rain_spawn_volume(env_scale: f32, window_h: f32, tuning: &RainTuning) -> RainSpawnVolume {
-    let (min, max) = room_spawn_aabb(env_scale, window_h).unwrap_or((
-        [-500.0, -350.0, window_h * 0.2],
-        [500.0, 350.0, window_h * 0.85],
-    ));
+    let (min, max) = main_menu_glb::main_menu_rain_hit_spawn_aabb(window_h, env_scale)
+        .or_else(|| room_spawn_aabb(env_scale, window_h))
+        .unwrap_or((
+            [-500.0, -350.0, window_h * 0.2],
+            [500.0, 350.0, window_h * 0.85],
+        ));
     let pad_xy = tuning.field.volume_pad_xy.max(0.0);
     let ext_x = (max[0] - min[0]).max(1.0);
     let ext_y = (max[1] - min[1]).max(1.0);

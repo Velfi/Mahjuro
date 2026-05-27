@@ -126,6 +126,26 @@ impl RoomEnvironmentBounds {
         (self.min + self.max) * 0.5
     }
 
+    /// Merge document-space bounds from every triangle in `meshes`.
+    pub fn from_collision_meshes(meshes: &[RoomCollisionMesh]) -> Option<Self> {
+        let mut min_v = Vec3::splat(f32::INFINITY);
+        let mut max_v = Vec3::splat(f32::NEG_INFINITY);
+        let mut found = false;
+        for mesh in meshes {
+            for tri in &mesh.triangles {
+                for p in tri {
+                    min_v = min_v.min(*p);
+                    max_v = max_v.max(*p);
+                    found = true;
+                }
+            }
+        }
+        if !found {
+            return None;
+        }
+        Some(Self { min: min_v, max: max_v })
+    }
+
     pub fn corners(self) -> [Vec3; 8] {
         let mn = self.min;
         let mx = self.max;
@@ -392,6 +412,60 @@ pub fn room_camera_fit_clip_planes(mut cam: CameraParams, corners_world: &[Vec3]
     cam.clip_near = Some(near);
     cam.clip_far = Some(far);
     cam
+}
+
+/// Document-space AABB for one named environment draw mesh (e.g. main-menu `ground`).
+pub fn room_env_primitive_bounds_doc(
+    prims: &[RoomEnvPrimitiveCpu],
+    node_name: &str,
+) -> Option<RoomEnvironmentBounds> {
+    let mut min_v = Vec3::splat(f32::INFINITY);
+    let mut max_v = Vec3::splat(f32::NEG_INFINITY);
+    let mut found = false;
+    for prim in prims {
+        if prim.gltf_node_name.as_deref() != Some(node_name) {
+            continue;
+        }
+        for vtx in &prim.mesh.vertices {
+            let pos = Vec3::from(vtx.position);
+            min_v = min_v.min(pos);
+            max_v = max_v.max(pos);
+            found = true;
+        }
+    }
+    if !found {
+        return None;
+    }
+    Some(RoomEnvironmentBounds { min: min_v, max: max_v })
+}
+
+/// Document-space AABB for one named collision / rain-hit mesh node.
+pub fn room_collision_mesh_bounds_doc(
+    meshes: &[RoomCollisionMesh],
+    node_name: &str,
+) -> Option<RoomEnvironmentBounds> {
+    let mesh = meshes.iter().find(|m| m.node_name == node_name)?;
+    RoomEnvironmentBounds::from_collision_meshes(std::slice::from_ref(mesh))
+}
+
+/// Centered world min/max after [`room_env_model_matrix`] (same basis as rain collision).
+pub fn room_world_bounds_aabb_centered(
+    bounds_doc: RoomEnvironmentBounds,
+    env_center_doc: Vec3,
+    window_h: f32,
+    env_height_scale: f32,
+) -> ([f32; 3], [f32; 3]) {
+    let s = room_env_world_scale(window_h, env_height_scale);
+    let mut min = [f32::INFINITY; 3];
+    let mut max = [f32::NEG_INFINITY; 3];
+    for p in bounds_doc.corners() {
+        let w = ((p - env_center_doc) * s).to_array();
+        for i in 0..3 {
+            min[i] = min[i].min(w[i]);
+            max[i] = max[i].max(w[i]);
+        }
+    }
+    (min, max)
 }
 
 /// World-space AABB corners after centering and scale (for FOV fitting).
@@ -986,7 +1060,11 @@ pub fn harvest_khr_punctual_light(
 /// Boolean-operand meshes that stay in the glTF export but must not draw at runtime.
 #[inline]
 pub fn skip_room_env_authoring_mesh_node_name(name: &str) -> bool {
-    name == "subtractor"
+    name.eq_ignore_ascii_case("subtractor")
+        || name
+            .as_bytes()
+            .get(..11)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"subtractor."))
 }
 
 /// How mesh geometry under a node contributes to environment draw + picking.
@@ -1017,9 +1095,9 @@ pub trait RoomEnvWalkHooks {
     }
 }
 
-/// Bind pose for shop [`shop.glb`](../../assets/3d/shop.glb) `Eyeball` (filled during scene walk).
+/// Bind pose for one named glTF node (filled during scene walk; used for node TRS animation).
 #[derive(Clone, Copy, Debug)]
-pub struct ShopEyeballBindPose {
+pub struct RoomNodeBindPose {
     pub bind_world_doc: Mat4,
     pub parent_world_doc: Mat4,
 }
@@ -1028,8 +1106,8 @@ pub struct ShopEyeballBindPose {
 pub struct RoomEnvWalkState<'a> {
     pub candle_node_prefix: &'a str,
     pub lantern_node_prefix: &'a str,
-    /// When walking `shop.glb`, captures the Eyeball node for `eyeball_travel`.
-    pub shop_eyeball_bind: Option<ShopEyeballBindPose>,
+    /// Named node bind poses for glTF animation sampling (first occurrence wins).
+    pub node_bind_poses: &'a mut FxHashMap<String, RoomNodeBindPose>,
     pub markers: &'a mut FxHashMap<String, Mat4>,
     pub env_primitives: &'a mut Vec<RoomEnvPrimitiveCpu>,
     pub marker_mesh_bounds_doc: &'a mut FxHashMap<String, RoomEnvironmentBounds>,
@@ -1086,16 +1164,18 @@ pub fn walk_room_env_node(
         );
     }
 
-    if name == "Eyeball" {
-        if state.shop_eyeball_bind.is_none() {
-            state.shop_eyeball_bind = Some(ShopEyeballBindPose {
-                bind_world_doc: world,
-                parent_world_doc: parent,
-            });
-        } else {
-            // Keep the first Eyeball as canonical so animation parsing,
-            // bind capture, and GPU primitive mapping all agree.
-            log::warn!("{label}: duplicate Eyeball node found — using first match");
+    if !name.is_empty() {
+        use std::collections::hash_map::Entry;
+        match state.node_bind_poses.entry(name.to_string()) {
+            Entry::Vacant(e) => {
+                e.insert(RoomNodeBindPose {
+                    bind_world_doc: world,
+                    parent_world_doc: parent,
+                });
+            }
+            Entry::Occupied(_) => {
+                log::debug!("{label}: duplicate glTF node name {name:?} — using first bind pose");
+            }
         }
     }
 

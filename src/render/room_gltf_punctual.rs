@@ -20,7 +20,7 @@ pub enum RoomPunctualProfile {
         flame_time_s: f32,
         lamp_flicker: f32,
     },
-    /// `moonlight` / `door_light`: Kelvin tints when glTF `color` is unit white.
+    /// `light_moonlight` / `light_doorway`: glTF `color`, or Kelvin when export is unit white.
     MainMenu,
 }
 
@@ -53,8 +53,10 @@ pub fn gltf_punctual_linear_rgb(
     ]
 }
 
-const MAIN_MENU_MOONLIGHT_TEMP_K: f32 = 5500.0;
-const MAIN_MENU_DOOR_LIGHT_TEMP_K: f32 = 2500.0;
+/// Moon fill — cool blue (glTF export leaves `color` at unit white). sRGB `(0.52, 0.72, 1.0)`.
+const MAIN_MENU_LIGHT_MOONLIGHT_COLOR_LINEAR: [f32; 3] = [0.2298, 0.4770, 1.0];
+/// Porch bulb — warm incandescent.
+const MAIN_MENU_LIGHT_DOORWAY_TEMP_K: f32 = 2700.0;
 
 #[inline]
 fn is_near_unit_white(rgb: [f32; 3]) -> bool {
@@ -67,9 +69,33 @@ fn main_menu_point_color(l: &RoomGltfEmbeddedPointLight, tune: &RoomEnvLightingT
         return base;
     }
     match l.node_name.as_str() {
-        "moonlight" => blackbody::blackbody_rgb_linear(MAIN_MENU_MOONLIGHT_TEMP_K),
-        "door_light" => blackbody::blackbody_rgb_linear(MAIN_MENU_DOOR_LIGHT_TEMP_K),
+        "light_moonlight" => MAIN_MENU_LIGHT_MOONLIGHT_COLOR_LINEAR,
+        "light_doorway" => blackbody::blackbody_rgb_linear(MAIN_MENU_LIGHT_DOORWAY_TEMP_K),
         _ => base,
+    }
+}
+
+/// Warn when [`main_menu.glb`](../../../assets/3d/main_menu.glb) punctual nodes are misnamed.
+pub fn log_main_menu_punctual_light_nodes(cpu: &RoomGlbCpu) {
+    const EXPECTED: [&str; 2] = ["light_moonlight", "light_doorway"];
+    for l in &cpu.embedded_point_lights {
+        if !EXPECTED.contains(&l.node_name.as_str()) {
+            log::warn!(
+                "main_menu.glb: point light {:?} has no MainMenu tint (rename to one of {EXPECTED:?})",
+                l.node_name,
+            );
+        }
+    }
+    for name in EXPECTED {
+        if !cpu
+            .embedded_point_lights
+            .iter()
+            .any(|l| l.node_name == name)
+        {
+            log::warn!(
+                "main_menu.glb: missing point light {name:?} — export a punctual empty with that exact name",
+            );
+        }
     }
 }
 
@@ -207,4 +233,40 @@ fn spot_from_embedded(
         color: gltf_punctual_linear_rgb(l.color_linear, l.is_candle, l.is_lantern, tune),
         intensity: (l.intensity * tune.gltf_light_intensity_scale).max(0.0),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::room_env_gltf::RoomGltfEmbeddedPointLight;
+    use crate::render::room_glb::RoomEnvLightingTune;
+    use glam::Vec3;
+
+    fn point(name: &str, color_linear: [f32; 3]) -> RoomGltfEmbeddedPointLight {
+        RoomGltfEmbeddedPointLight {
+            node_name: name.to_string(),
+            pos_doc: Vec3::ZERO,
+            color_linear,
+            is_candle: false,
+            is_lantern: false,
+            intensity: 1.0,
+            range_doc: None,
+        }
+    }
+
+    #[test]
+    fn main_menu_named_lights_respect_gltf_or_kelvin_fallback() {
+        let tune = RoomEnvLightingTune::SOURCE_DEFAULTS;
+        let moon = main_menu_point_color(&point("light_moonlight", [0.2, 0.8, 0.1]), &tune);
+        assert_eq!(moon, [0.2, 0.8, 0.1]);
+        let door = main_menu_point_color(&point("light_doorway", [0.95, 0.72, 0.38]), &tune);
+        assert_eq!(door, [0.95, 0.72, 0.38]);
+        let moon_white = main_menu_point_color(&point("light_moonlight", [1.0, 1.0, 1.0]), &tune);
+        assert_eq!(moon_white, MAIN_MENU_LIGHT_MOONLIGHT_COLOR_LINEAR);
+        let door_white = main_menu_point_color(&point("light_doorway", [1.0, 1.0, 1.0]), &tune);
+        assert_eq!(
+            door_white,
+            blackbody::blackbody_rgb_linear(MAIN_MENU_LIGHT_DOORWAY_TEMP_K)
+        );
+    }
 }

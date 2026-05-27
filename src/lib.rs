@@ -69,6 +69,7 @@ use render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
 use render::wgpu_renderer::{GpuInstance, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;
+use scenes::animation_lab::AnimationLabScene;
 use scenes::material_viewer::MaterialViewerScene;
 use scenes::rumble_lab::RumbleLabScene;
 use scenes::splash::SplashScene;

@@ -275,94 +275,71 @@ impl ShopScene {
             west_sell_hold_started: None,
             storeroom_orbit_yaw: 0.0,
             storeroom_orbit_pitch: 0.0,
-            eyeball_travel_started: None,
-            eyeball_travel_duration_secs: None,
-            eyeball_travel_elapsed_secs: 0.0,
-            eyeball_travel_paused: false,
+            gltf_anims: crate::render::room_gltf_anim::GltfAnimPlaybackSet::default(),
         }
+    }
+
+    fn shop_gltf_clip_duration(clip_name: &str) -> Option<f32> {
+        crate::render::room_glb::with_shop_glb_cpu(|opt| {
+            opt.and_then(|cpu| cpu.gltf_anim_library.clip_duration(clip_name))
+        })
+    }
+
+    /// Start or resume a named glTF clip embedded in `shop.glb`.
+    pub fn play_gltf_anim(&mut self, clip_name: &str, looping: bool) -> bool {
+        let Some(duration) = Self::shop_gltf_clip_duration(clip_name) else {
+            log::warn!(
+                "play_gltf_anim({clip_name}): clip not loaded (rebuild after updating shop.glb)"
+            );
+            return false;
+        };
+        self.gltf_anims.play(clip_name, duration, looping);
+        true
+    }
+
+    /// Toggle pause for a playing glTF clip. Returns `Some(paused_now)` when active.
+    pub fn toggle_pause_gltf_anim(&mut self, clip_name: &str) -> Option<bool> {
+        self.gltf_anims.toggle_pause(clip_name)
+    }
+
+    /// Restart a glTF clip from time 0.
+    pub fn restart_gltf_anim(&mut self, clip_name: &str) -> bool {
+        let Some(duration) = Self::shop_gltf_clip_duration(clip_name) else {
+            log::warn!(
+                "restart_gltf_anim({clip_name}): clip not loaded (rebuild after updating shop.glb)"
+            );
+            return false;
+        };
+        self.gltf_anims.restart(clip_name, duration);
+        true
+    }
+
+    /// Stop a glTF clip and return to bind pose.
+    pub fn stop_gltf_anim(&mut self, clip_name: &str) {
+        self.gltf_anims.stop(clip_name);
+    }
+
+    /// Active glTF animation samples for the current frame.
+    pub(crate) fn gltf_anim_samples(&self) -> Vec<(String, f32)> {
+        self.gltf_anims.active_samples()
     }
 
     /// Debug: start `eyeball_travel` if available and not already running.
     /// Returns `true` when playback is active after this call.
     pub fn debug_start_eyeball_travel(&mut self) -> bool {
-        let duration = crate::render::room_glb::with_shop_glb_cpu(|opt| {
-            opt.and_then(|cpu| cpu.shop_eyeball_travel.as_ref())
-                .map(|a| a.clip.duration_secs)
-        });
-        let Some(duration) = duration else {
-            log::warn!("Play Eyeball Travel: eyeball_travel clip not loaded (rebuild after updating shop.glb)");
-            return false;
-        };
-        if self.eyeball_travel_duration_secs.is_none() {
-            self.eyeball_travel_duration_secs = Some(duration);
-            self.eyeball_travel_elapsed_secs = 0.0;
-            self.eyeball_travel_started = Some(Instant::now());
-            self.eyeball_travel_paused = false;
-            return true;
-        }
-        if self.eyeball_travel_paused {
-            self.eyeball_travel_started = Some(Instant::now());
-            self.eyeball_travel_paused = false;
-        }
-        self.eyeball_travel_duration_secs = Some(duration);
-        true
+        self.play_gltf_anim("eyeball_travel", false)
     }
 
     /// Debug: toggle pause state for `eyeball_travel` playback.
     /// Returns `Some(paused_now)` when toggled, `None` when clip is not active.
     pub fn debug_toggle_pause_eyeball_travel(&mut self) -> Option<bool> {
-        self.eyeball_travel_duration_secs?;
-        if self.eyeball_travel_paused {
-            self.eyeball_travel_started = Some(Instant::now());
-            self.eyeball_travel_paused = false;
-            Some(false)
-        } else {
-            let now = Instant::now();
-            if let Some(started) = self.eyeball_travel_started.take() {
-                self.eyeball_travel_elapsed_secs +=
-                    now.saturating_duration_since(started).as_secs_f32();
-            }
-            self.eyeball_travel_paused = true;
-            Some(true)
-        }
+        self.toggle_pause_gltf_anim("eyeball_travel")
     }
 
     /// Debug: restart `eyeball_travel` from time 0.
     /// Returns `true` when clip is available.
     pub fn debug_restart_eyeball_travel(&mut self) -> bool {
-        let duration = crate::render::room_glb::with_shop_glb_cpu(|opt| {
-            opt.and_then(|cpu| cpu.shop_eyeball_travel.as_ref())
-                .map(|a| a.clip.duration_secs)
-        });
-        let Some(duration) = duration else {
-            log::warn!(
-                "Restart Eyeball Travel: eyeball_travel clip not loaded (rebuild after updating shop.glb)"
-            );
-            return false;
-        };
-        self.eyeball_travel_duration_secs = Some(duration);
-        self.eyeball_travel_elapsed_secs = 0.0;
-        self.eyeball_travel_started = Some(Instant::now());
-        self.eyeball_travel_paused = false;
-        true
-    }
-
-    /// Elapsed seconds for `eyeball_travel`, if playing and the clip is loaded.
-    pub(crate) fn eyeball_travel_playback_sec(&self) -> Option<f32> {
-        let duration = self.eyeball_travel_duration_secs?;
-        let elapsed = if self.eyeball_travel_paused {
-            self.eyeball_travel_elapsed_secs
-        } else {
-            let started = self.eyeball_travel_started?;
-            self.eyeball_travel_elapsed_secs
-                + Instant::now()
-                    .saturating_duration_since(started)
-                    .as_secs_f32()
-        };
-        if elapsed >= duration {
-            return None;
-        }
-        Some(elapsed)
+        self.restart_gltf_anim("eyeball_travel")
     }
 
     pub(super) fn continue_scene(&self, run: &mut crate::game::run::RunState) -> Scene {

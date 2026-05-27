@@ -7,6 +7,8 @@ use glam::{Mat4, Vec3};
 pub struct RayHit {
     /// Distance along `world_dir` from `world_origin`.
     pub t: f32,
+    /// Shaded face normal in world space (points against the incoming ray).
+    pub normal: Vec3,
 }
 
 /// Möller–Trumbore against triangles in mesh-local space (`model` maps local → world).
@@ -19,8 +21,9 @@ pub fn ray_hit_trimesh(
     let inv = model.inverse();
     let lo = inv.transform_point3(world_origin);
     let ld = inv.transform_vector3(world_dir);
+    let world_dir_unit = world_dir.normalize_or_zero();
     const EPS: f32 = 1e-7;
-    let mut best: Option<f32> = None;
+    let mut best: Option<(f32, Vec3)> = None;
     for [a, b, c] in tris {
         let e1 = *b - *a;
         let e2 = *c - *a;
@@ -50,10 +53,14 @@ pub fn ray_hit_trimesh(
         if wt <= EPS {
             continue;
         }
+        let mut n_world = model.transform_vector3(e1.cross(e2)).normalize_or_zero();
+        if n_world.dot(world_dir_unit) > 0.0 {
+            n_world = -n_world;
+        }
         match best {
-            Some(bt) if bt <= wt => {}
-            _ => best = Some(wt),
+            Some((bt, _)) if bt <= wt => {}
+            _ => best = Some((wt, n_world)),
         }
     }
-    best.map(|t| RayHit { t })
+    best.map(|(t, normal)| RayHit { t, normal })
 }

@@ -37,6 +37,7 @@ impl App {
             Scene::YakuJournal(_) => Some("yaku_journal"),
             Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
             Scene::ButtonAabbLab(_) => Some("button_aabb_lab"),
+            Scene::AnimationLab(_) => Some("shop"),
             Scene::Tixels(_) => Some("tixels"),
             Scene::GameOver(_) => Some("gameplay"),
             _ => None,
@@ -389,6 +390,7 @@ impl App {
                 Scene::RumbleLab(_)
                     | Scene::MaterialViewer(_)
                     | Scene::TransitionPlayground(_)
+                    | Scene::AnimationLab(_)
                     | Scene::TileAnchorLab(_)
                     | Scene::ButtonAabbLab(_)
                     | Scene::Tixels(_)
@@ -617,7 +619,18 @@ impl App {
         }
 
         if let Some(ref overlay) = self.debug.rain_debug_overlay {
-            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
+            let cam = frame
+                .camera_override
+                .unwrap_or(self.debug.last_effective_camera);
+            let env_scale = crate::render::main_menu_glb::main_menu_env_height_scale(
+                scene_look.room_gltf_height_scale,
+            );
+            let (insts, lbls) = overlay.draw(
+                size.width as f32,
+                size.height as f32,
+                cam,
+                env_scale,
+            );
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
@@ -779,6 +792,7 @@ impl App {
             Scene::YakuJournal(_) => Some("yaku_journal"),
             Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
             Scene::ButtonAabbLab(_) => Some("button_aabb_lab"),
+            Scene::AnimationLab(_) => Some("shop"),
             Scene::Tixels(_) => Some("tixels"),
             Scene::GameOver(_) => Some("gameplay"),
             _ => None,

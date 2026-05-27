@@ -267,22 +267,30 @@ impl WgpuRenderer {
         }
     }
 
-    /// Write the shared room-GLB shadow caster uniform (`light_view_proj * model`).
+    /// Write per-primitive room-GLB shadow caster uniforms (`light_view_proj * model`).
     pub(super) fn write_room_env_shadow_caster(
         &self,
         gpu: &crate::render::wgpu_renderer::ShopEnvironmentGpu,
         light_view_proj: [f32; 16],
-        model: glam::Mat4,
+        base_model: glam::Mat4,
+        anim_deltas: &rustc_hash::FxHashMap<usize, glam::Mat4>,
         changed: &mut bool,
     ) {
-        self.queue.write_buffer(
-            &gpu.shadow_uniform_buffer,
-            0,
-            bytemuck::bytes_of(&ShadowCasterUniform {
-                light_view_proj,
-                model: model.to_cols_array(),
-            }),
-        );
+        for (pi, buf) in gpu.shadow_uniform_buffers.iter().enumerate() {
+            let prim_model = if let Some(delta) = anim_deltas.get(&pi) {
+                base_model * *delta
+            } else {
+                base_model
+            };
+            self.queue.write_buffer(
+                buf,
+                0,
+                bytemuck::bytes_of(&ShadowCasterUniform {
+                    light_view_proj,
+                    model: prim_model.to_cols_array(),
+                }),
+            );
+        }
         *changed = true;
     }
 }

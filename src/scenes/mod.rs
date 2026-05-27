@@ -29,6 +29,7 @@ pub mod showcase_stage;
 pub mod splash;
 pub mod staircase;
 pub mod start_game_modal;
+pub mod animation_lab;
 pub mod button_aabb_lab;
 pub mod tile_anchor_lab;
 pub(crate) mod tiles_intro_copy;
@@ -57,6 +58,7 @@ pub use showcase::{
 pub use splash::SplashScene;
 pub use staircase::StaircaseScene;
 pub use start_game_modal::TileSelectScene;
+pub use animation_lab::AnimationLabScene;
 pub use button_aabb_lab::ButtonAabbLabScene;
 pub use tile_anchor_lab::TileAnchorLabScene;
 pub use tixels::TixelsScene;
@@ -559,6 +561,7 @@ pub enum Scene {
     TutorialCampaign(TutorialCampaignScene),
     TutorialSummary(TutorialSummaryScene),
     TransitionPlayground(TransitionPlaygroundScene),
+    AnimationLab(AnimationLabScene),
     RumbleLab(RumbleLabScene),
     YakuJournal(YakuJournalScene),
 }
