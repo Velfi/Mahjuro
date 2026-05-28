@@ -89,9 +89,7 @@ impl FramePerfWatchdog {
         };
         log::warn!(
             "low FPS sustained: ema={:.1} ms ({:.1} FPS) over the last {:.1}s. \
-             Check the `swapchain ready:` / `presentation env:` lines logged at startup; \
-             on Steam Deck game mode an unexpectedly low `frame_latency` value or a \
-             `XDG_CURRENT_DESKTOP=gamescope` environment is the usual cause.",
+             Check the `swapchain ready:` / `presentation env:` lines logged at startup.",
             self.ema_dt_ms,
             fps,
             SUSTAINED_SECONDS,

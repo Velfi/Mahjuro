@@ -6,7 +6,7 @@ use super::export_schema::{
     LossBreakdownDerived, MapTable, NamedCount, NamedCountPct, NamedPerRun, OrdealChamberChartRow,
     PerRunAverages, RelicAttributionRow, RelicBuyRow, RelicDepthRow, RelicShopFunnelRow,
     RelicShopTimingRow, RelicValueRow, RelicWinRateRow, SurplusSlotRow, WilsonCiPct, YakuDerived,
-    YakuRow,
+    YakuRow, ZodiacBalanceAlarm, ZodiacBalanceRow,
 };
 use super::relic_analytics::VALUE_BUCKET_LABELS;
 use super::reporting::human_readable_score;
@@ -19,8 +19,14 @@ use crate::core::chamber_target::{TARGET_SCALING, score_for};
 use crate::core::relic::{Rarity, all_relic_defs};
 use crate::core::rules::ChamberKind;
 use crate::core::yaku::YakuKind;
+use crate::core::zodiac::ZodiacKind;
 
 const MIN_SAMPLES_FOR_WIN_CORR: u32 = 20;
+const ZODIAC_MIN_ACQUIRED_FOR_ALARMS: u32 = 25;
+const ZODIAC_WIN_DELTA_ALERT_PCT: f64 = 5.0;
+const ZODIAC_WIN_DELTA_CI_MARGIN_PCT: f64 = 2.5;
+const ZODIAC_USE_PER_ACQUIRE_LOW_ALERT: f64 = 0.55;
+const ZODIAC_PRIMARY_LEVEL_HIGH_ALERT: f64 = 4.0;
 
 fn relic_rarity_slug(display_name: &str) -> Option<String> {
     all_relic_defs()
@@ -363,6 +369,150 @@ fn build_ordeal_chamber_chart(a: &AggregateStats, base_target: u32) -> Vec<Ordea
             },
         )
         .collect()
+}
+
+fn build_zodiac_balance(
+    a: &AggregateStats,
+    runs: &[RunStats],
+    overall_win_pct: f64,
+) -> (Vec<ZodiacBalanceRow>, Vec<ZodiacBalanceAlarm>) {
+    let mut rows = Vec::with_capacity(ZodiacKind::all().len());
+    for &z in ZodiacKind::all() {
+        let name = z.name();
+        let yaku_name = z.yaku().name();
+        let acquired = a.zodiacs_picked.get(name).copied().unwrap_or(0);
+        let used = a.total_zodiacs_used.get(name).copied().unwrap_or(0);
+
+        let runs_acquired = runs
+            .iter()
+            .filter(|s| s.zodiacs_picked.get(name).copied().unwrap_or(0) > 0)
+            .count() as u32;
+        let wins_acquired = runs
+            .iter()
+            .filter(|s| s.victory && s.zodiacs_picked.get(name).copied().unwrap_or(0) > 0)
+            .count() as u32;
+
+        let level_sum: f64 = runs
+            .iter()
+            .filter(|s| s.zodiacs_picked.get(name).copied().unwrap_or(0) > 0)
+            .map(|s| s.final_yaku_levels.level_of(z.yaku()) as f64)
+            .sum();
+        let avg_level = if runs_acquired > 0 {
+            level_sum / runs_acquired as f64
+        } else {
+            1.0
+        };
+
+        let win_pct = if runs_acquired > 0 {
+            wins_acquired as f64 * 100.0 / runs_acquired as f64
+        } else {
+            0.0
+        };
+        let (win_pct_ci_lo, win_pct_ci_hi) = if runs_acquired > 0 {
+            wilson_95_pct(wins_acquired as u64, runs_acquired as u64).unwrap_or((win_pct, win_pct))
+        } else {
+            (0.0, 0.0)
+        };
+
+        rows.push(ZodiacBalanceRow {
+            zodiac: name.to_string(),
+            yaku: yaku_name.to_string(),
+            acquired,
+            acquired_per_run: if a.runs > 0 {
+                acquired as f64 / a.runs as f64
+            } else {
+                0.0
+            },
+            used,
+            used_per_run: if a.runs > 0 {
+                used as f64 / a.runs as f64
+            } else {
+                0.0
+            },
+            use_per_acquire: if acquired > 0 {
+                used as f64 / acquired as f64
+            } else {
+                0.0
+            },
+            runs_acquired,
+            win_pct_when_acquired: win_pct,
+            win_pct_ci_lo,
+            win_pct_ci_hi,
+            delta_vs_baseline_pct: if runs_acquired > 0 {
+                win_pct - overall_win_pct
+            } else {
+                0.0
+            },
+            avg_primary_yaku_level_when_acquired: avg_level,
+        });
+    }
+
+    rows.sort_by(|a, b| b.acquired.cmp(&a.acquired).then_with(|| a.zodiac.cmp(&b.zodiac)));
+
+    let mut alarms = Vec::new();
+    for row in &rows {
+        if row.acquired < ZODIAC_MIN_ACQUIRED_FOR_ALARMS {
+            continue;
+        }
+        if row.delta_vs_baseline_pct >= ZODIAC_WIN_DELTA_ALERT_PCT
+            && row.win_pct_ci_lo >= overall_win_pct + ZODIAC_WIN_DELTA_CI_MARGIN_PCT
+        {
+            alarms.push(ZodiacBalanceAlarm {
+                zodiac: row.zodiac.clone(),
+                severity: "warn".to_string(),
+                signal: "high-win-delta".to_string(),
+                observed: row.delta_vs_baseline_pct,
+                threshold: ZODIAC_WIN_DELTA_ALERT_PCT,
+                detail: format!(
+                    "Win% when acquired is {:.1}% vs baseline {:.1}% (95% CI {:.1}–{:.1}).",
+                    row.win_pct_when_acquired, overall_win_pct, row.win_pct_ci_lo, row.win_pct_ci_hi
+                ),
+            });
+        }
+        if row.delta_vs_baseline_pct <= -ZODIAC_WIN_DELTA_ALERT_PCT
+            && row.win_pct_ci_hi <= overall_win_pct - ZODIAC_WIN_DELTA_CI_MARGIN_PCT
+        {
+            alarms.push(ZodiacBalanceAlarm {
+                zodiac: row.zodiac.clone(),
+                severity: "warn".to_string(),
+                signal: "low-win-delta".to_string(),
+                observed: row.delta_vs_baseline_pct,
+                threshold: -ZODIAC_WIN_DELTA_ALERT_PCT,
+                detail: format!(
+                    "Win% when acquired is {:.1}% vs baseline {:.1}% (95% CI {:.1}–{:.1}).",
+                    row.win_pct_when_acquired, overall_win_pct, row.win_pct_ci_lo, row.win_pct_ci_hi
+                ),
+            });
+        }
+        if row.use_per_acquire <= ZODIAC_USE_PER_ACQUIRE_LOW_ALERT {
+            alarms.push(ZodiacBalanceAlarm {
+                zodiac: row.zodiac.clone(),
+                severity: "info".to_string(),
+                signal: "low-use-per-acquire".to_string(),
+                observed: row.use_per_acquire,
+                threshold: ZODIAC_USE_PER_ACQUIRE_LOW_ALERT,
+                detail: format!(
+                    "Only {:.2} uses per acquisition ({} used / {} acquired).",
+                    row.use_per_acquire, row.used, row.acquired
+                ),
+            });
+        }
+        if row.avg_primary_yaku_level_when_acquired >= ZODIAC_PRIMARY_LEVEL_HIGH_ALERT {
+            alarms.push(ZodiacBalanceAlarm {
+                zodiac: row.zodiac.clone(),
+                severity: "info".to_string(),
+                signal: "high-final-level".to_string(),
+                observed: row.avg_primary_yaku_level_when_acquired,
+                threshold: ZODIAC_PRIMARY_LEVEL_HIGH_ALERT,
+                detail: format!(
+                    "Primary yaku ends at average level {:.2} on runs that acquired it.",
+                    row.avg_primary_yaku_level_when_acquired
+                ),
+            });
+        }
+    }
+
+    (rows, alarms)
 }
 
 pub fn derived_from_batch(
@@ -990,6 +1140,7 @@ pub fn derived_from_batch(
     let talismans_shop = shop_per_run(&a.talismans_picked, a.runs);
     let zodiacs_shop = shop_per_run(&a.zodiacs_picked, a.runs);
     let packs_shop = shop_per_run(&a.packs_picked, a.runs);
+    let (zodiac_balance, zodiac_balance_alarms) = build_zodiac_balance(a, runs, overall_win);
 
     let total_yaku: u64 = a.yaku_scored.values().sum();
     let yaku = if total_yaku > 0 {
@@ -1149,6 +1300,8 @@ pub fn derived_from_batch(
         talismans_shop,
         zodiacs_shop,
         packs_shop,
+        zodiac_balance,
+        zodiac_balance_alarms,
         yaku,
         bot_issues,
         supplementary_tables,

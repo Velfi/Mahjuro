@@ -39,7 +39,7 @@ pub(crate) fn setup_hero_state(run: &mut RunState) {
 
 #[cfg(feature = "screenshot")]
 pub(crate) fn setup_shop_state(run: &mut RunState) {
-    mahjuro::room_bake::setup_shop_state(run);
+    crate::room_bake::setup_shop_state(run);
 }
 
 #[cfg(feature = "screenshot")]
@@ -86,7 +86,7 @@ pub(crate) fn setup_victory_game_over_screenshot_state(run: &mut RunState) {
 
 #[cfg(feature = "screenshot")]
 pub(crate) fn setup_gameplay_screenshot_state(run: &mut RunState) {
-    mahjuro::room_bake::setup_gameplay_bake_state(run);
+    crate::room_bake::setup_gameplay_bake_state(run);
 }
 
 #[cfg(feature = "screenshot")]

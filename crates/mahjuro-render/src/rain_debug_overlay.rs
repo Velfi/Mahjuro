@@ -35,21 +35,6 @@ fn rain_view_right(cam: &CameraParams) -> Vec3 {
     forward.cross(up).normalize_or_zero()
 }
 
-fn volume_lateral_half(volume: RainSpawnVolume, cam: &CameraParams) -> f32 {
-    let eye = Vec3::from_array(cam.eye);
-    let right = rain_view_right(cam);
-    let mut half = 0.0f32;
-    for xi in [volume.min.x, volume.max.x] {
-        for yi in [volume.min.y, volume.max.y] {
-            for zi in [volume.min.z, volume.max.z] {
-                let p = Vec3::new(xi, yi, zi);
-                half = half.max((p - eye).dot(right).abs());
-            }
-        }
-    }
-    half.max(1.0)
-}
-
 fn push_quad(
     instances: &mut Vec<GpuInstance>,
     x: f32,
@@ -360,8 +345,8 @@ fn draw_spawn_field_diagram(
     let eye = Vec3::from_array(cam.eye);
     let forward = rain_view_forward(cam);
     let right = rain_view_right(cam);
-    let (d_min, d_max) = volume.view_depth_range(cam);
-    let lateral_half = volume_lateral_half(volume, cam);
+    let aspect = window_w / window_h.max(1.0);
+    let (d_min, d_max) = volume.frustum_depth_range(cam);
     let near_bias = tuning.field.spawn_near_bias;
     let z_span = (volume.max.z - volume.min.z).max(1e-3);
     let spawn_z = volume.max.z - z_span * 0.275;
@@ -382,12 +367,15 @@ fn draw_spawn_field_diagram(
                 row as f32 / (SPAWN_FIELD_ROWS - 1) as f32
             };
             let depth = d_min + depth_t * (d_max - d_min).max(1e-3);
+            let lateral_half =
+                RainSpawnVolume::frustum_lateral_half_at(cam, depth, aspect);
             let mut pos = eye + forward * depth + right * (lateral_t * lateral_half);
             pos.z = spawn_z;
 
             let in_volume = volume.contains(pos);
-            let weight = if in_volume {
-                volume.spawn_weight_at(cam, pos, near_bias)
+            let in_frustum = volume.in_view_frustum(cam, pos, aspect);
+            let weight = if in_volume && in_frustum {
+                volume.spawn_weight_at(cam, pos, aspect, near_bias)
             } else {
                 0.0
             };
@@ -396,7 +384,7 @@ fn draw_spawn_field_diagram(
             let cy = plot_y + plot_h - (row as f32 + 0.5) * cell_h;
             let dot = (cell_w.min(cell_h) * 0.38).max(1.5);
             let size = dot * (0.55 + 0.45 * weight);
-            let alpha = if in_volume {
+            let alpha = if in_volume && in_frustum {
                 0.12 + 0.88 * weight
             } else {
                 0.04
@@ -417,8 +405,7 @@ fn draw_spawn_field_diagram(
     };
     let cam_x = plot_x + plot_w * 0.5;
     let cam_y = plot_y + plot_h - cam_depth_t * plot_h;
-    let aspect = window_w / window_h.max(1.0);
-    let frustum_reach = (plot_h * 0.34).min(56.0 * scale).max(20.0 * scale);
+    let frustum_reach = (cam_y - plot_y).max(20.0 * scale);
     push_camera_marker(
         instances,
         cam_x,
@@ -646,7 +633,7 @@ fn draw_spawn_field_diagram(
         legend_w - 8.0 * scale,
         scale,
         window_h,
-        "Vertical: near camera (bottom) → far (top)",
+        "Brighter: near camera along view frustum",
         |inst, _cx, cy, sc| {
             let bar_w = (3.0 * sc).max(2.0);
             let bar_h = (12.0 * sc).max(8.0);

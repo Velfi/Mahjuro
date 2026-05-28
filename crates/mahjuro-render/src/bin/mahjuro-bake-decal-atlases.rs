@@ -1,4 +1,10 @@
 //! CPU-only bake: `textures/tile_sets/<name>/showcase_decal_atlas.png` per player tileset.
+//!
+//! On success, refreshes `assets/textures/tile_sets/.decal_bake_stamp` with the same
+//! FNV-1a hash that `mahjuro`'s `build.rs` recomputes.
+
+use mahjuro_bake_stamp::BakeKind;
+use mahjuro_bake_stamp::showcase_decal::ShowcaseDecal;
 
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -43,5 +49,23 @@ fn main() -> anyhow::Result<()> {
         baked += 1;
     }
     log::info!("showcase decal atlas bake finished ({baked} tilesets)");
+
+    let repo = repo_root()?;
+    let stamped = ShowcaseDecal::write_stamp(&repo)?;
+    log::info!(
+        "refreshed {} ({})",
+        stamped.stamp_path.display(),
+        stamped.hash
+    );
     Ok(())
+}
+
+/// Repo root with no `..` components — must match `build.rs`'s digest paths.
+fn repo_root() -> anyhow::Result<std::path::PathBuf> {
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| anyhow::anyhow!("CARGO_MANIFEST_DIR has no grandparent"))
 }

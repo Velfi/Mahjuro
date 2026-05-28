@@ -1,12 +1,12 @@
 //! Run-state fixtures for offline room lighting bakes.
 
-use crate::core::consumable::Consumable;
-use crate::core::hand::{DetectedMeld, MeldKind};
-use crate::core::relic::RelicId;
-use crate::core::talisman::TalismanKind;
-use crate::core::tile::{Suit, Tile};
-use crate::core::zodiac::ZodiacKind;
-use crate::game::run::RunState;
+use mahjuro::core::consumable::Consumable;
+use mahjuro::core::hand::{DetectedMeld, MeldKind};
+use mahjuro::core::relic::RelicId;
+use mahjuro::core::talisman::TalismanKind;
+use mahjuro::core::tile::{Suit, Tile};
+use mahjuro::core::zodiac::ZodiacKind;
+use mahjuro::game::run::RunState;
 
 pub fn setup_shop_state(run: &mut RunState) {
     run.yen = 42;

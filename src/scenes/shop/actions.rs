@@ -259,6 +259,7 @@ impl ShopScene {
             storeroom_orbit_yaw: 0.0,
             storeroom_orbit_pitch: 0.0,
             gltf_anims: crate::render::room_gltf_anim::GltfAnimPlaybackSet::default(),
+            departing_stock: Vec::new(),
         }
     }
 
@@ -479,7 +480,7 @@ impl ShopScene {
 
     /// Replace all unsold stock with fresh random items and bump the cost.
     pub(super) fn reroll(&mut self, run: &mut crate::game::run::RunState) {
-        if self.mode == ShopMode::Tutorial {
+        if self.mode == ShopMode::Tutorial || self.restock_exit_active() {
             return;
         }
         let mut bus = crate::game::event_bus::EventBus::default();
@@ -509,29 +510,22 @@ impl ShopScene {
             _ => self.reroll_cost += REROLL_COST_INCREMENT,
         }
         let shop = GameEngine::read_shop(run);
-        let (items, zodiac_items, talisman_items, pack_items) = generate_shop_stock(
-            &shop.relic_state,
-            &shop.available_relics,
-            0,
-            run.relic_shop_pool_extinction(),
-            &run.mode,
-            run,
-        );
-        self.items = items;
-        self.zodiac_items = zodiac_items;
-        self.talisman_items = talisman_items;
-        self.pack_items = pack_items;
-        self.focus = Some(default_shop_focus_for_stock(
-            &self.items,
-            &self.zodiac_items,
-            &self.talisman_items,
-            &self.pack_items,
-        ));
+        let pending = self.pending_shop_stock_from_run(&shop, run);
+        self.begin_restock_exit(pending, std::time::Instant::now(), true);
     }
 
     /// Debug-only: reroll stock without deducting gold or incrementing cost.
     pub fn debug_reroll(&mut self, run: &crate::game::run::RunState) {
         let shop = GameEngine::read_shop(run);
+        let pending = self.pending_shop_stock_from_run(&shop, run);
+        self.begin_restock_exit(pending, std::time::Instant::now(), true);
+    }
+
+    fn pending_shop_stock_from_run(
+        &self,
+        shop: &ShopReadModel,
+        run: &crate::game::run::RunState,
+    ) -> super::restock_exit::PendingShopStock {
         let (items, zodiac_items, talisman_items, pack_items) = generate_shop_stock(
             &shop.relic_state,
             &shop.available_relics,
@@ -540,15 +534,18 @@ impl ShopScene {
             &run.mode,
             run,
         );
-        self.items = items;
-        self.zodiac_items = zodiac_items;
-        self.talisman_items = talisman_items;
-        self.pack_items = pack_items;
-        self.focus = Some(default_shop_focus_for_stock(
-            &self.items,
-            &self.zodiac_items,
-            &self.talisman_items,
-            &self.pack_items,
-        ));
+        let focus = default_shop_focus_for_stock(
+            &items,
+            &zodiac_items,
+            &talisman_items,
+            &pack_items,
+        );
+        super::restock_exit::PendingShopStock {
+            items,
+            zodiac_items,
+            talisman_items,
+            pack_items,
+            focus: Some(focus),
+        }
     }
 }

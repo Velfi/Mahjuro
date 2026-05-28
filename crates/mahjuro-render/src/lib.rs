@@ -54,6 +54,8 @@ pub mod room_env_gltf;
 pub mod room_bake_cache;
 pub mod room_gi_bake;
 pub mod room_glb;
+pub mod room_gpu_profile;
+pub mod room_preload;
 pub mod room_gltf_anim;
 pub mod room_gltf_punctual;
 pub mod room_shadow_bake;

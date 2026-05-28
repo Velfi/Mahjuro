@@ -180,6 +180,52 @@ impl ZodiacKind {
         self.yaku_levels().iter().any(|&yk| yaku_scored(yk))
     }
 
+    /// Additive mult granted to each bound yaku level when this zodiac is
+    /// consumed. Tuned per-zodiac (Balatro-style planets), not global.
+    pub fn level_up_mult_per_level(self) -> f64 {
+        match self {
+            ZodiacKind::Mouse => 0.82,
+            ZodiacKind::Rat => 0.78,
+            ZodiacKind::Ox => 1.00,
+            ZodiacKind::Tiger => 0.96,
+            ZodiacKind::Rabbit => 0.88,
+            ZodiacKind::Dragon => 0.90,
+            ZodiacKind::Snake => 0.86,
+            ZodiacKind::Horse => 0.92,
+            ZodiacKind::Goat => 0.84,
+            ZodiacKind::Monkey => 1.06,
+            ZodiacKind::Rooster => 1.10,
+            ZodiacKind::Dog => 0.98,
+            ZodiacKind::Pig => 0.94,
+            ZodiacKind::Qilin => 0.70,
+            ZodiacKind::Phoenix => 0.80,
+            ZodiacKind::Crane => 1.02,
+        }
+    }
+
+    /// Additive chips granted to each bound yaku level when this zodiac is
+    /// consumed. Tuned per-zodiac (Balatro-style planets), not global.
+    pub fn level_up_chips_per_level(self) -> i32 {
+        match self {
+            ZodiacKind::Mouse => 44,
+            ZodiacKind::Rat => 42,
+            ZodiacKind::Ox => 56,
+            ZodiacKind::Tiger => 54,
+            ZodiacKind::Rabbit => 48,
+            ZodiacKind::Dragon => 50,
+            ZodiacKind::Snake => 47,
+            ZodiacKind::Horse => 52,
+            ZodiacKind::Goat => 46,
+            ZodiacKind::Monkey => 58,
+            ZodiacKind::Rooster => 60,
+            ZodiacKind::Dog => 55,
+            ZodiacKind::Pig => 53,
+            ZodiacKind::Qilin => 38,
+            ZodiacKind::Phoenix => 45,
+            ZodiacKind::Crane => 57,
+        }
+    }
+
     /// Ribbons eligible for shop stock and random zodiac grants.
     pub fn spawn_pool(yaku_scored: impl Fn(YakuKind) -> bool) -> Vec<ZodiacKind> {
         Self::all()
@@ -368,5 +414,21 @@ mod tests {
         assert_eq!(yl.level_up(YakuKind::Toitoi), 2);
         assert_eq!(yl.level_up(YakuKind::Toitoi), 3);
         assert_eq!(yl.level_of(YakuKind::Toitoi), 3);
+    }
+
+    #[test]
+    fn zodiac_level_up_bonuses_are_unique() {
+        let mut mult_values = std::collections::HashSet::new();
+        let mut chip_values = std::collections::HashSet::new();
+        for &z in ZodiacKind::all() {
+            assert!(
+                mult_values.insert((z.level_up_mult_per_level() * 100.0).round() as i32),
+                "{z:?} mult bonus duplicates another zodiac"
+            );
+            assert!(
+                chip_values.insert(z.level_up_chips_per_level()),
+                "{z:?} chip bonus duplicates another zodiac"
+            );
+        }
     }
 }

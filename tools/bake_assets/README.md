@@ -55,3 +55,5 @@ The manifest includes **`game_version`** (from the root crate `[package].version
 - `MAHJURO_ASSETS` — loose `assets/` root (used when packs are absent or you want to override).
 - `MAHJURO_SKIP_ASSET_BAKE` — if set (non-empty, not `0`/`false`), `build.rs` does not run the baker (see above).
 - `MAHJURO_STRICT_PACK_VERSION` — if set, panic when manifest `game_version` ≠ binary (see above).
+
+Full env/CLI list: [docs/agents/launch-options.md](../../docs/agents/launch-options.md).

@@ -3,7 +3,7 @@
 //! Named [`scope`] guards record elapsed time on drop. [`report_sync_boot`] and
 //! [`note_async_boot_complete`] emit sorted `log::info!` tables (slowest first).
 //! Deferred room GPU uploads log via [`log_sample`] when they finish (e.g. first
-//! transition into gameplay).
+//! transition into gameplay). Per-room payload + hitch lines use [`crate::room_gpu_profile`].
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};

@@ -10,7 +10,7 @@
 //! Decodes through [`crate::room_env_gltf`]; decoded layout matches [`crate::room_glb::RoomGlbCpu`]
 //! for the shared GPU path (`room_glb.wgsl` / embedded lights).
 
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 use glam::Vec3;
 
@@ -138,7 +138,7 @@ pub const HALLWAY_BALLOON_FLOOR_Z: f32 = 0.08;
 // - `lateral = normalize(cross(depth_axis, world_up))` (handedness follows depth sign in `mask.y`).
 // - `side_c = dot(world, lateral) - stretch.y` with `stretch.y` = glTF root lateral coord (not AABB center).
 // - `side_n = clamp(side_c / flags.w, −1, 1)`; `flags.w` = lateral corridor half-width (bounds span).
-// - Twist: normalized `side_n`; breathe uses world `side_c` (same center, world-unit amplitude).
+// - Twist: rigid spiral around depth (`u`); sign from `twist.w` (+1 / −1 per run). Not `side_n`.
 // - `twist.w` flips rotation hand; breathe/pulse depth phase uses normalized `u` along `mask` span.
 // - `stretch.z` stores glTF root depth (CPU). `bow.rgb` = per-run wall tint; `bow.w` = balloon amp.
 // - `ripple` = lateral waves.
@@ -173,10 +173,9 @@ pub struct HallwayDistortion {
     /// x = stretch along depth axis, y = glTF-root lateral coord (`dot(origin, lateral)` in world),
     /// z = glTF-root depth coord (`dot(origin, depth_axis)` for `y_rel`), w = stretch bias scale.
     pub stretch: [f32; 4],
-    /// x = max twist magnitude (rad), y = twist mask power, z = depth mask profile (0 = legacy
+    /// x = max twist magnitude (rad) at far end of corridor, y = twist mask power, z = depth mask profile (0 = legacy
     /// smoothstep ramp along +depth; 1 = bell curve centered on [`HallwayDistortion::mask`] z/w
-    /// span from GLB bounds). w = twist sign (+1 or −1); negates rotation so the hall can twist
-    /// either way around the depth axis (see `room_glb.wgsl` / `tile_3d.wgsl`).
+    /// span from GLB bounds). w = twist handedness (+1 or −1); whole hall spirals CW or CCW around depth.
     pub twist: [f32; 4],
     /// x = depth axis index (0..2), y = depth sign (±1), z/w = depth span along that axis in
     /// world units (see [`hallway_distortion_apply_glb_depth_extent`]; shaders interpret with
@@ -448,17 +447,30 @@ enum HallwayGlbCache {
 
 static HALLWAY_GLB_CPU: RwLock<HallwayGlbCache> = RwLock::new(HallwayGlbCache::Uninit);
 
-fn ensure_hallway_glb_loaded() {
-    let mut w = HALLWAY_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
-    match &*w {
-        HallwayGlbCache::Uninit => {}
-        HallwayGlbCache::Ready(Some(cpu))
-            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
-                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
-        {
-            *w = HallwayGlbCache::Uninit;
+/// True when `hallway.glb` has been decoded into the process cache.
+pub fn hallway_cpu_decoded() -> bool {
+    let g = HALLWAY_GLB_CPU.read();
+    matches!(&*g, HallwayGlbCache::Ready(Some(_)))
+}
+
+/// True when decoded environment meshes are present and not yet released for GPU upload.
+pub fn hallway_cpu_ready_for_gpu_upload() -> bool {
+    let g = HALLWAY_GLB_CPU.read();
+    match &*g {
+        HallwayGlbCache::Ready(Some(cpu)) => {
+            !cpu.environment_primitives.is_empty() && !cpu.environment_primitives_released
         }
-        _ => return,
+        _ => false,
+    }
+}
+
+/// Decode `hallway.glb` into the process-wide CPU cache (main or prefetch thread).
+pub fn decode_hallway_glb_into_cache() {
+    let mut w = HALLWAY_GLB_CPU.write();
+    if matches!(&*w, HallwayGlbCache::Ready(Some(cpu)) if !room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
+        && !room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu))
+    {
+        return;
     }
     let ready = if let Some(file) = mahjuro_assets::asset_path::get("3d/hallway.glb") {
         match load_hallway_glb_from_bytes(&file.data) {
@@ -478,10 +490,26 @@ fn ensure_hallway_glb_loaded() {
     *w = HallwayGlbCache::Ready(ready.map(Box::new));
 }
 
+fn ensure_hallway_glb_loaded() {
+    crate::room_preload::join_hallway_cpu_prefetch_blocking();
+    let mut w = HALLWAY_GLB_CPU.write();
+    match &*w {
+        HallwayGlbCache::Uninit => {}
+        HallwayGlbCache::Ready(Some(cpu))
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) =>
+        {
+            *w = HallwayGlbCache::Uninit;
+        }
+        _ => return,
+    }
+    drop(w);
+    decode_hallway_glb_into_cache();
+}
+
 /// Read-only access to decoded hallway data.
 pub fn with_hallway_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     ensure_hallway_glb_loaded();
-    let g = HALLWAY_GLB_CPU.read().unwrap_or_else(|e| e.into_inner());
+    let g = HALLWAY_GLB_CPU.read();
     match &*g {
         HallwayGlbCache::Ready(Some(cpu)) => f(Some(cpu)),
         HallwayGlbCache::Ready(None) => f(None),
@@ -598,7 +626,7 @@ pub fn hallway_distortion_apply_glb_depth_extent(
 
 /// Drops CPU mesh/texture RAM after GPU upload (same contract as shop).
 pub fn release_hallway_environment_cpu_sources_after_gpu_upload() {
-    let mut g = HALLWAY_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
+    let mut g = HALLWAY_GLB_CPU.write();
     if let HallwayGlbCache::Ready(Some(cpu)) = &mut *g {
         room_glb::release_room_environment_primitives_cpu(cpu);
     }

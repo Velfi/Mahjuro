@@ -34,6 +34,9 @@ LAYOUT = [
 
 # Optional alternate stems (no `.png`) when sources use descriptive names.
 CODE_ALTERNATES: dict[str, tuple[str, ...]] = {
+    "B1": ("1s",), "B2": ("2s",), "B3": ("3s",), "B4": ("4s",), "B5": ("5s",), "B6": ("6s",), "B7": ("7s",), "B8": ("8s",), "B9": ("9s",),
+    "C1": ("1m",), "C2": ("2m",), "C3": ("3m",), "C4": ("4m",), "C5": ("5m",), "C6": ("6m",), "C7": ("7m",), "C8": ("8m",), "C9": ("9m",),
+    "D1": ("1p",), "D2": ("2p",), "D3": ("3p",), "D4": ("4p",), "D5": ("5p",), "D6": ("6p",), "D7": ("7p",), "D8": ("8p",), "D9": ("9p",),
     "EWind": ("EastWind",),
     "SWind": ("SouthWind",),
     "WWind": ("WestWind",),
@@ -41,10 +44,10 @@ CODE_ALTERNATES: dict[str, tuple[str, ...]] = {
     "DRed": ("RedDragon",),
     "DGreen": ("GreenDragon",),
     "DWhite": ("WhiteDragon",),
-    "Flower1": ("F1",),
-    "Flower2": ("F2",),
-    "Flower3": ("F3",),
-    "Flower4": ("F4",),
+    "Flower1": ("F1", "Flowers1"),
+    "Flower2": ("F2", "Flowers2"),
+    "Flower3": ("F3", "Flowers3"),
+    "Flower4": ("F4", "Flowers4"),
     "Season1": ("S1",),
     "Season2": ("S2",),
     "Season3": ("S3",),

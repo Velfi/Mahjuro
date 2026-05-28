@@ -10,10 +10,13 @@ use mahjuro_bake_stamp::BakeKind;
 use mahjuro_bake_stamp::room_gi::RoomGi;
 use mahjuro_bake_stamp::room_shadow::RoomShadow;
 
-use crate::app::HeadlessApp;
 use crate::bake_cli::{BakeRoomCli, RoomBakeKind};
+use crate::room_bake::scene_for_room;
 use crate::room_bake_app::RoomBakeApp;
 use crate::slug::resolve_bake_rooms;
+
+const EXPECTED_GI_STAMP_HASH_ENV: &str = "MAHJURO_EXPECT_ROOM_GI_STAMP_HASH";
+const EXPECTED_SHADOW_STAMP_HASH_ENV: &str = "MAHJURO_EXPECT_ROOM_SHADOW_STAMP_HASH";
 
 pub fn run(cli: BakeRoomCli) -> anyhow::Result<()> {
     mahjuro::asset_path::init();
@@ -34,7 +37,7 @@ pub fn run(cli: BakeRoomCli) -> anyhow::Result<()> {
     let height = cli.height.max(1);
 
     for room in &rooms {
-        let (scene, run, game_in_progress) = mahjuro::room_bake::scene_for_room(*room, &progress);
+        let (scene, run, game_in_progress) = scene_for_room(*room, &progress);
         let mut app = RoomBakeApp::new(
             scene,
             run,
@@ -79,12 +82,18 @@ fn refresh_stamps_if_canonical(
 
     if bake_gi {
         if cli.gi_dir == Path::new(RoomGi::OUT_DIR) {
-            let stamped = RoomGi::write_stamp(&repo)?;
-            log::info!(
-                "refreshed {} ({})",
-                stamped.stamp_path.display(),
-                stamped.hash
-            );
+            if let Some(expected_hash) = expected_stamp_hash_from_env(EXPECTED_GI_STAMP_HASH_ENV) {
+                let stamp_path = repo.join(RoomGi::STAMP_PATH);
+                mahjuro_bake_stamp::write_stamp_line(&stamp_path, &expected_hash)?;
+                log::info!("refreshed {} ({})", stamp_path.display(), expected_hash);
+            } else {
+                let stamped = RoomGi::write_stamp(&repo)?;
+                log::info!(
+                    "refreshed {} ({})",
+                    stamped.stamp_path.display(),
+                    stamped.hash
+                );
+            }
         } else {
             log::info!(
                 "--gi-dir is non-canonical ({}); leaving {} alone",
@@ -96,12 +105,20 @@ fn refresh_stamps_if_canonical(
 
     if bake_shadow {
         if cli.shadow_dir == Path::new(RoomShadow::OUT_DIR) {
-            let stamped = RoomShadow::write_stamp(&repo)?;
-            log::info!(
-                "refreshed {} ({})",
-                stamped.stamp_path.display(),
-                stamped.hash
-            );
+            if let Some(expected_hash) =
+                expected_stamp_hash_from_env(EXPECTED_SHADOW_STAMP_HASH_ENV)
+            {
+                let stamp_path = repo.join(RoomShadow::STAMP_PATH);
+                mahjuro_bake_stamp::write_stamp_line(&stamp_path, &expected_hash)?;
+                log::info!("refreshed {} ({})", stamp_path.display(), expected_hash);
+            } else {
+                let stamped = RoomShadow::write_stamp(&repo)?;
+                log::info!(
+                    "refreshed {} ({})",
+                    stamped.stamp_path.display(),
+                    stamped.hash
+                );
+            }
         } else {
             log::info!(
                 "--shadow-dir is non-canonical ({}); leaving {} alone",
@@ -112,6 +129,17 @@ fn refresh_stamps_if_canonical(
     }
 
     Ok(())
+}
+
+fn expected_stamp_hash_from_env(var: &str) -> Option<String> {
+    let raw = std::env::var(var).ok()?;
+    let hash = raw.trim();
+    if hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Some(hash.to_ascii_lowercase())
+    } else {
+        log::warn!("ignoring invalid {} value: {:?}", var, raw);
+        None
+    }
 }
 
 /// Repo root with no `..` components. The build script uses `mahjuro`'s

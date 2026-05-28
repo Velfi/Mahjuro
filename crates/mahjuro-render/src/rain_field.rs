@@ -3,6 +3,8 @@
 //! Spawns drops in a thin band under the spawn ceiling of a padded `rain_hit_*` AABB, integrates in world −Z with wind,
 //! raycasts against `rain_hit_*` collision shells, and emits screen-space splashes.
 
+use std::cell::RefCell;
+
 use glam::Vec3;
 use rand::RngExt;
 
@@ -12,7 +14,7 @@ use crate::particles::{ParticleSystem, RainCollider, RainSpawnVolume};
 use crate::rain_tuning::RainTuning;
 use crate::room_env_gltf::RoomCollisionMesh;
 use crate::room_glb;
-use crate::scene_light_sample::SceneLightSampleCtx;
+use crate::scene_light_sample::{RainVolumetricLit, SceneLightSampleCtx};
 use crate::wgpu_renderer::GpuInstance;
 
 pub struct RainField {
@@ -22,6 +24,8 @@ pub struct RainField {
     /// Random credits required for the next drop (uniform ~[0.35, 1.65], mean 1).
     /// Avoids fixed 1.0 steps that align many births on the same frames ("waves").
     spawn_next_threshold: f32,
+    quad_scratch: RefCell<Vec<GpuInstance>>,
+    instance_scratch: RefCell<Vec<([f32; 4], [f32; 4])>>,
 }
 
 impl RainField {
@@ -35,6 +39,8 @@ impl RainField {
             particles: ParticleSystem::new(),
             spawn_accum: 0.0,
             spawn_next_threshold: Self::random_spawn_threshold(),
+            quad_scratch: RefCell::new(Vec::new()),
+            instance_scratch: RefCell::new(Vec::new()),
         }
     }
 
@@ -46,7 +52,7 @@ impl RainField {
         window_w: f32,
         window_h: f32,
         env_scale: f32,
-        rain_meshes: &[RoomCollisionMesh],
+        rain_mesh: Option<&RoomCollisionMesh>,
         lighting: Option<&SceneLightSampleCtx<'_>>,
     ) {
         let speed = tuning.speed_mul.max(0.0);
@@ -66,20 +72,20 @@ impl RainField {
                 self.spawn_accum -= self.spawn_next_threshold;
                 self.spawn_next_threshold = 0.35 + rng.random::<f32>() * 1.3;
                 let fall_mul = 0.88 + rng.random::<f32>() * 0.24;
+                let aspect = window_w / window_h.max(1.0);
                 self.particles.spawn_world_drop(
-                    volume.random_pos_near_camera(cam, tuning.field.spawn_near_bias),
+                    volume.random_pos_near_camera(cam, aspect, tuning.field.spawn_near_bias),
                     fall_mul,
                 );
             }
         }
 
         let model = main_menu_glb::main_menu_rain_env_model_matrix(window_h, env_scale);
-        let collider = model
-            .filter(|_| !rain_meshes.is_empty())
-            .map(|m| RainCollider {
-                model: m,
-                meshes: rain_meshes,
-            });
+        let collider = model.zip(rain_mesh).map(|(m, mesh)| RainCollider {
+            model: m,
+            inv_model: m.inverse(),
+            mesh,
+        });
 
         self.particles.update_world(
             dt,
@@ -107,33 +113,38 @@ impl RainField {
         window_h: f32,
         streak_len_px: f32,
         drop_color: [f32; 4],
-        lighting: Option<&SceneLightSampleCtx<'_>>,
+        lit: Option<RainVolumetricLit>,
     ) {
         if !self.particles.is_active() {
             return;
         }
-        let mut quads: Vec<GpuInstance> = Vec::new();
-        for (rect, color) in self
-            .particles
-            .instances_world(
-                cam,
-                window_w,
-                window_h,
-                streak_len_px,
-                drop_color,
-                lighting,
-            )
-            .into_iter()
+        let proj = cam.screen_projector(window_w, window_h);
+        let mut instance_scratch = self.instance_scratch.borrow_mut();
+        instance_scratch.clear();
+        self.particles.fill_world_instances(
+            &mut instance_scratch,
+            proj,
+            cam,
+            streak_len_px,
+            drop_color,
+            lit.as_ref(),
+        );
+        let mut quad_scratch = self.quad_scratch.borrow_mut();
+        quad_scratch.clear();
+        quad_scratch.reserve(instance_scratch.len() + 64);
+        for (rect, color) in instance_scratch
+            .iter()
+            .copied()
             .chain(self.particles.instances())
         {
-            quads.push(GpuInstance {
+            quad_scratch.push(GpuInstance {
                 rect,
                 color,
                 user: 0,
             });
         }
-        if !quads.is_empty() {
-            frame.quads(quads);
+        if !quad_scratch.is_empty() {
+            frame.quads(std::mem::take(&mut *quad_scratch));
         }
     }
 }

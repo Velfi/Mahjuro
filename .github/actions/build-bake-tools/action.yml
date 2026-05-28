@@ -26,6 +26,7 @@ runs:
         if [[ "${{ inputs.profile }}" == release ]]; then
           bake+=(--release)
         fi
+        export MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1
         export MAHJURO_SKIP_ROOM_GI_BAKE=1
         export MAHJURO_SKIP_ROOM_SHADOW_BAKE=1
         export MAHJURO_SKIP_SHOWCASE_DECAL_BAKE=1

@@ -157,14 +157,16 @@ impl SceneBehavior for CreditsScene {
         self.sync_scroll(&layout);
 
         if ctx.scroll_lines.abs() > 0.001 {
-            let (cx, cy) = ctx.cursor_pos;
-            let content_end_y = layout.content_start_y
-                + layout.visible_slots as f32 * (layout.slot_h + layout.slot_gap);
-            if cx >= layout.content_x
-                && cx <= layout.content_x + layout.content_w
-                && cy >= layout.content_start_y
-                && cy <= content_end_y
-            {
+            let wheel_over_content = {
+                let (cx, cy) = ctx.cursor_pos;
+                let content_end_y = layout.content_start_y
+                    + layout.visible_slots as f32 * (layout.slot_h + layout.slot_gap);
+                cx >= layout.content_x
+                    && cx <= layout.content_x + layout.content_w
+                    && cy >= layout.content_start_y
+                    && cy <= content_end_y
+            };
+            if ctx.input_mode != InputMode::Cursor || wheel_over_content {
                 self.scroll.scroll_by(-ctx.scroll_lines);
             }
         }

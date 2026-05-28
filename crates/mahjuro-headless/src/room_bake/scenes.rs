@@ -1,10 +1,10 @@
 //! Scene + run setup for offline room GI / shadow bakes.
 
-use crate::core::progression::PlayerProgress;
-use crate::game::run::RunState;
-use crate::render::room_gi_bake::RoomGiRoom;
-use crate::scenes::shop::ShopScene;
-use crate::scenes::{
+use mahjuro::core::progression::PlayerProgress;
+use mahjuro::game::run::RunState;
+use mahjuro::render::room_gi_bake::RoomGiRoom;
+use mahjuro::scenes::shop::ShopScene;
+use mahjuro::scenes::{
     CollectionScene, GameplayScene, MainMenuExteriorScene, PickChamberScene, Scene,
     StaircaseScene,
 };

@@ -1116,6 +1116,43 @@ impl AggregateStats {
                 );
             }
         }
+        if !d.zodiac_balance.is_empty() {
+            out!(
+                "\nzodiac balance (acquire/use/win telemetry; win% is conditioned on runs that acquired):"
+            );
+            out!(
+                "  {:<14} {:<18} {:>6} {:>6} {:>7} {:>8} {:>18} {:>8}",
+                "zodiac", "yaku", "acq", "used", "use/acq", "Δwin", "95% CI", "avgLvl"
+            );
+            for row in d.zodiac_balance.iter().filter(|r| r.acquired > 0) {
+                out!(
+                    "  {:<14} {:<18} {:>6} {:>6} {:>7.2} {:>+7.1} [{:>4.1},{:>4.1}] {:>8.2}",
+                    row.zodiac,
+                    row.yaku,
+                    row.acquired,
+                    row.used,
+                    row.use_per_acquire,
+                    row.delta_vs_baseline_pct,
+                    row.win_pct_ci_lo,
+                    row.win_pct_ci_hi,
+                    row.avg_primary_yaku_level_when_acquired
+                );
+            }
+        }
+        if !d.zodiac_balance_alarms.is_empty() {
+            out!("\nzodiac balance alarms:");
+            for alarm in &d.zodiac_balance_alarms {
+                out!(
+                    "  [{}] {:<14} {:<20} observed={:>6.2} threshold={:>6.2}  {}",
+                    alarm.severity,
+                    alarm.zodiac,
+                    alarm.signal,
+                    alarm.observed,
+                    alarm.threshold,
+                    alarm.detail
+                );
+            }
+        }
 
         if let Some(ref y) = d.yaku {
             out!("\nyaku scored (each committed play may count multiple patterns):");

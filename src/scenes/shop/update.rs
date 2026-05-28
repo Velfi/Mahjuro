@@ -71,7 +71,10 @@ impl ShopScene {
             return Some(self.continue_scene(ctx.run));
         }
         if matches!(hit, ShopHit::Dish(id) if id == PICK_REROLL_PROP) {
-            if self.mode == ShopMode::Standard && ctx.run.can_afford_shop_reroll(self.reroll_cost) {
+            if !self.restock_exit_active()
+                && self.mode == ShopMode::Standard
+                && ctx.run.can_afford_shop_reroll(self.reroll_cost)
+            {
                 self.reroll(ctx.run);
             }
             return None;
@@ -110,6 +113,7 @@ impl ShopScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.age_secs += dt;
+        self.tick_departing_stock(now, 1080.0);
         self.gltf_anims.prune_finished();
     }
 
@@ -170,6 +174,7 @@ impl ShopScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.age_secs += dt;
+        self.tick_departing_stock(now, ctx.layout.window_h);
         if ctx.mouse_left_down {
             // Subtle pre-inspect peek — much slower and tighter than item-inspect orbit.
             const ORBIT: f32 = 0.55;
@@ -453,6 +458,7 @@ impl ShopScene {
                         return Some(self.continue_scene(ctx.run));
                     }
                     if matches!(focus, ShopFocus::Reroll)
+                        && !self.restock_exit_active()
                         && self.mode == ShopMode::Standard
                         && ctx.run.can_afford_shop_reroll(self.reroll_cost)
                     {
@@ -527,6 +533,7 @@ impl ShopScene {
                 return Some(self.continue_scene(ctx.run));
             }
             if cid == SHOP_REROLL_ID
+                && !self.restock_exit_active()
                 && self.mode == ShopMode::Standard
                 && ctx.run.can_afford_shop_reroll(self.reroll_cost)
             {

@@ -1,12 +1,12 @@
 [package]
 name = "mahjuro-gfx-types"
-version = "0.5.0-21"
-edition = "2024"
-publish = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [dependencies]
-anyhow = "1.0.102"
-dirs = "6.0.0"
-serde = { version = "1.0.228", features = ["derive"] }
+anyhow.workspace = true
+dirs.workspace = true
+serde.workspace = true
 # (derive used by effects.rs / tile.rs)
-serde_json = "1.0.149"
+serde_json.workspace = true

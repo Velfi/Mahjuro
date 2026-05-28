@@ -2,7 +2,7 @@
 
 Headless bake tools live in [`crates/mahjuro-headless`](../../crates/mahjuro-headless) (`mahjuro-bake`, `mahjuro-screenshot`) so they do not build the interactive `mahjuro` binary (no `rodio`, Steam, or SDL). GPU work is in `mahjuro-render`; room scenes still link for draw recording.
 
-Stamp hashes and skip env vars are centralized in [`crates/mahjuro-bake-stamp`](../../crates/mahjuro-bake-stamp). `build.rs` compares committed `.inputs_stamp` files against current inputs; set the matching `MAHJURO_SKIP_*_BAKE=1` while rebuilding a baker so stale stamps do not block compilation.
+Stamp hashes and skip env vars are centralized in [`crates/mahjuro-bake-stamp`](../../crates/mahjuro-bake-stamp). `build.rs` compares committed stamps against current inputs; on **local host builds** it auto-rebakes when stale by running a **pre-built** bake binary (`target/debug/mahjuro-bake`, etc.). It does **not** spawn nested `cargo` from the build script ([cargo#6412](https://github.com/rust-lang/cargo/issues/6412) — that deadlocks). Build tools once with `scripts/rebake-offline.sh` if auto-rebake says the binary is missing. **CI** (`CI=true`) and **cross-compiles** still panic. Set `MAHJURO_SKIP_AUTO_OFFLINE_BAKE=1` to disable auto-rebake. See [launch options](launch-options.md).
 
 ## Room vertex warp + live shadows
 
@@ -15,13 +15,12 @@ Static rooms ship offline `assets/data/room_shadow/<room>.msh` (MSH1: depth + co
 **Rebake all rooms** (refreshes `.inputs_stamp` automatically):
 
 ```bash
-MAHJURO_SKIP_ROOM_GI_BAKE=1 MAHJURO_SKIP_ROOM_SHADOW_BAKE=1 \
-  cargo build -p mahjuro-headless --bin mahjuro-bake --features bake && \
-  ./target/debug/mahjuro-bake
+scripts/rebake-offline.sh room
+# or: cargo run -p mahjuro-headless --bin mahjuro-bake --features bake
 ```
 
 - Stamp logic: [`mahjuro_bake_stamp::room_shadow`](../../crates/mahjuro-bake-stamp/src/room_shadow.rs)
-- Skip freshness check while rebuilding the baker: `MAHJURO_SKIP_ROOM_SHADOW_BAKE=1` (mirrors `MAHJURO_SKIP_ROOM_GI_BAKE`)
+- Freshness checks auto-skip when building `mahjuro-headless` with `--features bake` (`mahjuro/offline-bake-support` on the dependency graph) or when `MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1` is set.
 - Implementation: [`room_shadow_bake.rs`](../../crates/mahjuro-render/src/room_shadow_bake.rs)
 
 ### Archive (exception)
@@ -67,4 +66,4 @@ See [`ScreenshotCli`](../../crates/mahjuro-headless/src/screenshot_cli.rs). Pull
 cargo build -p mahjuro-headless --bin mahjuro-bake --features bake
 ```
 
-Depends on `mahjuro` with `bake-support` only. On a successful full-room run, `mahjuro-bake` refreshes `.inputs_stamp` for each baked kind so the next `cargo build` does not flag committed outputs as stale.
+Lives in `mahjuro-headless` (`RoomBakeApp` + `room_bake`). On a successful full-room run, `mahjuro-bake` refreshes `.inputs_stamp` for each baked kind so the next `cargo build` does not flag committed outputs as stale.

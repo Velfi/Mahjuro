@@ -25,11 +25,16 @@
 //! paths do not invalidate the bake). Set `MAHJURO_SKIP_ASSET_BAKE=1` to skip entirely.
 //!
 //! **Room GI / shadow / decal / relic bakes:** committed outputs under `assets/` must
-//! match their input stamps; `build.rs` fails the build when stale. Rebake offline and
-//! commit outputs + stamps (`mahjuro-bake`, `mahjuro-bake-decal-atlases`,
-//! `mahjuro-bake-relics`). Set `MAHJURO_SKIP_*_BAKE=1` only while compiling those tools
-//! after changing bake inputs (nested `cargo build` from `build.rs` deadlocks).
+//! match their input stamps. On local host builds, `build.rs` auto-rebakes when stale by
+//! running a pre-built bake binary (never nested `cargo` — see rust-lang/cargo#6412).
+//! CI (`CI=true`) and cross-compiles still panic. Build bake tools once via
+//! `scripts/rebake-offline.sh` if auto-rebake reports a missing binary.
+//! `mahjuro` is built with `headless-screenshot` or `offline-bake-support`,
+//! `MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1`, `MAHJURO_SKIP_OFFLINE_BAKES=1`, or a per-bake
+//! `MAHJURO_SKIP_*_BAKE=1`.
 
+#[path = "build/offline_bake.rs"]
+mod offline_bake;
 #[path = "build/asset_pack_bake.rs"]
 mod asset_pack_bake;
 #[path = "build/room_gi_bake.rs"]
@@ -69,7 +74,10 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=STEAM_SDK_LOCATION");
     println!("cargo:rerun-if-env-changed=MAHJURO_SKIP_ASSET_BAKE");
+    println!("cargo:rerun-if-env-changed={}", mahjuro_bake_stamp::SKIP_COMMITTED_BAKE_CHECKS_ENV);
+    println!("cargo:rerun-if-env-changed={}", mahjuro_bake_stamp::SKIP_OFFLINE_BAKES_ENV);
     println!("cargo:rerun-if-changed=build.rs");
+    offline_bake::emit_rerun_if_changed();
     room_gpu_bake::emit_rerun_if_changed();
     showcase_decal_bake::emit_rerun_if_changed();
     relic_bake::emit_rerun_if_changed();
@@ -79,9 +87,7 @@ fn main() {
         && let Some(repo) = env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from)
     {
         asset_pack_bake::emit_rerun_if_changed(&repo, &profile_dir);
-        room_gpu_bake::assert_room_gpu_bakes_current(&repo);
-        showcase_decal_bake::assert_showcase_decal_atlases_current(&repo);
-        relic_bake::assert_relic_bakes_current(&repo);
+        offline_bake::ensure_committed_offline_bakes_current(&repo, &profile_dir);
         asset_pack_bake::maybe_bake_asset_packs(&repo, &profile_dir);
     }
 

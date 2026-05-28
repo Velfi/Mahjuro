@@ -367,6 +367,40 @@ pub struct YakuDerived {
 }
 
 #[derive(Serialize)]
+pub struct ZodiacBalanceRow {
+    pub zodiac: String,
+    pub yaku: String,
+    pub acquired: u32,
+    pub acquired_per_run: f64,
+    pub used: u64,
+    pub used_per_run: f64,
+    /// `used / acquired` (how often acquired ribbons are actually consumed).
+    pub use_per_acquire: f64,
+    /// Runs with at least one acquisition of this zodiac.
+    pub runs_acquired: u32,
+    /// Batch win% conditioned on runs that acquired this zodiac.
+    pub win_pct_when_acquired: f64,
+    pub win_pct_ci_lo: f64,
+    pub win_pct_ci_hi: f64,
+    /// `win_pct_when_acquired - overall_batch_win_pct`.
+    pub delta_vs_baseline_pct: f64,
+    /// Primary yaku level at run end, averaged over runs where this zodiac was acquired.
+    pub avg_primary_yaku_level_when_acquired: f64,
+}
+
+#[derive(Serialize)]
+pub struct ZodiacBalanceAlarm {
+    pub zodiac: String,
+    /// `info` / `warn`.
+    pub severity: String,
+    /// Short machine-friendly signal id.
+    pub signal: String,
+    pub observed: f64,
+    pub threshold: f64,
+    pub detail: String,
+}
+
+#[derive(Serialize)]
 pub struct NamedCount {
     pub name: String,
     pub count: u64,
@@ -442,6 +476,10 @@ pub struct BotReportDerived {
     pub talismans_shop: Vec<NamedPerRun>,
     pub zodiacs_shop: Vec<NamedPerRun>,
     pub packs_shop: Vec<NamedPerRun>,
+    /// Per-zodiac balance telemetry table (acquire/use/win/level signals).
+    pub zodiac_balance: Vec<ZodiacBalanceRow>,
+    /// Threshold-driven alarms for likely over/under-tuned zodiacs.
+    pub zodiac_balance_alarms: Vec<ZodiacBalanceAlarm>,
     pub yaku: Option<YakuDerived>,
     pub bot_issues: Option<BotIssuesDerived>,
     pub supplementary_tables: Vec<MapTable>,
@@ -479,6 +517,8 @@ impl Default for BotReportDerived {
             talismans_shop: Vec::new(),
             zodiacs_shop: Vec::new(),
             packs_shop: Vec::new(),
+            zodiac_balance: Vec::new(),
+            zodiac_balance_alarms: Vec::new(),
             yaku: None,
             bot_issues: None,
             supplementary_tables: Vec::new(),

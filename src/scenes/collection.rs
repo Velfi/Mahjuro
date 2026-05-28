@@ -2094,8 +2094,10 @@ fn description_for(
         ),
         ArtifactKind::Talisman(kind) => kind.description().to_string(),
         ArtifactKind::Zodiac(kind) => format!(
-            "Levelled by the {} zodiac ribbon (+0.5 mult, +20 chips per level).",
-            kind.name()
+            "Levelled by the {} zodiac ribbon (+{:.2} mult, +{} chips per level).",
+            kind.name(),
+            kind.level_up_mult_per_level(),
+            kind.level_up_chips_per_level(),
         ),
         ArtifactKind::Ordeal(kind) => kind.def().description.to_string(),
         ArtifactKind::ChronicleSummary => {

@@ -115,8 +115,12 @@ fn apply_hallway_distortion(world_in: vec3<f32>, h: HallwayDistortion) -> vec3<f
     let stretch_k = h.stretch.x * h.stretch.w * mask_f * mix(1.0, 1.0 + bp * 0.9, sm0);
     w = w + axis * (stretch_k * u);
 
+    // Rigid spiral around corridor depth: every vertex at the same `u` shares one angle
+    // (handedness from twist.w). Scale by `u` so rotation accumulates down the hall; no
+    // `side_n` — that wrings left/right and shears centerline props (lamps, ceiling trim).
     let twist_dir = select(-1.0, 1.0, h.twist.w >= 0.0);
-    let ang = h.twist.x * twist_dir * side_n * pow(mask_f, h.twist.y) * mix(1.0, 1.0 + bp * 1.25, sm0);
+    let twist_env = pow(mask_f, h.twist.y) * mix(1.0, 1.0 + bp * 1.25, sm0);
+    let ang = h.twist.x * twist_dir * u * twist_env;
     let proj_len = dot(w, axis);
     let p_perp = w - axis * proj_len;
     let c = cos(ang);

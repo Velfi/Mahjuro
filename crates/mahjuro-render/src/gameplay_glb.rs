@@ -19,7 +19,7 @@
 //!
 //! Export **without Draco**. Decodes through [`crate::room_env_gltf`].
 
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 use glam::{EulerRot, Mat4, Quat, Vec2, Vec3};
 
@@ -109,7 +109,7 @@ pub enum GameplayGlbLoadState {
 
 pub fn gameplay_glb_load_state() -> GameplayGlbLoadState {
     ensure_gameplay_glb_loaded();
-    match &*GAMEPLAY_GLB_CPU.read().unwrap_or_else(|e| e.into_inner()) {
+    match &*GAMEPLAY_GLB_CPU.read() {
         GameplayGlbCache::Uninit => GameplayGlbLoadState::Missing,
         GameplayGlbCache::Missing => GameplayGlbLoadState::Missing,
         GameplayGlbCache::Invalid(msg) => GameplayGlbLoadState::Invalid(msg.clone()),
@@ -117,18 +117,30 @@ pub fn gameplay_glb_load_state() -> GameplayGlbLoadState {
     }
 }
 
-fn ensure_gameplay_glb_loaded() {
-    let mut w = GAMEPLAY_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
-    match &*w {
-        GameplayGlbCache::Uninit => {}
-        GameplayGlbCache::Ready(cpu)
-            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
-                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
-        {
-            *w = GameplayGlbCache::Uninit;
+/// True when `gameplay.glb` has been decoded into the process cache.
+pub fn gameplay_cpu_decoded() -> bool {
+    let g = GAMEPLAY_GLB_CPU.read();
+    matches!(&*g, GameplayGlbCache::Ready(_))
+}
+
+/// True when decoded environment meshes are present and not yet released for GPU upload.
+pub fn gameplay_cpu_ready_for_gpu_upload() -> bool {
+    let g = GAMEPLAY_GLB_CPU.read();
+    match &*g {
+        GameplayGlbCache::Ready(cpu) => {
+            !cpu.environment_primitives.is_empty() && !cpu.environment_primitives_released
         }
-        _ if !matches!(*w, GameplayGlbCache::Uninit) => return,
-        _ => {}
+        _ => false,
+    }
+}
+
+/// Decode `gameplay.glb` into the process-wide CPU cache (main or prefetch thread).
+pub fn decode_gameplay_glb_into_cache() {
+    let mut w = GAMEPLAY_GLB_CPU.write();
+    if matches!(&*w, GameplayGlbCache::Ready(cpu) if !room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
+        && !room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu))
+    {
+        return;
     }
     *w = if let Some(file) = mahjuro_assets::asset_path::get("3d/gameplay.glb") {
         match load_gameplay_glb_from_bytes(&file.data) {
@@ -148,6 +160,23 @@ fn ensure_gameplay_glb_loaded() {
         log::error!("gameplay.glb not embedded");
         GameplayGlbCache::Missing
     };
+}
+
+fn ensure_gameplay_glb_loaded() {
+    crate::room_preload::join_gameplay_cpu_prefetch_blocking();
+    let mut w = GAMEPLAY_GLB_CPU.write();
+    match &*w {
+        GameplayGlbCache::Uninit => {}
+        GameplayGlbCache::Ready(cpu)
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) =>
+        {
+            *w = GameplayGlbCache::Uninit;
+        }
+        _ if !matches!(*w, GameplayGlbCache::Uninit) => return,
+        _ => {}
+    }
+    drop(w);
+    decode_gameplay_glb_into_cache();
 }
 
 pub fn validate_gameplay_glb(cpu: RoomGlbCpu) -> anyhow::Result<Box<RoomGlbCpu>> {
@@ -201,7 +230,7 @@ pub fn validate_gameplay_glb(cpu: RoomGlbCpu) -> anyhow::Result<Box<RoomGlbCpu>>
 
 pub fn with_gameplay_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     ensure_gameplay_glb_loaded();
-    let g = GAMEPLAY_GLB_CPU.read().unwrap_or_else(|e| e.into_inner());
+    let g = GAMEPLAY_GLB_CPU.read();
     match &*g {
         GameplayGlbCache::Ready(cpu) => f(Some(cpu)),
         GameplayGlbCache::Missing | GameplayGlbCache::Invalid(_) => f(None),
@@ -213,7 +242,7 @@ pub fn with_gameplay_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
 }
 
 pub fn release_gameplay_environment_cpu_sources_after_gpu_upload() {
-    let mut g = GAMEPLAY_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
+    let mut g = GAMEPLAY_GLB_CPU.write();
     if let GameplayGlbCache::Ready(cpu) = &mut *g {
         room_glb::release_room_environment_primitives_cpu(cpu);
     }

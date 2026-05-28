@@ -90,6 +90,76 @@ pub struct RoomEnvPrimitiveCpu {
 pub struct RoomCollisionMesh {
     pub node_name: String,
     pub triangles: Vec<[Vec3; 3]>,
+    /// Mesh-local AABB of all triangle vertices (ray broad-phase).
+    pub local_min: Vec3,
+    pub local_max: Vec3,
+}
+
+impl RoomCollisionMesh {
+    pub fn from_triangles(node_name: impl Into<String>, triangles: Vec<[Vec3; 3]>) -> Self {
+        let (local_min, local_max) = local_bounds_from_tris(&triangles);
+        Self {
+            node_name: node_name.into(),
+            triangles,
+            local_min,
+            local_max,
+        }
+    }
+
+    /// One triangle soup for CPU rain raycasts (all `rain_hit_*` nodes in a room).
+    pub fn merge_rain_surfaces(meshes: &[Self]) -> Option<Self> {
+        match meshes.len() {
+            0 => None,
+            1 => Some(meshes[0].clone()),
+            _ => {
+                let cap = meshes.iter().map(|m| m.triangles.len()).sum();
+                let mut tris = Vec::with_capacity(cap);
+                for mesh in meshes {
+                    tris.extend_from_slice(&mesh.triangles);
+                }
+                Some(Self::from_triangles("rain_hit_merged", tris))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod collision_mesh_tests {
+    use super::*;
+
+    #[test]
+    fn merge_rain_surfaces_concatenates_tris() {
+        let a = RoomCollisionMesh::from_triangles(
+            "rain_hit_a",
+            vec![
+                [Vec3::ZERO, Vec3::X, Vec3::Y],
+                [Vec3::ONE, Vec3::ZERO, Vec3::Y],
+            ],
+        );
+        let b = RoomCollisionMesh::from_triangles(
+            "rain_hit_b",
+            vec![[Vec3::ZERO, Vec3::Z, Vec3::Y]],
+        );
+        let merged = RoomCollisionMesh::merge_rain_surfaces(&[a, b]).unwrap();
+        assert_eq!(merged.triangles.len(), 3);
+        assert_eq!(merged.node_name, "rain_hit_merged");
+    }
+}
+
+fn local_bounds_from_tris(tris: &[[Vec3; 3]]) -> (Vec3, Vec3) {
+    let mut min_v = Vec3::splat(f32::INFINITY);
+    let mut max_v = Vec3::splat(f32::NEG_INFINITY);
+    for tri in tris {
+        for p in tri {
+            min_v = min_v.min(*p);
+            max_v = max_v.max(*p);
+        }
+    }
+    if min_v.x.is_finite() {
+        (min_v, max_v)
+    } else {
+        (Vec3::ZERO, Vec3::ZERO)
+    }
 }
 
 /// Axis-aligned bounds of decoded environment vertices (glTF document space).
@@ -1145,10 +1215,9 @@ pub fn walk_room_env_node(
                         }
                     }
                     if !tris.is_empty() {
-                        state.collision_meshes.push(RoomCollisionMesh {
-                            node_name: name.to_string(),
-                            triangles: tris,
-                        });
+                        state
+                            .collision_meshes
+                            .push(RoomCollisionMesh::from_triangles(name, tris));
                     }
                 }
             }
@@ -1171,10 +1240,9 @@ pub fn walk_room_env_node(
                     state.env_primitives.push(decoded);
                 }
                 if !tris.is_empty() {
-                    state.collision_meshes.push(RoomCollisionMesh {
-                        node_name: name.to_string(),
-                        triangles: tris,
-                    });
+                    state
+                        .collision_meshes
+                        .push(RoomCollisionMesh::from_triangles(name, tris));
                 }
             }
             RoomMeshPolicy::EnvironmentDraw => {
@@ -1202,10 +1270,9 @@ pub fn walk_room_env_node(
                     }
                 }
                 if !tris.is_empty() {
-                    state.rain_surface_meshes.push(RoomCollisionMesh {
-                        node_name: name.to_string(),
-                        triangles: tris,
-                    });
+                    state
+                        .rain_surface_meshes
+                        .push(RoomCollisionMesh::from_triangles(name, tris));
                 }
             }
         }

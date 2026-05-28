@@ -8,6 +8,7 @@ Short pointers to deeper context. Read the linked file before working in the are
 - [Widget tree (scene input)](docs/agents/widget-tree.md) — `Tree<A>` / `FlatItem<A>` immediate-mode UI; single source of truth for rects, hover/keyboard nav.
 - [Font & text layout](docs/agents/font-scaling.md) — label auto-shrink, colored/plain block height helpers.
 - [Chart guidelines](docs/agents/chart-guidelines.md) — Duke top-ten rules for Chronicle/dashboard charts.
+- [Launch options](docs/agents/launch-options.md) — CLI flags and `MAHJURO_*` env vars (runtime + build).
 - [Room shadows & baking](docs/agents/room-shadows-and-baking.md) — offline `.msh` / `.mgi`, live prop shadows, rebake commands, headless tools, relic RLC1.
 - [macOS dylibs / app bundle](docs/agents/macos-dylibs.md) — `libsteam_api.dylib`, static SDL3, `@loader_path` / `@rpath`, CI vs `package-macos.sh`.
 - [Scoring](docs/agents/scoring.md) — play / cash-in loop, melds, chips, multipliers.

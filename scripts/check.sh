@@ -13,7 +13,7 @@
 #   scripts/check.sh [options]
 #
 # Options:
-#   --build-bake-tools  Build mahjuro-bake / decal / relic bakers (sets MAHJURO_SKIP_* for that step only)
+#   --build-bake-tools  Build mahjuro-bake / decal / relic bakers (sets MAHJURO_SKIP_OFFLINE_BAKES=1 for that step)
 #   --target TRIPLE     Pass --target to cargo (default: host triple)
 #   --release           Use release profile (CI uses debug)
 #   --extras            Also run fmt --check, clippy, and Python unit tests
@@ -73,10 +73,8 @@ if [[ "$PROFILE" == release ]]; then
 fi
 
 export_bake_skip_env() {
-    export MAHJURO_SKIP_ROOM_GI_BAKE=1
-    export MAHJURO_SKIP_ROOM_SHADOW_BAKE=1
-    export MAHJURO_SKIP_SHOWCASE_DECAL_BAKE=1
-    export MAHJURO_SKIP_RELIC_BAKE=1
+    export MAHJURO_SKIP_OFFLINE_BAKES=1
+    export MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1
 }
 
 build_bake_tools() {

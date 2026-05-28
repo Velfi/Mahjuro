@@ -705,12 +705,35 @@ impl App {
         // `App::frame_picks`). Without this caching, each gameplay frame
         // pays for two full walks of the per-class matrix lists for
         // shop/gameplay objects in particular.
+        let scene_key = crate::scenes::active_scene_key(&self.scene);
+        let warm_gameplay_for_resume =
+            matches!(self.resume_scene, crate::persistence::ResumeScene::Gameplay);
         self.frame_picks = if let Some(r) = self.renderer.as_mut() {
-            r.ensure_rooms_for_scene_key(crate::scenes::active_scene_key(&self.scene));
+            r.poll_room_prefetch_gpu_uploads(
+                scene_key,
+                self.last_frame_dt * 1000.0,
+                warm_gameplay_for_resume,
+            );
+            r.ensure_rooms_for_scene_key(scene_key);
             FramePicks {
-                hand: r.pick_hand_tile(cursor_pos.0, cursor_pos.1),
-                shop: r.pick_shop_object(cursor_pos.0, cursor_pos.1),
-                gameplay: r.pick_gameplay_object(cursor_pos.0, cursor_pos.1),
+                hand: if matches!(scene_key, Some("gameplay") | Some("tutorial")) {
+                    r.pick_hand_tile(cursor_pos.0, cursor_pos.1)
+                } else {
+                    None
+                },
+                shop: if matches!(
+                    scene_key,
+                    Some("shop") | Some("showcase") | Some("pick_chamber")
+                ) {
+                    r.pick_shop_object(cursor_pos.0, cursor_pos.1)
+                } else {
+                    None
+                },
+                gameplay: if matches!(scene_key, Some("gameplay") | Some("tutorial")) {
+                    r.pick_gameplay_object(cursor_pos.0, cursor_pos.1)
+                } else {
+                    None
+                },
             }
         } else {
             FramePicks::default()
@@ -719,13 +742,14 @@ impl App {
         let picked_gameplay_object = self.frame_picks.gameplay;
         let picked_hand_tile_for_update = self.frame_picks.hand;
         let mut scroll_lines = std::mem::take(&mut self.scroll_delta);
-        // Right stick vertical scroll is opt-in by scene: Yaku Journal and
-        // Chronicle dashboard/listing. Other scenes keep right stick free.
+        // Right stick vertical scroll is opt-in by scene: Yaku Journal,
+        // Chronicle dashboard/listing, and Credits. Other scenes keep right stick free.
         let right_stick_scroll_enabled = {
             let active_scene = self.overlay_stack.last().unwrap_or(&self.scene);
             match active_scene {
                 Scene::YakuJournal(_) => true,
                 Scene::Collection(scene) => scene.is_chronicle_tab(),
+                Scene::Credits(_) => true,
                 _ => false,
             }
         };
