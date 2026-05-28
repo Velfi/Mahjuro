@@ -691,7 +691,11 @@ impl AggregateStats {
         )
     }
 
-    pub fn write_summary(&self, w: &mut dyn Write) -> std::io::Result<()> {
+    pub fn write_summary_with_runs(
+        &self,
+        w: &mut dyn Write,
+        runs: Option<&[RunStats]>,
+    ) -> std::io::Result<()> {
         macro_rules! out {
             ($($t:tt)*) => {
                 writeln!(w, $($t)*)?;
@@ -705,7 +709,7 @@ impl AggregateStats {
         let d = self.to_derived(
             YakuKind::all().len(),
             crate::core::chamber_target::DEFAULT_BASE_TARGET,
-            None,
+            runs,
         );
         let pr = &d.per_run;
         out!(
@@ -1253,8 +1257,16 @@ impl AggregateStats {
         Ok(())
     }
 
+    pub fn write_summary(&self, w: &mut dyn Write) -> std::io::Result<()> {
+        self.write_summary_with_runs(w, None)
+    }
+
+    pub fn print_summary_with_runs(&self, runs: Option<&[RunStats]>) {
+        let _ = self.write_summary_with_runs(&mut std::io::stdout().lock(), runs);
+    }
+
     pub fn print_summary(&self) {
-        let _ = self.write_summary(&mut std::io::stdout().lock());
+        self.print_summary_with_runs(None);
     }
 }
 

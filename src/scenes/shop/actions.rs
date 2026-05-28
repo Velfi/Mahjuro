@@ -260,6 +260,7 @@ impl ShopScene {
             storeroom_orbit_pitch: 0.0,
             gltf_anims: crate::render::room_gltf_anim::GltfAnimPlaybackSet::default(),
             departing_stock: Vec::new(),
+            restock_enter_at: None,
         }
     }
 

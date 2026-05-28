@@ -12,8 +12,12 @@ use super::{ConsumableShopItem, ShopFocus, ShopItem, ShopScene, TilePackShopItem
 
 /// Delay between adjacent spawn slots (left → right).
 pub(super) const RESTOCK_EXIT_STAGGER: f32 = 0.042;
-/// Screen-down travel (anchor py) before an entry is culled.
-pub(super) const RESTOCK_EXIT_OFFSCREEN_PY_FRAC: f32 = 0.58;
+
+/// Incoming shelf scale pop (per slot, after restock).
+pub(super) const RESTOCK_ENTER_DURATION: f32 = 0.20;
+pub(super) const RESTOCK_ENTER_STAGGER: f32 = 0.022;
+/// How far below the shelf (anchor `lift` / world −Z) before an entry is culled.
+pub(super) const RESTOCK_EXIT_OFFSCREEN_LIFT_FRAC: f32 = 0.48;
 
 pub(super) struct PendingShopStock {
     pub items: Vec<ShopItem>,
@@ -81,17 +85,26 @@ impl ShopScene {
         self.departing_stock_active()
     }
 
-    pub(super) fn tick_departing_stock(&mut self, now: Instant, window_h: f32) {
-        if self.departing_stock.is_empty() {
-            return;
-        }
-        let h = window_h.max(1.0);
-        self.departing_stock.retain_mut(|batch| {
-            batch.entries.retain(|entry| {
-                !restock_exit_offscreen_for_slot(entry.slot_i(), h, batch.started_at, now)
+    pub(super) fn tick_restock_animations(&mut self, now: Instant, window_h: f32) {
+        if !self.departing_stock.is_empty() {
+            let h = window_h.max(1.0);
+            self.departing_stock.retain_mut(|batch| {
+                batch.entries.retain(|entry| {
+                    !restock_exit_offscreen_for_slot(entry.slot_i(), h, batch.started_at, now)
+                });
+                !batch.entries.is_empty()
             });
-            !batch.entries.is_empty()
-        });
+        }
+        if let Some(at) = self.restock_enter_at
+            && now.saturating_duration_since(at).as_secs_f32() >= restock_enter_total_secs()
+        {
+            self.restock_enter_at = None;
+        }
+    }
+
+    #[inline]
+    pub(super) fn tick_departing_stock(&mut self, now: Instant, window_h: f32) {
+        self.tick_restock_animations(now, window_h);
     }
 
     pub(super) fn apply_pending_shop_stock(&mut self, pending: PendingShopStock) {
@@ -114,6 +127,7 @@ impl ShopScene {
             Vec::new()
         };
         self.apply_pending_shop_stock(pending);
+        self.restock_enter_at = Some(now);
         if !entries.is_empty() {
             self.departing_stock.push(ShopDepartingBatch {
                 started_at: now,
@@ -121,6 +135,40 @@ impl ShopScene {
             });
         }
     }
+}
+
+fn restock_enter_total_secs() -> f32 {
+    RESTOCK_ENTER_DURATION
+        + RESTOCK_ENTER_STAGGER * (super::view::SHOP_SPAWN_SLOT_COUNT.saturating_sub(1) as f32)
+        + 0.03
+}
+
+/// Quick overshoot scale for newly restocked shelf items (1.0 = settled).
+pub(super) fn restock_enter_scale(slot_i: usize, started_at: Instant, now: Instant) -> f32 {
+    let elapsed = now.saturating_duration_since(started_at).as_secs_f32();
+    let t = ((elapsed - slot_i as f32 * RESTOCK_ENTER_STAGGER) / RESTOCK_ENTER_DURATION)
+        .clamp(0.0, 1.0);
+    if t <= 0.0 {
+        return 0.86;
+    }
+    const START: f32 = 0.86;
+    const PEAK: f32 = 1.08;
+    if t < 0.45 {
+        let u = t / 0.45;
+        let ease = 1.0 - (1.0 - u).powi(3);
+        START + (PEAK - START) * ease
+    } else {
+        let u = ((t - 0.45) / 0.55).clamp(0.0, 1.0);
+        let ease = 1.0 - (1.0 - u).powi(2);
+        PEAK + (1.0 - PEAK) * ease
+    }
+}
+
+#[inline]
+pub(super) fn apply_restock_enter_scale(mesh: &mut crate::render::draw_cmd::Object3d, scale: f32) {
+    mesh.extents[0] *= scale;
+    mesh.extents[1] *= scale;
+    mesh.extents[2] *= scale;
 }
 
 pub(super) fn snapshot_departing_for_sale(scene: &ShopScene) -> Vec<DepartingShelfEntry> {
@@ -182,7 +230,7 @@ pub(super) fn restock_exit_offscreen_for_slot(
     now: Instant,
 ) -> bool {
     let delta = restock_exit_mesh_delta(slot_i, h, started_at, now);
-    delta.pos_offset[1] >= h * RESTOCK_EXIT_OFFSCREEN_PY_FRAC || delta.alpha_mul <= 0.01
+    -delta.pos_offset[2] >= h * RESTOCK_EXIT_OFFSCREEN_LIFT_FRAC || delta.alpha_mul <= 0.01
 }
 
 /// Gravity-style ease for tip/roll only (0..1).
@@ -191,7 +239,7 @@ fn fall_ease(t: f32) -> f32 {
     (t.clamp(0.0, 1.0)).powi(3)
 }
 
-/// Unbounded screen-down drop — items keep falling until culled off-screen.
+/// Unbounded drop in world −Z (`Object3d::pos` lift), with a small +Y nudge toward the player.
 pub(super) fn restock_exit_mesh_delta(
     slot_i: usize,
     h: f32,
@@ -208,19 +256,21 @@ pub(super) fn restock_exit_mesh_delta(
         };
     }
     let scale = h / 1080.0;
-    // py anchor units — quadratic gravity, no end cap.
-    let py = 0.5 * 520.0 * scale * t * t;
-    let tip_phase = fall_ease((t / 0.35).min(1.0));
-    let tip = tip_phase * 0.18;
+    // Gravity along anchor lift (= world +Z); quadratic, no end cap.
+    let lift_drop = 0.5 * 980.0 * scale * t * t;
+    // Larger layout py → world −Y (toward the camera at −Y).
+    let forward_py = h * (0.14 * t + 0.24 * t * t).min(0.46);
+    let tip_phase = fall_ease((t / 0.28).min(1.0));
+    let tip = tip_phase * 0.24;
     let roll = (elapsed * 9.5 + slot_i as f32 * 0.7).sin() * 0.09 * (0.35 + tip_phase * 0.65);
     let lateral = (slot_i as f32 - 4.0) * h * 0.005 * (t / 0.5).min(1.2);
-    let alpha_mul = if py < h * 0.36 {
+    let alpha_mul = if lift_drop < h * 0.08 {
         1.0
     } else {
-        ((h * RESTOCK_EXIT_OFFSCREEN_PY_FRAC - py) / (h * 0.14)).clamp(0.0, 1.0)
+        ((h * RESTOCK_EXIT_OFFSCREEN_LIFT_FRAC - lift_drop) / (h * 0.06)).clamp(0.0, 1.0)
     };
     RestockExitMeshDelta {
-        pos_offset: [lateral, py, -h * 0.05 * (t / 0.6).min(1.5)],
+        pos_offset: [lateral, forward_py, -lift_drop],
         rot_add: [tip, 0.0, roll],
         alpha_mul,
     }
