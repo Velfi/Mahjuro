@@ -8,7 +8,7 @@
 //! camera from [`hallway_glb::hallway_camera_pick_chamber`], [`DrawCmd::HallwayEnvironment`],
 //! and a 2D HUD (side panels, skip context) on top.
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::core::rules::ChamberKind;
 use crate::game::engine::{GameCommand, GameEngine};
 use crate::game::event_bus::GameEvent;

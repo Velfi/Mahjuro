@@ -76,6 +76,17 @@ impl MyScene {
 
 8. **Cursor-hover tooltips are opt-in.** Tree [`Item`](../../src/ui/widget_tree.rs) and [`FlatItem`](../../src/ui/widget_tree.rs) carry an optional `tooltip`; default is none. Use [`FlatItem::with_tooltip`](../../src/ui/widget_tree.rs), [`button_id_tooltip`](../../src/ui/widget_tree.rs), or set `Item.tooltip` when building custom rows.
 
+## Styled copy
+
+Scene body copy that needs wrapping or emphasis goes through [`widget::push_text_block`](../../src/ui/widget.rs), which runs safe inline markup via [`styled_text.rs`](../../src/ui/styled_text.rs):
+
+- `**bold**`, `*italic*`, `__underline__`
+- `{{effect:rainbow}}…{{/effect}}` (and other registered effects)
+
+Set `TextStyle::glossary_tint: true` to combine markup with per-word vocabulary coloring ([`colored_keywords`](../../src/ui/colored_keywords.rs)). [`widget::push_button`](../../src/ui/widget.rs) labels stay plain — no markup.
+
+Layout height for styled blocks: see [font-scaling.md](font-scaling.md).
+
 ## Adding or reordering an item
 
 1. Add an enum variant.

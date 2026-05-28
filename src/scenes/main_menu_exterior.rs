@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::time::Instant;
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::core::progression::PlayerProgress;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;

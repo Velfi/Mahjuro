@@ -2,7 +2,7 @@
 //! shop. Left/right arrows cycle through tile materials; each material
 //! displays its name and gameplay bonus. Play starts the run.
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::core::stake::Stake;
 use crate::core::tile::{Suit, Tile};
 use crate::game::engine::GameEngine;

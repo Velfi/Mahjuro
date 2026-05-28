@@ -8,7 +8,7 @@
 //! in-shop help. The previous scene is suspended by `App` and restored when
 //! the player presses Back.
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::core::hand::MeldKind;
 use crate::core::progression::PlayerProgress;
 use crate::core::tile::{Suit, Tile};

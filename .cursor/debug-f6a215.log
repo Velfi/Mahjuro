@@ -1,3 +1,0 @@
-{"data":{"gilrs_ok":true},"hypothesisId":"A","location":"input.rs:InputState::new","message":"gilrs_init","sessionId":"f6a215","timestamp":1777406402763}
-{"data":{},"hypothesisId":"D","location":"input.rs:poll_gamepads","message":"gilrs_connected","sessionId":"f6a215","timestamp":1777406402773}
-{"data":{"gp_actions":1,"gp_event_count":2,"was_mode":"Cursor"},"hypothesisId":"B","location":"input.rs:poll_gamepads","message":"mode_set_controller","sessionId":"f6a215","timestamp":1777406412440}

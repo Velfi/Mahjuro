@@ -87,7 +87,7 @@ impl GameplayCoreState {
     }
 
     pub fn selected_count(&self) -> usize {
-        self.selected.iter().filter(|&&selected| selected).count()
+        self.selected.iter().filter(|&&s| s).count()
     }
 
     pub fn selected_indices(&self) -> Vec<usize> {

@@ -4,7 +4,7 @@
 //! sections (Audio, Graphics, Controls, Accessibility, Data) in a
 //! scrollable content pane on the right.
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};

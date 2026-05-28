@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::core::tile::{Suit, Tile};
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;

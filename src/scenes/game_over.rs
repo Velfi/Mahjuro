@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::core::memorial_talisman::{MemorialTalismanKind, select_memorial};
 use crate::game::memorial_run::snapshot_from_run;
 use crate::core::progression::{

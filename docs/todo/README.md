@@ -6,6 +6,7 @@ Follow-up tasks that are scoped but not scheduled. Each entry links to a doc wit
 
 - [Event-driven run mutations (subscribers beyond gold)](event-driven-run-mutations.md) — centralize relic destruction, optional plays/discards and tile-supply hooks the same way gold now uses `notify_run_gold_changed` + `GameEvent::GoldChanged`.
 - [Finish the wgpu render-runtime split](render-runtime-finish-split.md) — Object3d dispatch + encoder/passes are still in one ~5,000-line `render()`; first pass landed seven sibling modules.
+- [Room-bake compile surface trim](room-bake-compile-trim.md) — shrink what `mahjuro-bake` links: split SDL input, cfg-gate scene modules, optional minimal render frames; `RoomBakeApp` + `mahjuro::room_bake` already landed.
 
 ## Tooling / quality
 

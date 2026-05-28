@@ -1992,6 +1992,7 @@ dependencies = [
  "lyon_path",
  "lyon_tessellation",
  "mahjuro-assets",
+ "mahjuro-bake-stamp",
  "mahjuro-core",
  "mahjuro-gfx-types",
  "mahjuro-render",
@@ -2025,6 +2026,10 @@ dependencies = [
  "serde_json",
  "zip",
 ]
+
+[[package]]
+name = "mahjuro-bake-stamp"
+version = "0.1.0"
 
 [[package]]
 name = "mahjuro-core"
@@ -2065,6 +2070,7 @@ dependencies = [
  "log",
  "mahjuro",
  "mahjuro-assets",
+ "mahjuro-bake-stamp",
  "mahjuro-render",
  "rustc-hash 2.1.2",
 ]
@@ -2086,6 +2092,7 @@ dependencies = [
  "lyon_path",
  "lyon_tessellation",
  "mahjuro-assets",
+ "mahjuro-bake-stamp",
  "mahjuro-core",
  "mahjuro-gfx-types",
  "mahjuro-types",

@@ -77,7 +77,7 @@ fn march_emissive(origin: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
             i32(clamp(uv.x * full_w - 0.5, 0.0, full_w - 1.0)),
             i32(clamp(uv.y * full_h - 0.5, 0.0, full_h - 1.0)),
         );
-        let d_s = textureLoad(depth_tex, px, 0);
+        let d_s = textureLoad(depth_tex, px, 0).x;
         if (d_s >= 0.9999) {
             continue;
         }

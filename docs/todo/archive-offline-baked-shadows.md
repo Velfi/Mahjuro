@@ -26,7 +26,7 @@ Out of scope: rebaking shop/hallway/main_menu policy. Out of scope: dynamic grid
 - [shaders/room_glb.wgsl](../../shaders/room_glb.wgsl) — `sample_shadow_visibility`, baked vs live `light_view_proj`, archive `params.w` modes.
 - [src/main/headless.rs](../../src/main/headless.rs) — `scene_for_room_gi_bake` / `run_bake_room_shadows_command` (Collection Relics tab camera).
 - [build/room_shadow_bake.rs](../../build/room_shadow_bake.rs) — release rebake stamp inputs.
-- [AGENTS.md](../../AGENTS.md) — baked/live shadow policy paragraph for archive.
+- [room-shadows-and-baking.md](../agents/room-shadows-and-baking.md) — baked/live shadow policy (archive exception).
 
 ## Open questions
 - **Bake-first vs live-only archive.** Is offline contact worth the Blender split, or is punctual-only lighting acceptable long-term for archive?

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use super::input_hash::{Fnv64, log_bake_timing, read_stamp_line, write_stamp_line};
+use mahjuro_bake_stamp::{Fnv64, log_bake_timing, read_stamp_line, write_stamp_line};
 
 const RULES_PATH: &str = "tools/bake_assets/pack_rules.json";
 const BAKE_SCRIPT_PATH: &str = "tools/bake_assets/bake_assets.py";

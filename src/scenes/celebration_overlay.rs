@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use super::UpdateCtx;
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::effect_layers::EffectLayers;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::render::draw_cmd::UiFrame;

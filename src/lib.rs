@@ -15,10 +15,6 @@ pub use game::ordeal::OrdealKindExt;
 pub mod sfx_id;
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 mod audio;
-#[cfg(feature = "bake-support")]
-pub mod audio {
-    pub use crate::sfx_id::{all_sfx_ids, AmbientId, MusicId, SfxId};
-}
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 pub mod bot;
 #[cfg(feature = "game")]
@@ -57,26 +53,21 @@ mod main_frame_tick;
 mod main_perf_watchdog;
 #[path = "main/render_settings.rs"]
 pub mod main_render_settings;
+#[cfg(feature = "game")]
 #[path = "main/room_gltf_brownout.rs"]
 mod main_room_gltf_brownout;
 pub mod persistence;
+#[cfg(feature = "bake-support")]
+pub mod room_bake;
 pub use mahjuro_render::physical_size;
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 #[path = "main/scene_transition.rs"]
 mod scene_transition;
 pub mod scenes;
-#[cfg(any(
-    feature = "game",
-    feature = "headless-screenshot",
-    feature = "bake-support"
-))]
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
 mod sdl_shell;
 pub use mahjuro_render::startup_profile;
-#[cfg(any(feature = "game", feature = "headless-screenshot"))]
-mod steam;
-#[cfg(feature = "bake-support")]
-#[path = "steam/bake_stub.rs"]
-mod steam;
+pub mod steam;
 pub mod ui;
 
 #[cfg(feature = "game")]

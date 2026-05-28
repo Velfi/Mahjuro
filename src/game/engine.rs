@@ -939,7 +939,7 @@ impl<'a> GameEngine<'a> {
                 self.run.defeat_journal.shop_relic_buys =
                     self.run.defeat_journal.shop_relic_buys.saturating_add(1);
                 self.bus
-                    .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
+                    .push(GameEvent::UiSound(crate::sfx_id::SfxId::Purchase));
                 self.bus.push(GameEvent::PlayRelicStinger(relic));
                 ShopCommandData::None
             }
@@ -969,7 +969,7 @@ impl<'a> GameEngine<'a> {
                 }
                 self.run
                     .apply_yen_reward(refund as i32, Some(&mut self.bus));
-                self.bus.push(GameEvent::UiSound(crate::audio::SfxId::Sell));
+                self.bus.push(GameEvent::UiSound(crate::sfx_id::SfxId::Sell));
                 *self.run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
                 if self.run.relics.has(RelicId::Bonfire) {
                     self.run.relic_activations.push(RelicId::Bonfire);
@@ -1009,7 +1009,7 @@ impl<'a> GameEngine<'a> {
                 self.run
                     .apply_yen_delta(-(price as i32), Some(&mut self.bus));
                 self.bus
-                    .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
+                    .push(GameEvent::UiSound(crate::sfx_id::SfxId::Purchase));
                 let yaku = zodiac.yaku();
                 let new_level = self.run.yaku_levels.level_up_for_zodiac(zodiac);
                 ShopCommandData::ZodiacApplied {
@@ -1039,7 +1039,7 @@ impl<'a> GameEngine<'a> {
                 self.run.defeat_journal.shop_talisman_buys =
                     self.run.defeat_journal.shop_talisman_buys.saturating_add(1);
                 self.bus
-                    .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
+                    .push(GameEvent::UiSound(crate::sfx_id::SfxId::Purchase));
                 self.bus.push(GameEvent::TalismanPurchased(kind));
                 ShopCommandData::None
             }
@@ -1057,7 +1057,7 @@ impl<'a> GameEngine<'a> {
                 self.run.consumables.items.remove(index);
                 self.run
                     .apply_yen_reward(refund as i32, Some(&mut self.bus));
-                self.bus.push(GameEvent::UiSound(crate::audio::SfxId::Sell));
+                self.bus.push(GameEvent::UiSound(crate::sfx_id::SfxId::Sell));
                 ShopCommandData::None
             }
             ShopCommand::UseConsumable { index } => {

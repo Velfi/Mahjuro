@@ -52,7 +52,7 @@ pub mod color {
     /// `#DAC8A9` — palest gold, hero score numerals & selected-tile rims.
     pub const CHAMPAGNE: [f32; 4] = [0.855, 0.786, 0.666, 1.0];
     /// `#C8B38D` — primary gold accent, headers, currency.
-    pub const GOLD: [f32; 4] = [0.785, 0.704, 0.553, 1.0];
+    pub const GOLD: [f32; 4] = mahjuro_types::theme_tokens::GOLD;
     /// `#A89263` — darker gold for borders, inset frames.
     pub const BRASS: [f32; 4] = [0.663, 0.573, 0.392, 1.0];
     /// `#73603F` — deepest gold, almost bronze, used for shadow lines.
@@ -71,9 +71,9 @@ pub mod color {
     /// general surface color.
     pub const JADE: [f32; 4] = [0.613, 0.755, 0.702, 1.0];
     /// `#9B6F74` — danger / exit / negative. **Semantic** signal red.
-    pub const RUBY: [f32; 4] = [0.611, 0.438, 0.459, 1.0];
+    pub const RUBY: [f32; 4] = mahjuro_types::theme_tokens::RUBY;
     /// `#C5AD8C` — warning / attention.
-    pub const AMBER: [f32; 4] = [0.776, 0.680, 0.553, 1.0];
+    pub const AMBER: [f32; 4] = mahjuro_types::theme_tokens::AMBER;
 
     // ── Lapis: the cool number-signal counterpart to RUBY.
     /// `#AEC0D2` — sky-blue tint for "Chips" score tokens, info chips,
@@ -83,7 +83,15 @@ pub mod color {
     /// four cascade kinds appear together. Distinct from the moody
     /// `TWILIGHT_*` family, which is *atmospheric* night-sky color, not a
     /// number-signal accent.
-    pub const LAPIS: [f32; 4] = [0.686, 0.757, 0.825, 1.0];
+    pub const LAPIS: [f32; 4] = mahjuro_types::theme_tokens::LAPIS;
+
+    /// Score cascade HUD / popup tints (Chips / Mult / Final).
+    pub mod score_cascade {
+        use super::*;
+        pub const CHIPS: [f32; 4] = LAPIS;
+        pub const MULT: [f32; 4] = RUBY;
+        pub const FINAL: [f32; 4] = PARCHMENT;
+    }
 
     // ── Chart encodings: more chroma than UI semantics so bars, sparklines,
     //    and outcome strips read at a glance on walnut panels.
