@@ -24,7 +24,7 @@ Blender object names must match glTF node names exactly:
 
 Static geometry (table surface, dishes, candles, …) is part of the environment mesh. Do not duplicate those with procedural `Object3d`.
 
-**Unexportables** (Blender collection): layout-preview meshes for tiles, relics, score plaque parts, bowl, mirror, wood tablet, etc. Keep them in the `.blend` for authoring but **disable that collection for glTF export** — if any Unexportables mesh is present, [`load_gameplay_glb_from_bytes`](../../src/render/gameplay_glb.rs) fails at decode. The round score (`0 / 500`) is **2D HUD text** only.
+**Unexportables** (Blender collection): authoring-only layout that must not ship. **Exclude from glTF export** when possible. If an `Unexportables` root node appears anyway, [`walk_room_env_node`](../../crates/mahjuro-render/src/room_env_gltf.rs) skips that entire subtree (no error). All other exported meshes draw unless they are boolean **`subtractor`** operands ([`skip_room_env_authoring_mesh_node_name`](../../crates/mahjuro-render/src/room_env_gltf.rs)). Round score (`0 / 500`) is **2D HUD text** only.
 
 Dynamic spawns use [`GameplayGlbAnchors`](../../src/scenes/gameplay/glb_anchors.rs) (built from [`GameplayMarkerPose`](../../src/render/gameplay_glb.rs): surface anchor + euler rotation + scale per empty) — [`GameplayPositions`](../../src/ui/scene_layout/gameplay.rs) keeps candle tuning and score-reel lift, not prop placement.
 

@@ -211,15 +211,6 @@ pub fn validate_gameplay_glb(cpu: RoomGlbCpu) -> anyhow::Result<Box<RoomGlbCpu>>
             "gameplay.glb missing glTF perspective camera node `{GAMEPLAY_CAMERA_NODE}` (assign a Camera object in Blender, export as glTF camera)"
         );
     }
-    for prim in &cpu.environment_primitives {
-        if let Some(name) = prim.gltf_node_name.as_deref()
-            && is_gameplay_unexportable_mesh(name)
-        {
-            anyhow::bail!(
-                "gameplay.glb exports Unexportables mesh `{name}` — disable the Unexportables collection for glTF export"
-            );
-        }
-    }
     log::debug!(
         "gameplay.glb: {} marker(s), {} draw primitive(s)",
         cpu.markers.len(),
@@ -269,23 +260,6 @@ fn is_gameplay_spawn_marker(name: &str) -> bool {
         || TILE_PLINTH_MARKERS.contains(&name)
 }
 
-/// Blender **Unexportables** collection: layout-preview meshes that must not be in the
-/// glTF export (tiles, relics, score plaque parts, action props, …).
-#[inline]
-fn is_gameplay_unexportable_mesh(name: &str) -> bool {
-    name.starts_with("score_counter")
-        || name.starts_with("hand_tile")
-        || name.starts_with("Relic_")
-        || name.starts_with("Ribbon_")
-        || name.starts_with("Talisman_")
-        || name.starts_with("YakuTablet_")
-        || name.starts_with("TallyStick")
-        || name.starts_with("Book")
-        || name.starts_with("Bowl_")
-        || name == "gold coins"
-        || matches!(name, "Cash In" | "Text" | "player_relic.005")
-}
-
 #[inline]
 fn is_gameplay_env_button_node(name: &str) -> bool {
     name == BTN_CASH_IN
@@ -311,10 +285,6 @@ struct GameplayRoomWalkHooks;
 impl RoomEnvWalkHooks for GameplayRoomWalkHooks {
     fn is_marker(&self, name: &str) -> bool {
         is_gameplay_spawn_marker(name)
-    }
-
-    fn forbid_env_mesh(&self, name: &str) -> bool {
-        is_gameplay_unexportable_mesh(name)
     }
 
     fn mesh_policy(&self, name: &str) -> RoomMeshPolicy {
@@ -1147,25 +1117,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unexportable_mesh_names_are_recognized() {
-        for name in [
-            "score_counter.001",
-            "hand_tile_0",
-            "Relic_0_31",
-            "Bowl_0_57",
-            "gold coins",
-        ] {
-            assert!(
-                is_gameplay_unexportable_mesh(name),
-                "{name} should be forbidden"
-            );
-        }
-        assert!(!is_gameplay_unexportable_mesh("table"));
-        assert!(!is_gameplay_unexportable_mesh("btn_cash_in"));
-        assert!(!is_gameplay_unexportable_mesh("CandleWax_6_29"));
-    }
-
-    #[test]
     fn gameplay_room_shadow_caster_policy() {
         assert!(!gameplay_prim_casts_room_shadow(Some("table")));
         assert!(!gameplay_prim_casts_room_shadow(Some("candles")));
@@ -1177,7 +1128,7 @@ mod tests {
     }
 
     #[test]
-    fn shipped_gameplay_glb_loads_with_required_markers_and_no_unexportables() {
+    fn shipped_gameplay_glb_loads_with_required_markers() {
         let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
         let cpu = load_gameplay_glb_from_bytes(bytes).expect("decode gameplay.glb");
         validate_gameplay_glb(cpu).expect("valid gameplay.glb");

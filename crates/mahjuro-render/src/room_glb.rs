@@ -808,7 +808,7 @@ pub fn load_room_glb_from_bytes(
         capped_images: &capped_images,
     };
     for node in scene.nodes() {
-        walk_room_env_node(node, Mat4::IDENTITY, hooks, &mut walk_state)?;
+        walk_room_env_node(node, Mat4::IDENTITY, false, hooks, &mut walk_state)?;
     }
 
     let (embedded_perspective_camera, embedded_cameras_by_name) = embedded_cameras.into_parts();
