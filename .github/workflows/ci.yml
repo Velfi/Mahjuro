@@ -50,6 +50,8 @@ jobs:
     env:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
       HAS_AZURE_CREDS: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      MAHJURO_SKIP_ROOM_GI_BAKE: "1"
+      MAHJURO_SKIP_ROOM_SHADOW_BAKE: "1"
 
     steps:
       - uses: actions/checkout@v6
