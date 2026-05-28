@@ -75,13 +75,47 @@ fn write_rel_path_key(h: &mut Fnv64, path: &Path) {
     h.write(b"\0");
 }
 
+/// Mix file bytes into `h`, normalizing CRLF/CR → LF for text so stamps match on Windows CI.
+fn hash_bytes_for_stamp(h: &mut Fnv64, rel: &str, bytes: &[u8]) {
+    if !is_text_rel(rel) || !bytes.contains(&b'\r') {
+        h.write(bytes);
+        return;
+    }
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\r' {
+            if bytes.get(i + 1) == Some(&b'\n') {
+                out.push(b'\n');
+                i += 2;
+            } else {
+                out.push(b'\n');
+                i += 1;
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    h.write(&out);
+}
+
+fn is_text_rel(rel: &str) -> bool {
+    let lower = rel.to_ascii_lowercase();
+    [
+        ".rs", ".toml", ".txt", ".svg", ".wgsl", ".json", ".md", ".xml", ".html", ".css",
+    ]
+    .iter()
+    .any(|ext| lower.ends_with(ext))
+}
+
 /// Mix a single file into `h` under a repo-relative key (`/` separators).
 pub fn hash_file_at_rel(h: &mut Fnv64, rel: &str, path: &Path) {
     write_rel_path_key(h, Path::new(rel));
     if path.is_file()
         && let Ok(bytes) = fs::read(path)
     {
-        h.write(&bytes);
+        hash_bytes_for_stamp(h, rel, &bytes);
     }
 }
 
@@ -417,5 +451,23 @@ mod tests {
         let repo = PathBuf::from(r"D:\a\Mahjuro\Mahjuro");
         let path = PathBuf::from(r"D:\a\Mahjuro\Mahjuro\assets\fonts\foo.ttf");
         assert_eq!(repo_relative(&repo, &path), "assets/fonts/foo.ttf");
+    }
+
+    #[test]
+    fn hash_bytes_for_stamp_normalizes_crlf_text() {
+        let lf = b"line one\nline two\n";
+        let crlf = b"line one\r\nline two\r\n";
+        let mut h_lf = Fnv64::new();
+        hash_bytes_for_stamp(&mut h_lf, "assets/fonts/OFL.txt", lf);
+        let mut h_crlf = Fnv64::new();
+        hash_bytes_for_stamp(&mut h_crlf, "assets/fonts/OFL.txt", crlf);
+        assert_eq!(h_lf.finish_hex(), h_crlf.finish_hex());
+
+        let png = b"\x89PNG\r\n\x1a\nbinary";
+        let mut h_png = Fnv64::new();
+        hash_bytes_for_stamp(&mut h_png, "assets/textures/foo.png", png);
+        let mut h_png_raw = Fnv64::new();
+        h_png_raw.write(png);
+        assert_eq!(h_png.finish_hex(), h_png_raw.finish_hex());
     }
 }
