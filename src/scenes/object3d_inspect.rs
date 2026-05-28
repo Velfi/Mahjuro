@@ -31,6 +31,20 @@ use glam::{Mat3, Mat4, Vec3};
 
 use crate::render::draw_cmd::{CameraParams, Object3d};
 use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
+use crate::ui::input::UiAction;
+
+/// Inputs that dismiss a [`crate::scenes::ShowcasePresenter`] item-inspect overlay.
+pub const ITEM_INSPECT_OVERLAY_EXIT: [UiAction; 3] = [
+    UiAction::NorthFacePress,
+    UiAction::Cancel,
+    UiAction::Pause,
+];
+
+/// Whether `action` should pop shop / archive item inspect on the showcase overlay.
+#[inline]
+pub fn item_inspect_overlay_exit(action: UiAction) -> bool {
+    ITEM_INSPECT_OVERLAY_EXIT.contains(&action)
+}
 
 /// Orbit + zoom state for close-up inspection (right stick, triggers, scroll).
 #[derive(Clone, Copy, Debug)]

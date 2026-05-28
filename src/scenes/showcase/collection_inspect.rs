@@ -146,10 +146,7 @@ impl CollectionInspectPresenter {
                 }
                 continue;
             }
-            if matches!(
-                a,
-                UiAction::NorthFacePress | UiAction::Cancel | UiAction::Pause
-            ) {
+            if crate::scenes::object3d_inspect::item_inspect_overlay_exit(*a) {
                 *ctx.overlay_request = Some(OverlayRequest::Pop);
                 return None;
             }
