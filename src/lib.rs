@@ -57,8 +57,6 @@ pub mod main_render_settings;
 #[path = "main/room_gltf_brownout.rs"]
 mod main_room_gltf_brownout;
 pub mod persistence;
-#[cfg(feature = "bake-support")]
-pub mod room_bake;
 pub use mahjuro_render::physical_size;
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 #[path = "main/scene_transition.rs"]

@@ -12,10 +12,66 @@ members = [
 default-members = ["."]
 resolver = "2"
 
-[package]
-name = "mahjuro"
+[workspace.package]
 version = "0.5.0-21"
 edition = "2024"
+publish = false
+
+[workspace.dependencies]
+mahjuro = { path = ".", default-features = false }
+mahjuro-assets = { path = "crates/mahjuro-assets" }
+mahjuro-bake-stamp = { path = "crates/mahjuro-bake-stamp" }
+mahjuro-core = { path = "crates/mahjuro-core" }
+mahjuro-gfx-types = { path = "crates/mahjuro-gfx-types" }
+mahjuro-render = { path = "crates/mahjuro-render", default-features = false }
+mahjuro-types = { path = "crates/mahjuro-types" }
+anyhow = "1.0.102"
+arboard = "3.6.1"
+bytemuck = { version = "1.23", features = ["derive"] }
+cassowary = "0.3.0"
+chrono = "0.4.44"
+clap = { version = "4.5", features = ["derive"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+dirs = "6.0.0"
+enum_dispatch = "0.3"
+env_logger = "0.11.8"
+fontdue = "0.9.3"
+glam = { version = "0.30.9", features = ["bytemuck"] }
+gltf = { version = "1.4.1", features = [
+    "KHR_texture_transform",
+    "KHR_lights_punctual",
+    "KHR_materials_emissive_strength",
+] }
+human_format = "1.2.1"
+ignore = "0.4.25"
+image = { version = "0.25", default-features = false }
+indicatif = { version = "0.17", features = ["rayon"] }
+log = "0.4.28"
+lyon_path = "1.0"
+lyon_tessellation = "1.0"
+muda = "0.17.2"
+parking_lot = "0.12"
+pollster = "0.4.0"
+proptest = "1.6"
+rand = "0.10.0"
+raw-window-handle = "0.6"
+rayon = "1.11.0"
+resvg = "0.44"
+rodio = { version = "0.19", features = ["vorbis", "mp3"] }
+rustc-hash = "2.1"
+sdl3 = { version = "0.17", features = ["raw-window-handle"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+steamworks = { version = "0.13", features = ["raw-bindings"] }
+thiserror = "2.0.18"
+ttf-parser = "0.25"
+wgpu = { version = "29.0.1", features = ["static-dxc"] }
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+[package]
+name = "mahjuro"
+version.workspace = true
+edition.workspace = true
 default-run = "mahjuro"
 
 [features]
@@ -28,14 +84,16 @@ game = [
     "mahjuro-render/clipboard",
     "mahjuro-render/windowed",
 ]
-headless-bake = []
 headless-screenshot = [
     "dep:rodio",
     "dep:arboard",
     "dep:steamworks",
     "mahjuro-render/clipboard",
 ]
-bake-support = []
+# Skips committed offline bake freshness in `build.rs` while compiling `mahjuro` as a
+# dependency of `mahjuro-headless` (room bakes). Without this, stale stamps block the
+# bake binary itself — chicken and egg.
+offline-bake-support = []
 
 [[bin]]
 name = "mahjuro"
@@ -58,52 +116,48 @@ opt-level = 2
 opt-level = 3
 
 [dependencies]
-mahjuro-assets = { path = "crates/mahjuro-assets" }
-mahjuro-gfx-types = { path = "crates/mahjuro-gfx-types" }
-mahjuro-types = { path = "crates/mahjuro-types" }
-mahjuro-core = { path = "crates/mahjuro-core" }
-mahjuro-render = { path = "crates/mahjuro-render", default-features = false }
-anyhow = "1.0.102"
-bytemuck = { version = "1.23", features = ["derive"] }
-cassowary = "0.3.0"
-clap = { version = "4.5", features = ["derive"] }
-env_logger = "0.11.8"
-lyon_path = "1.0"
-lyon_tessellation = "1.0"
-fontdue = "0.9.3"
-glam = { version = "0.30.9", features = ["bytemuck"] }
-gltf = { version = "1.4.1", features = [
-    "KHR_texture_transform",
-    "KHR_lights_punctual",
-    "KHR_materials_emissive_strength",
-] }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
-sdl3 = { version = "0.17", features = ["build-from-source-static", "raw-window-handle"] }
-log = "0.4.28"
-pollster = "0.4.0"
-rand = "0.10.0"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-raw-window-handle = "0.6"
-thiserror = "2.0.18"
-ttf-parser = "0.25"
+mahjuro-assets.workspace = true
+mahjuro-gfx-types.workspace = true
+mahjuro-types.workspace = true
+mahjuro-core.workspace = true
+mahjuro-render.workspace = true
+anyhow.workspace = true
+bytemuck.workspace = true
+cassowary.workspace = true
+clap.workspace = true
+env_logger.workspace = true
+lyon_path.workspace = true
+lyon_tessellation.workspace = true
+fontdue.workspace = true
+glam.workspace = true
+gltf.workspace = true
+image = { workspace = true, features = ["png", "jpeg", "bmp", "gif", "webp"] }
+sdl3 = { workspace = true, features = ["build-from-source-static"] }
+log.workspace = true
+pollster.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+raw-window-handle.workspace = true
+thiserror.workspace = true
+ttf-parser.workspace = true
 # Windows/Proton: wgpu DX12 falls back to FXC when dxcompiler.dll is missing.
 # FXC cannot compile naga's SM 5.1 sampler/texture bindings (fatal on first
 # fullscreen pass, e.g. shooting-star cascade composite on Steam Deck).
-wgpu = { version = "29.0.1", features = ["static-dxc"] }
-muda = { version = "0.17.2", optional = true }
-chrono = "0.4.44"
-dirs = "6.0.0"
-arboard = { version = "3.6.1", optional = true }
-enum_dispatch = "0.3"
-rodio = { version = "0.19", features = ["vorbis", "mp3"], optional = true }
-zip = { version = "2.2", default-features = false, features = ["deflate"] }
-rayon = "1.11.0"
-indicatif = { version = "0.17", features = ["rayon"] }
-rustc-hash = "2.1"
-human_format = "1.2.1"
-steamworks = { version = "0.13", features = ["raw-bindings"], optional = true }
-resvg = "0.44"
+wgpu.workspace = true
+muda = { workspace = true, optional = true }
+chrono.workspace = true
+dirs.workspace = true
+arboard = { workspace = true, optional = true }
+enum_dispatch.workspace = true
+rodio = { workspace = true, optional = true }
+zip.workspace = true
+rayon.workspace = true
+indicatif.workspace = true
+rustc-hash.workspace = true
+human_format.workspace = true
+steamworks = { workspace = true, optional = true }
+resvg.workspace = true
 
 # Patched wgpu-hal:
 #   - Clear stale Metal vertex buffer slots when switching pipelines (fixes
@@ -120,11 +174,12 @@ wgpu-hal = { path = "vendor/wgpu-hal" }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSEvent"] }
 
 [build-dependencies]
-mahjuro-bake-stamp = { path = "crates/mahjuro-bake-stamp" }
+ignore.workspace = true
+mahjuro-bake-stamp.workspace = true
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-proptest = "1.6"
+criterion.workspace = true
+proptest.workspace = true
 
 [[bench]]
 name = "bot"

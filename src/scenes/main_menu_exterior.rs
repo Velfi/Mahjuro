@@ -11,9 +11,11 @@ use crate::game::run::RunState;
 use crate::persistence::{self, ResumeScene, TileMaterial};
 use crate::render::draw_cmd::{CameraParams, ImageQuad, ImageQuadSource, ScenePunctualLight, UiFrame};
 use crate::render::main_menu_glb;
-use crate::render::rain_field::RainField;
+use crate::render::rain_field::{RainField, main_menu_rain_spawn_volume};
 use crate::render::room_glb::{self, RoomEnvLightingTune};
-use crate::render::scene_light_sample::{PunctualOccluderAabb, SceneLightSampleCtx};
+use crate::render::scene_light_sample::{
+    PunctualOccluderAabb, RainVolumetricLit, SceneLightSampleCtx,
+};
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextAlign, TextLabel};
 use crate::ui::focus_nav::{self, FocusDir};
@@ -47,6 +49,16 @@ fn push_main_menu_rain(
     let tune = ctx.room_env_for("main_menu_exterior").0;
     let bundle = build_main_menu_rain_lighting(w, h, env_scale, &tune);
     let lighting = main_menu_rain_light_sample_ctx(w, h, env_scale, &cam, &tune, &bundle);
+    let volume = main_menu_rain_spawn_volume(env_scale, h, &ctx.rain_tuning);
+    let (d_min, d_max) = volume.frustum_depth_range(&cam);
+    let base_rgb = [
+        ctx.rain_tuning.field.drop_color[0],
+        ctx.rain_tuning.field.drop_color[1],
+        ctx.rain_tuning.field.drop_color[2],
+    ];
+    let lit = Some(RainVolumetricLit::build(
+        &cam, base_rgb, d_min, d_max, &lighting,
+    ));
     rain_field.push_quads(
         frame,
         &cam,
@@ -54,7 +66,7 @@ fn push_main_menu_rain(
         h,
         ctx.rain_tuning.field.streak_len_px,
         ctx.rain_tuning.field.drop_color,
-        Some(&lighting),
+        lit,
     );
 }
 
@@ -338,10 +350,10 @@ impl SceneBehavior for MainMenuExteriorScene {
             let h = ctx.layout.window_h;
             let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
             let cam = main_menu_glb::main_menu_camera_base(w, h, env_scale);
-            let meshes = main_menu_glb::main_menu_rain_surface_meshes();
             let tune = RoomEnvLightingTune::default();
             let bundle = build_main_menu_rain_lighting(w, h, env_scale, &tune);
             let lighting = main_menu_rain_light_sample_ctx(w, h, env_scale, &cam, &tune, &bundle);
+            let rain_mesh = main_menu_glb::main_menu_rain_collision_mesh();
             self.rain_field.update(
                 dt,
                 &ctx.rain_tuning,
@@ -349,7 +361,7 @@ impl SceneBehavior for MainMenuExteriorScene {
                 w,
                 h,
                 env_scale,
-                &meshes,
+                rain_mesh.as_ref(),
                 Some(&lighting),
             );
         }

@@ -87,7 +87,7 @@
 //!
 //! Shared glTF room decode (meshes, lights, cameras, collision) lives in [`crate::room_env_gltf`].
 
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 use rustc_hash::FxHashMap;
 
@@ -107,17 +107,31 @@ enum RoomGlbCache {
 
 static ROOM_GLB_CPU: RwLock<RoomGlbCache> = RwLock::new(RoomGlbCache::Uninit);
 
-fn ensure_shop_glb_loaded() {
-    let mut w = ROOM_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
-    match &*w {
-        RoomGlbCache::Uninit => {}
-        RoomGlbCache::Ready(Some(cpu))
-            if room_glb_cpu_needs_environment_mesh_reload(cpu)
-                || room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
-        {
-            *w = RoomGlbCache::Uninit;
+/// True when `shop.glb` has been decoded into the process cache (meshes may already be
+/// released after a prior GPU upload).
+pub fn shop_cpu_decoded() -> bool {
+    let g = ROOM_GLB_CPU.read();
+    matches!(&*g, RoomGlbCache::Ready(Some(_)))
+}
+
+/// True when decoded environment meshes are present and not yet released for GPU upload.
+pub fn shop_cpu_ready_for_gpu_upload() -> bool {
+    let g = ROOM_GLB_CPU.read();
+    match &*g {
+        RoomGlbCache::Ready(Some(cpu)) => {
+            !cpu.environment_primitives.is_empty() && !cpu.environment_primitives_released
         }
-        _ => return,
+        _ => false,
+    }
+}
+
+/// Decode `shop.glb` into the process-wide CPU cache (main or prefetch thread).
+pub fn decode_shop_glb_into_cache() {
+    let mut w = ROOM_GLB_CPU.write();
+    if matches!(&*w, RoomGlbCache::Ready(Some(cpu)) if !room_glb_cpu_needs_environment_mesh_reload(cpu)
+        && !room_glb_cpu_stale_environment_for_gpu_upload(cpu))
+    {
+        return;
     }
     let ready = if let Some(file) = mahjuro_assets::asset_path::get("3d/shop.glb") {
         match load_shop_glb_from_bytes(&file.data) {
@@ -156,11 +170,25 @@ fn ensure_shop_glb_loaded() {
     *w = RoomGlbCache::Ready(ready.map(Box::new));
 }
 
+fn ensure_shop_glb_loaded() {
+    crate::room_preload::join_shop_cpu_prefetch_blocking();
+    let mut w = ROOM_GLB_CPU.write();
+    match &*w {
+        RoomGlbCache::Uninit => {}
+        RoomGlbCache::Ready(Some(cpu)) if room_glb_cpu_needs_environment_mesh_reload(cpu) => {
+            *w = RoomGlbCache::Uninit;
+        }
+        _ => return,
+    }
+    drop(w);
+    decode_shop_glb_into_cache();
+}
+
 /// Read-only access to decoded shop data (markers, lights, collision, …).  
 /// Do not call [`release_shop_environment_cpu_sources_after_gpu_upload`] from inside `f` (deadlock).
 pub fn with_shop_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     ensure_shop_glb_loaded();
-    let g = ROOM_GLB_CPU.read().unwrap_or_else(|e| e.into_inner());
+    let g = ROOM_GLB_CPU.read();
     match &*g {
         RoomGlbCache::Ready(Some(cpu)) => f(Some(cpu)),
         RoomGlbCache::Ready(None) => f(None),
@@ -185,8 +213,9 @@ pub(crate) fn room_glb_cpu_needs_environment_mesh_reload(cpu: &RoomGlbCpu) -> bo
         && !cpu.environment_primitives_released
 }
 
-/// After [`release_room_environment_primitives_cpu`], a second [`crate::wgpu_renderer::WgpuRenderer`]
-/// init must re-parse environment meshes for GPU upload; metadata-only accessors must not.
+/// After [`release_room_environment_primitives_cpu`], environment meshes must be re-parsed
+/// before another GPU upload. Metadata-only accessors ([`with_shop_glb_cpu`], picking, punctual
+/// lights) must **not** trigger a reload — they only need bounds, markers, and collision soups.
 pub(crate) fn room_glb_cpu_stale_environment_for_gpu_upload(cpu: &RoomGlbCpu) -> bool {
     cpu.environment_primitives_released
         && cpu.environment_primitives.is_empty()
@@ -194,7 +223,7 @@ pub(crate) fn room_glb_cpu_stale_environment_for_gpu_upload(cpu: &RoomGlbCpu) ->
 }
 
 pub fn release_shop_environment_cpu_sources_after_gpu_upload() {
-    let mut g = ROOM_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
+    let mut g = ROOM_GLB_CPU.write();
     if let RoomGlbCache::Ready(Some(cpu)) = &mut *g {
         release_room_environment_primitives_cpu(cpu);
     }
@@ -547,6 +576,8 @@ pub struct RoomGlbCpu {
     pub embedded_spot_lights: Vec<RoomGlbEmbeddedSpotLight>,
     /// Invisible `rain_hit_*` shells for CPU rain splashes (main menu, etc.).
     pub rain_surface_meshes: Vec<RoomCollisionMesh>,
+    /// [`rain_surface_meshes`] merged for per-drop raycasts (built at glTF load).
+    pub rain_surface_merged: Option<RoomCollisionMesh>,
     /// Named node bind poses captured during the glTF scene walk.
     pub node_bind_poses: FxHashMap<String, renv::RoomNodeBindPose>,
     /// Parsed glTF node TRS animation clips keyed by animation name.
@@ -554,6 +585,12 @@ pub struct RoomGlbCpu {
 }
 
 impl RoomGlbCpu {
+    /// Merged `rain_hit_*` soup for CPU rain collision (see [`Self::rain_surface_merged`]).
+    #[inline]
+    pub fn rain_collision_mesh(&self) -> Option<&RoomCollisionMesh> {
+        self.rain_surface_merged.as_ref()
+    }
+
     /// glTF node local transform in **document** space (before [`room_env_model_matrix_from_cpu`]).
     #[inline]
     pub fn marker_node_transform_doc(&self, node_name: &str) -> Option<Mat4> {
@@ -782,6 +819,7 @@ pub fn load_room_glb_from_bytes(
         hooks.log_asset_label(),
     );
 
+    let rain_surface_merged = renv::RoomCollisionMesh::merge_rain_surfaces(&rain_surface_meshes);
     Ok(RoomGlbCpu {
         markers,
         environment_primitives,
@@ -794,6 +832,7 @@ pub fn load_room_glb_from_bytes(
         embedded_point_lights,
         embedded_spot_lights,
         rain_surface_meshes,
+        rain_surface_merged,
         node_bind_poses,
         gltf_anim_library,
     })

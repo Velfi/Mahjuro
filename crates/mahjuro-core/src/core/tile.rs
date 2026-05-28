@@ -5,19 +5,16 @@ use serde::{Deserialize, Deserializer, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Suit {
     // Ordered: numbered suits first, then honors, then bonus.
-    #[serde(alias = "Characters")]
     Manzu,
-    #[serde(alias = "Bamboos")]
     Souzu,
-    #[serde(alias = "Dots")]
     Pinzu,
     Wind,
     Dragon,
-    /// Bonus flower tiles (ranks 1–4). Rare wildcards that can substitute for
+    /// Bonus flower tiles (ranks 1–4). Wildcards that can substitute for
     /// one missing tile in a triplet or sequence (max one flower per meld).
     Flower,
     /// Bonus season tiles (ranks 1–4: Spring, Summer, Autumn, Winter).
-    /// Used only in solitaire mode; not part of the main game deck.
+    /// Currently unused.
     Season,
 }
 
@@ -196,7 +193,7 @@ impl Tile {
                 1 => "Plum Blossom".into(),
                 2 => "Orchid".into(),
                 3 => "Chrysanthemum".into(),
-                4 => "Bamboo".into(),
+                4 => "Lily Pad".into(),
                 _ => format!("Flower {}", self.rank),
             },
             Suit::Season => match self.rank {
@@ -210,9 +207,7 @@ impl Tile {
     }
 
     /// Base point value of a single tile face: numbered tiles are worth their
-    /// rank (1–9), honors (winds & dragons) are flat 12. The honor pump (was 10)
-    /// gives Yakuhai/Honitsu/Honroutou builds enough early-game traction to be
-    /// playable from ante 1, when leveled-yaku mults haven't kicked in yet.
+    /// rank (1–9), honors (winds & dragons) are flat 15.
     pub fn point_value(&self) -> u32 {
         match self.suit {
             Suit::Manzu | Suit::Souzu | Suit::Pinzu => self.rank as u32,
@@ -229,16 +224,7 @@ impl Tile {
             Suit::Souzu => Suit::Souzu.keyword_color(),
             Suit::Pinzu => Suit::Pinzu.keyword_color(),
             Suit::Wind => Suit::Wind.keyword_color(),
-            // Dragons are coloured per rank in the traditional set:
-            //   1 = Chun  (中) → red
-            //   2 = Hatsu (發) → green
-            //   3 = Haku  (白) → ivory/white
-            Suit::Dragon => match self.rank {
-                1 => Suit::Dragon.keyword_color(),
-                2 => Suit::Souzu.keyword_color(),
-                3 => [0.90, 0.88, 0.82, 1.0], // ivory white (low sat already)
-                _ => [0.55, 0.42, 0.58, 1.0], // fallback (shouldn't happen)
-            },
+            Suit::Dragon => Suit::Dragon.keyword_color(),
             Suit::Flower => Suit::Flower.keyword_color(),
             Suit::Season => Suit::Season.keyword_color(),
         }

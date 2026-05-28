@@ -356,8 +356,10 @@ impl ConsumableShopItem {
             Consumable::Zodiac(z) => {
                 let yk = z.yaku();
                 format!(
-                    "Levels {} for the rest of the run (+0.5 mult, +20 chips per level). {}",
+                    "Levels {} for the rest of the run (+{:.2} mult, +{} chips per level). {}",
                     yk.name(),
+                    z.level_up_mult_per_level(),
+                    z.level_up_chips_per_level(),
                     guide::yaku_shape_text(yk),
                 )
             }

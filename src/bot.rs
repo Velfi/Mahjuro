@@ -10,7 +10,7 @@
 //! weaker owned relic first when inventory is full), and skips
 //! Small/Big blinds when its expected score comfortably exceeds the target.
 //!
-//! Run with: `cargo run --release -- --bot 200`
+//! Run with: `cargo run --release -- bot 200`
 
 use crate::core::OrdealKindExt;
 use rand::RngExt;

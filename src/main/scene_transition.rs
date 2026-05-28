@@ -227,10 +227,22 @@ pub(crate) fn sync_ambient_for_scene(audio: &mut crate::audio::AudioManager, tag
 }
 
 pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_>) {
-    if should_clear_smoke_on_transition(ctx.from, ctx.to)
-        && let Some(r) = ctx.renderer
-    {
-        r.clear_smoke();
+    if let Some(r) = ctx.renderer {
+        if should_clear_smoke_on_transition(ctx.from, ctx.to) {
+            r.clear_smoke();
+        }
+        match ctx.to {
+            SceneTag::MainMenuExterior => {
+                r.prefetch_room_chain_next(crate::render::room_preload::RoomSceneChain::Shop);
+            }
+            SceneTag::Shop => {
+                r.prefetch_room_chain_next(crate::render::room_preload::RoomSceneChain::Hallway);
+            }
+            SceneTag::PickChamber => {
+                r.prefetch_room_chain_next(crate::render::room_preload::RoomSceneChain::Gameplay);
+            }
+            _ => {}
+        }
     }
     if ctx.to == SceneTag::MainMenuExterior {
         ctx.audio.play_sfx(crate::audio::SfxId::MainMenuEnter);

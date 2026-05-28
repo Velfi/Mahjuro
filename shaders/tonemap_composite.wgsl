@@ -1,7 +1,8 @@
 // Fullscreen pass: linear HDR scene+bloom → display encoding.
-// SDR (sRGB swapchain): exposure × ACES fitted → linear out (surface applies sRGB encode).
-// HDR swapchain (Rgba16Float): same ACES fitted as SDR (linear out; OS maps extended range).
-// Journal prepass (mode=1): linear × exposure into offscreen float for book mesh sampling.
+// SDR (sRGB swapchain, mode=0): exposure × ACES fitted → linear out (surface applies sRGB encode).
+// HDR swapchain (Rgba16Float, mode=1): linear × exposure pass-through so values > 1.0 reach
+// the OS / display tonemapper (scRGB / EDR). Re-tonemapping on HDR crushes extended range.
+// Journal prepass (mode=1): same linear path into offscreen float for book mesh sampling.
 //
 // VHS overlay (vhs_enabled = 1, swapchain path only): subtle CRT/tape look applied
 // after ACES so the rest of the scene's exposure/color math is unchanged. Per-
@@ -10,7 +11,8 @@
 
 struct TonemapParams {
     exposure: f32,
-    /// 0 = ACES tonemap (swapchain SDR or HDR); 1 = linear × exposure (journal prepass only).
+    /// 0 = ACES tonemap (SDR swapchain); 1 = linear × exposure (HDR swapchain);
+    /// 2 = linear × exposure, no VHS (journal prepass only).
     mode: f32,
     /// 1.0 = run the VHS branch; 0.0 = skip everything below ACES.
     vhs_enabled: f32,
@@ -130,13 +132,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     rgb = rgb * params.exposure;
 
-    if params.mode > 0.5 {
+    if params.mode > 1.5 {
         // Journal prepass: keep linear; never apply VHS to a buffer the
         // book-page mesh resamples (we don't want compounded artifacts).
         return vec4<f32>(rgb, 1.0);
     }
 
-    var color = aces_fitted(rgb);
+    var color: vec3<f32>;
+    if params.mode > 0.5 {
+        // HDR swapchain: pass extended-range linear scRGB to the OS tonemapper.
+        color = rgb;
+    } else {
+        color = aces_fitted(rgb);
+    }
 
     if on {
         // Scanlines: ~360 dark ridges across the screen; amplitude per uniform.

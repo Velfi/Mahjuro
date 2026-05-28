@@ -85,7 +85,7 @@ fn apply_shop_stock_bob(pos: &mut [f32; 3], h: f32, bob_seed: u32, age_secs: f32
 /// Screen-space hit ids (processed in `update` before the main shop pick pass).
 const SHOP_SHELF_CLICK_BASE: u32 = 0xD000;
 /// One UI/hit slot per `shop_spawn_relic_00` … `shop_spawn_relic_08` in shop.glb.
-const SHOP_SPAWN_SLOT_COUNT: usize = 9;
+pub(in crate::scenes::shop) const SHOP_SPAWN_SLOT_COUNT: usize = 9;
 const SHOP_CLICK_JOURNAL: u32 = 0xD011;
 const SHOP_CLICK_REROLL: u32 = 0xD012;
 const SHOP_CLICK_LEAVE: u32 = 0xD013;
@@ -1764,7 +1764,7 @@ fn sale_slot_for_focus(scene: &ShopScene, foc: ShopFocus) -> Option<usize> {
 }
 
 #[inline]
-fn euler_rad_add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+pub(in crate::scenes::shop) fn euler_rad_add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }
 
@@ -1839,7 +1839,9 @@ fn push_stock_meshes(
     let mut subject = None;
     let niche_base = w * 0.048;
     let env_h = scene.drawn_room_gltf_height_scale.get();
-    let stock_bobs = |foc: ShopFocus| !inspect_anchor.map(|(ifoc, _)| ifoc == foc).unwrap_or(false);
+    let stock_bobs = |foc: ShopFocus| {
+        !inspect_anchor.map(|(ifoc, _)| ifoc == foc).unwrap_or(false)
+    };
 
     let sale = for_sale_slots(scene);
     for (slot_i, foc_opt) in sale.iter().enumerate() {
@@ -2274,7 +2276,130 @@ fn push_stock_meshes(
         }
     }
 
+    push_departing_stock_meshes(scene, w, h, cam, env_h, niche_base, &mut dim);
+
     (dim, subject)
+}
+
+fn push_departing_stock_meshes(
+    scene: &ShopScene,
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    env_h: f32,
+    niche_base: f32,
+    dim: &mut Vec<Object3d>,
+) {
+    if scene.departing_stock.is_empty() {
+        return;
+    }
+    let now = std::time::Instant::now();
+    for batch in &scene.departing_stock {
+        for entry in &batch.entries {
+            let slot_i = entry.slot_i();
+            if super::restock_exit::restock_exit_offscreen_for_slot(slot_i, h, batch.started_at, now)
+            {
+                continue;
+            }
+            let r = shop_shelf_slot_rect(w, h, cam, slot_i, env_h);
+            let cx = r[0] + r[2] * 0.5;
+            let cy = r[1] + r[3] * 0.5;
+            let wz = shop_shelf_slot_wz(h, slot_i);
+            let anchor = |cz: f32| {
+                sale_anchor_at_slot(SaleAnchorAtSlot {
+                    screen: ShopScreenAnchor {
+                        w,
+                        h,
+                        cam,
+                        env_h,
+                        cx,
+                        cy,
+                        cz_fallback: cz,
+                    },
+                    slot_i,
+                })
+            };
+            let mut mesh = match entry {
+                super::restock_exit::DepartingShelfEntry::Relic { relic, rarity, .. } => {
+                    let half = relic_half_extents(*relic, niche_base);
+                    let cz = wz + half[2];
+                    Object3d {
+                        pos: anchor(cz),
+                        extents: [half[0] * 2.0, half[1] * 2.0, half[2] * 2.0],
+                        rotation: euler_xyz_rad_from_deg(
+                            super::SHOP_RELIC_LEAN_COUNTER,
+                            0.0,
+                            0.0,
+                        ),
+                        color: rarity_color(*rarity),
+                        kind: Object3dKind::Relic {
+                            relic_id: *relic,
+                            glow: 0.0,
+                            silhouette: false,
+                            debuffed: false,
+                        },
+                        hover_target: 0.0,
+                        anim_id: 0,
+                    }
+                }
+                super::restock_exit::DepartingShelfEntry::Pack { kind, .. } => {
+                    let pack_h = r[3] * 1.04;
+                    let pack_w = pack_h * PACK_ASPECT_W_OVER_H;
+                    let pack_t = pack_h * 0.11;
+                    let ext = [pack_w, pack_t, pack_h];
+                    let cz = wz + ext[2] * 0.5;
+                    Object3d {
+                        pos: anchor(cz),
+                        extents: ext,
+                        rotation: [0.0, 0.0, 0.0],
+                        color: kind.foil_tint(),
+                        kind: Object3dKind::Pack {
+                            kind: *kind,
+                            pick_id: None,
+                        },
+                        hover_target: 0.0,
+                        anim_id: 0,
+                    }
+                }
+                super::restock_exit::DepartingShelfEntry::Ribbon { zodiac, .. } => {
+                    let ribbon_len = for_sale_ribbon_length(r[2], r[3]);
+                    let ribbon_world = ribbon_display_length(ribbon_len);
+                    let cz = wz + ribbon_world * 0.35 - ribbon_world * 0.5;
+                    let mut col = consumable_color(Consumable::Zodiac(*zodiac));
+                    col[3] = 1.0;
+                    zodiac_ribbon_object3d(ZodiacRibbonSpec {
+                        pos: anchor(cz),
+                        length: ribbon_len,
+                        rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
+                        color: [1.0, 1.0, 1.0, col[3]],
+                        kind: Some(*zodiac),
+                        hover_target: 0.0,
+                        anim_id: 0,
+                        placement_rot_deg: [0.0, 0.0, 0.0],
+                    })
+                }
+                super::restock_exit::DepartingShelfEntry::Talisman { kind, .. } => {
+                    let tw = r[2] * FOR_SALE_TALISMAN_W_FRAC;
+                    let cz = wz + tw * 0.55;
+                    Object3d {
+                        pos: anchor(cz),
+                        extents: crate::render::talisman_mesh::talisman_object_extents(
+                            for_sale_talisman_tablet_extent(r[2]),
+                        ),
+                        rotation: crate::render::talisman_mesh::talisman_face_camera_rotation(0.0),
+                        color: consumable_color(Consumable::Talisman(*kind)),
+                        kind: Object3dKind::Talisman { kind: *kind },
+                        hover_target: 0.0,
+                        anim_id: 0,
+                    }
+                }
+            };
+            let delta =
+                super::restock_exit::restock_exit_mesh_delta(slot_i, h, batch.started_at, now);
+            super::restock_exit::apply_restock_exit_to_mesh(&mut mesh, delta);
+            dim.push(mesh);
+        }
+    }
 }
 
 fn rect_center_n(window_w: f32, window_h: f32, nx: f32, ny: f32, rw: f32, rh: f32) -> [f32; 4] {
@@ -2370,7 +2495,9 @@ fn sale_index_to_centered_slot(k: usize, n: usize) -> usize {
 /// Maps stock into [`SHOP_SPAWN_SLOT_COUNT`] cells (`shop_spawn_relic_00` … `_08`).
 /// Order: relics, then packs, then talismans, then ribbons; the group is centered in the row
 /// when fewer than nine items.
-fn for_sale_slots(scene: &ShopScene) -> [Option<ShopFocus>; SHOP_SPAWN_SLOT_COUNT] {
+pub(in crate::scenes::shop) fn for_sale_slots(
+    scene: &ShopScene,
+) -> [Option<ShopFocus>; SHOP_SPAWN_SLOT_COUNT] {
     let mut out = [None; SHOP_SPAWN_SLOT_COUNT];
 
     let mut ordered: Vec<ShopFocus> = Vec::new();

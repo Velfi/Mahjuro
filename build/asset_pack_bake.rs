@@ -1,7 +1,9 @@
 //! Invoked from `build.rs`: hash pack bake inputs and run `bake_assets.py` when stale.
 //!
-//! Skips files excluded from packs (`.DS_Store`, `assets/3d/source/`, loose maps, …) — same
-//! rules as `tools/bake_assets/bake_assets.py` `should_skip`. Does not use `rerun-if-changed=assets`.
+//! Input hashing walks `assets/` with repo `.gitignore` rules plus pack-only exclusions
+//! (same extras as `tools/bake_assets/bake_assets.py` `should_skip`). Cargo rerun uses a
+//! coarse `assets/` watch so build-script output stays readable; gitignored-only edits
+//! rerun the script but leave the inputs hash unchanged.
 
 use std::env;
 use std::fs;
@@ -23,22 +25,16 @@ const PACK_OUTPUTS: &[&str] = &[
     "mahjuro-pack-gameplay.zip",
 ];
 
-pub fn emit_rerun_if_changed(repo: &Path, profile_dir: &Path) {
+pub fn emit_rerun_if_changed(_repo: &Path, profile_dir: &Path) {
     println!("cargo:rerun-if-env-changed=MAHJURO_SKIP_ASSET_BAKE");
+    println!("cargo:rerun-if-changed=.gitignore");
     println!("cargo:rerun-if-changed={RULES_PATH}");
     println!("cargo:rerun-if-changed={BAKE_SCRIPT_PATH}");
+    println!("cargo:rerun-if-changed=assets");
     println!(
         "cargo:rerun-if-changed={}",
         profile_dir.join(STAMP_NAME).display()
     );
-
-    for path in pack_input_paths(repo) {
-        let rel = path
-            .strip_prefix(repo)
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        println!("cargo:rerun-if-changed={rel}");
-    }
 }
 
 pub fn maybe_bake_asset_packs(repo: &Path, profile_dir: &Path) {
@@ -124,33 +120,32 @@ fn should_skip_pack_input(rel: &str) -> bool {
 
 fn pack_input_paths(repo: &Path) -> Vec<PathBuf> {
     let assets = repo.join("assets");
-    let mut paths = Vec::new();
-    if assets.is_dir() {
-        collect_pack_input_paths(&assets, &assets, &mut paths);
-        paths.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
+    if !assets.is_dir() {
+        return Vec::new();
     }
-    paths
-}
 
-fn collect_pack_input_paths(assets_root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
+    let mut paths = Vec::new();
+    let mut builder = ignore::WalkBuilder::new(&assets);
+    builder
+        .git_ignore(true)
+        .git_global(false)
+        .git_exclude(false)
+        .parents(true);
+    for entry in builder.build().flatten() {
         let path = entry.path();
-        if path.is_dir() {
-            collect_pack_input_paths(assets_root, &path, out);
-        } else if path.is_file() {
-            let rel = path
-                .strip_prefix(assets_root)
-                .map(|p| p.to_string_lossy().replace('\\', "/"))
-                .unwrap_or_default();
-            if !should_skip_pack_input(&rel) {
-                out.push(path);
-            }
+        if !path.is_file() {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(&assets)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if !should_skip_pack_input(&rel) {
+            paths.push(path.to_path_buf());
         }
     }
+    paths.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
+    paths
 }
 
 fn compute_inputs_hash(repo: &Path, release: bool) -> String {

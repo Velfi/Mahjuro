@@ -1,8 +1,8 @@
 [package]
 name = "mahjuro-render"
-version = "0.5.0-21"
-edition = "2024"
-publish = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [[bin]]
 name = "mahjuro-bake-decal-atlases"
@@ -17,37 +17,36 @@ default = []
 clipboard = ["dep:arboard"]
 # SDL window/surface path for the interactive game; off for CPU-only bake binaries.
 windowed = ["dep:sdl3"]
+# Headless room/shadow bakes via mahjuro-headless (relaxes strict main_menu init).
+bake = []
 
 [dependencies]
-arboard = { version = "3.6.1", optional = true }
-mahjuro-core = { path = "../mahjuro-core" }
-mahjuro-types = { path = "../mahjuro-types" }
-mahjuro-assets = { path = "../mahjuro-assets" }
-mahjuro-gfx-types = { path = "../mahjuro-gfx-types" }
-mahjuro-bake-stamp = { path = "../mahjuro-bake-stamp" }
-anyhow = "1.0.102"
-bytemuck = { version = "1.23", features = ["derive"] }
-fontdue = "0.9.3"
-glam = { version = "0.30.9", features = ["bytemuck"] }
-gltf = { version = "1.4.1", features = [
-    "KHR_texture_transform",
-    "KHR_lights_punctual",
-    "KHR_materials_emissive_strength",
-] }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
-log = "0.4.28"
-env_logger = "0.11.8"
-pollster = "0.4.0"
-rand = "0.10.0"
-raw-window-handle = "0.6"
-rustc-hash = "2.1"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-ttf-parser = "0.25"
-wgpu = { version = "29.0.1", features = ["static-dxc"] }
-lyon_path = "1.0"
-lyon_tessellation = "1.0"
-resvg = "0.44"
-rayon = "1.11.0"
-chrono = "0.4"
-sdl3 = { version = "0.17", features = ["raw-window-handle"], optional = true }
+arboard = { workspace = true, optional = true }
+mahjuro-core.workspace = true
+mahjuro-types.workspace = true
+mahjuro-assets.workspace = true
+mahjuro-gfx-types.workspace = true
+mahjuro-bake-stamp.workspace = true
+anyhow.workspace = true
+bytemuck.workspace = true
+fontdue.workspace = true
+glam.workspace = true
+gltf.workspace = true
+image = { workspace = true, features = ["png", "jpeg", "bmp", "gif", "webp"] }
+log.workspace = true
+env_logger.workspace = true
+parking_lot.workspace = true
+pollster.workspace = true
+rand.workspace = true
+raw-window-handle.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ttf-parser.workspace = true
+wgpu.workspace = true
+lyon_path.workspace = true
+lyon_tessellation.workspace = true
+resvg.workspace = true
+rayon.workspace = true
+chrono.workspace = true
+sdl3 = { workspace = true, optional = true }

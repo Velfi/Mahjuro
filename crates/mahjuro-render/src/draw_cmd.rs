@@ -180,6 +180,12 @@ impl CameraParams {
         }
     }
 
+    /// Cached view×projection for many world→screen projections in one frame.
+    #[inline]
+    pub fn screen_projector(&self, window_w: f32, window_h: f32) -> ScreenProjector {
+        ScreenProjector::new(self, window_w, window_h)
+    }
+
     /// Project a world point to layout pixels (same contract as the internal render camera).
     pub fn project_world_to_screen(
         &self,
@@ -187,20 +193,52 @@ impl CameraParams {
         window_h: f32,
         world: glam::Vec3,
     ) -> (f32, f32) {
+        self.screen_projector(window_w, window_h).project(world)
+    }
+}
+
+/// Per-frame view×projection cache for rain and other batched screen projections.
+#[derive(Clone, Copy, Debug)]
+pub struct ScreenProjector {
+    view_proj: glam::Mat4,
+    window_w: f32,
+    window_h: f32,
+}
+
+impl ScreenProjector {
+    pub fn new(cam: &CameraParams, window_w: f32, window_h: f32) -> Self {
         let aspect = window_w / window_h.max(1e-6);
-        let eye = glam::Vec3::from_array(self.eye);
-        let target = glam::Vec3::from_array(self.target);
-        let up = glam::Vec3::from_array(self.up);
+        let eye = glam::Vec3::from_array(cam.eye);
+        let target = glam::Vec3::from_array(cam.target);
+        let up = glam::Vec3::from_array(cam.up);
         let view = glam::Mat4::look_at_rh(eye, target, up);
-        let (near, far) = self.clip_planes(window_h);
-        let proj = glam::Mat4::perspective_rh(self.fovy_deg.to_radians(), aspect, near, far);
-        let view_proj = proj * view;
-        let clip = view_proj * glam::Vec4::new(world.x, world.y, world.z, 1.0);
+        let (near, far) = cam.clip_planes(window_h);
+        let proj = glam::Mat4::perspective_rh(cam.fovy_deg.to_radians(), aspect, near, far);
+        Self {
+            view_proj: proj * view,
+            window_w,
+            window_h,
+        }
+    }
+
+    #[inline]
+    pub fn window_w(self) -> f32 {
+        self.window_w
+    }
+
+    #[inline]
+    pub fn window_h(self) -> f32 {
+        self.window_h
+    }
+
+    #[inline]
+    pub fn project(&self, world: glam::Vec3) -> (f32, f32) {
+        let clip = self.view_proj * glam::Vec4::new(world.x, world.y, world.z, 1.0);
         let inv_w = 1.0 / clip.w.max(1e-6);
         let nx = clip.x * inv_w;
         let ny = clip.y * inv_w;
-        let sx = (nx * 0.5 + 0.5) * window_w;
-        let sy = (1.0 - (ny * 0.5 + 0.5)) * window_h;
+        let sx = (nx * 0.5 + 0.5) * self.window_w;
+        let sy = (1.0 - (ny * 0.5 + 0.5)) * self.window_h;
         (sx, sy)
     }
 }

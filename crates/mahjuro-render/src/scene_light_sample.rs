@@ -386,6 +386,63 @@ pub fn shade_volumetric_rgb_at_world(
     finish_lit_rgb(base_rgb, albedo, lo, ctx)
 }
 
+/// Three depth samples of volumetric rain lighting (replaces per-drop shading).
+#[derive(Clone, Copy, Debug)]
+pub struct RainVolumetricLit {
+    near: [f32; 3],
+    mid: [f32; 3],
+    far: [f32; 3],
+    depth_min: f32,
+    depth_max: f32,
+}
+
+impl RainVolumetricLit {
+    pub fn build(
+        cam: &crate::draw_cmd::CameraParams,
+        base_rgb: [f32; 3],
+        depth_min: f32,
+        depth_max: f32,
+        ctx: &SceneLightSampleCtx<'_>,
+    ) -> Self {
+        let eye = Vec3::from_array(cam.eye);
+        let target = Vec3::from_array(cam.target);
+        let forward = (target - eye).normalize_or_zero();
+        let span = (depth_max - depth_min).max(1e-3);
+        let sample = |frac: f32| {
+            let pos = eye + forward * (depth_min + span * frac);
+            shade_volumetric_rgb_at_world(pos, base_rgb, ctx)
+        };
+        Self {
+            near: sample(0.2),
+            mid: sample(0.5),
+            far: sample(0.85),
+            depth_min,
+            depth_max,
+        }
+    }
+
+    pub fn sample_at(&self, world_pos: Vec3, cam: &crate::draw_cmd::CameraParams) -> [f32; 3] {
+        let eye = Vec3::from_array(cam.eye);
+        let target = Vec3::from_array(cam.target);
+        let forward = (target - eye).normalize_or_zero();
+        let depth = (world_pos - eye).dot(forward);
+        let span = (self.depth_max - self.depth_min).max(1e-3);
+        let t = ((depth - self.depth_min) / span).clamp(0.0, 1.0);
+        let lerp3 = |a: [f32; 3], b: [f32; 3], u: f32| {
+            [
+                a[0] + (b[0] - a[0]) * u,
+                a[1] + (b[1] - a[1]) * u,
+                a[2] + (b[2] - a[2]) * u,
+            ]
+        };
+        if t < 0.5 {
+            lerp3(self.near, self.mid, t / 0.5)
+        } else {
+            lerp3(self.mid, self.far, (t - 0.5) / 0.5)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

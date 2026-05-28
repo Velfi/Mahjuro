@@ -12,7 +12,7 @@
 //! - `compute_inputs_hash(repo)` — FNV-1a 64-bit hex digest, the value written to the stamp
 //! - `bake_status(repo)` — `(hash, stamp_ok, outputs_ok)` for the build-time check
 //! - `write_stamp(repo)` — recompute the digest and persist it (called by the bake binary)
-//! - `skip_bake_env()` — read the `MAHJURO_SKIP_*_BAKE` env var
+//! - `skip_bake_env()` — `MAHJURO_SKIP_OFFLINE_BAKES` or per-bake `MAHJURO_SKIP_*_BAKE`
 //! - `STAMP_PATH` / `OUT_DIR` / `SKIP_ENV` / `LABEL` / `BUILD_TOOL_CMD` / `REBAKE_CMD` /
 //!   `COMMIT_PATHS` — used by the `build.rs` panic message so the fix instructions stay
 //!   in sync with the actual paths.
@@ -152,6 +152,23 @@ pub fn skip_env_set(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Skip every committed offline bake freshness check (room GI/shadow, decal, relic).
+pub const SKIP_OFFLINE_BAKES_ENV: &str = "MAHJURO_SKIP_OFFLINE_BAKES";
+
+pub fn skip_offline_bakes() -> bool {
+    skip_env_set(SKIP_OFFLINE_BAKES_ENV)
+}
+
+/// Skip every committed `.inputs_stamp` freshness check (e.g. while compiling `mahjuro-bake`).
+pub const SKIP_COMMITTED_BAKE_CHECKS_ENV: &str = "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS";
+
+pub fn skip_committed_bake_checks() -> bool {
+    skip_env_set(SKIP_COMMITTED_BAKE_CHECKS_ENV)
+}
+
+pub const BUILD_BAKER_CMD: &str =
+    "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo build -p mahjuro-headless --bin mahjuro-bake --features bake";
+
 #[derive(Debug, Clone)]
 pub struct BakeStatus {
     pub hash: String,
@@ -186,7 +203,7 @@ pub trait BakeKind {
     fn outputs_ok(repo: &Path) -> bool;
 
     fn skip_bake_env() -> bool {
-        skip_env_set(Self::SKIP_ENV)
+        skip_offline_bakes() || skip_env_set(Self::SKIP_ENV)
     }
 
     fn stamp_file(repo: &Path) -> PathBuf {
@@ -232,7 +249,7 @@ pub fn out_of_date_message<K: BakeKind>(status: &BakeStatus) -> String {
             "{detail}\n\n",
             "To fix (needs a GPU):\n\n",
             "1. Build the offline baker:\n",
-            "   {skip_env}=1 {build_tool_cmd}\n\n",
+            "   {build_baker_cmd}\n\n",
             "2. Rebake (the binary refreshes the stamp on success):\n",
             "   {rebake_cmd}\n\n",
             "3. Commit the baked files + stamp:\n",
@@ -240,8 +257,7 @@ pub fn out_of_date_message<K: BakeKind>(status: &BakeStatus) -> String {
         ),
         label = K::LABEL,
         detail = detail,
-        skip_env = K::SKIP_ENV,
-        build_tool_cmd = K::BUILD_TOOL_CMD,
+        build_baker_cmd = BUILD_BAKER_CMD,
         rebake_cmd = K::REBAKE_CMD,
         commit_paths = K::COMMIT_PATHS,
     )
@@ -254,6 +270,8 @@ pub fn log_bake_timing(label: &str, start: Instant) {
 
 /// `cargo:rerun-if-changed` lines shared by `build/*.rs` freshness modules.
 pub fn emit_rerun_if_changed<K: BakeKind>(rerun_paths: &[&str]) {
+    println!("cargo:rerun-if-env-changed={SKIP_COMMITTED_BAKE_CHECKS_ENV}");
+    println!("cargo:rerun-if-env-changed={SKIP_OFFLINE_BAKES_ENV}");
     println!("cargo:rerun-if-env-changed={}", K::SKIP_ENV);
     println!("cargo:rerun-if-changed={}", K::STAMP_PATH);
     for path in rerun_paths {
@@ -261,12 +279,96 @@ pub fn emit_rerun_if_changed<K: BakeKind>(rerun_paths: &[&str]) {
     }
 }
 
+/// Skip automatic offline rebakes from `build.rs` (still panics when stale if checks run).
+pub const SKIP_AUTO_OFFLINE_REBAKE_ENV: &str = "MAHJURO_SKIP_AUTO_OFFLINE_BAKE";
+
+pub fn skip_auto_offline_rebake() -> bool {
+    skip_env_set(SKIP_AUTO_OFFLINE_REBAKE_ENV)
+}
+
+/// True when `build.rs` may spawn offline rebake tools (local dev host builds).
+pub fn auto_offline_rebake_enabled() -> bool {
+    !skip_auto_offline_rebake()
+        && !skip_env_set("CI")
+        && !cross_compiling()
+}
+
+fn cross_compiling() -> bool {
+    match (
+        std::env::var("HOST"),
+        std::env::var("TARGET"),
+    ) {
+        (Ok(host), Ok(target)) => host != target,
+        _ => false,
+    }
+}
+
+/// Freshness check used by `build.rs`: auto-rebake locally when stale, panic in CI or on failure.
+pub fn ensure_bake_current<K: BakeKind>(
+    repo: &Path,
+    rebake: impl FnOnce() -> Result<(), String>,
+) {
+    if skip_committed_bake_checks() || K::skip_bake_env() {
+        let via = if skip_committed_bake_checks() {
+            SKIP_COMMITTED_BAKE_CHECKS_ENV
+        } else if skip_offline_bakes() {
+            SKIP_OFFLINE_BAKES_ENV
+        } else {
+            K::SKIP_ENV
+        };
+        println!(
+            "cargo:warning={via}: skipping {} freshness check",
+            K::LABEL
+        );
+        return;
+    }
+
+    let status = K::bake_status(repo);
+    if status.stamp_ok && status.outputs_ok {
+        println!("cargo:info={}: committed bake matches inputs", K::LABEL);
+        return;
+    }
+
+    if auto_offline_rebake_enabled() {
+        println!(
+            "cargo:warning={}: inputs stale — auto-rebaking via pre-built tool (set {}=1 to disable)",
+            K::LABEL,
+            SKIP_AUTO_OFFLINE_REBAKE_ENV
+        );
+        let start = Instant::now();
+        if let Err(e) = rebake() {
+            panic!(
+                "{}\n\nauto-rebake failed: {e}",
+                out_of_date_message::<K>(&status)
+            );
+        }
+        log_bake_timing(K::LABEL, start);
+        let after = K::bake_status(repo);
+        if after.stamp_ok && after.outputs_ok {
+            println!("cargo:info={}: auto-rebake succeeded", K::LABEL);
+            return;
+        }
+        panic!(
+            "{}\n\nauto-rebake finished but outputs are still stale",
+            out_of_date_message::<K>(&after)
+        );
+    }
+
+    panic!("{}", out_of_date_message::<K>(&status));
+}
+
 /// Panic with [`out_of_date_message`] when committed outputs are stale (build.rs).
 pub fn assert_bake_current<K: BakeKind>(repo: &Path) {
-    if K::skip_bake_env() {
+    if skip_committed_bake_checks() || K::skip_bake_env() {
+        let via = if skip_committed_bake_checks() {
+            SKIP_COMMITTED_BAKE_CHECKS_ENV
+        } else if skip_offline_bakes() {
+            SKIP_OFFLINE_BAKES_ENV
+        } else {
+            K::SKIP_ENV
+        };
         println!(
-            "cargo:warning={}: skipping {} freshness check",
-            K::SKIP_ENV,
+            "cargo:warning={via}: skipping {} freshness check",
             K::LABEL
         );
         return;

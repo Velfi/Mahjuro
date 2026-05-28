@@ -106,16 +106,16 @@ Run a headless AI player to test game balance:
 
 ```bash
 # Run 200 bot games
-cargo run --release -- --bot 200
+cargo run --release -- bot 200
 
 # Parameter sweep for tuning
-cargo run --release -- --sweep --runs 30
+cargo run --release -- sweep --runs 30
 
 # Custom parameters
-cargo run --release -- --bot 200 --base-target 250 --target-scale 1.3 --plays 5
+cargo run --release -- bot 200 --base-target 250 --plays 5
 
 # Verbose trace for a single run
-cargo run --release -- --bot 1 --bot-log
+cargo run --release -- bot 1 --bot-log
 ```
 
 Always use `--release` for bot mode -- debug builds are 10-20x slower.
@@ -143,4 +143,5 @@ assets/       Tile models, textures, fonts, audio, `scenes/` per-scene art, musi
 | `ARCHITECTURE.md`       | System design and module structure      |
 | `PROGRESSION.md`        | Unlock trees and meta-progression       |
 | `BOT.md`                | Headless AI player guide and tuning     |
+| `docs/agents/launch-options.md` | CLI flags and `MAHJURO_*` env vars |
 | `docs/steam-uploads.md` | Publishing builds to Steam              |

@@ -13,6 +13,7 @@ use crate::core::hand::{DetectedMeld, MeldKind, enumerate_decompositions, valida
 use crate::core::json_asset::load_json_asset;
 use crate::core::rules::RuleModifier;
 use crate::core::tile::{Suit, Tile};
+use crate::core::zodiac::ZodiacKind;
 
 #[derive(Deserialize)]
 struct YakuDefRaw {
@@ -49,12 +50,6 @@ fn yaku_def(id: YakuKind) -> &'static YakuDef {
     map.get(&id)
         .unwrap_or_else(|| panic!("yaku def missing for {id:?}"))
 }
-
-/// Additive mult per zodiac level above 1 (applied on top of base yaku mult).
-pub const YAKU_MULT_PER_LEVEL: f64 = 0.9;
-
-/// Additive chips per zodiac level above 1.
-pub const YAKU_CHIPS_PER_LEVEL: i32 = 50;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -149,18 +144,32 @@ impl YakuKind {
         if level <= 1 {
             base
         } else {
-            base + YAKU_MULT_PER_LEVEL * (level - 1) as f64
+            base + self.level_up_mult_per_level() * (level - 1) as f64
         }
     }
 
-    /// Leveled chip bonus: `base + YAKU_CHIPS_PER_LEVEL × (level - 1)`.
+    /// Leveled chip bonus: `base + per-zodiac-chips × (level - 1)`.
     pub fn chip_bonus_at(self, level: u32) -> i32 {
         let base = self.base_chip_bonus();
         if level <= 1 {
             base
         } else {
-            base + YAKU_CHIPS_PER_LEVEL * (level as i32 - 1)
+            base + self.level_up_chips_per_level() * (level as i32 - 1)
         }
+    }
+
+    /// Per-level mult increase for this yaku's linked zodiac ribbon.
+    pub fn level_up_mult_per_level(self) -> f64 {
+        let zodiac = ZodiacKind::for_yaku(self)
+            .unwrap_or_else(|| panic!("missing zodiac mapping for yaku {self:?}"));
+        zodiac.level_up_mult_per_level()
+    }
+
+    /// Per-level chip increase for this yaku's linked zodiac ribbon.
+    pub fn level_up_chips_per_level(self) -> i32 {
+        let zodiac = ZodiacKind::for_yaku(self)
+            .unwrap_or_else(|| panic!("missing zodiac mapping for yaku {self:?}"));
+        zodiac.level_up_chips_per_level()
     }
 
     pub fn name(self) -> &'static str {
@@ -1678,10 +1687,10 @@ mod tests {
     #[test]
     fn mult_bonus_at_levels_up() {
         assert_eq!(YakuKind::Toitoi.mult_bonus_at(1), 3.0);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(2), 3.9);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 6.6);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(2), 4.0);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 7.0);
         assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 63);
-        assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 263);
+        assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 287);
     }
 
     /// Force a panic on data drift. Touching every variant via the metadata

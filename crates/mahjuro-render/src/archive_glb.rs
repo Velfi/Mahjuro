@@ -26,7 +26,7 @@
 //!
 //! Decodes through [`crate::room_env_gltf`]; GPU path matches shop/hallway (`room_glb.wgsl`).
 
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 use glam::{Mat4, Vec3};
 
@@ -80,8 +80,7 @@ pub const ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS: [f32; 3] = [1.0, 1.0, 1.0];
 ///
 /// Takes `cpu` by reference rather than re-entering [`with_archive_glb_cpu`] because callers
 /// (`build.rs`, `sync_archive_description_decal_texture`) are typically already inside that
-/// closure — recursive read-locks on `std::sync::RwLock` are UB on macOS pthreads and deadlock
-/// in practice.
+/// closure — recursive read-locks on the GLB `RwLock` deadlock in practice.
 pub fn archive_sign_description_decal_extents_for(cpu: &RoomGlbCpu) -> [f32; 3] {
     let Some(bounds) = cpu
         .marker_mesh_bounds_doc_for(SIGN_DESCRIPTION_LEFT)
@@ -161,17 +160,30 @@ enum ArchiveGlbCache {
 
 static ARCHIVE_GLB_CPU: RwLock<ArchiveGlbCache> = RwLock::new(ArchiveGlbCache::Uninit);
 
-fn ensure_archive_glb_loaded() {
-    let mut w = ARCHIVE_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
-    match &*w {
-        ArchiveGlbCache::Uninit => {}
-        ArchiveGlbCache::Ready(Some(cpu))
-            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
-                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
-        {
-            *w = ArchiveGlbCache::Uninit;
+/// True when `archive.glb` has been decoded into the process cache.
+pub fn archive_cpu_decoded() -> bool {
+    let g = ARCHIVE_GLB_CPU.read();
+    matches!(&*g, ArchiveGlbCache::Ready(Some(_)))
+}
+
+/// True when decoded environment meshes are present and not yet released for GPU upload.
+pub fn archive_cpu_ready_for_gpu_upload() -> bool {
+    let g = ARCHIVE_GLB_CPU.read();
+    match &*g {
+        ArchiveGlbCache::Ready(Some(cpu)) => {
+            !cpu.environment_primitives.is_empty() && !cpu.environment_primitives_released
         }
-        _ => return,
+        _ => false,
+    }
+}
+
+/// Decode `archive.glb` into the process-wide CPU cache (main or prefetch thread).
+pub fn decode_archive_glb_into_cache() {
+    let mut w = ARCHIVE_GLB_CPU.write();
+    if matches!(&*w, ArchiveGlbCache::Ready(Some(cpu)) if !room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
+        && !room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu))
+    {
+        return;
     }
     let ready = if let Some(file) = mahjuro_assets::asset_path::get("3d/archive.glb") {
         match load_archive_glb_from_bytes(&file.data) {
@@ -191,9 +203,25 @@ fn ensure_archive_glb_loaded() {
     *w = ArchiveGlbCache::Ready(ready.map(Box::new));
 }
 
+fn ensure_archive_glb_loaded() {
+    crate::room_preload::join_archive_cpu_prefetch_blocking();
+    let mut w = ARCHIVE_GLB_CPU.write();
+    match &*w {
+        ArchiveGlbCache::Uninit => {}
+        ArchiveGlbCache::Ready(Some(cpu))
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) =>
+        {
+            *w = ArchiveGlbCache::Uninit;
+        }
+        _ => return,
+    }
+    drop(w);
+    decode_archive_glb_into_cache();
+}
+
 pub fn with_archive_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     ensure_archive_glb_loaded();
-    let g = ARCHIVE_GLB_CPU.read().unwrap_or_else(|e| e.into_inner());
+    let g = ARCHIVE_GLB_CPU.read();
     match &*g {
         ArchiveGlbCache::Ready(Some(cpu)) => f(Some(cpu)),
         ArchiveGlbCache::Ready(None) => f(None),
@@ -205,7 +233,7 @@ pub fn with_archive_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
 }
 
 pub fn release_archive_environment_cpu_sources_after_gpu_upload() {
-    let mut g = ARCHIVE_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
+    let mut g = ARCHIVE_GLB_CPU.write();
     if let ArchiveGlbCache::Ready(Some(cpu)) = &mut *g {
         room_glb::release_room_environment_primitives_cpu(cpu);
     }

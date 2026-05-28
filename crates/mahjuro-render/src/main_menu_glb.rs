@@ -9,7 +9,7 @@
 //! Boolean `subtractor` meshes are culled at decode — see
 //! [`crate::room_env_gltf::skip_room_env_authoring_mesh_node_name`].
 
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 use glam::Vec3;
 
@@ -47,12 +47,11 @@ enum MainMenuGlbCache {
 static MAIN_MENU_GLB_CPU: RwLock<MainMenuGlbCache> = RwLock::new(MainMenuGlbCache::Uninit);
 
 fn ensure_main_menu_glb_loaded() {
-    let mut w = MAIN_MENU_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
+    let mut w = MAIN_MENU_GLB_CPU.write();
     match &*w {
         MainMenuGlbCache::Uninit => {}
         MainMenuGlbCache::Ready(Some(cpu))
-            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
-                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) =>
         {
             *w = MainMenuGlbCache::Uninit;
         }
@@ -61,18 +60,18 @@ fn ensure_main_menu_glb_loaded() {
     let ready = if let Some(file) = mahjuro_assets::asset_path::get("3d/main_menu.glb") {
         match load_main_menu_glb_from_bytes(&file.data) {
             Ok(cpu) => {
-                let rain_tris: usize = cpu
-                    .rain_surface_meshes
-                    .iter()
-                    .map(|m| m.triangles.len())
-                    .sum();
                 if cpu.rain_surface_meshes.is_empty() {
                     log::warn!(
                         "main_menu.glb: no rain_hit_* collision meshes — CPU rain splashes need invisible shells named rain_hit_* (export to assets/3d/main_menu.glb)"
                     );
                 } else {
+                    let rain_tris = cpu
+                        .rain_surface_merged
+                        .as_ref()
+                        .map(|m| m.triangles.len())
+                        .unwrap_or(0);
                     log::info!(
-                        "main_menu.glb: {} rain surface mesh(es), {} triangle(s): {:?}",
+                        "main_menu.glb: {} rain surface mesh(es) → {} merged triangle(s): {:?}",
                         cpu.rain_surface_meshes.len(),
                         rain_tris,
                         cpu.rain_surface_meshes
@@ -112,6 +111,11 @@ pub fn main_menu_rain_surface_meshes() -> Vec<crate::room_env_gltf::RoomCollisio
         opt.map(|c| c.rain_surface_meshes.clone())
             .unwrap_or_default()
     })
+}
+
+/// Merged `rain_hit_*` soup clone for CPU rain raycasts.
+pub fn main_menu_rain_collision_mesh() -> Option<crate::room_env_gltf::RoomCollisionMesh> {
+    with_main_menu_glb_cpu(|opt| opt.and_then(|c| c.rain_collision_mesh().cloned()))
 }
 
 /// Room collision meshes for analytic punctual occlusion (roof, etc.).
@@ -164,7 +168,7 @@ pub fn main_menu_room_draw_ready() -> bool {
 
 pub fn with_main_menu_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     ensure_main_menu_glb_loaded();
-    let g = MAIN_MENU_GLB_CPU.read().unwrap_or_else(|e| e.into_inner());
+    let g = MAIN_MENU_GLB_CPU.read();
     match &*g {
         MainMenuGlbCache::Ready(Some(cpu)) => f(Some(cpu)),
         MainMenuGlbCache::Ready(None) => f(None),
@@ -176,7 +180,7 @@ pub fn with_main_menu_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R 
 }
 
 pub fn release_main_menu_environment_cpu_sources_after_gpu_upload() {
-    let mut g = MAIN_MENU_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
+    let mut g = MAIN_MENU_GLB_CPU.write();
     if let MainMenuGlbCache::Ready(Some(cpu)) = &mut *g {
         room_glb::release_room_environment_primitives_cpu(cpu);
     }

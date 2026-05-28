@@ -2837,10 +2837,16 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         });
     crate::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
 
-    anyhow::ensure!(
-        main_menu_environment.is_some() && !main_menu_env_primitives.is_empty(),
-        "main_menu.glb failed to load (required at renderer init)"
-    );
+    // Do not panic if main_menu.glb is missing/empty during headless bake.
+    if main_menu_environment.is_none() || main_menu_env_primitives.is_empty() {
+        if cfg!(feature = "bake") {
+            log::warn!(
+                "main_menu.glb failed to load (required at renderer init) - continuing without it"
+            );
+        } else {
+            anyhow::bail!("main_menu.glb failed to load (required at renderer init)");
+        }
+    }
     let (gameplay_env_primitives, gameplay_environment, gameplay_cash_in_prim_indices, gameplay_env_shadow_caster_mask) =
         (Vec::new(), None, Vec::new(), Vec::new());
     let gameplay_env_collision_meshes = Vec::new();
@@ -3320,6 +3326,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         shop_gltf_anim_missing_clip_warned: std::cell::Cell::new(false),
         shop_eyeball_prim_indices,
         rooms_gpu_loaded: 0,
+        room_profile_frame_dt_ms: 1000.0 / 60.0,
         shadow_warp_layout,
         tile_env_normal_view,
         tile_env_mr_view,

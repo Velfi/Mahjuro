@@ -265,8 +265,10 @@ pub fn hand_tile_focus_tooltip(
 pub fn gameplay_consumable_description_full(c: Consumable) -> String {
     match c {
         Consumable::Zodiac(z) => format!(
-            "Levelled by the {} zodiac ribbon (+0.5 mult, +20 chips per level).",
-            z.name()
+            "Levelled by the {} zodiac ribbon (+{:.2} mult, +{} chips per level).",
+            z.name(),
+            z.level_up_mult_per_level(),
+            z.level_up_chips_per_level(),
         ),
         Consumable::Talisman(t) => t.description().to_string(),
         Consumable::Memorial(m) => m.description().to_string(),
@@ -405,11 +407,11 @@ pub fn hand_tile_keyword_lines(
     }
 
     if boss_debuffs.iter().any(|d| d.matches(tile)) {
-        lines.push(("Boss · scoring penalized".into(), color::RUBY));
+        lines.push(("Boss · this tile is debuffed".into(), color::RUBY));
     }
 
     if selected {
-        lines.push(("Play · queued".into(), color::BRASS));
+        lines.push(("Play · selected".into(), color::BRASS));
     }
 
     lines

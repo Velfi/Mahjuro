@@ -2271,10 +2271,17 @@ impl WgpuRenderer {
             pass.draw(0..3, 0..1);
         }
 
-        // Journal prepass writes bloom composite into `journal_scene_texture` for the
-        // book mesh to sample — keep that linear. Swapchain HDR (`Rgba16Float`) must
-        // use the same ACES fitted curve as SDR or ingame colors read oversaturated.
-        let tonemap_mode = if is_prepass { 1.0f32 } else { 0.0f32 };
+        // Journal prepass and HDR swapchain both want linear scene+bloom out of this pass.
+        // SDR applies ACES here; HDR leaves values > 1.0 for the OS / display tonemapper.
+        let swapchain_hdr =
+            !is_prepass && matches!(self.config.format, wgpu::TextureFormat::Rgba16Float);
+        let tonemap_mode = if is_prepass {
+            2.0f32
+        } else if swapchain_hdr {
+            1.0f32
+        } else {
+            0.0f32
+        };
         // Journal prepass also forces VHS off so the book-page mesh never
         // resamples a buffer with overlay artifacts baked in.
         let vhs_on_now = if is_prepass { false } else { effective_vhs_on };

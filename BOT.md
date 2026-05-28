@@ -15,19 +15,19 @@ Ante 2, no human will.
 
 ```bash
 # 100 runs with the default standard mode.
-cargo run --release -- --bot
+cargo run --release -- bot
 
 # 200 runs.
-cargo run --release -- --bot 200
+cargo run --release -- bot 200
 
 # Override individual mode fields without recompiling.
-cargo run --release -- --bot 200 --base-target 250 --target-scale 1.3
+cargo run --release -- bot 200 --base-target 250
 
 # Try giving the player an extra play.
-cargo run --release -- --bot 200 --plays 5
+cargo run --release -- bot 200 --plays 5
 
-# Sweep a 4×4×2 grid of (base_target × target_scale × plays).
-cargo run --release -- --sweep --runs 30
+# Sweep a grid of (base_target × plays).
+cargo run --release -- sweep --runs 30
 ```
 
 Always use `--release`. The bot is brute-force search across hand subsets and
@@ -37,12 +37,11 @@ each turn evaluates ~16k bitmasks; debug builds are 10–20× slower.
 
 | Flag | Type | Default | Notes |
 |---|---|---|---|
-| `--bot [N]` | u32 | 100 | Run N games with current overrides and print aggregate stats. |
-| `--sweep` | flag | — | Run a parameter grid (see below) instead of a single config. |
-| `--runs N` | u32 | 40 | Runs per cell when sweeping. |
-| `--base-target N` | u32 | 350 | Ante 1 base score (Small Blind target). |
-| `--target-scale F` | f32 | 1.7 | Multiplier applied to `base_target` when an ante completes. |
-| `--plays N` | u32 | 4 | `starting_plays` per blind. |
+| `bot [N]` | u32 | 100 | Subcommand: run N games with current overrides and print aggregate stats. |
+| `sweep` | subcommand | — | Run a parameter grid (see below) instead of a single config. |
+| `--runs N` | u32 | 40 | Runs per cell when sweeping (`sweep` subcommand). |
+| `--base-target N` | u32 | — | Ante 1 base score override (`bot` subcommand). |
+| `--plays N` | u32 | — | `starting_plays` per blind. |
 | `--discards N` | u32 | 3 | `starting_discards` per blind. |
 | `--yen N` | u32 | 4 | `starting_yen`. |
 | `--bot-run-timeout-secs N` | u32 | 10 | Wall-clock cap per run **attempt** (seconds). `0` = off. |
@@ -52,7 +51,7 @@ Anything not overridden uses `GameMode::standard()`.
 
 ## Output
 
-A normal `--bot` run prints stats like:
+A normal `bot` run prints stats like:
 
 ```
 === Bot Stats (200 runs) ===
@@ -100,7 +99,7 @@ hands per pass and uses fewer samples on late antes (see below).
 
 ## Sweep output
 
-`--sweep` prints a matrix per `starting_plays` value. Each cell shows
+`sweep` prints a matrix per `starting_plays` value. Each cell shows
 `antes_cleared / win_rate% (avg_blinds, avg_score)`:
 
 ```
@@ -119,7 +118,7 @@ tells you how sensitive the difficulty curve is to each axis. Steeper drop
 across a row → that axis is the dominant lever.
 
 To customize the sweep grid edit the constants in [src/main.rs](src/main.rs)
-under the `--sweep` block:
+under the `sweep` block:
 
 ```rust
 let bases: &[u32] = &[200, 250, 300, 350];
@@ -190,21 +189,20 @@ Per blind, in `play_run`:
 
 **"Where does the wall sit right now?"**
 ```bash
-cargo run --release -- --bot 200
+cargo run --release -- bot 200
 ```
 Look at `deaths_by_ante`. The mode (most common ante) is your hard wall.
 
-**"Is target_scaling the problem or base_target?"**
+**"Is base_target the problem?"**
 ```bash
-cargo run --release -- --sweep --runs 30
+cargo run --release -- sweep --runs 30
 ```
 The cell where `antes_cleared` improves the most when you change one axis is
-the dominant lever. Walk down a column (fixed scaling, varying base) to isolate
-base-target sensitivity; walk across a row to isolate scaling sensitivity.
+the dominant lever.
 
 **"Will adding a starting play save the game?"**
 ```bash
-cargo run --release -- --bot 200 --plays 5
+cargo run --release -- bot 200 --plays 5
 ```
 Compare `antes_cleared` to the baseline.
 
@@ -217,12 +215,12 @@ finishes in well under a minute.
 
 1. Add the field to `BotConfig` in [src/bot.rs](src/bot.rs).
 2. Apply it in `BotConfig::into_mode`.
-3. Wire a CLI flag in [src/main.rs](src/main.rs)'s `bot_config` block.
+3. Wire a CLI flag in [src/main/cli.rs](src/main/cli.rs) (`BotCli`).
 4. Optionally surface it in `run_sweep` as a new axis.
 
 ## Files
 
 - [src/bot.rs](src/bot.rs) — bot logic, run loop, stats, sweep
-- [src/main.rs](src/main.rs) — CLI parsing for `--bot` / `--sweep`
+- [src/main/cli.rs](src/main/cli.rs) — CLI parsing (`bot`, `sweep`, …)
 - [src/game/run.rs](src/game/run.rs) — `RunState`, `advance_round`, ante progression
 - [src/game/game_mode.rs](src/game/game_mode.rs) — `GameMode` (the thing `BotConfig` overrides)

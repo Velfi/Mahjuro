@@ -40,11 +40,22 @@ impl App {
             })?
         };
         self.renderer = Some(renderer);
-        if matches!(self.resume_scene, crate::persistence::ResumeScene::Gameplay) {
-            self.renderer
-                .as_mut()
-                .expect("renderer just set")
-                .ensure_gameplay_room_gpu_for_resume();
+        if let Some(renderer) = self.renderer.as_mut() {
+            use crate::persistence::ResumeScene;
+            use crate::render::room_preload::RoomSceneChain;
+            // Shop is always first in the hub chain; start CPU decode early.
+            renderer.prefetch_room_chain_next(RoomSceneChain::Shop);
+            match self.resume_scene {
+                ResumeScene::Gameplay => {
+                    renderer.prefetch_room_chain_next(RoomSceneChain::Hallway);
+                    renderer.prefetch_room_chain_next(RoomSceneChain::Gameplay);
+                }
+                ResumeScene::PickChamber => {
+                    renderer.prefetch_room_chain_next(RoomSceneChain::Hallway);
+                    renderer.prefetch_room_chain_next(RoomSceneChain::Gameplay);
+                }
+                ResumeScene::Shop => {}
+            }
         }
         self.input = {
             let _input = crate::startup_profile::scope("input.new");
@@ -117,6 +128,22 @@ impl App {
                     if splash_atlas_pending {
                         let tileset = self.gfx.tileset_name.clone();
                         renderer.ensure_active_showcase_decal_atlas(&tileset);
+                        did_loader_work = true;
+                    }
+                    if matches!(
+                        self.scene,
+                        Scene::MainMenuExterior(_)
+                            | Scene::Shop(_)
+                            | Scene::PickChamber(_)
+                    ) {
+                        renderer.poll_room_prefetch_gpu_uploads(
+                            crate::scenes::active_scene_key(&self.scene),
+                            self.last_frame_dt * 1000.0,
+                            matches!(
+                                self.resume_scene,
+                                crate::persistence::ResumeScene::Gameplay
+                            ),
+                        );
                         did_loader_work = true;
                     }
                 }
@@ -442,11 +469,11 @@ impl App {
             input.update_pointer_hover(input.last_cursor, &slots);
             // Showcase item inspect: LMB drag orbits the subject.
             if showcase_orbit && self.mouse_left_down {
-                input.accum_item_inspect_mouse_orbit(dx, dy);
+                input.accum_item_inspect_mouse_orbit(-dx, dy);
             }
             // Storeroom shop (pre-inspect): LMB drag orbits the room camera.
             if shop_storeroom_orbit {
-                input.accum_shop_storeroom_mouse_orbit(dx, dy);
+                input.accum_shop_storeroom_mouse_orbit(-dx, dy);
             }
             // Update drag position if dragging.
             if let Some(ref mut drag) = input.drag {

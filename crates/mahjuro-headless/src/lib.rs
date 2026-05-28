@@ -1,12 +1,15 @@
 //! Offscreen GPU tools: room lighting bakes and marketing screenshots.
 //!
 //! Built as a separate workspace crate so `cargo build -p mahjuro-bake` does not produce the
-//! interactive game binary. Bake and screenshot share [`HeadlessApp`] but use different feature
-//! flags on the `mahjuro` dependency: bake uses `bake-support` (no SDL/rodio/Steam client);
-//! screenshot pulls in bot + draw helpers via `headless-screenshot`.
+//! interactive game binary. Screenshots use [`HeadlessApp`]; room bakes use [`RoomBakeApp`].
+//! The `mahjuro` dependency is built with `default-features = false` (no SDL shell); screenshot
+//! additionally enables `headless-screenshot` for draw/bot helpers.
 
+#[cfg(feature = "screenshot")]
 mod app;
+#[cfg(feature = "screenshot")]
 mod fixtures;
+mod room_bake;
 mod slug;
 
 pub mod bake_cli;

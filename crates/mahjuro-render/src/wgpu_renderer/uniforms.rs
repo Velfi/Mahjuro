@@ -23,7 +23,8 @@ pub(crate) struct BloomParams {
 pub(crate) struct TonemapParams {
     /// Linear HDR multiplier applied before ACES.
     pub exposure: f32,
-    /// 0 = ACES fitted (SDR or HDR swapchain); 1 = linear × exposure (journal prepass float target).
+    /// 0 = ACES fitted (SDR swapchain); 1 = linear × exposure (HDR swapchain);
+    /// 2 = linear × exposure, no VHS (journal prepass float target).
     pub mode: f32,
     /// 1.0 = VHS branch enabled; 0.0 = clean tonemap. Independent of the
     /// per-component amounts so the Options toggle can hard-gate everything

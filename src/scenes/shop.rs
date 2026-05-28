@@ -6,6 +6,7 @@ mod actions;
 mod draw;
 mod layout;
 pub(crate) mod pack_celebration;
+mod restock_exit;
 pub(crate) mod pick_ids;
 mod shared;
 mod update;
@@ -112,6 +113,8 @@ pub struct ShopScene {
     storeroom_orbit_pitch: f32,
     /// glTF node TRS clip playbacks for embedded room meshes (e.g. `eyeball_travel`).
     gltf_anims: crate::render::room_gltf_anim::GltfAnimPlaybackSet,
+    /// For-sale meshes still falling after restock; culled once off-screen.
+    departing_stock: Vec<restock_exit::ShopDepartingBatch>,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.

@@ -3,7 +3,7 @@
 //! Shown after clearing an ordeal chamber, before the between-wing shop. Uses the same
 //! GPU path as shop/hallway (`room_glb.wgsl`).
 
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 use glam::Vec3;
 
@@ -24,12 +24,11 @@ enum StaircaseGlbCache {
 static STAIRCASE_GLB_CPU: RwLock<StaircaseGlbCache> = RwLock::new(StaircaseGlbCache::Uninit);
 
 fn ensure_staircase_glb_loaded() {
-    let mut w = STAIRCASE_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
+    let mut w = STAIRCASE_GLB_CPU.write();
     match &*w {
         StaircaseGlbCache::Uninit => {}
         StaircaseGlbCache::Ready(Some(cpu))
-            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
-                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) =>
         {
             *w = StaircaseGlbCache::Uninit;
         }
@@ -59,7 +58,7 @@ pub fn staircase_glb_loaded() -> bool {
 
 pub fn with_staircase_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     ensure_staircase_glb_loaded();
-    let g = STAIRCASE_GLB_CPU.read().unwrap_or_else(|e| e.into_inner());
+    let g = STAIRCASE_GLB_CPU.read();
     match &*g {
         StaircaseGlbCache::Ready(Some(cpu)) => f(Some(cpu)),
         StaircaseGlbCache::Ready(None) => f(None),
@@ -68,7 +67,7 @@ pub fn with_staircase_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R 
 }
 
 pub fn release_staircase_environment_cpu_sources_after_gpu_upload() {
-    let mut g = STAIRCASE_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
+    let mut g = STAIRCASE_GLB_CPU.write();
     if let StaircaseGlbCache::Ready(Some(cpu)) = &mut *g {
         room_glb::release_room_environment_primitives_cpu(cpu);
     }
