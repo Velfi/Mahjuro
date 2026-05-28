@@ -75,59 +75,93 @@ fn write_rel_path_key(h: &mut Fnv64, path: &Path) {
     h.write(b"\0");
 }
 
+/// Mix file bytes into `h`, normalizing CRLF/CR → LF for text so stamps match on Windows CI.
+fn hash_bytes_for_stamp(h: &mut Fnv64, rel: &str, bytes: &[u8]) {
+    if !is_text_rel(rel) || !bytes.contains(&b'\r') {
+        h.write(bytes);
+        return;
+    }
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\r' {
+            if bytes.get(i + 1) == Some(&b'\n') {
+                out.push(b'\n');
+                i += 2;
+            } else {
+                out.push(b'\n');
+                i += 1;
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    h.write(&out);
+}
+
+fn is_text_rel(rel: &str) -> bool {
+    let lower = rel.to_ascii_lowercase();
+    [
+        ".rs", ".toml", ".txt", ".svg", ".wgsl", ".json", ".md", ".xml", ".html", ".css",
+    ]
+    .iter()
+    .any(|ext| lower.ends_with(ext))
+}
+
+/// Mix a single file into `h` under a repo-relative key (`/` separators).
+pub fn hash_file_at_rel(h: &mut Fnv64, rel: &str, path: &Path) {
+    write_rel_path_key(h, Path::new(rel));
+    if path.is_file()
+        && let Ok(bytes) = fs::read(path)
+    {
+        hash_bytes_for_stamp(h, rel, &bytes);
+    }
+}
+
 /// Mix every listed path into `h` with repo-relative keys.
 /// Missing paths contribute only the path key.
 pub fn hash_paths(h: &mut Fnv64, repo: &Path, paths: &[PathBuf]) {
     for path in paths {
-        let rel = path
-            .strip_prefix(repo)
-            .unwrap_or(path.as_path());
-        write_rel_path_key(h, rel);
-        if path.is_file()
-            && let Ok(bytes) = fs::read(path)
-        {
-            h.write(&bytes);
-        }
+        let rel = repo_relative(repo, path);
+        hash_file_at_rel(h, &rel, path);
     }
 }
 
-/// Depth-first walk of `root`, skipping paths where `skip(rel_from_root)` is true.
-/// `rel_from_root` uses `/` separators and is empty at `root`.
-pub fn hash_tree(
-    h: &mut Fnv64,
-    root: &Path,
-    rel_prefix: &str,
-    skip: &impl Fn(&str) -> bool,
-) {
-    if skip(rel_prefix) {
-        return;
+/// Repo-relative path with `/` separators; stable when `strip_prefix` fails on Windows.
+pub(crate) fn repo_relative(repo: &Path, path: &Path) -> String {
+    if let Ok(rel) = path.strip_prefix(repo) {
+        return rel.to_string_lossy().replace('\\', "/");
     }
-    if root.is_file() {
-        h.write(rel_prefix.as_bytes());
-        h.write(b"\0");
-        if let Ok(bytes) = fs::read(root) {
-            h.write(&bytes);
-        }
-        return;
+    let repo_s = repo.to_string_lossy().replace('\\', "/");
+    let path_s = path.to_string_lossy().replace('\\', "/");
+    if let Some(suffix) = path_s
+        .strip_prefix(repo_s.as_str())
+        .map(|s| s.trim_start_matches(['/', '\\']))
+    {
+        return suffix.to_string();
     }
-    if !root.is_dir() {
-        return;
-    }
-    let Ok(read) = fs::read_dir(root) else {
-        return;
-    };
-    let mut children: Vec<_> = read.filter_map(|e| e.ok()).collect();
-    children.sort_by_key(|e| e.file_name());
-    for entry in children {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        let rel = if rel_prefix.is_empty() {
-            name.to_string()
-        } else {
-            format!("{rel_prefix}/{name}")
-        };
-        hash_tree(h, &entry.path(), &rel, skip);
-    }
+    path_s
+}
+
+/// Sorted file list under `root`, honoring `.gitignore` (matches committed tree on CI).
+pub fn hashable_git_files(root: &Path) -> Vec<PathBuf> {
+    let mut walk = ignore::WalkBuilder::new(root);
+    walk.hidden(false);
+    walk.git_ignore(true);
+    walk.git_global(true);
+    walk.git_exclude(true);
+    walk.parents(true);
+    walk.require_git(false);
+
+    let mut files: Vec<PathBuf> = walk
+        .build()
+        .filter_map(Result::ok)
+        .map(|entry| entry.into_path())
+        .filter(|path| path.is_file())
+        .collect();
+    files.sort();
+    files
 }
 
 pub fn read_stamp_line(path: &Path) -> Option<String> {
@@ -391,4 +425,49 @@ pub fn assert_bake_current<K: BakeKind>(repo: &Path) {
     }
 
     panic!("{}", out_of_date_message::<K>(&status));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::showcase_decal::ShowcaseDecal;
+    use std::path::PathBuf;
+
+    #[test]
+    fn showcase_decal_hash_matches_committed_stamp() {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let hash = ShowcaseDecal::compute_inputs_hash(&repo);
+        let stamp = std::fs::read_to_string(repo.join(ShowcaseDecal::STAMP_PATH))
+            .expect("stamp file");
+        assert_eq!(
+            stamp.trim(),
+            hash,
+            "re-run: cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases"
+        );
+    }
+
+    #[test]
+    fn repo_relative_normalizes_windows_paths() {
+        let repo = PathBuf::from(r"D:\a\Mahjuro\Mahjuro");
+        let path = PathBuf::from(r"D:\a\Mahjuro\Mahjuro\assets\fonts\foo.ttf");
+        assert_eq!(repo_relative(&repo, &path), "assets/fonts/foo.ttf");
+    }
+
+    #[test]
+    fn hash_bytes_for_stamp_normalizes_crlf_text() {
+        let lf = b"line one\nline two\n";
+        let crlf = b"line one\r\nline two\r\n";
+        let mut h_lf = Fnv64::new();
+        hash_bytes_for_stamp(&mut h_lf, "assets/fonts/OFL.txt", lf);
+        let mut h_crlf = Fnv64::new();
+        hash_bytes_for_stamp(&mut h_crlf, "assets/fonts/OFL.txt", crlf);
+        assert_eq!(h_lf.finish_hex(), h_crlf.finish_hex());
+
+        let png = b"\x89PNG\r\n\x1a\nbinary";
+        let mut h_png = Fnv64::new();
+        hash_bytes_for_stamp(&mut h_png, "assets/textures/foo.png", png);
+        let mut h_png_raw = Fnv64::new();
+        h_png_raw.write(png);
+        assert_eq!(h_png.finish_hex(), h_png_raw.finish_hex());
+    }
 }
