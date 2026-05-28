@@ -64,6 +64,28 @@ pub fn decomposition_affinity(sets: &[DetectedMeld], bias: DecompositionBias) ->
     score
 }
 
+/// When multiple decompositions validate, pick the one with highest shape affinity.
+pub fn pick_best_decomposition_by_affinity(
+    default_sets: Vec<DetectedMeld>,
+    alternatives: Vec<Vec<DetectedMeld>>,
+    full_hand: &[Tile],
+) -> Vec<DetectedMeld> {
+    if alternatives.len() <= 1 {
+        return default_sets;
+    }
+    let bias = infer_decomposition_bias(full_hand);
+    let mut best = default_sets;
+    let mut best_affinity = decomposition_affinity(&best, bias);
+    for candidate in alternatives {
+        let affinity = decomposition_affinity(&candidate, bias);
+        if affinity > best_affinity {
+            best_affinity = affinity;
+            best = candidate;
+        }
+    }
+    best
+}
+
 fn face_counts(tiles: &[Tile]) -> FxHashMap<(Suit, u8), usize> {
     let mut m: FxHashMap<(Suit, u8), usize> = FxHashMap::default();
     for t in tiles {

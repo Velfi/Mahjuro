@@ -1,4 +1,5 @@
 /// Compact slug: lowercase, no spaces/underscores/hyphens.
+#[cfg(feature = "screenshot")]
 pub(crate) fn normalize_slug(slug: &str) -> String {
     slug.trim()
         .to_ascii_lowercase()
@@ -6,6 +7,7 @@ pub(crate) fn normalize_slug(slug: &str) -> String {
 }
 
 /// Map `--boss` to [`OrdealKind`].
+#[cfg(feature = "screenshot")]
 pub(crate) fn parse_ordeal_slug(slug: &str) -> anyhow::Result<mahjuro::core::ordeal::OrdealKind> {
     let normalized = normalize_slug(slug);
     let normalize_name = |s: &str| {
@@ -26,6 +28,7 @@ pub(crate) fn parse_ordeal_slug(slug: &str) -> anyhow::Result<mahjuro::core::ord
     anyhow::bail!("unknown --boss '{slug}'");
 }
 
+#[cfg(feature = "screenshot")]
 pub(crate) fn parse_zodiac_slug(slug: &str) -> anyhow::Result<mahjuro::core::zodiac::ZodiacKind> {
     let normalized = normalize_slug(slug);
     for z in mahjuro::core::zodiac::ZodiacKind::all() {
@@ -36,6 +39,7 @@ pub(crate) fn parse_zodiac_slug(slug: &str) -> anyhow::Result<mahjuro::core::zod
     anyhow::bail!("unknown --zodiac '{slug}'");
 }
 
+#[cfg(feature = "screenshot")]
 pub(crate) fn parse_tile_pack_slug(
     slug: &str,
 ) -> anyhow::Result<mahjuro::core::tile_pack::TilePackKind> {

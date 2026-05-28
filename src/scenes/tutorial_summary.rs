@@ -1,6 +1,6 @@
 //! End-of-tutorial summary shown after the onboarding finale.
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::persistence;

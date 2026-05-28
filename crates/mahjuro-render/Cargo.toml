@@ -24,6 +24,7 @@ mahjuro-core = { path = "../mahjuro-core" }
 mahjuro-types = { path = "../mahjuro-types" }
 mahjuro-assets = { path = "../mahjuro-assets" }
 mahjuro-gfx-types = { path = "../mahjuro-gfx-types" }
+mahjuro-bake-stamp = { path = "../mahjuro-bake-stamp" }
 anyhow = "1.0.102"
 bytemuck = { version = "1.23", features = ["derive"] }
 fontdue = "0.9.3"

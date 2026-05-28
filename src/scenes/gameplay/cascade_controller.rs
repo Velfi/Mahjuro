@@ -30,7 +30,7 @@ pub(super) fn tick_active_cascade(
         while scene.pending_dora_chimes.first().is_some_and(|t| *t <= now) {
             scene.pending_dora_chimes.remove(0);
             ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
-                crate::audio::SfxId::DoraScored,
+                crate::sfx_id::SfxId::DoraScored,
             ));
         }
         cascade.update(now);
@@ -60,13 +60,13 @@ pub(super) fn tick_active_cascade(
         if next_stage != scene.cascade_handoff_stage {
             let sfx = match (scene.cascade_handoff_stage, next_stage) {
                 (CascadeHandoffStage::Pre, CascadeHandoffStage::Merging) => {
-                    Some(crate::audio::SfxId::CascadeMerge)
+                    Some(crate::sfx_id::SfxId::CascadeMerge)
                 }
                 (CascadeHandoffStage::Merging, CascadeHandoffStage::Flying) => {
-                    Some(crate::audio::SfxId::CascadeLaunch)
+                    Some(crate::sfx_id::SfxId::CascadeLaunch)
                 }
                 (CascadeHandoffStage::Flying, CascadeHandoffStage::Landed) => {
-                    Some(crate::audio::SfxId::CascadeLand)
+                    Some(crate::sfx_id::SfxId::CascadeLand)
                 }
                 _ => None,
             };

@@ -2,6 +2,7 @@
 members = [
     ".",
     "crates/mahjuro-assets",
+    "crates/mahjuro-bake-stamp",
     "crates/mahjuro-gfx-types",
     "crates/mahjuro-types",
     "crates/mahjuro-core",
@@ -117,6 +118,9 @@ wgpu-hal = { path = "vendor/wgpu-hal" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSEvent"] }
+
+[build-dependencies]
+mahjuro-bake-stamp = { path = "crates/mahjuro-bake-stamp" }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

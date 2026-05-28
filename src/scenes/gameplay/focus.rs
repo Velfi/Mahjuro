@@ -121,7 +121,7 @@ pub(super) fn play_select_sfx(
     added: u32,
     removed: u32,
 ) {
-    use crate::audio::SfxId;
+    use crate::sfx_id::SfxId;
     use crate::game::event_bus::GameEvent;
     if added > 0 {
         bus.push(GameEvent::UiSound(SfxId::TileSelect));
@@ -163,8 +163,8 @@ pub(super) fn focus_kind(f: Option<FocusTarget>) -> Option<FocusKind> {
     }
 }
 
-pub(super) fn focus_kind_sfx(k: FocusKind) -> Option<crate::audio::SfxId> {
-    use crate::audio::SfxId;
+pub(super) fn focus_kind_sfx(k: FocusKind) -> Option<crate::sfx_id::SfxId> {
+    use crate::sfx_id::SfxId;
     Some(match k {
         FocusKind::HandTile => SfxId::FocusHandTile,
         FocusKind::Button => SfxId::FocusButton,

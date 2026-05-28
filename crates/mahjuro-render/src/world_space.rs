@@ -33,7 +33,7 @@
 //! the third value is **+Z** lift above the felt.
 //!
 //! **Saved props** use [`crate::ui::placement::Placement`] — see
-//! `docs/agents/scene-placement.md`. This module’s [`PlacementAnchor`] is only
+//! `docs/agents/world-space.md`. This module’s [`PlacementAnchor`] is only
 //! for lightweight HUD-style anchors (reel, glyphs), not `ui::placement::PlacementAnchor`.
 
 use glam::{Mat4, Vec3, Vec4};

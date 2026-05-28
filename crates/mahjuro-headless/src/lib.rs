@@ -2,19 +2,21 @@
 //!
 //! Built as a separate workspace crate so `cargo build -p mahjuro-bake` does not produce the
 //! interactive game binary. Bake and screenshot share [`HeadlessApp`] but use different feature
-//! flags on the `mahjuro` dependency: bake uses `bake-support` (no SDL/Steam/rodio);
+//! flags on the `mahjuro` dependency: bake uses `bake-support` (no SDL/rodio/Steam client);
 //! screenshot pulls in bot + draw helpers via `headless-screenshot`.
 
 mod app;
 mod fixtures;
-mod room_bake_scenes;
 mod slug;
 
 pub mod bake_cli;
+#[cfg(feature = "screenshot")]
 pub mod screenshot_cli;
 
 #[cfg(feature = "bake")]
 mod bake;
+#[cfg(feature = "bake")]
+mod room_bake_app;
 #[cfg(feature = "screenshot")]
 mod screenshot_scenes;
 #[cfg(feature = "screenshot")]

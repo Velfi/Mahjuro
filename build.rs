@@ -30,8 +30,6 @@
 //! `mahjuro-bake-relics`). Set `MAHJURO_SKIP_*_BAKE=1` only while compiling those tools
 //! after changing bake inputs (nested `cargo build` from `build.rs` deadlocks).
 
-#[path = "build/input_hash.rs"]
-mod input_hash;
 #[path = "build/asset_pack_bake.rs"]
 mod asset_pack_bake;
 #[path = "build/room_gi_bake.rs"]

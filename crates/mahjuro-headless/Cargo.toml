@@ -7,7 +7,7 @@ publish = false
 
 [features]
 # `bake-support` must stay enabled whenever this crate is built: shared `mahjuro`
-# code still links scenes/game/ui and needs audio/steam/sdl stubs.
+# code still links scenes/game/ui for room draw; bake uses `mahjuro::room_bake` + `RoomBakeApp`.
 default = ["bake"]
 bake = ["mahjuro/bake-support"]
 screenshot = ["mahjuro/headless-screenshot"]
@@ -16,6 +16,7 @@ screenshot = ["mahjuro/headless-screenshot"]
 mahjuro = { path = "../..", default-features = false }
 mahjuro-render = { path = "../mahjuro-render", default-features = false }
 mahjuro-assets = { path = "../mahjuro-assets" }
+mahjuro-bake-stamp = { path = "../mahjuro-bake-stamp" }
 anyhow = "1.0.102"
 clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11.8"

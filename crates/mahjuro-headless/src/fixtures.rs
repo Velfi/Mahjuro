@@ -1,7 +1,7 @@
 use mahjuro::game::run::RunState;
-use mahjuro::scenes::shop::ShopScene;
 
 /// Replace `run`'s hand with a curated hero rack for marketing captures.
+#[cfg(feature = "screenshot")]
 pub(crate) fn setup_hero_state(run: &mut RunState) {
     use mahjuro::core::relic::RelicId;
     use mahjuro::core::tile::{Suit, Tile};
@@ -37,13 +37,12 @@ pub(crate) fn setup_hero_state(run: &mut RunState) {
     }
 }
 
+#[cfg(feature = "screenshot")]
 pub(crate) fn setup_shop_state(run: &mut RunState) {
-    run.yen = 42;
-    run.run_number = 3;
-    run.wing = 3;
-    run.tag_rich_stock = 1;
+    mahjuro::room_bake::setup_shop_state(run);
 }
 
+#[cfg(feature = "screenshot")]
 pub(crate) fn setup_defeat_game_over_screenshot_state(run: &mut RunState) {
     use mahjuro::core::ordeal::OrdealKind;
     use mahjuro::core::rules::ChamberKind;
@@ -64,6 +63,7 @@ pub(crate) fn setup_defeat_game_over_screenshot_state(run: &mut RunState) {
     run.yaku_times_played.insert(YakuKind::FullHand, 6);
 }
 
+#[cfg(feature = "screenshot")]
 pub(crate) fn setup_victory_game_over_screenshot_state(run: &mut RunState) {
     use mahjuro::core::ordeal::OrdealKind;
     use mahjuro::core::rules::ChamberKind;
@@ -84,70 +84,12 @@ pub(crate) fn setup_victory_game_over_screenshot_state(run: &mut RunState) {
     run.yaku_times_played.insert(YakuKind::Toitoi, 8);
 }
 
+#[cfg(feature = "screenshot")]
 pub(crate) fn setup_gameplay_screenshot_state(run: &mut RunState) {
-    use mahjuro::core::consumable::Consumable;
-    use mahjuro::core::hand::{DetectedMeld, MeldKind};
-    use mahjuro::core::relic::RelicId;
-    use mahjuro::core::talisman::TalismanKind;
-    use mahjuro::core::tile::{Suit, Tile};
-    use mahjuro::core::zodiac::ZodiacKind;
-
-    setup_hero_state(run);
-    *run.selected_mut() = vec![false; run.hand().len()];
-
-    run.set_auto_cash_in_on_full_structure(false);
-    *run.structure_tiles_mut() = vec![
-        Tile::new(Suit::Manzu, 1, 1),
-        Tile::new(Suit::Manzu, 1, 2),
-        Tile::new(Suit::Manzu, 2, 3),
-        Tile::new(Suit::Manzu, 3, 4),
-        Tile::new(Suit::Manzu, 4, 5),
-        Tile::new(Suit::Pinzu, 2, 6),
-        Tile::new(Suit::Pinzu, 3, 7),
-        Tile::new(Suit::Pinzu, 4, 8),
-        Tile::new(Suit::Souzu, 5, 9),
-        Tile::new(Suit::Souzu, 6, 10),
-        Tile::new(Suit::Souzu, 7, 11),
-        Tile::new(Suit::Wind, 1, 12),
-        Tile::new(Suit::Wind, 1, 13),
-        Tile::new(Suit::Wind, 1, 14),
-    ];
-    *run.structure_sets_mut() = vec![
-        DetectedMeld {
-            kind: MeldKind::Pair,
-            tile_ids: vec![1, 2],
-        },
-        DetectedMeld {
-            kind: MeldKind::Sequence,
-            tile_ids: vec![3, 4, 5],
-        },
-        DetectedMeld {
-            kind: MeldKind::Sequence,
-            tile_ids: vec![6, 7, 8],
-        },
-        DetectedMeld {
-            kind: MeldKind::Sequence,
-            tile_ids: vec![9, 10, 11],
-        },
-        DetectedMeld {
-            kind: MeldKind::Triplet,
-            tile_ids: vec![12, 13, 14],
-        },
-    ];
-
-    if !run.relics.is_full() {
-        run.relics.active.push(RelicId::Geese);
-    }
-
-    run.consumables.items.clear();
-    let _ = run
-        .consumables
-        .try_push(Consumable::Talisman(TalismanKind::Pearl));
-    let _ = run
-        .consumables
-        .try_push(Consumable::Zodiac(ZodiacKind::Dragon));
+    mahjuro::room_bake::setup_gameplay_bake_state(run);
 }
 
+#[cfg(feature = "screenshot")]
 pub(crate) fn force_ordeal_chamber(run: &mut RunState, kind: mahjuro::core::ordeal::OrdealKind) {
     use mahjuro::OrdealKindExt;
     run.chamber = mahjuro::core::rules::ChamberKind::Ordeal;
@@ -159,9 +101,11 @@ pub(crate) fn force_ordeal_chamber(run: &mut RunState, kind: mahjuro::core::orde
 }
 
 /// Prime shop stock generation (Qilin ribbon gate uses profile progress).
+#[cfg(feature = "screenshot")]
 pub(crate) fn prime_shop_stock(
     run: &mut RunState,
     progress: &mahjuro::core::progression::PlayerProgress,
 ) {
+    use mahjuro::scenes::shop::ShopScene;
     let _ = ShopScene::new(run, progress);
 }

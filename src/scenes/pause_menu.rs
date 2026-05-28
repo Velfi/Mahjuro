@@ -1,6 +1,6 @@
 //! Shared pause menu overlay used by gameplay, shop, and blind-selection scenes.
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::run::RunState;
@@ -248,7 +248,7 @@ impl PauseMenu {
         run: &mut RunState,
         bus: &mut EventBus,
         viewport: crate::ui::layout::ViewportCtx,
-        active_profile: usize,
+        _active_profile: usize,
     ) -> PauseUpdate {
         let PauseInput {
             actions,
@@ -284,7 +284,7 @@ impl PauseMenu {
                 }
                 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
                 if opts.take_export_requested() {
-                    let path = crate::persistence::play_stats_export_path(active_profile);
+                    let path = crate::persistence::play_stats_export_path(_active_profile);
                     match crate::bot::export_play_history_html(&path, progress) {
                         Ok(()) => bus.push(GameEvent::InfoModal {
                             title: "Stats exported".into(),

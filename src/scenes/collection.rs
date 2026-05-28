@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::core::archive_seen::{self, ArchiveSeenMark, ArchiveTab};
 use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
 use crate::core::OrdealKindExt;

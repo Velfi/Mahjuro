@@ -8,6 +8,21 @@ macro_rules! wgsl_file {
     };
 }
 
+/// Lit room/tile shaders: hallway warp VS + PBR lights + scene body + shadow atlas.
+macro_rules! scene_pbr_with_hallway_warp {
+    ($room_shader:literal) => {
+        concat!(
+            wgsl_file!("hallway_vertex_warp.wgsl"),
+            "\n",
+            wgsl_file!("scene_pbr_lights.wgsl"),
+            "\n",
+            wgsl_file!($room_shader),
+            "\n",
+            wgsl_file!("punctual_shadow_atlas.wgsl"),
+        )
+    };
+}
+
 pub const QUAD: &str = wgsl_file!("quad.wgsl");
 pub const TEXT_QUAD: &str = wgsl_file!("text_quad.wgsl");
 pub const GRADIENT_QUAD: &str = wgsl_file!("gradient_quad.wgsl");
@@ -31,12 +46,9 @@ pub const SHOOTING_STAR_CASCADE_COMPOSITE: &str =
 pub const SCENE_COLOR_DOWNSAMPLE: &str = wgsl_file!("scene_color_downsample.wgsl");
 pub const TILE_GLOW: &str = wgsl_file!("tile_glow.wgsl");
 pub const SHADOW: &str = concat!(
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../shaders/hallway_vertex_warp.wgsl"
-    )),
+    wgsl_file!("hallway_vertex_warp.wgsl"),
     "\n",
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../shaders/shadow.wgsl")),
+    wgsl_file!("shadow.wgsl")
 );
 pub const IMAGE_QUAD: &str = wgsl_file!("image_quad.wgsl");
 pub const BLOOM_EXTRACT: &str = wgsl_file!("bloom_extract.wgsl");
@@ -52,47 +64,10 @@ pub const EMISSIVE_GI_COMPOSITE: &str = wgsl_file!("emissive_gi_composite.wgsl")
 // no longer needs to be prepended here.
 
 /// `scene_pbr_lights` + `tile_3d`
-pub const TILE_3D: &str = concat!(
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../shaders/hallway_vertex_warp.wgsl"
-    )),
-    "\n",
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../shaders/scene_pbr_lights.wgsl"
-    )),
-    "\n",
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../shaders/tile_3d.wgsl")),
-    "\n",
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../shaders/punctual_shadow_atlas.wgsl"
-    )),
-);
+pub const TILE_3D: &str = scene_pbr_with_hallway_warp!("tile_3d.wgsl");
 
 /// `scene_pbr_lights` + `room_glb`
-pub const SHOP_GLB: &str = concat!(
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../shaders/hallway_vertex_warp.wgsl"
-    )),
-    "\n",
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../shaders/scene_pbr_lights.wgsl"
-    )),
-    "\n",
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../shaders/room_glb.wgsl"
-    )),
-    "\n",
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../shaders/punctual_shadow_atlas.wgsl"
-    )),
-);
+pub const SHOP_GLB: &str = scene_pbr_with_hallway_warp!("room_glb.wgsl");
 
 /// `tile_outline`
 pub const TILE_OUTLINE: &str = include_str!(concat!(

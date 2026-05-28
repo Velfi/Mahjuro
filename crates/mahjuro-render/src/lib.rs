@@ -51,6 +51,7 @@ pub mod reliquary_tray_mesh;
 pub mod ribbon_mesh;
 pub mod river_mesh;
 pub mod room_env_gltf;
+pub mod room_bake_cache;
 pub mod room_gi_bake;
 pub mod room_glb;
 pub mod room_gltf_anim;

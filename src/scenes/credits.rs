@@ -1,6 +1,6 @@
 //! Full-screen credits roll loaded from `assets/data/credits.json`.
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::core::credits::{CreditEntry, credits_catalog};
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::UiFrame;

@@ -4,7 +4,7 @@
 //! use a stable contact shadow field while catalog props use the live shadow map.
 //!
 //! **Rebake** after changing room GLB layout, key-light direction, or shadow
-//! frustum tuning — see `AGENTS.md`.
+//! frustum tuning — see `docs/agents/room-shadows-and-baking.md`.
 
 use std::sync::{Arc, OnceLock};
 
@@ -12,7 +12,7 @@ use mahjuro_assets::asset_path;
 use crate::room_gi_bake::RoomGiRoom;
 
 const MAGIC: &[u8; 4] = b"MSH1";
-const VERSION: u32 = 2;
+pub const VERSION: u32 = mahjuro_bake_stamp::room_shadow::MSH_FORMAT_VERSION;
 
 #[derive(Clone)]
 pub struct RoomShadowBake {
@@ -211,20 +211,8 @@ static BAKE_CACHE: [OnceLock<Option<Arc<RoomShadowBake>>>;
     OnceLock::new(),
 ];
 
-fn cache_slot(room: RoomGiRoom) -> &'static OnceLock<Option<Arc<RoomShadowBake>>> {
-    match room {
-        RoomGiRoom::Shop => &BAKE_CACHE[0],
-        RoomGiRoom::Hallway => &BAKE_CACHE[1],
-        RoomGiRoom::Archive => &BAKE_CACHE[2],
-        RoomGiRoom::MainMenu => &BAKE_CACHE[3],
-        RoomGiRoom::Staircase => &BAKE_CACHE[4],
-        RoomGiRoom::Gameplay => &BAKE_CACHE[5],
-    }
-}
-
 pub fn cached_room_shadow_bake(room: RoomGiRoom) -> Option<Arc<RoomShadowBake>> {
-    let slot = cache_slot(room);
-    slot.get_or_init(|| load_room_shadow_bake(room)).clone()
+    crate::room_bake_cache::cached_room_bake(room, &BAKE_CACHE, load_room_shadow_bake)
 }
 
 /// Required offline room shadow bake (`.msh`).

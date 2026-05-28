@@ -1,6 +1,6 @@
 //! Profile selection screen — pick one of three profile slots.
 
-use crate::audio::SfxId;
+use crate::sfx_id::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::persistence;
 use crate::render::theme::{color, typography};

@@ -1848,16 +1848,27 @@ impl WgpuRenderer {
                 let bake = crate::room_gi_bake::require_room_gi_bake(room)
                     .unwrap_or_else(|e| panic!("{e}"));
                 if !bake.aabb_matches(mn, mx) {
-                    panic!(
-                        "room GI bake {room:?} AABB stale vs live room bounds — re-run \
-                         mahjuro-bake --kinds gi"
+                    // Committed bake is stale (room AABB drifted since the
+                    // last `mahjuro-bake --kinds gi`). Don't poison the live
+                    // probe upload with mismatched bounds; render dynamic for
+                    // this frame instead. The build script's stamp check is
+                    // the authoritative source of truth — a stale bake will
+                    // panic there next compile, while the runtime keeps
+                    // working in the meantime (also lets `mahjuro-bake`
+                    // re-render the stale room instead of panicking on its
+                    // own warmup frames).
+                    log::warn!(
+                        "room GI bake {room:?} AABB stale vs live room bounds; \
+                         falling back to dynamic GI for this frame"
                     );
+                    false
+                } else {
+                    if self.probe_gi_gpu_room != Some(room) {
+                        gi_baked_upload =
+                            Some((room, std::sync::Arc::clone(&bake.probe_sh_bytes)));
+                    }
+                    true
                 }
-                if self.probe_gi_gpu_room != Some(room) {
-                    gi_baked_upload =
-                        Some((room, std::sync::Arc::clone(&bake.probe_sh_bytes)));
-                }
-                true
             } else {
                 false
             }

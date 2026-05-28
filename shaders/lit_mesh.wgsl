@@ -214,7 +214,7 @@ fn ssr_project(world: vec3<f32>) -> vec4<f32> {
 fn ssr_world_at(uv: vec2<f32>) -> vec3<f32> {
     let dim = vec2<f32>(textureDimensions(ssr_depth, 0));
     let px = vec2<i32>(clamp(uv * dim, vec2<f32>(0.0), dim - vec2<f32>(1.0)));
-    let d = textureLoad(ssr_depth, px, 0);
+    let d = textureLoad(ssr_depth, px, 0).x;
     let ndc = vec3<f32>(uv.x * 2.0 - 1.0, (1.0 - uv.y) * 2.0 - 1.0, d);
     let world = ssr_globals.inv_view_proj * vec4<f32>(ndc, 1.0);
     return world.xyz / max(world.w, 1e-6);

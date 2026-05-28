@@ -6,7 +6,7 @@
 //!
 //! **Rebake** after changing room GLB layout, probe grid, or
 //! [`crate::room_glb::ROOM_EMISSIVE_PROBE_DIR_SAMPLES`] /
-//! [`crate::room_glb::ROOM_EMISSIVE_PROBE_MARCH_STEPS`] — see `AGENTS.md`.
+//! [`crate::room_glb::ROOM_EMISSIVE_PROBE_MARCH_STEPS`] — see `docs/agents/room-shadows-and-baking.md`.
 
 use std::sync::{Arc, OnceLock};
 
@@ -16,7 +16,7 @@ use mahjuro_assets::asset_path;
 use crate::room_glb;
 
 const MAGIC: &[u8; 4] = b"MGI1";
-const VERSION: u32 = 2;
+pub const VERSION: u32 = mahjuro_bake_stamp::room_gi::MGI_FORMAT_VERSION;
 const PROBE_SH_STRIDE: usize = 9 * std::mem::size_of::<[f32; 4]>();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -54,14 +54,12 @@ impl RoomGiRoom {
     ];
 
     pub fn slug(self) -> &'static str {
-        match self {
-            Self::Shop => "shop",
-            Self::Hallway => "hallway",
-            Self::Archive => "archive",
-            Self::MainMenu => "main_menu",
-            Self::Staircase => "staircase",
-            Self::Gameplay => "gameplay",
-        }
+        mahjuro_bake_stamp::room_slugs::ALL[room_gi_room_index(self)]
+    }
+
+    /// Offline bake filename under `assets/data/room_gi` or `room_shadow`.
+    pub fn offline_bake_filename(self, ext: &str) -> String {
+        format!("{}.{}", self.slug(), ext)
     }
 
     pub fn asset_path(self) -> &'static str {
@@ -290,22 +288,9 @@ static BAKE_CACHE: [OnceLock<Option<Arc<RoomGiBake>>>; ROOM_GI_ROOM_COUNT] = [
     OnceLock::new(),
 ];
 
-fn cache_slot(room: RoomGiRoom) -> &'static OnceLock<Option<Arc<RoomGiBake>>> {
-    match room {
-        RoomGiRoom::Shop => &BAKE_CACHE[0],
-        RoomGiRoom::Hallway => &BAKE_CACHE[1],
-        RoomGiRoom::Archive => &BAKE_CACHE[2],
-        RoomGiRoom::MainMenu => &BAKE_CACHE[3],
-        RoomGiRoom::Staircase => &BAKE_CACHE[4],
-        RoomGiRoom::Gameplay => &BAKE_CACHE[5],
-    }
-}
-
 /// Load (and cache) the offline bake for `room`, if present in the asset pack.
 pub fn cached_room_gi_bake(room: RoomGiRoom) -> Option<Arc<RoomGiBake>> {
-    cache_slot(room)
-        .get_or_init(|| load_room_gi_bake(room))
-        .clone()
+    crate::room_bake_cache::cached_room_bake(room, &BAKE_CACHE, load_room_gi_bake)
 }
 
 /// Required offline room GI bake (`.mgi`).
@@ -353,6 +338,17 @@ pub fn probe_sh_meta(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn offline_bake_slugs_match_bake_stamp() {
+        for (room, slug) in RoomGiRoom::ALL
+            .into_iter()
+            .zip(mahjuro_bake_stamp::room_slugs::ALL.iter().copied())
+        {
+            assert_eq!(room.slug(), slug);
+            assert_eq!(room.offline_bake_filename("mgi"), format!("{slug}.mgi"));
+        }
+    }
 
     #[test]
     fn round_trip_header_and_payload_size() {

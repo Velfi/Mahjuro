@@ -524,7 +524,7 @@ pub(super) fn process_focus_and_actions(
                     actions_for_scene.push(UiAction::CommitDiscard);
                 } else {
                     ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
-                        crate::audio::SfxId::InvalidAction,
+                        crate::sfx_id::SfxId::InvalidAction,
                     ));
                 }
                 continue;
@@ -781,7 +781,7 @@ pub(super) fn process_focus_and_actions(
             UiAction::CommitDiscard => {
                 if !ctx.run.onboarding_discard_allowed() {
                     ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
-                        crate::audio::SfxId::InvalidAction,
+                        crate::sfx_id::SfxId::InvalidAction,
                     ));
                     continue;
                 }
@@ -846,7 +846,7 @@ pub(super) fn process_focus_and_actions(
                     scene.river_sink_batch = None;
                     ctx.run.apply_discard_undo(snap, Some(ctx.bus));
                     ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
-                        crate::audio::SfxId::TilePlace,
+                        crate::sfx_id::SfxId::TilePlace,
                     ));
                     ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
                 }

@@ -413,6 +413,18 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
             required_features |= wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
         }
     }
+    // Opt into linear filtering of R32Float / Rgba32Float textures when the
+    // adapter supports it. The SSR feedback (`lit-mesh-spot-ssr-bg`) and the
+    // emissive probe update (`emissive-probe-update-bg`) bind R32Float depth
+    // textures with `Float { filterable: true }` layouts; without this, every
+    // resize hits a wgpu validation error on offline-bake adapters that don't
+    // auto-expose the feature.
+    if adapter
+        .features()
+        .contains(wgpu::Features::FLOAT32_FILTERABLE)
+    {
+        required_features |= wgpu::Features::FLOAT32_FILTERABLE;
+    }
 
     log::debug!("wgpu: requesting logical device…");
     let _device_scope = crate::startup_profile::scope("wgpu.device");

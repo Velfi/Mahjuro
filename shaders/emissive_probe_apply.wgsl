@@ -174,7 +174,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         i32(clamp(pyf, 0.0, full_h - 1.0)),
     );
 
-    let d_c = textureLoad(depth_tex, center_px, 0);
+    let d_c = textureLoad(depth_tex, center_px, 0).x;
     if (d_c >= 0.9999) {
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }

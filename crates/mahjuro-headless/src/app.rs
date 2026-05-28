@@ -1,5 +1,7 @@
-use std::path::PathBuf;
 use std::time::Instant;
+
+#[cfg(feature = "screenshot")]
+use std::path::PathBuf;
 
 use mahjuro::game::cascade::CascadeTuning;
 use mahjuro::game::event_bus::EventBus;
@@ -115,10 +117,7 @@ impl HeadlessApp {
         })
     }
 
-    pub(crate) fn queue_action_on_tick(&mut self, tick: u32, action: UiAction) {
-        self.queued_actions.push((tick, action));
-    }
-
+    #[cfg(feature = "screenshot")]
     pub(crate) fn unlock_all_yaku_for_screenshot(&mut self) {
         use mahjuro::core::yaku::YakuKind;
         for yk in YakuKind::all() {
@@ -134,12 +133,14 @@ impl HeadlessApp {
         }
     }
 
+    #[cfg(feature = "screenshot")]
     pub(crate) fn unlock_all_for_collection_screenshot(&mut self) {
         let signature_hand = mahjuro::scenes::archive_career::sample_signature_hand_tiles();
         self.progress
             .apply_screenshot_collection_demo(signature_hand);
     }
 
+    #[cfg(feature = "screenshot")]
     pub(crate) fn force_relic_unlock_modal(&mut self) {
         use mahjuro::core::relic::all_relic_defs;
         use mahjuro::ui::modal::{Modal, ModalQueue, ModalTheme, UnlockPage};
@@ -477,6 +478,12 @@ impl HeadlessApp {
         }
     }
 
+    #[cfg(feature = "screenshot")]
+    pub(crate) fn queue_action_on_tick(&mut self, tick: u32, action: UiAction) {
+        self.queued_actions.push((tick, action));
+    }
+
+    #[cfg(feature = "screenshot")]
     pub(crate) fn run_screenshot(
         mut self,
         output: PathBuf,

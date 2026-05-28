@@ -1,6 +1,6 @@
 use super::relic_removal::TransformationPrimaryRelic;
 use crate::{
-    audio::SfxId,
+    sfx_id::SfxId,
     OrdealKindExt,
     core::{
         debuff::TileDebuff,
