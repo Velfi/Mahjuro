@@ -40,7 +40,7 @@ impl BakeKind for Relic {
         h.write(b"relic-rlc1-v1\n");
         for path in Self::stamp_input_paths(repo) {
             if path.is_file() {
-                hash_paths(&mut h, std::slice::from_ref(&path));
+                hash_paths(&mut h, repo, std::slice::from_ref(&path));
             } else if path.is_dir() {
                 let rel = path
                     .strip_prefix(repo)
