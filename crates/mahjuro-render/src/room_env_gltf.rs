@@ -1093,17 +1093,23 @@ pub enum RoomMeshPolicy {
     RainSurfaceCollision,
 }
 
+/// Blender **Unexportables** collection root when it appears in a glTF export.
+/// The entire subtree is skipped at decode (no draw, lights, markers, or collision).
+/// You do not need to export this collection — absence is fine; presence is ignored.
+pub const ROOM_ENV_UNEXPORTABLES_COLLECTION_NODE: &str = "Unexportables";
+
+#[inline]
+pub fn is_room_env_unexportables_subtree_root(name: &str) -> bool {
+    name == ROOM_ENV_UNEXPORTABLES_COLLECTION_NODE
+}
+
 /// Per-asset rules for [`walk_room_env_node`].
 pub trait RoomEnvWalkHooks {
     fn is_marker(&self, name: &str) -> bool;
     fn mesh_policy(&self, name: &str) -> RoomMeshPolicy;
     fn log_asset_label(&self) -> &'static str;
-    /// Authoring-only instances (e.g. scattered foliage cards) that must not draw or affect bounds.
+    /// Per-node mesh skip (most rooms rely on [`skip_room_env_authoring_mesh_node_name`] for subtractors).
     fn skip_env_mesh(&self, _name: &str) -> bool {
-        false
-    }
-    /// Hard error when a named mesh must not appear in the glTF export (e.g. gameplay Unexportables).
-    fn forbid_env_mesh(&self, _name: &str) -> bool {
         false
     }
 }
@@ -1136,6 +1142,7 @@ pub struct RoomEnvWalkState<'a> {
 pub fn walk_room_env_node(
     node: gltf::Node<'_>,
     parent: Mat4,
+    in_unexportables_subtree: bool,
     hooks: &impl RoomEnvWalkHooks,
     state: &mut RoomEnvWalkState<'_>,
 ) -> anyhow::Result<()> {
@@ -1143,6 +1150,15 @@ pub fn walk_room_env_node(
     let local = Mat4::from_cols_array_2d(&node.transform().matrix());
     let world = parent * local;
     let name = node.name().unwrap_or("");
+    let in_unexportables_subtree =
+        in_unexportables_subtree || is_room_env_unexportables_subtree_root(name);
+
+    if in_unexportables_subtree {
+        for child in node.children() {
+            walk_room_env_node(child, world, true, hooks, state)?;
+        }
+        return Ok(());
+    }
 
     if let Some(light) = node.light() {
         harvest_khr_punctual_light(
@@ -1189,14 +1205,6 @@ pub fn walk_room_env_node(
             Entry::Occupied(_) => {
                 log::debug!("{label}: duplicate glTF node name {name:?} — using first bind pose");
             }
-        }
-    }
-
-    if let Some(_mesh) = node.mesh() {
-        if hooks.forbid_env_mesh(name) {
-            anyhow::bail!(
-                "{label} must not export Unexportables mesh `{name}` — disable that collection for glTF export"
-            );
         }
     }
 
@@ -1279,7 +1287,7 @@ pub fn walk_room_env_node(
     }
 
     for child in node.children() {
-        walk_room_env_node(child, world, hooks, state)?;
+        walk_room_env_node(child, world, false, hooks, state)?;
     }
     Ok(())
 }
