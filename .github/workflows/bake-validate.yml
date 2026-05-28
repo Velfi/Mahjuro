@@ -67,6 +67,7 @@ jobs:
             libudev-dev \
             pkg-config \
             libx11-dev \
+            libxtst-dev \
             libxi-dev \
             libxrandr-dev \
             libxss-dev \
