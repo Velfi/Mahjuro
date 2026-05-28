@@ -115,6 +115,8 @@ pub struct ShopScene {
     gltf_anims: crate::render::room_gltf_anim::GltfAnimPlaybackSet,
     /// For-sale meshes still falling after restock; culled once off-screen.
     departing_stock: Vec<restock_exit::ShopDepartingBatch>,
+    /// When the current for-sale row should play the enter scale pop.
+    restock_enter_at: Option<Instant>,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.

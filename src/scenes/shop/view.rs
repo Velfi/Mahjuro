@@ -1842,6 +1842,16 @@ fn push_stock_meshes(
     let stock_bobs = |foc: ShopFocus| {
         !inspect_anchor.map(|(ifoc, _)| ifoc == foc).unwrap_or(false)
     };
+    let enter_at = scene.restock_enter_at;
+    let enter_now = std::time::Instant::now();
+    let enter_scale = |slot_i: usize| {
+        enter_at.map(|at| super::restock_exit::restock_enter_scale(slot_i, at, enter_now))
+    };
+    let apply_enter_pop = |slot_i: usize, mesh: &mut Object3d| {
+        if let Some(s) = enter_scale(slot_i) {
+            super::restock_exit::apply_restock_enter_scale(mesh, s);
+        }
+    };
 
     let sale = for_sale_slots(scene);
     for (slot_i, foc_opt) in sale.iter().enumerate() {
@@ -1885,27 +1895,29 @@ fn push_stock_meshes(
                     if stock_bobs(*foc) {
                         apply_shop_stock_bob(&mut relic_pos, h, slot_i as u32, scene.age_secs);
                     }
+                    let mut mesh = Object3d {
+                        pos: relic_pos,
+                        extents: [half[0] * 2.0, half[1] * 2.0, half[2] * 2.0],
+                        rotation: euler_xyz_rad_from_deg(
+                            super::SHOP_RELIC_LEAN_COUNTER,
+                            0.0,
+                            0.0,
+                        ),
+                        color: col,
+                        kind: Object3dKind::Relic {
+                            relic_id: item.relic,
+                            glow: relic_glow(scene, item.relic),
+                            silhouette: false,
+                            debuffed: false,
+                        },
+                        hover_target: 0.0,
+                        anim_id: 0,
+                    };
+                    apply_enter_pop(slot_i, &mut mesh);
                     partition_shop_inspect_stock_mesh(
                         inspect_anchor,
                         *foc,
-                        Object3d {
-                            pos: relic_pos,
-                            extents: [half[0] * 2.0, half[1] * 2.0, half[2] * 2.0],
-                            rotation: euler_xyz_rad_from_deg(
-                                super::SHOP_RELIC_LEAN_COUNTER,
-                                0.0,
-                                0.0,
-                            ),
-                            color: col,
-                            kind: Object3dKind::Relic {
-                                relic_id: item.relic,
-                                glow: relic_glow(scene, item.relic),
-                                silhouette: false,
-                                debuffed: false,
-                            },
-                            hover_target: 0.0,
-                            anim_id: 0,
-                        },
+                        mesh,
                         &mut dim,
                         &mut subject,
                     );
@@ -1945,21 +1957,23 @@ fn push_stock_meshes(
                 if stock_bobs(*foc) {
                     apply_shop_stock_bob(&mut pack_pos, h, slot_i as u32 + 16, scene.age_secs);
                 }
+                let mut mesh = Object3d {
+                    pos: pack_pos,
+                    extents: ext,
+                    rotation: [0.0, 0.0, 0.0],
+                    color: pack.kind.foil_tint(),
+                    kind: Object3dKind::Pack {
+                        kind: pack.kind,
+                        pick_id: None,
+                    },
+                    hover_target: 0.0,
+                    anim_id: 0,
+                };
+                apply_enter_pop(slot_i, &mut mesh);
                 partition_shop_inspect_stock_mesh(
                     inspect_anchor,
                     *foc,
-                    Object3d {
-                        pos: pack_pos,
-                        extents: ext,
-                        rotation: [0.0, 0.0, 0.0],
-                        color: pack.kind.foil_tint(),
-                        kind: Object3dKind::Pack {
-                            kind: pack.kind,
-                            pick_id: None,
-                        },
-                        hover_target: 0.0,
-                        anim_id: 0,
-                    },
+                    mesh,
                     &mut dim,
                     &mut subject,
                 );
@@ -1975,7 +1989,8 @@ fn push_stock_meshes(
                 // Largest 3:1 ribbon that fits the inspect slot's
                 // (0.38 × 0.62) envelope — width-bound when the slot is
                 // very tall, length-bound otherwise.
-                let ribbon_len = for_sale_ribbon_length(r[2], r[3]);
+                let ribbon_len = for_sale_ribbon_length(r[2], r[3])
+                    * enter_scale(slot_i).unwrap_or(1.0);
                 let ribbon_world = ribbon_display_length(ribbon_len);
                 let z_k = if let Consumable::Zodiac(z) = item.consumable {
                     Some(z)
@@ -2056,22 +2071,22 @@ fn push_stock_meshes(
                     if stock_bobs(*foc) {
                         apply_shop_stock_bob(&mut tal_pos, h, slot_i as u32 + 48, scene.age_secs);
                     }
+                    let mut mesh = Object3d {
+                        pos: tal_pos,
+                        extents: crate::render::talisman_mesh::talisman_object_extents(
+                            for_sale_talisman_tablet_extent(r[2]),
+                        ),
+                        rotation: crate::render::talisman_mesh::talisman_face_camera_rotation(0.0),
+                        color: col,
+                        kind: Object3dKind::Talisman { kind: tk },
+                        hover_target: 0.0,
+                        anim_id: 0,
+                    };
+                    apply_enter_pop(slot_i, &mut mesh);
                     partition_shop_inspect_stock_mesh(
                         inspect_anchor,
                         *foc,
-                        Object3d {
-                            pos: tal_pos,
-                            extents: crate::render::talisman_mesh::talisman_object_extents(
-                                for_sale_talisman_tablet_extent(r[2]),
-                            ),
-                            rotation: crate::render::talisman_mesh::talisman_face_camera_rotation(
-                                0.0,
-                            ),
-                            color: col,
-                            kind: Object3dKind::Talisman { kind: tk },
-                            hover_target: 0.0,
-                            anim_id: 0,
-                        },
+                        mesh,
                         &mut dim,
                         &mut subject,
                     );

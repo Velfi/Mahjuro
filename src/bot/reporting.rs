@@ -270,7 +270,7 @@ fn write_bot_export(
         }
         BotOutputFormat::Txt => {
             let mut buf = Vec::new();
-            agg.write_summary(&mut buf)?;
+            agg.write_summary_with_runs(&mut buf, Some(run_stats))?;
             std::fs::write(&target.path, buf)?;
             Ok(())
         }
@@ -512,7 +512,7 @@ pub fn run_headless_aggregate(
 pub fn run_headless(n: u32, config: BotConfig, options: BotRunOptions) {
     let mode = config.clone().into_mode();
     let batch = run_headless_aggregate(n, config, options.clone());
-    batch.aggregate.print_summary();
+    batch.aggregate.print_summary_with_runs(Some(&batch.runs));
     if let Some(ref path) = options.output_runs {
         match write_runs_jsonl(path, &batch.runs) {
             Ok(()) => println!(
