@@ -51,7 +51,7 @@ impl BakeKind for RoomGi {
 
 pub fn rerun_if_changed_paths() -> &'static [&'static str] {
     &[
-        "assets/3d/shop.glb",
+        "assets/3d/Shop.glb",
         "assets/3d/hallway.glb",
         "assets/3d/archive.glb",
         "assets/3d/main_menu.glb",

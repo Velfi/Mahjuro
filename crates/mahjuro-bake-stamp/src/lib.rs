@@ -431,18 +431,58 @@ pub fn assert_bake_current<K: BakeKind>(repo: &Path) {
 mod tests {
     use super::*;
     use crate::showcase_decal::ShowcaseDecal;
+    use crate::room_gi::RoomGi;
+    use crate::room_shadow::RoomShadow;
     use std::path::PathBuf;
+
+    fn assert_stamp_matches<K: BakeKind>() {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let hash = K::compute_inputs_hash(&repo);
+        let stamp = std::fs::read_to_string(repo.join(K::STAMP_PATH)).expect("stamp file");
+        assert_eq!(stamp.trim(), hash, "{}", K::REBAKE_CMD);
+    }
 
     #[test]
     fn showcase_decal_hash_matches_committed_stamp() {
+        assert_stamp_matches::<ShowcaseDecal>();
+    }
+
+    #[test]
+    fn room_gi_hash_matches_committed_stamp() {
+        assert_stamp_matches::<RoomGi>();
+    }
+
+    #[test]
+    fn room_shadow_hash_matches_committed_stamp() {
+        assert_stamp_matches::<RoomShadow>();
+    }
+
+    #[test]
+    fn room_gi_hash_includes_shop_glb_bytes() {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let hash = ShowcaseDecal::compute_inputs_hash(&repo);
-        let stamp = std::fs::read_to_string(repo.join(ShowcaseDecal::STAMP_PATH))
-            .expect("stamp file");
-        assert_eq!(
-            stamp.trim(),
-            hash,
-            "re-run: cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases"
+        let shop = repo.join("assets/3d/Shop.glb");
+        assert!(
+            shop.is_file() && shop.metadata().unwrap().len() > 1_000_000,
+            "Shop.glb must be materialized locally"
+        );
+        let full = RoomGi::compute_inputs_hash(&repo);
+        let mut paths = RoomGi::stamp_input_paths(&repo);
+        paths.retain(|p| p != &shop);
+        let mut h = Fnv64::new();
+        h.write(format!("mgi-v{}\n", crate::room_gi::MGI_FORMAT_VERSION).as_bytes());
+        h.write(
+            format!(
+                "bake-{}x{}\n",
+                crate::room_gi::BAKE_WIDTH,
+                crate::room_gi::BAKE_HEIGHT
+            )
+            .as_bytes(),
+        );
+        hash_paths(&mut h, &repo, &paths);
+        let without_shop = h.finish_hex();
+        assert_ne!(
+            full, without_shop,
+            "shop GLB must contribute to the room GI stamp"
         );
     }
 
