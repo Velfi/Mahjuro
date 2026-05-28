@@ -9,14 +9,14 @@ use crate::{
     },
     game::{
         event_bus::{EventBus, GameEvent},
-        run::{RunState, try_disgust_substitution, try_joker_substitution, try_wind_substitution},
+        run::{RunState, try_disgust_substitution, try_wind_substitution},
     },
 };
 
 use super::relic_removal::TransformationPrimaryRelic;
 
 impl RunState {
-    /// Try validating tiles, applying JokerTile / WildWinds substitutions if needed.
+    /// Try validating tiles, applying WildWinds substitutions if needed.
     /// Returns the decomposition and the (possibly modified) tiles used for scoring.
     pub fn try_validate_with_wildcards(
         &self,
@@ -37,14 +37,6 @@ impl RunState {
         // Try standard validation first.
         if let Some(sets) = validate_selection_with_rules(tiles, validation_rules) {
             return Some((sets, tiles.to_vec()));
-        }
-
-        // JokerTile: try substituting one tile with each possible face.
-        if self.relics.has(RelicId::JokerTile)
-            && !self.joker_used
-            && let Some(result) = try_joker_substitution(tiles, validation_rules)
-        {
-            return Some(result);
         }
 
         // Disgust: relabel West tiles as East so EW / EWW / EWWW validate as

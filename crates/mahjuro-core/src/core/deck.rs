@@ -13,6 +13,23 @@ use crate::core::tile::{Suit, Tile};
 /// mid-round.
 pub const OVERFLOW_TILE_ID_BASE: u32 = 10_000;
 
+/// Tile IDs for permanent extra copies added by the Joker Tile relic.
+pub const JOKER_EXTRA_TILE_ID_BASE: u32 = 12_000;
+
+/// Stable id for the n-th Joker Tile extra (0-based index in `joker_extra_faces`).
+pub fn joker_extra_tile_id(index: usize) -> u32 {
+    JOKER_EXTRA_TILE_ID_BASE + index as u32
+}
+
+/// Build permanent wall tiles for faces previously copied by Joker Tile.
+pub fn build_joker_extras(faces: &[(Suit, u8)]) -> Vec<Tile> {
+    faces
+        .iter()
+        .enumerate()
+        .map(|(i, &(suit, rank))| Tile::new(suit, rank, joker_extra_tile_id(i)))
+        .collect()
+}
+
 /// Standard 140-tile wall (4× each regular tile + 4 unique flower wildcards).
 pub fn build_wall() -> Vec<Tile> {
     let mut id = 0u32;
@@ -198,6 +215,7 @@ impl Wall {
         packs: &[crate::core::tile_pack::TilePackKind],
         enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
         overflow: bool,
+        joker_extras: &[(Suit, u8)],
     ) -> Self {
         use crate::core::tile_pack::{PACK_ID_STRIDE, PACK_TILE_ID_BASE};
 
@@ -205,6 +223,7 @@ impl Wall {
         if overflow {
             tiles.extend(build_overflow_extras());
         }
+        tiles.extend(build_joker_extras(joker_extras));
         for (i, pack) in packs.iter().enumerate() {
             let start_id = PACK_TILE_ID_BASE + (i as u32) * PACK_ID_STRIDE;
             let mut pack_tiles = pack.generate_tiles(start_id);
@@ -219,6 +238,20 @@ impl Wall {
             tiles.retain(|t| !removed.contains(&t.id));
         }
         Self::new(tiles)
+    }
+
+    /// Insert `tile` into the undrawn portion of the wall at a random position.
+    pub fn inject_into_remaining(&mut self, tile: Tile) {
+        use rand::RngExt;
+
+        let tiles = Arc::make_mut(&mut self.tiles);
+        let remaining = tiles.len().saturating_sub(self.cursor);
+        if remaining == 0 {
+            tiles.push(tile);
+            return;
+        }
+        let offset = rand::rng().random_range(0..remaining);
+        tiles.insert(self.cursor + offset, tile);
     }
 
     /// The tile faces that count as dora (same faces shown on the plinth).

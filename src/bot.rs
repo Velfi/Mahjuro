@@ -1763,6 +1763,7 @@ fn sample_random_hand_with_extra_pack(
         &packs,
         &run.tile_enhancements,
         run.relics.has(RelicId::StrengthInNumbers),
+        &run.joker_extra_faces,
     );
     let mut hand = Vec::with_capacity(size);
     for _ in 0..size {
@@ -2266,6 +2267,7 @@ fn pack_marginal_value(run: &RunState, kind: TilePackKind) -> i32 {
             &run.tile_packs,
             &run.tile_enhancements,
             run.relics.has(RelicId::StrengthInNumbers),
+            &run.joker_extra_faces,
         );
         let target = crate::core::ordeal::effective_hand_size(run);
         let mut base_hand = Vec::with_capacity(target);

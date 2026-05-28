@@ -60,10 +60,6 @@ impl RunState {
         };
         let sets = self.pick_best_decomposition(sets, &scoring_tiles, &selected_tiles);
 
-        if scoring_tiles != selected_tiles && self.relics.has(RelicId::JokerTile) {
-            self.joker_used = true;
-            self.push_relic_activation(RelicId::JokerTile);
-        }
         self.tiles_played = self.tiles_played.saturating_add(scoring_tiles.len() as u32);
 
         let current_tile_count = self.structure_tiles.len();

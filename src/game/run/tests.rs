@@ -59,7 +59,7 @@ use crate::core::debuff::{TileDebuff, TileDebuffClass};
             hand,
             structure_sets: vec![],
             structure_tiles: vec![],
-            joker_used: false,
+            joker_extra_faces: vec![],
             last_breakdown: None,
             mode: mode.clone(),
             auto_cash_in_on_full_structure: true,
@@ -1394,87 +1394,64 @@ use crate::core::debuff::{TileDebuff, TileDebuffClass};
 
 #[cfg(test)]
 mod joker_tile_tests {
-    use crate::{
-        core::{
-            hand::MeldKind,
-            rules::RuleModifier,
-            tile::{Suit, Tile},
-        },
-        game::run::try_joker_substitution,
-    };
+    use crate::core::deck::{Wall, build_joker_extras, build_wall, joker_extra_tile_id};
+    use crate::core::relic::RelicId;
+    use crate::core::rules::ChamberKind;
+    use crate::core::tile::{Suit, Tile};
+    use crate::game::game_mode::GameMode;
+    use crate::game::run::RunState;
 
-    fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
-        Tile::new(suit, rank, id)
+    #[test]
+    fn joker_extras_inject_into_wall_build() {
+        let faces = vec![(Suit::Manzu, 3), (Suit::Pinzu, 7)];
+        let mut wall = Wall::from_unshuffled(build_wall());
+        for tile in build_joker_extras(&faces) {
+            wall.inject_into_remaining(tile);
+        }
+        let manzu_3 = wall
+            .peek_next(wall.remaining())
+            .iter()
+            .filter(|t| t.suit == Suit::Manzu && t.rank == 3)
+            .count();
+        assert_eq!(manzu_3, 5, "standard 4 + 1 joker extra");
+        assert_eq!(joker_extra_tile_id(1), build_joker_extras(&faces)[1].id);
     }
 
     #[test]
-    fn joker_completes_sequence() {
-        // 1m 2m 5s — joker should turn 5s into 3m
-        let tiles = vec![
-            tile(Suit::Manzu, 1, 0),
-            tile(Suit::Manzu, 2, 1),
-            tile(Suit::Souzu, 5, 2),
+    fn joker_tile_adds_permanent_copy_from_starting_hand() {
+        let mut run = RunState::new(GameMode::standard());
+        run.grant_relic(RelicId::JokerTile);
+        run.hand = vec![
+            Tile::new(Suit::Manzu, 1, 0),
+            Tile::new(Suit::Souzu, 5, 1),
         ];
-        let result = try_joker_substitution(&tiles, &[]);
-        assert!(result.is_some(), "joker should complete the sequence");
-        let (sets, modified) = result.unwrap();
-        assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, MeldKind::Sequence);
-        // The modified tile should now be 3m
-        assert_eq!(modified[2].suit, Suit::Manzu);
-        assert_eq!(modified[2].rank, 3);
+        run.selected = vec![false; run.hand.len()];
+        run.wall = Wall::from_unshuffled(build_wall());
+        let remaining_before = run.wall.remaining();
+
+        run.joker_tile_add_starting_hand_copy();
+
+        assert_eq!(run.joker_extra_faces.len(), 1);
+        assert!(
+            run.hand
+                .iter()
+                .any(|t| (t.suit, t.rank) == run.joker_extra_faces[0]),
+            "copied face should come from starting hand"
+        );
+        assert_eq!(run.wall.remaining(), remaining_before + 1);
+        assert!(run.relic_activations.contains(&RelicId::JokerTile));
     }
 
     #[test]
-    fn joker_completes_triplet() {
-        // 7p 7p 1s — joker should turn 1s into 7p
-        let tiles = vec![
-            tile(Suit::Pinzu, 7, 0),
-            tile(Suit::Pinzu, 7, 1),
-            tile(Suit::Souzu, 1, 2),
-        ];
-        let result = try_joker_substitution(&tiles, &[]);
-        assert!(result.is_some());
-        let (sets, _) = result.unwrap();
-        assert_eq!(sets[0].kind, MeldKind::Triplet);
-    }
+    fn apply_chamber_stacks_joker_copies_across_chambers() {
+        let mut run = RunState::new(GameMode::standard());
+        run.grant_relic(RelicId::JokerTile);
+        run.apply_chamber(ChamberKind::Small, None);
+        let after_first = run.joker_extra_faces.len();
+        assert_eq!(after_first, 1);
 
-    #[test]
-    fn joker_makes_pair_from_two_tiles() {
-        // 1m 5s — joker turns 5s into 1m for a pair
-        let tiles = vec![tile(Suit::Manzu, 1, 0), tile(Suit::Souzu, 5, 1)];
-        let result = try_joker_substitution(&tiles, &[]);
-        assert!(result.is_some());
-        let (sets, _) = result.unwrap();
-        assert_eq!(sets[0].kind, MeldKind::Pair);
-    }
-
-    #[test]
-    fn joker_only_substitutes_one_tile() {
-        // 1m 5s 9p — all different, need 2 subs to make a meld, joker can only do 1
-        let tiles = vec![
-            tile(Suit::Manzu, 1, 0),
-            tile(Suit::Souzu, 5, 1),
-            tile(Suit::Pinzu, 9, 2),
-        ];
-        assert!(try_joker_substitution(&tiles, &[]).is_none());
-    }
-
-    #[test]
-    fn joker_respects_no_sequences_rule() {
-        // 1m 2m 5s — would be a sequence with joker, but NoSequences blocks it
-        let tiles = vec![
-            tile(Suit::Manzu, 1, 0),
-            tile(Suit::Manzu, 2, 1),
-            tile(Suit::Souzu, 5, 2),
-        ];
-        let result = try_joker_substitution(&tiles, &[RuleModifier::NoSequences]);
-        // Could still work if joker turns 5s into 1m or 2m for a triplet — but
-        // we only have 2 of those, so a triplet needs the joker tile to match one.
-        // 1m 2m 1m → not a valid decomposition (pair 1m + leftover 2m).
-        // 1m 2m 2m → pair 2m + leftover 1m. Also invalid.
-        // No triplet possible, so should be None.
-        assert!(result.is_none());
+        run.apply_chamber(ChamberKind::Big, None);
+        assert_eq!(run.joker_extra_faces.len(), after_first + 1);
     }
 }
 
