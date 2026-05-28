@@ -191,7 +191,7 @@ struct SsrGlobals {
 };
 @group(3) @binding(1) var<uniform> ssr_globals: SsrGlobals;
 @group(3) @binding(2) var ssr_scene_prev: texture_2d<f32>;
-@group(3) @binding(3) var ssr_depth: texture_depth_2d;
+@group(3) @binding(3) var ssr_depth: texture_2d<f32>;
 @group(3) @binding(4) var ssr_samp: sampler;
 
 // Project a world-space point to screen-space UV (0..1, top-left origin

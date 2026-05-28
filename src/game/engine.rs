@@ -335,6 +335,8 @@ pub struct ShopReadModel {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PickChamberReadModel {
     pub upcoming_chamber: ChamberKind,
+    /// Chronicle RNG seed — drives pick-blind hallway warp/tint.
+    pub run_seed: u64,
     pub wing: u32,
     pub run_number: u32,
     pub base_target: u32,
@@ -582,6 +584,7 @@ impl<'a> GameEngine<'a> {
         };
         PickChamberReadModel {
             upcoming_chamber: run.upcoming_chamber,
+            run_seed: run.chronicle.seed,
             wing: run.wing,
             run_number: run.run_number,
             base_target: run.base_target,

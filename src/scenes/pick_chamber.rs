@@ -364,6 +364,7 @@ impl SceneBehavior for PickChamberScene {
             } else {
                 hallway_glb::HallwayDistortion::from_pick_chamber(
                     upcoming,
+                    pick.run_seed,
                     pick.run_number,
                     pick.wing,
                 )

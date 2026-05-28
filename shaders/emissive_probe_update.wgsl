@@ -22,7 +22,7 @@ struct ProbeSh {
 
 @group(0) @binding(0) var<uniform> p: ProbeGiFrameUniform;
 @group(0) @binding(1) var emissive_tex: texture_2d<f32>;
-@group(0) @binding(2) var depth_tex: texture_depth_2d;
+@group(0) @binding(2) var depth_tex: texture_2d<f32>;
 @group(0) @binding(3) var samp: sampler;
 @group(0) @binding(4) var<storage, read_write> probes: array<ProbeSh>;
 

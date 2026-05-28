@@ -23,10 +23,17 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         depth_view,
         ssr_prev_depth_texture,
         ssr_prev_depth_view,
+        depth_r32_snapshot_texture,
+        depth_r32_snapshot_view,
     } = {
         let _early = crate::startup_profile::scope("wgpu.early_gpu");
         super::super::init_phases::early_gpu_and_depth(target_init)?
     };
+    let depth_copy_staging_buffer = super::super::resources::create_depth_copy_staging(
+        &device,
+        config.width.max(1),
+        config.height.max(1),
+    );
 
     {
         let _bakes = crate::startup_profile::scope("wgpu.offline_bakes");
@@ -2177,7 +2184,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Depth,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
                     },
                     count: None,
                 },
@@ -2229,7 +2236,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Depth,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
                     },
                     count: None,
                 },
@@ -2294,7 +2301,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::TextureView(&depth_view),
+                resource: wgpu::BindingResource::TextureView(&depth_r32_snapshot_view),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -2320,7 +2327,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::TextureView(&depth_view),
+                resource: wgpu::BindingResource::TextureView(&depth_r32_snapshot_view),
             },
         ],
     });
@@ -3244,6 +3251,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         depth_view,
         ssr_prev_depth_texture,
         ssr_prev_depth_view,
+        depth_r32_snapshot_texture,
+        depth_r32_snapshot_view,
+        depth_copy_staging_buffer,
         quad_pipeline,
         quad_pipeline_display,
         gradient_quad_pipeline,

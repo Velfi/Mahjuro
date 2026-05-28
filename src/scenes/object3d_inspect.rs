@@ -67,7 +67,7 @@ impl InspectRig {
         let h = window_h.max(1.0);
         Self {
             base_dir: Vec3::new(0.0_f32, -0.90, 0.44).normalize(),
-            base_distance: h * 0.78,
+            base_distance: h * 1.17,
             fovy_deg: 38.0,
         }
     }
