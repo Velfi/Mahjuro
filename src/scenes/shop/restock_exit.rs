@@ -11,13 +11,13 @@ use crate::core::zodiac::ZodiacKind;
 use super::{ConsumableShopItem, ShopFocus, ShopItem, ShopScene, TilePackShopItem};
 
 /// Delay between adjacent spawn slots (left → right).
-pub(super) const RESTOCK_EXIT_STAGGER: f32 = 0.042;
+pub(super) const RESTOCK_EXIT_STAGGER: f32 = 0.028;
 
 /// Incoming shelf scale pop (per slot, after restock).
-pub(super) const RESTOCK_ENTER_DURATION: f32 = 0.20;
-pub(super) const RESTOCK_ENTER_STAGGER: f32 = 0.022;
+pub(super) const RESTOCK_ENTER_DURATION: f32 = 0.14;
+pub(super) const RESTOCK_ENTER_STAGGER: f32 = 0.015;
 /// How far below the shelf (anchor `lift` / world −Z) before an entry is culled.
-pub(super) const RESTOCK_EXIT_OFFSCREEN_LIFT_FRAC: f32 = 0.48;
+pub(super) const RESTOCK_EXIT_OFFSCREEN_LIFT_FRAC: f32 = 0.72;
 
 pub(super) struct PendingShopStock {
     pub items: Vec<ShopItem>,
@@ -257,17 +257,18 @@ pub(super) fn restock_exit_mesh_delta(
     }
     let scale = h / 1080.0;
     // Gravity along anchor lift (= world +Z); quadratic, no end cap.
-    let lift_drop = 0.5 * 980.0 * scale * t * t;
+    let lift_drop = 0.5 * 1680.0 * scale * t * t;
     // Larger layout py → world −Y (toward the camera at −Y).
-    let forward_py = h * (0.14 * t + 0.24 * t * t).min(0.46);
-    let tip_phase = fall_ease((t / 0.28).min(1.0));
+    let forward_py = h * (0.18 * t + 0.30 * t * t).min(0.50);
+    let tip_phase = fall_ease((t / 0.18).min(1.0));
     let tip = tip_phase * 0.24;
-    let roll = (elapsed * 9.5 + slot_i as f32 * 0.7).sin() * 0.09 * (0.35 + tip_phase * 0.65);
-    let lateral = (slot_i as f32 - 4.0) * h * 0.005 * (t / 0.5).min(1.2);
-    let alpha_mul = if lift_drop < h * 0.08 {
+    let roll = (elapsed * 12.0 + slot_i as f32 * 0.7).sin() * 0.09 * (0.35 + tip_phase * 0.65);
+    let lateral = (slot_i as f32 - 4.0) * h * 0.005 * (t / 0.38).min(1.2);
+    let fade_span = h * 0.14;
+    let alpha_mul = if lift_drop < h * 0.05 {
         1.0
     } else {
-        ((h * RESTOCK_EXIT_OFFSCREEN_LIFT_FRAC - lift_drop) / (h * 0.06)).clamp(0.0, 1.0)
+        ((h * RESTOCK_EXIT_OFFSCREEN_LIFT_FRAC - lift_drop) / fade_span).clamp(0.0, 1.0)
     };
     RestockExitMeshDelta {
         pos_offset: [lateral, forward_py, -lift_drop],
