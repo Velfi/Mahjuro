@@ -93,7 +93,7 @@
   {
     "id": "joker_tile",
     "name": "Joker Tile",
-    "description": "Chamber entered: create a permanent copy of a random tile in your starting hand",
+    "description": "Chamber entered: create a permanent copy of a random tile in your hand",
     "rarity": "rare",
     "flavor_spans": [
       {
