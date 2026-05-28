@@ -726,19 +726,21 @@ impl CollectionScene {
                 &final_cam,
                 frame.archive_description_sign_use_left,
             );
-            push_archive_cubby_new_badges(
-                bosses,
-                page,
-                focus_flat,
-                &anchors,
-                w,
-                h,
-                &final_cam,
-                cell,
-                sign_occluder,
-                &mut quads,
-                text_labels,
-            );
+            if inspect.is_none() {
+                push_archive_cubby_new_badges(
+                    bosses,
+                    page,
+                    focus_flat,
+                    &anchors,
+                    w,
+                    h,
+                    &final_cam,
+                    cell,
+                    sign_occluder,
+                    &mut quads,
+                    text_labels,
+                );
+            }
         }
 
         // ── Foreground: close-up + description plaque ───────────────
@@ -1037,6 +1039,7 @@ impl CollectionScene {
         let back_h = ch.chrome_btn_h;
         let ring_focus = self.chrome_focus_for_draw(ctx.input_mode);
         let page_nav = archive_page_nav(self.active_tab, ctx.progress, self.archive_page);
+        let chronicle_open = matches!(self.active_tab, Tab::Chronicle) && inspect.is_none();
 
         if let Some(back_rect) = archive_main_menu_btn_rect(w, h, &cam, env_h_draw)
             && ring_focus == Some(CollectionAction::Back)
@@ -1058,7 +1061,7 @@ impl CollectionScene {
                     ctx.archive_chronicle_last_seen_run_len,
                 )
                 .for_tab(tab_to_archive_tab(TABS[ti]));
-                if tab_new > 0 {
+                if tab_new > 0 && !chronicle_open {
                     crate::ui::corner_badge::push_corner_badge(
                         &mut quads,
                         &mut text_labels,
@@ -1086,7 +1089,7 @@ impl CollectionScene {
         }
 
         let footer_anchor_y = h - back_h - h * 0.02;
-        let chronicle_ledger = matches!(self.active_tab, Tab::Chronicle) && inspect.is_none();
+        let chronicle_ledger = chronicle_open;
 
         // Control hints — pinned above the footer chrome. The page / scroll
         // affordance line is omitted when the tab fits in one page so the

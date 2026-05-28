@@ -1934,6 +1934,15 @@ impl WgpuRenderer {
                 bytemuck::bytes_of(&gi),
             );
 
+            super::super::resources::encode_copy_depth_to_r32float(
+                &mut encoder,
+                &self.depth_copy_staging_buffer,
+                &self.depth_texture,
+                &self.depth_r32_snapshot_texture,
+                self.size.width,
+                self.size.height,
+            );
+
             if probe_count > 0 {
                 if gi_update_probes {
                     let gi_compute_ts = self
@@ -2030,24 +2039,13 @@ impl WgpuRenderer {
             // matches `depth_texture`). The lit_mesh SSR sampler reads both
             // via normalised UVs so the size mismatch with `scene_prev` is
             // fine. A future change can downsample depth to halve this too.
-            encoder.copy_texture_to_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.depth_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::DepthOnly,
-                },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.ssr_prev_depth_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::DepthOnly,
-                },
-                wgpu::Extent3d {
-                    width: self.size.width.max(1),
-                    height: self.size.height.max(1),
-                    depth_or_array_layers: 1,
-                },
+            super::super::resources::encode_copy_depth_to_r32float(
+                &mut encoder,
+                &self.depth_copy_staging_buffer,
+                &self.depth_texture,
+                &self.ssr_prev_depth_texture,
+                self.size.width,
+                self.size.height,
             );
         }
 

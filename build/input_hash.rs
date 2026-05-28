@@ -114,6 +114,57 @@ pub fn outputs_present(out_dir: &Path, rooms: &[&str], ext: &str) -> bool {
         .all(|room| out_dir.join(format!("{room}.{ext}")).is_file())
 }
 
+/// Fail the build when committed bake outputs or their stamp do not match current inputs.
+pub fn assert_committed_bake_current(c: CommittedBakeCheck<'_>) {
+    if c.stamp_ok && c.outputs_ok {
+        println!("cargo:info={}: committed bake matches inputs", c.label);
+        return;
+    }
+
+    let detail = if !c.stamp_ok {
+        format!(
+            "  {} is missing or stale (expected hash {})",
+            c.stamp_path, c.expected_hash
+        )
+    } else {
+        format!("  baked outputs missing or incomplete under {}/", c.outputs_dir)
+    };
+
+    let message = format!(
+        concat!(
+            "{label} is out of date.\n\n",
+            "{detail}\n\n",
+            "To fix (needs a GPU):\n\n",
+            "1. Build the offline baker:\n",
+            "   {skip_env}=1 {build_tool_cmd}\n\n",
+            "2. Rebake and refresh the stamp:\n",
+            "   {rebake_cmd}\n\n",
+            "3. Commit the baked files:\n",
+            "   git add {commit_paths}",
+        ),
+        label = c.label,
+        detail = detail,
+        skip_env = c.skip_env,
+        build_tool_cmd = c.build_tool_cmd,
+        rebake_cmd = c.rebake_cmd,
+        commit_paths = c.commit_paths,
+    );
+    panic!("{message}");
+}
+
+pub struct CommittedBakeCheck<'a> {
+    pub label: &'a str,
+    pub stamp_path: &'a str,
+    pub outputs_dir: &'a str,
+    pub commit_paths: &'a str,
+    pub expected_hash: &'a str,
+    pub stamp_ok: bool,
+    pub outputs_ok: bool,
+    pub skip_env: &'a str,
+    pub build_tool_cmd: &'a str,
+    pub rebake_cmd: &'a str,
+}
+
 pub fn log_bake_timing(label: &str, start: Instant) {
     let secs = start.elapsed().as_secs_f64();
     println!("cargo:info=bake timing: {label} {secs:.2}s");

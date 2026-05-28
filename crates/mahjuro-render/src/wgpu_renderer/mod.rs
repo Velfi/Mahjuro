@@ -112,6 +112,11 @@ pub struct WgpuRenderer {
     /// `runtime/render.rs`.
     ssr_prev_depth_texture: wgpu::Texture,
     ssr_prev_depth_view: wgpu::TextureView,
+    /// Current-frame depth copied to R32Float before emissive-probe passes
+    /// (`textureLoad` is unsupported on depth textures in the GLSL backend).
+    depth_r32_snapshot_texture: wgpu::Texture,
+    depth_r32_snapshot_view: wgpu::TextureView,
+    depth_copy_staging_buffer: wgpu::Buffer,
     quad_pipeline: wgpu::RenderPipeline,
     /// Same shader as `quad_pipeline`, targeting the swapchain format (post-tonemap UI).
     quad_pipeline_display: wgpu::RenderPipeline,
@@ -814,7 +819,7 @@ pub(crate) use lighting_buffers::{
     TileOccluderGpu, TileOccludersBuf,
 };
 pub(crate) use moon::current_moon_phase;
-pub(crate) use resources::{create_depth, create_depth_copy};
+pub(crate) use resources::{create_depth, create_depth_r32_snapshot};
 pub(crate) use screenshot::ScreenshotStaging;
 pub(crate) use targets::RenderTarget;
 pub(crate) use tile_pipeline::{TileGlbPipelineKey, TilePrimitiveGpu};

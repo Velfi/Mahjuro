@@ -106,24 +106,6 @@ jobs:
           prefix-key: ci
           key: ${{ matrix.target }}
 
-      - name: Build offline bake tools
-        if: matrix.name != 'macOS'
-        uses: ./.github/actions/build-bake-tools
-        with:
-          target: ${{ matrix.target }}
-
-      - name: Build offline bake tools (macOS universal)
-        if: matrix.name == 'macOS'
-        uses: ./.github/actions/build-bake-tools
-        with:
-          target: aarch64-apple-darwin
-
-      - name: Build offline bake tools (macOS x86_64)
-        if: matrix.name == 'macOS'
-        uses: ./.github/actions/build-bake-tools
-        with:
-          target: x86_64-apple-darwin
-
       - name: Build (debug)
         if: matrix.name != 'macOS'
         run: cargo build --locked --target ${{ matrix.target }}

@@ -189,9 +189,26 @@ impl WgpuRenderer {
         self.depth_texture = dt;
         self.depth_view = dv;
         self.ssr_prev_depth_texture.destroy();
-        let (sdt, sdv) = create_depth_copy(&self.device, new_size.width, new_size.height);
+        let (sdt, sdv) = create_depth_r32_snapshot(
+            &self.device,
+            new_size.width,
+            new_size.height,
+            "ssr-prev-depth",
+        );
         self.ssr_prev_depth_texture = sdt;
         self.ssr_prev_depth_view = sdv;
+        self.depth_r32_snapshot_texture.destroy();
+        let (drt, drv) = create_depth_r32_snapshot(
+            &self.device,
+            new_size.width,
+            new_size.height,
+            "depth-r32-snapshot",
+        );
+        self.depth_r32_snapshot_texture = drt;
+        self.depth_r32_snapshot_view = drv;
+        self.depth_copy_staging_buffer.destroy();
+        self.depth_copy_staging_buffer =
+            create_depth_copy_staging(&self.device, new_size.width, new_size.height);
 
         // SSR scene history texture lives at *half* the swapchain size
         // (see `scene_color_downsample.wgsl`); rebuild the bind group so
@@ -438,7 +455,7 @@ impl WgpuRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&self.depth_view),
+                        resource: wgpu::BindingResource::TextureView(&self.depth_r32_snapshot_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
@@ -465,7 +482,7 @@ impl WgpuRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&self.depth_view),
+                        resource: wgpu::BindingResource::TextureView(&self.depth_r32_snapshot_view),
                     },
                 ],
             });

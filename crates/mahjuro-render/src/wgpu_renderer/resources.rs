@@ -812,14 +812,16 @@ pub(super) fn create_post_texture(
     (tex, view)
 }
 
-/// Depth texture usable as a shader-sampled snapshot (e.g. SSR history).
-pub(crate) fn create_depth_copy(
+/// R32 depth snapshot for `textureLoad` in SSR / emissive-probe shaders.
+/// GLES/llvmpipe cannot compile WGSL `textureLoad` on `texture_depth_2d`.
+pub(crate) fn create_depth_r32_snapshot(
     device: &wgpu::Device,
     width: u32,
     height: u32,
+    label: &'static str,
 ) -> (wgpu::Texture, wgpu::TextureView) {
     let tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("depth-copy"),
+        label: Some(label),
         size: wgpu::Extent3d {
             width: width.max(1),
             height: height.max(1),
@@ -828,10 +830,83 @@ pub(crate) fn create_depth_copy(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
+        format: wgpu::TextureFormat::R32Float,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     (tex, view)
+}
+
+pub(crate) fn depth_copy_buffer_size(width: u32, height: u32) -> u64 {
+    let bytes_per_row = depth_copy_bytes_per_row(width);
+    bytes_per_row as u64 * height.max(1) as u64
+}
+
+fn depth_copy_bytes_per_row(width: u32) -> u32 {
+    let unpadded = width.max(1) * 4;
+    unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
+}
+
+pub(crate) fn create_depth_copy_staging(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("depth-copy-staging"),
+        size: depth_copy_buffer_size(width, height),
+        usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+/// Copy a hardware depth attachment into an R32Float snapshot via staging.
+pub(crate) fn encode_copy_depth_to_r32float(
+    encoder: &mut wgpu::CommandEncoder,
+    staging: &wgpu::Buffer,
+    src_depth: &wgpu::Texture,
+    dst_r32: &wgpu::Texture,
+    width: u32,
+    height: u32,
+) {
+    let width = width.max(1);
+    let height = height.max(1);
+    let bytes_per_row = depth_copy_bytes_per_row(width);
+    let extent = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let buffer_layout = wgpu::TexelCopyBufferLayout {
+        offset: 0,
+        bytes_per_row: Some(bytes_per_row),
+        rows_per_image: Some(height),
+    };
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: src_depth,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::DepthOnly,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: staging,
+            layout: buffer_layout,
+        },
+        extent,
+    );
+    encoder.copy_buffer_to_texture(
+        wgpu::TexelCopyBufferInfo {
+            buffer: staging,
+            layout: buffer_layout,
+        },
+        wgpu::TexelCopyTextureInfo {
+            texture: dst_r32,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        extent,
+    );
 }

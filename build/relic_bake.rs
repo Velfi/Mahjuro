@@ -1,12 +1,12 @@
-//! Invoked from `build.rs`: hash inputs and run `mahjuro-bake-relics` when stale.
+//! Invoked from `build.rs`: verify committed relic RLC1 bakes match inputs.
 
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Instant;
 
-use super::input_hash::{Fnv64, hash_paths, hash_tree, log_bake_timing, read_stamp_line, write_stamp_line};
+use super::input_hash::{
+    assert_committed_bake_current, CommittedBakeCheck, Fnv64, hash_paths, hash_tree, read_stamp_line,
+};
 
 const STAMP_PATH: &str = "assets/data/relic_baked/.inputs_stamp";
 const OUT_DIR: &str = "assets/data/relic_baked";
@@ -25,45 +25,28 @@ pub fn emit_rerun_if_changed() {
     }
 }
 
-pub fn maybe_bake_relics(repo: &Path, profile_dir: &Path) {
+pub fn assert_relic_bakes_current(repo: &Path) {
     if skip_bake_env() {
-        println!("cargo:warning=MAHJURO_SKIP_RELIC_BAKE: skipping relic RLC1 bake");
+        println!("cargo:warning=MAHJURO_SKIP_RELIC_BAKE: skipping relic RLC1 bake freshness check");
         return;
     }
 
-    let stamp_file = repo.join(STAMP_PATH);
     let hash = compute_inputs_hash(repo);
-    let stamp_ok = read_stamp_line(&stamp_file).is_some_and(|s| s == hash);
+    let stamp_ok = read_stamp_line(&repo.join(STAMP_PATH)).is_some_and(|s| s == hash);
     let outputs_ok = outputs_present(repo);
 
-    if stamp_ok && outputs_ok {
-        println!("cargo:info=relic bake: inputs unchanged, skipping");
-        return;
-    }
-
-    let start = Instant::now();
-    let exe = super::bake_tool::require_relic_bake_exe(profile_dir);
-
-    let status = Command::new(&exe)
-        .env("MAHJURO_ASSETS", repo.join("assets"))
-        .current_dir(repo)
-        .status();
-    match status {
-        Ok(s) if s.success() => {
-            if let Some(parent) = stamp_file.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            write_stamp_line(&stamp_file, &hash).unwrap_or_else(|e| {
-                panic!("relic bake: could not write stamp: {e}");
-            });
-            log_bake_timing("relic RLC1 bakes", start);
-        }
-        Ok(s) => panic!(
-            "relic bake failed (exit {s}); run \
-             `cargo run -p mahjuro-render --bin mahjuro-bake-relics` manually"
-        ),
-        Err(e) => panic!("relic bake failed to run: {e}"),
-    }
+    assert_committed_bake_current(CommittedBakeCheck {
+        label: "relic RLC1 bake",
+        stamp_path: STAMP_PATH,
+        outputs_dir: OUT_DIR,
+        commit_paths: "assets/data/relic_baked/*.rlc assets/data/relic_baked/.inputs_stamp",
+        expected_hash: &hash,
+        stamp_ok,
+        outputs_ok,
+        skip_env: "MAHJURO_SKIP_RELIC_BAKE",
+        build_tool_cmd: "cargo build -p mahjuro-render --bin mahjuro-bake-relics",
+        rebake_cmd: "cargo run -p mahjuro-render --bin mahjuro-bake-relics",
+    });
 }
 
 fn skip_bake_env() -> bool {

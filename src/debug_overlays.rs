@@ -1903,8 +1903,8 @@ const HALL_DIST_DEBUG_ROW_COUNT: usize = 15;
 
 const HALL_DIST_DEBUG_ROW_META: &[(&str, f32, f32, f32)] = &[
     ("Blind (0 Auto 1S 2B 3Boss)", 0.0, 3.0, 0.25),
-    ("Seed run #", 1.0, 30.0, 0.5),
-    ("Seed ante", 1.0, 12.0, 0.25),
+    ("Run seed lo (u32)", 0.0, 4_294_967_295.0, 1.0),
+    ("Run seed hi (u32)", 0.0, 4_294_967_295.0, 1.0),
     ("Global intensity ×", 0.0, 10.0, 0.02),
     ("Breathe amp ×", 0.0, 10.0, 0.05),
     ("Ripple amp ×", 0.0, 10.0, 0.05),
@@ -1987,8 +1987,10 @@ fn hall_dist_point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
 pub struct HallwayDistortionDebugOverlay {
     cursor: usize,
     chamber_row: u8,
+    seed_lo: f32,
+    seed_hi: f32,
     run_number: f32,
-    ante: f32,
+    wing: f32,
     global_mul: f32,
     breathe_mul: f32,
     ceiling_mul: f32,
@@ -2007,12 +2009,14 @@ pub struct HallwayDistortionDebugOverlay {
 }
 
 impl HallwayDistortionDebugOverlay {
-    pub fn new() -> Self {
+    pub fn from_run(run_seed: u64, run_number: u32, wing: u32) -> Self {
         Self {
             cursor: 0,
             chamber_row: 0,
-            run_number: 1.0,
-            ante: 1.0,
+            seed_lo: (run_seed as u32) as f32,
+            seed_hi: (run_seed >> 32) as f32,
+            run_number: run_number.max(1) as f32,
+            wing: wing.max(1) as f32,
             global_mul: 1.0,
             breathe_mul: 1.0,
             ceiling_mul: 1.0,
@@ -2032,10 +2036,13 @@ impl HallwayDistortionDebugOverlay {
     }
 
     pub fn to_snapshot(&self) -> HallwayDistortionDebugSnapshot {
+        let lo = self.seed_lo.round().clamp(0.0, u32::MAX as f32) as u32;
+        let hi = self.seed_hi.round().clamp(0.0, u32::MAX as f32) as u32;
         HallwayDistortionDebugSnapshot {
             chamber_mode: self.chamber_row.min(3),
-            seed_run: self.run_number.round().clamp(1.0, 999.0) as u32,
-            seed_ante: self.ante.round().clamp(1.0, 99.0) as u32,
+            run_seed: u64::from(lo) | (u64::from(hi) << 32),
+            run_number: self.run_number.round().clamp(1.0, 999.0) as u32,
+            wing: self.wing.round().clamp(1.0, 99.0) as u32,
             global_mul: self.global_mul,
             breathe_mul: self.breathe_mul,
             ceiling_mul: self.ceiling_mul,
@@ -2058,8 +2065,8 @@ impl HallwayDistortionDebugOverlay {
     fn row_value(&self, row: usize) -> f32 {
         match row {
             0 => self.chamber_row as f32,
-            1 => self.run_number,
-            2 => self.ante,
+            1 => self.seed_lo,
+            2 => self.seed_hi,
             3 => self.global_mul,
             4 => self.breathe_mul,
             5 => self.ripple_mul,
@@ -2081,8 +2088,8 @@ impl HallwayDistortionDebugOverlay {
         let v = v.clamp(lo, hi);
         match row {
             0 => self.chamber_row = (v.round() as i32).clamp(0, 3) as u8,
-            1 => self.run_number = v,
-            2 => self.ante = v,
+            1 => self.seed_lo = v,
+            2 => self.seed_hi = v,
             3 => self.global_mul = v,
             4 => self.breathe_mul = v,
             5 => self.ripple_mul = v,
@@ -2167,10 +2174,11 @@ impl HallwayDistortionDebugOverlay {
         if ctrl && matches!(code, Scancode::C) && !self.editing {
             let s = self.to_snapshot();
             let text = format!(
-                "HallwayDistortionDebugSnapshot {{ chamber_mode: {}, seed_run: {}, seed_ante: {}, global_mul: {:.4}, breathe_mul: {:.4}, ripple_mul: {:.4}, ceiling_mul: {:.4}, stretch_mul: {:.4}, twist_mul: {:.4}, pulse_mul: {:.4}, drift_mul: {:.4}, balloon_mul: {:.4}, wall_tint: {}, ripple_waves_mul: {:.4}, ripple_travel_mul: {:.4} }}",
+                "HallwayDistortionDebugSnapshot {{ chamber_mode: {}, run_seed: {:#018x}, run_number: {}, wing: {}, global_mul: {:.4}, breathe_mul: {:.4}, ripple_mul: {:.4}, ceiling_mul: {:.4}, stretch_mul: {:.4}, twist_mul: {:.4}, pulse_mul: {:.4}, drift_mul: {:.4}, balloon_mul: {:.4}, wall_tint: {}, ripple_waves_mul: {:.4}, ripple_travel_mul: {:.4} }}",
                 s.chamber_mode,
-                s.seed_run,
-                s.seed_ante,
+                s.run_seed,
+                s.run_number,
+                s.wing,
                 s.global_mul,
                 s.breathe_mul,
                 s.ripple_mul,

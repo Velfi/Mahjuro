@@ -3,7 +3,7 @@
 
 use super::embedded_wgsl;
 use super::{
-    RenderTarget, TargetInit, clamp_render_physical_size, create_depth, create_depth_copy,
+    RenderTarget, TargetInit, clamp_render_physical_size, create_depth, create_depth_r32_snapshot,
 };
 
 /// Env set on the `vulkan-wsi-probe` subprocess so it does not recurse into another probe.
@@ -212,6 +212,8 @@ pub(super) struct EarlyGpuState {
     pub depth_view: wgpu::TextureView,
     pub ssr_prev_depth_texture: wgpu::Texture,
     pub ssr_prev_depth_view: wgpu::TextureView,
+    pub depth_r32_snapshot_texture: wgpu::Texture,
+    pub depth_r32_snapshot_view: wgpu::TextureView,
 }
 
 #[inline(never)]
@@ -506,8 +508,18 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     };
 
     let (depth_texture, depth_view) = create_depth(&device, size.width.max(1), size.height.max(1));
-    let (ssr_prev_depth_texture, ssr_prev_depth_view) =
-        create_depth_copy(&device, size.width.max(1), size.height.max(1));
+    let (ssr_prev_depth_texture, ssr_prev_depth_view) = create_depth_r32_snapshot(
+        &device,
+        size.width.max(1),
+        size.height.max(1),
+        "ssr-prev-depth",
+    );
+    let (depth_r32_snapshot_texture, depth_r32_snapshot_view) = create_depth_r32_snapshot(
+        &device,
+        size.width.max(1),
+        size.height.max(1),
+        "depth-r32-snapshot",
+    );
 
     Ok(EarlyGpuState {
         device,
@@ -524,6 +536,8 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         depth_view,
         ssr_prev_depth_texture,
         ssr_prev_depth_view,
+        depth_r32_snapshot_texture,
+        depth_r32_snapshot_view,
     })
 }
 

@@ -1,10 +1,8 @@
-//! Batches room GI + shadow GPU bakes into a single `mahjuro-bake` invocation when possible.
+//! Room GI + shadow bake freshness checks (invoked from `build.rs`).
 
 use std::path::Path;
-use std::process::Command;
-use std::time::Instant;
 
-use super::input_hash::{log_bake_timing, write_stamp_line};
+use super::input_hash::{assert_committed_bake_current, CommittedBakeCheck};
 use super::{room_gi_bake, room_shadow_bake};
 
 pub fn emit_rerun_if_changed() {
@@ -12,102 +10,46 @@ pub fn emit_rerun_if_changed() {
     room_shadow_bake::emit_rerun_if_changed();
 }
 
-pub fn maybe_bake_room_gpu(repo: &Path, profile_dir: &Path) {
-    let gi_skip = room_gi_bake::skip_bake_env();
-    let shadow_skip = room_shadow_bake::skip_bake_env();
-
-    if gi_skip {
-        println!("cargo:warning=MAHJURO_SKIP_ROOM_GI_BAKE: skipping room GI probe bake");
-    }
-    if shadow_skip {
-        println!("cargo:warning=MAHJURO_SKIP_ROOM_SHADOW_BAKE: skipping room shadow bake");
-    }
-
+pub fn assert_room_gpu_bakes_current(repo: &Path) {
     let gi = room_gi_bake::bake_status(repo);
+    if !room_gi_bake::skip_bake_env() {
+        assert_committed_bake_current(CommittedBakeCheck {
+            label: "room GI bake",
+            stamp_path: room_gi_bake::STAMP_PATH,
+            outputs_dir: room_gi_bake::OUT_DIR,
+            commit_paths: "assets/data/room_gi/*.mgi assets/data/room_gi/.inputs_stamp",
+            expected_hash: &gi.hash,
+            stamp_ok: gi.stamp_ok,
+            outputs_ok: gi.outputs_ok,
+            skip_env: "MAHJURO_SKIP_ROOM_GI_BAKE",
+            build_tool_cmd:
+                "cargo build -p mahjuro-headless --bin mahjuro-bake --features bake",
+            rebake_cmd:
+                "cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds gi",
+        });
+    } else {
+        println!("cargo:warning=MAHJURO_SKIP_ROOM_GI_BAKE: skipping room GI bake freshness check");
+    }
+
     let shadow = room_shadow_bake::bake_status(repo);
-
-    let need_gi = !gi_skip && !gi.up_to_date;
-    let need_shadow = !shadow_skip && !shadow.up_to_date;
-
-    if !gi_skip && gi.up_to_date {
-        println!("cargo:info=room GI bake: inputs unchanged, skipping GPU bake");
-    }
-    if !shadow_skip && shadow.up_to_date {
-        println!("cargo:info=room shadow bake: inputs unchanged, skipping GPU bake");
-    }
-
-    if !need_gi && !need_shadow {
-        return;
-    }
-
-    let start = Instant::now();
-    let exe = super::bake_tool::require_bake_exe(profile_dir);
-
-    let mut kinds = Vec::new();
-    if need_gi {
-        kinds.push("gi");
-    }
-    if need_shadow {
-        kinds.push("shadow");
-    }
-    let kinds_arg = kinds.join(",");
-
-    println!(
-        "cargo:warning=room GPU bake: running {kinds_arg} via {}",
-        exe.display()
-    );
-
-    let mut cmd = Command::new(&exe);
-    cmd.current_dir(repo);
-    cmd.arg("--kinds").arg(&kinds_arg);
-
-    if need_gi {
-        room_gi_bake::ensure_out_dir(repo);
-        cmd.args([
-            "--gi-dir",
-            room_gi_bake::out_dir(repo).to_str().unwrap_or(room_gi_bake::OUT_DIR),
-            "--width",
-            &room_gi_bake::BAKE_WIDTH.to_string(),
-            "--height",
-            &room_gi_bake::BAKE_HEIGHT.to_string(),
-        ]);
-    }
-    if need_shadow {
-        room_shadow_bake::ensure_out_dir(repo);
-        cmd.args([
-            "--shadow-dir",
-            room_shadow_bake::out_dir(repo)
-                .to_str()
-                .unwrap_or(room_shadow_bake::OUT_DIR),
-        ]);
-    }
-
-    match cmd.status() {
-        Ok(s) if s.success() => {}
-        Ok(s) => panic!(
-            "room GPU bake ({kinds_arg}) failed (exit {s}); fix headless init or set \
-             MAHJURO_SKIP_ROOM_GI_BAKE=1 / MAHJURO_SKIP_ROOM_SHADOW_BAKE=1"
-        ),
-        Err(e) => panic!("failed to spawn room GPU bake ({kinds_arg}): {e}"),
-    }
-
-    if need_gi {
-        write_stamp_line(&room_gi_bake::stamp_file(repo), &gi.hash).unwrap_or_else(|e| {
-            panic!(
-                "room GI bake: could not write stamp {}: {e}",
-                room_gi_bake::stamp_file(repo).display()
-            );
+    if !room_shadow_bake::skip_bake_env() {
+        assert_committed_bake_current(CommittedBakeCheck {
+            label: "room shadow bake",
+            stamp_path: room_shadow_bake::STAMP_PATH,
+            outputs_dir: room_shadow_bake::OUT_DIR,
+            commit_paths: "assets/data/room_shadow/*.msh assets/data/room_shadow/.inputs_stamp",
+            expected_hash: &shadow.hash,
+            stamp_ok: shadow.stamp_ok,
+            outputs_ok: shadow.outputs_ok,
+            skip_env: "MAHJURO_SKIP_ROOM_SHADOW_BAKE",
+            build_tool_cmd:
+                "cargo build -p mahjuro-headless --bin mahjuro-bake --features bake",
+            rebake_cmd:
+                "cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds shadow",
         });
+    } else {
+        println!(
+            "cargo:warning=MAHJURO_SKIP_ROOM_SHADOW_BAKE: skipping room shadow bake freshness check"
+        );
     }
-    if need_shadow {
-        write_stamp_line(&room_shadow_bake::stamp_file(repo), &shadow.hash).unwrap_or_else(|e| {
-            panic!(
-                "room shadow bake: could not write stamp {}: {e}",
-                room_shadow_bake::stamp_file(repo).display()
-            );
-        });
-        println!("cargo:info=room shadow bake: wrote {}/*.msh", room_shadow_bake::OUT_DIR);
-    }
-
-    log_bake_timing(&format!("room GPU ({kinds_arg})"), start);
 }

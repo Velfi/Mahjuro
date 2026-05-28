@@ -174,8 +174,13 @@ impl App {
                     self.debug.hallway_distortion_debug_overlay = None;
                     log::debug!("Closed hallway vertex warp debug overlay");
                 } else {
+                    let run = &self.run;
                     self.debug.hallway_distortion_debug_overlay =
-                        Some(HallwayDistortionDebugOverlay::new());
+                        Some(HallwayDistortionDebugOverlay::from_run(
+                            run.chronicle.seed,
+                            run.run_number,
+                            run.wing,
+                        ));
                     log::debug!("Opened hallway vertex warp debug overlay");
                 }
             }

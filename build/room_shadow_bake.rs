@@ -20,7 +20,8 @@ const ROOMS: &[&str] = &[
 
 pub struct BakeStatus {
     pub hash: String,
-    pub up_to_date: bool,
+    pub stamp_ok: bool,
+    pub outputs_ok: bool,
 }
 
 pub fn stamp_file(repo: &Path) -> PathBuf {
@@ -100,6 +101,7 @@ pub fn bake_status(repo: &Path) -> BakeStatus {
     let outputs_ok = outputs_present(&out_dir(repo), ROOMS, "msh");
     BakeStatus {
         hash,
-        up_to_date: stamp_ok && outputs_ok,
+        stamp_ok,
+        outputs_ok,
     }
 }

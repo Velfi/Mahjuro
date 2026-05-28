@@ -123,6 +123,11 @@ pub const HALLWAY_RIPPLE_WAVES: f32 = 5.0;
 pub const HALLWAY_RIPPLE_SPEED: f32 = 1.2;
 /// `mix(standing, traveling, w)` — higher = more travel down the hall.
 pub const HALLWAY_RIPPLE_TRAVEL_MIX: f32 = 0.7;
+/// Last wing index for hallway intensity ramp (keep in sync with `run::FINAL_WING`).
+pub const HALLWAY_WING_FINAL: u32 = 7;
+/// Pick-blind warp scale at wing 1 vs [`HALLWAY_WING_FINAL`].
+pub const HALLWAY_WING_INTENSITY_AT_FIRST: f32 = 0.82;
+pub const HALLWAY_WING_INTENSITY_AT_FINAL: f32 = 1.28;
 /// Wall barrel-bow displacement at the wall surface (world units; shader `bow.w`).
 pub const HALLWAY_BALLOON_AMOUNT: f32 = 0.065;
 /// World Z for vertical barrel midline in WGSL (`mix(floor, ceiling, 0.5)`); keep in sync with shaders.
@@ -189,15 +194,28 @@ pub struct HallwayDistortion {
 }
 
 #[inline]
-fn loop_seed_hash(run_number: u32, ante: u32, blind: ChamberKind) -> u32 {
+fn u32_from_seed64(mut x: u64) -> u32 {
+    x ^= x >> 33;
+    x = x.wrapping_mul(0xff51_afed_558c_cd65);
+    x ^= x >> 33;
+    x = x.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    x ^= x >> 33;
+    x as u32
+}
+
+#[inline]
+fn loop_seed_hash(run_seed: u64, run_number: u32, wing: u32, blind: ChamberKind) -> u32 {
     let b = match blind {
         ChamberKind::Small => 0u32,
         ChamberKind::Big => 1u32,
         ChamberKind::Ordeal => 2u32,
     };
-    let mut x = run_number.wrapping_mul(0x9E37_79B1u32)
-        ^ ante.wrapping_mul(0x85EB_CA6Bu32)
-        ^ b.wrapping_mul(0xC2B2_AE35u32);
+    let mut x = u32_from_seed64(
+        run_seed
+            ^ (run_number as u64).wrapping_mul(0x9E37_79B1_85EB_CA87)
+            ^ (wing as u64).wrapping_mul(0xC2B2_AE3D_27D4EB4F)
+            ^ (b as u64).wrapping_mul(0x1656_67B1_9E3779F9),
+    );
     x ^= x << 13;
     x ^= x >> 17;
     x ^= x << 5;
@@ -210,8 +228,8 @@ fn u01(x: u32) -> f32 {
 }
 
 #[inline]
-fn wall_tint_seed_hash(run_number: u32, ante: u32) -> u32 {
-    let mut x = run_number.wrapping_mul(0x7F4A_7C15u32) ^ ante.wrapping_mul(0x1656_67B1u32);
+fn wall_tint_seed_hash(run_seed: u64, wing: u32) -> u32 {
+    let mut x = u32_from_seed64(run_seed ^ (wing as u64).wrapping_mul(0x7F4A_7C15_1656_67B1));
     x ^= x << 13;
     x ^= x >> 17;
     x ^= x << 5;
@@ -221,11 +239,11 @@ fn wall_tint_seed_hash(run_number: u32, ante: u32) -> u32 {
 /// Number of preset wall tints in [`hallway_wall_tint_rgb`].
 pub const HALLWAY_WALL_TINT_COUNT: usize = HALLWAY_WALL_TINTS.len();
 
-/// One of eight hallway wall tints, stable for a given run and ante.
+/// One of eight hallway wall tints, stable for a given run seed and wing.
 #[inline]
-pub fn hallway_wall_tint_rgb(run_number: u32, ante: u32) -> [f32; 3] {
+pub fn hallway_wall_tint_rgb(run_seed: u64, wing: u32) -> [f32; 3] {
     hallway_wall_tint_by_index(
-        (wall_tint_seed_hash(run_number, ante) as usize) % HALLWAY_WALL_TINT_COUNT,
+        (wall_tint_seed_hash(run_seed, wing) as usize) % HALLWAY_WALL_TINT_COUNT,
     )
 }
 
@@ -233,6 +251,18 @@ pub fn hallway_wall_tint_rgb(run_number: u32, ante: u32) -> [f32; 3] {
 #[inline]
 pub fn hallway_wall_tint_by_index(idx: usize) -> [f32; 3] {
     HALLWAY_WALL_TINTS[idx % HALLWAY_WALL_TINT_COUNT]
+}
+
+/// Linear ramp on current wing (1-indexed). Wings above [`HALLWAY_WING_FINAL`] clamp to the final value.
+#[inline]
+pub fn hallway_wing_intensity_scale(wing: u32) -> f32 {
+    if HALLWAY_WING_FINAL <= 1 {
+        return HALLWAY_WING_INTENSITY_AT_FINAL;
+    }
+    let wing = wing.max(1);
+    let t = ((wing - 1) as f32 / (HALLWAY_WING_FINAL - 1) as f32).clamp(0.0, 1.0);
+    HALLWAY_WING_INTENSITY_AT_FIRST
+        + t * (HALLWAY_WING_INTENSITY_AT_FINAL - HALLWAY_WING_INTENSITY_AT_FIRST)
 }
 
 fn tag_hallway_walls_for_runtime_tint(cpu: &mut RoomGlbCpu) {
@@ -248,8 +278,13 @@ fn tag_hallway_walls_for_runtime_tint(cpu: &mut RoomGlbCpu) {
 impl HallwayDistortion {
     /// Build distortion parameters for the pick-blind hallway. Wall-clock time (seconds) is
     /// merged in [`WgpuRenderer::write_hallway_environment_uniforms`](crate::wgpu_renderer::WgpuRenderer).
-    pub fn from_pick_chamber(blind: ChamberKind, run_number: u32, ante: u32) -> Self {
-        let h = loop_seed_hash(run_number, ante, blind);
+    pub fn from_pick_chamber(
+        blind: ChamberKind,
+        run_seed: u64,
+        run_number: u32,
+        wing: u32,
+    ) -> Self {
+        let h = loop_seed_hash(run_seed, run_number, wing, blind);
         let breathe_phase = u01(h.rotate_left(7)) * std::f32::consts::TAU;
         let breathe_freq_jitter = 0.88 + u01(h.rotate_left(17)) * 0.22;
         let stretch_bias = 0.82 + u01(h.rotate_left(19)) * 0.36;
@@ -263,17 +298,18 @@ impl HallwayDistortion {
         let ripple_travel_mix =
             (HALLWAY_RIPPLE_TRAVEL_MIX + (u01(h.rotate_left(13)) - 0.5) * 0.12).clamp(0.55, 0.85);
 
-        let (global_intensity, breathe_mul, stretch_mul, twist_mul, ripple_mul, balloon_mul) =
+        let (mut global_intensity, breathe_mul, stretch_mul, twist_mul, ripple_mul, balloon_mul) =
             match blind {
                 ChamberKind::Small => (0.58, 0.58, 0.7, 0.52, 0.5, 0.5),
                 ChamberKind::Big => (0.74, 0.68, 0.85, 0.72, 0.75, 0.75),
                 ChamberKind::Ordeal => (0.25, 0.82, 1.15, 1.08, 0.4, 1.0),
             };
+        global_intensity *= hallway_wing_intensity_scale(wing);
         let boss_pressure = match blind {
             ChamberKind::Ordeal => 1.0,
             ChamberKind::Small | ChamberKind::Big => 0.0,
         };
-        let wall_tint = hallway_wall_tint_rgb(run_number, ante);
+        let wall_tint = hallway_wall_tint_rgb(run_seed, wing);
         let ripple_amp = (HALLWAY_RIPPLE_AMOUNT * ripple_mul * global_intensity)
             .max(HALLWAY_RIPPLE_AMOUNT * 0.4);
         let balloon_amp = HALLWAY_BALLOON_AMOUNT * balloon_mul * global_intensity;
@@ -362,8 +398,12 @@ impl HallwayDistortion {
 pub struct HallwayDistortionDebugSnapshot {
     /// `0` = use the run's upcoming blind; `1` Small, `2` Big, `3` Boss.
     pub chamber_mode: u8,
-    pub seed_run: u32,
-    pub seed_ante: u32,
+    /// Chronicle RNG seed.
+    pub run_seed: u64,
+    /// Blind counter within the run (see [`PickChamberReadModel::run_number`]).
+    pub run_number: u32,
+    /// Current wing / ante.
+    pub wing: u32,
     pub global_mul: f32,
     pub breathe_mul: f32,
     pub ceiling_mul: f32,
@@ -381,9 +421,8 @@ pub struct HallwayDistortionDebugSnapshot {
 }
 
 impl HallwayDistortionDebugSnapshot {
-    /// `upcoming` is used when `chamber_mode == 0` (Auto). Run/ante seeds always
-    /// come from [`HallwayDistortionDebugSnapshot::seed_run`] /
-    /// [`HallwayDistortionDebugSnapshot::seed_ante`] (the overlay sliders).
+    /// `upcoming` is used when `chamber_mode == 0` (Auto). [`run_seed`] comes from the
+    /// overlay (defaults to the active run when the panel is opened).
     pub fn resolve(self, upcoming: ChamberKind) -> HallwayDistortion {
         let blind = match self.chamber_mode {
             0 => upcoming,
@@ -391,9 +430,12 @@ impl HallwayDistortionDebugSnapshot {
             2 => ChamberKind::Big,
             _ => ChamberKind::Ordeal,
         };
-        let rn = self.seed_run.max(1);
-        let an = self.seed_ante.max(1);
-        let mut d = HallwayDistortion::from_pick_chamber(blind, rn, an);
+        let mut d = HallwayDistortion::from_pick_chamber(
+            blind,
+            self.run_seed,
+            self.run_number.max(1),
+            self.wing.max(1),
+        );
         d.apply_debug_snapshot_scales(self);
         d
     }
@@ -765,7 +807,7 @@ mod tests {
             .expect("walls primitive");
         let window_h = 1080.0f32;
         let env_h = 1.0f32;
-        let mut dist = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 1, 1);
+        let mut dist = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 1, 1, 1);
         super::hallway_distortion_apply_glb_depth_extent(&mut dist, window_h, env_h);
         let m = room_glb::room_env_model_matrix_from_cpu(window_h, env_h, &cpu);
         let axis_doc = super::hallway_depth_axis_doc();
@@ -839,13 +881,33 @@ mod tests {
     }
 
     #[test]
+    fn hallway_wing_intensity_ramps_to_final_wing() {
+        assert!(
+            (super::hallway_wing_intensity_scale(1) - super::HALLWAY_WING_INTENSITY_AT_FIRST).abs()
+                < 1e-5
+        );
+        assert!(
+            (super::hallway_wing_intensity_scale(super::HALLWAY_WING_FINAL)
+                - super::HALLWAY_WING_INTENSITY_AT_FINAL)
+                .abs()
+                < 1e-5
+        );
+        assert!(
+            (super::hallway_wing_intensity_scale(super::HALLWAY_WING_FINAL + 2)
+                - super::hallway_wing_intensity_scale(super::HALLWAY_WING_FINAL))
+                .abs()
+                < 1e-5
+        );
+    }
+
+    #[test]
     fn pick_chamber_distortion_populates_lateral_ripple() {
-        let d = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 3, 2);
+        let d = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 0xA5A5_5A5A_A5A5_5A5Au64, 3, 2);
         assert!(d.ripple[0] > 1e-5, "ripple amplitude");
         assert!(d.ripple[1] >= HALLWAY_RIPPLE_WAVES * 0.89);
         assert!((d.ripple[2] - HALLWAY_RIPPLE_SPEED).abs() < 1e-5);
         assert!(d.ripple[3] >= 0.55 && d.ripple[3] <= 0.85);
-        let boss = HallwayDistortion::from_pick_chamber(ChamberKind::Ordeal, 3, 2);
+        let boss = HallwayDistortion::from_pick_chamber(ChamberKind::Ordeal, 0xA5A5_5A5A_A5A5_5A5Au64, 3, 2);
         assert!(
             boss.ripple[0] >= HALLWAY_RIPPLE_AMOUNT * 0.39,
             "boss ripple keeps a visibility floor"

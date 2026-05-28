@@ -124,9 +124,9 @@ pub enum HintSegment {
     Sep,
     PlainText(String),
     Bind {
-        keys: Vec<HintKey>,
+        key_groups: Vec<Vec<HintKey>>,
+        within_join: HintKeyJoin,
         label: String,
-        key_join: HintKeyJoin,
     },
 }
 
@@ -143,11 +143,20 @@ impl HintSegment {
         Self::bind_join(label, keys, HintKeyJoin::Slash)
     }
 
-    pub fn bind_join(label: impl Into<String>, keys: Vec<HintKey>, key_join: HintKeyJoin) -> Self {
+    pub fn bind_join(label: impl Into<String>, keys: Vec<HintKey>, within_join: HintKeyJoin) -> Self {
+        Self::bind_groups(label, vec![keys], within_join)
+    }
+
+    /// Slash separates groups; `within_join` joins keys inside each group.
+    pub fn bind_groups(
+        label: impl Into<String>,
+        key_groups: Vec<Vec<HintKey>>,
+        within_join: HintKeyJoin,
+    ) -> Self {
         Self::Bind {
-            keys,
+            key_groups,
+            within_join,
             label: label.into(),
-            key_join,
         }
     }
 }
@@ -172,10 +181,21 @@ impl HintRow {
         mut self,
         label: impl Into<String>,
         keys: Vec<HintKey>,
-        key_join: HintKeyJoin,
+        within_join: HintKeyJoin,
     ) -> Self {
         self.segments
-            .push(HintSegment::bind_join(label, keys, key_join));
+            .push(HintSegment::bind_join(label, keys, within_join));
+        self
+    }
+
+    pub fn bind_groups(
+        mut self,
+        label: impl Into<String>,
+        key_groups: Vec<Vec<HintKey>>,
+        within_join: HintKeyJoin,
+    ) -> Self {
+        self.segments
+            .push(HintSegment::bind_groups(label, key_groups, within_join));
         self
     }
 
@@ -237,9 +257,9 @@ impl HintStyle {
     }
 }
 
-/// Camera controls while item inspect is active (orbit + zoom only; item cycling uses normal focus nav).
+/// Camera + exit controls while item inspect is active (item cycling uses normal focus nav).
 pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
-    if matches!(input_mode, InputMode::Controller) {
+    let camera = if matches!(input_mode, InputMode::Controller) {
         HintRow::new()
             .bind_join(
                 "orbit",
@@ -255,7 +275,6 @@ pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
                 ],
                 HintKeyJoin::Slash,
             )
-            .into_segments()
     } else {
         HintRow::new()
             .bind_join(
@@ -267,40 +286,38 @@ pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
                 HintKeyJoin::Slash,
             )
             .sep()
-            .bind_join(
-                "zoom in",
-                vec![
-                    HintKey::Keyboard("keyboard_shift"),
-                    HintKey::Keyboard("keyboard_arrow_up"),
-                ],
-                HintKeyJoin::Plus,
-            )
-            .sep()
-            .bind_join(
-                "zoom out",
-                vec![
-                    HintKey::Keyboard("keyboard_shift"),
-                    HintKey::Keyboard("keyboard_arrow_down"),
-                ],
-                HintKeyJoin::Plus,
-            )
-            .sep()
-            .bind_join(
+            .bind_groups(
                 "zoom",
-                vec![HintKey::Keyboard("mouse_scroll_vertical")],
-                HintKeyJoin::Tight,
+                vec![
+                    vec![
+                        HintKey::Keyboard("keyboard_shift"),
+                        HintKey::Keyboard("keyboard_arrows_vertical"),
+                    ],
+                    vec![HintKey::Keyboard("mouse_scroll_vertical")],
+                ],
+                HintKeyJoin::Plus,
             )
-            .into_segments()
-    }
+    };
+    camera
+        .sep()
+        .bind(
+            "exit",
+            vec![HintKey::for_input(
+                input_mode,
+                UiAction::Cancel,
+                "keyboard_escape",
+            )],
+        )
+        .into_segments()
 }
 
 enum InlineSegmentRef<'a> {
     Sep,
     PlainText(&'a str),
     Bind {
-        keys: &'a [HintKey],
+        key_groups: &'a [Vec<HintKey>],
+        within_join: HintKeyJoin,
         label: &'a str,
-        key_join: HintKeyJoin,
     },
 }
 
@@ -323,13 +340,13 @@ fn inline_segment_refs<'a>(
             HintSegment::Sep => InlineSegmentRef::Sep,
             HintSegment::PlainText(text) => InlineSegmentRef::PlainText(text),
             HintSegment::Bind {
-                keys,
+                key_groups,
+                within_join,
                 label,
-                key_join,
             } => InlineSegmentRef::Bind {
-                keys: keys.as_slice(),
+                key_groups: key_groups.as_slice(),
+                within_join: *within_join,
                 label: label.as_str(),
-                key_join: *key_join,
             },
         });
     }
@@ -357,20 +374,25 @@ fn measure_inline_bind(
     icon_px: f32,
     gap_after_icon: f32,
     font_px: f32,
-    keys: &[HintKey],
+    key_groups: &[Vec<HintKey>],
+    within_join: HintKeyJoin,
     label: &str,
-    key_join: HintKeyJoin,
 ) -> f32 {
-    let join_text = key_join_text(key_join);
+    let within_text = key_join_text(within_join);
     let mut w = 0.0;
-    for (i, &key) in keys.iter().enumerate() {
-        if i > 0 && !join_text.is_empty() {
-            w += measure_text(font_px, join_text);
+    for (gi, group) in key_groups.iter().enumerate() {
+        if gi > 0 {
+            w += measure_text(font_px, INLINE_SLASH);
         }
-        if resolve_hint_key(glyphs, surface, key).is_some() {
-            w += icon_px;
-            if i + 1 == keys.len() {
-                w += gap_after_icon;
+        for (ki, &key) in group.iter().enumerate() {
+            if ki > 0 && !within_text.is_empty() {
+                w += measure_text(font_px, within_text);
+            }
+            if resolve_hint_key(glyphs, surface, key).is_some() {
+                w += icon_px;
+                if gi + 1 == key_groups.len() && ki + 1 == group.len() {
+                    w += gap_after_icon;
+                }
             }
         }
     }
@@ -390,18 +412,18 @@ fn measure_inline_row(
             InlineSegmentRef::Sep => measure_text(font_px, INLINE_SEP),
             InlineSegmentRef::PlainText(text) => measure_text(font_px, text),
             InlineSegmentRef::Bind {
-                keys,
+                key_groups,
+                within_join,
                 label,
-                key_join,
             } => measure_inline_bind(
                 glyphs,
                 surface,
                 icon_px,
                 gap_after_icon,
                 font_px,
-                keys,
+                key_groups,
+                within_join,
                 label,
-                key_join,
             ),
         }
     })
@@ -452,33 +474,44 @@ fn emit_inline_row(
                 x += w.max(1.0);
             }
             InlineSegmentRef::Bind {
-                keys,
+                key_groups,
+                within_join,
                 label,
-                key_join,
             } => {
-                let join_text = key_join_text(key_join);
-                for (i, &key) in keys.iter().enumerate() {
-                    if i > 0 && !join_text.is_empty() {
-                        let w = measure_text(style.font_px, join_text);
+                let within_text = key_join_text(within_join);
+                for (gi, group) in key_groups.iter().enumerate() {
+                    if gi > 0 {
+                        let w = measure_text(style.font_px, INLINE_SLASH);
                         texts.push(inline_text_label(
                             [x, text_y, w, style.line_h],
-                            join_text,
+                            INLINE_SLASH,
                             style,
                         ));
                         x += w;
                     }
-                    if let Some(source) = resolve_hint_key(glyphs, surface, key) {
-                        icon_cmds.push(ImageQuad {
-                            inst: GpuInstance {
-                                rect: [x, iy, icon_px, icon_px],
-                                color: style.icon_tint,
-                                user: 0,
-                            },
-                            source,
-                        });
-                        x += icon_px;
-                        if i + 1 == keys.len() {
-                            x += gap_after_icon;
+                    for (ki, &key) in group.iter().enumerate() {
+                        if ki > 0 && !within_text.is_empty() {
+                            let w = measure_text(style.font_px, within_text);
+                            texts.push(inline_text_label(
+                                [x, text_y, w, style.line_h],
+                                within_text,
+                                style,
+                            ));
+                            x += w;
+                        }
+                        if let Some(source) = resolve_hint_key(glyphs, surface, key) {
+                            icon_cmds.push(ImageQuad {
+                                inst: GpuInstance {
+                                    rect: [x, iy, icon_px, icon_px],
+                                    color: style.icon_tint,
+                                    user: 0,
+                                },
+                                source,
+                            });
+                            x += icon_px;
+                            if gi + 1 == key_groups.len() && ki + 1 == group.len() {
+                                x += gap_after_icon;
+                            }
                         }
                     }
                 }

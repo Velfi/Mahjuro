@@ -1,8 +1,7 @@
 name: Build offline bake tools
 description: >
   Build mahjuro-bake, mahjuro-bake-decal-atlases, and mahjuro-bake-relics into target/<triple>/<profile>/
-  before the main mahjuro build. build.rs cannot spawn nested cargo (target-dir deadlock).
-  Skips GPU bakes while compiling so stale stamps do not require the binaries yet.
+  for local rebakes. Sets MAHJURO_SKIP_* so stale stamps do not block compiling the tools.
 
 inputs:
   target:

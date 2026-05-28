@@ -1,14 +1,15 @@
-//! Invoked from `build.rs`: hash inputs and run `mahjuro-bake-decal-atlases` when stale.
+//! Invoked from `build.rs`: verify committed showcase decal atlases match inputs.
 
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Instant;
 
-use super::input_hash::{Fnv64, hash_paths, hash_tree, log_bake_timing, read_stamp_line, write_stamp_line};
+use super::input_hash::{
+    assert_committed_bake_current, CommittedBakeCheck, Fnv64, hash_paths, hash_tree, read_stamp_line,
+};
 
 const STAMP_PATH: &str = "assets/textures/tile_sets/.decal_bake_stamp";
+const OUT_DIR: &str = "assets/textures/tile_sets";
 
 /// Baked outputs and the stamp file must not feed back into the input fingerprint.
 fn skip_decal_input(rel: &str) -> bool {
@@ -31,42 +32,31 @@ pub fn emit_rerun_if_changed() {
     }
 }
 
-pub fn maybe_bake_showcase_decal_atlases(repo: &Path, profile_dir: &Path) {
+pub fn assert_showcase_decal_atlases_current(repo: &Path) {
     if skip_bake_env() {
-        println!("cargo:warning=MAHJURO_SKIP_SHOWCASE_DECAL_BAKE: skipping showcase decal atlas bake");
+        println!(
+            "cargo:warning=MAHJURO_SKIP_SHOWCASE_DECAL_BAKE: skipping showcase decal atlas freshness check"
+        );
         return;
     }
 
-    let stamp_file = repo.join(STAMP_PATH);
     let hash = compute_inputs_hash(repo);
-    let stamp_ok = read_stamp_line(&stamp_file).is_some_and(|s| s == hash);
+    let stamp_ok = read_stamp_line(&repo.join(STAMP_PATH)).is_some_and(|s| s == hash);
     let outputs_ok = outputs_present(repo);
 
-    if stamp_ok && outputs_ok {
-        println!("cargo:info=showcase decal atlas bake: inputs unchanged, skipping");
-        return;
-    }
-
-    let start = Instant::now();
-    let exe = super::bake_tool::require_decal_bake_exe(profile_dir);
-
-    let status = Command::new(&exe)
-        .env("MAHJURO_ASSETS", repo.join("assets"))
-        .current_dir(repo)
-        .status();
-    match status {
-        Ok(s) if s.success() => {
-            write_stamp_line(&stamp_file, &hash).unwrap_or_else(|e| {
-                panic!("showcase decal atlas bake: could not write stamp: {e}");
-            });
-            log_bake_timing("showcase decal atlases", start);
-        }
-        Ok(s) => panic!(
-            "showcase decal atlas bake failed (exit {s}); run \
-             `cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases` manually"
-        ),
-        Err(e) => panic!("showcase decal atlas bake failed to run: {e}"),
-    }
+    assert_committed_bake_current(CommittedBakeCheck {
+        label: "showcase decal atlas bake",
+        stamp_path: STAMP_PATH,
+        outputs_dir: OUT_DIR,
+        commit_paths:
+            "assets/textures/tile_sets/*/showcase_decal_atlas.png assets/textures/tile_sets/.decal_bake_stamp",
+        expected_hash: &hash,
+        stamp_ok,
+        outputs_ok,
+        skip_env: "MAHJURO_SKIP_SHOWCASE_DECAL_BAKE",
+        build_tool_cmd: "cargo build -p mahjuro-render --bin mahjuro-bake-decal-atlases",
+        rebake_cmd: "cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases",
+    });
 }
 
 fn skip_bake_env() -> bool {
@@ -111,7 +101,7 @@ fn compute_inputs_hash(repo: &Path) -> String {
 }
 
 fn list_tileset_names(repo: &Path) -> Vec<String> {
-    let root = repo.join("assets/textures/tile_sets");
+    let root = repo.join(OUT_DIR);
     let Ok(read) = fs::read_dir(&root) else {
         return Vec::new();
     };
@@ -126,7 +116,7 @@ fn list_tileset_names(repo: &Path) -> Vec<String> {
 
 fn outputs_present(repo: &Path) -> bool {
     list_tileset_names(repo).iter().all(|name| {
-        repo.join("assets/textures/tile_sets")
+        repo.join(OUT_DIR)
             .join(name)
             .join("showcase_decal_atlas.png")
             .is_file()

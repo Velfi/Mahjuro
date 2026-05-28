@@ -17,7 +17,7 @@ struct ProbeSh {
 
 @group(0) @binding(0) var<uniform> p: ProbeGiFrameUniform;
 @group(0) @binding(1) var<storage, read> probes: array<ProbeSh>;
-@group(0) @binding(2) var depth_tex: texture_depth_2d;
+@group(0) @binding(2) var depth_tex: texture_2d<f32>;
 
 const MAX_PROBES: u32 = 256u;
 

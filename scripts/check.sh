@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #
 # Local pre-push checks — mirrors .github/workflows/ci.yml "build-and-test" job:
-#   1. Build offline bake tools (mahjuro-bake, decal/relic bakers)
-#   2. cargo build --locked
-#   3. cargo test --locked  (xvfb-run on Linux, same as CI)
+#   1. cargo build --locked
+#   2. cargo test --locked  (xvfb-run on Linux, same as CI)
 #
 # Does NOT run fmt, clippy, or Python tests (use --extras). CI does not run those either.
 #
 # Prerequisites: repo assets present (git lfs pull if tests fail on missing files).
+# Committed bake outputs must match their stamps; see build.rs / AGENTS.md to rebake.
 #
 # Usage:
 #   scripts/check.sh [options]
 #
 # Options:
-#   --skip-bake-tools   Skip step 1 (use when bake binaries are already in target/)
+#   --build-bake-tools  Build mahjuro-bake / decal / relic bakers (sets MAHJURO_SKIP_* for that step only)
 #   --target TRIPLE     Pass --target to cargo (default: host triple)
 #   --release           Use release profile (CI uses debug)
 #   --extras            Also run fmt --check, clippy, and Python unit tests
@@ -29,14 +29,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-SKIP_BAKE_TOOLS=0
+BUILD_BAKE_TOOLS=0
 TARGET=""
 PROFILE=debug
 EXTRAS=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --skip-bake-tools) SKIP_BAKE_TOOLS=1 ;;
+        --build-bake-tools) BUILD_BAKE_TOOLS=1 ;;
         --release)         PROFILE=release ;;
         --extras)          EXTRAS=1 ;;
         --target)
@@ -72,8 +72,6 @@ if [[ "$PROFILE" == release ]]; then
     CARGO_ARGS+=(--release)
 fi
 
-# Same as .github/actions/build-bake-tools — keep build.rs from re-running GPU bakes
-# during the main build/test after tools are already in target/.
 export_bake_skip_env() {
     export MAHJURO_SKIP_ROOM_GI_BAKE=1
     export MAHJURO_SKIP_ROOM_SHADOW_BAKE=1
@@ -82,7 +80,7 @@ export_bake_skip_env() {
 }
 
 build_bake_tools() {
-    echo "==> [CI 1/3] Building offline bake tools (target=$TARGET profile=$PROFILE)"
+    echo "==> Building offline bake tools (target=$TARGET profile=$PROFILE)"
     local bake=(cargo build "${CARGO_ARGS[@]}")
     export_bake_skip_env
 
@@ -114,18 +112,14 @@ run_extras() {
     python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 }
 
-export_bake_skip_env
-
-if [[ "$SKIP_BAKE_TOOLS" -eq 0 ]]; then
+if [[ "$BUILD_BAKE_TOOLS" -eq 1 ]]; then
     build_bake_tools
-else
-    echo "==> Skipping bake tools (--skip-bake-tools); build.rs will use existing target/ binaries"
 fi
 
-echo "==> [CI 2/3] cargo build"
+echo "==> [CI 1/2] cargo build"
 cargo build "${CARGO_ARGS[@]}"
 
-echo "==> [CI 3/3] cargo test"
+echo "==> [CI 2/2] cargo test"
 run_tests
 
 if [[ "$EXTRAS" -eq 1 ]]; then
