@@ -231,7 +231,7 @@ impl App {
                         .is_some_and(|r| r.shop_eyeball_prim_index_loaded());
                     if s.debug_start_eyeball_travel() {
                         log::info!(
-                            "Started shop eyeball_travel playback at t={:.3}s (clip_loaded={clip_loaded}, gpu_eyeball_prim_index_loaded={prim_index_loaded})",
+                            "Started shop eyeball_travel playback at t={:.3}s (clip_loaded={clip_loaded}, gpu_clip_loaded={gpu_clip_loaded}, gpu_eyeball_prim_index_loaded={prim_index_loaded})",
                             s.eyeball_travel_playback_sec().unwrap_or(0.0)
                         );
                     } else {
@@ -244,14 +244,8 @@ impl App {
             },
             DebugAction::TogglePauseShopEyeballTravel => match &mut self.scene {
                 Scene::Shop(s) => match s.debug_toggle_pause_eyeball_travel() {
-                    Some(true) => log::info!(
-                        "Paused shop eyeball_travel playback at t={:.3}s",
-                        s.eyeball_travel_playback_sec().unwrap_or(0.0)
-                    ),
-                    Some(false) => log::info!(
-                        "Resumed shop eyeball_travel playback at t={:.3}s",
-                        s.eyeball_travel_playback_sec().unwrap_or(0.0)
-                    ),
+                    Some(true) => log::info!("Paused shop eyeball_travel playback"),
+                    Some(false) => log::info!("Resumed shop eyeball_travel playback"),
                     None => log::warn!(
                         "Pause/Resume Eyeball Travel ignored — clip is not active (start it first)"
                     ),
