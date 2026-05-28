@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{BakeKind, Fnv64, hash_paths, hash_tree};
+use crate::{BakeKind, Fnv64, hash_file_at_rel, hashable_git_files, repo_relative};
 
 pub struct ShowcaseDecal;
 
@@ -27,16 +27,19 @@ impl BakeKind for ShowcaseDecal {
 
     fn compute_inputs_hash(repo: &Path) -> String {
         let mut h = Fnv64::new();
-        h.write(b"showcase-decal-v1\n");
-        for path in Self::stamp_input_paths(repo) {
+        h.write(b"showcase-decal-v2\n");
+        for rel in rerun_if_changed_paths() {
+            let path = repo.join(rel);
             if path.is_file() {
-                hash_paths(&mut h, repo, std::slice::from_ref(&path));
+                hash_file_at_rel(&mut h, rel, &path);
             } else if path.is_dir() {
-                let rel = path
-                    .strip_prefix(repo)
-                    .map(|p| p.to_string_lossy().replace('\\', "/"))
-                    .unwrap_or_default();
-                hash_tree(&mut h, &path, &rel, &skip_decal_input);
+                for file in hashable_git_files(&path) {
+                    let rel = repo_relative(repo, &file);
+                    if skip_decal_input(&rel) {
+                        continue;
+                    }
+                    hash_file_at_rel(&mut h, &rel, &file);
+                }
             }
         }
         for name in list_tileset_names(repo) {
@@ -73,6 +76,8 @@ fn skip_decal_input(rel: &str) -> bool {
     base == ".decal_bake_stamp"
         || base == "showcase_decal_atlas.png"
         || base == ".DS_Store"
+        || base == "Thumbs.db"
+        || base.eq_ignore_ascii_case("desktop.ini")
 }
 
 fn list_tileset_names(repo: &Path) -> Vec<String> {
