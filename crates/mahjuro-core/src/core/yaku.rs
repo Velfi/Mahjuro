@@ -215,7 +215,7 @@ pub struct YakuPreview {
 ///
 /// When `wildcard_result` is `Some`, it supplies a pre-computed decomposition
 /// and (possibly substituted) tile list from relic-aware validation (e.g.
-/// WildWinds, JokerTile). This lets the preview reflect hands that only
+/// WildWinds). This lets the preview reflect hands that only
 /// become valid after relic substitutions.
 pub fn yaku_preview(
     tiles: &[Tile],
@@ -279,7 +279,7 @@ fn yaku_preview_inner(
 /// supplied `round_wind` (1=East, 2=South, 3=West, 4=North). Dragon triplets
 /// always count regardless of `round_wind`.
 ///
-/// `original_tiles` — when wildcard substitution (JokerTile / WildWinds) has
+/// `original_tiles` — when wildcard substitution (WildWinds) has
 /// modified tiles to make valid melds, pass the *pre-substitution* tiles here
 /// so that suit-composition yaku (honitsu, chinitsu, tanyao, honroutou) are
 pub fn detect_yaku_with_wind(
@@ -292,7 +292,7 @@ pub fn detect_yaku_with_wind(
 ) -> Vec<YakuKind> {
     // Suit/rank composition checks use original (pre-substitution) tiles so
     // that wildcard relics can't fabricate yaku the player's real hand
-    // doesn't have (e.g. JokerTile turning a mixed-suit hand into honitsu).
+    // doesn't have (e.g. WildWinds turning a mixed-suit hand into honitsu).
     let composition = original_tiles.unwrap_or(tiles);
     let mut found = Vec::new();
 

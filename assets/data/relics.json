@@ -93,7 +93,7 @@
   {
     "id": "joker_tile",
     "name": "Joker Tile",
-    "description": "Once per round: one tile acts as wild",
+    "description": "Chamber entered: create a permanent copy of a random tile in your starting hand",
     "rarity": "rare",
     "flavor_spans": [
       {

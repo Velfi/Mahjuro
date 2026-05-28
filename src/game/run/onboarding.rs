@@ -101,7 +101,6 @@ impl RunState {
         self.round_score = 0;
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
@@ -119,7 +118,6 @@ impl RunState {
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
@@ -132,6 +130,7 @@ impl RunState {
             &self.tile_packs,
             &self.tile_enhancements,
             overflow,
+            &self.joker_extra_faces,
         );
         self.hand.clear();
         let draw_count = crate::core::ordeal::effective_hand_size(self);

@@ -244,8 +244,6 @@ pub struct RunState {
     pub available_relics: Vec<RelicId>,
     /// Whether the player scored on their last play (for ChainReaction relic).
     pub scored_last_turn: bool,
-    /// Whether JokerTile was used this round.
-    pub joker_used: bool,
     /// Whether the player has scored a FullHand yaku this round (e.g. Eight
     /// Treasures triggers on the first FullHand of the round).
     pub full_hand_played_this_round: bool,
@@ -356,6 +354,9 @@ pub struct RunState {
     /// extra tiles into the wall every round. Append-only.
     #[serde(default)]
     pub tile_packs: Vec<crate::core::tile_pack::TilePackKind>,
+    /// Permanent extra tile faces added by Joker Tile at each chamber start.
+    #[serde(default)]
+    pub joker_extra_faces: Vec<(crate::core::tile::Suit, u8)>,
 
     // ── Skip-reward tags ──────────────────────────────────────────────
     /// Tag assigned to the Small blind this ante.
@@ -807,7 +808,6 @@ impl RunState {
             available_rules: mode.starting_rules.clone(),
             available_relics: default_available_relics(),
             scored_last_turn: false,
-            joker_used: false,
             full_hand_played_this_round: false,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
             consumables: crate::core::consumable::ConsumableInventory {
@@ -849,6 +849,7 @@ impl RunState {
             global_buff_enhancement: None,
             removed_tile_ids: rustc_hash::FxHashSet::default(),
             tile_packs: Vec::new(),
+            joker_extra_faces: Vec::new(),
             small_chamber_tag: None,
             big_chamber_tag: None,
             tag_free_reroll: 0,
@@ -1042,53 +1043,23 @@ impl RunState {
             }
         }
     }
-}
 
-/// All tile faces for substitution attempts.
-const ALL_FACES: [(Suit, u8); 34] = {
-    let mut faces = [(Suit::Manzu, 0u8); 34];
-    let mut i = 0;
-    let suits = [Suit::Manzu, Suit::Souzu, Suit::Pinzu];
-    let mut si = 0;
-    while si < 3 {
-        let mut r = 1u8;
-        while r <= 9 {
-            faces[i] = (suits[si], r);
-            i += 1;
-            r += 1;
+    /// Joker Tile: permanently add a copy of a random starting-hand tile to the wall.
+    pub(crate) fn joker_tile_add_starting_hand_copy(&mut self) {
+        if !self.relics.has(RelicId::JokerTile) || self.hand.is_empty() {
+            return;
         }
-        si += 1;
-    }
-    let mut r = 1u8;
-    while r <= 4 {
-        faces[i] = (Suit::Wind, r);
-        i += 1;
-        r += 1;
-    }
-    r = 1;
-    while r <= 3 {
-        faces[i] = (Suit::Dragon, r);
-        i += 1;
-        r += 1;
-    }
-    faces
-};
+        use rand::RngExt;
 
-/// Try substituting one tile with every possible face (JokerTile).
-fn try_joker_substitution(
-    tiles: &[Tile],
-    rules: &[RuleModifier],
-) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
-    for (idx, _) in tiles.iter().enumerate() {
-        for &(suit, rank) in &ALL_FACES {
-            let mut modified = tiles.to_vec();
-            modified[idx] = Tile::new(suit, rank, modified[idx].id);
-            if let Some(sets) = validate_selection_with_rules(&modified, rules) {
-                return Some((sets, modified));
-            }
-        }
+        let mut rng = rand::rng();
+        let idx = rng.random_range(0..self.hand.len());
+        let (suit, rank) = (self.hand[idx].suit, self.hand[idx].rank);
+        let id = crate::core::deck::joker_extra_tile_id(self.joker_extra_faces.len());
+        self.joker_extra_faces.push((suit, rank));
+        self.wall
+            .inject_into_remaining(Tile::new(suit, rank, id));
+        self.push_relic_activation(RelicId::JokerTile);
     }
-    None
 }
 
 /// Build the set of faces a wild wind tile could usefully become:

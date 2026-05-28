@@ -36,7 +36,6 @@ pub(crate) struct ChamberPlanCheckpoint {
     relic_counters: std::collections::BTreeMap<RelicId, i32>,
     relics: RelicState,
     scored_last_turn: bool,
-    joker_used: bool,
     full_hand_played_this_round: bool,
     played_yaku_this_round: Vec<crate::core::yaku::YakuKind>,
     tiles_discarded: u32,
@@ -62,7 +61,6 @@ impl ChamberPlanCheckpoint {
             relic_counters: run.relic_counters.clone(),
             relics: run.relics.clone(),
             scored_last_turn: run.scored_last_turn,
-            joker_used: run.joker_used,
             full_hand_played_this_round: run.full_hand_played_this_round,
             played_yaku_this_round: run.played_yaku_this_round.clone(),
             tiles_discarded: run.tiles_discarded,
@@ -83,7 +81,6 @@ impl ChamberPlanCheckpoint {
         run.relic_counters = self.relic_counters.clone();
         run.relics = self.relics.clone();
         run.scored_last_turn = self.scored_last_turn;
-        run.joker_used = self.joker_used;
         run.full_hand_played_this_round = self.full_hand_played_this_round;
         run.played_yaku_this_round = self.played_yaku_this_round.clone();
         run.tiles_discarded = self.tiles_discarded;

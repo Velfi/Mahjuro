@@ -78,6 +78,7 @@ impl RunState {
             &self.tile_packs,
             &self.tile_enhancements,
             overflow,
+            &self.joker_extra_faces,
         );
         if self.relics.has(crate::core::relic::RelicId::DoraCrown) {
             self.wall.reveal_extra_dora_indicator();
@@ -107,6 +108,7 @@ impl RunState {
         GameplayCoreState::with_run_mut(self, |core| {
             core.finalize_hand_after_draw();
         });
+        self.joker_tile_add_starting_hand_copy();
 
         // Round-start yen (Charity, Sweepstakes): one `apply_yen_reward` so `bus` is not moved twice.
         let mut round_start_yen = 0i32;
@@ -201,7 +203,6 @@ impl RunState {
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.ordeal.bonus_hand_size = 0;
         self.ordeal.yen_cost_per_play = 0;
@@ -262,7 +263,6 @@ impl RunState {
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.ordeal.bonus_hand_size = 0;
         self.ordeal.yen_cost_per_play = 0;
@@ -294,7 +294,6 @@ impl RunState {
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.joker_used = false;
         // Reset per-round boss-effect state. The ante's `upcoming_ordeal` is
         // unchanged — skipping a Small/Big still leaves the same boss waiting.
         self.ordeal.bonus_hand_size = 0;
