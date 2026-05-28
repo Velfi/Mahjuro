@@ -9,6 +9,7 @@ use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::DrawCtx;
+use crate::scenes::object3d_inspect::ITEM_INSPECT_OVERLAY_EXIT;
 use crate::ui::glyph_source::{GlyphResolver, StickSide, TriggerSide};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::kenney_prompt_paths::keyboard_key;
@@ -118,16 +119,48 @@ fn resolve_hint_key(
 
 // ── Inline layout ───────────────────────────────────────────────────────────
 
+/// One labelled bind: slash between groups, `within_join` inside each group.
+#[derive(Clone, Debug)]
+pub struct HintBind {
+    pub label: String,
+    pub key_groups: Vec<Vec<HintKey>>,
+    pub within_join: HintKeyJoin,
+}
+
+impl HintBind {
+    pub fn alternatives(label: impl Into<String>, keys: Vec<HintKey>) -> Self {
+        Self {
+            label: label.into(),
+            key_groups: vec![keys],
+            within_join: HintKeyJoin::Slash,
+        }
+    }
+
+    pub fn grouped(
+        label: impl Into<String>,
+        key_groups: Vec<Vec<HintKey>>,
+        within_join: HintKeyJoin,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            key_groups,
+            within_join,
+        }
+    }
+}
+
+impl From<HintBind> for HintSegment {
+    fn from(bind: HintBind) -> Self {
+        Self::Bind(bind)
+    }
+}
+
 /// One chunk in a centred inline hint row.
 #[derive(Clone, Debug)]
 pub enum HintSegment {
     Sep,
     PlainText(String),
-    Bind {
-        key_groups: Vec<Vec<HintKey>>,
-        within_join: HintKeyJoin,
-        label: String,
-    },
+    Bind(HintBind),
 }
 
 impl HintSegment {
@@ -140,11 +173,11 @@ impl HintSegment {
     }
 
     pub fn bind(label: impl Into<String>, keys: Vec<HintKey>) -> Self {
-        Self::bind_join(label, keys, HintKeyJoin::Slash)
+        HintBind::alternatives(label, keys).into()
     }
 
     pub fn bind_join(label: impl Into<String>, keys: Vec<HintKey>, within_join: HintKeyJoin) -> Self {
-        Self::bind_groups(label, vec![keys], within_join)
+        HintBind::grouped(label, vec![keys], within_join).into()
     }
 
     /// Slash separates groups; `within_join` joins keys inside each group.
@@ -153,11 +186,7 @@ impl HintSegment {
         key_groups: Vec<Vec<HintKey>>,
         within_join: HintKeyJoin,
     ) -> Self {
-        Self::Bind {
-            key_groups,
-            within_join,
-            label: label.into(),
-        }
+        HintBind::grouped(label, key_groups, within_join).into()
     }
 }
 
@@ -172,31 +201,31 @@ impl HintRow {
         Self::default()
     }
 
-    pub fn bind(mut self, label: impl Into<String>, keys: Vec<HintKey>) -> Self {
-        self.segments.push(HintSegment::bind(label, keys));
+    pub fn push(mut self, segment: HintSegment) -> Self {
+        self.segments.push(segment);
         self
     }
 
+    pub fn bind(self, label: impl Into<String>, keys: Vec<HintKey>) -> Self {
+        self.push(HintSegment::bind(label, keys))
+    }
+
     pub fn bind_join(
-        mut self,
+        self,
         label: impl Into<String>,
         keys: Vec<HintKey>,
         within_join: HintKeyJoin,
     ) -> Self {
-        self.segments
-            .push(HintSegment::bind_join(label, keys, within_join));
-        self
+        self.push(HintSegment::bind_join(label, keys, within_join))
     }
 
     pub fn bind_groups(
-        mut self,
+        self,
         label: impl Into<String>,
         key_groups: Vec<Vec<HintKey>>,
         within_join: HintKeyJoin,
     ) -> Self {
-        self.segments
-            .push(HintSegment::bind_groups(label, key_groups, within_join));
-        self
+        self.push(HintSegment::bind_groups(label, key_groups, within_join))
     }
 
     pub fn sep(mut self) -> Self {
@@ -257,68 +286,117 @@ impl HintStyle {
     }
 }
 
+/// Kenney keyboard sprite for `action` when building inline inspect hints.
+fn inspect_overlay_exit_hint_key(input_mode: InputMode, action: UiAction) -> Option<HintKey> {
+    match (input_mode, action) {
+        (InputMode::Controller, UiAction::Cancel | UiAction::NorthFacePress) => {
+            Some(HintKey::Action(action))
+        }
+        (InputMode::Controller, UiAction::Pause) => None,
+        (InputMode::Keyboard | InputMode::Cursor, UiAction::Cancel) => {
+            Some(HintKey::Keyboard("keyboard_backspace"))
+        }
+        (InputMode::Keyboard | InputMode::Cursor, UiAction::Pause) => {
+            Some(HintKey::Keyboard("keyboard_escape"))
+        }
+        (InputMode::Keyboard | InputMode::Cursor, UiAction::NorthFacePress) => {
+            Some(HintKey::Keyboard("keyboard_e"))
+        }
+        _ => None,
+    }
+}
+
+fn inspect_orbit_bind(input_mode: InputMode) -> HintBind {
+    if matches!(input_mode, InputMode::Controller) {
+        HintBind::grouped(
+            "orbit",
+            vec![vec![HintKey::Stick(StickSide::Right)]],
+            HintKeyJoin::Tight,
+        )
+    } else {
+        HintBind::alternatives(
+            "orbit",
+            vec![
+                HintKey::Keyboard("keyboard_arrows"),
+                HintKey::Keyboard("mouse_move"),
+            ],
+        )
+    }
+}
+
+fn inspect_zoom_bind(input_mode: InputMode) -> HintBind {
+    if matches!(input_mode, InputMode::Controller) {
+        HintBind::alternatives(
+            "zoom",
+            vec![
+                HintKey::Trigger(TriggerSide::Left),
+                HintKey::Trigger(TriggerSide::Right),
+            ],
+        )
+    } else {
+        HintBind::grouped(
+            "zoom",
+            vec![
+                vec![
+                    HintKey::Keyboard("keyboard_shift"),
+                    HintKey::Keyboard("keyboard_arrows_vertical"),
+                ],
+                vec![HintKey::Keyboard("mouse_scroll_vertical")],
+            ],
+            HintKeyJoin::Plus,
+        )
+    }
+}
+
+fn inspect_exit_bind(input_mode: InputMode) -> HintBind {
+    let keys: Vec<HintKey> = ITEM_INSPECT_OVERLAY_EXIT
+        .iter()
+        .filter_map(|&action| inspect_overlay_exit_hint_key(input_mode, action))
+        .collect();
+    HintBind::alternatives("exit", keys)
+}
+
 /// Camera + exit controls while item inspect is active (item cycling uses normal focus nav).
 pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
-    let camera = if matches!(input_mode, InputMode::Controller) {
-        HintRow::new()
-            .bind_join(
-                "orbit",
-                vec![HintKey::Stick(StickSide::Right)],
-                HintKeyJoin::Tight,
-            )
-            .sep()
-            .bind_join(
-                "zoom",
-                vec![
-                    HintKey::Trigger(TriggerSide::Left),
-                    HintKey::Trigger(TriggerSide::Right),
-                ],
-                HintKeyJoin::Slash,
-            )
-    } else {
-        HintRow::new()
-            .bind_join(
-                "orbit",
-                vec![
-                    HintKey::Keyboard("keyboard_arrows"),
-                    HintKey::Keyboard("mouse_move"),
-                ],
-                HintKeyJoin::Slash,
-            )
-            .sep()
-            .bind_groups(
-                "zoom",
-                vec![
-                    vec![
-                        HintKey::Keyboard("keyboard_shift"),
-                        HintKey::Keyboard("keyboard_arrows_vertical"),
-                    ],
-                    vec![HintKey::Keyboard("mouse_scroll_vertical")],
-                ],
-                HintKeyJoin::Plus,
-            )
-    };
-    camera
+    HintRow::new()
+        .push(inspect_orbit_bind(input_mode).into())
         .sep()
-        .bind(
-            "exit",
-            vec![HintKey::for_input(
-                input_mode,
-                UiAction::Cancel,
-                "keyboard_escape",
-            )],
-        )
+        .push(inspect_zoom_bind(input_mode).into())
+        .sep()
+        .push(inspect_exit_bind(input_mode).into())
         .into_segments()
 }
 
 enum InlineSegmentRef<'a> {
     Sep,
     PlainText(&'a str),
-    Bind {
-        key_groups: &'a [Vec<HintKey>],
-        within_join: HintKeyJoin,
-        label: &'a str,
-    },
+    Bind(&'a HintBind),
+}
+
+enum InlineBindPart {
+    GroupSep,
+    WithinSep,
+    Key(HintKey, bool),
+}
+
+fn for_each_inline_bind_part(
+    bind: &HintBind,
+    mut f: impl FnMut(InlineBindPart),
+) {
+    let within_text = key_join_text(bind.within_join);
+    for (gi, group) in bind.key_groups.iter().enumerate() {
+        if gi > 0 {
+            f(InlineBindPart::GroupSep);
+        }
+        for (ki, &key) in group.iter().enumerate() {
+            if ki > 0 && !within_text.is_empty() {
+                f(InlineBindPart::WithinSep);
+            }
+            let last_icon =
+                gi + 1 == bind.key_groups.len() && ki + 1 == group.len();
+            f(InlineBindPart::Key(key, last_icon));
+        }
+    }
 }
 
 fn key_join_text(join: HintKeyJoin) -> &'static str {
@@ -339,15 +417,7 @@ fn inline_segment_refs<'a>(
         scratch.push(match seg {
             HintSegment::Sep => InlineSegmentRef::Sep,
             HintSegment::PlainText(text) => InlineSegmentRef::PlainText(text),
-            HintSegment::Bind {
-                key_groups,
-                within_join,
-                label,
-            } => InlineSegmentRef::Bind {
-                key_groups: key_groups.as_slice(),
-                within_join: *within_join,
-                label: label.as_str(),
-            },
+            HintSegment::Bind(bind) => InlineSegmentRef::Bind(bind),
         });
     }
     scratch.as_slice()
@@ -374,29 +444,23 @@ fn measure_inline_bind(
     icon_px: f32,
     gap_after_icon: f32,
     font_px: f32,
-    key_groups: &[Vec<HintKey>],
-    within_join: HintKeyJoin,
-    label: &str,
+    bind: &HintBind,
 ) -> f32 {
-    let within_text = key_join_text(within_join);
+    let within_text = key_join_text(bind.within_join);
     let mut w = 0.0;
-    for (gi, group) in key_groups.iter().enumerate() {
-        if gi > 0 {
-            w += measure_text(font_px, INLINE_SLASH);
-        }
-        for (ki, &key) in group.iter().enumerate() {
-            if ki > 0 && !within_text.is_empty() {
-                w += measure_text(font_px, within_text);
-            }
+    for_each_inline_bind_part(bind, |part| match part {
+        InlineBindPart::GroupSep => w += measure_text(font_px, INLINE_SLASH),
+        InlineBindPart::WithinSep => w += measure_text(font_px, within_text),
+        InlineBindPart::Key(key, last_icon) => {
             if resolve_hint_key(glyphs, surface, key).is_some() {
                 w += icon_px;
-                if gi + 1 == key_groups.len() && ki + 1 == group.len() {
+                if last_icon {
                     w += gap_after_icon;
                 }
             }
         }
-    }
-    w + measure_text(font_px, &bind_suffix(label))
+    });
+    w + measure_text(font_px, &bind_suffix(&bind.label))
 }
 
 fn measure_inline_row(
@@ -411,20 +475,9 @@ fn measure_inline_row(
         acc + match *seg {
             InlineSegmentRef::Sep => measure_text(font_px, INLINE_SEP),
             InlineSegmentRef::PlainText(text) => measure_text(font_px, text),
-            InlineSegmentRef::Bind {
-                key_groups,
-                within_join,
-                label,
-            } => measure_inline_bind(
-                glyphs,
-                surface,
-                icon_px,
-                gap_after_icon,
-                font_px,
-                key_groups,
-                within_join,
-                label,
-            ),
+            InlineSegmentRef::Bind(bind) => {
+                measure_inline_bind(glyphs, surface, icon_px, gap_after_icon, font_px, bind)
+            }
         }
     })
 }
@@ -473,14 +526,10 @@ fn emit_inline_row(
                 ));
                 x += w.max(1.0);
             }
-            InlineSegmentRef::Bind {
-                key_groups,
-                within_join,
-                label,
-            } => {
-                let within_text = key_join_text(within_join);
-                for (gi, group) in key_groups.iter().enumerate() {
-                    if gi > 0 {
+            InlineSegmentRef::Bind(bind) => {
+                let within_text = key_join_text(bind.within_join);
+                for_each_inline_bind_part(bind, |part| match part {
+                    InlineBindPart::GroupSep => {
                         let w = measure_text(style.font_px, INLINE_SLASH);
                         texts.push(inline_text_label(
                             [x, text_y, w, style.line_h],
@@ -489,16 +538,16 @@ fn emit_inline_row(
                         ));
                         x += w;
                     }
-                    for (ki, &key) in group.iter().enumerate() {
-                        if ki > 0 && !within_text.is_empty() {
-                            let w = measure_text(style.font_px, within_text);
-                            texts.push(inline_text_label(
-                                [x, text_y, w, style.line_h],
-                                within_text,
-                                style,
-                            ));
-                            x += w;
-                        }
+                    InlineBindPart::WithinSep => {
+                        let w = measure_text(style.font_px, within_text);
+                        texts.push(inline_text_label(
+                            [x, text_y, w, style.line_h],
+                            within_text,
+                            style,
+                        ));
+                        x += w;
+                    }
+                    InlineBindPart::Key(key, last_icon) => {
                         if let Some(source) = resolve_hint_key(glyphs, surface, key) {
                             icon_cmds.push(ImageQuad {
                                 inst: GpuInstance {
@@ -509,13 +558,13 @@ fn emit_inline_row(
                                 source,
                             });
                             x += icon_px;
-                            if gi + 1 == key_groups.len() && ki + 1 == group.len() {
+                            if last_icon {
                                 x += gap_after_icon;
                             }
                         }
                     }
-                }
-                let suffix = bind_suffix(label);
+                });
+                let suffix = bind_suffix(&bind.label);
                 let w = measure_text(style.font_px, &suffix);
                 texts.push(inline_text_label(
                     [x, text_y, w.max(1.0), style.line_h],
