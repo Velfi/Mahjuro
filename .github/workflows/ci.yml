@@ -186,13 +186,21 @@ jobs:
       - name: Prepare artifact (Unix)
         if: matrix.name != 'Windows'
         run: |
+          set -euo pipefail
+          # Linux compile step adds 8G swap; drop it before staging (~2.7G assets copy).
+          if [ -f /home/runner/cargo_extra.swap ]; then
+            sudo swapoff /home/runner/cargo_extra.swap
+            sudo rm -f /home/runner/cargo_extra.swap
+          fi
           mkdir -p staging
           if [ "${{ matrix.name }}" = "macOS" ]; then
             cp target/debug-universal-mahjuro staging/mahjuro
           else
             cp target/${{ matrix.target }}/debug/${{ matrix.binary }} staging/
           fi
-          rsync -a --exclude='*.blend' --exclude='*.blend1' assets/ staging/assets/
+          # Hard-link assets so staging does not duplicate LFS content on disk.
+          cp -al assets staging/assets
+          find staging/assets -type f \( -name '*.blend' -o -name '*.blend1' \) -delete
 
       - name: Prepare artifact (Windows)
         if: matrix.name == 'Windows'
