@@ -2070,6 +2070,9 @@ dependencies = [
 [[package]]
 name = "mahjuro-bake-stamp"
 version = "0.5.0-21"
+dependencies = [
+ "ignore",
+]
 
 [[package]]
 name = "mahjuro-core"
