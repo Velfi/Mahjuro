@@ -40,7 +40,7 @@ impl BakeKind for RoomGi {
         let mut h = Fnv64::new();
         h.write(format!("mgi-v{MGI_FORMAT_VERSION}\n").as_bytes());
         h.write(format!("bake-{BAKE_WIDTH}x{BAKE_HEIGHT}\n").as_bytes());
-        hash_paths(&mut h, &Self::stamp_input_paths(repo));
+        hash_paths(&mut h, repo, &Self::stamp_input_paths(repo));
         h.finish_hex()
     }
 

@@ -70,10 +70,19 @@ impl Fnv64 {
     }
 }
 
-/// Mix every listed path into `h`. Missing paths contribute only the path key.
-pub fn hash_paths(h: &mut Fnv64, paths: &[PathBuf]) {
+fn write_rel_path_key(h: &mut Fnv64, path: &Path) {
+    h.write(path.to_string_lossy().replace('\\', "/").as_bytes());
+    h.write(b"\0");
+}
+
+/// Mix every listed path into `h` with repo-relative keys.
+/// Missing paths contribute only the path key.
+pub fn hash_paths(h: &mut Fnv64, repo: &Path, paths: &[PathBuf]) {
     for path in paths {
-        h.write_path_key(path);
+        let rel = path
+            .strip_prefix(repo)
+            .unwrap_or(path.as_path());
+        write_rel_path_key(h, rel);
         if path.is_file()
             && let Ok(bytes) = fs::read(path)
         {
@@ -94,7 +103,8 @@ pub fn hash_tree(
         return;
     }
     if root.is_file() {
-        h.write_path_key(root);
+        h.write(rel_prefix.as_bytes());
+        h.write(b"\0");
         if let Ok(bytes) = fs::read(root) {
             h.write(&bytes);
         }
