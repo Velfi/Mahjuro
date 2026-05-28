@@ -247,7 +247,8 @@ pub struct RunStats {
     pub ordeal_attempts_by_wing: std::collections::BTreeMap<u32, u32>,
     /// Count of [`GameEvent::YakuScored`] per committed scoring action (one play may award several).
     pub yaku_scored: std::collections::BTreeMap<&'static str, u32>,
-    /// Zodiac **consumes** from the dish during blinds (not shop purchases; see `zodiacs_picked`).
+    /// Zodiac applications: dish consumes during blinds plus shop purchases
+    /// (shop applies immediately).
     pub zodiacs_used: std::collections::BTreeMap<&'static str, u32>,
     /// Talisman uses from dish + any [`GameEvent::TalismanUsed`] seen on the scoring bus.
     pub talismans_used: std::collections::BTreeMap<&'static str, u32>,

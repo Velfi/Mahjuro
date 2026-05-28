@@ -4,3 +4,6 @@ version.workspace = true
 edition.workspace = true
 description = "Shared input-hash + .inputs_stamp helpers for committed bake outputs (used by mahjuro's build.rs and the offline bake binaries so the build-time freshness check and the runtime rebake agree on the hash)."
 publish.workspace = true
+
+[dependencies]
+ignore.workspace = true

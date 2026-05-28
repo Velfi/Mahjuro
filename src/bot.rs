@@ -2601,6 +2601,10 @@ fn visit_shop(
                 let new_level = run.yaku_levels.level_up_for_zodiac(zodiac);
                 stats.yen_spent += price;
                 *stats.zodiacs_picked.entry(zodiac.name()).or_insert(0) += 1;
+                // Bot shop flow applies zodiac effects immediately on purchase
+                // (same as game shop command path), so treat that as a "use"
+                // for telemetry parity with inventory consumes.
+                *stats.zodiacs_used.entry(zodiac.name()).or_insert(0) += 1;
                 bot_log!(
                     log,
                     "    shop: bought zodiac {:?} for {} (marginal value {}, level {}, yen now {})",
