@@ -76,17 +76,19 @@ fi
 # when .changes/ has no fragments). Stages deletion of any fragment files.
 python3 scripts/compile_changelog.py "$VERSION"
 
-# Bump version in the [package] section of Cargo.toml using a Python helper
-# (avoids touching dependency version strings).
+# Bump version in [workspace.package] (member crates use version.workspace = true).
 python3 - "$VERSION" <<'PY'
 import re, sys, pathlib
 new_version = sys.argv[1]
 path = pathlib.Path("Cargo.toml")
 text = path.read_text()
-pattern = re.compile(r'(\[package\][^\[]*?\nversion\s*=\s*")([^"]+)(")', re.DOTALL)
+pattern = re.compile(
+    r'(\[workspace\.package\][^\[]*?\nversion\s*=\s*")([^"]+)(")',
+    re.DOTALL,
+)
 new_text, n = pattern.subn(rf'\g<1>{new_version}\g<3>', text, count=1)
 if n != 1:
-    sys.exit("error: could not find [package] version in Cargo.toml")
+    sys.exit("error: could not find [workspace.package] version in Cargo.toml")
 path.write_text(new_text)
 PY
 
