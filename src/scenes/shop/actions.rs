@@ -230,7 +230,7 @@ impl ShopScene {
             &talisman_items,
             &pack_items,
         ));
-        Self {
+        let mut scene = Self {
             mode,
             items,
             zodiac_items,
@@ -261,7 +261,14 @@ impl ShopScene {
             gltf_anims: crate::render::room_gltf_anim::GltfAnimPlaybackSet::default(),
             departing_stock: Vec::new(),
             restock_enter_at: None,
-        }
+        };
+        scene.start_idle_gltf_anims();
+        scene
+    }
+
+    fn start_idle_gltf_anims(&mut self) {
+        const CLIP: &str = "ArmSwing";
+        let _ = self.play_gltf_anim(CLIP, true);
     }
 
     fn shop_gltf_clip_duration(clip_name: &str) -> Option<f32> {

@@ -111,7 +111,7 @@ pub struct ShopScene {
     /// LMB-drag turntable on the storeroom camera (radians, applied around [`CameraParams::target`]).
     storeroom_orbit_yaw: f32,
     storeroom_orbit_pitch: f32,
-    /// glTF node TRS clip playbacks for embedded room meshes (e.g. `eyeball_travel`).
+    /// glTF node TRS clip playbacks for embedded room meshes (e.g. `ArmSwing`, `eyeball_travel`).
     gltf_anims: crate::render::room_gltf_anim::GltfAnimPlaybackSet,
     /// For-sale meshes still falling after restock; culled once off-screen.
     departing_stock: Vec<restock_exit::ShopDepartingBatch>,
