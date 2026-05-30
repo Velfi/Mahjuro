@@ -413,6 +413,17 @@ fn update_profile_cache(index: usize, progress: &PlayerProgress) {
     }
 }
 
+/// Drop the in-memory snapshot for one slot so the next [`load_profile`] reads disk.
+///
+/// Call after deleting a save file or before switching profiles so a slot that
+/// was cleared on disk is not resurrected from a stale cache entry.
+pub fn clear_profile_cache_slot(index: usize) {
+    let idx = index.min(MAX_PROFILES - 1);
+    if let Ok(mut guard) = profile_cache().lock() {
+        guard[idx] = None;
+    }
+}
+
 /// Background-thread profile saver. Pairs with `App::mark_profile_dirty`
 /// + a frame-end flush so per-event saves (relic activation, boss
 ///   bookkeeping, yaku tally, …) don't stall the frame on slow disks
@@ -692,6 +703,7 @@ pub fn delete_profile(index: usize) {
         log::warn!("delete_profile: {e}");
     }
     delete_saved_run(index);
+    clear_profile_cache_slot(index);
 }
 
 #[cfg(test)]

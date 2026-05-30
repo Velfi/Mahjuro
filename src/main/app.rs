@@ -302,6 +302,7 @@ impl crate::App {
         let _ = crate::persistence::save_profile(self.active_profile, &self.progress);
         self.persist_run_if_in_progress();
         self.active_profile = new_index;
+        crate::persistence::clear_profile_cache_slot(new_index);
         self.progress = crate::persistence::load_profile(new_index);
         // Resume the new profile's saved run if it has one — otherwise a
         // fresh demo run, exactly like first-launch behavior.

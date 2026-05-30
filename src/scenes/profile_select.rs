@@ -246,17 +246,25 @@ impl ProfileSelectScene {
     }
 }
 
+fn profile_slot_deletable(index: usize) -> bool {
+    persistence::profile_exists(index) || persistence::has_saved_run(index)
+}
+
 impl SceneBehavior for ProfileSelectScene {
     fn face_button_bindings(
         &self,
         _ctx: crate::ui::input::FaceBindingCtx,
     ) -> crate::ui::input::FaceButtonBindings {
-        if self.confirm_delete != ConfirmDelete::None {
-            return crate::ui::input::FaceButtonBindings::default();
-        }
-        crate::ui::input::FaceButtonBindings {
-            west_press: Some(UiAction::Delete),
-            ..Default::default()
+        match self.confirm_delete {
+            ConfirmDelete::None => crate::ui::input::FaceButtonBindings {
+                west_press: Some(UiAction::Delete),
+                ..Default::default()
+            },
+            // Same face button that opened the dialog confirms deletion.
+            ConfirmDelete::Pending(_) => crate::ui::input::FaceButtonBindings {
+                west_press: Some(UiAction::Confirm),
+                ..Default::default()
+            },
         }
     }
 
@@ -265,12 +273,14 @@ impl SceneBehavior for ProfileSelectScene {
         if let ConfirmDelete::Pending(del_idx) = self.confirm_delete {
             for a in ctx.actions {
                 match a {
-                    UiAction::Confirm => {
+                    UiAction::Confirm | UiAction::Delete => {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                         *ctx.delete_profile = Some(del_idx);
                         self.confirm_delete = ConfirmDelete::None;
                         return None;
                     }
-                    UiAction::Cancel | UiAction::Pause | UiAction::Delete => {
+                    UiAction::Cancel | UiAction::Pause => {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                         self.confirm_delete = ConfirmDelete::None;
                         return None;
                     }
@@ -304,7 +314,8 @@ impl SceneBehavior for ProfileSelectScene {
             }
             if matches!(a, UiAction::Delete) {
                 let idx = self.cursor();
-                if persistence::profile_exists(idx) {
+                if profile_slot_deletable(idx) {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::TileClick));
                     self.confirm_delete = ConfirmDelete::Pending(idx);
                     return None;
                 }
@@ -556,12 +567,13 @@ impl SceneBehavior for ProfileSelectScene {
 
         }
 
-        // Scene-specific action hint (delete is not a universal face-button mapping).
-        if self.confirm_delete == ConfirmDelete::None {
-            let hint_style = HintStyle::profile_footer(h);
-            let hint_h = hint_style.line_h;
-            let hint_y = h - hint_h - h * 0.02;
-            let bottom_footer = HintRow::new()
+        // Scene-specific action hints (delete is not a universal face-button mapping).
+        let hint_style = HintStyle::profile_footer(h);
+        let hint_h = hint_style.line_h;
+        let hint_y = h - hint_h - h * 0.02;
+        let bottom_rect = [0.0, hint_y, w, hint_h];
+        let bottom_footer = match self.confirm_delete {
+            ConfirmDelete::None => HintRow::new()
                 .bind(
                     "delete",
                     vec![HintKey::for_input(
@@ -570,16 +582,33 @@ impl SceneBehavior for ProfileSelectScene {
                         "keyboard_x",
                     )],
                 )
-                .into_segments();
-            let bottom_rect = [0.0, hint_y, w, hint_h];
-            push_inline_hint_rows(
-                &mut frame,
-                &ctx,
-                &[bottom_rect],
-                &[bottom_footer],
-                hint_style,
-            );
-        }
+                .into_segments(),
+            ConfirmDelete::Pending(_) => HintRow::new()
+                .bind(
+                    "confirm delete",
+                    vec![
+                        HintKey::for_input(ctx.input_mode, UiAction::Confirm, "keyboard_return"),
+                        HintKey::for_input(ctx.input_mode, UiAction::Delete, "keyboard_x"),
+                    ],
+                )
+                .sep()
+                .bind(
+                    "back",
+                    vec![HintKey::for_input(
+                        ctx.input_mode,
+                        UiAction::Cancel,
+                        "keyboard_escape",
+                    )],
+                )
+                .into_segments(),
+        };
+        push_inline_hint_rows(
+            &mut frame,
+            &ctx,
+            &[bottom_rect],
+            &[bottom_footer],
+            hint_style,
+        );
 
         frame.buttons = buttons;
         frame.window_title = "Mahjuro — Select Profile".into();
