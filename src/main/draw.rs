@@ -673,7 +673,8 @@ impl App {
                 let pad = (h * 0.012 * scale).max(6.0);
                 let min_outer_h = ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
                 let line_h = (min_outer_h * 0.52).max(8.0);
-                let max_tooltip_w = (260.0 * scale).min(w * 0.32).min(400.0);
+                let max_tooltip_w =
+                    crate::render::theme::metrics::tooltip_max_panel_px(w, h) * 0.72;
                 let max_inner_w = (max_tooltip_w - 2.0 * pad).max(40.0);
                 let preferred_inner_w = crate::ui::colored_keywords::colored_paragraph_preferred_width(
                     label.as_ref(),
@@ -711,12 +712,14 @@ impl App {
                 }
                 // Same brass + midnight frame as [`crate::ui::tooltip`] / focus inspect panels.
                 let mut tip_quads: Vec<GpuInstance> = Vec::with_capacity(2);
+                let border = crate::render::theme::metrics::tooltip_border_px(w, h);
                 crate::ui::tooltip::push_tooltip_frame_quads(
                     &mut tip_quads,
                     tip_x,
                     tip_y,
                     tooltip_w,
                     tooltip_h,
+                    border,
                 );
                 frame.overlay_quads(tip_quads);
                 let text_top = tip_y + pad + ((tooltip_h - 2.0 * pad - content_h) * 0.5).max(0.0);

@@ -7,7 +7,7 @@ use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
 use crate::ui::colored_keywords;
-use crate::ui::tooltip::{self, push_tooltip_frame_quads};
+use crate::ui::tooltip::push_tooltip_frame_quads;
 
 /// Rough line count for relic / staircase flavor layout (matches bottom-aligned raster band).
 pub fn estimated_flavor_line_count(
@@ -63,13 +63,16 @@ pub fn push_focus_tooltip_panel_2d(
         return;
     }
 
-    let pad = 14.0_f32.max(10.0);
-    let border = tooltip::FRAME_BORDER_PX;
     let margin = window_w * 0.02;
-    let scale = crate::render::theme::metrics::scene_scale(window_w, window_h);
-    let max_panel_w = (300.0 * scale).min(window_w * 0.32).min(440.0);
+    let pad = 14.0_f32.max(10.0);
+    // Inset from the walnut fill edge to copy; independent of the brass rim draw width.
+    const FILL_INSET_PX: f32 = 2.0;
+    let rim =
+        crate::render::theme::metrics::tooltip_border_px(window_w, window_h);
+    let max_panel_w =
+        crate::render::theme::metrics::tooltip_max_panel_px(window_w, window_h);
     let min_inner_w = 80.0_f32;
-    let max_inner_w = (max_panel_w - pad * 2.0 - border * 2.0).max(min_inner_w);
+    let max_inner_w = (max_panel_w - pad * 2.0 - FILL_INSET_PX * 2.0).max(min_inner_w);
 
     let heading_px = typography::size(typography::H28, window_h);
     let body_px = typography::size(typography::H36, window_h);
@@ -111,7 +114,7 @@ pub fn push_focus_tooltip_panel_2d(
         ));
     }
     inner_w = inner_w.clamp(min_inner_w, max_inner_w);
-    let panel_w = inner_w + pad * 2.0 + border * 2.0;
+    let panel_w = inner_w + pad * 2.0 + FILL_INSET_PX * 2.0;
 
     let block_height = |text: &str, col: [f32; 4], tier: Tier| -> f32 {
         let line_h = match tier {
@@ -121,7 +124,7 @@ pub fn push_focus_tooltip_panel_2d(
         colored_keywords::colored_multiline_text_height(text, inner_w, line_h, col)
     };
 
-    let mut total_h = pad * 2.0 + border * 2.0;
+    let mut total_h = pad * 2.0 + FILL_INSET_PX * 2.0;
     for (i, (text, col, tier)) in blocks.iter().enumerate() {
         total_h += block_height(text, *col, *tier);
         if i + 1 < blocks.len() {
@@ -162,10 +165,10 @@ pub fn push_focus_tooltip_panel_2d(
         }
     }
 
-    push_tooltip_frame_quads(quads, left, top, panel_w, total_h);
+    push_tooltip_frame_quads(quads, left, top, panel_w, total_h, rim);
 
-    let text_left = left + pad + border;
-    let mut y = top + pad + border;
+    let text_left = left + pad + FILL_INSET_PX;
+    let mut y = top + pad + FILL_INSET_PX;
 
     for (i, (text, col, tier)) in blocks.iter().enumerate() {
         let line_h = match tier {

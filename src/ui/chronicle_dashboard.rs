@@ -3,7 +3,7 @@
 use crate::core::progression::{PlayerProgress, RunRecord};
 use crate::core::yaku::YakuKind;
 use crate::render::draw_cmd::{ImageQuad, ImageQuadSource};
-use crate::render::theme::{color, typography};
+use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
 use crate::scenes::archive_career;
 use crate::ui::chart_primitives::{
@@ -12,8 +12,6 @@ use crate::ui::chart_primitives::{
 };
 use crate::ui::chronicle_charts;
 use crate::ui::clip::intersect_rect;
-use crate::ui::tooltip::FRAME_BORDER_PX;
-
 const LEFT_PANE_FRAC: f32 = 0.35;
 const KPI_COUNT: usize = 4;
 /// Focus-ring stroke; content and [`ChroniclePaneLayout`] insets sit inside this border.
@@ -2228,6 +2226,8 @@ pub fn push_chronicle_dashboard(
 
     push_ledger_sheet(
         out_quads,
+        w,
+        h,
         panes.inner_x,
         panes.inner_y,
         panes.inner_w,
@@ -2323,12 +2323,14 @@ fn push_pane_focus_ring(out: &mut Vec<GpuInstance>, rect: [f32; 4], active: bool
 
 fn push_ledger_sheet(
     out: &mut Vec<GpuInstance>,
+    window_w: f32,
+    window_h: f32,
     inner_x: f32,
     inner_y: f32,
     inner_w: f32,
     inner_h: f32,
 ) {
-    let b = FRAME_BORDER_PX;
+    let b = metrics::tooltip_border_px(window_w, window_h);
     chart_primitives::push_quad(
         out,
         [
