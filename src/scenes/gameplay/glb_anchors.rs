@@ -497,11 +497,6 @@ mod tests {
                 center[0].is_finite() && center[1].is_finite() && center[2].is_finite(),
                 "slot {i} finite"
             );
-            assert!(
-                center[0] >= -w && center[0] <= w * 2.0 && center[1] >= -h && center[1] <= h * 2.0,
-                "slot {i} on screen-ish: {:?}",
-                center
-            );
             assert!(slot_w > 0.0, "slot {i} width");
             assert!(
                 rot.iter().all(|r| r.is_finite()),
@@ -510,6 +505,11 @@ mod tests {
             let world =
                 layout_anchor_to_world(w, h, Some(&cam), center[0], center[1], center[2], false);
             assert!(world.z.is_finite(), "slot {i} finite world z: {world:?}");
+            let (sx, sy) = cam.project_world_to_screen(w, h, world);
+            assert!(
+                sx >= -w && sx <= w * 2.0 && sy >= -h && sy <= h * 2.0,
+                "slot {i} on screen-ish: projected ({sx}, {sy}) anchor {center:?}",
+            );
         }
         let (first, _, _) = anchors.hand_world_slots.first().unwrap();
         let (last, _, _) = anchors.hand_world_slots.last().unwrap();
