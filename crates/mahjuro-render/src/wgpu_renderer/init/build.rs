@@ -2586,16 +2586,24 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         mips,
                         &tile_glb_default_emissive_view,
                     );
+                    let mut pbr_uniform = GltfPbrUniform::from_loaded(
+                        prim.metallic_factor,
+                        prim.roughness_factor,
+                        prim.emissive_factor,
+                        prim.alpha_mode,
+                        prim.alpha_cutoff,
+                    );
+                    if env_prim
+                        .gltf_node_name
+                        .as_deref()
+                        .is_some_and(crate::main_menu_glb::is_main_menu_rainbow_emissive_env_node)
+                    {
+                        pbr_uniform.emissive_factor[3] = 1.0;
+                    }
                     let pbr_uniform_buffer =
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("main_menu-pbr-{i}")),
-                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
-                                prim.metallic_factor,
-                                prim.roughness_factor,
-                                prim.emissive_factor,
-                                prim.alpha_mode,
-                                prim.alpha_cutoff,
-                            )),
+                            contents: bytemuck::bytes_of(&pbr_uniform),
                             usage: wgpu::BufferUsages::UNIFORM,
                         });
                     let sampler =

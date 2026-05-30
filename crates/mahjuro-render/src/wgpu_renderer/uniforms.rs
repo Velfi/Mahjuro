@@ -8,7 +8,8 @@ pub(crate) struct Globals {
     pub transition_progress: f32,
     pub quality_level: f32,
     pub moon_phase: f32,
-    /// `[0]` cascade quality; `[1]` main-menu June pride rainbow (starfield + moon tag).
+    /// `[0]` cascade quality (`shooting_star_cascade.wgsl`); `[1]` main-menu pride
+    /// rainbow (`starfield.wgsl` reads `_globals_pad.x`); `[2]` unused.
     pub _globals_pad: [f32; 3],
 }
 
