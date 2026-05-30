@@ -4,7 +4,7 @@ use crate::ui::placement::Placement;
 pub struct TileSelectPositions {
     /// Top-left of the title / material copy column (normalized window fractions).
     pub left_panel: Placement,
-    /// Top-left of the focusable button column (Play, Back, stake row).
+    /// Top-left of the focusable button column (Play, Back, season row).
     pub button_menu: Placement,
     /// Top-left corner of the tile preview grid.
     pub preview_corner_tl: Placement,

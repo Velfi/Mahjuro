@@ -393,11 +393,20 @@ impl PacksState {
 fn verify_manifest_version(manifest: &PackManifest) {
     let expected = env!("CARGO_PKG_VERSION");
     if manifest.game_version != expected {
-        log::warn!(
-            "pack_manifest game_version ({}) != binary {} — install may be mismatched",
-            manifest.game_version,
-            expected
-        );
+        if manifest.game_version == "0.0.0" {
+            // Dev packs may intentionally ship a placeholder version.
+            log::info!(
+                "pack_manifest game_version is placeholder ({}) while binary is {}",
+                manifest.game_version,
+                expected
+            );
+        } else {
+            log::warn!(
+                "pack_manifest game_version ({}) != binary {} — install may be mismatched",
+                manifest.game_version,
+                expected
+            );
+        }
         if std::env::var_os("MAHJURO_STRICT_PACK_VERSION").is_some() {
             panic!(
                 "MAHJURO_STRICT_PACK_VERSION: pack game_version {} != {}",
@@ -408,6 +417,11 @@ fn verify_manifest_version(manifest: &PackManifest) {
 }
 
 fn init_state() -> AssetsState {
+    // Explicit loose tree wins over packs next to the exe (see launch-options.md).
+    if let Some(root) = try_loose_root() {
+        log::warn!("assets: loose tree {}", root.display());
+        return AssetsState::Loose(root);
+    }
     if let Some(dir) = resolve_pack_dir() {
         let path = dir.join(MANIFEST_NAME);
         let raw = match std::fs::read_to_string(&path) {

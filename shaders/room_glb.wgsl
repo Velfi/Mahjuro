@@ -2,6 +2,7 @@
 // Separate from `tile_3d.wgsl` (candle pools + artistic lambert floor).
 //
 // Uniform hacks (same `CameraUniform` layout as tiles; shop writer only):
+// - `base_color_factor.y` = animation-lab unlit debug (`1` = flat N·L).
 // - `tile_seed`     = linear HDR exposure multiplier before tonemap
 // - `decal_atlas_uv.x` = ambient scale (0 = punctual-only interior)
 // - `decal_atlas_uv.y` = 1/world_scale — inverse-square uses document-space distance (glTF units)
@@ -20,7 +21,7 @@ struct CameraUniform {
     cam_pos: vec3<f32>,
     tile_seed: f32,
     decal_atlas_uv: vec4<f32>,
-    /// Must match `wgpu_renderer::CameraUniform::hdr_tonemap` (layout parity with `lit_mesh` felt row).
+    /// Must match `wgpu_renderer::CameraUniform::hdr_tonemap` (layout parity with `lit_mesh`).
     /// `w` is **reserved / no-op** — the fragment always writes linear HDR to
     /// `scene_color`, and `tonemap_composite.wgsl` is the single ACES pass.
     hdr_tonemap: vec4<f32>,
@@ -360,7 +361,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     if (is_hallway_wall_tint && hd.flags.x > 0.5) {
         albedo = albedo * hd.bow.rgb;
     }
-    // Archive `sign_description_*` meshes tag `COLOR_0.a = 2` in `room_env_gltf` (see `decode_env_primitive`).
+    // Archive decal boards tag `COLOR_0.a = 2` in `room_env_gltf` (see `decode_env_primitive`).
     let is_archive_decal = abs(in.v_color.a - 2.0) < 0.01;
     let is_archive_no_dir_shadow = abs(in.v_color.a - 3.0) < 0.01;
     if (is_archive_decal) {
@@ -395,9 +396,18 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let B = normalize(in.b_w);
     let n_world = normalize(nm.x * T + nm.y * B + nm.z * Ngeom);
 
-    let emissive = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb
+    var emissive = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb
         * pbr.emissive_factor.rgb
         * cam.decal_atlas_uv.z;
+    // Main-menu `MoonObject`: `emissive_factor.w` tags the rainbow swirl path;
+    // `hdr_tonemap.w` carries scene time (main menu only).
+    if (pbr.emissive_factor.w > 0.5) {
+        let mask = max(emissive.r, max(emissive.g, emissive.b));
+        let swirl_uv = in.uv_emr * 0.65
+            + vec2<f32>(in.world_pos.x, in.world_pos.y) * 0.004;
+        let rainbow = rainbow_swirl_rgb(swirl_uv, cam.hdr_tonemap.w);
+        emissive = rainbow * mask;
+    }
 
     let V = normalize(cam.cam_pos - in.world_pos);
     let NdotV = max(dot(n_world, V), 1e-4);
@@ -539,16 +549,19 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     var lit_hdr = Lo * cam.tile_seed + ambient + metal_hemi;
     // Shared directional shadow map (props + room self-shadow in key-light space).
     // Archive signs + chrome/pedestal shells skip directional shadows (tags 2 / 3 in `room_env_gltf`).
-    // Gameplay punctual atlas replaces the single key-light map.
+    // Gameplay punctual atlas replaces the single key-light map, but offline `.msh`
+    // contact still applies when `params.w >= 1.5` (baked-only mode).
     let punctual_atlas = shadow_globals.punctual_params.z > 0.5;
+    let baked_contact_only = shadow_globals.params.w >= 1.5;
     let shadow_vis = select(
         sample_shadow_visibility(in.world_pos),
         1.0,
-        punctual_atlas || is_archive_decal || is_archive_no_dir_shadow,
+        (punctual_atlas && !baked_contact_only)
+            || is_archive_decal
+            || is_archive_no_dir_shadow,
     );
     lit_hdr = lit_hdr * shadow_vis;
     let hdr = lit_hdr + emissive;
-
     return ShopShaded(hdr, emissive, out_alpha);
 }
 

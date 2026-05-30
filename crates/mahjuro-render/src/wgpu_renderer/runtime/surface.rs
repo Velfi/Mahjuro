@@ -551,7 +551,17 @@ impl WgpuRenderer {
                 transition_progress: 0.0,
                 quality_level: 2.0,
                 moon_phase: current_moon_phase(),
-                _globals_pad: [0.0; 3],
+                _globals_pad: [
+                    0.0,
+                    if crate::main_menu_glb::main_menu_pride_rainbow_active(
+                        self.main_menu_pride_rainbow_debug,
+                    ) {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    0.0,
+                ],
             }),
         );
         let inv_bw = 1.0 / bloom_w as f32;

@@ -294,6 +294,12 @@ struct TutorialTilesCopyLayout {
     start_y: f32,
 }
 
+impl Default for TutorialCampaignScene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TutorialCampaignScene {
     pub fn new() -> Self {
         Self::with_page(0)
@@ -1514,7 +1520,8 @@ impl SceneBehavior for TutorialCampaignScene {
                     ctx.bus.push(GameEvent::UiSound(SfxId::RelicPickup));
                     GameEngine::begin_onboarding_lessons(ctx.run);
                     Some(Scene::Gameplay(Box::new(
-                        super::gameplay::GameplayScene::with_pending_chamber(
+                        super::gameplay::GameplayScene::enter_pending_chamber(
+                            ctx.run,
                             crate::core::rules::ChamberKind::Small,
                         ),
                     )))
@@ -1778,7 +1785,7 @@ impl SceneBehavior for TutorialCampaignScene {
             (content_bottom + 14.0 * scale).min(nav_top - 120.0 * scale)
         };
 
-        if let (Some(ref layout), Some(ref scoring)) = (try_it_layout, scoring_layout.as_ref()) {
+        if let (Some(ref layout), Some(scoring)) = (try_it_layout, scoring_layout.as_ref()) {
             let heading_h = 22.0 * scale;
             let try_it_lift = (28.0 * scale).max(20.0);
             let try_it_world_z_py_nudge = 18.0 * scale;
@@ -2105,7 +2112,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     1.95,
                 ),
             ]
-        } else if let (Some(ref layout), Some(ref scoring)) =
+        } else if let (Some(ref layout), Some(scoring)) =
             (try_it_layout, scoring_layout.as_ref())
         {
             let prop_light_y = layout.discard_rect[1] + layout.discard_rect[3] * 0.35;

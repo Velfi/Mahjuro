@@ -556,6 +556,9 @@ impl RunState {
     }
 
     pub(super) fn emit_round_resolution_events(&mut self, bus: &mut EventBus) {
+        if self.suppress_chamber_resolution {
+            return;
+        }
         bus.push(GameEvent::ScoreUpdated);
         if self.round_score >= self.target_score as u64 {
             let base_reward = self.chamber.clear_reward();

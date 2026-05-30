@@ -164,7 +164,7 @@
 <body>
   <h1>Mahjuro — game data JSON editor</h1>
   <p class="hint">
-    Load ship data from <code>assets/data/</code> (e.g. <code>relics.json</code>, <code>bosses.json</code>, <code>yaku.json</code>, <code>stakes.json</code>, <code>tags.json</code>, <code>talismans.json</code>, <code>tile_packs.json</code>, <code>zodiacs.json</code>) via the file picker or <strong>drag and drop</strong>.
+    Load ship data from <code>assets/data/</code> (e.g. <code>relics.json</code>, <code>bosses.json</code>, <code>yaku.json</code>, <code>seasons.json</code>, <code>tags.json</code>, <code>talismans.json</code>, <code>tile_packs.json</code>, <code>zodiacs.json</code>) via the file picker or <strong>drag and drop</strong>.
     Row pick is by <code>id</code>. Save writes the full document (array or <code>zodiacs.json</code> wrapper). Browsers with <code>showSaveFilePicker</code> get a save dialog; others download using the loaded filename.
   </p>
 
@@ -183,7 +183,7 @@
       <option value="relics">Relics — flavor_spans</option>
       <option value="bosses">Bosses — table fields</option>
       <option value="yaku">Yaku — table fields</option>
-      <option value="stakes">Stakes — table fields</option>
+      <option value="seasons">Seasons — table fields</option>
       <option value="tags">Tags — table fields</option>
       <option value="talismans">Talismans — table fields</option>
       <option value="tile_packs">Tile packs — table fields</option>
@@ -318,8 +318,8 @@
       }
     ]
   },
-  "stakes": {
-    "suggestedFilename": "stakes.json",
+  "seasons": {
+    "suggestedFilename": "seasons.json",
     "fields": [
       {
         "key": "id",
@@ -586,7 +586,7 @@
         "relics.json": "relics",
         "bosses.json": "bosses",
         "yaku.json": "yaku",
-        "stakes.json": "stakes",
+        "seasons.json": "seasons",
         "tags.json": "tags",
         "talismans.json": "talismans",
         "tile_packs.json": "tile_packs",
@@ -601,7 +601,7 @@
       if (!s || typeof s !== "object") return null;
       if ("mult_bonus" in s && "chip_bonus" in s) return "yaku";
       if ("tier" in s && "min_ante" in s) return "bosses";
-      if ("label" in s && "base_target_mult" in s) return "stakes";
+      if ("label" in s && "base_target_mult" in s) return "seasons";
       if ("texture_file" in s) return "tile_packs";
       if (Array.isArray(s.accent) && s.accent.length) return "talismans";
       if ("gold_value" in s) return "tags";

@@ -150,6 +150,39 @@ fn word_width(font: &fontdue::Font, word: &str, font_px: f32) -> f32 {
         .sum()
 }
 
+/// Single-line advance width for a colored paragraph at `line_h`, capped by `max_width_px`.
+/// Used to size tooltip panels to their copy instead of a fixed fraction of the window.
+pub fn colored_paragraph_preferred_width(text: &str, line_h: f32, max_width_px: f32) -> f32 {
+    let text = text.trim();
+    if text.is_empty() {
+        return 0.0;
+    }
+    let Some(font) = load_ui_font() else {
+        return (text.chars().count() as f32 * line_h * 0.55).min(max_width_px);
+    };
+    let font_px = line_h * 0.99;
+    let space_w = font.metrics(' ', font_px).advance_width;
+    let default = [0.0; 4];
+    let mut widest = 0.0_f32;
+    for paragraph in text.split('\n') {
+        let words: Vec<&str> = paragraph.split_whitespace().collect();
+        if words.is_empty() {
+            continue;
+        }
+        let mut line_w = 0.0;
+        for (i, word) in words.iter().enumerate() {
+            if i > 0 {
+                line_w += space_w;
+            }
+            for (seg, _) in colored_token_segments(word, default) {
+                line_w += word_width(font, &seg, font_px);
+            }
+        }
+        widest = widest.max(line_w);
+    }
+    widest.clamp(0.0, max_width_px)
+}
+
 /// Line-wrap `text` into rows of `(word, color)` chunks (spaces omitted as
 /// separate chunks; a following space is implied between words except at
 /// line breaks). Words are atomic — punctuation split for tinting never
@@ -181,7 +214,7 @@ pub fn wrap_colored_words(
             let segments = colored_token_segments(w, default);
             let width = segments
                 .iter()
-                .map(|(seg, _)| word_width(&font, seg, font_px))
+                .map(|(seg, _)| word_width(font, seg, font_px))
                 .sum();
             TextBreakUnit {
                 width,
@@ -285,7 +318,7 @@ pub fn push_colored_rows_left(
         let line_y = top_y + row as f32 * line_step;
         let mut cx = text_left;
         for (s, c) in chunks {
-            let piece_w = word_width(&font, s, font_px).max(1.0);
+            let piece_w = word_width(font, s, font_px).max(1.0);
             out.push(TextLabel {
                 rect: [cx, line_y, piece_w, line_step],
                 text: s.clone(),
@@ -337,7 +370,7 @@ pub fn push_colored_rows_in_width(
         let line_y = top_y + row as f32 * line_step;
         let measured: f32 = chunks
             .iter()
-            .map(|(s, _)| word_width(&font, s, font_px))
+            .map(|(s, _)| word_width(font, s, font_px))
             .sum();
         let line_start = match align {
             TextAlign::Left => block_left,
@@ -346,7 +379,7 @@ pub fn push_colored_rows_in_width(
         };
         let mut cx = line_start;
         for (s, c) in chunks {
-            let piece_w = word_width(&font, s, font_px).max(1.0);
+            let piece_w = word_width(font, s, font_px).max(1.0);
             out.push(TextLabel {
                 rect: [cx, line_y, piece_w, line_step],
                 text: s.clone(),
@@ -394,7 +427,7 @@ mod tests {
         let line_h = font_px / 0.99;
         let text = "An East Wind is blowing!";
         let font = load_ui_font().expect("ui font");
-        let max_w = word_width(&font, "An East Wind is blowing", font_px) + 2.0;
+        let max_w = word_width(font, "An East Wind is blowing", font_px) + 2.0;
         let default = [1.0, 1.0, 1.0, 1.0];
         let lines = wrap_colored_words(text, max_w, line_h, default);
         let joined: Vec<String> = lines

@@ -75,7 +75,7 @@ pub fn run_record_from_run(run: &RunState, outcome: RunOutcome) -> RunRecord {
         relics_owned: run.relics.active.clone(),
         consumables_owned: run.consumables.items.clone(),
         tile_material: run.mode.tile_material,
-        stake: run.mode.stake,
+        season: run.mode.season,
         tutorial_run: false,
         memorial_kind: run.defeat_memorial_kind,
         best_hand_tiles: run.best_hand_tiles.clone(),
@@ -109,7 +109,7 @@ fn finalize_run_chronicle(run: &RunState, outcome: RunOutcome) -> run_chronicle:
     );
 
     if let Some(bd) = run.last_breakdown.as_ref() {
-        chronicle.set_terminal_breakdown(bd, run.mode.stake);
+        chronicle.set_terminal_breakdown(bd, run.mode.season);
         if victory {
             chronicle.signature_hand = Some(run_chronicle::signature_from_breakdown(
                 bd,

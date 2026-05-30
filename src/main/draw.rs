@@ -205,6 +205,9 @@ impl App {
                 self.pending_scene = Some(if self.run.is_run_complete() {
                     // Victory — save progress (mirrors the GameOver loss path).
                     self.progress.has_won = true;
+                    if self.run.mode.tile_material == crate::persistence::TileMaterial::Plastic {
+                        self.progress.has_won_with_plastic = true;
+                    }
                     self.progress.runs_completed += 1;
                     self.progress.award_level_points_for_outcome(
                         crate::core::progression::RunOutcome::Victory,
@@ -217,16 +220,16 @@ impl App {
                         self.steam
                             .unlock_achievement(crate::steam::Achievement::TenRunsPlayed);
                     }
-                    // Stake ladder: crediting a full victory on this
-                    // (material, stake) pair unlocks the next tier for that
+                    // Season ladder: crediting a full victory on this
+                    // (material, season) pair unlocks the next tier for that
                     // material. Idempotent — repeat wins are no-ops. Returns
-                    // `Some(stake)` exactly when a new tier unlocked.
-                    let newly_unlocked_stake = self
+                    // `Some(season)` exactly when a new tier unlocked.
+                    let newly_unlocked_season = self
                         .progress
-                        .record_stake_victory(self.run.mode.tile_material, self.run.mode.stake);
-                    if let Some(crate::core::stake::Stake::Summer) = newly_unlocked_stake {
+                        .record_season_victory(self.run.mode.tile_material, self.run.mode.season);
+                    if let Some(crate::core::season::Season::Summer) = newly_unlocked_season {
                         self.steam
-                            .unlock_achievement(crate::steam::Achievement::Stake2Unlocked);
+                            .unlock_achievement(crate::steam::Achievement::Season2Unlocked);
                     }
                     self.progress
                         .run_history
@@ -292,7 +295,7 @@ impl App {
                     let modal = Modal::new("Try Again!", &feedback, ModalTheme::Info);
                     self.modals.push(modal);
                     self.pending_scene = Some(Scene::Gameplay(Box::new(
-                        GameplayScene::with_pending_chamber(retry_blind),
+                        GameplayScene::enter_pending_chamber(&mut self.run, retry_blind),
                     )));
                     self.transition_alpha = 1.0;
                     return;
@@ -375,6 +378,7 @@ impl App {
             || self.debug.camera_debug_overlay.is_some()
             || self.debug.scene_look_debug_overlay.is_some()
             || self.debug.rain_debug_overlay.is_some()
+            || self.debug.flame_debug_overlay.is_some()
             || self.debug.hallway_distortion_debug_overlay.is_some();
         let preserve_overlay_stack_buttons = matches!(
             self.overlay_stack.last(),
@@ -385,6 +389,8 @@ impl App {
                     | Scene::AnimationLab(_)
                     | Scene::TileAnchorLab(_)
                     | Scene::ButtonAabbLab(_)
+                    | Scene::RollerLab(_)
+                    | Scene::CascadeLab(_)
                     | Scene::Tixels(_)
             )
         );
@@ -492,6 +498,7 @@ impl App {
                 .as_ref()
                 .map(|o| o.to_snapshot()),
             renderer.rain_tuning,
+            renderer.flame_tuning,
         );
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
@@ -608,6 +615,7 @@ impl App {
         }
 
         if let Some(ref overlay) = self.debug.rain_debug_overlay {
+            frame.debug_rain_hit_colliders = overlay.show_rain_hit_colliders;
             let cam = frame
                 .camera_override
                 .unwrap_or(self.debug.last_effective_camera);
@@ -630,6 +638,12 @@ impl App {
                 size.height as f32,
                 scene_look.room_gltf_height_scale,
             );
+            append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
+        }
+
+        // Candle flame tuning (left panel).
+        if let Some(ref overlay) = self.debug.flame_debug_overlay {
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
@@ -658,9 +672,16 @@ impl App {
             {
                 let pad = (h * 0.012 * scale).max(6.0);
                 let min_outer_h = ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
-                let est_chars = label.chars().count().max(1);
                 let line_h = (min_outer_h * 0.52).max(8.0);
-                let tooltip_w = ((est_chars as f32 * line_h + pad * 2.0).max(72.0)).min(w * 0.5);
+                let max_tooltip_w = (260.0 * scale).min(w * 0.32).min(400.0);
+                let max_inner_w = (max_tooltip_w - 2.0 * pad).max(40.0);
+                let preferred_inner_w = crate::ui::colored_keywords::colored_paragraph_preferred_width(
+                    label.as_ref(),
+                    line_h,
+                    max_inner_w,
+                )
+                .max(40.0);
+                let tooltip_w = (preferred_inner_w + 2.0 * pad).clamp(72.0, max_tooltip_w);
                 let (bx, by, bw, bh) = btn.rect;
                 let cx = bx + bw * 0.5;
                 let mut tip_x = cx - tooltip_w * 0.5;
@@ -794,6 +815,7 @@ impl App {
         );
 
         renderer.set_hdr_enabled(self.effect_layers.hdr_enabled(&self.gfx));
+        renderer.main_menu_pride_rainbow_debug = self.debug.main_menu_pride_rainbow_debug;
 
         // Journal pre-pass: when the shop set `journal_prepass_frame`,
         // render that frame to the offscreen `journal_scene_texture`
@@ -812,6 +834,23 @@ impl App {
             .begin(crate::render::cpu_profiler::CpuStage::Render);
         if let Err(e) = renderer.render(&frame, render_settings) {
             log::error!("render: {e:?}");
+        }
+        let rollers_loop = frame
+            .gameplay_score_roller_values
+            .and_then(|(score, target)| {
+                renderer
+                    .gameplay_score_rollers_spinning(score, target)
+                    .then_some((
+                        crate::audio::SfxId::RollersSpin,
+                        renderer.gameplay_score_roller_loop_speed(),
+                    ))
+            });
+        match rollers_loop {
+            Some((id, speed)) => self.audio.set_sfx_loop(Some(id), speed),
+            None => self.audio.set_sfx_loop(None, 1.0),
+        }
+        if renderer.take_gameplay_score_roller_stop() {
+            self.audio.play_sfx(crate::audio::SfxId::RollerStop);
         }
         self.cpu_profiler
             .end(crate::render::cpu_profiler::CpuStage::Render);

@@ -233,7 +233,7 @@ impl ShopScene {
             let k = 1.0 - (-14.0_f32 * dt).exp();
             self.leave_bell_hover_anim += (target - self.leave_bell_hover_anim) * k;
         }
-        self.particles.update(dt);
+        self.particles.update(dt, None);
         self.score_popups.update(now);
 
         // Drain finished zodiac celebration -> spawn popup + particles.
@@ -245,11 +245,16 @@ impl ShopScene {
             let center = (w * 0.5, h * 0.45);
             self.score_popups.spawn(
                 label,
-                center,
+                crate::render::world_space::LayoutAnchorPx {
+                    px: center.0,
+                    py: center.1,
+                    lift_z: crate::render::score_popups::TABLE_POPUP_LIFT_Z,
+                },
                 center,
                 None,
                 crate::core::scoring::StepKind::Yen,
                 new_level as f32,
+                crate::render::score_popups::PopupMotionTiming::shipping_default(),
             );
             self.particles.emit(
                 center.0,
@@ -290,13 +295,6 @@ impl ShopScene {
 
         // Pause menu handling.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
-            // Drain a guide request from the pause menu.
-            if self.pause_menu.take_guide_request() {
-                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Guide(
-                    GuideScene::new(),
-                ))));
-                return None;
-            }
             if self.pause_menu.take_credits_request() {
                 *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Credits(
                     crate::scenes::CreditsScene::overlay(),

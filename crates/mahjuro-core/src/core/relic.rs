@@ -456,7 +456,7 @@ pub fn relic_buy_price(id: RelicId) -> u32 {
     }
 }
 
-/// Catalog shop price with Merchant's Eye's 25% discount (before stake scaling).
+/// Catalog shop price with Merchant's Eye's 25% discount (before season scaling).
 /// Floors to at least 1 gold.
 pub fn apply_merchants_eye_discount(base: u32, relics: &RelicState) -> u32 {
     if relics.has(RelicId::MerchantsEye) {

@@ -152,12 +152,14 @@ const SHOP_RELIC_LEAN_INVENTORY: f32 = 138.0;
 
 impl ShopScene {
     #[inline]
+    #[cfg(feature = "game")]
     pub(crate) fn sell_hold_in_progress(&self) -> bool {
         self.west_sell_hold_started.is_some()
     }
 
     /// Normalized hold progress for rumble / HUD ring (0..=1).
     #[inline]
+    #[cfg(feature = "game")]
     pub(crate) fn sell_hold_progress(&self, now: std::time::Instant) -> Option<f32> {
         self.west_sell_hold_started.map(|started| {
             (now.saturating_duration_since(started).as_secs_f32() / SHOP_SELL_HOLD_SECONDS)
@@ -294,12 +296,12 @@ mod tests {
     }
 
     #[test]
-    fn stake_scales_shop_prices() {
-        use crate::core::stake::Stake;
+    fn season_scales_shop_prices() {
+        use crate::core::season::Season;
         let relics = RelicState::default();
         let available = vec![RelicId::PairPower];
-        let spring = GameMode::with_material_and_stake(TileMaterial::Bamboo, Stake::Spring);
-        let winter = GameMode::with_material_and_stake(TileMaterial::Bamboo, Stake::Winter);
+        let spring = GameMode::with_material_and_season(TileMaterial::Bamboo, Season::Spring);
+        let winter = GameMode::with_material_and_season(TileMaterial::Bamboo, Season::Winter);
         let spring_run = crate::game::run::RunState::new(spring.clone());
         let winter_run = crate::game::run::RunState::new(winter.clone());
 

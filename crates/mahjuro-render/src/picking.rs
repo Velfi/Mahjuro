@@ -388,6 +388,9 @@ impl WgpuRenderer {
         let has_journal_book = self
             .last_primitive_pick_models
             .contains_key(&mahjuro_types::shop_pick::YAKU_JOURNAL_BOOK_PICK_ID);
+        let has_guide_book = self
+            .last_primitive_pick_models
+            .contains_key(&mahjuro_types::shop_pick::GUIDE_BOOK_PICK_ID);
         let has_main_menu_pick = [
             MAIN_MENU_PICK_PLAY,
             MAIN_MENU_PICK_OPTIONS,
@@ -405,6 +408,7 @@ impl WgpuRenderer {
             && self.last_bowl_model.is_none()
             && self.last_mirror_model.is_none()
             && !has_journal_book
+            && !has_guide_book
             && !has_main_menu_pick
             && !has_cash_in_btn
         {
@@ -516,13 +520,21 @@ impl WgpuRenderer {
                 }
             }
         }
-        // Yaku Journal book — same unit-cube proxy as shop (`Object3dKind::Book`).
+        // Yaku journal book — same unit-cube proxy as shop (`Object3dKind::Book`).
         if let Some(model) = self
             .last_primitive_pick_models
             .get(&mahjuro_types::shop_pick::YAKU_JOURNAL_BOOK_PICK_ID)
             && let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0)
         {
             consider(GameplayPick::JournalBook, t);
+        }
+        // Guide book — same mesh/proxy as the yaku journal.
+        if let Some(model) = self
+            .last_primitive_pick_models
+            .get(&mahjuro_types::shop_pick::GUIDE_BOOK_PICK_ID)
+            && let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0)
+        {
+            consider(GameplayPick::GuideBook, t);
         }
         // Discard bowl — tighter local AABB from the bowl mesh constants.
         if let Some(model) = self.last_bowl_model.as_ref()

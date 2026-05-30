@@ -16,6 +16,8 @@ macro_rules! scene_pbr_with_hallway_warp {
             "\n",
             wgsl_file!("scene_pbr_lights.wgsl"),
             "\n",
+            wgsl_file!("rainbow_swirl.wgsl"),
+            "\n",
             wgsl_file!($room_shader),
             "\n",
             wgsl_file!("punctual_shadow_atlas.wgsl"),
@@ -35,7 +37,11 @@ pub const FLAME: &str = concat!(
     "\n",
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../shaders/flame.wgsl")),
 );
-pub const STARFIELD: &str = wgsl_file!("starfield.wgsl");
+pub const STARFIELD: &str = concat!(
+    wgsl_file!("rainbow_swirl.wgsl"),
+    "\n",
+    wgsl_file!("starfield.wgsl"),
+);
 pub const EMBER_DRIFT: &str = wgsl_file!("ember_drift.wgsl");
 pub const GOLDEN_DUST: &str = wgsl_file!("golden_dust.wgsl");
 pub const MOONLIT_WATER: &str = wgsl_file!("moonlit_water.wgsl");

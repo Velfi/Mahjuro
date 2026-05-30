@@ -38,8 +38,6 @@ pub enum GameCommand {
     DiscardSelectionNoRefill,
     RefillHand,
     UseConsumable { index: usize },
-    SortHandBySuit,
-    SortHandByRank,
     ApplyChamber { blind: ChamberKind },
     SkipUpcomingChamberWithTag,
 }
@@ -279,6 +277,8 @@ pub struct GameplayReadModel {
     pub structure_tiles: Vec<Tile>,
     pub structure_sets: Vec<DetectedMeld>,
     pub trigger_enabled: bool,
+    /// True when structure is banked but cash-in is blocked until discards are spent (The House).
+    pub cash_in_blocked_until_discards_spent: bool,
     pub trigger_preview_total: u64,
     pub selected_count: usize,
     pub hand_len: usize,
@@ -397,16 +397,16 @@ impl<'a> GameEngine<'a> {
         Self::apply_progression_and_settings(run, progress, settings);
     }
 
-    /// Stake-aware variant used by the tile-select modal's stake picker.
+    /// Season-aware variant used by the tile-select modal's season picker.
     /// Spring behaves identically to `start_run_with_material`.
-    pub fn start_run_with_material_and_stake(
+    pub fn start_run_with_material_and_season(
         run: &mut RunState,
         material: TileMaterial,
-        stake: crate::core::stake::Stake,
+        season: crate::core::season::Season,
         progress: &PlayerProgress,
         settings: &AppSettings,
     ) {
-        *run = RunState::new_with_material_and_stake(material, stake);
+        *run = RunState::new_with_material_and_season(material, season);
         Self::apply_progression_and_settings(run, progress, settings);
     }
 
@@ -693,7 +693,7 @@ impl<'a> GameEngine<'a> {
         GameplayReadModel {
             chamber: run.chamber,
             chamber_label,
-            ordeal_kind: (run.chamber == ChamberKind::Ordeal).then(|| run.ordeal.upcoming).flatten(),
+            ordeal_kind: (run.chamber == ChamberKind::Ordeal).then_some(run.ordeal.upcoming).flatten(),
             ordeal_ofuda_title,
             ordeal_ofuda_rule_text,
             run_number: run.run_number,
@@ -711,6 +711,7 @@ impl<'a> GameEngine<'a> {
             structure_tiles: core.structure_tiles.clone(),
             structure_sets: core.structure_sets.clone(),
             trigger_enabled: run.can_trigger_structure_now(),
+            cash_in_blocked_until_discards_spent: run.cash_in_blocked_until_discards_spent(),
             trigger_preview_total: run.preview_manual_trigger_total(),
             selected_count: core.selected_count(),
             hand_len: core.hand_len(),
@@ -882,18 +883,6 @@ impl<'a> GameEngine<'a> {
                     );
                 };
                 CommandData::UseConsumable { result }
-            }
-            GameCommand::SortHandBySuit => {
-                GameplayCoreState::with_run_mut(self.run, |core| {
-                    core.sort_hand_by_suit();
-                });
-                CommandData::None
-            }
-            GameCommand::SortHandByRank => {
-                GameplayCoreState::with_run_mut(self.run, |core| {
-                    core.sort_hand_by_rank();
-                });
-                CommandData::None
             }
             GameCommand::ApplyChamber { blind } => {
                 self.run.apply_chamber(blind, Some(&mut self.bus));
@@ -1327,9 +1316,9 @@ impl<'a> GameEngine<'a> {
     }
 }
 
-/// Stake-aware consumable sell price — half the stake-scaled buy price, floor 1.
+/// Season-aware consumable sell price — half the season-scaled buy price, floor 1.
 /// This is the only sell-price path; there is no "raw" variant because every
-/// purchase is made at the stake-scaled price.
+/// purchase is made at the season-scaled price.
 pub(crate) fn consumable_sell_price_for_mode(
     c: Consumable,
     mode: &crate::game::game_mode::GameMode,
@@ -1477,19 +1466,12 @@ mod tests {
     }
 
     #[test]
-    fn sort_commands_preserve_hand_selection_invariant() {
+    fn finalize_hand_after_draw_preserves_hand_selection_invariant() {
         let mut run = deterministic_run();
         run.selected_mut()[0] = true;
-        let mut bus = EventBus::default();
-        {
-            let mut engine = GameEngine::new(&mut run, &mut bus);
-            let _ = engine.dispatch(GameCommand::SortHandBySuit);
-        }
-        assert_hand_selection_invariant(&run);
-        {
-            let mut engine = GameEngine::new(&mut run, &mut bus);
-            let _ = engine.dispatch(GameCommand::SortHandByRank);
-        }
+        GameplayCoreState::with_run_mut(&mut run, |core| {
+            core.finalize_hand_after_draw();
+        });
         assert_hand_selection_invariant(&run);
     }
 

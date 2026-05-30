@@ -20,9 +20,15 @@ Blender object names must match glTF node names exactly:
 | `btn_cash_in` / `label_cash_in` | Authored cash-in control (env mesh + engraved label) |
 | `player_relic` … `player_relic.004` | Relic medallions (up to five) |
 | `player_consumables` / `.001` | Owned consumable spawns (ribbon / talisman; porcelain dish is static env) |
-| `player_yaku_journal` | Procedural journal book (`Object3dKind::Book`; opens yaku journal on click) |
+| `player_yaku_journal` | Procedural yaku journal book (`Object3dKind::Book`; spine label "Yaku"; opens yaku journal on click) |
+| `player_guidebook` | Procedural guide book (`Object3dKind::Book`; spine label "Guide"; opens guide on click) |
+| `score_cascade_reel` | Score odometer fly-to anchor during cascade hand-off |
+| `score_pops_lerp_target` | Cascade score-popup stream destination (`+50`, `×3`, …) |
+| `score_cascade_pad` | Center of the chips × mult HUD trio |
+| `score_cascade_chips` / `score_cascade_mult` | Chip / mult accumulator token destinations |
+| `score_cascade_src_chips` / `score_cascade_src_mult` / `score_cascade_src_misc` | Popup launch points for steps not tied to structure tiles, relics, or yaku tablets |
 
-Static geometry (table surface, dishes, candles, …) is part of the environment mesh. Do not duplicate those with procedural `Object3d`.
+Static geometry (table surface, dishes, candles, score `frame`, …) is part of the environment mesh. Do not duplicate those with procedural `Object3d`.
 
 **Unexportables** (Blender collection): authoring-only layout that must not ship. **Exclude from glTF export** when possible. If an `Unexportables` root node appears anyway, [`walk_room_env_node`](../../crates/mahjuro-render/src/room_env_gltf.rs) skips that entire subtree (no error). All other exported meshes draw unless they are boolean **`subtractor`** operands ([`skip_room_env_authoring_mesh_node_name`](../../crates/mahjuro-render/src/room_env_gltf.rs)). Round score (`0 / 500`) is **2D HUD text** only.
 

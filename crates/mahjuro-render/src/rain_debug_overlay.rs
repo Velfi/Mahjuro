@@ -3,6 +3,7 @@
 use glam::Vec3;
 use sdl3::keyboard::Scancode;
 
+use crate::debug_overlay_ui::{self, DebugPointerState, DebugRowVisual};
 use crate::draw_cmd::CameraParams;
 use crate::particles::RainSpawnVolume;
 use crate::rain_field::main_menu_rain_spawn_volume;
@@ -10,17 +11,18 @@ use crate::rain_tuning::{
     RAIN_DEBUG_ROW_META, RAIN_DEBUG_SLIDER_COUNT, RainTuning, rain_color_swatch_rgb,
     rain_hue_wheel_preview_linear, rain_row_is_hue, rain_row_is_saturation,
 };
-use crate::theme::{color, metrics, typography};
+use crate::theme::{color, metrics, typography, ButtonVariant};
 use crate::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use mahjuro_types::UiAction;
 
 const SPAWN_FIELD_COLS: usize = 26;
 const SPAWN_FIELD_ROWS: usize = 18;
 
-const RAIN_SAVE_ROW: usize = RAIN_DEBUG_SLIDER_COUNT;
-const RAIN_RESET_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 1;
-const RAIN_CLOSE_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 2;
-const RAIN_ROW_COUNT: usize = RAIN_DEBUG_SLIDER_COUNT + 3;
+const RAIN_SHOW_HIT_ROW: usize = RAIN_DEBUG_SLIDER_COUNT;
+const RAIN_SAVE_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 1;
+const RAIN_RESET_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 2;
+const RAIN_CLOSE_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 3;
+const RAIN_ROW_COUNT: usize = RAIN_DEBUG_SLIDER_COUNT + 4;
 const VISIBLE_ROWS: usize = 22;
 
 fn rain_view_forward(cam: &CameraParams) -> Vec3 {
@@ -732,6 +734,28 @@ impl RainDebugLayout {
         let row_y = self.rows_y0 + vis as f32 * (self.row_h + self.row_gap);
         (self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h)
     }
+
+    fn action_row_rect(&self, row: usize) -> Option<(f32, f32, f32, f32)> {
+        if !(RAIN_SHOW_HIT_ROW..=RAIN_CLOSE_ROW).contains(&row) {
+            return None;
+        }
+        let action_idx = row - RAIN_SHOW_HIT_ROW;
+        let pad = (8.0 * self.scale).max(5.0);
+        let actions_y0 =
+            self.rows_y0 + VISIBLE_ROWS as f32 * (self.row_h + self.row_gap) + pad;
+        let row_y = actions_y0 + action_idx as f32 * (self.row_h + self.row_gap);
+        Some((self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h))
+    }
+
+    fn hit_row_rect(&self, row: usize) -> Option<(f32, f32, f32, f32)> {
+        if let Some(r) = self.action_row_rect(row) {
+            return Some(r);
+        }
+        if row < RAIN_DEBUG_SLIDER_COUNT {
+            return Some(self.row_rect(row));
+        }
+        None
+    }
 }
 
 fn point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
@@ -741,10 +765,12 @@ fn point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
 pub struct RainDebugOverlay {
     cursor: usize,
     pub tuning: RainTuning,
+    pub show_rain_hit_colliders: bool,
     scroll_row: usize,
     editing: bool,
     edit_buffer: String,
     dragging_slider: Option<usize>,
+    pointer: DebugPointerState,
 }
 
 pub enum RainDebugResult {
@@ -759,10 +785,12 @@ impl RainDebugOverlay {
         Self {
             cursor: 0,
             tuning,
+            show_rain_hit_colliders: false,
             scroll_row: 0,
             editing: false,
             edit_buffer: String::new(),
             dragging_slider: None,
+            pointer: DebugPointerState::default(),
         }
     }
 
@@ -893,8 +921,10 @@ impl RainDebugOverlay {
         instances: &mut Vec<GpuInstance>,
         labels: &mut Vec<TextLabel>,
         row_font: f32,
+        variant: ButtonVariant,
     ) {
-        let is_focused = self.cursor == row;
+        let visual = DebugRowVisual::for_row(row, self.cursor, &self.pointer);
+        let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, variant);
         instances.push(GpuInstance {
             rect: [
                 layout.panel_x + 4.0,
@@ -902,22 +932,14 @@ impl RainDebugOverlay {
                 layout.panel_w - 8.0,
                 layout.row_h,
             ],
-            color: if is_focused {
-                color::alpha(color::WALNUT_SOFT, 0.95)
-            } else {
-                color::alpha(color::WALNUT_DEEP, 0.85)
-            },
+            color: bg,
             user: 0,
         });
         labels.push(TextLabel {
             rect: [layout.panel_x, row_y, layout.panel_w, layout.row_h],
             text: label.into(),
             font_px: Some(row_font),
-            color: if is_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::JADE, 0.7)
-            },
+            color: tc,
             align: TextAlign::Center,
             ..Default::default()
         });
@@ -996,8 +1018,21 @@ impl RainDebugOverlay {
     ) -> RainDebugResult {
         self.ensure_scroll();
         let layout = RainDebugLayout::compute(window_w, window_h, self.scroll_row);
+        self.pointer.sync_held(mouse);
+        self.pointer.clear_hover();
 
         if let Some((mx, my, clicked, held)) = mouse {
+            for i in 0..self.row_count() {
+                if let Some(rect) = layout.hit_row_rect(i)
+                    && point_in_rect(mx, my, rect) {
+                        self.pointer.hover_row = Some(i);
+                        if self.dragging_slider.is_none() {
+                            self.cursor = i;
+                        }
+                        break;
+                    }
+            }
+
             if let Some(di) = self.dragging_slider
                 && held
                 && di < RAIN_DEBUG_SLIDER_COUNT
@@ -1027,6 +1062,24 @@ impl RainDebugOverlay {
                         self.cursor = i;
                         self.begin_editing();
                         break;
+                    }
+                }
+                for row in RAIN_SHOW_HIT_ROW..=RAIN_CLOSE_ROW {
+                    let Some(rect) = layout.action_row_rect(row) else {
+                        continue;
+                    };
+                    if point_in_rect(mx, my, rect) {
+                        self.cursor = row;
+                        self.clear_edit();
+                        return match row {
+                            RAIN_SHOW_HIT_ROW => {
+                                self.show_rain_hit_colliders = !self.show_rain_hit_colliders;
+                                RainDebugResult::Stay
+                            }
+                            RAIN_SAVE_ROW => RainDebugResult::Save,
+                            RAIN_RESET_ROW => RainDebugResult::Reset,
+                            _ => RainDebugResult::Close,
+                        };
                     }
                 }
             }
@@ -1064,6 +1117,8 @@ impl RainDebugOverlay {
                 UiAction::Confirm | UiAction::CommitDiscard => {
                     if self.editing {
                         self.commit_edit();
+                    } else if self.cursor == RAIN_SHOW_HIT_ROW {
+                        self.show_rain_hit_colliders = !self.show_rain_hit_colliders;
                     } else if self.cursor == RAIN_SAVE_ROW {
                         return RainDebugResult::Save;
                     } else if self.cursor == RAIN_RESET_ROW {
@@ -1112,7 +1167,7 @@ impl RainDebugOverlay {
         let pad = (8.0 * layout.scale).max(5.0);
         let title_h = (22.0 * layout.scale).max(14.0);
         let hint_h = (13.0 * layout.scale).max(9.0);
-        let vis_h = VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + layout.row_h * 3.0;
+        let vis_h = VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + layout.row_h * 4.0;
         let panel_h = pad + title_h + pad + vis_h + pad + hint_h * 2.0 + pad * 2.0;
         let row_font = typography::tier_at_most(layout.row_h * 0.48, window_h);
 
@@ -1151,26 +1206,16 @@ impl RainDebugOverlay {
             .skip(self.scroll_row)
             .take(VISIBLE_ROWS.min(RAIN_DEBUG_SLIDER_COUNT.saturating_sub(self.scroll_row)))
         {
-            let is_focused = self.cursor == i;
+            let visual = DebugRowVisual::for_row(i, self.cursor, &self.pointer);
             let v = self.row_value(i);
 
-            let bg = if is_focused {
-                color::alpha(color::WALNUT_SOFT, 0.95)
-            } else {
-                color::alpha(color::WALNUT_DEEP, 0.80)
-            };
+            let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, ButtonVariant::Default);
             let (rx, ry, rw, rh) = layout.row_rect(i);
             instances.push(GpuInstance {
                 rect: [rx, ry, rw, rh],
                 color: bg,
                 user: 0,
             });
-
-            let tc = if is_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::STONE, 0.95)
-            };
 
             let swatch = (14.0 * layout.scale).max(10.0);
             let mut label_x = layout.panel_x + 6.0 * layout.scale;
@@ -1179,7 +1224,7 @@ impl RainDebugOverlay {
                 let sw_y = ry + (layout.row_h - swatch) * 0.5;
                 instances.push(GpuInstance {
                     rect: [label_x - 1.0, sw_y - 1.0, swatch + 2.0, swatch + 2.0],
-                    color: color::alpha(color::PARCHMENT, if is_focused { 0.55 } else { 0.28 }),
+                    color: color::alpha(color::PARCHMENT, if visual.highlighted { 0.55 } else { 0.28 }),
                     user: 0,
                 });
                 instances.push(GpuInstance {
@@ -1212,14 +1257,14 @@ impl RainDebugOverlay {
                 });
                 let fill_color = rain_color_swatch_rgb(&self.tuning, i)
                     .map(|[r, g, b]| {
-                        if is_focused {
+                        if visual.highlighted {
                             [r, g, b, 0.95]
                         } else {
                             [r * 0.85, g * 0.85, b * 0.85, 0.75]
                         }
                     })
                     .unwrap_or_else(|| {
-                        if is_focused {
+                        if visual.highlighted {
                             color::JADE
                         } else {
                             color::alpha(color::JADE, 0.7)
@@ -1236,7 +1281,7 @@ impl RainDebugOverlay {
             let knob_y = track_y + (th - knob_size) * 0.5;
             instances.push(GpuInstance {
                 rect: [knob_x, knob_y, knob_size, knob_size],
-                color: if is_focused {
+                color: if visual.highlighted {
                     color::PARCHMENT
                 } else {
                     color::alpha(color::STONE, 0.95)
@@ -1249,7 +1294,7 @@ impl RainDebugOverlay {
                 format!(
                     "{}{}",
                     self.edit_buffer,
-                    if is_focused { "\u{258c}" } else { "" }
+                    if visual.highlighted { "\u{258c}" } else { "" }
                 )
             } else {
                 Self::format_row_display(i, v)
@@ -1275,10 +1320,19 @@ impl RainDebugOverlay {
 
         let actions_y0 =
             layout.rows_y0 + VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + pad;
-        for (idx, (row, label)) in [
-            (RAIN_SAVE_ROW, "Save for main menu"),
-            (RAIN_RESET_ROW, "Reset to defaults"),
-            (RAIN_CLOSE_ROW, "Close"),
+        for (idx, (row, label, variant)) in [
+            (
+                RAIN_SHOW_HIT_ROW,
+                if self.show_rain_hit_colliders {
+                    "Show rain_hit colliders [ON]"
+                } else {
+                    "Show rain_hit colliders [OFF]"
+                },
+                ButtonVariant::Default,
+            ),
+            (RAIN_SAVE_ROW, "Save for main menu", ButtonVariant::Primary),
+            (RAIN_RESET_ROW, "Reset to defaults", ButtonVariant::Danger),
+            (RAIN_CLOSE_ROW, "Close", ButtonVariant::Subtle),
         ]
         .into_iter()
         .enumerate()
@@ -1292,6 +1346,7 @@ impl RainDebugOverlay {
                 &mut instances,
                 &mut labels,
                 row_font,
+                variant,
             );
         }
 

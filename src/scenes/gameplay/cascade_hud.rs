@@ -3,9 +3,9 @@ use std::sync::Arc;
 use crate::render::draw_cmd::{GlyphMaterial, Object3d, Object3dKind};
 
 #[derive(Clone)]
-pub(super) struct CascadeShowcase {
-    pub(super) tiles: Vec<crate::core::tile::Tile>,
-    pub(super) sets: Vec<crate::core::hand::DetectedMeld>,
+pub(crate) struct CascadeShowcase {
+    pub(crate) tiles: Vec<crate::core::tile::Tile>,
+    pub(crate) sets: Vec<crate::core::hand::DetectedMeld>,
 }
 
 /// Per-frame cascade HUD state snapshot: the chips/×/mult trio under the

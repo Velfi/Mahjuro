@@ -28,20 +28,78 @@ pub(crate) struct DecodedBackgroundImage {
     pub height: u32,
 }
 
-/// Lit-mesh shading for boss-icon medallions (true albedo; light specular).
+/// Build GPU resources for the rain-hit debug overlay (merged `rain_hit_*` shells).
+pub(super) fn init_main_menu_rain_hit_debug(
+    device: &wgpu::Device,
+    material_layout: &wgpu::BindGroupLayout,
+    shadow_caster_layout: &wgpu::BindGroupLayout,
+    albedo_view: &wgpu::TextureView,
+    relief_view: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+) -> (Option<LitMeshGpu>, Option<LitMeshInstance>) {
+    use crate::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
+    use crate::tile_glb::Vertex3dTex;
+
+    let meshes = crate::main_menu_glb::main_menu_rain_surface_meshes();
+    if meshes.is_empty() {
+        return (None, None);
+    }
+    let tri_count: usize = meshes.iter().map(|m| m.triangles.len()).sum();
+    let mut vertices = Vec::with_capacity(tri_count * 3);
+    let mut indices = Vec::with_capacity(tri_count * 3);
+    for mesh in &meshes {
+        for tri in &mesh.triangles {
+            let base = vertices.len() as u32;
+            for v in tri {
+                vertices.push(Vertex3dTex::new(
+                    v.to_array(),
+                    [0.0, 0.0, 1.0],
+                    [0.0, 0.0],
+                    Vertex3dTex::DEFAULT_TANGENT,
+                ));
+            }
+            indices.extend_from_slice(&[base, base + 1, base + 2]);
+        }
+    }
+    if indices.is_empty() {
+        return (None, None);
+    }
+    let cpu = MeshCpu {
+        vertices,
+        indices,
+        default_material: MaterialParams {
+            kind: MaterialKind::Emissive,
+            base_color: [1.0, 0.06, 0.06, 0.95],
+            specular_strength: 2.5,
+            specular_power: 0.0,
+        },
+    };
+    let gpu = LitMeshGpu::new(device, &cpu, "main-menu-rain-hit-debug");
+    let inst = LitMeshInstance::new(
+        device,
+        material_layout,
+        shadow_caster_layout,
+        albedo_view,
+        relief_view,
+        sampler,
+    );
+    (Some(gpu), Some(inst))
+}
+
+/// Flat texture read for boss-icon medallions (matches 2D atlas; no scene lighting).
 pub(super) fn ordeal_icon_material_params(base_color: [f32; 4], glow: f32) -> MaterialParams {
     let g = glow.clamp(0.0, 1.0);
     let target = [1.55, 1.32, 0.78, base_color[3]];
     MaterialParams {
-        kind: MaterialKind::Plain,
+        kind: MaterialKind::Unshaded,
         base_color: [
             base_color[0] + (target[0] - base_color[0]) * g,
             base_color[1] + (target[1] - base_color[1]) * g,
             base_color[2] + (target[2] - base_color[2]) * g,
             base_color[3],
         ],
-        specular_strength: 0.42 + 0.22 * g,
-        specular_power: 56.0,
+        specular_strength: 0.0,
+        specular_power: 0.0,
     }
 }
 
@@ -126,7 +184,7 @@ pub(super) fn upload_rgba_texture(
     (tex, view)
 }
 
-pub(super) fn white_albedo(
+pub(crate) fn white_albedo(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> (wgpu::Texture, wgpu::TextureView) {
@@ -219,7 +277,7 @@ pub(super) fn upload_rgba_texture_linear(
     (tex, view)
 }
 
-pub(super) struct TextureUploadParams<'a> {
+pub(crate) struct TextureUploadParams<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
     pub label: String,
@@ -231,7 +289,7 @@ pub(super) struct TextureUploadParams<'a> {
 }
 
 /// Upload RGBA8 with optional CPU-generated mip chain (box filter).
-pub(super) fn upload_rgba_texture_with_mips(
+pub(crate) fn upload_rgba_texture_with_mips(
     p: &TextureUploadParams<'_>,
 ) -> (wgpu::Texture, wgpu::TextureView) {
     upload_rgba_texture_with_mip_chain(p, None)
@@ -443,21 +501,6 @@ pub(super) fn default_emissive_map(
         &[255, 255, 255, 255],
         1,
         1,
-    )
-}
-
-/// Decode the embedded coin face heightmap PNG and upload it as a linear
-/// data texture. Falls back to a flat mid-gray 1×1 if the asset is missing
-/// or fails to decode (so the coin still renders, just without engraving).
-pub(super) fn load_coin_heightmap(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-) -> (wgpu::Texture, wgpu::TextureView) {
-    load_metal_heightmap(
-        device,
-        queue,
-        "textures/coin_heightmap.png",
-        "coin-heightmap",
     )
 }
 

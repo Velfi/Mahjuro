@@ -224,6 +224,12 @@ pub struct CollectionScene {
     chronicle_focused_pane: crate::ui::chronicle_dashboard::ChronicleScrollPane,
 }
 
+impl Default for CollectionScene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CollectionScene {
     pub fn new() -> Self {
         Self::with_active_tab(Tab::Relics)
@@ -569,6 +575,8 @@ impl CollectionScene {
             frame.archive_environment();
         }
         frame.archive_sign_description_decal_text = None;
+        frame.archive_inspect_plaque_decal_text = None;
+        frame.archive_inspect_plaque_visible = false;
 
         let cell = (w * 0.12).min(h * 0.18);
         let total_cells = bosses.len() as i32;
@@ -933,7 +941,12 @@ impl CollectionScene {
             } else {
                 card_text
             };
-            frame.archive_sign_description_decal_text = Some(sign_text);
+            if inspect.is_some() {
+                frame.archive_inspect_plaque_visible = true;
+                frame.archive_inspect_plaque_decal_text = Some(sign_text);
+            } else {
+                frame.archive_sign_description_decal_text = Some(sign_text);
+            }
         }
 
         // Assemble the frame. 2D chrome from the caller (`quads` / `text_labels`)

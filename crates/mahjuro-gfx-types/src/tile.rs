@@ -76,6 +76,8 @@ pub enum TileMaterial {
 }
 
 impl TileMaterial {
+    pub const ALL: [Self; 3] = [Self::Bamboo, Self::Plastic, Self::TortoiseShell];
+
     pub fn next(self) -> Self {
         match self {
             Self::Bamboo => Self::Plastic,

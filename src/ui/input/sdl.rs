@@ -290,7 +290,10 @@ impl InputState {
                         Some((UiAction::FocusUp, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
                 }
                 GpButton::Start => actions.push(UiAction::Pause),
-                GpButton::Back => actions.push(UiAction::Help),
+                // Select / View / Share / − (platform-dependent label).
+                GpButton::Back | GpButton::Touchpad | GpButton::Misc1 => {
+                    actions.push(UiAction::Help);
+                }
                 GpButton::LeftStick => actions.push(UiAction::InvertSelection),
                 GpButton::LeftShoulder => {
                     actions.push(UiAction::NavigateHudPrev);

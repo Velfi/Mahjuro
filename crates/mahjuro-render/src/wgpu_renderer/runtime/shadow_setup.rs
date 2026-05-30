@@ -158,12 +158,12 @@ impl WgpuRenderer {
 }
 #[inline]
 pub(super) fn room_baked_shadow_loaded(
-    slots: &[crate::wgpu_renderer::impl_room_shadow::RoomBakedShadowGpu;
+    slots: &[Option<crate::wgpu_renderer::impl_room_shadow::RoomBakedShadowGpu>;
          crate::room_gi_bake::ROOM_GI_ROOM_COUNT],
     env: ActiveRoomEnv,
 ) -> Option<RoomGiRoom> {
     let room = env.to_room_gi()?;
-    let _ = &slots[room_gi_room_index(room)];
+    slots[room_gi_room_index(room)].as_ref()?;
     Some(room)
 }
 
@@ -544,6 +544,7 @@ impl WgpuRenderer {
                 rewrite!(self.tally_stick_instances)
             }
             super::DrawKind::ExtrudedGlyph => rewrite!(self.extruded_glyph_instances),
+            super::DrawKind::GltfCoin => {}
             super::DrawKind::Primitive(shape) => {
                 if let Some(pool) = self.primitive_instances.get(&shape) {
                     rewrite!(pool);

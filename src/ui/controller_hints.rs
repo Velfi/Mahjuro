@@ -837,7 +837,7 @@ pub fn push_column_hints(
     let label_block_h = legend_line_h + style.label_pad_y * 2.0;
 
     let measure_label = |text: &str| -> f32 {
-        if let Some(ref font) = ui_font {
+        if let Some(font) = ui_font {
             let (_, _, advances) = measure_label_advances(
                 font,
                 text,

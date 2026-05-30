@@ -1,5 +1,6 @@
 //! Unified input: mouse, keyboard, gamepad → semantic actions.
 
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
 use std::time::Instant;
 
 use sdl3::gamepad::Button as GpButton;
@@ -189,22 +190,30 @@ pub struct InputState {
     pub hold_to_sell_rumble_enabled: bool,
     /// Last non-neutral horizontal left-stick direction:
     /// -1 = left, +1 = right, 0 = neutral.
+    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
     left_stick_x_dir: i8,
     /// Last non-neutral vertical left-stick direction we emitted:
     /// -1 = up, +1 = down, 0 = neutral.
+    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
     left_stick_y_dir: i8,
     /// Timestamp of the latest stick-navigation edge. Kept for future
     /// tuning / diagnostics and to make the gating behavior explicit.
+    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
     last_stick_nav_at: Instant,
     /// While a D-pad direction is held, next time to emit a repeat (after the
     /// initial [`ButtonPressed`] step).
+    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
     dpad_repeat: Option<(UiAction, Instant)>,
     /// Left stick: repeat horizontal nav while tilt is held past the deadzone.
+    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
     stick_repeat_x: Option<(i8, Instant)>,
     /// Left stick: repeat vertical nav while tilt is held past the deadzone.
+    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
     stick_repeat_y: Option<(i8, Instant)>,
     /// D-pad hold repeats (also fed from SDL D-pad buttons).
+    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
     dpad_axis_repeat_x: Option<(i8, Instant)>,
+    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
     dpad_axis_repeat_y: Option<(i8, Instant)>,
     /// Right stick axes (−1..1) while a showcase orbit presenter is active.
     pub item_inspect_orbit_stick: (f32, f32),
@@ -222,8 +231,10 @@ pub struct InputState {
     /// against. Used to debounce: we only re-evaluate when the connected
     /// controller's family actually changes (Nintendo ↔ Xbox etc.), not every
     /// frame. `None` until we've seen a real pad at least once.
+    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
     last_seen_layout_style: Option<GamepadStyle>,
     /// Scheduled scoring / rumble-lab pulses (`SDL_Gamepad::set_rumble` cannot overlap envelope/composite).
+    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
     scoring_rumble_schedule: Vec<(Instant, u16, u16, u32, f32)>,
 }
 
@@ -240,13 +251,21 @@ impl InputState {
             swap_xy: settings.swap_xy,
             xy_quick_action: settings.xy_quick_action,
             hold_to_sell_rumble_enabled: settings.hold_to_sell_rumble,
+            #[cfg(any(feature = "game", feature = "headless-screenshot"))]
             left_stick_x_dir: 0,
+            #[cfg(any(feature = "game", feature = "headless-screenshot"))]
             left_stick_y_dir: 0,
+            #[cfg(any(feature = "game", feature = "headless-screenshot"))]
             last_stick_nav_at: Instant::now(),
+            #[cfg(any(feature = "game", feature = "headless-screenshot"))]
             dpad_repeat: None,
+            #[cfg(any(feature = "game", feature = "headless-screenshot"))]
             stick_repeat_x: None,
+            #[cfg(any(feature = "game", feature = "headless-screenshot"))]
             stick_repeat_y: None,
+            #[cfg(any(feature = "game", feature = "headless-screenshot"))]
             dpad_axis_repeat_x: None,
+            #[cfg(any(feature = "game", feature = "headless-screenshot"))]
             dpad_axis_repeat_y: None,
             item_inspect_orbit_stick: (0.0, 0.0),
             item_inspect_mouse_orbit_px: (0.0, 0.0),
@@ -254,7 +273,9 @@ impl InputState {
             item_inspect_zoom_triggers: 0.0,
             right_stick_scroll_axis: 0.0,
             gamepad_style: GamepadStyle::default(),
+            #[cfg(any(feature = "game", feature = "headless-screenshot"))]
             last_seen_layout_style: None,
+            #[cfg(any(feature = "game", feature = "headless-screenshot"))]
             scoring_rumble_schedule: Vec::new(),
         })
     }
@@ -353,22 +374,16 @@ impl InputState {
             Scancode::Z => actions.push(UiAction::InvertSelection),
             Scancode::T => actions.push(UiAction::TriggerStructure),
             Scancode::Return | Scancode::KpEnter => actions.push(UiAction::Confirm),
-            // Tab is dual-purpose: scenes that opt in to TabNext/TabPrev
-            // (e.g. the collection browser) get tab-cycle semantics; the
-            // gameplay scene treats SortBySuit identically to a Tab press.
-            // Both actions are emitted so each scene can pick the one it
-            // cares about and ignore the other.
+            // Tab / Shift+Tab cycle tabs in scenes that opt in (e.g. collection browser).
             Scancode::Tab => {
                 if shift {
                     actions.push(UiAction::TabPrev);
                 } else {
                     actions.push(UiAction::TabNext);
-                    actions.push(UiAction::SortBySuit);
                 }
             }
             Scancode::PageDown => actions.push(UiAction::PageNext),
             Scancode::PageUp => actions.push(UiAction::PagePrev),
-            Scancode::Grave => actions.push(UiAction::SortByRank),
             // HUD strip nav (consumable focus on the gameplay scene; includes the
             // optional discard undo target when Accessibility → Discard undo is on).
             // Mirrors LB / RB on the controller so keyboard players have a non-mouse path.
@@ -377,9 +392,8 @@ impl InputState {
             // **Q** / **E** = gamepad West / North (see [`UiAction::WestFacePress`], [`UiAction::NorthFacePress`]).
             Scancode::E => actions.push(UiAction::NorthFacePress),
             Scancode::Q => actions.push(UiAction::WestFacePress),
-            // Glossary / help — `?`, `/`, `H`, `F1`. ShiftLeft+Slash on
-            // most layouts produces `?`, but we don't need shift state here:
-            // both Slash and KeyH are unambiguous.
+            // Glossary / help — `?`, `/`, `H`, `F1`; controller Select / View / −
+            // (`GpButton::Back`, touchpad click, PS5 Create) via [`UiAction::Help`].
             Scancode::Slash | Scancode::H | Scancode::F1 => actions.push(UiAction::Help),
             _ => {}
         }
@@ -459,14 +473,11 @@ pub fn apply_ui_actions(
             UiAction::Cancel => {
                 run.clear_selection();
             }
-            UiAction::SortBySuit
-            | UiAction::SortByRank
-            | UiAction::TriggerStructure
+            UiAction::TriggerStructure
             | UiAction::InvertSelection
             | UiAction::UndoDiscard
             | UiAction::Pause
             | UiAction::Help
-            | UiAction::DebugBlowWind
             | UiAction::DebugToggleAxes
             | UiAction::Delete => {}
             UiAction::FocusNext

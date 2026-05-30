@@ -25,9 +25,8 @@ pub(super) fn tick_basic_animations(
     if ctx.headless {
         scene.light_ramp = 1.0;
         scene.light_ramp_anchor = None;
-        scene.candle_wind_dim = 1.0;
     }
-    scene.particles.update(dt);
+    scene.particles.update(dt, None);
     scene.flying_coins.update(dt);
     scene.score_popups.update(now);
     let gameplay = GameEngine::read(ctx.run);
@@ -78,35 +77,27 @@ pub(super) fn tick_basic_animations(
     }
 }
 
-/// Cache wind delay/duration from the cascade tuning, then detect deal
-/// events and stamp `last_deal_at` / `light_ramp_anchor`.
-pub(super) fn tick_wind_and_deal_detection(
+/// Detect deal events and stamp `light_ramp_anchor`.
+pub(super) fn tick_deal_detection(
     scene: &mut GameplayScene,
     ctx: &mut UpdateCtx<'_>,
     now: Instant,
 ) {
-    // Cache the latest wind timing from the cascade tuning so live
-    // tweaks in the debug overlay take effect on the next frame and so
-    // `draw()` (no `cascade_tuning` access) can read these.
-    scene.wind_delay_secs = ctx.cascade_tuning.wind_delay_ms as f32 / 1000.0;
-    scene.wind_duration_secs = ctx.cascade_tuning.wind_duration_ms as f32 / 1000.0;
     // Detect deal events: any time the hand grows (initial round deal,
-    // post-discard refill) we stamp `last_deal_at` so the post-deal wind
-    // gust can fire `wind_delay_secs` later. While `pending_chamber` is
-    // set, we intentionally ignore the stale previous-round hand — seed
-    // `prev_hand_len` to it so the detector fires only once apply_chamber
-    // clears and redeals (marking the true round-start deal).
+    // post-discard refill) we may stamp `light_ramp_anchor`. While
+    // `pending_chamber` is set, we intentionally ignore the stale
+    // previous-round hand — seed `prev_hand_len` to it so the detector
+    // fires only once apply_chamber clears and redeals (marking the true
+    // round-start deal).
     let interaction = GameEngine::read_interaction(ctx.run);
     let cur_hand_len = interaction.hand_len;
     if scene.pending_chamber.is_some() {
         scene.prev_hand_len = cur_hand_len;
     } else {
-        if cur_hand_len > scene.prev_hand_len {
-            scene.last_deal_at = Some(now);
-            if scene.light_ramp < 1.0 && scene.light_ramp_anchor.is_none() {
+        if cur_hand_len > scene.prev_hand_len
+            && scene.light_ramp < 1.0 && scene.light_ramp_anchor.is_none() {
                 scene.light_ramp_anchor = Some(now);
             }
-        }
         scene.prev_hand_len = cur_hand_len;
     }
 }
@@ -160,22 +151,6 @@ pub(super) fn tick_yen_change_coins(scene: &mut GameplayScene, ctx: &mut UpdateC
 
 /// Advance candle flicker, decay candle flare, and tick the light ramp.
 pub(super) fn tick_candle_and_light_ramp(scene: &mut GameplayScene, now: Instant, dt: f32) {
-    // Post-deal wind snuffs flames/lights via brightness (shape stays upright indoors).
-    scene.candle_wind_dim = scene
-        .last_deal_at
-        .map(|d| {
-            let elapsed = now.saturating_duration_since(d).as_secs_f32();
-            let delay = scene.wind_delay_secs;
-            let dur = scene.wind_duration_secs.max(0.001);
-            if elapsed < delay || elapsed >= delay + dur {
-                1.0
-            } else {
-                let t = (elapsed - delay) / dur;
-                let env = (4.0 * t * (1.0 - t)).clamp(0.0, 1.0);
-                1.0 - 0.88 * env
-            }
-        })
-        .unwrap_or(1.0);
     scene.candle_time += dt;
     let _ = dt;
 
@@ -189,8 +164,8 @@ pub(super) fn tick_candle_and_light_ramp(scene: &mut GameplayScene, now: Instant
     }
 
     // Light ramp: candles start dark and spark on after the opening deal.
-    // Uses `light_ramp_anchor`, not `last_deal_at`, so the opening-smoke
-    // path can clear the latter without freezing brightness mid-ramp.
+    // Uses `light_ramp_anchor` so the opening-smoke path can clear deal
+    // timestamps without freezing brightness mid-ramp.
     if scene.light_ramp < 1.0
         && let Some(t0) = scene.light_ramp_anchor
     {

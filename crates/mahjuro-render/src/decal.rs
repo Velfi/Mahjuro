@@ -663,13 +663,13 @@ pub fn rasterize_yaku_tablet_decal(
     rasterize_tablet_label_decal(name, ui_font, emoji_font, 256, 96, [0.42, 0.32, 0.18, 1.0])
 }
 
-/// Gilded engraving for the wood action tablets. Uses the same three-pass
-/// treatment as the hanging plaques — burnt-umber recess, rich gold body,
-/// pale champagne highlight — so "Sort by Suit" etc. read as carved and
-/// gold-painted lettering rather than flat ink.
-pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>) -> Vec<u8> {
-    let width: u32 = 512;
-    let height: u32 = 192;
+/// Gilded engraving decal at explicit pixel dimensions (three-pass gold leaf).
+pub fn rasterize_gilded_engraving_decal(
+    label: &str,
+    ui_font: Option<&fontdue::Font>,
+    width: u32,
+    height: u32,
+) -> Vec<u8> {
     let mut rgba = vec![0u8; (width * height * 4) as usize];
     let Some(font) = ui_font else {
         return rgba;
@@ -732,6 +732,22 @@ pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>)
         gold_highlight,
     );
     rgba
+}
+
+/// Gilded engraving for the wood action tablets. Uses the same three-pass
+/// treatment as the hanging plaques — burnt-umber recess, rich gold body,
+/// pale champagne highlight — so "Sort by Suit" etc. read as carved and
+/// gold-painted lettering rather than flat ink.
+pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>) -> Vec<u8> {
+    rasterize_gilded_engraving_decal(label, ui_font, 512, 192)
+}
+
+/// Gilded cover title for table books. Portrait aspect matches
+/// [`crate::scene_glue::book_cover_decal_dimensions`] so the decal maps 1:1
+/// onto the +Y cover face (mesh X = width, mesh Z = height) without stretch.
+pub fn rasterize_book_cover_decal(label: &str, ui_font: Option<&fontdue::Font>) -> Vec<u8> {
+    let (w, h) = crate::scene_glue::book_cover_decal_dimensions();
+    rasterize_gilded_engraving_decal(label, ui_font, w, h)
 }
 
 /// Two-line engraved decal for the gameplay scene's hanging score plaque.

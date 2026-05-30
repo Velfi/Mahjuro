@@ -1,4 +1,4 @@
-//! Gameplay debug visibility toggles (Debug → Visibility… menu).
+//! Gameplay debug visibility toggles (Debug → Overlays → Gameplay Visibility…).
 
 use crate::render::draw_cmd::{DrawCmd, Object3dKind, ShowcaseTilePlacement, TileOverlayRectGroup};
 
@@ -115,6 +115,7 @@ impl DebugVisibility {
             Object3dKind::Primitive { shape, .. } => {
                 use crate::render::primitive::MeshId;
                 match shape {
+                    MeshId::Coin => self.hide_yen_pile,
                     MeshId::Cylinder => self.hide_yen_pile,
                     _ => false,
                 }

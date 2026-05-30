@@ -88,7 +88,7 @@ impl WgpuRenderer {
                         device: &self.device,
                         layout: &self.tile_material_layout,
                         shadow_caster_layout: &self.shadow_caster_layout,
-                        primitives: &self.tile_primitives,
+                        primitives: self.active_tile_mesh().primitives.as_slice(),
                         decal_atlas,
                         distortion_placeholder: &self.tile_env_distortion_placeholder,
                     };
@@ -141,7 +141,7 @@ impl WgpuRenderer {
                             device: &self.device,
                             layout: &self.tile_material_layout,
                             shadow_caster_layout: &self.shadow_caster_layout,
-                            primitives: &self.tile_primitives,
+                            primitives: self.active_tile_mesh().primitives.as_slice(),
                             decal_atlas,
                             distortion_placeholder: &self.tile_env_distortion_placeholder,
                         };

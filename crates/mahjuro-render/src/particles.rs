@@ -10,12 +10,25 @@ use crate::scene_light_sample::{
     RainVolumetricLit, SceneLightSampleCtx, shade_dielectric_rgb_at_world,
 };
 
+#[derive(Clone, Copy, Debug)]
+pub struct RainSplashUpdate<'a> {
+    pub cam: &'a CameraParams,
+    pub window_w: f32,
+    pub window_h: f32,
+    pub fall_speed: f32,
+}
+
 #[derive(Clone, Debug)]
 struct Particle {
     x: f32,
     y: f32,
     vx: f32,
     vy: f32,
+    grav_x: f32,
+    grav_y: f32,
+    /// When set, integrated in Z-up world space and reprojected each frame.
+    world_pos: Option<Vec3>,
+    world_vel: Option<Vec3>,
     color: [f32; 4],
     life: f32,
     max_life: f32,
@@ -301,17 +314,110 @@ mod rain_spawn_bias_tests {
     }
 }
 
+#[cfg(test)]
+mod splash_normal_tests {
+    use super::*;
+
+    #[test]
+    fn splash_strength_peaks_on_up_facing_hits() {
+        let floor = splash_strength_from_normal(Vec3::new(0.0, 0.0, 1.0));
+        let wall = splash_strength_from_normal(Vec3::new(1.0, 0.0, 0.0));
+        let underside = splash_strength_from_normal(Vec3::new(0.0, 0.0, -1.0));
+        assert!(floor > wall, "floor {floor} should beat wall {wall}");
+        assert!(wall > underside, "wall {wall} should beat underside {underside}");
+    }
+
+    #[test]
+    fn splash_params_scale_with_surface() {
+        let (floor_count, floor_life, floor_size) =
+            splash_params_for_normal(Vec3::Z, 16, 0.4, 1.0);
+        let (wall_count, wall_life, wall_size) =
+            splash_params_for_normal(Vec3::X, 16, 0.4, 1.0);
+        assert!(floor_count > wall_count);
+        assert!(floor_life > wall_life);
+        assert!(floor_size > wall_size);
+    }
+
+    #[test]
+    fn floor_splash_rebounds_along_normal() {
+        let mut rng = rand::rng();
+        let impact = Vec3::new(120.0, 80.0, -8000.0);
+        let normal = Vec3::Z;
+        let mut saw_upward = false;
+        for _ in 0..24 {
+            let v = sample_splash_velocity_world(impact, normal, &mut rng);
+            if v.dot(normal) > 0.0 {
+                saw_upward = true;
+                break;
+            }
+        }
+        assert!(saw_upward, "floor impacts should produce normal rebound");
+    }
+
+    #[test]
+    fn wall_splash_stays_mostly_tangent() {
+        let mut rng = rand::rng();
+        let impact = Vec3::new(400.0, 200.0, -8000.0);
+        let normal = Vec3::X;
+        for _ in 0..24 {
+            let v = sample_splash_velocity_world(impact, normal, &mut rng);
+            let normal_frac = v.dot(normal).abs() / v.length().max(1.0);
+            assert!(
+                normal_frac < 0.35,
+                "wall spray should stay tangent, got normal_frac={normal_frac}"
+            );
+        }
+    }
+
+    #[test]
+    fn splash_gravity_accelerates_down_z() {
+        let g = splash_world_gravity_accel(8000.0);
+        assert!(g.z < 0.0, "gravity should pull −Z, got {g}");
+        assert_eq!(g.x, 0.0);
+        assert_eq!(g.y, 0.0);
+    }
+
+    #[test]
+    fn flat_splash_spreads_radially_not_with_wind() {
+        let mut rng = rand::rng();
+        let impact = Vec3::new(400.0, 800.0, -8000.0);
+        let normal = Vec3::Z;
+        let wind_h = Vec3::new(400.0, 800.0, 0.0).normalize();
+        let mut off_wind = 0;
+        for _ in 0..48 {
+            let v = sample_splash_velocity_world(impact, normal, &mut rng);
+            let h = Vec3::new(v.x, v.y, 0.0).normalize_or_zero();
+            if h.dot(wind_h) < 0.5 {
+                off_wind += 1;
+            }
+        }
+        assert!(
+            off_wind >= 8,
+            "flat splashes should radiate outward, not all with wind (off_wind={off_wind})"
+        );
+    }
+}
+
 pub struct ParticleSystem {
     particles: Vec<Particle>,
     world_drops: Vec<WorldDrop>,
     splashes_this_frame: u32,
-    rain_hits_scratch: Vec<(usize, Vec3, Vec3)>,
+    rain_hits_scratch: Vec<(usize, Vec3, Vec3, Vec3)>,
 }
 
 const MAX_SPLASH_EVENTS_PER_FRAME: u32 = 48;
 const SPLASH_SIZE_REF_DISTANCE: f32 = 350.0;
 const SPLASH_SIZE_MIN_MUL: f32 = 0.45;
 const SPLASH_SIZE_MAX_MUL: f32 = 1.9;
+const SCREEN_PARTICLE_GRAV_Y: f32 = 80.0;
+const SPLASH_SPEED_FRAC_MIN: f32 = 0.035;
+const SPLASH_SPEED_FRAC_MAX: f32 = 0.11;
+const SPLASH_NORMAL_RESTITUTION: f32 = 0.08;
+const SPLASH_WORLD_GRAVITY_MUL: f32 = 0.35;
+/// |normal.z| above this → flat ground/roof crown (radial spray, not wind-aligned).
+const SPLASH_FLAT_NORMAL_MIN: f32 = 0.85;
+/// Subtle wind lean on flat surfaces (0 = perfectly radial).
+const SPLASH_FLAT_WIND_SKEW: f32 = 0.18;
 
 #[inline]
 fn rain_on_screen(proj: ScreenProjector, pos: Vec3, margin: f32) -> bool {
@@ -347,6 +453,101 @@ fn splash_size_mul_for_distance(cam: &CameraParams, hit_world: Vec3) -> f32 {
     (SPLASH_SIZE_REF_DISTANCE / dist).clamp(SPLASH_SIZE_MIN_MUL, SPLASH_SIZE_MAX_MUL)
 }
 
+/// Z-up: up-facing floors read strongest; walls and undersides taper off.
+#[inline]
+fn splash_strength_from_normal(normal: Vec3) -> f32 {
+    let nz = normal.z.clamp(-1.0, 1.0);
+    let floor = nz.max(0.0);
+    let wall = (1.0 - nz.abs()).max(0.0);
+    let underside = (1.0 - floor - wall).max(0.0);
+    (floor + wall * 0.35 + underside * 0.12).clamp(0.1, 1.0)
+}
+
+#[inline]
+fn splash_params_for_normal(
+    normal: Vec3,
+    base_count: usize,
+    base_lifetime: f32,
+    distance_size_mul: f32,
+) -> (usize, f32, f32) {
+    let strength = splash_strength_from_normal(normal);
+    let count = ((base_count as f32) * (0.2 + 0.8 * strength))
+        .round()
+        .max(1.0) as usize;
+    let lifetime = base_lifetime * (0.35 + 0.65 * strength);
+    let size_mul = distance_size_mul * (0.25 + 0.75 * strength);
+    (count, lifetime, size_mul)
+}
+
+fn splash_tangent_frame(normal: Vec3) -> (Vec3, Vec3) {
+    let n = normal.normalize_or_zero();
+    let ref_axis = if n.z.abs() < 0.95 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    let tangent = ref_axis.cross(n).normalize_or_zero();
+    let bitangent = n.cross(tangent).normalize_or_zero();
+    (tangent, bitangent)
+}
+
+/// Tangential spray from impact velocity + weak normal rebound (Z-up world).
+fn sample_splash_velocity_world(
+    impact_vel: Vec3,
+    normal: Vec3,
+    rng: &mut impl rand::Rng,
+) -> Vec3 {
+    let n = normal.normalize_or_zero();
+    let impact_speed = impact_vel.length().max(1.0);
+    let vn = n * impact_vel.dot(n);
+    let vt = impact_vel - vn;
+
+    let (t0, b0) = splash_tangent_frame(n);
+    let angle: f32 = rng.random::<f32>() * std::f32::consts::TAU;
+    let spread = (t0 * angle.cos() + b0 * angle.sin()).normalize_or_zero();
+
+    let flat = n.z.abs() >= SPLASH_FLAT_NORMAL_MIN;
+    let dir = if flat {
+        // Horizontal surfaces: radial crown in the tangent plane. Wind only nudges
+        // (on flats, tangential impact velocity is almost entirely wind in XY).
+        let wind_skew = {
+            let vt_h = Vec3::new(vt.x, vt.y, 0.0);
+            if vt_h.length_squared() > 1e-4 {
+                vt_h.normalize() * SPLASH_FLAT_WIND_SKEW
+            } else {
+                Vec3::ZERO
+            }
+        };
+        (spread + wind_skew).normalize_or_zero()
+    } else {
+        let flow = if vt.length_squared() > 1e-4 {
+            vt.normalize()
+        } else {
+            t0
+        };
+        (flow * 0.55 + spread * 0.45).normalize_or_zero()
+    };
+
+    let frac = SPLASH_SPEED_FRAC_MIN
+        + rng.random::<f32>() * (SPLASH_SPEED_FRAC_MAX - SPLASH_SPEED_FRAC_MIN);
+    let spray = dir * (impact_speed * frac);
+
+    let into_surface = (-impact_vel.dot(n)).max(0.0);
+    let rebound = n * (into_surface * SPLASH_NORMAL_RESTITUTION * rng.random::<f32>());
+
+    spray + rebound
+}
+
+fn splash_world_gravity_accel(fall_speed: f32) -> Vec3 {
+    Vec3::new(0.0, 0.0, -fall_speed.abs() * SPLASH_WORLD_GRAVITY_MUL)
+}
+
+impl Default for ParticleSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ParticleSystem {
     pub fn new() -> Self {
         Self {
@@ -380,6 +581,10 @@ impl ParticleSystem {
                 y,
                 vx: angle.cos() * speed,
                 vy: angle.sin() * speed - 20.0,
+                grav_x: 0.0,
+                grav_y: SCREEN_PARTICLE_GRAV_Y,
+                world_pos: None,
+                world_vel: None,
                 color,
                 life: 1.0,
                 max_life: lifetime,
@@ -403,6 +608,10 @@ impl ParticleSystem {
                 y,
                 vx: angle.cos() * speed,
                 vy: angle.sin() * speed - 180.0,
+                grav_x: 0.0,
+                grav_y: SCREEN_PARTICLE_GRAV_Y,
+                world_pos: None,
+                world_vel: None,
                 color,
                 life: 1.0,
                 max_life: lifetime,
@@ -420,11 +629,15 @@ impl ParticleSystem {
         });
     }
 
-    /// Radial splash at a screen position (rain impact).
+    /// Splash flecks spawned from a world-space rain impact.
     pub fn emit_splash_at(
         &mut self,
-        sx: f32,
-        sy: f32,
+        cam: &CameraParams,
+        window_w: f32,
+        window_h: f32,
+        hit_world: Vec3,
+        impact_vel: Vec3,
+        hit_normal: Vec3,
         count: usize,
         color: [f32; 4],
         lifetime: f32,
@@ -435,16 +648,20 @@ impl ParticleSystem {
         }
         self.splashes_this_frame += 1;
         let size_mul = size_mul.clamp(SPLASH_SIZE_MIN_MUL, SPLASH_SIZE_MAX_MUL);
+        let (sx, sy) = cam.project_world_to_screen(window_w, window_h, hit_world);
         let mut rng = rand::rng();
         for _ in 0..count {
-            let angle: f32 = rng.random::<f32>() * std::f32::consts::TAU;
-            let speed: f32 = 40.0 + rng.random::<f32>() * 120.0;
+            let vel_world = sample_splash_velocity_world(impact_vel, hit_normal, &mut rng);
             let size: f32 = (3.0 + rng.random::<f32>() * 7.0) * size_mul;
             self.particles.push(Particle {
                 x: sx,
                 y: sy,
-                vx: angle.cos() * speed,
-                vy: angle.sin() * speed - 30.0,
+                vx: 0.0,
+                vy: 0.0,
+                grav_x: 0.0,
+                grav_y: 0.0,
+                world_pos: Some(hit_world),
+                world_vel: Some(vel_world),
                 color,
                 life: 1.0,
                 max_life: lifetime,
@@ -503,15 +720,15 @@ impl ParticleSystem {
                     c.mesh,
                 )
             {
-                self.rain_hits_scratch.push((i, hit_world, hit_normal));
+                self.rain_hits_scratch
+                    .push((i, hit_world, hit_normal, drop.vel));
             } else if drop.pos.z < volume.min.z {
                 drop.pos = volume.random_pos_near_camera(cam, aspect, spawn_near_bias);
                 drop.fall_speed_mul = 0.88 + rng.random::<f32>() * 0.24;
             }
         }
         let hits = std::mem::take(&mut self.rain_hits_scratch);
-        for (i, hit_world, hit_normal) in hits {
-            let (sx, sy) = cam.project_world_to_screen(window_w, window_h, hit_world);
+        for (i, hit_world, hit_normal, impact_vel) in hits {
             let splash_rgb = if let Some(ctx) = lighting {
                 shade_dielectric_rgb_at_world(
                     hit_world,
@@ -536,26 +753,47 @@ impl ParticleSystem {
                 splash_rgb[2],
                 splash_color[3],
             ];
-            let splash_size_mul = splash_size_mul_for_distance(cam, hit_world);
+            let distance_size_mul = splash_size_mul_for_distance(cam, hit_world);
+            let (count, lifetime, size_mul) =
+                splash_params_for_normal(hit_normal, splash_count, splash_lifetime, distance_size_mul);
             self.emit_splash_at(
-                sx,
-                sy,
-                splash_count,
+                cam,
+                window_w,
+                window_h,
+                hit_world,
+                impact_vel,
+                hit_normal,
+                count,
                 lit_splash,
-                splash_lifetime,
-                splash_size_mul,
+                lifetime,
+                size_mul,
             );
             self.world_drops[i].pos = volume.random_pos_near_camera(cam, aspect, spawn_near_bias);
             self.world_drops[i].fall_speed_mul = 0.88 + rng.random::<f32>() * 0.24;
         }
     }
 
-    /// Advance simulation by `dt` seconds.
-    pub fn update(&mut self, dt: f32) {
+    /// Advance simulation by `dt` seconds. Pass [`RainSplashUpdate`] when rain
+    /// splash flecks are active so they integrate in Z-up world space.
+    pub fn update(&mut self, dt: f32, rain: Option<RainSplashUpdate<'_>>) {
+        let world_gravity = rain.map(|ctx| splash_world_gravity_accel(ctx.fall_speed));
         for p in &mut self.particles {
-            p.x += p.vx * dt;
-            p.y += p.vy * dt;
-            p.vy += 80.0 * dt;
+            if let (Some(pos), Some(vel)) = (p.world_pos.as_mut(), p.world_vel.as_mut()) {
+                if let Some(ctx) = rain {
+                    if let Some(g) = world_gravity {
+                        *vel += g * dt;
+                    }
+                    *pos += *vel * dt;
+                    (p.x, p.y) = ctx
+                        .cam
+                        .project_world_to_screen(ctx.window_w, ctx.window_h, *pos);
+                }
+            } else {
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                p.vx += p.grav_x * dt;
+                p.vy += p.grav_y * dt;
+            }
             p.life -= dt / p.max_life;
         }
         self.particles.retain(|p| p.life > 0.0);

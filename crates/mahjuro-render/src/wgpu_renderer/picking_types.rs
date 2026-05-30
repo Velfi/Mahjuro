@@ -67,8 +67,10 @@ pub enum GameplayPick {
     WoodTablet(usize),
     /// Authored `btn_cash_in` mesh in `gameplay.glb` (env draw + collision pick).
     CashInButton,
-    /// Leather-bound Yaku Journal book (same mesh as the shop).
+    /// Leather-bound Yaku journal book (same mesh as the shop).
     JournalBook,
+    /// Gameplay-table guide book (`player_guidebook` empty).
+    GuideBook,
     /// The discard bowl. Click target = commit the selected discard.
     DiscardBowl,
     /// The bronze mirror. Click target = play the selected hand.

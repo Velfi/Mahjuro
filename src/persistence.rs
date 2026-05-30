@@ -205,8 +205,25 @@ pub struct AppSettings {
     pub archive_last_seen_run_len: [u32; 3],
 }
 
+/// Stored volume gain: `1.0` = 100% (unity), `2.0` = 200% (VLC-style boost cap).
+pub const VOLUME_MIN: f32 = 0.0;
+pub const VOLUME_MAX: f32 = 2.0;
+pub const VOLUME_UNITY: f32 = 1.0;
+pub const VOLUME_STEP: f32 = 0.05;
+
+#[inline]
+pub fn clamp_volume(vol: f32) -> f32 {
+    vol.clamp(VOLUME_MIN, VOLUME_MAX)
+}
+
+/// Rounded percentage for options readouts (`1.0` → `100`, `2.0` → `200`).
+#[inline]
+pub fn volume_display_percent(vol: f32) -> u32 {
+    (clamp_volume(vol) * 100.0).round() as u32
+}
+
 fn default_volume() -> f32 {
-    0.7
+    VOLUME_UNITY
 }
 fn default_true() -> bool {
     true
@@ -227,9 +244,9 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             active_profile: 0,
-            master_volume: 0.7,
-            sfx_volume: 0.7,
-            music_volume: 0.7,
+            master_volume: VOLUME_UNITY,
+            sfx_volume: VOLUME_UNITY,
+            music_volume: VOLUME_UNITY,
             sfx_enabled: true,
             effects_quality: EffectsQuality::High,
             tile_preset: TilePreset::Chinese,
@@ -369,10 +386,11 @@ fn load_profile_uncached(index: usize) -> PlayerProgress {
     // Meta-level points landed after older profiles were already on disk.
     // Re-derive once from run history (or run count fallback) when absent.
     progress.backfill_level_progress_points_from_history();
-    // Stakes landed after some profiles already had victories on disk. Re-derive
-    // `unlocked_stakes` from history every load so older saves see the right
+    // Seasons landed after some profiles already had victories on disk. Re-derive
+    // `unlocked_seasons` from history every load so older saves see the right
     // ladder without requiring a manual migration — the backfill is idempotent.
-    progress.backfill_stakes_from_history();
+    progress.backfill_seasons_from_history();
+    progress.backfill_material_unlocks_from_history();
     progress
 }
 

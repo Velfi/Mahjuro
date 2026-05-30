@@ -24,8 +24,8 @@ pub enum Achievement {
     FirstRunCompleted,
     /// Started 10 distinct runs. Retention signal.
     TenRunsPlayed,
-    /// Unlocked the Summer stake (first step up from baseline).
-    Stake2Unlocked,
+    /// Unlocked the Summer season (first step up from baseline).
+    Season2Unlocked,
     /// Encountered every boss blind at least once.
     AllBossesSeen,
     /// Silk Thread metamorphosed into Silk Moth — the player babied a
@@ -53,7 +53,7 @@ impl Achievement {
             Self::FirstOrdealDefeated => "FIRST_BOSS_DEFEATED",
             Self::FirstRunCompleted => "FIRST_RUN_COMPLETED",
             Self::TenRunsPlayed => "TEN_RUNS_PLAYED",
-            Self::Stake2Unlocked => "STAKE_2_UNLOCKED",
+            Self::Season2Unlocked => "STAKE_2_UNLOCKED",
             Self::AllBossesSeen => "ALL_BOSSES_SEEN",
             Self::SilkMothEmerged => "SILK_MOTH_EMERGED",
             Self::TaotieAwakened => "TAOTIE_AWAKENED",

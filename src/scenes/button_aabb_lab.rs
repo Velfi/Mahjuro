@@ -1,6 +1,6 @@
 //! Debug scene: projected button hit rects (mesh AABB vs model AABB).
 //!
-//! Entered from Debug → Scene Jumps → Button AABB Lab…
+//! Entered from Debug → Labs → Button AABB Lab…
 
 use crate::render::archive_glb::{
     self, ARCHIVE_TAB_BUTTON_NODES, BTN_MAIN_MENU, BTN_PAGE_LEFT, BTN_PAGE_RIGHT,

@@ -161,6 +161,15 @@ pub(crate) struct HandTileGpu {
     pub tile_id: (Suit, u8, Option<mahjuro_core::core::tile::TileEnhancement>, bool),
 }
 
+/// GPU resources for an instanced standalone GLB prop (e.g. yen coins).
+pub(crate) struct GltfPropGpu {
+    pub uniform_buffer: wgpu::Buffer,
+    pub bind_groups: Vec<wgpu::BindGroup>,
+    pub shadow_uniform_buffer: wgpu::Buffer,
+    pub shadow_bind_group: wgpu::BindGroup,
+    pub cached_shadow_caster: crate::lit_mesh::ShadowCasterUniform,
+}
+
 /// GPU resources for a showcase tile (pack celebration, hand strip, choose-tiles grid, etc.).
 pub(crate) struct ShowcaseTileGpu {
     /// Sub-rect within `showcase_decal_atlas` for this tile identity (see `tile_3d.wgsl`).
@@ -188,8 +197,10 @@ pub(crate) struct ShopEnvironmentGpu {
     /// Same `distortion_buffer` as `room_glb` @binding(8) — shadow VS group 1 (warp disabled when zeroed).
     pub shadow_warp_bind_group: wgpu::BindGroup,
     pub bind_groups: Vec<wgpu::BindGroup>,
-    /// Archive room only: CPU-updated decal atlas at `@group(0) @binding(3)`.
+    /// Archive browse boards (`sign_description_*`): CPU-updated decal at `@group(0) @binding(3)`.
     pub archive_sign_decal_texture: Option<wgpu::Texture>,
+    /// Archive item inspect (`inspect_plaque`): separate atlas sized to that mesh aspect.
+    pub archive_inspect_plaque_decal_texture: Option<wgpu::Texture>,
 }
 
 pub(crate) struct TileFaceOverlayGpu {

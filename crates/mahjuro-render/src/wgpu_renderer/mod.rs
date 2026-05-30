@@ -91,7 +91,7 @@ use crate::table_transform::{
 };
 use crate::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh};
 use crate::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip_mesh};
-use crate::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
+use crate::tile_glb::Vertex3dTex;
 use crate::wood_tablet_mesh::build_wood_tablet_mesh;
 use crate::world_space::pixel_to_world;
 use mahjuro_types::scene_draw::BackgroundId;
@@ -205,13 +205,9 @@ pub struct WgpuRenderer {
     _tile_default_normal_texture: wgpu::Texture,
     _tile_glb_default_mr_texture: wgpu::Texture,
     _tile_glb_default_emissive_texture: wgpu::Texture,
-    /// Per-primitive GPU resources for the tile mesh (one entry per glTF
-    /// primitive, e.g. ivory face + bamboo body).
-    tile_primitives: Vec<TilePrimitiveGpu>,
-    /// All tile primitives concatenated — used for outline shell draws only.
-    tile_outline_vertex_buffer: wgpu::Buffer,
-    tile_outline_index_buffer: wgpu::Buffer,
-    tile_outline_index_count: u32,
+    /// Per-material GPU tile meshes (`Bamboo`, `Plastic`, `TortoiseShell`).
+    tile_meshes: [TileMeshGpuSet; crate::tile_glb::TILE_MATERIAL_MESH_COUNT],
+    active_tile_material: mahjuro_gfx_types::TileMaterial,
     /// [`shop.glb`](../../assets/3d/shop.glb) environment primitives (tile vertex layout + materials).
     shop_env_primitives: Vec<TilePrimitiveGpu>,
     shop_environment: Option<ShopEnvironmentGpu>,
@@ -243,9 +239,24 @@ pub struct WgpuRenderer {
     gameplay_env_primitives: Vec<TilePrimitiveGpu>,
     /// GPU primitive indices for `btn_cash_in` / `label_cash_in` (multi-material meshes).
     gameplay_cash_in_prim_indices: Vec<usize>,
+    /// Primitive groups for each gameplay score roller slot (0..20).
+    gameplay_score_roller_prim_groups: Vec<Vec<usize>>,
+    /// Roller pivot points in gameplay.glb document space (parallel with slot index).
+    gameplay_score_roller_pivots_doc: Vec<[f32; 3]>,
+    /// Roller spin axes in gameplay.glb document space (parallel with slot index).
+    gameplay_score_roller_axes_doc: Vec<[f32; 3]>,
+    /// Smoothed mechanical drives for score / target banks.
+    gameplay_score_roller_drive_values: std::cell::RefCell<[f64; 2]>,
+    gameplay_score_roller_drive_initialized: std::cell::RefCell<[bool; 2]>,
+    /// Continuous roll time while either bank is catching up (resets on stop, not retarget).
+    gameplay_score_roller_roll_elapsed: std::cell::RefCell<f64>,
+    /// Set when both odometer banks finish a spin; drained by the app after render.
+    gameplay_score_roller_stopped: std::cell::RefCell<bool>,
     /// Per-primitive gameplay env shadow cast policy (see [`gameplay_prim_casts_room_shadow`]).
     gameplay_env_shadow_caster_mask: Vec<bool>,
     gameplay_environment: Option<ShopEnvironmentGpu>,
+    /// GPU primitive index of `inspect_plaque` in `archive_env_primitives` (inspect decal host).
+    archive_inspect_plaque_prim_idx: Option<usize>,
     /// GPU primitive index of `sign_description_left` in `archive_env_primitives` (for culling).
     archive_sign_left_prim_idx: Option<usize>,
     archive_sign_right_prim_idx: Option<usize>,
@@ -254,8 +265,10 @@ pub struct WgpuRenderer {
     archive_page_right_prim_indices: Vec<usize>,
     /// Per-primitive shadow caster flags (parallel to `archive_env_primitives`).
     archive_env_shadow_caster_mask: Vec<bool>,
-    /// Last-uploaded description decal (`archive_sign_decal_texture`); `u64::MAX` = cleared / none.
+    /// Last-uploaded browse-board decal; `u64::MAX` = cleared / none.
     archive_sign_decal_upload_key: u64,
+    /// Last-uploaded inspect-plaque decal; `u64::MAX` = cleared / none.
+    archive_inspect_plaque_decal_upload_key: u64,
     /// Per-scene room GLB tuning (linear/ambient/emissive/height). Filled each frame
     /// from [`crate::tuning::scene_look::SceneLookTuningSet`]; each GLB env pass
     /// reads its own scene key (shop, pick_chamber, gameplay, …).
@@ -464,8 +477,8 @@ pub struct WgpuRenderer {
     room_gi_capture_pending: Option<crate::room_gi_bake::RoomGiRoom>,
     room_gi_capture_meta: Option<crate::room_gi_bake::RoomGiBake>,
     room_gi_captured: Option<crate::room_gi_bake::RoomGiBake>,
-    /// Offline baked room shadow maps (one per static room).
-    room_baked_shadow_gpu: [impl_room_shadow::RoomBakedShadowGpu;
+    /// Offline baked room shadow maps (one per static room); lazy-uploaded on first draw.
+    room_baked_shadow_gpu: [Option<impl_room_shadow::RoomBakedShadowGpu>;
         crate::room_gi_bake::ROOM_GI_ROOM_COUNT],
     active_room_baked_shadow: Option<crate::room_gi_bake::RoomGiRoom>,
     room_shadow_capture_pending: Option<crate::room_gi_bake::RoomGiRoom>,
@@ -591,9 +604,6 @@ pub struct WgpuRenderer {
     /// the click silhouette matches the visible relic outline instead of a
     /// loose AABB slab.
     pub(super) relic_tri_lists: FxHashMap<RelicId, Vec<[glam::Vec3; 3]>>,
-    /// Uploaded to `SsrGlobals.felt.x` — procedural felt shader tier (see
-    /// [`mahjuro_gfx_types::EffectsQuality::felt_shader_lod`]).
-    pub(super) felt_shader_lod: f32,
     /// Per-relic-placeholder (world-space model matrix, relic id) captured
     /// each frame for `pick_shop_object` raycasting and the bulk screen-rect
     /// reprojection. The relic id drives per-triangle trimesh picking so the
@@ -730,6 +740,10 @@ pub struct WgpuRenderer {
     /// material samples a heightmap (e.g. engraved coin faces).
     primitive_textures:
         FxHashMap<crate::primitive::MeshId, (wgpu::TextureView, wgpu::TextureView)>,
+    /// Authored mesh + material slots from [`coin.glb`](../../../assets/3d/coin.glb).
+    coin_glb_primitives: Vec<TilePrimitiveGpu>,
+    /// Per-instance uniforms/bind groups for [`DrawKind::GltfCoin`].
+    coin_glb_instances: Vec<GltfPropGpu>,
     /// Per-pick-id model matrix snapshot for primitive hit-testing.
     pub(super) last_primitive_pick_models: FxHashMap<u32, Mat4>,
     /// Three reusable lit-mesh instances for the debug world-axes overlay
@@ -758,6 +772,9 @@ pub struct WgpuRenderer {
     /// by every 3D shader through `shadow_sample_bind_group`.
     shadow_map_texture: wgpu::Texture,
     shadow_map_view: wgpu::TextureView,
+    shadow_sample_layout: wgpu::BindGroupLayout,
+    shadow_compare_sampler: wgpu::Sampler,
+    shadow_ao_sampler: wgpu::Sampler,
     /// Bind-group layout for per-caster uniforms (group 0 of the shadow
     /// pipeline). Each `LitMeshInstance` and `HandTileGpu` owns one bind
     /// group built against this layout.
@@ -789,6 +806,15 @@ pub struct WgpuRenderer {
     /// (Outdated, Timeout, etc.) and self-emits a one-shot info summary
     /// after warmup. See [`runtime::AcquireTelemetry`].
     acquire_telemetry: runtime::AcquireTelemetry,
+    /// Live candle flame tuning (shader + placement); synced from scene / debug overlay.
+    pub flame_tuning: crate::flame_tuning::FlameTuning,
+    /// Debug menu: force main-menu pride rainbow on moon / stars outside June.
+    pub main_menu_pride_rainbow_debug: bool,
+    /// Emissive overlay mesh for main-menu `rain_hit_*` shells (rain debug menu).
+    pub(super) main_menu_rain_hit_debug_mesh: Option<LitMeshGpu>,
+    pub(super) main_menu_rain_hit_debug_instance: Option<LitMeshInstance>,
+    /// Log once per room when probe GI AABB drifts stale (see `render.rs`).
+    probe_gi_stale_aabb_warned_room: Option<crate::room_gi_bake::RoomGiRoom>,
 }
 
 mod impl_loaders;
@@ -800,7 +826,7 @@ mod impl_screenshot;
 
 pub use constants::{
     MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MAX_BOOK_SLOTS,
-    MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS,
+    MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_COIN_GLTF_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS,
     MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_ORDEAL_ICON_SLOTS, MAX_POINT_LIGHTS, MAX_RELIC_SLOTS,
     MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
@@ -824,7 +850,7 @@ pub(crate) use moon::current_moon_phase;
 pub(crate) use resources::{create_depth, create_depth_r32_snapshot};
 pub(crate) use screenshot::ScreenshotStaging;
 pub(crate) use targets::RenderTarget;
-pub(crate) use tile_pipeline::{TileGlbPipelineKey, TilePrimitiveGpu};
+pub(crate) use tile_pipeline::{TileGlbPipelineKey, TileMeshGpuSet, TilePrimitiveGpu};
 pub(crate) use uniforms::{
     BloomParams, CameraUniform, FlameViewUniform, Globals, ProbeGiFrameUniform,
     TileOutlineFrameUniform, TileOutlineInstance, TonemapParams,
@@ -836,6 +862,6 @@ pub(super) use constants::{
 pub(crate) use projection::PickCamera;
 
 pub(crate) use internal_slots::{
-    CachedTextLabel, HandTileGpu, ShopEnvironmentGpu, ShowcaseTileGpu, TextLabelShapeKey,
+    CachedTextLabel, GltfPropGpu, HandTileGpu, ShopEnvironmentGpu, ShowcaseTileGpu, TextLabelShapeKey,
     TileFaceOverlayGpu,
 };

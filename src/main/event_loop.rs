@@ -130,6 +130,10 @@ impl App {
                         renderer.ensure_active_showcase_decal_atlas(&tileset);
                         did_loader_work = true;
                     }
+                    if matches!(self.scene, Scene::Splash(_)) {
+                        renderer.prepare_splash_hub_boot();
+                        did_loader_work = true;
+                    }
                     if matches!(
                         self.scene,
                         Scene::MainMenuExterior(_)
@@ -512,6 +516,18 @@ impl App {
         if let Some(ref mut o) = self.debug.rain_debug_overlay {
             let ctrl = mod_ctrl(self.modifiers) || mod_gui(self.modifiers);
             if o.feed_key_event(scancode, ctrl) {
+                return Ok(());
+            }
+        }
+        if let Some(ref mut o) = self.debug.flame_debug_overlay {
+            let ctrl = mod_ctrl(self.modifiers) || mod_gui(self.modifiers);
+            if o.feed_key_event(scancode, ctrl) {
+                return Ok(());
+            }
+        }
+        if let Some(crate::scenes::Scene::CascadeLab(lab)) = self.overlay_stack.last_mut() {
+            let shift = mod_shift(self.modifiers);
+            if lab.feed_structure_key(scancode, shift) {
                 return Ok(());
             }
         }

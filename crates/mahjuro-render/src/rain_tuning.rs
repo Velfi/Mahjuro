@@ -46,12 +46,20 @@ fn default_field_spawn_near_bias() -> f32 {
     2.2
 }
 
+fn default_moon_emission_color() -> [f32; 3] {
+    [1.0, 1.0, 1.0]
+}
+
 /// World rain tuning — [`Self::field`] plus global [`Self::speed_mul`].
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RainTuning {
     /// Scales field fall, wind, and spawn rate. Persists for saved overlays / headless.
     pub speed_mul: f32,
     pub field: RainFieldTuning,
+    /// Linear RGB multiplier on [`main_menu.glb`](../../assets/3d/main_menu.glb) `MoonObject`
+    /// and `star*` glTF emissive factors (after authored strength / texture).
+    #[serde(default = "default_moon_emission_color")]
+    pub moon_emission_color: [f32; 3],
 }
 
 impl Default for RainTuning {
@@ -79,6 +87,7 @@ impl RainTuning {
                 volume_top_mul: 0.65,
                 spawn_near_bias: 2.9529,
             },
+            moon_emission_color: default_moon_emission_color(),
         }
     }
 
@@ -133,6 +142,8 @@ impl RainTuning {
             13 => self.field.volume_pad_xy,
             14 => self.field.volume_top_mul,
             15 => self.field.spawn_near_bias,
+            16 => rgb_linear_hue(self.moon_emission_color),
+            17 => rgb_linear_sat(self.moon_emission_color),
             _ => 0.0,
         }
     }
@@ -173,6 +184,16 @@ impl RainTuning {
             13 => self.field.volume_pad_xy = v,
             14 => self.field.volume_top_mul = v,
             15 => self.field.spawn_near_bias = v,
+            16 => {
+                let mut rgb = self.moon_emission_color;
+                set_linear_rgb_hue(&mut rgb, v);
+                self.moon_emission_color = rgb;
+            }
+            17 => {
+                let mut rgb = self.moon_emission_color;
+                set_linear_rgb_sat(&mut rgb, v);
+                self.moon_emission_color = rgb;
+            }
             _ => {}
         }
     }
@@ -194,6 +215,7 @@ impl RainTuning {
                 "        volume_pad_xy: {:.4}, volume_top_mul: {:.4},\n",
                 "        spawn_near_bias: {:.4},\n",
                 "    }},\n",
+                "    moon_emission_color: [{:.4}, {:.4}, {:.4}],\n",
                 "}};\n",
             ),
             self.speed_mul,
@@ -213,6 +235,9 @@ impl RainTuning {
             self.field.volume_pad_xy,
             self.field.volume_top_mul,
             self.field.spawn_near_bias,
+            self.moon_emission_color[0],
+            self.moon_emission_color[1],
+            self.moon_emission_color[2],
         )
     }
 }
@@ -285,6 +310,7 @@ pub fn rain_color_swatch_rgb(tuning: &RainTuning, row: usize) -> Option<[f32; 3]
             tuning.field.drop_color[1],
             tuning.field.drop_color[2],
         ],
+        16..=17 => tuning.moon_emission_color,
         _ => return None,
     };
     let peak = rgb[0].max(rgb[1]).max(rgb[2]);
@@ -295,11 +321,11 @@ pub fn rain_color_swatch_rgb(tuning: &RainTuning, row: usize) -> Option<[f32; 3]
 }
 
 pub fn rain_row_is_hue(row: usize) -> bool {
-    row == 10
+    matches!(row, 10 | 16)
 }
 
 pub fn rain_row_is_saturation(row: usize) -> bool {
-    row == 11
+    matches!(row, 11 | 17)
 }
 
 /// Full-saturation linear RGB at hue `h` (hue-wheel slider art).
@@ -324,6 +350,8 @@ pub const RAIN_DEBUG_ROW_META: &[(&str, f32, f32, f32)] = &[
     ("Volume pad XY (fraction)", 0.0, 2.0, 0.02),
     ("Volume top (× room Z)", 0.1, 2.0, 0.02),
     ("Spawn near-camera bias", 0.0, 6.0, 0.05),
+    ("Moon emission hue", 0.0, 1.0, 1.0 / 360.0),
+    ("Moon emission saturation", 0.0, 1.0, 0.01),
 ];
 
 /// Slider rows in the rain debug overlay (Save / Reset / Close follow).

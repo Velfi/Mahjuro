@@ -3,7 +3,7 @@
 //
 // Mesh authored Y-up; mapped to Mahjuro Z-up in the vertex stage.
 // Instance: [`GpuFlameInstance`] → locations 3–4 (anchor+wind_x, scale+phase+brightness+wind_y).
-// Tuning constants: [`flame_volume.rs`] (`FLAME_MESH_*`).
+// Tuning: live [`flame_tuning::FlameTuning`] uploaded in `FlameView.tuning`.
 
 struct Globals {
     screen: vec2<f32>,
@@ -12,9 +12,26 @@ struct Globals {
 };
 @group(0) @binding(0) var<uniform> globals: Globals;
 
+struct FlameShaderTuning {
+    flame_height: f32,
+    flame_width: f32,
+    taper_factor: f32,
+    height_rw_rate: f32,
+    height_rw_amp: f32,
+    bright_rw_rate: f32,
+    micro_rw_rate: f32,
+    bright_rw_amp: f32,
+    emission_gain: f32,
+    max_alpha: f32,
+    border_width: f32,
+    bottom_fade_y_start: f32,
+    bottom_fade_y_end: f32,
+};
+
 struct FlameView {
     view_proj: mat4x4<f32>,
     view_pos: vec4<f32>,
+    tuning: FlameShaderTuning,
 };
 @group(1) @binding(0) var<uniform> view: FlameView;
 
@@ -26,21 +43,6 @@ struct VsOut {
     @location(3) world_nrm: vec3<f32>,
     @location(4) @interpolate(flat) dance_w: f32,
 };
-
-// Sync with `flame_volume.rs` (`FLAME_MESH_*`).
-const FLAME_HEIGHT: f32 = 1.72 * 2.0;
-const FLAME_WIDTH: f32 = 0.82;
-const TAPER_FACTOR: f32 = 0.88;
-const HEIGHT_RW_RATE: f32 = 17.0;
-const HEIGHT_RW_AMP: f32 = 0.016;
-const BRIGHT_RW_RATE: f32 = 15.0;
-const MICRO_RW_RATE: f32 = 19.0;
-const BRIGHT_RW_AMP: f32 = 0.018;
-const EMISSION_GAIN: f32 = 10.5;
-const MAX_ALPHA: f32 = 0.72;
-const BORDER_WIDTH: f32 = 0.75;
-const BOTTOM_FADE_Y_START: f32 = 0.0;
-const BOTTOM_FADE_Y_END: f32 = 0.14;
 
 fn hash21(p: vec2<f32>) -> f32 {
     let h = dot(p, vec2<f32>(127.1, 311.7));
@@ -102,8 +104,8 @@ fn vs_main(
     let dance_w = tip_t * tip_t;
 
     var pos = mesh_pos;
-    pos.x = mix(pos.x, 0.0, tip_t * TAPER_FACTOR);
-    pos.z = mix(pos.z, 0.0, tip_t * TAPER_FACTOR);
+    pos.x = mix(pos.x, 0.0, tip_t * view.tuning.taper_factor);
+    pos.z = mix(pos.z, 0.0, tip_t * view.tuning.taper_factor);
 
     // Indoor: whole column barely leans; gust wind is heavily damped in the emitter.
     let col_phase = pos.y * 1.1 + ph;
@@ -113,19 +115,23 @@ fn vs_main(
     pos.x += sway_x * move_amp + wind.x * scale * dance_w * 0.02;
     pos.z += sway_z * move_amp + wind.y * scale * dance_w * 0.02;
 
-    let h_rw = flame_rw_1d(ph * 0.41 + 2.7, t, HEIGHT_RW_RATE);
-    let breathe = 1.0 + h_rw * HEIGHT_RW_AMP * dance_w;
-    pos.y *= FLAME_HEIGHT * breathe;
-    let tip_rw = flame_rw_1d(ph * 0.63 + 5.1, t, HEIGHT_RW_RATE * 1.25);
+    let h_rw = flame_rw_1d(ph * 0.41 + 2.7, t, view.tuning.height_rw_rate);
+    let breathe = 1.0 + h_rw * view.tuning.height_rw_amp * dance_w;
+    pos.y *= view.tuning.flame_height * breathe;
+    let tip_rw = flame_rw_1d(ph * 0.63 + 5.1, t, view.tuning.height_rw_rate * 1.25);
     pos.y += max(0.0, tip_rw) * tip_t * tip_t * scale * 0.008;
 
-    let world_offset = vec3<f32>(pos.x * FLAME_WIDTH, pos.z * FLAME_WIDTH, pos.y) * scale;
+    let world_offset = vec3<f32>(
+        pos.x * view.tuning.flame_width,
+        pos.z * view.tuning.flame_width,
+        pos.y,
+    ) * scale;
     let world = anchor + world_offset;
 
     // Bent normal: blend mesh normal toward displacement direction for rim lighting.
     var nrm = mesh_nrm;
-    nrm.x *= 1.0 - tip_t * TAPER_FACTOR * 0.85;
-    nrm.z *= 1.0 - tip_t * TAPER_FACTOR * 0.85;
+    nrm.x *= 1.0 - tip_t * view.tuning.taper_factor * 0.85;
+    nrm.z *= 1.0 - tip_t * view.tuning.taper_factor * 0.85;
     let sway_bias = normalize(vec3<f32>(sway_x, 0.0, sway_z + 0.15));
     nrm = normalize(vec3<f32>(nrm.x, nrm.z, nrm.y) + sway_bias * dance_w * 0.08);
 
@@ -159,10 +165,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     );
     let flame_noise = fbm(flow_uv) * 0.5 + fbm(flow_uv * 1.9 + 2.7) * 0.5;
     alpha *= mix(0.78, 1.06, smoothstep(0.32, 0.68, flame_noise));
-    alpha *= smoothstep(BOTTOM_FADE_Y_START, BOTTOM_FADE_Y_END, in.uv.y);
-    let micro_rw = flame_rw_1d(in.uv.y * 2.0 + in.uv.x * 0.4, t, MICRO_RW_RATE);
-    alpha *= 1.0 + micro_rw * BRIGHT_RW_AMP * in.dance_w;
-    alpha = clamp(alpha, 0.0, MAX_ALPHA);
+    alpha *= smoothstep(
+        view.tuning.bottom_fade_y_start,
+        view.tuning.bottom_fade_y_end,
+        in.uv.y,
+    );
+    let micro_rw = flame_rw_1d(in.uv.y * 2.0 + in.uv.x * 0.4, t, view.tuning.micro_rw_rate);
+    alpha *= 1.0 + micro_rw * view.tuning.bright_rw_amp * in.dance_w;
+    alpha = clamp(alpha, 0.0, view.tuning.max_alpha);
     if (alpha < 0.004) {
         discard;
     }
@@ -173,12 +183,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let rim = mix(
         vec3<f32>(1.0, 1.0, 1.0),
         vec3<f32>(1.0, 0.75, 0.0),
-        pow(edge, 1.0 - BORDER_WIDTH) + 0.5 - in.uv.y,
+        pow(edge, 1.0 - view.tuning.border_width) + 0.5 - in.uv.y,
     );
     col = mix(col, rim, edge * 0.45);
 
-    let flick = 1.0 + flame_rw_1d(in.uv.y * 1.5 + in.uv.x * 0.25, t, BRIGHT_RW_RATE) * BRIGHT_RW_AMP;
-    let emission = col * max(vision_dot, 0.12) * EMISSION_GAIN * in.brightness * flick;
+    let flick = 1.0
+        + flame_rw_1d(in.uv.y * 1.5 + in.uv.x * 0.25, t, view.tuning.bright_rw_rate)
+        * view.tuning.bright_rw_amp;
+    let emission = col * max(vision_dot, 0.12) * view.tuning.emission_gain * in.brightness * flick;
     let rgb = emission / (1.0 + emission * 0.12);
 
     return vec4<f32>(rgb * alpha, alpha);

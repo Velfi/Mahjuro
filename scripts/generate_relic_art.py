@@ -529,7 +529,7 @@ RELICS = [
         "survey boat in profile on exposed tidal mud flats, spanning left "
         "to right. Squat workboat hull, cabin roof with a compact radar "
         "dome and short survey antenna — no tall sail mast. Measuring "
-        "stakes in the mud under a pale open sky. Flat grey estuary light. "
+        "seasons in the mud under a pale open sky. Flat grey estuary light. "
         "Crisp pin, everything sharp and in focus.",
         "Dark hull, brown mud, white measuring stakes, small radar dome, short antenna, pale sky, grey flat light.",
     ),

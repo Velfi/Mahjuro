@@ -2554,9 +2554,7 @@ fn visit_shop(
                 } else {
                     run.mode.scale_shop_price(relic_shop_price(id, &run.relics))
                 };
-                if free_relics > 0 {
-                    free_relics -= 1;
-                }
+                free_relics = free_relics.saturating_sub(1);
                 if let Some(sell_idx) = sell_index {
                     let sold = run.relics.active[sell_idx];
                     let hold = relic_hold_value_with_base(run, sell_idx, &shop_base);

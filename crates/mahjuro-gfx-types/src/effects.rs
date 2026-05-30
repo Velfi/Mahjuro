@@ -50,14 +50,4 @@ impl EffectsQuality {
         }
     }
 
-    /// Procedural felt shader tier for `lit_mesh.wgsl` (`SsrGlobals.felt.x`).
-    /// `0` = minimal baize tint (effects Off), `1` = reduced noise path
-    /// (Low), `2` = full detail (Medium/High).
-    pub fn felt_shader_lod(self) -> f32 {
-        match self {
-            Self::Off => 0.0,
-            Self::Low => 1.0,
-            Self::Medium | Self::High => 2.0,
-        }
-    }
 }

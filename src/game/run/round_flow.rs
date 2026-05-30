@@ -11,6 +11,14 @@ use crate::{
 };
 
 impl RunState {
+    /// Zero round score and set the upcoming chamber target before the gameplay
+    /// scene loads. `apply_chamber` still runs later for the deal and boss hooks;
+    /// this only primes HUD values so score rollers do not spin off the last round.
+    pub fn preset_round_hud_for_chamber_entry(&mut self, blind: ChamberKind) {
+        self.round_score = 0;
+        self.target_score = self.chamber_score_target(blind);
+    }
+
     /// Apply a blind choice: sets target score, dispatches boss effect on
     /// boss blinds, and applies any per-round resource resets.
     pub fn apply_chamber(&mut self, blind: ChamberKind, bus: Option<&mut EventBus>) {
@@ -235,6 +243,7 @@ impl RunState {
     /// Second Wind: leave the current blind with no blind clear gold and no boss
     /// / ante credit. Relic hooks that run at a normal round end (Paper Lantern,
     /// Nest Egg, Obsession, …) still apply; Heirloom does not (blind was not cleared).
+    #[cfg(any(feature = "game", feature = "headless-screenshot", test))]
     pub(crate) fn forfeit_current_chamber_second_wind(&mut self, bus: &mut EventBus) {
         self.roll_lantern_maybe_shatter(bus);
         if self.relics.has(RelicId::NestEgg) {

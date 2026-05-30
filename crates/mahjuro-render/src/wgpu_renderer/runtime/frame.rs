@@ -6,6 +6,11 @@ pub(super) enum RenderFrame {
 }
 
 impl WgpuRenderer {
+    #[inline]
+    pub(super) fn active_tile_mesh(&self) -> &TileMeshGpuSet {
+        &self.tile_meshes[crate::tile_glb::tile_material_index(self.active_tile_material)]
+    }
+
     fn push_active_showcase_decal_atlas_to_cache(&mut self) {
         let (Some(tileset), Some(atlas)) = (
             self.showcase_decal_atlas_tileset.take(),
@@ -62,7 +67,7 @@ impl WgpuRenderer {
     pub(super) fn apply_render_settings(
         &mut self,
         tile_material: mahjuro_gfx_types::TileMaterial,
-        effects_quality: mahjuro_gfx_types::EffectsQuality,
+        _effects_quality: mahjuro_gfx_types::EffectsQuality,
         tileset_name: &str,
     ) {
         // Showcase decal atlas is loaded lazily in `run_showcase_tiles_placement` when
@@ -71,13 +76,17 @@ impl WgpuRenderer {
         // procedural mesh; 4 = shop env (base map only); 5 = `tile.glb` + projected decal.
         // Imported tile meshes must use kind 5 — procedural 0–2 assumes authored local frame
         // (front-face + ivory band) and reads nearly black on GLB geometry (e.g. pack reveal).
-        self.tile_base_color_factor[3] = if self.tile_primitives.is_empty() {
+        self.tile_base_color_factor[3] = if self.active_tile_mesh().primitives.is_empty() {
             crate::tile_body::TileBodyShaderKind::resolve(tile_material).id()
         } else {
             crate::tile_body::TEXTURED_TILE_GAMEPLAY_BODY_KIND
         };
 
-        self.felt_shader_lod = effects_quality.felt_shader_lod();
+        if self.active_tile_material != tile_material {
+            self.active_tile_material = tile_material;
+            self.hand_tiles.clear();
+            self.showcase_tiles.clear();
+        }
 
         // Swap tilesets: if the user picked a different set in Options, update
         // the active name and blow the per-tile decal caches so the next frame
@@ -314,7 +323,17 @@ impl WgpuRenderer {
                 transition_progress: frame.transition_progress,
                 quality_level: effects_quality.quality_level_f32(),
                 moon_phase: current_moon_phase(),
-                _globals_pad: [cascade_quality_level, 0.0, 0.0],
+                _globals_pad: [
+                    cascade_quality_level,
+                    if crate::main_menu_glb::main_menu_pride_rainbow_active(
+                        self.main_menu_pride_rainbow_debug,
+                    ) {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    0.0,
+                ],
             }),
         );
         // Gameplay / artist-style point lights (group 1 for tiles + lit_mesh).

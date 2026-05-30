@@ -601,7 +601,7 @@ pub fn regular_pool() -> Vec<OrdealKind> {
 /// ante are still better than no boss at all.
 ///
 /// `min_wing_floor`: subtracted from each boss's `min_ante` (saturating) so
-/// higher stakes can see harder bosses earlier. Use `0` for the Spring default.
+/// higher seasons can see harder bosses earlier. Use `0` for the Spring default.
 pub fn pick_for_wing_with_floor(
     pool: &mut Vec<OrdealKind>,
     ante: u32,

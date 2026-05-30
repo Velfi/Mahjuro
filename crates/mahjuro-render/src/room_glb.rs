@@ -344,7 +344,7 @@ pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = 1.0;
 /// `lit_mesh` (pack box) shares this with showcase tiles; too low reads as black with zero ambient.
 pub const TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE: f32 = 1.0 / 3.8;
 
-/// Floor for `hdr_tonemap.z` → `lit_mesh` `felt.w` hemispheric fill (`× 0.08` in shader) on pack scenes
+/// Floor for `hdr_tonemap.z` → `lit_mesh` hemispheric fill (`× 0.08` in shader) on pack scenes
 /// when [`SHOP_ENV_AMBIENT_SCALE`] is 0.
 pub const TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN: f32 = 0.62;
 
@@ -863,6 +863,7 @@ pub fn shop_embedded_point_lights_runtime(
     tune: &RoomEnvLightingTune,
     flame_time_s: f32,
     lamp_flicker: f32,
+    candle_flicker_amp: f32,
 ) -> Vec<crate::wgpu_renderer::PointLight> {
     with_shop_glb_cpu(|opt| {
         opt.map(|cpu| {
@@ -875,6 +876,7 @@ pub fn shop_embedded_point_lights_runtime(
                 crate::room_gltf_punctual::RoomPunctualProfile::ShopCandles {
                     flame_time_s,
                     lamp_flicker,
+                    flicker_amp: candle_flicker_amp,
                 },
                 "shop.glb",
             )

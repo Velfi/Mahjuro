@@ -3,6 +3,9 @@
 //! intercept input while open.
 
 use crate::audio;
+use crate::cascade_tuning_timeline::{
+    apply_timeline_drag, draw_timelines, CascadeTuningTimelineGeom, TimelineDragTarget,
+};
 use crate::core::rules::ChamberKind;
 use crate::game::cascade::CascadeTuning;
 use crate::game::scene_look_tuning::{
@@ -14,7 +17,8 @@ use crate::render::draw_cmd::CameraParams;
 use crate::render::hallway_glb::{
     HallwayDistortion, HallwayDistortionDebugSnapshot, hallway_distortion_apply_glb_depth_extent,
 };
-use crate::render::theme::{color, metrics, typography};
+use crate::render::debug_overlay_ui::{self, DebugPointerState, DebugRowVisual};
+use crate::render::theme::{color, metrics, typography, ButtonVariant};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 use sdl3::keyboard::Scancode;
@@ -28,10 +32,72 @@ use crate::scenes::debug_visibility::{
 /// Cursor index for the Hide All / Reveal All button (one past the last checkbox row).
 const VIS_CURSOR_TOGGLE_ALL: usize = GAMEPLAY_VIS_ROW_COUNT;
 
+struct DebugVisLayout {
+    panel_x: f32,
+    panel_w: f32,
+    rows_y0: f32,
+    row_h: f32,
+    row_gap: f32,
+    btn_h: f32,
+    visible_window: usize,
+}
+
+impl DebugVisLayout {
+    fn compute(window_w: f32, window_h: f32) -> Self {
+        let scale = metrics::scene_scale(window_w, window_h);
+        let panel_w = (440.0 * scale).clamp(360.0, 680.0).min(window_w * 0.90);
+        let row_font = typography::tier_at_most(26.0, window_h);
+        let row_h = (row_font * 1.55).clamp(30.0, 44.0);
+        let row_gap = (5.0 * scale).clamp(4.0, 6.0);
+        let title_font = typography::tier_at_most(34.0, window_h);
+        let title_h = (title_font * 1.45).clamp(34.0, 50.0);
+        let btn_h = (row_font * 1.6).clamp(30.0, 44.0);
+        let footer_font = (row_font * 0.70).max(12.0);
+        let footer_h = (footer_font * 1.35).clamp(16.0, 24.0);
+        let visible_rows = GAMEPLAY_VIS_VISIBLE_ROWS.min(GAMEPLAY_VIS_ROW_COUNT) as f32;
+        let panel_h = title_h
+            + row_gap
+            + visible_rows * (row_h + row_gap)
+            + row_gap
+            + btn_h
+            + footer_h
+            + row_gap * 3.0;
+        let panel_x = (window_w - panel_w) * 0.5;
+        let panel_y = (window_h - panel_h) * 0.5;
+        let rows_y0 = panel_y + row_gap + title_h + row_gap;
+        Self {
+            panel_x,
+            panel_w,
+            rows_y0,
+            row_h,
+            row_gap,
+            btn_h,
+            visible_window: GAMEPLAY_VIS_VISIBLE_ROWS.min(GAMEPLAY_VIS_ROW_COUNT),
+        }
+    }
+
+    fn checkbox_row_rect(&self, slot: usize) -> (f32, f32, f32, f32) {
+        let row_y = self.rows_y0 + slot as f32 * (self.row_h + self.row_gap);
+        (self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h)
+    }
+
+    fn toggle_all_rect(&self) -> (f32, f32, f32, f32) {
+        let row_y = self.rows_y0 + self.visible_window as f32 * (self.row_h + self.row_gap);
+        let btn_y = row_y + self.row_gap;
+        (self.panel_x + 4.0, btn_y, self.panel_w - 8.0, self.btn_h)
+    }
+}
+
+#[inline]
+fn debug_vis_point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
+    mx >= r.0 && mx <= r.0 + r.2 && my >= r.1 && my <= r.1 + r.3
+}
+
 pub struct DebugVisibilityOverlay {
     cursor: usize,
     scroll: usize,
     pub vis: DebugVisibility,
+    pointer: DebugPointerState,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -46,13 +112,57 @@ impl DebugVisibilityOverlay {
             cursor: 0,
             scroll: 0,
             vis,
+            pointer: DebugPointerState::default(),
         }
     }
 
     /// Total cursor positions = checkbox rows + 1 (the toggle-all button).
     const CURSOR_COUNT: usize = GAMEPLAY_VIS_ROW_COUNT + 1;
 
-    pub fn update(&mut self, actions: &[UiAction]) -> DebugVisResult {
+    pub fn update(
+        &mut self,
+        actions: &[UiAction],
+        mouse: Option<(f32, f32, bool, bool)>,
+        window_w: f32,
+        window_h: f32,
+    ) -> DebugVisResult {
+        let layout = DebugVisLayout::compute(window_w, window_h);
+        self.pointer.sync_held(mouse);
+        self.pointer.clear_hover();
+
+        if let Some((mx, my, clicked, _)) = mouse {
+            let mut hit = false;
+            for slot in 0..layout.visible_window {
+                let i = self.scroll + slot;
+                if i >= GAMEPLAY_VIS_ROW_COUNT {
+                    break;
+                }
+                let rect = layout.checkbox_row_rect(slot);
+                if debug_vis_point_in_rect(mx, my, rect) {
+                    self.pointer.hover_row = Some(i);
+                    self.cursor = i;
+                    hit = true;
+                    if clicked
+                        && let Some(f) = self.vis.flag_mut(i) {
+                            *f = !*f;
+                        }
+                    break;
+                }
+            }
+            if !hit && debug_vis_point_in_rect(mx, my, layout.toggle_all_rect()) {
+                self.pointer.hover_row = Some(VIS_CURSOR_TOGGLE_ALL);
+                self.cursor = VIS_CURSOR_TOGGLE_ALL;
+                if clicked {
+                    let hide_all = !self.vis.any_hide();
+                    for i in 0..GAMEPLAY_VIS_ROW_COUNT {
+                        if let Some(f) = self.vis.flag_mut(i) {
+                            *f = hide_all;
+                        }
+                    }
+                }
+            }
+        }
+
         for a in actions {
             match a {
                 UiAction::FocusDown => {
@@ -168,14 +278,10 @@ impl DebugVisibilityOverlay {
                 break;
             }
             let (name, checked) = self.vis.label_checked(i);
-            let is_focused = self.cursor == i;
+            let visual = DebugRowVisual::for_row(i, self.cursor, &self.pointer);
 
             // Row background.
-            let bg = if is_focused {
-                color::alpha(color::WALNUT_BRIGHT, 0.85)
-            } else {
-                color::alpha(color::WALNUT_DEEP, 0.75)
-            };
+            let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, ButtonVariant::Default);
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
                 color: bg,
@@ -211,11 +317,6 @@ impl DebugVisibilityOverlay {
             }
 
             // Label.
-            let tc = if is_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::STONE, 0.9)
-            };
             labels.push(TextLabel {
                 rect: [
                     cb_x + check_size + row_pad,
@@ -234,14 +335,12 @@ impl DebugVisibilityOverlay {
         }
 
         // Hide All / Reveal All button.
-        let btn_focused = self.cursor == VIS_CURSOR_TOGGLE_ALL;
+        let btn_visual =
+            DebugRowVisual::for_row(VIS_CURSOR_TOGGLE_ALL, self.cursor, &self.pointer);
         let all_hidden = self.vis.any_hide();
         let btn_label = if all_hidden { "Reveal All" } else { "Hide All" };
-        let btn_bg = if btn_focused {
-            color::alpha(color::WALNUT_BRIGHT, 0.95)
-        } else {
-            color::alpha(color::WALNUT_DEEP, 0.85)
-        };
+        let (btn_bg, btn_tc) =
+            debug_overlay_ui::row_surface_colors(btn_visual, ButtonVariant::Primary);
         let btn_y = row_y + row_gap;
         instances.push(GpuInstance {
             rect: [panel_x + 4.0, btn_y, panel_w - 8.0, btn_h],
@@ -251,13 +350,9 @@ impl DebugVisibilityOverlay {
         labels.push(TextLabel {
             rect: [panel_x + 4.0, btn_y, panel_w - 8.0, btn_h],
             text: btn_label.into(),
-            color: if btn_focused {
-                color::GOLD
-            } else {
-                color::alpha(color::STONE, 0.9)
-            },
+            color: btn_tc,
             font_px: Some(row_font),
-            bold: btn_focused,
+            bold: btn_visual.highlighted,
             ..Default::default()
         });
 
@@ -276,15 +371,106 @@ impl DebugVisibilityOverlay {
 
 // ── Cascade tuning overlay ──────────────────────────────────────────────
 
-pub const TUNING_ROW_COUNT: usize = 15; // 14 sliders + Export button
+pub const TUNING_ROW_COUNT: usize = 13; // 12 sliders + Export button
 const TUNING_SLIDER_ROWS: usize = TUNING_ROW_COUNT - 1;
 const TUNING_MIN_MS: u64 = 50;
 const TUNING_MAX_MS: u64 = 5000;
 const TUNING_STEP_MS: u64 = 50;
 
+struct TuningLayout {
+    panel_x: f32,
+    panel_y: f32,
+    panel_w: f32,
+    rows_y0: f32,
+    row_h: f32,
+    row_gap: f32,
+    title_h: f32,
+    row_total_h: f32,
+    label_w: f32,
+    slider_w: f32,
+    scale: f32,
+}
+
+impl TuningLayout {
+    fn compute(window_w: f32, window_h: f32) -> Self {
+        let scale = metrics::scene_scale(window_w, window_h);
+        let panel_w = (520.0 * scale).min(window_w * 0.90);
+        let row_h = (40.0 * scale).max(26.0);
+        let desc_h = (18.0 * scale).max(12.0);
+        let row_gap = (10.0 * scale).max(4.0);
+        let title_h = (48.0 * scale).max(28.0);
+        let diagram_h = (120.0 * scale).max(88.0);
+        let row_total_h = row_h + desc_h + row_gap;
+        let panel_h = title_h
+            + row_gap
+            + diagram_h
+            + row_gap
+            + TUNING_SLIDER_ROWS as f32 * row_total_h
+            + (row_h + row_gap)
+            + row_gap * 3.0;
+        let panel_x = (window_w - panel_w) * 0.5;
+        let panel_y = (window_h - panel_h) * 0.5;
+        let rows_y0 = panel_y + row_gap + title_h + row_gap + diagram_h + row_gap;
+        let label_w = panel_w * 0.38;
+        let slider_w = panel_w * 0.35;
+        Self {
+            panel_x,
+            panel_y,
+            panel_w,
+            rows_y0,
+            row_h,
+            row_gap,
+            title_h,
+            row_total_h,
+            label_w,
+            slider_w,
+            scale,
+        }
+    }
+
+    fn title_block_h(&self) -> f32 {
+        self.row_gap + self.title_h + self.row_gap
+    }
+
+    fn slider_track(&self, row: usize) -> (f32, f32, f32, f32) {
+        let row_y = self.rows_y0 + row as f32 * self.row_total_h;
+        let track_x = self.panel_x + self.label_w;
+        let track_h = (8.0 * self.scale).max(4.0);
+        let track_y = row_y + (self.row_h - track_h) * 0.5;
+        (track_x, track_y, self.slider_w, track_h)
+    }
+
+    fn export_button_rect(&self) -> (f32, f32, f32, f32) {
+        let export_y = self.rows_y0 + TUNING_SLIDER_ROWS as f32 * self.row_total_h;
+        (self.panel_x + 4.0, export_y, self.panel_w - 8.0, self.row_h)
+    }
+
+    fn row_rect(&self, row: usize) -> (f32, f32, f32, f32) {
+        if row >= TUNING_ROW_COUNT - 1 {
+            return self.export_button_rect();
+        }
+        let desc_h = self.row_total_h - self.row_h - self.row_gap;
+        let row_y = self.rows_y0 + row as f32 * self.row_total_h;
+        (
+            self.panel_x + 4.0,
+            row_y,
+            self.panel_w - 8.0,
+            self.row_h + desc_h,
+        )
+    }
+}
+
+#[inline]
+fn tuning_point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
+    mx >= r.0 && mx <= r.0 + r.2 && my >= r.1 && my <= r.1 + r.3
+}
+
 pub struct TuningOverlay {
     cursor: usize,
     pub tuning: CascadeTuning,
+    dragging_slider: Option<usize>,
+    dragging_timeline: Option<TimelineDragTarget>,
+    pointer: DebugPointerState,
 }
 
 pub enum TuningResult {
@@ -298,10 +484,120 @@ impl TuningOverlay {
         Self {
             cursor: 0,
             tuning: tuning.clone(),
+            dragging_slider: None,
+            dragging_timeline: None,
+            pointer: DebugPointerState::default(),
         }
     }
 
-    pub fn update(&mut self, actions: &[UiAction]) -> TuningResult {
+    fn apply_slider_mx(&mut self, row: usize, mx: f32, layout: &TuningLayout) {
+        let (tx, _, tw, _) = layout.slider_track(row);
+        let t = ((mx - tx) / tw.max(1e-6)).clamp(0.0, 1.0);
+        let ms = (TUNING_MIN_MS as f32 + t * (TUNING_MAX_MS - TUNING_MIN_MS) as f32).round() as u64;
+        self.set_row_ms(row, ms);
+    }
+
+    fn set_row_ms(&mut self, row: usize, ms: u64) {
+        let ms = ms.clamp(TUNING_MIN_MS, TUNING_MAX_MS);
+        let field = match row {
+            0 => &mut self.tuning.base_hold_ms,
+            1 => &mut self.tuning.step_hold_ms,
+            2 => &mut self.tuning.total_hold_ms,
+            3 => &mut self.tuning.tick_duration_ms,
+            4 => &mut self.tuning.discard_refill_cap_ms,
+            5 => &mut self.tuning.discard_lift_ms,
+            6 => &mut self.tuning.discard_flight_ms,
+            7 => &mut self.tuning.discard_landing_ms,
+            8 => &mut self.tuning.discard_stagger_ms,
+            9 => &mut self.tuning.discard_river_sink_ms,
+            10 => &mut self.tuning.draw_settle_ms,
+            11 => &mut self.tuning.sort_settle_ms,
+            _ => return,
+        };
+        *field = ms;
+    }
+
+    pub fn update(
+        &mut self,
+        actions: &[UiAction],
+        mouse: Option<(f32, f32, bool, bool)>,
+        window_w: f32,
+        window_h: f32,
+    ) -> TuningResult {
+        let layout = TuningLayout::compute(window_w, window_h);
+        self.pointer.sync_held(mouse);
+        self.pointer.clear_hover();
+
+        if let Some((mx, my, clicked, held)) = mouse {
+            let diagram_top = layout.panel_y + layout.title_block_h();
+            let timeline = CascadeTuningTimelineGeom::compute(
+                layout.panel_x,
+                layout.panel_w,
+                diagram_top,
+                layout.scale,
+            );
+
+            if clicked && self.dragging_timeline.is_none() && self.dragging_slider.is_none()
+                && let Some(target) = timeline.hit_handle(mx, my, &self.tuning) {
+                    self.dragging_timeline = Some(target);
+                    self.cursor = CascadeTuningTimelineGeom::cursor_for_drag(target);
+                }
+            if let Some(target) = self.dragging_timeline
+                && held {
+                    apply_timeline_drag(&mut self.tuning, target, mx, &timeline);
+                    self.cursor = CascadeTuningTimelineGeom::cursor_for_drag(target);
+                }
+
+            for i in 0..TUNING_ROW_COUNT {
+                if debug_overlay_ui::point_in_rect_tuple(mx, my, layout.row_rect(i)) {
+                    self.pointer.hover_row = Some(i);
+                    if self.dragging_slider.is_none() && self.dragging_timeline.is_none() {
+                        self.cursor = i;
+                    }
+                    break;
+                }
+            }
+
+            if let Some(di) = self.dragging_slider
+                && held
+                && di < TUNING_SLIDER_ROWS
+            {
+                self.apply_slider_mx(di, mx, &layout);
+            }
+
+            if (clicked || held)
+                && self.dragging_slider.is_none()
+                && self.dragging_timeline.is_none()
+            {
+                for i in 0..TUNING_SLIDER_ROWS {
+                    if tuning_point_in_rect(mx, my, layout.slider_track(i)) {
+                        self.cursor = i;
+                        self.apply_slider_mx(i, mx, &layout);
+                        if held {
+                            self.dragging_slider = Some(i);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if clicked && self.dragging_slider.is_none() && self.dragging_timeline.is_none()
+                && tuning_point_in_rect(mx, my, layout.export_button_rect()) {
+                    self.cursor = TUNING_ROW_COUNT - 1;
+                    return TuningResult::Export;
+                }
+        }
+
+        if let Some((_, _, _, held)) = mouse {
+            if !held {
+                self.dragging_slider = None;
+                self.dragging_timeline = None;
+            }
+        } else {
+            self.dragging_slider = None;
+            self.dragging_timeline = None;
+        }
+
         for a in actions {
             match a {
                 UiAction::FocusDown => {
@@ -344,8 +640,6 @@ impl TuningOverlay {
             9 => &mut self.tuning.discard_river_sink_ms,
             10 => &mut self.tuning.draw_settle_ms,
             11 => &mut self.tuning.sort_settle_ms,
-            12 => &mut self.tuning.wind_delay_ms,
-            13 => &mut self.tuning.wind_duration_ms,
             _ => return,
         };
         *field = (*field as i64 + delta).clamp(TUNING_MIN_MS as i64, TUNING_MAX_MS as i64) as u64;
@@ -369,7 +663,7 @@ impl TuningOverlay {
         let desc_h = (18.0 * scale).max(12.0);
         let row_gap = (10.0 * scale).max(4.0);
         let title_h = (48.0 * scale).max(28.0);
-        let diagram_h = (80.0 * scale).max(50.0);
+        let diagram_h = (120.0 * scale).max(88.0);
         let row_total_h = row_h + desc_h + row_gap;
         let panel_h = title_h + row_gap
             + diagram_h + row_gap
@@ -412,89 +706,23 @@ impl TuningOverlay {
             ..Default::default()
         });
 
-        let mut cursor_y = panel_y + row_gap + title_h + row_gap;
+        let diagram_top = panel_y + row_gap + title_h + row_gap;
+        let timeline_geom =
+            CascadeTuningTimelineGeom::compute(panel_x, panel_w, diagram_top, scale);
+        draw_timelines(
+            &timeline_geom,
+            &self.tuning,
+            panel_x,
+            panel_w,
+            scale,
+            self.cursor,
+            self.dragging_timeline,
+            window_h,
+            &mut instances,
+            &mut labels,
+        );
 
-        // Timing diagram.
-        let diag_pad = 12.0 * scale;
-        instances.push(GpuInstance {
-            rect: [
-                panel_x + diag_pad,
-                cursor_y,
-                panel_w - diag_pad * 2.0,
-                diagram_h,
-            ],
-            color: color::alpha(color::WALNUT_INK, 0.9),
-            user: 0,
-        });
-        // Draw timeline segments proportional to actual values.
-        let total_ms =
-            self.tuning.base_hold_ms + self.tuning.step_hold_ms * 2 + self.tuning.total_hold_ms;
-        let bar_x = panel_x + diag_pad + 8.0 * scale;
-        let bar_w = panel_w - diag_pad * 2.0 - 16.0 * scale;
-        let bar_h = (16.0 * scale).max(10.0);
-        let bar_y = cursor_y + diagram_h * 0.35;
-        let colors: [[f32; 4]; 4] = [
-            color::alpha(color::WALNUT_BRIGHT, 0.9), // base hold
-            color::alpha(color::JADE, 0.9),          // step 1 (jade)
-            color::alpha(color::WALNUT_SOFT, 0.9),   // step 2 (walnut, darker)
-            color::alpha(color::GOLD, 0.9),          // total hold (brass)
-        ];
-        let segments: [u64; 4] = [
-            self.tuning.base_hold_ms,
-            self.tuning.step_hold_ms,
-            self.tuning.step_hold_ms,
-            self.tuning.total_hold_ms,
-        ];
-        let seg_labels = ["Base", "Step", "Step", "Total"];
-        let mut seg_x = bar_x;
-        for (i, &ms) in segments.iter().enumerate() {
-            let seg_w = bar_w * (ms as f32 / total_ms as f32);
-            instances.push(GpuInstance {
-                rect: [seg_x, bar_y, seg_w, bar_h],
-                color: colors[i],
-                user: 0,
-            });
-            // Segment label (centered in segment).
-            if seg_w > 20.0 {
-                labels.push(TextLabel {
-                    rect: [seg_x, bar_y, seg_w, bar_h],
-                    text: seg_labels[i].to_string(),
-                    color: color::alpha(color::WALNUT_INK, 0.9),
-                    ..Default::default()
-                });
-            }
-            seg_x += seg_w;
-        }
-        // Diagram title.
-        labels.push(TextLabel {
-            rect: [
-                panel_x + diag_pad,
-                cursor_y + 2.0,
-                panel_w - diag_pad * 2.0,
-                diagram_h * 0.28,
-            ],
-            text: "Timeline: Base > Steps (x N) > Total".into(),
-            color: color::alpha(color::STONE, 0.8),
-            ..Default::default()
-        });
-        // Tick duration annotation.
-        let tick_label_y = bar_y + bar_h + 4.0 * scale;
-        labels.push(TextLabel {
-            rect: [
-                panel_x + diag_pad,
-                tick_label_y,
-                panel_w - diag_pad * 2.0,
-                diagram_h * 0.25,
-            ],
-            text: format!(
-                "Score counter ticks over {}ms per phase",
-                self.tuning.tick_duration_ms
-            ),
-            color: color::alpha(color::STONE, 0.7),
-            ..Default::default()
-        });
-
-        cursor_y += diagram_h + row_gap;
+        let cursor_y = diagram_top + timeline_geom.diagram_h + row_gap;
 
         // Slider rows with descriptions.
         let label_w = panel_w * 0.38;
@@ -562,28 +790,14 @@ impl TuningOverlay {
                 "How long sort and drag-reorder animations take",
                 self.tuning.sort_settle_ms,
             ),
-            (
-                "Wind Delay",
-                "Pause after deal before the smoke gust + candle dim",
-                self.tuning.wind_delay_ms,
-            ),
-            (
-                "Wind Duration",
-                "Length of the post-deal smoke gust + candle dim envelope",
-                self.tuning.wind_duration_ms,
-            ),
         ];
 
         for (i, (name, desc, value)) in rows.iter().enumerate() {
             let row_y = cursor_y + i as f32 * row_total_h;
-            let is_focused = self.cursor == i;
+            let visual = DebugRowVisual::for_row(i, self.cursor, &self.pointer);
+            let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, ButtonVariant::Default);
 
             // Row background.
-            let bg = if is_focused {
-                color::alpha(color::WALNUT_BRIGHT, 0.85)
-            } else {
-                color::alpha(color::WALNUT_DEEP, 0.75)
-            };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h + desc_h],
                 color: bg,
@@ -591,11 +805,6 @@ impl TuningOverlay {
             });
 
             // Label.
-            let tc = if is_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::STONE, 0.9)
-            };
             labels.push(TextLabel {
                 rect: [panel_x + 12.0 * scale, row_y, label_w, row_h],
                 text: name.to_string(),
@@ -629,11 +838,7 @@ impl TuningOverlay {
             // Slider fill.
             let t = (*value as f32 - TUNING_MIN_MS as f32) / (TUNING_MAX_MS - TUNING_MIN_MS) as f32;
             let fill_w = slider_w * t.clamp(0.0, 1.0);
-            let fill_color = if is_focused {
-                color::WALNUT_BRIGHT
-            } else {
-                color::alpha(color::WALNUT_BRIGHT, 0.7)
-            };
+            let fill_color = debug_overlay_ui::slider_accent_color(visual);
             instances.push(GpuInstance {
                 rect: [track_x, track_y, fill_w, track_h],
                 color: fill_color,
@@ -646,7 +851,7 @@ impl TuningOverlay {
             let knob_y = track_y + (track_h - knob_size) * 0.5;
             instances.push(GpuInstance {
                 rect: [knob_x, knob_y, knob_size, knob_size],
-                color: if is_focused {
+                color: if visual.highlighted {
                     color::PARCHMENT
                 } else {
                     color::alpha(color::STONE, 0.9)
@@ -666,25 +871,19 @@ impl TuningOverlay {
 
         // Export button row.
         let export_y = cursor_y + TUNING_SLIDER_ROWS as f32 * row_total_h;
-        let is_focused = self.cursor == TUNING_ROW_COUNT - 1;
-        let bg = if is_focused {
-            color::alpha(color::WALNUT_SOFT, 0.95)
-        } else {
-            color::alpha(color::WALNUT_DEEP, 0.85)
-        };
+        let export_visual =
+            DebugRowVisual::for_row(TUNING_ROW_COUNT - 1, self.cursor, &self.pointer);
+        let (export_bg, export_tc) =
+            debug_overlay_ui::row_surface_colors(export_visual, ButtonVariant::Primary);
         instances.push(GpuInstance {
             rect: [panel_x + 4.0, export_y, panel_w - 8.0, row_h],
-            color: bg,
+            color: export_bg,
             user: 0,
         });
         labels.push(TextLabel {
             rect: [panel_x, export_y, panel_w, row_h],
             text: "Export as JSON".into(),
-            color: if is_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::STONE, 0.9)
-            },
+            color: export_tc,
             ..Default::default()
         });
 
@@ -692,7 +891,7 @@ impl TuningOverlay {
         let hint_y = export_y + row_h + row_gap;
         labels.push(TextLabel {
             rect: [panel_x, hint_y, panel_w, row_h * 0.6],
-            text: "Left/Right: adjust   Esc: close".into(),
+            text: "Drag timeline handles · sliders below · Left/Right nudge · Esc close".into(),
             color: color::alpha(color::UMBER, 0.7),
             ..Default::default()
         });
@@ -707,6 +906,7 @@ pub struct SfxTestOverlay {
     cursor: usize,
     /// Cached row rects from the last `draw()` call, used for mouse hit-testing.
     row_rects: Vec<[f32; 4]>,
+    pointer: DebugPointerState,
 }
 
 impl SfxTestOverlay {
@@ -714,25 +914,29 @@ impl SfxTestOverlay {
         Self {
             cursor: 0,
             row_rects: Vec::new(),
+            pointer: DebugPointerState::default(),
         }
     }
 
     /// Returns `true` if the overlay should close.
     ///
-    /// `mouse` is `Some((x, y, clicked))` when cursor position is known;
+    /// `mouse` is `Some((x, y, clicked, held))` when cursor position is known;
     /// `clicked` is true on the frame a left-button press landed.
     pub fn update(
         &mut self,
         actions: &[UiAction],
         audio: &mut audio::AudioManager,
-        mouse: Option<(f32, f32, bool)>,
+        mouse: Option<(f32, f32, bool, bool)>,
     ) -> bool {
         let count = audio::all_sfx_ids().len();
+        self.pointer.sync_held(mouse);
+        self.pointer.clear_hover();
 
         // Mouse hover → move cursor; click → play.
-        if let Some((mx, my, clicked)) = mouse {
+        if let Some((mx, my, clicked, _)) = mouse {
             for (i, r) in self.row_rects.iter().enumerate() {
-                if mx >= r[0] && mx <= r[0] + r[2] && my >= r[1] && my <= r[1] + r[3] {
+                if debug_overlay_ui::point_in_rect(mx, my, *r) {
+                    self.pointer.hover_row = Some(i);
                     self.cursor = i;
                     if clicked && let Some(&id) = audio::all_sfx_ids().get(i) {
                         audio.play_sfx(id);
@@ -823,24 +1027,14 @@ impl SfxTestOverlay {
             let row_y = rows_y0 + i as f32 * (row_h + row_gap);
             self.row_rects
                 .push([panel_x + 4.0, row_y, panel_w - 8.0, row_h]);
-            let is_focused = self.cursor == i;
-
-            let bg = if is_focused {
-                color::alpha(color::WALNUT_BRIGHT, 0.85)
-            } else {
-                color::alpha(color::WALNUT_DEEP, 0.80)
-            };
+            let visual = DebugRowVisual::for_row(i, self.cursor, &self.pointer);
+            let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, ButtonVariant::Default);
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
                 color: bg,
                 user: 0,
             });
 
-            let tc = if is_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::STONE, 0.95)
-            };
             // Variant name (left).
             let name_w = panel_w * 0.32;
             labels.push(TextLabel {
@@ -887,6 +1081,7 @@ pub struct CameraDebugOverlay {
     /// Window height at draw time, included in clipboard output so the
     /// camera can be scaled proportionally at different resolutions.
     last_window_h: f32,
+    pointer: DebugPointerState,
 }
 
 impl CameraDebugOverlay {
@@ -898,6 +1093,7 @@ impl CameraDebugOverlay {
             up: cam.up,
             fovy_deg: cam.fovy_deg,
             last_window_h: 0.0,
+            pointer: DebugPointerState::default(),
         }
     }
 
@@ -942,8 +1138,40 @@ impl CameraDebugOverlay {
     }
 
     /// Returns `true` if the overlay should close.
-    pub fn update(&mut self, actions: &[UiAction], window_h: f32) -> bool {
+    pub fn update(
+        &mut self,
+        actions: &[UiAction],
+        mouse: Option<(f32, f32, bool, bool)>,
+        window_w: f32,
+        window_h: f32,
+    ) -> bool {
         self.last_window_h = window_h;
+        self.pointer.sync_held(mouse);
+        self.pointer.clear_hover();
+
+        let scale = metrics::scene_scale(window_w, window_h);
+        let row_h = (22.0 * scale).max(16.0);
+        let row_gap = (3.0 * scale).max(2.0);
+        let title_h = (24.0 * scale).max(16.0);
+        let pad = (8.0 * scale).max(5.0);
+        let margin = (10.0 * scale).max(6.0);
+        let panel_w = (260.0 * scale).min(window_w * 0.38);
+        let panel_x = window_w - panel_w - margin;
+        let panel_y = margin;
+        let rows_y0 = panel_y + pad + title_h + pad;
+
+        if let Some((mx, my, _, _)) = mouse {
+            for i in 0..self.row_count() {
+                let row_y = rows_y0 + i as f32 * (row_h + row_gap);
+                let rect = [panel_x + 4.0, row_y, panel_w - 8.0, row_h];
+                if debug_overlay_ui::point_in_rect(mx, my, rect) {
+                    self.pointer.hover_row = Some(i);
+                    self.cursor = i;
+                    break;
+                }
+            }
+        }
+
         for a in actions {
             match a {
                 UiAction::FocusDown => {
@@ -1049,24 +1277,14 @@ impl CameraDebugOverlay {
         let rows_y0 = panel_y + pad + title_h + pad;
         for (i, (name, value)) in rows.iter().enumerate() {
             let row_y = rows_y0 + i as f32 * (row_h + row_gap);
-            let is_focused = self.cursor == i;
-
-            let bg = if is_focused {
-                color::alpha(color::WALNUT_BRIGHT, 0.85)
-            } else {
-                color::alpha(color::WALNUT_DEEP, 0.80)
-            };
+            let visual = DebugRowVisual::for_row(i, self.cursor, &self.pointer);
+            let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, ButtonVariant::Default);
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
                 color: bg,
                 user: 0,
             });
 
-            let tc = if is_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::STONE, 0.95)
-            };
             // Label (left).
             let name_w = panel_w * 0.50;
             labels.push(TextLabel {
@@ -1169,6 +1387,25 @@ impl SceneLookDebugLayout {
         let x = self.panel_x + self.label_w + self.slider_w + 4.0 * self.scale;
         (x, row_y, self.value_w, self.row_h)
     }
+
+    fn action_row_rect(&self, row: usize) -> Option<(f32, f32, f32, f32)> {
+        if !(SCENE_LOOK_SAVE_ROW..=SCENE_LOOK_SCENE_NEXT_ROW).contains(&row) {
+            return None;
+        }
+        let row_y = self.rows_y0 + row as f32 * (self.row_h + self.row_gap);
+        Some((self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h))
+    }
+
+    fn row_rect(&self, row: usize) -> Option<(f32, f32, f32, f32)> {
+        if let Some(r) = self.action_row_rect(row) {
+            return Some(r);
+        }
+        if row >= SCENE_LOOK_SLIDER_COUNT {
+            return None;
+        }
+        let row_y = self.rows_y0 + row as f32 * (self.row_h + self.row_gap);
+        Some((self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h))
+    }
 }
 
 #[inline]
@@ -1183,6 +1420,7 @@ pub struct SceneLookDebugOverlay {
     editing: bool,
     edit_buffer: String,
     dragging_slider: Option<usize>,
+    pointer: DebugPointerState,
 }
 
 pub enum SceneLookDebugResult {
@@ -1201,6 +1439,7 @@ impl SceneLookDebugOverlay {
             editing: false,
             edit_buffer: String::new(),
             dragging_slider: None,
+            pointer: DebugPointerState::default(),
         }
     }
 
@@ -1466,8 +1705,21 @@ impl SceneLookDebugOverlay {
     ) -> SceneLookDebugResult {
         let layout = SceneLookDebugLayout::compute(window_w, window_h, self.row_count());
         let slider_rows = SCENE_LOOK_SLIDER_COUNT;
+        self.pointer.sync_held(mouse);
+        self.pointer.clear_hover();
 
         if let Some((mx, my, clicked, held)) = mouse {
+            for i in 0..self.row_count() {
+                if let Some(rect) = layout.row_rect(i)
+                    && scene_look_point_in_rect(mx, my, rect) {
+                        self.pointer.hover_row = Some(i);
+                        if self.dragging_slider.is_none() {
+                            self.cursor = i;
+                        }
+                        break;
+                    }
+            }
+
             if let Some(di) = self.dragging_slider
                 && held
                 && di < slider_rows
@@ -1497,6 +1749,27 @@ impl SceneLookDebugOverlay {
                         self.cursor = i;
                         self.begin_editing();
                         break;
+                    }
+                }
+                for row in SCENE_LOOK_SAVE_ROW..=SCENE_LOOK_SCENE_NEXT_ROW {
+                    let Some(rect) = layout.action_row_rect(row) else {
+                        continue;
+                    };
+                    if scene_look_point_in_rect(mx, my, rect) {
+                        self.cursor = row;
+                        self.clear_edit();
+                        return match row {
+                            SCENE_LOOK_SAVE_ROW => SceneLookDebugResult::Save,
+                            SCENE_LOOK_RESET_ROW => SceneLookDebugResult::Reset,
+                            SCENE_LOOK_SCENE_PREV_ROW => {
+                                self.step_scene(-1, set);
+                                SceneLookDebugResult::Stay
+                            }
+                            _ => {
+                                self.step_scene(1, set);
+                                SceneLookDebugResult::Stay
+                            }
+                        };
                     }
                 }
             }
@@ -1611,13 +1884,11 @@ impl SceneLookDebugOverlay {
         label: &str,
         instances: &mut Vec<GpuInstance>,
         labels: &mut Vec<TextLabel>,
-        focused_bg: [f32; 4],
-        idle_bg: [f32; 4],
-        focused_tc: [f32; 4],
-        idle_tc: [f32; 4],
+        variant: ButtonVariant,
     ) {
         let row_y = layout.rows_y0 + row as f32 * (layout.row_h + layout.row_gap);
-        let is_focused = self.cursor == row;
+        let visual = DebugRowVisual::for_row(row, self.cursor, &self.pointer);
+        let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, variant);
         instances.push(GpuInstance {
             rect: [
                 layout.panel_x + 4.0,
@@ -1625,13 +1896,13 @@ impl SceneLookDebugOverlay {
                 layout.panel_w - 8.0,
                 layout.row_h,
             ],
-            color: if is_focused { focused_bg } else { idle_bg },
+            color: bg,
             user: 0,
         });
         labels.push(TextLabel {
             rect: [layout.panel_x, row_y, layout.panel_w, layout.row_h],
             text: label.into(),
-            color: if is_focused { focused_tc } else { idle_tc },
+            color: tc,
             ..Default::default()
         });
     }
@@ -1706,14 +1977,10 @@ impl SceneLookDebugOverlay {
             .take(SCENE_LOOK_SLIDER_COUNT)
         {
             let row_y = layout.rows_y0 + i as f32 * (layout.row_h + layout.row_gap);
-            let is_focused = self.cursor == i;
+            let visual = DebugRowVisual::for_row(i, self.cursor, &self.pointer);
             let v = self.row_value(i);
 
-            let bg = if is_focused {
-                color::alpha(color::WALNUT_SOFT, 0.95)
-            } else {
-                color::alpha(color::WALNUT_DEEP, 0.80)
-            };
+            let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, ButtonVariant::Default);
             instances.push(GpuInstance {
                 rect: [
                     layout.panel_x + 4.0,
@@ -1724,12 +1991,6 @@ impl SceneLookDebugOverlay {
                 color: bg,
                 user: 0,
             });
-
-            let tc = if is_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::STONE, 0.95)
-            };
 
             let swatch = (14.0 * layout.scale).max(10.0);
             let mut label_x = layout.panel_x + 6.0 * layout.scale;
@@ -1743,7 +2004,7 @@ impl SceneLookDebugOverlay {
                 });
                 instances.push(GpuInstance {
                     rect: [label_x - 1.0, sw_y - 1.0, swatch + 2.0, swatch + 2.0],
-                    color: color::alpha(color::PARCHMENT, if is_focused { 0.55 } else { 0.28 }),
+                    color: color::alpha(color::PARCHMENT, if visual.highlighted { 0.55 } else { 0.28 }),
                     user: 0,
                 });
                 label_x += swatch + 4.0 * layout.scale;
@@ -1769,14 +2030,14 @@ impl SceneLookDebugOverlay {
                 });
                 let fill_color = scene_look_tuning::scene_look_tint_swatch_rgb(&self.look, i)
                     .map(|[r, g, b]| {
-                        if is_focused {
+                        if visual.highlighted {
                             [r, g, b, 0.95]
                         } else {
                             [r * 0.85, g * 0.85, b * 0.85, 0.75]
                         }
                     })
                     .unwrap_or_else(|| {
-                        if is_focused {
+                        if visual.highlighted {
                             color::JADE
                         } else {
                             color::alpha(color::JADE, 0.7)
@@ -1793,7 +2054,7 @@ impl SceneLookDebugOverlay {
             let knob_y = track_y + (th - knob_size) * 0.5;
             instances.push(GpuInstance {
                 rect: [knob_x, knob_y, knob_size, knob_size],
-                color: if is_focused {
+                color: if visual.highlighted {
                     color::PARCHMENT
                 } else {
                     color::alpha(color::STONE, 0.95)
@@ -1806,7 +2067,7 @@ impl SceneLookDebugOverlay {
                 format!(
                     "{}{}",
                     self.edit_buffer,
-                    if is_focused { "\u{258c}" } else { "" }
+                    if visual.highlighted { "\u{258c}" } else { "" }
                 )
             } else {
                 Self::format_row_display(i, v)
@@ -1838,10 +2099,7 @@ impl SceneLookDebugOverlay {
             "Save for this scene",
             &mut instances,
             &mut labels,
-            color::alpha(color::WALNUT_SOFT, 0.95),
-            color::alpha(color::WALNUT_DEEP, 0.85),
-            color::PARCHMENT,
-            color::alpha(color::JADE, 0.7),
+            ButtonVariant::Primary,
         );
         self.draw_action_row(
             &layout,
@@ -1849,10 +2107,7 @@ impl SceneLookDebugOverlay {
             "Reset scene to default",
             &mut instances,
             &mut labels,
-            color::alpha(color::RUBY, 0.55),
-            color::alpha(color::WALNUT_BRIGHT, 0.85),
-            color::PARCHMENT,
-            color::alpha(color::RUBY, 0.7),
+            ButtonVariant::Danger,
         );
         self.draw_action_row(
             &layout,
@@ -1860,10 +2115,7 @@ impl SceneLookDebugOverlay {
             "\u{2190} Previous scene",
             &mut instances,
             &mut labels,
-            color::alpha(color::WALNUT_BRIGHT, 0.9),
-            color::alpha(color::WALNUT_SOFT, 0.78),
-            color::PARCHMENT,
-            color::alpha(color::STONE, 0.9),
+            ButtonVariant::Default,
         );
         self.draw_action_row(
             &layout,
@@ -1871,10 +2123,7 @@ impl SceneLookDebugOverlay {
             "Next scene \u{2192}",
             &mut instances,
             &mut labels,
-            color::alpha(color::WALNUT_BRIGHT, 0.9),
-            color::alpha(color::WALNUT_SOFT, 0.78),
-            color::PARCHMENT,
-            color::alpha(color::STONE, 0.9),
+            ButtonVariant::Default,
         );
 
         let hint_y =
@@ -1977,6 +2226,11 @@ impl HallDistDebugLayout {
         let x = self.panel_x + self.label_w + self.slider_w + 4.0 * self.scale;
         (x, row_y, self.value_w, self.row_h)
     }
+
+    fn row_rect(&self, row: usize) -> (f32, f32, f32, f32) {
+        let row_y = self.rows_y0 + row as f32 * (self.row_h + self.row_gap);
+        (self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h)
+    }
 }
 
 #[inline]
@@ -2006,6 +2260,7 @@ pub struct HallwayDistortionDebugOverlay {
     editing: bool,
     edit_buffer: String,
     dragging_slider: Option<usize>,
+    pointer: DebugPointerState,
 }
 
 impl HallwayDistortionDebugOverlay {
@@ -2032,6 +2287,7 @@ impl HallwayDistortionDebugOverlay {
             editing: false,
             edit_buffer: String::new(),
             dragging_slider: None,
+            pointer: DebugPointerState::default(),
         }
     }
 
@@ -2284,8 +2540,20 @@ impl HallwayDistortionDebugOverlay {
     ) -> bool {
         let layout = HallDistDebugLayout::compute(window_w, window_h, self.row_count());
         let n = self.row_count();
+        self.pointer.sync_held(mouse);
+        self.pointer.clear_hover();
 
         if let Some((mx, my, clicked, held)) = mouse {
+            for i in 0..n {
+                if hall_dist_point_in_rect(mx, my, layout.row_rect(i)) {
+                    self.pointer.hover_row = Some(i);
+                    if self.dragging_slider.is_none() {
+                        self.cursor = i;
+                    }
+                    break;
+                }
+            }
+
             if let Some(di) = self.dragging_slider
                 && held
             {
@@ -2514,24 +2782,13 @@ impl HallwayDistortionDebugOverlay {
             .take(self.row_count())
         {
             let row_y = layout.rows_y0 + i as f32 * (layout.row_h + row_gap);
-            let is_focused = self.cursor == i;
-
-            let bg = if is_focused {
-                color::alpha(color::WALNUT_BRIGHT, 0.95)
-            } else {
-                color::alpha(color::WALNUT_SOFT, 0.78)
-            };
+            let visual = DebugRowVisual::for_row(i, self.cursor, &self.pointer);
+            let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, ButtonVariant::Default);
             instances.push(GpuInstance {
                 rect: [px + 4.0, row_y, pw - 8.0, layout.row_h],
                 color: bg,
                 user: 0,
             });
-
-            let tc = if is_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::STONE, 0.9)
-            };
             labels.push(TextLabel {
                 rect: [px + 6.0 * scale, row_y, layout.label_w, layout.row_h],
                 text: (*name).into(),
@@ -2550,7 +2807,7 @@ impl HallwayDistortionDebugOverlay {
             let v = self.row_value(i);
             let t = ((v - min) / (max - min)).clamp(0.0, 1.0);
             let fill_w = tw * t;
-            let fill_color = if is_focused {
+            let fill_color = if visual.highlighted {
                 color::AMBER
             } else {
                 color::alpha(color::ANTIQUE, 0.95)
@@ -2566,7 +2823,7 @@ impl HallwayDistortionDebugOverlay {
             let knob_y = track_y + (th - knob_size) * 0.5;
             instances.push(GpuInstance {
                 rect: [knob_x, knob_y, knob_size, knob_size],
-                color: if is_focused {
+                color: if visual.highlighted {
                     color::PARCHMENT
                 } else {
                     color::alpha(color::STONE, 0.9)

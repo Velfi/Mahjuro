@@ -47,7 +47,7 @@ impl CollectionInspectPresenter {
         let Some(mut lerp) = self.target_lerp else {
             return;
         };
-        lerp.elapsed += dt.max(0.0).min(0.10);
+        lerp.elapsed += dt.clamp(0.0, 0.10);
         let t = (lerp.elapsed / ORBIT_TARGET_LERP_DURATION).clamp(0.0, 1.0);
         let eased = crate::scenes::object3d_inspect::ease_in_out_cubic(t);
         self.orbit.target_world = lerp3(lerp.from, lerp.to, eased);

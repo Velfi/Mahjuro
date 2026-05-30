@@ -172,7 +172,7 @@ retention dashboard). Enter **API Name**, **Display Name**, and
 | `FIRST_BOSS_DEFEATED` | Boss Down | Defeat your first boss blind. | First boss blind beaten |
 | `FIRST_RUN_COMPLETED` | Run Won | Win a full run. | First full-run victory |
 | `TEN_RUNS_PLAYED` | Dedicated | Complete 10 runs. | `runs_completed` reaches 10 |
-| `STAKE_2_UNLOCKED` | Summer Unlocked | Unlock the Summer stake. | Summer stake unlocked |
+| `STAKE_2_UNLOCKED` | Summer Unlocked | Unlock the Summer season. | Summer season unlocked |
 | `ALL_BOSSES_SEEN` | Full Roster | Encounter every non-final boss blind at least once. | All non-final bosses seen |
 | `SILK_MOTH_EMERGED` | Silk Moth | Carry Silk Thread through to Silk Moth. | Silk Thread → Silk Moth |
 | `TAOTIE_AWAKENED` | Taotie | Carry Melting Ice through to Taotie. | Melting Ice → Taotie |

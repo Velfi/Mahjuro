@@ -107,8 +107,8 @@ impl SceneBehavior for GameplayScene {
         self.cursor_pos = ctx.cursor_pos;
 
         {
-            let _g = crate::render::cpu_profiler::scope("update.tick_wind_and_deal_detection");
-            animation_state::tick_wind_and_deal_detection(self, &mut ctx, now);
+            let _g = crate::render::cpu_profiler::scope("update.tick_deal_detection");
+            animation_state::tick_deal_detection(self, &mut ctx, now);
         }
         {
             let _g = crate::render::cpu_profiler::scope("update.tick_gold_change_coins");
@@ -124,9 +124,7 @@ impl SceneBehavior for GameplayScene {
         // rules, and on-round-start relic triggers (Sweepstakes coin shower,
         // DoraCrown extra dora, future hooks) all happen now instead of
         // before the scene rendered — the player sees them unfold as the
-        // transition clears. The post-deal wind gust that follows the
-        // deal is what sweeps the remaining curtain away, so timing-wise
-        // this lands at the end of the fade-in.
+        // transition clears.
         if let Some(blind) = self.pending_chamber {
             // Keep the table empty behind the opening transition. Paths
             // that land here may have left a stale hand on the run state
@@ -182,14 +180,6 @@ impl SceneBehavior for GameplayScene {
         // Pause menu handling — drives the menu while paused and intercepts
         // the open-on-Pause shortcut. Returns immediately if either applies.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
-            // The pause menu's "Guide" entry sets a one-shot flag and
-            // closes itself; drain the flag to push the Guide as an overlay.
-            if self.pause_menu.take_guide_request() {
-                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Guide(
-                    GuideScene::new(),
-                ))));
-                return None;
-            }
             if self.pause_menu.take_credits_request() {
                 *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Credits(
                     crate::scenes::CreditsScene::overlay(),
@@ -237,11 +227,16 @@ impl SceneBehavior for GameplayScene {
                         let src = ctx.cursor_pos;
                         self.score_popups.spawn(
                             label,
-                            src,
+                            crate::render::world_space::LayoutAnchorPx {
+                                px: src.0,
+                                py: src.1,
+                                lift_z: crate::render::score_popups::TABLE_POPUP_LIFT_Z,
+                            },
                             src,
                             None,
                             crate::core::scoring::StepKind::Yen,
                             new_level as f32,
+                            crate::render::score_popups::PopupMotionTiming::shipping_default(),
                         );
                         self.particles
                             .emit(src.0, src.1, 24, color::RELIC_GOLD, 0.9);
@@ -329,6 +324,11 @@ impl SceneBehavior for GameplayScene {
             _ => usize::MAX,
         };
         let now = Instant::now();
+        let live_score = if !self.cascade_queue.is_empty() {
+            self.displayed_score
+        } else {
+            gameplay.round_score
+        };
 
         let current_chamber = gameplay.run_number;
         // TODO there should be a const for this
@@ -339,12 +339,8 @@ impl SceneBehavior for GameplayScene {
         // tracks the current run state even when the glossary takes over
         // the screen.
         let window_title = format!(
-            "Mahjuro — {current_chamber}/{total_chambers} {chamber_name} {} / {}  Gold: {}  Hands: {}  Discards: {}",
-            if !self.cascade_queue.is_empty() {
-                self.displayed_score
-            } else {
-                gameplay.round_score
-            },
+            "Mahjuro — {chamber_name} {current_chamber}/{total_chambers} - Score {} / {}  Target-  Yen: {}  Plays: {}  Discards: {}",
+            live_score,
             gameplay.target_score,
             gameplay.yen,
             gameplay.plays_remaining,
@@ -511,8 +507,10 @@ impl SceneBehavior for GameplayScene {
         structure_showcase.extend(yaku_structure_showcase);
 
         let paused = self.pause_menu.paused;
-        let discard_undo_rect;
-        let cash_in_enabled = gameplay.trigger_enabled;
+        
+        let cash_in_blocked = gameplay.cash_in_blocked_until_discards_spent;
+        let cash_in_visible = gameplay.trigger_enabled || cash_in_blocked;
+        let _cash_in_enabled = gameplay.trigger_enabled;
         let play_enabled = selection_valid && gameplay.plays_remaining > 0;
         let discard_enabled = selected_count > 0 && gameplay.discards_remaining > 0;
         let action_row = input_handler::build_glb_action_pick_proxies(
@@ -525,6 +523,7 @@ impl SceneBehavior for GameplayScene {
             discard_bowl_placement,
             bronze_mirror_placement,
             journal_book,
+            guidebook,
         } = action_row;
 
         // Dora indicator screen rect. Pre-computed up here so the focus
@@ -625,10 +624,9 @@ impl SceneBehavior for GameplayScene {
         } else {
             vec![]
         };
-        // Phase 8: the `?` glossary badge has been removed from the
-        // gameplay HUD. The glossary is now reachable from the pause menu's
-        // "Glossary" entry. The keyboard `Help` action shortcut still works
-        // as a hidden affordance for power users.
+        // Phase 8: the `?` glossary badge has been removed from the gameplay
+        // HUD. Open the Guide book on the table, or press Select / View / −
+        // (`Help`) for the full reference.
 
         // Pause overlay — built into its own dedicated layer so it lands
         // ABOVE the hover layer in canonical push order. Reuses the
@@ -701,7 +699,8 @@ impl SceneBehavior for GameplayScene {
         let _ = relic_icons; // gameplay no longer renders 2D relic icons.
         let mut frame = UiFrame::new();
         let fov_pop_offset = self.final_tiles_fov_pop_offset_deg(now);
-        scene_camera.fovy_deg = (scene_camera.fovy_deg - fov_pop_offset).max(35.0);
+        // Keep authored GLB framing at rest; only apply temporary pop animation.
+        scene_camera.fovy_deg = (scene_camera.fovy_deg - fov_pop_offset).max(1.0);
         frame.camera_override = Some(scene_camera);
         (discard_btn_rect, play_btn_rect, trigger_btn_rect) =
             super::glb_anchors::reproject_action_button_rects(
@@ -715,7 +714,7 @@ impl SceneBehavior for GameplayScene {
         let btn_rects = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
         input_handler::push_action_button_focus_rects(
             &btn_rects,
-            cash_in_enabled,
+            cash_in_visible,
             &mut focus_rect_graph,
         );
         if !vis.hide_journal
@@ -729,6 +728,15 @@ impl SceneBehavior for GameplayScene {
             );
             if journal_rect[2] > 1.0 && journal_rect[3] > 1.0 {
                 focus_rect_graph.push((FocusTarget::Journal, journal_rect));
+            }
+            let guidebook_rect = crate::render::gameplay_glb::gameplay_journal_book_screen_rect(
+                layout.window_w,
+                layout.window_h,
+                &scene_camera,
+                &glb_anchors.guidebook_pick,
+            );
+            if guidebook_rect[2] > 1.0 && guidebook_rect[3] > 1.0 {
+                focus_rect_graph.push((FocusTarget::Guidebook, guidebook_rect));
             }
         }
         let hand_slot_w = layout
@@ -763,7 +771,7 @@ impl SceneBehavior for GameplayScene {
             } else {
                 (None, None, 0.0, 0.0)
             };
-        discard_undo_rect = if !paused
+        let discard_undo_rect = if !paused
             && !ctx.modal_active
             && self.cascade_queue.is_empty()
             && self.journal_transition.is_none()
@@ -783,14 +791,16 @@ impl SceneBehavior for GameplayScene {
         } else {
             None
         };
-        frame.gameplay_cash_in_button_visible = gameplay.trigger_enabled;
+        frame.gameplay_cash_in_button_visible = cash_in_visible;
         frame.gameplay_action_picks = Some(crate::render::draw_cmd::GameplayActionPickProxies {
             bowl: discard_bowl_placement.clone(),
             mirror: bronze_mirror_placement.clone(),
             journal: journal_book.clone(),
+            guidebook: guidebook.clone(),
             cash_in_tablet: None,
         });
         frame.background(BackgroundId::Black);
+        frame.gameplay_score_roller_values = Some((live_score, gameplay.target_score as u64));
         if !vis.hide_environment {
             frame.gameplay_environment();
         }
@@ -798,7 +808,7 @@ impl SceneBehavior for GameplayScene {
         frame.scene_lighting.embedded_gltf_punctual = room_glb_lights;
         frame.scene_lighting.room_glb_brdf = room_glb_lights;
         if room_glb_lights && !vis.hide_candle_lights {
-            let lamp_flicker = self.light_ramp * self.candle_wind_dim;
+            let lamp_flicker = self.light_ramp;
             frame.scene_lighting.punctual =
                 crate::render::gameplay_glb::gameplay_embedded_point_lights_runtime(
                     layout.window_w,
@@ -807,6 +817,7 @@ impl SceneBehavior for GameplayScene {
                     &ctx.room_env_for("gameplay").0,
                     self.candle_time,
                     lamp_flicker,
+                    ctx.flame_tuning.candle_flicker_amp,
                 )
                 .into_iter()
                 .map(crate::render::draw_cmd::ScenePunctualLight::InverseSquare)
@@ -822,10 +833,12 @@ impl SceneBehavior for GameplayScene {
                 layout.window_h,
                 env_h,
                 lamp_flicker,
+                &ctx.flame_tuning,
             );
             frame.candle_light_count = glb_flames.len() as u32;
-            frame.flame_height_world = crate::render::flame_volume::shop_gltf_flame_height_world(
+            frame.flame_height_world = ctx.flame_tuning.flame_height_world(
                 crate::render::room_glb::room_env_world_scale(layout.window_h, env_h),
+                crate::render::flame_volume::SHOP_GLTF_CANDLE_HEIGHT_DOC_M,
             );
             frame.procedural_flame_emitters = glb_flames;
         }
@@ -930,8 +943,21 @@ impl SceneBehavior for GameplayScene {
         //
         // The score readout itself is **2D** (`TextLabel`s in the persistent
         // text pass). Cascade popups and hand-off glyphs still use 3D meshes;
-        // their destinations use `score_counter_layout`.
-        let score_counter = super::score_counter::score_counter_layout(layout, &self.positions);
+        let score_cascade = match super::score_counter::resolve_score_cascade_layout(
+            layout,
+            &self.positions,
+            layout.window_w,
+            layout.window_h,
+            &scene_camera,
+            env_h,
+        ) {
+            Ok(cascade) => cascade,
+            Err(e) => {
+                log::error!("score cascade layout: {e:#}");
+                return super::glb_anchors::gameplay_glb_error_frame(layout, &e.to_string());
+            }
+        };
+        let score_counter = score_cascade.counter;
         // Debug visibility: `hide_score_readout` gates the 2D score line.
         // Anchor it from the plaque's *actual* left edge instead of the raw
         // score-panel bounds: perspective projection pulls taller / higher
@@ -1045,6 +1071,24 @@ impl SceneBehavior for GameplayScene {
                 });
             }
         }
+        if cash_in_blocked {
+            let trigger_rect = [
+                trigger_btn_rect.0,
+                trigger_btn_rect.1,
+                trigger_btn_rect.2,
+                trigger_btn_rect.3,
+            ];
+            if trigger_rect[2] > 1.0 && trigger_rect[3] > 1.0 {
+                hud_quads.push(GpuInstance {
+                    rect: trigger_rect,
+                    color: color::alpha(color::WALNUT_INK, 0.42),
+                    user: 0,
+                });
+                frame.image_quads([crate::render::draw_cmd::debuff_marker_image_quad(
+                    trigger_rect,
+                )]);
+            }
+        }
         if let Some(undo_rect) = discard_undo_rect {
             let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
             let bg = if is_focus {
@@ -1088,6 +1132,11 @@ impl SceneBehavior for GameplayScene {
         }
         if !vis.hide_journal
             && let Some(ref book) = journal_book
+        {
+            frame.object3d(book.clone());
+        }
+        if !vis.hide_journal
+            && let Some(ref book) = guidebook
         {
             frame.object3d(book.clone());
         }
@@ -1320,54 +1369,7 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        let hud_text = if !vis.hide_score_readout {
-            use crate::render::theme::typography;
-            let sp = layout.score_panel;
-            let zc = (layout.window_w / 900.0).max(0.55);
-            let ww = layout.window_w;
-            let wh = layout.window_h;
-
-            // The Cassowary score strip is only ~9% of window height (`layout.rs`).
-            // Basing font caps on that rect forces a microscopic ceiling; pin H6 from
-            // `window_h` and rasterize inside a wide, tall enough rect centered on
-            // the strip (see `font-scaling.md`).
-            let main_fs = typography::size(typography::H6, wh);
-            let label_w = (ww * 0.52).max(sp.w + 36.0 * zc).min(ww - 16.0).max(160.0);
-            let label_h = (main_fs * 1.48).clamp(64.0, wh * 0.22);
-            let anchor_x = sp.x + sp.w * 0.5;
-            let anchor_y = sp.y + sp.h * super::score_counter::readout_2d::ANCHOR_Y_FRAC;
-            let mut main_rect = [
-                anchor_x - label_w * 0.5,
-                anchor_y - label_h * 0.5,
-                label_w,
-                label_h,
-            ];
-            main_rect[0] = main_rect[0].clamp(8.0, (ww - main_rect[2] - 8.0).max(8.0));
-            main_rect[1] = main_rect[1].max(6.0);
-
-            let live_score = if !self.cascade_queue.is_empty() {
-                self.displayed_score
-            } else {
-                gameplay.round_score
-            };
-            let main_line = format!("{live_score} / {}", gameplay.target_score);
-
-            let mut v = Vec::with_capacity(1 + hud_text.len());
-            v.push(TextLabel {
-                rect: main_rect,
-                text: main_line,
-                color: color::CHAMPAGNE,
-                font_px: Some(main_fs),
-                align: crate::render::wgpu_renderer::TextAlign::Center,
-                no_glossary: true,
-                bold: true,
-                ..Default::default()
-            });
-            v.append(&mut hud_text);
-            v
-        } else {
-            hud_text
-        };
+        let hud_text = hud_text;
         frame.texts(hud_text);
 
         if let Some(undo_rect) = discard_undo_rect {
@@ -1667,7 +1669,7 @@ impl SceneBehavior for GameplayScene {
                                 window_h: layout.window_h,
                                 anchor_rect: Some(rect),
                                 title: "Undo discard",
-                                desc: "Confirm to restore your previous hand and wall before the last discard. Clears when you play, sort, use a consumable, or discard again.",
+                                desc: "Confirm to restore your previous hand and wall before the last discard. Clears when you play, use a consumable, or discard again.",
                                 cta: "",
                                 accent_color: color::CHAMPAGNE,
                                 hover_is_owned: false,
@@ -1713,6 +1715,40 @@ impl SceneBehavior for GameplayScene {
                         );
                     }
                     FocusTarget::Button(GameplayButton::Trigger) => {
+                        let (title, desc, accent) = if cash_in_blocked {
+                            let boss = if boss_title_text.is_empty() {
+                                "The boss".to_string()
+                            } else {
+                                boss_title_text.clone()
+                            };
+                            let discards = gameplay.discards_remaining;
+                            let discard_word = if discards == 1 {
+                                "discard"
+                            } else {
+                                "discards"
+                            };
+                            let desc = if boss_rule_text.is_empty() {
+                                format!(
+                                    "{boss} is blocking cash-in until you use all discards ({discards} {discard_word} left)."
+                                )
+                            } else {
+                                format!(
+                                    "{boss_rule_text} ({discards} {discard_word} left)."
+                                )
+                            };
+                            (
+                                "Cash In".to_string(),
+                                desc,
+                                color::RUBY,
+                            )
+                        } else {
+                            (
+                                "Cash In".to_string(),
+                                "Confirm to score the melds in your structure and end the round."
+                                    .to_string(),
+                                color::CHAMPAGNE,
+                            )
+                        };
                         push_focus_tooltip_panel_2d(
                             &mut inspect_tooltip_quads,
                             &mut inspect_tooltip_texts,
@@ -1720,10 +1756,14 @@ impl SceneBehavior for GameplayScene {
                                 window_w: layout.window_w,
                                 window_h: layout.window_h,
                                 anchor_rect: Some(rect),
-                                title: "Cash In",
-                                desc: "Confirm to score the melds in your structure and end the round.",
-                                cta: "",
-                                accent_color: color::CHAMPAGNE,
+                                title: title.as_str(),
+                                desc: desc.as_str(),
+                                cta: if cash_in_blocked {
+                                    "Ordeal Rule"
+                                } else {
+                                    ""
+                                },
+                                accent_color: accent,
                                 hover_is_owned: false,
                                 skip_title_block: false,
                                 avoid_rect: None,
@@ -1738,8 +1778,26 @@ impl SceneBehavior for GameplayScene {
                                 window_w: layout.window_w,
                                 window_h: layout.window_h,
                                 anchor_rect: Some(rect),
-                                title: "Yaku journal",
-                                desc: "Confirm to open the journal and browse yaku reference.",
+                                title: "Yaku",
+                                desc: "Confirm to open the yaku journal and browse scored hands.",
+                                cta: "",
+                                accent_color: color::CHAMPAGNE,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
+                    FocusTarget::Guidebook => {
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: "Guide",
+                                desc: "Confirm to open the guide and browse tiles, melds, and rules.",
                                 cta: "",
                                 accent_color: color::CHAMPAGNE,
                                 hover_is_owned: false,
@@ -1817,7 +1875,7 @@ impl SceneBehavior for GameplayScene {
                     GAMEPLAY_3D_HIT_ID,
                 ));
             }
-            if cash_in_enabled {
+            if cash_in_visible {
                 let (bx, by, bw, bh) = trigger_btn_rect;
                 buttons.push(ButtonDef::scene((bx, by, bw, bh), GAMEPLAY_3D_HIT_ID));
             }
@@ -1840,7 +1898,17 @@ impl SceneBehavior for GameplayScene {
         // clicks meant for the pause menu. Crucially we do *not* clear
         // `buttons` here: that would also wipe the pause-menu buttons we
         // just added, leaving the pause overlay completely unclickable.
-        if !self.pause_menu.paused && ctx.picked_gameplay_object.is_some() {
+        use crate::render::wgpu_renderer::GameplayPick;
+        let push_3d_hit = if self.lab_mode {
+            gameplay.trigger_enabled
+                && matches!(
+                    ctx.picked_gameplay_object,
+                    Some(GameplayPick::CashInButton)
+                )
+        } else {
+            ctx.picked_gameplay_object.is_some()
+        };
+        if !self.pause_menu.paused && push_3d_hit {
             buttons.push(ButtonDef::scene(
                 (0.0, 0.0, layout.window_w, layout.window_h),
                 GAMEPLAY_3D_HIT_ID,
@@ -1859,7 +1927,7 @@ impl SceneBehavior for GameplayScene {
         // hit-test the cursor and run spatial navigation against.
         *self.last_focus_rects.borrow_mut() = focus_rect_graph;
 
-        // Cheap invariant check — catches future migration mistakes that
+        // Cheap invariant check — catches future migration miseasons that
         // accidentally push two `HandTileFaces` markers (or zero of one)
         // into the cmds list, which would silently break tile-face z
         // order. Compiled out of release builds.

@@ -21,6 +21,8 @@ pub mod options;
 pub mod pause_menu;
 pub mod pick_chamber;
 pub mod profile_select;
+pub mod cascade_lab;
+pub mod roller_lab;
 pub mod rumble_lab;
 pub(crate) mod scoring_intro_copy;
 pub mod shop;
@@ -49,6 +51,8 @@ pub use material_viewer::MaterialViewerScene;
 pub use options::OptionsScene;
 pub use pick_chamber::PickChamberScene;
 pub use profile_select::ProfileSelectScene;
+pub use cascade_lab::CascadeLabScene;
+pub use roller_lab::RollerLabScene;
 pub use rumble_lab::RumbleLabScene;
 pub use shop::ShopScene;
 pub use showcase::{
@@ -186,6 +190,7 @@ pub struct UpdateCtx<'a> {
     /// Per-profile chronicle cursor from settings — stable for the Archive visit.
     pub archive_chronicle_last_seen: u32,
     pub rain_tuning: crate::render::rain_tuning::RainTuning,
+    pub flame_tuning: crate::render::flame_tuning::FlameTuning,
 }
 
 /// Pushdown-stack action a scene's `update()` can request. Scenes do this
@@ -260,6 +265,7 @@ pub struct DrawCtx<'a> {
     pub hallway_distortion_debug:
         Option<crate::render::hallway_glb::HallwayDistortionDebugSnapshot>,
     pub rain_tuning: crate::render::rain_tuning::RainTuning,
+    pub flame_tuning: crate::render::flame_tuning::FlameTuning,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -295,6 +301,7 @@ impl<'a> DrawCtx<'a> {
             crate::render::hallway_glb::HallwayDistortionDebugSnapshot,
         >,
         rain_tuning: crate::render::rain_tuning::RainTuning,
+        flame_tuning: crate::render::flame_tuning::FlameTuning,
     ) -> Self {
         Self {
             layout,
@@ -322,6 +329,7 @@ impl<'a> DrawCtx<'a> {
             archive_chronicle_last_seen_run_len,
             hallway_distortion_debug,
             rain_tuning,
+            flame_tuning,
         }
     }
 
@@ -449,6 +457,7 @@ impl<T: SceneBehavior + ?Sized> SceneBehavior for Box<T> {
 /// `enum_dispatch` reads this attribute and generates `impl SceneBehavior
 /// for Scene` arms automatically; see [`SceneBehavior`] for the contract.
 #[enum_dispatch(SceneBehavior)]
+#[allow(clippy::large_enum_variant)]
 pub enum Scene {
     Splash(SplashScene),
     MainMenuExterior(MainMenuExteriorScene),
@@ -474,6 +483,8 @@ pub enum Scene {
     TransitionPlayground(TransitionPlaygroundScene),
     AnimationLab(AnimationLabScene),
     RumbleLab(RumbleLabScene),
+    RollerLab(RollerLabScene),
+    CascadeLab(Box<CascadeLabScene>),
     YakuJournal(YakuJournalScene),
 }
 
@@ -493,6 +504,8 @@ pub fn active_scene_key(scene: &Scene) -> Option<&'static str> {
         Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
         Scene::ButtonAabbLab(_) => Some("button_aabb_lab"),
         Scene::AnimationLab(_) => Some("shop"),
+        Scene::RollerLab(_) => Some("gameplay"),
+        Scene::CascadeLab(_) => Some("gameplay"),
         Scene::Tixels(_) => Some("tixels"),
         Scene::GameOver(_) => Some("gameplay"),
         _ => None,
@@ -511,7 +524,7 @@ mod scene_behavior_tests {
 
     #[test]
     fn boxed_gameplay_forwards_face_button_bindings_through_scene_enum() {
-        let scene = Scene::Gameplay(Box::new(GameplayScene::new()));
+        let scene = Scene::Gameplay(Box::default());
         let bindings = scene.face_button_bindings(FaceBindingCtx {
             xy_quick_action: true,
         });

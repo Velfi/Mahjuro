@@ -41,7 +41,7 @@ Rebake after changing room GLB layout, probe grid, or [`ROOM_EMISSIVE_PROBE_DIR_
 
 ## Relic RLC1 bakes
 
-`assets/data/relic_baked/<slug>.rlc` — mask-cut albedo + relief + mesh. Runtime loads RLC1 instead of decoding PNGs when all bakes are present.
+`assets/data/relic_baked/<slug>.rlc` — mask-cut albedo + relief + mesh. Runtime loads RLC1 only (source PNGs under `textures/relics/` are bake-time inputs and are excluded from release asset packs).
 
 **Rebake** (refreshes `.inputs_stamp` automatically):
 

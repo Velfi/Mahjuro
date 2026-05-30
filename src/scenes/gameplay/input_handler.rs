@@ -1,5 +1,5 @@
 //! Input handler — owns the unified focus model + 3D hit dispatcher +
-//! gameplay action handlers (ScoreHand, TriggerStructure, sort, discard) of
+//! gameplay action handlers (ScoreHand, TriggerStructure, discard) of
 //! [`super::GameplayScene::update`]. Behaviour is identical to the inline
 //! code; this is purely organisational.
 
@@ -19,9 +19,14 @@ use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind};
 use crate::scenes::gameplay::RELIC_GLOW_LIFETIME;
 use crate::scenes::journal_transition::{JournalDirection, JournalTransition};
-use crate::scenes::{OverlayRequest, Scene, SceneTransition, UpdateCtx, YakuJournalScene};
+use crate::scenes::{GuideScene, OverlayRequest, Scene, SceneTransition, UpdateCtx, YakuJournalScene};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
 use crate::ui::input::{UiAction, apply_ui_actions};
+
+/// Vertical bounce (mm, before `layout.mm`) when a scoring step highlights this source.
+const SCORE_WAVE_YAKU_MM: f32 = 4.0;
+const SCORE_WAVE_STRUCTURE_TILE_MM: f32 = 5.0;
+const RELIC_SCORE_VERTICAL_MM: f32 = 3.5;
 
 /// Screen-space center of the `idx`-th active relic (`player_relic` empties).
 pub(super) fn relic_tray_screen_center_xy(
@@ -95,6 +100,9 @@ pub(super) fn process_focus_and_actions(
     now: Instant,
     focus_kind_before: Option<super::focus::FocusKind>,
 ) -> Option<SceneTransition> {
+    if scene.lab_mode() {
+        return process_lab_cash_in(scene, ctx, now);
+    }
     let interaction = GameEngine::read_interaction(ctx.run);
     // ── Unified focus model ──────────────────────────────────────────
     //
@@ -128,6 +136,7 @@ pub(super) fn process_focus_and_actions(
             | FocusTarget::Ordeal
             | FocusTarget::RoundWind => true,
             FocusTarget::Journal => scene.journal_transition.is_none(),
+            FocusTarget::Guidebook => scene.journal_transition.is_none(),
             FocusTarget::DiscardUndo => {
                 crate::persistence::load_settings().discard_undo_enabled
                     && scene.discard_undo.is_some()
@@ -143,7 +152,7 @@ pub(super) fn process_focus_and_actions(
         Some(FocusTarget::Button(GameplayButton::Trigger))
     ) {
         let gameplay = GameEngine::read(ctx.run);
-        if !gameplay.trigger_enabled {
+        if !gameplay.trigger_enabled && !gameplay.cash_in_blocked_until_discards_spent {
             scene.focus = None;
         }
     }
@@ -222,7 +231,7 @@ pub(super) fn process_focus_and_actions(
     // route by self.focus variant. Cancel → clear focus AND fall
     // through so existing `clear_selection` semantics still apply.
     // Everything else flows into `actions_for_scene` for the existing
-    // gameplay action handlers below (ScoreHand, SortBySuit, etc.).
+    // gameplay action handlers below (ScoreHand, etc.).
     let mut actions_for_scene: Vec<UiAction> = Vec::new();
     for &a in ctx.actions.iter() {
         if !matches!(a, UiAction::Help | UiAction::Pause)
@@ -256,7 +265,10 @@ pub(super) fn process_focus_and_actions(
                 let overridden = match (scene.focus, dir) {
                     // RIGHT from Play → Cash in when banked structure can be scored
                     (Some(FocusTarget::Button(GameplayButton::Play)), FocusDir::Right)
-                        if GameEngine::read(ctx.run).trigger_enabled =>
+                        if {
+                            let g = GameEngine::read(ctx.run);
+                            g.trigger_enabled || g.cash_in_blocked_until_discards_spent
+                        } =>
                     {
                         focus_rects
                             .iter()
@@ -279,8 +291,9 @@ pub(super) fn process_focus_and_actions(
                             .find(|(t, _)| matches!(t, FocusTarget::Journal))
                             .map(|(t, _)| *t)
                     }
-                    // UP from journal → Play
-                    (Some(FocusTarget::Journal), FocusDir::Up) => focus_rects
+                    // UP from journal / guidebook → Play
+                    (Some(FocusTarget::Journal), FocusDir::Up)
+                    | (Some(FocusTarget::Guidebook), FocusDir::Up) => focus_rects
                         .iter()
                         .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
                         .map(|(t, _)| *t),
@@ -408,6 +421,12 @@ pub(super) fn process_focus_and_actions(
                         });
                         return Some(None);
                     }
+                    Some(FocusTarget::Guidebook) if scene.journal_transition.is_none() => {
+                        *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Guide(
+                            GuideScene::new(),
+                        ))));
+                        return Some(None);
+                    }
                     Some(FocusTarget::Consumable(i)) => {
                         let outcome = {
                             let mut engine = GameEngine::new(ctx.run, ctx.bus);
@@ -423,11 +442,16 @@ pub(super) fn process_focus_and_actions(
                                 let src = ctx.cursor_pos;
                                 scene.score_popups.spawn(
                                     label,
-                                    src,
+                                    crate::render::world_space::LayoutAnchorPx {
+                                        px: src.0,
+                                        py: src.1,
+                                        lift_z: crate::render::score_popups::TABLE_POPUP_LIFT_Z,
+                                    },
                                     src,
                                     None,
                                     crate::core::scoring::StepKind::Yen,
                                     new_level as f32,
+                                    crate::render::score_popups::PopupMotionTiming::shipping_default(),
                                 );
                                 scene.particles.emit(
                                     src.0,
@@ -468,7 +492,8 @@ pub(super) fn process_focus_and_actions(
                     | Some(FocusTarget::Dora)
                     | Some(FocusTarget::Ordeal)
                     | Some(FocusTarget::RoundWind)
-                    | Some(FocusTarget::Journal) => {}
+                    | Some(FocusTarget::Journal)
+                    | Some(FocusTarget::Guidebook) => {}
                     None => {}
                 }
                 continue;
@@ -576,6 +601,14 @@ pub(super) fn process_focus_and_actions(
             });
             return Some(None);
         }
+        if matches!(ctx.picked_gameplay_object, Some(GameplayPick::GuideBook))
+            && scene.journal_transition.is_none()
+        {
+            *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Guide(
+                GuideScene::new(),
+            ))));
+            return Some(None);
+        }
         let action = match ctx.picked_gameplay_object {
             Some(GameplayPick::CashInButton) if cash_in_enabled => Some(UiAction::TriggerStructure),
             Some(GameplayPick::BronzeMirror) => Some(UiAction::ScoreHand),
@@ -585,17 +618,6 @@ pub(super) fn process_focus_and_actions(
         if let Some(a) = action {
             actions_for_scene.push(a);
         }
-    }
-
-    // Debug: `B` blows a strong gust of wind at the candle row so the
-    // flame's wind reaction is observable on demand. Stamps a timer the
-    // draw step reads to emit the actual `WindGust` impulses.
-    if actions_for_scene
-        .iter()
-        .any(|a| matches!(a, UiAction::DebugBlowWind))
-    {
-        scene.debug_wind_at = Some(now);
-        log::info!("[debug] candle wind gust triggered");
     }
 
     if actions_for_scene
@@ -711,11 +733,16 @@ pub(super) fn process_focus_and_actions(
                                 } else {
                                     "Structure grows".to_string()
                                 },
-                                (px, py),
+                                crate::render::world_space::LayoutAnchorPx {
+                                    px,
+                                    py,
+                                    lift_z: crate::render::score_popups::TABLE_POPUP_LIFT_Z,
+                                },
                                 (px, py),
                                 None,
                                 StepKind::Chips,
                                 d as f32,
+                                crate::render::score_popups::PopupMotionTiming::shipping_default(),
                             );
                         }
                     }
@@ -765,18 +792,6 @@ pub(super) fn process_focus_and_actions(
                     ctx.anim.pulse(ENTITY_SCORE_PANEL);
                     scene.begin_scoring_cascade(ctx, score_before, gained, cascade_showcase);
                 }
-            }
-            UiAction::SortBySuit => {
-                scene.clear_discard_undo();
-                let mut engine = GameEngine::new(ctx.run, ctx.bus);
-                let _ = engine.dispatch(GameCommand::SortHandBySuit);
-                ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
-            }
-            UiAction::SortByRank => {
-                scene.clear_discard_undo();
-                let mut engine = GameEngine::new(ctx.run, ctx.bus);
-                let _ = engine.dispatch(GameCommand::SortHandByRank);
-                ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
             }
             UiAction::CommitDiscard => {
                 if !ctx.run.onboarding_discard_allowed() {
@@ -862,8 +877,6 @@ pub(super) fn process_focus_and_actions(
                 a,
                 UiAction::ScoreHand
                     | UiAction::TriggerStructure
-                    | UiAction::SortBySuit
-                    | UiAction::SortByRank
                     | UiAction::CommitDiscard
                     | UiAction::UndoDiscard
             )
@@ -887,7 +900,28 @@ pub(super) fn process_focus_and_actions(
     None
 }
 
-/// Build the relic tray at `player_relic` GLB empties.
+/// Cascade Lab: only the authored 3D cash-in control — no table focus/hover.
+fn process_lab_cash_in(
+    scene: &mut GameplayScene,
+    ctx: &mut UpdateCtx<'_>,
+    _now: Instant,
+) -> Option<SceneTransition> {
+    use crate::render::wgpu_renderer::GameplayPick;
+
+    for &cid in ctx.button_clicks {
+        if cid != super::GAMEPLAY_3D_HIT_ID {
+            continue;
+        }
+        let cash_in_enabled = GameEngine::read(ctx.run).trigger_enabled;
+        if matches!(ctx.picked_gameplay_object, Some(GameplayPick::CashInButton))
+            && cash_in_enabled
+        {
+            scene.lab_cash_in(ctx);
+        }
+    }
+    None
+}
+
 pub(super) fn build_relic_tray(
     scene: &GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
@@ -950,12 +984,12 @@ pub(super) fn build_relic_tray(
             let color = crate::render::theme::color::rarity(rarity.tier());
 
             // Activation glow: fast-attack / smooth-decay envelope.
-            let (glow, wiggle_deg) = if let Some(start) = scene.relic_glow_starts.get(&rid) {
+            let (glow, wiggle_deg, vertical_wave) = if let Some(start) = scene.relic_glow_starts.get(&rid) {
                 let now_for_glow = Instant::now();
                 let age = now_for_glow.saturating_duration_since(*start).as_secs_f32();
                 let life = RELIC_GLOW_LIFETIME.as_secs_f32();
                 if age >= life {
-                    (0.0, 0.0)
+                    (0.0, 0.0, 0.0)
                 } else {
                     let t = (age / life).clamp(0.0, 1.0);
                     let attack_end = 0.12_f32;
@@ -966,10 +1000,11 @@ pub(super) fn build_relic_tray(
                         (1.0 - decay_t).max(0.0).powi(2)
                     };
                     let wiggle = glow * 12.0 * (age * 22.0).sin();
-                    (glow, wiggle)
+                    let vertical = glow * (age * 18.0).sin();
+                    (glow, wiggle, vertical)
                 }
             } else {
-                (0.0, 0.0)
+                (0.0, 0.0, 0.0)
             };
 
             let mut rotation = crate::render::gameplay_glb::rotate_marker_pose_x_180(
@@ -982,7 +1017,13 @@ pub(super) fn build_relic_tray(
                 );
             }
             relic_objects.push(Object3d {
-                pos: pose.anchor,
+                pos: {
+                    let mut anchor = pose.anchor;
+                    if vertical_wave != 0.0 {
+                        anchor[2] += layout.mm(RELIC_SCORE_VERTICAL_MM * vertical_wave);
+                    }
+                    anchor
+                },
                 extents: [slot_face, thick, slot_face],
                 rotation,
                 color,
@@ -1036,11 +1077,14 @@ pub(super) fn build_consumable_spawns(
 
     let mut talisman_draw_i: usize = 0;
     let mut ribbon_draw_i: usize = 0;
-    for slot_idx in 0..consumable_capacity {
+    for (slot_idx, &pose) in glb_consumable_poses
+        .iter()
+        .enumerate()
+        .take(consumable_capacity)
+    {
         let Some(&slot_item) = consumables.get(slot_idx) else {
             continue;
         };
-        let pose = glb_consumable_poses[slot_idx];
         let author_scale = pose.uniform_author_scale(layout.window_h, ctx.room_gltf_height_scale);
         let slot_w = base_slot_w * author_scale;
         let slot_h = base_slot_h * author_scale;
@@ -1212,6 +1256,7 @@ pub(super) fn build_glb_action_pick_proxies(
         discard_bowl_placement: Some(anchors.discard_river_pick.clone()),
         bronze_mirror_placement: Some(anchors.play_mirror_pick.clone()),
         journal_book: Some(journal_book),
+        guidebook: Some(anchors.guidebook_pick.clone()),
     }
 }
 
@@ -1221,6 +1266,7 @@ pub(super) struct ActionRowOutputs {
     pub(super) discard_bowl_placement: Option<crate::render::draw_cmd::Object3d>,
     pub(super) bronze_mirror_placement: Option<crate::render::draw_cmd::Object3d>,
     pub(super) journal_book: Option<crate::render::draw_cmd::Object3d>,
+    pub(super) guidebook: Option<crate::render::draw_cmd::Object3d>,
 }
 
 /// Outputs of the yaku panel + structure showcase + yaku tablet builder.
@@ -1231,15 +1277,38 @@ pub(super) struct YakuPanelOutputs {
     pub(super) structure_showcase: Vec<crate::render::draw_cmd::ShowcaseTilePlacement>,
 }
 
-/// Screen center for structure showcase tiles (matches [`build_yaku_panel_and_tablets`] layout).
+/// Median of packed object3d anchor triples (matches showcase tile `center_pos` encoding).
+pub(super) fn median_layout_anchor(centers: &[[f32; 3]]) -> crate::render::world_space::LayoutAnchorPx {
+    debug_assert!(!centers.is_empty());
+    let median = |values: &mut Vec<f32>| {
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mid = values.len() / 2;
+        if values.len() % 2 == 1 {
+            values[mid]
+        } else {
+            (values[mid - 1] + values[mid]) * 0.5
+        }
+    };
+    let mut xs: Vec<f32> = centers.iter().map(|c| c[0]).collect();
+    let mut ys: Vec<f32> = centers.iter().map(|c| c[1]).collect();
+    let mut zs: Vec<f32> = centers.iter().map(|c| c[2]).collect();
+    crate::render::world_space::LayoutAnchorPx {
+        px: median(&mut xs),
+        py: median(&mut ys),
+        lift_z: median(&mut zs),
+    }
+}
+
+/// Median center for structure showcase tiles (matches [`build_yaku_panel_and_tablets`] layout).
 pub(super) fn structure_showcase_tile_popup_center(
     structure_marker_poses: &[crate::render::gameplay_glb::GameplayMarkerPose; 2],
+    layout: &crate::ui::layout::LayoutResult,
     layout_scale: f32,
     showcase: &CascadeShowcase,
     tile_ids: &[u32],
     has_structure: bool,
     cascade_showcase_active: bool,
-) -> Option<(f32, f32)> {
+) -> Option<crate::render::world_space::LayoutAnchorPx> {
     let a_l = structure_marker_poses[0].anchor;
     let a_r = structure_marker_poses[1].anchor;
     let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
@@ -1259,22 +1328,20 @@ pub(super) fn structure_showcase_tile_popup_center(
     let tile_size =
         (available_span / total_tiles.max(1) as f32).clamp(22.0, (44.0 * layout_scale).max(28.0));
     let mut cursor = 0.0f32;
-    let mut sum_x = 0.0;
-    let mut sum_y = 0.0;
-    let mut count = 0usize;
+    let mut centers: Vec<[f32; 3]> = Vec::new();
     for (mi, set) in showcase.sets.iter().enumerate() {
-        for &tid in &set.tile_ids {
+        for (ti, &tid) in set.tile_ids.iter().enumerate() {
             let t = if layout_span > 0.0 {
                 (cursor + tile_size * 0.5) / layout_span
             } else {
                 0.5
             };
-            let anchor =
+            let mut anchor =
                 crate::render::gameplay_glb::lerp_marker_anchor(a_l, a_r, t.clamp(0.0, 1.0));
             if tile_ids.contains(&tid) {
-                sum_x += anchor[0];
-                sum_y += anchor[1];
-                count += 1;
+                let lift_mm = ti as f32 * 1.2 + mi as f32 * 0.15;
+                anchor[2] += layout.mm(lift_mm);
+                centers.push(anchor);
             }
             cursor += tile_size + intra_gap;
         }
@@ -1282,7 +1349,7 @@ pub(super) fn structure_showcase_tile_popup_center(
             cursor += inter_gap - intra_gap;
         }
     }
-    (count > 0).then_some((sum_x / count as f32, sum_y / count as f32))
+    (!centers.is_empty()).then(|| median_layout_anchor(&centers))
 }
 
 /// Build the yaku progress panel (previews, structure showcase tiles) and yaku tablets.
@@ -1375,6 +1442,11 @@ pub(super) fn build_yaku_panel_and_tablets(
 
     let mut structure_showcase: Vec<ShowcaseTilePlacement> = Vec::new();
 
+    let wave_t = cascade_frame.as_ref().map(|frame| frame.wave_t).unwrap_or(0.0);
+    let active_yaku = cascade_frame
+        .as_ref()
+        .and_then(|frame| frame.active_yaku.as_deref());
+
     // Structure strip / scored-hand showcase: while idle it shows the
     // committed structure, and while a cascade is active it keeps the
     // just-scored tiles visible long enough to pulse them in sequence.
@@ -1411,10 +1483,6 @@ pub(super) fn build_yaku_panel_and_tablets(
             .as_ref()
             .map(|frame| frame.highlight_tile_ids.as_slice())
             .unwrap_or(&[]);
-        let pulse_t = cascade_frame
-            .as_ref()
-            .map(|frame| frame.phase_t)
-            .unwrap_or(0.0);
         for (mi, set) in showcase.sets.iter().enumerate() {
             for (ti, &tid) in set.tile_ids.iter().enumerate() {
                 let Some(tile) = showcase.tiles.iter().find(|t| t.id == tid).copied() else {
@@ -1433,14 +1501,13 @@ pub(super) fn build_yaku_panel_and_tablets(
                     .position(|id| *id == tid)
                     .map(|pulse_idx| {
                         let delay = (pulse_idx as f32 * 0.18).min(0.7);
-                        let local_t =
-                            ((pulse_t - delay) / (1.0 - delay).max(0.001)).clamp(0.0, 1.0);
-                        (local_t * std::f32::consts::PI).sin().max(0.0)
+                        let wave = wave_t * (1.0 - delay * 0.35);
+                        wave.abs().clamp(0.0, 1.0)
                     })
                     .unwrap_or(0.0);
-                let scale = 1.0 + 0.16 * pulse;
-                let brightness = 1.0 + 0.35 * pulse;
-                lift_mm += 6.0 * pulse;
+                let scale = 1.0 + 0.14 * pulse;
+                let brightness = 1.0 + 0.45 * pulse;
+                lift_mm += SCORE_WAVE_STRUCTURE_TILE_MM * wave_t * pulse;
                 anchor[2] += layout.mm(lift_mm);
                 structure_showcase.push(ShowcaseTilePlacement {
                     tile,
@@ -1454,8 +1521,12 @@ pub(super) fn build_yaku_panel_and_tablets(
                     selected: false,
                     hovered: false,
                     outline: false,
-                    glow: false,
-                    glow_color: None,
+                    glow: pulse > 0.05,
+                    glow_color: if pulse > 0.05 {
+                        Some(crate::render::theme::color::score_cascade::CHIPS)
+                    } else {
+                        None
+                    },
                     pick_id: None,
                     overlay_rect_group: None,
                 });
@@ -1516,8 +1587,12 @@ pub(super) fn build_yaku_panel_and_tablets(
         let tablet_depth = panel_h * yaku_scale;
         let mut push_tablet = |i: usize, label: std::borrow::Cow<'static, str>, active: bool| {
             let t = (i as f32 * tablet_step_t).clamp(0.0, 1.0);
-            let pos = crate::render::gameplay_glb::lerp_marker_anchor(a_l, a_r, t);
+            let mut pos = crate::render::gameplay_glb::lerp_marker_anchor(a_l, a_r, t);
             let rotation = crate::render::gameplay_glb::lerp_marker_rotation_rad(rot_l, rot_r, t);
+            let yaku_wave = active_yaku.is_some_and(|name| label.contains(name));
+            if yaku_wave {
+                pos[2] += layout.mm(SCORE_WAVE_YAKU_MM * wave_t);
+            }
             let hovered_now = matches!(
                 ctx.picked_gameplay_object,
                 Some(crate::render::wgpu_renderer::GameplayPick::YakuTablet(j)) if j == i
@@ -1529,7 +1604,7 @@ pub(super) fn build_yaku_panel_and_tablets(
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::YakuTablet {
                     label,
-                    active,
+                    active: active || yaku_wave,
                     hover: if hovered_now { 1.0 } else { 0.0 },
                 },
                 hover_target: 0.0,

@@ -3,7 +3,8 @@
 pub use mahjuro_core::core::{
     archive_seen, chamber_target, consumable, credits, debuff, deck, hand, hand_intent,
     memorial_talisman, ordeal_kind, progression, relic, relic_desc_template, rules,
-    run_chronicle, scoring, stake, staircase_flavor, structure, tag, talisman, tile,
+    run_chronicle, scoring, season, staircase_flavor, structure, structure_notation, tag,
+    talisman, tile,
     tile_pack, yaku, zodiac,
 };
 

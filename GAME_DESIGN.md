@@ -134,7 +134,7 @@ Talismans and zodiacs share one **consumable inventory** (default **2 slots**). 
 ### **A. In-Run Progression**
 
 * The run advances through a ladder of **antes**, each with **Small → Big → Boss** in order; boss encounters pull from themed pools, and the **final ante** reserves **Dragon**.
-* **Score targets** scale as **`base_target × run_number`** (`run_number` rises after every blind **cleared** or **skipped**). `base_target` is set at run creation from **stake** (e.g. Spring defaults to **500** before material/stake tweaks). Boss blinds add pressure via **boss hooks**, not a separate target multiplier in code.
+* **Score targets** scale as **`base_target × run_number`** (`run_number` rises after every blind **cleared** or **skipped**). `base_target` is set at run creation from **season** (e.g. Spring defaults to **500** before material/season tweaks). Boss blinds add pressure via **boss hooks**, not a separate target multiplier in code.
 * Round wind cycles East → South → West → North by ante, affecting Yakuhai eligibility
 * Coins earned from blinds fund shop purchases between rounds
 * Skipping a blind advances `run_number` and yields a smaller payout—you **do not** fight that blind for score or rewards
@@ -144,8 +144,8 @@ Talismans and zodiacs share one **consumable inventory** (default **2 slots**). 
 Tracked in `PlayerProgress` with a **tiered unlock ladder** driven by **runs completed** (thresholds live in progression code / data):
 
 * Each tier unlocks **relic shop pools**, **round rules** available in shops/runs, and milestone copy for **yaku** / **dora** (dora scoring is active whenever indicators are on the wall; tier **L6** surfaces dora in level-up tables). The full yaku list scores in normal runs; **Kokushi Musō** stays hidden in reference UI until first cash-in.
-* A capped **high-score list** per profile; **run history** records finished runs for analytics and stake unlocks.
-* **Stake** ladder (**Spring → Summer → Autumn → Winter**) raises targets, shop prices, reroll base cost, and boss floors; **Winter** also adds the **No-Sequence Bonus** rule every round. Higher stakes unlock per **tile material** after clearing the previous stake with that material.
+* A capped **high-score list** per profile; **run history** records finished runs for analytics and season unlocks.
+* **Season** ladder (**Spring → Summer → Autumn → Winter**) raises targets, shop prices, reroll base cost, and boss floors; **Winter** also adds the **No-Sequence Bonus** rule every round. Higher seasons unlock per **tile material** after clearing the previous season with that material.
 * First **victory** unlocks **Plastic** tiles (+1 starting discard); **Tortoise Shell** grants bonus starting yen (material choice at run start).
 
 ### **C. Knowledge Progression**
@@ -160,7 +160,7 @@ Tracked in `PlayerProgress` with a **tiered unlock ladder** driven by **runs com
 ## **5. Difficulty Scaling**
 
 * Many distinct **boss kinds** in code, grouped into soft / medium / hard / reactive pools, with **Dragon** on the final ante (full roster in `assets/data/bosses.json` + `BossKind` in `boss.rs`)—effects mix `RuleModifier` pushes, **tile debuffs**, taxes, tweaks, and reactive “pick at reveal” variants (**Mirror**, **Counterweight**, **Tax Collector**).
-* Score targets rise with **run_number** (every blind faced or skipped) and **stake** (`base_target`); ante progression swaps boss pools and round wind
+* Score targets rise with **run_number** (every blind faced or skipped) and **season** (`base_target`); ante progression swaps boss pools and round wind
 * Round rules and boss hooks stack in later antes
 * The **Dragon** final boss pushes **Require Honor** (structure must include an honor tile)
 
@@ -179,7 +179,7 @@ Tracked in `PlayerProgress` with a **tiered unlock ladder** driven by **runs com
 
 ## **7. Accessibility & Approachability**
 
-* Onboarding and stakes ease players in; the full **yaku** list is scoring-eligible in normal runs once progression is applied—difficulty comes from blinds, bosses, and relic/rule chaos rather than hiding patterns mid-run
+* Onboarding and seasons ease players in; the full **yaku** list is scoring-eligible in normal runs once progression is applied—difficulty comes from blinds, bosses, and relic/rule chaos rather than hiding patterns mid-run
 * Friendly terminology:
   * Pair → Pair
   * Triplet → Three of a Kind
@@ -212,8 +212,8 @@ The original MVP scope is fully implemented and significantly exceeded:
 | Scoring system                    | Done        | Balatro-style chips × mult with cascades  |
 | 10–15 relics                      | Exceeded    | Large pool — `assets/data/relics.json`    |
 | 1–2 rule modifiers                | Exceeded    | Broad `RuleModifier` set + rich boss hooks |
-| Score targets                     | Done        | Full ante ladder (**Small / Big / Boss** per ante); **Spring–Winter stakes** |
-| Post-run unlocks                  | Done        | Tiered relic/rule/**dora** gating + stakes |
+| Score targets                     | Done        | Full ante ladder (**Small / Big / Boss** per ante); **Spring–Winter seasons** |
+| Post-run unlocks                  | Done        | Tiered relic/rule/**dora** gating + seasons |
 | *Bonus: Yaku system*              | Implemented | Full list in `yaku.json` + zodiac leveling |
 | *Bonus: Talismans & enhancements* | Implemented | Hand-wide buffs, transforms, …            |
 | *Bonus: 3D shop*                  | Implemented | Curio cabinet, spotlight hover, dishes    |
@@ -224,7 +224,7 @@ The original MVP scope is fully implemented and significantly exceeded:
 
 ## **10. Longer-Term Features / Expansion Ideas**
 
-* More bosses / antes / themed stakes
+* More bosses / antes / themed seasons
 * More yaku and depth (waits, richer dora variants)
 * Cosmetic tile sets beyond Bamboo / Plastic / Tortoise Shell
 * Leaderboards and daily seeds for score attack

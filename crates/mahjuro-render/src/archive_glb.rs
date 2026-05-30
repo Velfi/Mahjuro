@@ -2,10 +2,11 @@
 //!
 //! ## Node names (Blender object names → glTF nodes)
 //!
-//! - `sign_description_left` / `sign_description_right` — description boards; runtime draws one
-//!   mesh (see `archive_env_skip_description_prim`) based on cursor so the active board is away
-//!   from the pointer; catalog copy is CPU-rasterized into a shared decal atlas and composited in
-//!   `room_glb.wgsl` on those meshes (vertex `COLOR_0.a = 2` tag from `decode_env_primitive`).
+//! - `sign_description_left` / `sign_description_right` — grid-mode description boards; runtime
+//!   draws one mesh (see `archive_env_skip_description_prim`) based on cursor so the active board
+//!   is away from the pointer; browse copy is CPU-rasterized into a shared decal atlas.
+//! - `inspect_plaque` — inspect-mode description board beside the turntable; same decal atlas
+//!   path (`COLOR_0.a = 2` in `decode_env_primitive`); hidden outside item inspect.
 //! - `archive_spawn_item.001` … `archive_spawn_item.021` — 21 item anchors (3×7 window into the tab catalogue).
 //! - `btn_relics_tab`, `btn_zodiacs_tab`, `btn_bosses_tab`, `btn_talismans_tab`, `btn_chronicle_tab` —
 //!   section tabs (meshes draw; hit rects project mesh AABBs like shop `exit_btn`).
@@ -37,6 +38,7 @@ use crate::wgpu_renderer::{PointLight, SpotLight};
 
 pub const SIGN_DESCRIPTION_LEFT: &str = "sign_description_left";
 pub const SIGN_DESCRIPTION_RIGHT: &str = "sign_description_right";
+pub const INSPECT_PLAQUE: &str = "inspect_plaque";
 pub const SECTION_BUTTONS_LEFT_BOUND: &str = "section_buttons_left_bound";
 pub const SECTION_BUTTONS_RIGHT_BOUND: &str = "section_buttons_right_bound";
 pub const ARCHIVE_SPAWN_FOCUSED_ITEM: &str = "archive_spawn_focused_item";
@@ -73,21 +75,8 @@ pub fn archive_prim_casts_room_shadow(_node_name: Option<&str>) -> bool {
 /// [`archive_sign_description_decal_extents`].
 pub const ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS: [f32; 3] = [1.0, 1.0, 1.0];
 
-/// Read the `sign_description_*` mesh's face aspect from a loaded archive `.glb` and pack it
-/// into the `[long, short, thin]` host extents that [`crate::decal::decal_dimensions`]
-/// expects. Returns [`ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS`] when the asset is unavailable so
-/// the rasterized decal matches the rectangular sign and does not stretch / squish glyphs.
-///
-/// Takes `cpu` by reference rather than re-entering [`with_archive_glb_cpu`] because callers
-/// (`build.rs`, `sync_archive_description_decal_texture`) are typically already inside that
-/// closure — recursive read-locks on the GLB `RwLock` deadlock in practice.
-pub fn archive_sign_description_decal_extents_for(cpu: &RoomGlbCpu) -> [f32; 3] {
-    let Some(bounds) = cpu
-        .marker_mesh_bounds_doc_for(SIGN_DESCRIPTION_LEFT)
-        .or_else(|| cpu.marker_mesh_bounds_doc_for(SIGN_DESCRIPTION_RIGHT))
-    else {
-        return ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS;
-    };
+fn archive_decal_host_extents_for_marker(cpu: &RoomGlbCpu, node: &str) -> Option<[f32; 3]> {
+    let bounds = cpu.marker_mesh_bounds_doc_for(node)?;
     let diag = bounds.max - bounds.min;
     let mut e = [diag.x.abs(), diag.y.abs(), diag.z.abs()];
     // Sort ascending so e[2] = longest face edge, e[1] = shorter face edge, e[0] = thickness.
@@ -96,7 +85,21 @@ pub fn archive_sign_description_decal_extents_for(cpu: &RoomGlbCpu) -> [f32; 3] 
     let short = e[1].max(1e-6);
     // `decal_dimensions(Fit)` does `extents[0] / extents[1].max(1.0)` — normalize the short
     // edge to exactly 1.0 so doc-space units (which can be < 1) still yield the true aspect.
-    [long / short, 1.0, 1.0]
+    Some([long / short, 1.0, 1.0])
+}
+
+/// Read the `sign_description_*` mesh face aspect from a loaded archive `.glb`.
+pub fn archive_sign_description_decal_extents_for(cpu: &RoomGlbCpu) -> [f32; 3] {
+    archive_decal_host_extents_for_marker(cpu, SIGN_DESCRIPTION_LEFT)
+        .or_else(|| archive_decal_host_extents_for_marker(cpu, SIGN_DESCRIPTION_RIGHT))
+        .unwrap_or(ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS)
+}
+
+/// Read the `inspect_plaque` mesh face aspect (authored UVs span ~0–1 × 0.61–1; remapped in
+/// [`crate::room_env_gltf`] so the decal maps once across the quad).
+pub fn archive_inspect_plaque_decal_extents_for(cpu: &RoomGlbCpu) -> [f32; 3] {
+    archive_decal_host_extents_for_marker(cpu, INSPECT_PLAQUE)
+        .unwrap_or(ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS)
 }
 
 /// Convenience wrapper that opens the archive `.glb` cache. **Do not call from inside an
@@ -105,6 +108,14 @@ pub fn archive_sign_description_decal_extents_for(cpu: &RoomGlbCpu) -> [f32; 3] 
 pub fn archive_sign_description_decal_extents() -> [f32; 3] {
     with_archive_glb_cpu(|opt| {
         opt.map(archive_sign_description_decal_extents_for)
+            .unwrap_or(ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS)
+    })
+}
+
+/// Convenience wrapper for [`archive_inspect_plaque_decal_extents_for`].
+pub fn archive_inspect_plaque_decal_extents() -> [f32; 3] {
+    with_archive_glb_cpu(|opt| {
+        opt.map(archive_inspect_plaque_decal_extents_for)
             .unwrap_or(ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS)
     })
 }
@@ -267,6 +278,7 @@ fn is_archive_marker_name(name: &str) -> bool {
             name,
             SIGN_DESCRIPTION_LEFT
                 | SIGN_DESCRIPTION_RIGHT
+                | INSPECT_PLAQUE
                 | SECTION_BUTTONS_LEFT_BOUND
                 | SECTION_BUTTONS_RIGHT_BOUND
                 | ARCHIVE_SPAWN_FOCUSED_ITEM
@@ -283,7 +295,10 @@ impl RoomEnvWalkHooks for ArchiveRoomWalkHooks {
     }
 
     fn mesh_policy(&self, name: &str) -> RoomMeshPolicy {
-        if matches!(name, SIGN_DESCRIPTION_LEFT | SIGN_DESCRIPTION_RIGHT)
+        if matches!(
+            name,
+            SIGN_DESCRIPTION_LEFT | SIGN_DESCRIPTION_RIGHT | INSPECT_PLAQUE
+        )
             || is_archive_button_node(name)
         {
             RoomMeshPolicy::EnvironmentDraw
@@ -547,6 +562,22 @@ mod tests {
                     "missing marker data for {node}"
                 );
             }
+        });
+    }
+
+    #[test]
+    fn archive_inspect_plaque_has_decal_host_bounds() {
+        with_archive_glb_cpu(|opt| {
+            let cpu = opt.expect("archive.glb should load in tests");
+            let extents = archive_inspect_plaque_decal_extents_for(cpu);
+            assert!(
+                extents[0] > 1.0,
+                "inspect_plaque should be wider than tall: {extents:?}"
+            );
+            assert!(
+                cpu.marker_mesh_bounds_doc_for(INSPECT_PLAQUE).is_some(),
+                "missing mesh bounds for inspect_plaque"
+            );
         });
     }
 

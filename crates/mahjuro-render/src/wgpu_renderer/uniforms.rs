@@ -8,6 +8,7 @@ pub(crate) struct Globals {
     pub transition_progress: f32,
     pub quality_level: f32,
     pub moon_phase: f32,
+    /// `[0]` cascade quality; `[1]` main-menu June pride rainbow (starfield + moon tag).
     pub _globals_pad: [f32; 3],
 }
 
@@ -78,7 +79,7 @@ pub(crate) struct CameraUniform {
     pub decal_atlas_uv: [f32; 4],
     /// x = use shop-style ACES HDR path (`1`/`0`); y = linear exposure; z = hemispheric ambient scale;
     /// w = tile shader inverse document scale for embedded glTF punctual attenuation.
-    /// Matches `SsrGlobals.felt.yzw` on `lit_mesh` for the same frame, except `w`.
+    /// Matches `SsrGlobals.hdr_tonemap.xyz` on `lit_mesh` for the same frame; `w` differs.
     pub hdr_tonemap: [f32; 4],
 }
 
@@ -98,14 +99,13 @@ pub(crate) struct TileOutlineInstance {
     pub base_color_factor: [f32; 4],
 }
 
-/// View uniform consumed by the 3D flame pipeline. Mirrors
-/// `FlameView` in `shaders/flame.wgsl`: just the matrices the
-/// billboard vertex shader needs. Kept separate from `SsrGlobals`
-/// because the SSR layout restricts its uniform to the fragment
-/// stage, and the flame vertex shader needs `view_proj`.
+/// View + shader tuning consumed by the 3D flame pipeline. Mirrors
+/// `FlameView` in `shaders/flame.wgsl`.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct FlameViewUniform {
     pub view_proj: [f32; 16],
     pub view_pos: [f32; 4],
+    pub tuning: [f32; 13],
+    pub _pad: [f32; 3],
 }

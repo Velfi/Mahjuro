@@ -48,11 +48,11 @@ pub struct BotCli {
     pub discards: Option<u32>,
     #[arg(long)]
     pub yen: Option<u32>,
-    /// Difficulty stake: spring (baseline), summer, autumn, or winter. Omit
+    /// Difficulty season: spring (baseline), summer, autumn, or winter. Omit
     /// for Spring. Stratifies balance snapshots so each tier's target /
     /// shop / boss deltas can be evaluated independently.
-    #[arg(long)]
-    pub stake: Option<crate::core::stake::Stake>,
+    #[arg(long, visible_alias = "stake")]
+    pub season: Option<crate::core::season::Season>,
     #[arg(long, action = ArgAction::SetTrue)]
     pub bot_log: bool,
     /// Write bot results to this path. Format is taken from `--output-format`, or
@@ -80,8 +80,8 @@ pub struct BotCli {
     /// Max proactive sells per shop visit (default 2).
     #[arg(long)]
     pub sell_max_per_visit: Option<u32>,
-    /// In-blind expectimax depth (`0` = legacy greedy, `1` = one-ply unified, `2` = recommended default, `3` = pruned).
-    #[arg(long, default_value_t = 2)]
+    /// In-blind expectimax depth (`0` = legacy greedy, `1` = one-ply unified default, `2` = two-ply, `3` = pruned).
+    #[arg(long, default_value_t = 1)]
     pub chamber_planner_depth: u32,
 }
 
@@ -123,7 +123,7 @@ impl BotCli {
             starting_plays: self.plays,
             starting_discards: self.discards,
             starting_yen: self.yen,
-            stake: self.stake,
+            season: self.season,
             sell_enabled: if self.sell_enabled { Some(true) } else { None },
             sell_hold_threshold: self.sell_hold_threshold,
             sell_max_per_visit: self.sell_max_per_visit,

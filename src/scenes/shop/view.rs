@@ -121,6 +121,7 @@ fn shop_gltf_candle_flame_emitters(
     _age_secs: f32,
     lamp_flicker: f32,
     _layout: &crate::ui::layout::LayoutResult,
+    tuning: &crate::render::flame_tuning::FlameTuning,
 ) -> Vec<FlameEmitter> {
     with_shop_glb_cpu(|opt| {
         let Some(cpu) = opt else {
@@ -131,7 +132,9 @@ fn shop_gltf_candle_flame_emitters(
             .environment_bounds_doc
             .map(|b| b.center())
             .unwrap_or(Vec3::ZERO);
-        let flame_scale = crate::render::flame_volume::shop_gltf_flame_emitter_scale(s);
+        let flame_scale = tuning.emitter_scale(
+            crate::render::flame_volume::SHOP_GLTF_CANDLE_HEIGHT_DOC_M * s.max(1e-6),
+        );
         cpu.embedded_point_lights
             .iter()
             .filter(|l| l.is_candle)
@@ -143,10 +146,7 @@ fn shop_gltf_candle_flame_emitters(
                     .wrapping_add(0xA5A5_A5A5);
                 let scale_jitter = 0.88 + (seed & 0x3f) as f32 / 63.0 * 0.24;
                 let emitter_scale = flame_scale * scale_jitter;
-                let world = crate::render::flame_volume::shop_gltf_wick_from_light(
-                    light_world,
-                    emitter_scale,
-                );
+                let world = tuning.wick_from_light(light_world, emitter_scale);
                 let phase = (seed as f32 * 2.328_306e-10).fract();
                 let brightness = lamp_flicker;
                 FlameEmitter {
@@ -155,7 +155,7 @@ fn shop_gltf_candle_flame_emitters(
                     wind: Vec2::ZERO,
                     brightness,
                     phase,
-                    flicker_amp: crate::render::flame_volume::SHOP_CANDLE_FLICKER_AMP,
+                    flicker_amp: tuning.candle_flicker_amp,
                 }
             })
             .collect()
@@ -685,6 +685,7 @@ pub(crate) fn render_shop_frame(
                 &ctx.room_env_for("shop").0,
                 shop.age_secs,
                 lamp_flicker,
+                ctx.flame_tuning.candle_flicker_amp,
             )
             .into_iter()
             .map(ScenePunctualLight::InverseSquare)
@@ -815,10 +816,12 @@ pub(crate) fn render_shop_frame(
                 shop.age_secs,
                 lamp_flicker,
                 ctx.layout,
+                &ctx.flame_tuning,
             );
             frame.candle_light_count = candle_flames.len() as u32;
-            frame.flame_height_world = crate::render::flame_volume::shop_gltf_flame_height_world(
+            frame.flame_height_world = ctx.flame_tuning.flame_height_world(
                 room_env_world_scale(h, env_h),
+                crate::render::flame_volume::SHOP_GLTF_CANDLE_HEIGHT_DOC_M,
             );
             frame.procedural_flame_emitters = candle_flames;
         }

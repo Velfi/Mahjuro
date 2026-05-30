@@ -103,5 +103,7 @@ pub enum DrawKind {
     TallyStickBase,
     TallyStickTip,
     ExtrudedGlyph,
+    /// Standalone GLB prop drawn via the glTF PBR tile pipeline (yen coins).
+    GltfCoin,
     Primitive(crate::primitive::MeshId),
 }

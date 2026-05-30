@@ -46,6 +46,12 @@ pub struct PickChamberScene {
     pause_menu: PauseMenu,
 }
 
+impl Default for PickChamberScene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PickChamberScene {
     pub fn new() -> Self {
         let mut tree = TreeState::new();
@@ -317,7 +323,7 @@ impl SceneBehavior for PickChamberScene {
                     ctx.bus.push(GameEvent::OrdealEncountered(bk));
                 }
                 Some(Scene::Gameplay(Box::new(
-                    GameplayScene::with_pending_chamber(upcoming),
+                    GameplayScene::enter_pending_chamber(ctx.run, upcoming),
                 )))
             }
             Some(ChamberAction::SkipChamber) => None,
@@ -520,8 +526,8 @@ impl SceneBehavior for PickChamberScene {
                 } else {
                     upcoming.name().to_string()
                 };
-                let stake_suffix = match ctx.run.mode.stake {
-                    crate::core::stake::Stake::Spring => String::new(),
+                let season_suffix = match ctx.run.mode.season {
+                    crate::core::season::Season::Spring => String::new(),
                     other => format!(" · {}", other.label()),
                 };
                 let edge_margin = (w * 0.025).max(14.0);
@@ -562,7 +568,7 @@ impl SceneBehavior for PickChamberScene {
                         )
                         + 4.0
                         + wrapped_text_height(
-                            &format!("Reward ¥{}{}", upcoming.clear_reward(), stake_suffix),
+                            &format!("Reward ¥{}{}", upcoming.clear_reward(), season_suffix),
                             text_w_play,
                             px_detail,
                             h_detail,
@@ -613,7 +619,7 @@ impl SceneBehavior for PickChamberScene {
                         .unwrap_or(chamber_display.as_str());
                     let title_w: f32 = if let Some(font) = load_ui_font() {
                         let (_, _, advances) = measure_label_advances(
-                            &font,
+                            font,
                             first_line,
                             8192,
                             h_blind.max(1.0) as u32,
@@ -674,7 +680,7 @@ impl SceneBehavior for PickChamberScene {
                     col_w: text_w_play,
                     font_px: px_detail,
                     line_h: h_detail,
-                    text: &format!("Reward ¥{}{}", upcoming.clear_reward(), stake_suffix),
+                    text: &format!("Reward ¥{}{}", upcoming.clear_reward(), season_suffix),
                     color: play_color,
                     align: TextAlign::Right,
                 });

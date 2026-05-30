@@ -6,7 +6,7 @@
 
 use crate::sfx_id::SfxId;
 use crate::game::event_bus::GameEvent;
-use crate::render::theme::{color, typography};
+use crate::render::theme::{ButtonState, ButtonVariant, button_colors, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::clip::intersect_rect;
 use crate::ui::input::{InputMode, UiAction};
@@ -20,8 +20,15 @@ use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-/// Volume adjustment step per input press.
-const VOL_STEP: f32 = 0.05;
+use crate::persistence::{self, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, VOLUME_UNITY};
+
+fn volume_restore_default(current: f32) -> f32 {
+    if current > 0.0 {
+        current
+    } else {
+        VOLUME_UNITY
+    }
+}
 /// Gamma adjustment step per input press.
 const GAMMA_STEP: f32 = 0.05;
 
@@ -29,6 +36,9 @@ const GAMMA_STEP: f32 = 0.05;
 const TOC_ID_BASE: u32 = 0xF200;
 /// Click-id for the fixed Back button.
 const BACK_ID: u32 = 0xF210;
+/// Tile set row: mouse-only prev/next arrows (registered before the row hit target).
+const TILESET_ARROW_PREV_ID: u32 = 0xF211;
+const TILESET_ARROW_NEXT_ID: u32 = 0xF212;
 
 /// Label column width as a fraction of the content pane.
 const LABEL_FRAC: f32 = 0.42;
@@ -239,6 +249,77 @@ fn row_columns(content_x: f32, content_w: f32) -> RowColumns {
     }
 }
 
+struct TilesetArrowLayout {
+    prev: [f32; 4],
+    next: [f32; 4],
+    value: [f32; 4],
+}
+
+fn tileset_arrow_layout(row_rect: [f32; 4], cols: &RowColumns, scale: f32) -> TilesetArrowLayout {
+    let [_row_x, row_y, _row_w, row_h] = row_rect;
+    let gap = (4.0 * scale).max(2.0);
+    let arrow_w = (row_h * 0.82).clamp(24.0, row_h);
+    let control_right = cols.control_x + cols.control_w + cols.readout_w;
+    let next_x = control_right - arrow_w;
+    let prev_x = cols.control_x;
+    let value_x = prev_x + arrow_w + gap;
+    let value_w = (next_x - gap - value_x).max(0.0);
+    let arrow_y = row_y + (row_h - arrow_w) * 0.5;
+    TilesetArrowLayout {
+        prev: [prev_x, arrow_y, arrow_w, arrow_w],
+        next: [next_x, arrow_y, arrow_w, arrow_w],
+        value: [value_x, row_y, value_w, row_h],
+    }
+}
+
+fn point_in_rect((x, y): (f32, f32), rect: [f32; 4]) -> bool {
+    let [rx, ry, rw, rh] = rect;
+    x >= rx && x <= rx + rw && y >= ry && y <= ry + rh
+}
+
+fn push_cycle_arrow(
+    instances: &mut Vec<GpuInstance>,
+    text_labels: &mut Vec<TextLabel>,
+    buttons: &mut Vec<ButtonDef>,
+    rect: [f32; 4],
+    label: &str,
+    click_id: u32,
+    enabled: bool,
+    hovered: bool,
+    content_clip_rect: [f32; 4],
+) {
+    let Some(clipped) = intersect_rect(rect, content_clip_rect) else {
+        return;
+    };
+    let state = if !enabled {
+        ButtonState::Disabled
+    } else if hovered {
+        ButtonState::Hover
+    } else {
+        ButtonState::Rest
+    };
+    let colors = button_colors(ButtonVariant::Default, state);
+    instances.push(GpuInstance {
+        rect: clipped,
+        color: colors.bg,
+        user: 0,
+    });
+    text_labels.push(TextLabel {
+        rect,
+        text: label.into(),
+        color: colors.text,
+        align: TextAlign::Center,
+        clip_rect: Some(content_clip_rect),
+        ..Default::default()
+    });
+    if enabled {
+        buttons.push(ButtonDef::scene(
+            (clipped[0], clipped[1], clipped[2], clipped[3]),
+            click_id,
+        ));
+    }
+}
+
 fn on_off(enabled: bool) -> String {
     if enabled { "ON".into() } else { "OFF".into() }
 }
@@ -247,15 +328,15 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
     match row {
         Row::Master => (
             "Master",
-            format!("{}%", (scene.master_volume * 100.0).round() as u32),
+            format!("{}%", persistence::volume_display_percent(scene.master_volume)),
         ),
         Row::Music => (
             "Music",
-            format!("{}%", (scene.music_volume * 100.0).round() as u32),
+            format!("{}%", persistence::volume_display_percent(scene.music_volume)),
         ),
         Row::Sfx => (
             "SFX",
-            format!("{}%", (scene.sfx_volume * 100.0).round() as u32),
+            format!("{}%", persistence::volume_display_percent(scene.sfx_volume)),
         ),
         Row::SfxToggle => ("SFX enabled", on_off(scene.sfx_enabled)),
         Row::Gamma => ("Gamma", format!("{:.2}", scene.gamma)),
@@ -411,6 +492,10 @@ pub struct OptionsScene {
     scroll: SmoothScroll,
     /// While `Some`, LMB is held after pressing on this row's slider track.
     dragging_slider: Option<Row>,
+    /// Last non-zero volume before bar-click mute (Master / Music / SFX).
+    master_volume_restore: f32,
+    music_volume_restore: f32,
+    sfx_volume_restore: f32,
 
     /// Local copy of settings; written back on change and scene exit.
     pub master_volume: f32,
@@ -438,6 +523,14 @@ pub struct OptionsScene {
     pub hints_enabled: bool,
     pub discard_undo_enabled: bool,
     pub glyph_prompt: crate::persistence::GlyphPromptSetting,
+    /// Last cursor position (updated each [`Self::update_input`] for arrow hover).
+    cursor_pos: (f32, f32),
+}
+
+impl Default for OptionsScene {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl OptionsScene {
@@ -464,6 +557,9 @@ impl OptionsScene {
             credits_requested: false,
             scroll: SmoothScroll::new(),
             dragging_slider: None,
+            master_volume_restore: volume_restore_default(settings.master_volume),
+            music_volume_restore: volume_restore_default(settings.music_volume),
+            sfx_volume_restore: volume_restore_default(settings.sfx_volume),
             master_volume: settings.master_volume,
             sfx_volume: settings.sfx_volume,
             music_volume: settings.music_volume,
@@ -486,6 +582,7 @@ impl OptionsScene {
             hints_enabled: settings.hints_enabled,
             discard_undo_enabled: settings.discard_undo_enabled,
             glyph_prompt: settings.glyph_prompt,
+            cursor_pos: (0.0, 0.0),
         }
     }
 
@@ -567,7 +664,7 @@ impl OptionsScene {
                 crate::persistence::GAMMA_MAX,
                 GAMMA_STEP,
             ),
-            _ => (0.0, 1.0, VOL_STEP),
+            _ => (VOLUME_MIN, VOLUME_MAX, VOLUME_STEP),
         }
     }
 
@@ -586,12 +683,58 @@ impl OptionsScene {
         let snapped = ((value - lo) / step).round() * step + lo;
         let clamped = snapped.clamp(lo, hi);
         match row {
-            Row::Master => self.master_volume = clamped,
-            Row::Music => self.music_volume = clamped,
-            Row::Sfx => self.sfx_volume = clamped,
+            Row::Master => {
+                self.master_volume = clamped;
+                if clamped > 0.0 {
+                    self.master_volume_restore = clamped;
+                }
+            }
+            Row::Music => {
+                self.music_volume = clamped;
+                if clamped > 0.0 {
+                    self.music_volume_restore = clamped;
+                }
+            }
+            Row::Sfx => {
+                self.sfx_volume = clamped;
+                if clamped > 0.0 {
+                    self.sfx_volume_restore = clamped;
+                }
+            }
             Row::Gamma => self.gamma = clamped,
             _ => {}
         }
+    }
+
+    fn toggle_volume_row(&mut self, row: Row) {
+        match row {
+            Row::Master => {
+                if self.master_volume > 0.0 {
+                    self.master_volume_restore = self.master_volume;
+                    self.master_volume = 0.0;
+                } else {
+                    self.master_volume = self.master_volume_restore;
+                }
+            }
+            Row::Music => {
+                if self.music_volume > 0.0 {
+                    self.music_volume_restore = self.music_volume;
+                    self.music_volume = 0.0;
+                } else {
+                    self.music_volume = self.music_volume_restore;
+                }
+            }
+            Row::Sfx => {
+                if self.sfx_volume > 0.0 {
+                    self.sfx_volume_restore = self.sfx_volume;
+                    self.sfx_volume = 0.0;
+                } else {
+                    self.sfx_volume = self.sfx_volume_restore;
+                }
+            }
+            _ => return,
+        }
+        self.save_settings();
     }
 
     fn adjust_slider(&mut self, row: Row, delta_steps: f32) {
@@ -719,7 +862,15 @@ impl OptionsScene {
     /// Apply a click/confirm on a row. Returns true if the scene should close.
     fn apply_click(&mut self, row: Row, layout: &PanelLayout, cursor_pos: (f32, f32)) -> bool {
         match row {
-            Row::Master | Row::Music | Row::Sfx | Row::Gamma => {
+            Row::Master | Row::Music | Row::Sfx => {
+                if Self::cursor_on_slider_track(layout, cursor_pos) {
+                    self.set_slider_from_cursor(row, layout, cursor_pos);
+                    self.save_settings();
+                } else {
+                    self.toggle_volume_row(row);
+                }
+            }
+            Row::Gamma => {
                 if Self::cursor_on_slider_track(layout, cursor_pos) {
                     self.set_slider_from_cursor(row, layout, cursor_pos);
                     self.save_settings();
@@ -822,6 +973,7 @@ impl OptionsScene {
         if !mouse_left_down {
             self.dragging_slider = None;
         }
+        self.cursor_pos = cursor_pos;
         let layout = compute_layout(window_w, window_h);
         self.sync_scroll(&layout);
         let prev_focus = (self.focused, self.back_focused);
@@ -893,6 +1045,22 @@ impl OptionsScene {
                 self.save_settings();
                 self.cancel_requested = true;
                 return true;
+            }
+            if cid == TILESET_ARROW_PREV_ID {
+                self.focused = Row::Tileset;
+                self.back_focused = false;
+                self.cycle_tileset(-1);
+                self.save_settings();
+                self.confirm_requested = true;
+                continue;
+            }
+            if cid == TILESET_ARROW_NEXT_ID {
+                self.focused = Row::Tileset;
+                self.back_focused = false;
+                self.cycle_tileset(1);
+                self.save_settings();
+                self.confirm_requested = true;
+                continue;
             }
             if let Some(row) = Row::from_click_id(cid) {
                 self.focused = row;
@@ -1097,6 +1265,7 @@ impl OptionsScene {
                     self.draw_row(
                         instances,
                         text_labels,
+                        buttons,
                         row,
                         slot_rect,
                         content_clip_rect,
@@ -1216,6 +1385,7 @@ impl OptionsScene {
         &self,
         instances: &mut Vec<GpuInstance>,
         text_labels: &mut Vec<TextLabel>,
+        buttons: &mut Vec<ButtonDef>,
         row: Row,
         rect: [f32; 4],
         content_clip_rect: [f32; 4],
@@ -1302,6 +1472,63 @@ impl OptionsScene {
                     clip_rect: Some(content_clip_rect),
                     ..Default::default()
                 });
+            }
+            Row::Tileset => {
+                let (label, value) = row_copy(row, self);
+                let bg_color = if is_focused {
+                    color::WALNUT_SOFT
+                } else {
+                    color::WALNUT_RAISED
+                };
+                push_quad_in_clip([row_x, row_y, row_w, row_h], bg_color);
+                if is_focused {
+                    push_quad_in_clip([row_x, row_y, accent_w, row_h], color::GOLD);
+                }
+
+                text_labels.push(TextLabel {
+                    rect: [cols.label_x + pad, row_y, cols.label_w - pad * 2.0, row_h],
+                    text: label.into(),
+                    color: label_color,
+                    align: TextAlign::Left,
+                    clip_rect: Some(content_clip_rect),
+                    ..Default::default()
+                });
+
+                let arrows = tileset_arrow_layout(rect, cols, scale);
+                let arrows_enabled = self.available_tilesets.len() > 1;
+                let cursor = self.cursor_pos;
+                push_cycle_arrow(
+                    instances,
+                    text_labels,
+                    buttons,
+                    arrows.prev,
+                    "◀",
+                    TILESET_ARROW_PREV_ID,
+                    arrows_enabled,
+                    arrows_enabled && point_in_rect(cursor, arrows.prev),
+                    content_clip_rect,
+                );
+                push_cycle_arrow(
+                    instances,
+                    text_labels,
+                    buttons,
+                    arrows.next,
+                    "▶",
+                    TILESET_ARROW_NEXT_ID,
+                    arrows_enabled,
+                    arrows_enabled && point_in_rect(cursor, arrows.next),
+                    content_clip_rect,
+                );
+                if !value.is_empty() {
+                    text_labels.push(TextLabel {
+                        rect: arrows.value,
+                        text: value,
+                        color: value_color,
+                        align: TextAlign::Center,
+                        clip_rect: Some(content_clip_rect),
+                        ..Default::default()
+                    });
+                }
             }
             _ => {
                 let (label, value) = row_copy(row, self);

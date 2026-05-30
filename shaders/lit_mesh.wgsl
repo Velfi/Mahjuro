@@ -182,9 +182,9 @@ struct SsrGlobals {
     // x = enabled (0/1), y = max_distance (world units),
     // z = stride (world units / step), w = max_steps
     params: vec4<f32>,
-    // x = felt procedural LOD (0..2); y = physical HDR (glTF punctual + ACES); z = linear exposure;
-    // w = ambient hemispheric scale (see `upload_camera_uniforms`).
-    felt: vec4<f32>,
+    // x = ACES HDR path (1 = linear HDR + ACES composite); y = linear exposure;
+    // z = ambient hemispheric scale; w = reserved.
+    hdr_tonemap: vec4<f32>,
     // x = 1/shop_env_world_scale for embedded glTF punctual (document-space falloff); 0 = world units.
     // y = shop display-case material tuning (1 = shop + embedded punctual); attenuation uses x only.
     shop_punctual: vec4<f32>,
@@ -243,7 +243,7 @@ fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
         }
     }
     let gs = sum / 9.0;
-    let phys_hdr = clamp(ssr_globals.felt.y, 0.0, 1.0);
+    let phys_hdr = clamp(ssr_globals.hdr_tonemap.x, 0.0, 1.0);
     return mix(gs, 1.0, phys_hdr);
 }
 
@@ -612,209 +612,6 @@ fn wood_sample_world(world_xy: vec2<f32>) -> WoodSample {
     return wood_sample_basis(wood_basis_world(world_xy));
 }
 
-// ── Felt (mahjong-parlor green baize) ─────────────────────────────────
-// Procedural felt sampler used by the `FeltGreen` material on the
-// horizontal table. Samples in world XY so the felt grain stays at a
-// fixed physical scale regardless of how far the table is stretched
-// (the gameplay table is enlarged to "infinite plane" extents). Returns
-// a low-saturation green albedo plus a slightly perturbed normal so the
-// broad sheen breaks up across the surface.
-struct FeltSample {
-    albedo: vec3<f32>,
-    n: vec3<f32>,
-};
-
-// Sample the procedural felt field. `micro_strength` controls how much
-// of the high-frequency microfiber normal perturbation to apply — call
-// sites fade this out at distance so the sub-mm fibers don't alias
-// into screen-space noise on the horizon.
-//
-// Stage 9 hook: to escape procedural land entirely and use authored
-// PBR textures, replace the body of this function with samples from
-// new bindings (albedo, normal, roughness, AO, height) added to the
-// lit_mesh material layout. Keep this signature so the call sites in
-// the FS don't change. The procedural path is fine as a fallback.
-fn felt_sample_world(
-    world_xy: vec2<f32>,
-    base_n: vec3<f32>,
-    micro_strength: f32,
-    lod: f32,
-) -> FeltSample {
-    let lod_clamped = clamp(lod, 0.0, 2.0);
-
-    // Effects Off — uniform baize tint; skips all procedural noise.
-    if (lod_clamped < 0.5) {
-        var s: FeltSample;
-        s.albedo = vec3<f32>(0.038, 0.135, 0.058);
-        s.n = normalize(base_n);
-        return s;
-    }
-
-    // World-space frequency of the felt fiber field (after early-out so
-    // Metal doesn't emit an unused module constant on the uniform path).
-    const FELT_SCALE: f32 = 0.18;
-    let p = world_xy * FELT_SCALE;
-
-    // ── Screen-space derivative for noise filtering ─────────────────
-    let footprint = max(fwidth(p.x), fwidth(p.y));
-
-    let macro_filter = 1.0 - smoothstep(0.4, 1.4, footprint * 0.6);
-    let macro_var = clamp(
-        0.5 + (fbm2(p * 0.6) - 0.5) * macro_filter * 0.4,
-        0.0, 1.0,
-    );
-
-    let dark  = vec3<f32>(0.022, 0.080, 0.035);
-    let mid_c = vec3<f32>(0.038, 0.135, 0.058);
-    let light = vec3<f32>(0.060, 0.185, 0.085);
-    var c = mix(dark, mid_c, macro_var);
-    c = mix(c, light, smoothstep(0.55, 0.95, macro_var));
-
-    let full_detail = lod_clamped >= 1.995;
-
-    // Effects Low — macro palette + light fiber normal; no microfiber /
-    // mid-octave / multi-tap micro normals (major ALU savings).
-    if (!full_detail) {
-        let fiber_p = p * vec2<f32>(38.0, 14.0);
-        let fiber_footprint = max(fwidth(fiber_p.x), fwidth(fiber_p.y));
-        let fiber_filter = 1.0 - smoothstep(0.5, 1.5, fiber_footprint);
-        let fiber = (vnoise2(fiber_p) - 0.5) * 0.12 * fiber_filter;
-        c = c * (1.0 + fiber * 0.6);
-        let dx = (vnoise2(fiber_p + vec2<f32>(0.0, 1.7)) - 0.5);
-        let dy = (vnoise2(fiber_p + vec2<f32>(2.3, 0.0)) - 0.5);
-        let macro_offset = vec3<f32>(dx, dy, 0.0) * 0.05 * fiber_filter;
-        var s: FeltSample;
-        s.albedo = max(c, vec3<f32>(0.0));
-        s.n = normalize(base_n + macro_offset);
-        return s;
-    }
-
-    // Mid-frequency tonal noise — fills in between the low octave and
-    // the fiber octave so the felt has variation at the cm-scale,
-    // not just the chunky 10-cm-scale. Faded out independently.
-    let mid_filter = 1.0 - smoothstep(0.05, 0.20, footprint);
-    let mid_n = (fbm2(p * 3.5) - 0.5) * mid_filter * 0.18;
-
-    // High-frequency anisotropic fiber noise: stretched along Y so the
-    // fuzz reads as combed in one direction. Same multi-octave fade
-    // so the fibers don't alias into chunky lattice cells.
-    let fiber_p = p * vec2<f32>(38.0, 14.0);
-    let fiber_footprint = max(fwidth(fiber_p.x), fwidth(fiber_p.y));
-    let fiber_filter = 1.0 - smoothstep(0.5, 1.5, fiber_footprint);
-    let fiber = (vnoise2(fiber_p) - 0.5) * 0.12 * fiber_filter;
-
-    // Sub-mm microfiber field: a 5.5× higher-frequency version of the
-    // fiber noise. Faded with distance via `micro_strength` PLUS the
-    // per-pixel footprint check.
-    let micro_p = fiber_p * 5.5;
-    let micro_footprint = fiber_footprint * 5.5;
-    let micro_filter = (1.0 - smoothstep(0.5, 1.5, micro_footprint)) * micro_strength;
-
-    // Subtle fiber-tinted variance so the surface doesn't read as a
-    // flat painted plane. Mid octave folds in for cm-scale variation.
-    c = c * (1.0 + fiber * 0.6 + mid_n);
-
-    // Perturb the normal along TWO octaves of the fiber field. Both
-    // octaves are footprint-filtered to avoid the noise lattice
-    // showing through as visible blocks on distant surface.
-    let dx = (vnoise2(fiber_p + vec2<f32>(0.0, 1.7)) - 0.5);
-    let dy = (vnoise2(fiber_p + vec2<f32>(2.3, 0.0)) - 0.5);
-    let mdx = (vnoise2(micro_p + vec2<f32>(0.0, 1.7)) - 0.5);
-    let mdy = (vnoise2(micro_p + vec2<f32>(2.3, 0.0)) - 0.5);
-    let macro_offset = vec3<f32>(dx,  dy,  0.0) * 0.05 * fiber_filter;
-    let micro_offset = vec3<f32>(mdx, mdy, 0.0) * 0.025 * micro_filter;
-    let n  = normalize(base_n + macro_offset + micro_offset);
-
-    var s: FeltSample;
-    s.albedo = max(c, vec3<f32>(0.0));
-    s.n = n;
-    return s;
-}
-
-// Soft circle field: returns a 0..1 mask where 1 is the centre of any
-// circle sampled by the hash. Used for tile-contact ghosts (Stage 5)
-// and edge-wear hotspots (Stage 6). Each cell of a coarse grid hashes
-// to a centre offset and a radius — most cells produce nothing, a few
-// produce dim rings.
-fn felt_contact_field(world_xy: vec2<f32>, cell_size: f32, density: f32, max_r: f32) -> f32 {
-    let g = world_xy / cell_size;
-    let cell = floor(g);
-    let g_frac = g - cell;
-    var acc = 0.0;
-    // 3x3 neighbourhood lookup — handles circles that span cell boundaries.
-    for (var dx = -1; dx <= 1; dx = dx + 1) {
-        for (var dy = -1; dy <= 1; dy = dy + 1) {
-            let neighbour = cell + vec2<f32>(f32(dx), f32(dy));
-            let h0 = hash21(neighbour);
-            // Most cells skip — only `density` fraction host a ring.
-            if (h0 > density) {
-                continue;
-            }
-            let h1 = hash21(neighbour + vec2<f32>(17.3, 0.0));
-            let h2 = hash21(neighbour + vec2<f32>(0.0, 23.7));
-            let h3 = hash21(neighbour + vec2<f32>(91.1, 41.5));
-            // Centre offset within the cell + radius scale.
-            let centre_off = vec2<f32>(f32(dx), f32(dy)) + vec2<f32>(h1, h2);
-            let r = mix(0.18, max_r, h3);
-            let d = length(g_frac - centre_off);
-            // Soft falloff — fades to zero at the radius.
-            let m = 1.0 - smoothstep(r * 0.4, r, d);
-            acc = max(acc, m);
-        }
-    }
-    return acc;
-}
-
-// Apply Stage 5 (contact ghosts), Stage 6 (edge wear + dust), and
-// Stage 7 (sub-visible weave) to a base felt albedo. Kept in one
-// function so the felt branch in the FS is just a single call. All
-// detail layers are filtered by the screen-space derivative so they
-// fade out cleanly as the surface moves further from the camera —
-// this is what kills the pixellated lattice look on distant felt.
-fn felt_apply_wear_dust(base: vec3<f32>, world_xy: vec2<f32>, lod: f32) -> vec3<f32> {
-    // Contact rings + weave are skipped below Medium — `felt_contact_field`
-    // is the hottest helper here (nested 3×3 grid).
-    if (lod < 1.995) {
-        return max(base, vec3<f32>(0.0));
-    }
-
-    var c = base;
-    let footprint = max(fwidth(world_xy.x), fwidth(world_xy.y));
-
-    // ── Stage 5: Tile contact ghosts ───────────────────────────────
-    // Persistent dark rings sprinkled across the felt — read as the
-    // memory of past tile placements where the nap was compressed.
-    // Amplitude pulled back to a near-imperceptible 0.8% so the surface
-    // reads as fresh card-table baize rather than a worn parlor table.
-    let contact_filter = 1.0 - smoothstep(8.0, 24.0, footprint);
-    let contact_mask = felt_contact_field(world_xy, 36.0, 0.10, 0.5);
-    c = c * (1.0 - contact_mask * 0.008 * contact_filter);
-
-    // ── Stage 6a: Edge-wear hotspots ───────────────────────────────
-    // Disabled: the wear ring read as a stain on fresh baize. Real
-    // card-table felt only shows wear after years of use; the table
-    // here should look new.
-
-    // ── Stage 6b: Dust / lint specks ──────────────────────────────
-    // Disabled. At any visible density these read as digital noise on
-    // the felt rather than as dust — the high-frequency fiber field
-    // already carries the surface variation we need.
-
-    // ── Stage 7: Sub-visible weave lattice ─────────────────────────
-    // Real baize has a fine perpendicular weave. Two perpendicular
-    // sin grids modulate the brightness by ±2% — invisible at game
-    // distance, adds depth on close-up screenshots. Fades out as the
-    // weave frequency exceeds Nyquist for the current pixel footprint.
-    let weave_freq = 28.0;
-    let weave_filter = 1.0 - smoothstep(0.05, 0.18, footprint * weave_freq);
-    let weave_x = sin(world_xy.x * weave_freq);
-    let weave_y = sin(world_xy.y * weave_freq);
-    let weave = (weave_x + weave_y) * 0.5;
-    c = c * (1.0 + weave * 0.025 * weave_filter);
-
-    return max(c, vec3<f32>(0.0));
-}
-
 @fragment
 fn fs_main(
     in: VsOut,
@@ -832,7 +629,7 @@ fn fs_main(
     //   7 = PackWrap, 8 = Foil, 9 = Glass, 10 = Enamel,
     //   11 = Jade, 12 = Moonstone, 13 = Pearl, 14 = GoldNugget,
     //   15 = Polychrome, 16 = Porcelain, 17 = Brass, 18 = Leather,
-    //   19 = FeltGreen, 20 = Emissive, 21 = Chitin
+    //   19 = FeltGreen (legacy), 20 = Emissive, 21 = Chitin, 22 = Unshaded
     let is_wax       = (kind > 0.5 && kind < 1.5);
     let is_wick      = (kind > 1.5 && kind < 2.5);
     let is_wood      = (kind > 2.5 && kind < 4.5);
@@ -850,11 +647,10 @@ fn fs_main(
     let is_porcelain = (kind > 15.5 && kind < 16.5);
     let is_brass     = (kind > 16.5 && kind < 17.5);
     let is_leather   = (kind > 17.5 && kind < 18.5);
-    let is_felt      = (kind > 18.5 && kind < 19.5);
     let is_emissive  = (kind > 19.5 && kind < 20.5);
     let is_chitin    = (kind > 20.5 && kind < 21.5);
-    let felt_lod = clamp(ssr_globals.felt.x, 0.0, 2.0);
-    let phys_hdr = clamp(ssr_globals.felt.y, 0.0, 1.0);
+    let is_unshaded  = (kind > 21.5 && kind < 22.5);
+    let phys_hdr = clamp(ssr_globals.hdr_tonemap.x, 0.0, 1.0);
     // Shop storeroom-only albedo / spec / ambient tweaks (see `shop_punctual.y` upload).
     let shop_display_case_tuning = phys_hdr > 0.5 && ssr_globals.shop_punctual.y > 0.5;
 
@@ -897,7 +693,6 @@ fn fs_main(
         && !is_foil
         && !is_pack_wrap
         && !is_enamel
-        && !is_felt
         && !is_wick;
     var albedo = mesh.base_color.rgb * tex_rgb;
     if (has_decal) {
@@ -1033,6 +828,15 @@ fn fs_main(
             albedo = mix(mesh.base_color.rgb, tex_rgb, relic_front_tex);
         }
     }
+    if (is_unshaded) {
+        // Boss ordeal icons: same extruded-pin topology as relics, but the
+        // front cap should read as the flat 2D atlas cell — no lighting.
+        let relic_front_tex = smoothstep(0.55, 0.82, in.local_n.y);
+        if (relic_front_tex > 0.48 && tex_sample.a < (16.0 / 255.0)) {
+            discard;
+        }
+        albedo = mix(mesh.base_color.rgb, tex_rgb * mesh.base_color.rgb, relic_front_tex);
+    }
     var wood_grain = 0.0;
     var wood_pore = 0.0;
     if (is_wood) {
@@ -1052,18 +856,6 @@ fn fs_main(
         albedo = w.albedo;
         wood_grain = w.grain;
         wood_pore = w.pore;
-    }
-    if (is_felt) {
-        // Mahjong-parlor green felt: procedural baize overrides the (white)
-        // albedo tex. Sampled in world XY for the same reason as kind 3 —
-        // the gameplay table is enlarged to "infinite plane" extents and
-        // we don't want the felt grain to stretch with the model scale.
-        // The perturbed normal is folded into `n` after the world-normal
-        // setup further down. Albedo doesn't need the microfiber octave
-        // (only the normal does), so we pass strength 0 here.
-        let f = felt_sample_world(in.world_pos.xy, vec3<f32>(0.0, 0.0, 1.0), 0.0, felt_lod);
-        albedo = f.albedo;
-        albedo = felt_apply_wear_dust(albedo, in.world_pos.xy, felt_lod);
     }
 
     // ── Porcelain crazing (the spider-web of fine cracks across aged
@@ -1264,26 +1056,6 @@ fn fs_main(
         let perturbed_local = normalize(in.local_n + crack_local_perturb);
         let perturbed_world = normalize((mesh.model * vec4<f32>(perturbed_local, 0.0)).xyz);
         n = normalize(mix(n, perturbed_world, clamp(crack_mask * 0.6, 0.0, 0.6)));
-    }
-
-    // ── Felt fiber normal perturbation ──────────────────────────────
-    // Resample the felt fiber field (the same one that drove albedo)
-    // and use its perturbed normal so the broad sheen breaks up across
-    // the surface. Felt isn't a mirror but it isn't perfectly Lambertian
-    // either — this is what makes the candle pools read as "soft glow on
-    // baize" rather than "spotlight on painted plane".
-    //
-    // The microfiber octave (sub-mm fiber wobble) is faded out with
-    // distance from the camera so distant felt doesn't alias into
-    // shimmering noise on the horizon. Within ~0.3 world units of the
-    // camera we get full microfiber detail; past 1.5 units it drops to
-    // zero and only the macro fiber field remains.
-    if (is_felt) {
-        let cam_for_fade = ssr_globals.view_pos.xyz;
-        let dist = length(cam_for_fade - in.world_pos);
-        let micro_strength = 1.0 - smoothstep(0.3, 1.5, dist);
-        let f = felt_sample_world(in.world_pos.xy, n, micro_strength, felt_lod);
-        n = f.n;
     }
 
     // ── Discard-river material ─────────────────────────────────────────
@@ -1513,9 +1285,9 @@ fn fs_main(
         );
         var rgb_w = water_albedo * (lit_water + ambient) + spec_water;
         if (phys_hdr > 0.5) {
-            let amb = ssr_globals.felt.w * 0.08;
+            let amb = ssr_globals.hdr_tonemap.z * 0.08;
             rgb_w = rgb_w + water_albedo * vec3<f32>(amb);
-            rgb_w = rgb_w * ssr_globals.felt.z;
+            rgb_w = rgb_w * ssr_globals.hdr_tonemap.y;
         } else {
             let inv_g = 1.0 / max(lights.extras.x, 0.01);
             rgb_w = pow(rgb_w, vec3<f32>(inv_g));
@@ -1733,16 +1505,6 @@ fn fs_main(
         wrap = 0.35;
         sss_strength = 0.28;
         sss_tint = mesh.base_color.rgb + vec3<f32>(0.18, 0.10, 0.04);
-    } else if (is_felt) {
-        // Felt: gentle wrap so the dark side of each candle pool
-        // doesn't read as dead black. Real wool fibers scatter a small
-        // amount of light through the surface — tinted slightly green
-        // so the bleed feels like the felt's own colour rather than a
-        // foreign halo. Strength stays low; felt is much less
-        // translucent than wax or leather.
-        wrap = 0.22;
-        sss_strength = 0.14;
-        sss_tint = vec3<f32>(0.10, 0.18, 0.08);
     }
 
     // ── Back-transmission (Penner SSS) tunables ──────────────────────
@@ -1994,57 +1756,6 @@ fn fs_main(
                     let sheen = pow(1.0 - ndv, 2.5) * pow(nh, 4.0) * 0.45;
                     spec_acc = spec_acc + lc * intensity * atten * cand_vis * sheen * polish_tint;
                 }
-            } else if (is_felt) {
-                // ── Felt anisotropic sheen (Kajiya-Kay) ─────────────────
-                // Real felt has a nap direction. Light raking across the
-                // nap glows softly; light along it stays matte. We pick
-                // world +Y as the nap axis (matches the anisotropic
-                // frequency ratio used in felt_sample_world). The lobe
-                // is sharpest perpendicular to the tangent — sin(θ)^k
-                // around the tangent ring.
-                //
-                // Two perpendicular tangent samples (warp + weft) so the
-                // weave catches light from both major axes — single-axis
-                // Kajiya reads as "brushed metal" not "fabric."
-                let nap_y = vec3<f32>(0.0, 1.0, 0.0);
-                let nap_x = vec3<f32>(1.0, 0.0, 0.0);
-                let t_warp = normalize(nap_y - n * dot(n, nap_y));
-                let t_weft = normalize(nap_x - n * dot(n, nap_x));
-
-                let tdh_w = dot(t_warp, h);
-                let tdh_x = dot(t_weft, h);
-                let sin_w = sqrt(max(1.0 - tdh_w * tdh_w, 0.0));
-                let sin_x = sqrt(max(1.0 - tdh_x * tdh_x, 0.0));
-                // Warp lobe (along nap) is broader; weft (across) is
-                // tighter — felted wool isn't perfectly woven so the
-                // two lobes are unequal.
-                let aniso_w = pow(sin_w, max(spec_power * 6.0, 1.0)) * 0.65;
-                let aniso_x = pow(sin_x, max(spec_power * 12.0, 1.0)) * 0.35;
-                let aniso = aniso_w + aniso_x;
-
-                // Schlick Fresnel — felt is a dielectric, F0 ≈ 0.04, but
-                // the sheen rim swells aggressively at glancing angles.
-                let vdh = max(dot(view_dir, h), 0.0);
-                let fresnel = 0.04 + 0.96 * pow(1.0 - vdh, 5.0);
-                // Slight green-yellow tint so the highlight feels like
-                // it's picking up the felt's own colour rather than a
-                // foreign white plastic glint.
-                let sheen_tint = vec3<f32>(0.85, 1.05, 0.78);
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis
-                         * aniso * fresnel * sheen_tint * spec_strength * 8.0;
-
-                // ── Retroreflection rim ─────────────────────────────
-                // Real felt fibers retroreflect light back toward the
-                // viewer, which is why pool/poker baize looks slightly
-                // lit-from-within at grazing angles. Modeled as a
-                // view-dependent rim term — strongest where the surface
-                // turns away from the camera. Tinted by the felt's own
-                // sheen colour so the bloom feels like the fabric
-                // glowing rather than a foreign halo.
-                let ndv = max(dot(n, view_dir), 0.0);
-                let retro = pow(1.0 - ndv, 4.0) * 0.55;
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis
-                         * retro * sheen_tint * 0.6;
             } else if (is_chitin) {
                 // Mirror + holo bands are in the talisman block below.
             } else {
@@ -2326,7 +2037,7 @@ fn fs_main(
                 let f_metal_sp = f0_sp + (vec3<f32>(1.0) - f0_sp) * pow(1.0 - vdh_sp, 5.0);
                 let conductor_scale_sp = select(1.0, 0.85, is_brass);
                 spec_acc = spec_acc + sc * s_bl_sp * f_metal_sp * conductor_scale_sp;
-            } else if (!is_felt) {
+            } else {
                 spec_acc = spec_acc + sc * s_bl_sp;
             }
         }
@@ -2716,14 +2427,18 @@ fn fs_main(
     if (is_emissive) {
         emissive = emissive + mesh.base_color.rgb * spec_strength;
     }
-    rgb = rgb
-        + albedo * lit_shadowed * diffuse_scale
-        + sss_acc * sss_tint
-        + back_acc * back_tint
-        + spec_final
-        + coat_final
-        + sheen_acc
-        + emissive;
+    if (is_unshaded) {
+        rgb = albedo;
+    } else {
+        rgb = rgb
+            + albedo * lit_shadowed * diffuse_scale
+            + sss_acc * sss_tint
+            + back_acc * back_tint
+            + spec_final
+            + coat_final
+            + sheen_acc
+            + emissive;
+    }
 
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     var out_rgb: vec3<f32>;
@@ -2732,13 +2447,24 @@ fn fs_main(
         // applies ACES + sRGB encode for the swapchain. The per-shader
         // `lights.extras.x` gamma slider is intentionally a no-op here — display
         // encoding belongs at the composite stage now.
-        var amb = ssr_globals.felt.w * 0.08;
+        var amb = ssr_globals.hdr_tonemap.z * 0.08;
         if (ssr_globals.shop_punctual.y > 0.5 && is_enamel) {
-            amb = ssr_globals.felt.w * 0.20;
+            amb = ssr_globals.hdr_tonemap.z * 0.20;
         }
-        var hdr = rgb + albedo * vec3<f32>(amb) * diffuse_scale;
-        hdr = hdr * ssr_globals.felt.z;
-        out_rgb = hdr;
+        if (is_unshaded) {
+            // Flat atlas decals skip punctual lighting but still need to land in
+            // the same HDR range as the rest of the frame. Embedded-room scenes
+            // multiply lit props by `hdr_tonemap.y` (~1/512) only after large
+            // candle `lit` terms — without that boost, albedo * exposure reads black.
+            out_rgb = albedo;
+        } else {
+            var hdr = rgb;
+            hdr = hdr + albedo * vec3<f32>(amb) * diffuse_scale;
+            hdr = hdr * ssr_globals.hdr_tonemap.y;
+            out_rgb = hdr;
+        }
+    } else if (is_unshaded) {
+        out_rgb = albedo;
     } else {
         // Legacy non-HDR scenes still apply the user gamma slider in-shader.
         out_rgb = pow(rgb, vec3<f32>(inv_g));

@@ -66,8 +66,10 @@ pub fn push_focus_tooltip_panel_2d(
     let pad = 14.0_f32.max(10.0);
     let border = tooltip::FRAME_BORDER_PX;
     let margin = window_w * 0.02;
-    let panel_w = (window_w * 0.45).min(640.0);
-    let inner_w = (panel_w - pad * 2.0 - border * 2.0).max(80.0);
+    let scale = crate::render::theme::metrics::scene_scale(window_w, window_h);
+    let max_panel_w = (300.0 * scale).min(window_w * 0.32).min(440.0);
+    let min_inner_w = 80.0_f32;
+    let max_inner_w = (max_panel_w - pad * 2.0 - border * 2.0).max(min_inner_w);
 
     let heading_px = typography::size(typography::H28, window_h);
     let body_px = typography::size(typography::H36, window_h);
@@ -95,6 +97,21 @@ pub fn push_focus_tooltip_panel_2d(
     if blocks.is_empty() {
         return;
     }
+
+    let mut inner_w = min_inner_w;
+    for (text, _col, tier) in &blocks {
+        let line_h = match tier {
+            Tier::Heading => heading_px,
+            Tier::Body => body_px,
+        };
+        inner_w = inner_w.max(colored_keywords::colored_paragraph_preferred_width(
+            text,
+            line_h,
+            max_inner_w,
+        ));
+    }
+    inner_w = inner_w.clamp(min_inner_w, max_inner_w);
+    let panel_w = inner_w + pad * 2.0 + border * 2.0;
 
     let block_height = |text: &str, col: [f32; 4], tier: Tier| -> f32 {
         let line_h = match tier {

@@ -140,6 +140,12 @@ pub struct Fireworks {
     spawn_spread: f32,
 }
 
+impl Default for Fireworks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Fireworks {
     pub fn new() -> Self {
         Self {

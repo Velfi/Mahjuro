@@ -4,11 +4,12 @@
 ///
 /// Looping tracks (`MainMenu`, `Gameplay`, `GameplayIntense`, `Shop`) play via
 /// [`AudioManager::set_music_track`] / [`AudioManager::set_gameplay_music`].
-/// One-shot intros (`GameplayIntro`, `GameplayIntenseIntro`) play once on the
-/// music bus via [`AudioManager::play_music_intro_then_loop`], then hand off to
-/// their paired loop. Win/loss jingles (`ChamberWin`, `ChamberLoss`, `OrdealWin`,
-/// `OrdealLoss`) play once via [`AudioManager::play_music_jingle`] on the **SFX**
-/// volume bus (options SFX slider), then resume the last requested loop.
+/// One-shot intros (`GameplayIntro`, `GameplayIntenseIntro`) and win/loss
+/// stingers (`ChamberWin`, `ChamberLoss`, `OrdealWin`, `OrdealLoss`) play once
+/// on the music sink but use the **SFX** volume slider (same as [`AmbientId`]
+/// beds). Intros hand off to their paired loop via
+/// [`AudioManager::play_music_intro_then_loop`]; stingers via
+/// [`AudioManager::play_music_jingle`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MusicId {
     MainMenu,
@@ -166,6 +167,10 @@ pub enum SfxId {
     TalismanPurchased,
     /// Talisman consumed from the dish.
     TalismanUsed,
+    /// Looping mechanical whir while gameplay score odometer rollers spin.
+    RollersSpin,
+    /// Mechanical thunk when the score odometer rollers finish spinning.
+    RollerStop,
 }
 
 /// All SFX variants in display order. Single source of truth shared by the
@@ -245,6 +250,8 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::OrdealDefeated,
         SfxId::TalismanPurchased,
         SfxId::TalismanUsed,
+        SfxId::RollersSpin,
+        SfxId::RollerStop,
     ]
 }
 

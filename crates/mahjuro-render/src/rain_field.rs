@@ -1,7 +1,7 @@
 //! World-space rain volume for exterior scenes (main menu).
 //!
 //! Spawns drops in a thin band under the spawn ceiling of a padded `rain_hit_*` AABB, integrates in world −Z with wind,
-//! raycasts against `rain_hit_*` collision shells, and emits screen-space splashes.
+//! raycasts against `rain_hit_*` collision shells, and emits world-space splashes.
 
 use std::cell::RefCell;
 
@@ -10,7 +10,7 @@ use rand::RngExt;
 
 use crate::draw_cmd::{CameraParams, UiFrame};
 use crate::main_menu_glb;
-use crate::particles::{ParticleSystem, RainCollider, RainSpawnVolume};
+use crate::particles::{ParticleSystem, RainCollider, RainSpawnVolume, RainSplashUpdate};
 use crate::rain_tuning::RainTuning;
 use crate::room_env_gltf::RoomCollisionMesh;
 use crate::room_glb;
@@ -26,6 +26,12 @@ pub struct RainField {
     spawn_next_threshold: f32,
     quad_scratch: RefCell<Vec<GpuInstance>>,
     instance_scratch: RefCell<Vec<([f32; 4], [f32; 4])>>,
+}
+
+impl Default for RainField {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RainField {
@@ -102,7 +108,15 @@ impl RainField {
             tuning.field.spawn_near_bias,
             lighting,
         );
-        self.particles.update(dt);
+        self.particles.update(
+            dt,
+            Some(RainSplashUpdate {
+                cam,
+                window_w,
+                window_h,
+                fall_speed: tuning.field_fall_speed_world(),
+            }),
+        );
     }
 
     pub fn push_quads(
