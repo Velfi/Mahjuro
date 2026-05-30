@@ -123,6 +123,7 @@ pub struct GameplayGlbAnchors {
     pub discard_river_pick: Object3d,
     pub play_mirror_pick: Object3d,
     pub journal_pick: Object3d,
+    pub guidebook_pick: Object3d,
 }
 
 fn require_marker_pair_screen_rect(
@@ -356,6 +357,7 @@ fn resolve_gameplay_glb_anchors_from_cpu(
     let play_mirror_pick =
         gameplay_glb::gameplay_pick_play_mirror(w, h, env_h, cpu, play_btn_fallback_rect)?;
     let journal_pick = gameplay_glb::gameplay_pick_journal_book(w, h, env_h, cpu, 0.0)?;
+    let guidebook_pick = gameplay_glb::gameplay_pick_guidebook(w, h, env_h, cpu)?;
 
     Ok(GameplayGlbAnchors {
         hand_slots,
@@ -374,6 +376,7 @@ fn resolve_gameplay_glb_anchors_from_cpu(
         discard_river_pick,
         play_mirror_pick,
         journal_pick,
+        guidebook_pick,
     })
 }
 
@@ -384,6 +387,16 @@ pub fn relic_tray_screen_center(
     env_height_scale: f32,
     idx: usize,
 ) -> anyhow::Result<(f32, f32)> {
+    relic_tray_anchor(w, h, env_height_scale, idx).map(|a| (a.px, a.py))
+}
+
+/// Surface anchor for relic slot `idx` (`pixel_to_world` round-trip triple).
+pub fn relic_tray_anchor(
+    w: f32,
+    h: f32,
+    env_height_scale: f32,
+    idx: usize,
+) -> anyhow::Result<crate::render::world_space::LayoutAnchorPx> {
     let name = PLAYER_RELIC_MARKERS
         .get(idx)
         .copied()
@@ -391,7 +404,11 @@ pub fn relic_tray_screen_center(
     gameplay_glb::with_gameplay_glb_cpu(|cpu| {
         let cpu = cpu.ok_or_else(|| anyhow::anyhow!("gameplay.glb not loaded"))?;
         let pose = gameplay_glb::require_gameplay_marker_pose(w, h, env_height_scale, cpu, name)?;
-        Ok((pose.anchor[0], pose.anchor[1]))
+        Ok(crate::render::world_space::LayoutAnchorPx {
+            px: pose.anchor[0],
+            py: pose.anchor[1],
+            lift_z: pose.anchor[2],
+        })
     })
 }
 
@@ -428,13 +445,14 @@ pub fn gameplay_glb_error_frame(
     frame.background(BackgroundId::Black);
     let w = layout.window_w;
     let h = layout.window_h;
-    let mut label = TextLabel::default();
-    label.rect = [w * 0.08, h * 0.35, w * 0.84, h * 0.3];
-    label.text = format!("gameplay.glb failed to load:\n{message}");
-    label.color = color::alpha(color::CHAMPAGNE, 0.95);
-    label.font_px = Some((h * 0.028).max(18.0));
-    label.align = TextAlign::Center;
-    frame.texts(vec![label]);
+    frame.texts(vec![TextLabel {
+        rect: [w * 0.08, h * 0.35, w * 0.84, h * 0.3],
+        text: format!("gameplay.glb failed to load:\n{message}"),
+        color: color::alpha(color::CHAMPAGNE, 0.95),
+        font_px: Some((h * 0.028).max(18.0)),
+        align: TextAlign::Center,
+        ..Default::default()
+    }]);
     frame
 }
 

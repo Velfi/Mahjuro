@@ -167,5 +167,5 @@ pub fn finale_intro_message() -> &'static str {
     "You must now prepare to undergo an ordeal — The Iconoclast\n\n\
      The Iconoclast changes the rules of the game, debuffing Wind and Dragon tiles. \
      They still form melds, but they score for nothing. \
-     The bigger the structure, the bigger the score. Check the pause menu Guide to learn more."
+     The bigger the structure, the bigger the score. Open the Guide book on the table to learn more."
 }

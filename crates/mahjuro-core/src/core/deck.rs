@@ -272,13 +272,23 @@ impl Wall {
     /// so any id-keyed bookkeeping (dedup, enhancement lookups) stays valid;
     /// otherwise synthesizes a high id that won't collide with live tiles.
     pub fn set_sole_dora(&mut self, suit: Suit, rank: u8) {
-        let id = self
-            .tiles
+        self.set_dora_indicator_faces(&[(suit, rank)]);
+    }
+
+    /// Replace dora plinth faces (1–2 tiles). Used by Cascade Lab and tests.
+    pub fn set_dora_indicator_faces(&mut self, faces: &[(Suit, u8)]) {
+        self.dora_indicators = faces
             .iter()
-            .find(|t| t.suit == suit && t.rank == rank)
-            .map(|t| t.id)
-            .unwrap_or(u32::MAX);
-        self.dora_indicators = vec![Tile::new(suit, rank, id)];
+            .map(|&(suit, rank)| {
+                let id = self
+                    .tiles
+                    .iter()
+                    .find(|t| t.suit == suit && t.rank == rank)
+                    .map(|t| t.id)
+                    .unwrap_or(u32::MAX);
+                Tile::new(suit, rank, id)
+            })
+            .collect();
     }
 
     /// Reveal an additional dora (used by the Dora Crown relic). Picks the

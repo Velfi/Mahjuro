@@ -32,11 +32,11 @@
   {
     "id": "winter",
     "label": "Winter",
-    "description": "+50% targets, +50% shop, +2 reroll cost, earliest ordeals, sequences lose bonus.",
+    "description": "+50% targets, +50% shop, +2 reroll cost, earliest ordeals.",
     "base_target_mult": 1.5,
     "price_multiplier": 1.5,
     "reroll_base_cost": 7,
     "ordeal_min_wing_floor": 2,
-    "starting_rules": ["no_sequence_bonus"]
+    "starting_rules": []
   }
 ]

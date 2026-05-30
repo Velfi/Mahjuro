@@ -1,6 +1,6 @@
 //! Debug scene: projected tile bounds vs label anchors (guide / tutorial layout path).
 //!
-//! Entered from Debug → Scene Jumps → Tile Anchor Lab…
+//! Entered from Debug → Labs → Tile Anchor Lab…
 
 use crate::core::tile::{Suit, Tile};
 use crate::persistence::TilePreset;

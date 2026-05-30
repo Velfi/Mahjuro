@@ -19,6 +19,7 @@ pub enum RoomPunctualProfile {
     ShopCandles {
         flame_time_s: f32,
         lamp_flicker: f32,
+        flicker_amp: f32,
     },
     /// `light_moonlight*` / `light_doorway*`: glTF `color`, or Kelvin when export is unit white.
     MainMenu,
@@ -140,6 +141,7 @@ fn point_intensity(
     if let RoomPunctualProfile::ShopCandles {
         flame_time_s,
         lamp_flicker,
+        flicker_amp,
     } = profile
         && l.is_candle
     {
@@ -150,7 +152,7 @@ fn point_intensity(
         let phase = (seed as f32 * 2.328_306e-10).fract();
         intensity *= lamp_flicker;
         intensity *=
-            crate::flame_volume::shop_candle_flicker_multiplier(phase, flame_time_s);
+            crate::flame_volume::flame_flicker_multiplier_amp(phase, flame_time_s, flicker_amp);
     }
     intensity
 }

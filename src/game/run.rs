@@ -258,6 +258,9 @@ pub struct RunState {
     /// a full valid shape.
     #[serde(default = "default_auto_cash_in_on_full_structure")]
     pub auto_cash_in_on_full_structure: bool,
+    /// Debug labs: allow scoring past target without blind clear / run advance.
+    #[serde(skip)]
+    pub suppress_chamber_resolution: bool,
     #[serde(default = "default_hints_enabled")]
     pub hints_enabled: bool,
     // ── Boss blind state ─────────────────────────────────────────────────
@@ -662,6 +665,7 @@ impl RunState {
     }
 
     /// Set run yen to an absolute value (debug / tooling). Emits the net delta.
+    #[cfg(feature = "game")]
     pub(crate) fn set_run_yen_direct(&mut self, new_yen: i32, bus: Option<&mut EventBus>) {
         let old = self.yen;
         if new_yen == old {
@@ -773,7 +777,7 @@ impl RunState {
 
         let mut ordeal_pool_remaining = ordeal::regular_pool();
         let mut rng = rand::rng();
-        let ordeal_floor = mode.stake.ordeal_min_wing_floor();
+        let ordeal_floor = mode.season.ordeal_min_wing_floor();
         let upcoming_ordeal =
             ordeal::pick_for_wing_with_floor(&mut ordeal_pool_remaining, 1, ordeal_floor, &mut rng);
 
@@ -816,6 +820,7 @@ impl RunState {
             },
             mode,
             auto_cash_in_on_full_structure: true,
+            suppress_chamber_resolution: false,
             hints_enabled: false,
             ordeal: OrdealState {
                 pool_remaining: ordeal_pool_remaining,
@@ -944,7 +949,7 @@ impl RunState {
             return;
         }
         let mut rng = rand::rng();
-        let ordeal_floor = self.mode.stake.ordeal_min_wing_floor();
+        let ordeal_floor = self.mode.season.ordeal_min_wing_floor();
         self.ordeal.upcoming = if self.wing == FINAL_WING {
             Some(ordeal::pick_final(&mut rng))
         } else if self.wing > FINAL_WING {
@@ -995,13 +1000,13 @@ impl RunState {
         Self::new(GameMode::with_material(material))
     }
 
-    /// Factory that threads a difficulty stake into the game mode at run
+    /// Factory that threads a difficulty season into the game mode at run
     /// start. Spring produces the same result as `new_with_material`.
-    pub fn new_with_material_and_stake(
+    pub fn new_with_material_and_season(
         material: crate::persistence::TileMaterial,
-        stake: crate::core::stake::Stake,
+        season: crate::core::season::Season,
     ) -> Self {
-        Self::new(GameMode::with_material_and_stake(material, stake))
+        Self::new(GameMode::with_material_and_season(material, season))
     }
 
     /// Score target for a blind at the current ante (see `core::chamber_target`).

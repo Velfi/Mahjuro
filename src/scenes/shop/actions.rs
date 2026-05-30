@@ -176,7 +176,7 @@ impl ShopScene {
         }
         let shop = GameEngine::read_shop(run);
         let extra_relics = GameEngine::shop_extra_relic_stock(run);
-        let stake = run.mode.stake;
+        let season = run.mode.season;
         let (mut items, zodiac_items, talisman_items, pack_items) = if mode == ShopMode::Tutorial {
             tutorial_shop_stock(&run.mode)
         } else {
@@ -214,14 +214,14 @@ impl ShopScene {
 
         let consumed_tags = GameEngine::consume_shop_tags(run);
         let remaining_free_rerolls = consumed_tags.free_reroll;
-        // Reroll base cost is driven by the run's stake; tutorial and
+        // Reroll base cost is driven by the run's season; tutorial and
         // free-reroll tags still override it.
         let reroll_cost = if mode == ShopMode::Tutorial {
             u32::MAX
         } else if remaining_free_rerolls > 0 {
             0
         } else {
-            stake.reroll_base_cost()
+            season.reroll_base_cost()
         };
 
         let focus = Some(default_shop_focus_for_stock(
@@ -309,35 +309,14 @@ impl ShopScene {
         self.gltf_anims.active_samples()
     }
 
-    /// Current `eyeball_travel` playback time in seconds, if active.
-    pub fn eyeball_travel_playback_sec(&self) -> Option<f32> {
-        self.gltf_anims.playback_sec("eyeball_travel")
-    }
-
-    /// Debug: start `eyeball_travel` if available and not already running.
-    /// Returns `true` when playback is active after this call.
-    pub fn debug_start_eyeball_travel(&mut self) -> bool {
-        self.play_gltf_anim("eyeball_travel", false)
-    }
-
-    /// Debug: toggle pause state for `eyeball_travel` playback.
-    /// Returns `Some(paused_now)` when toggled, `None` when clip is not active.
-    pub fn debug_toggle_pause_eyeball_travel(&mut self) -> Option<bool> {
-        self.toggle_pause_gltf_anim("eyeball_travel")
-    }
-
-    /// Debug: restart `eyeball_travel` from time 0.
-    /// Returns `true` when clip is available.
-    pub fn debug_restart_eyeball_travel(&mut self) -> bool {
-        self.restart_gltf_anim("eyeball_travel")
-    }
-
     /// Whether storeroom dwell time should accumulate toward the eyeball milestone.
+    #[cfg(feature = "game")]
     pub(crate) fn counts_storeroom_dwell_time(&self) -> bool {
         self.mode == ShopMode::Standard && !self.pause_menu.paused
     }
 
     /// Play (or restart) `eyeball_travel` when a 15-minute storeroom milestone is reached.
+    #[cfg(feature = "game")]
     pub(crate) fn play_eyeball_travel_milestone(&mut self) {
         const CLIP: &str = "eyeball_travel";
         if self.gltf_anims.is_playing(CLIP) {
@@ -350,7 +329,8 @@ impl ShopScene {
     pub(super) fn continue_scene(&self, run: &mut crate::game::run::RunState) -> Scene {
         if self.mode == ShopMode::Tutorial {
             GameEngine::transition_to_onboarding_finale(run);
-            Scene::Gameplay(Box::new(GameplayScene::with_pending_chamber(
+            Scene::Gameplay(Box::new(GameplayScene::enter_pending_chamber(
+                run,
                 crate::core::rules::ChamberKind::Ordeal,
             )))
         } else {
@@ -505,7 +485,7 @@ impl ShopScene {
                 self.reroll_cost = if self.remaining_free_rerolls > 0 {
                     0
                 } else {
-                    run.mode.stake.reroll_base_cost()
+                    run.mode.season.reroll_base_cost()
                 };
             }
             _ => self.reroll_cost += REROLL_COST_INCREMENT,

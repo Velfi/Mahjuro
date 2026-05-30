@@ -821,12 +821,12 @@ pub fn decode_env_primitive(
         Vec::new()
     };
 
-    // Archive `sign_description_*` boards: pack the decal sampler onto the mesh's UV bounding
-    // box so the description maps exactly once across whatever UV layout the asset ships with
-    // (Repeat sampler + UVs > 1 would otherwise tile the text — see screenshot in PR thread).
+    // Archive decal boards (`sign_description_*`, `inspect_plaque`): pack the decal sampler onto
+    // the mesh's UV bounding box so the description maps exactly once across whatever UV layout
+    // the asset ships with (Repeat sampler + UVs > 1 would otherwise tile the text).
     let is_archive_sign = matches!(
         gltf_node_name,
-        "sign_description_left" | "sign_description_right"
+        "sign_description_left" | "sign_description_right" | "inspect_plaque"
     );
     let uv_remap = if is_archive_sign {
         let mut min = Vec2::splat(f32::INFINITY);

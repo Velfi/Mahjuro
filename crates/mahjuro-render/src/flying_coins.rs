@@ -97,6 +97,12 @@ pub struct FlyingCoinSystem {
     pending: Vec<PendingCoin>,
 }
 
+impl Default for FlyingCoinSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlyingCoinSystem {
     pub fn new() -> Self {
         Self {
@@ -261,10 +267,10 @@ impl FlyingCoinSystem {
                     pos: [c.px, c.py, c.world_y],
                     extents: [c.radius * 2.0, c.thickness, c.radius * 2.0],
                     rotation: [0.0, c.rot_y, 0.0],
-                    color: [1.00, 0.78, 0.30, alpha],
+                    color: [1.0, 1.0, 1.0, alpha],
                     kind: Object3dKind::Primitive {
-                        shape: crate::primitive::MeshId::Cylinder,
-                        material: crate::primitive::MaterialSpec::metal(),
+                        shape: crate::primitive::MeshId::Coin,
+                        material: crate::primitive::MaterialSpec::coin_glb(),
                         pick_id: None,
                         shadow_caster: false,
                         silhouette: false,

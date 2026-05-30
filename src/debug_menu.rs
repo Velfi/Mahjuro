@@ -7,7 +7,8 @@
 
 //! Native OS menubar "Debug" menu using muda.
 //!
-//! Provides debug shortcuts for setting player level, gold, relics, and card inventory.
+//! Provides debug shortcuts grouped by purpose: overlays, tuning panels,
+//! profiling, in-run cheats, standalone labs, end screens, and profile meta.
 //!
 //! ## Cross-platform installation
 //!
@@ -64,9 +65,12 @@ pub enum DebugAction {
     OpenSceneLookDebug,
     /// Main-menu rain (CPU world field) tuning overlay.
     OpenRainDebug,
+    /// Force main-menu June pride rainbow on moon / stars (preview any month).
+    ToggleMainMenuPrideRainbow,
     /// Pick-blind hallway vertex warp (sliders; Ctrl+C copies a Rust snapshot).
     OpenHallwayHallFxDebug,
-    BlowWindGust,
+    /// Shop / gameplay candle flame shader + placement tuning.
+    OpenFlameDebug,
     /// Capture GPU pass timings (shadow, main, room-bloom, GI, bloom, tonemap,
     /// …) averaged over the next 100 rendered frames and log the result. Only
     /// meaningful on backends that support `wgpu::Features::TIMESTAMP_QUERY`.
@@ -82,12 +86,6 @@ pub enum DebugAction {
     RerollShop,
     /// Force-open a random tile pack celebration (free, ignores shop stock).
     OpenPack,
-    /// Start or resume `eyeball_travel` on the shop GLB `Eyeball` mesh.
-    StartShopEyeballTravel,
-    /// Pause/resume `eyeball_travel` playback on the shop Eyeball mesh.
-    TogglePauseShopEyeballTravel,
-    /// Restart `eyeball_travel` from time 0 on the shop Eyeball mesh.
-    RestartShopEyeballTravel,
     /// Spawn a burst of demo score popups streaming toward the reel —
     /// visually exercises the chips/mult/gold polychrome streaming effect
     /// without needing to play a hand. Only meaningful in the gameplay scene.
@@ -104,6 +102,8 @@ pub enum DebugAction {
     /// Push the transition playground scene onto the overlay stack.
     OpenTransitionPlayground,
     OpenAnimationLab,
+    OpenRollerLab,
+    OpenCascadeLab,
     OpenRumbleLab,
     OpenTileAnchorLab,
     OpenButtonAabbLab,
@@ -121,6 +121,8 @@ pub enum DebugAction {
     SeedChronicleFromBotRuns(u32),
     /// Mark Kokushi Musō as discovered in the active profile (journal, guide, Qilin ribbon).
     RevealKokushiMusou,
+    /// Meta: unlock every tile material and every season on every material.
+    UnlockAllTilesetsAndSeasons,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -159,197 +161,118 @@ impl DebugMenuBar {
         // --- Debug submenu ---
         let debug_menu = Submenu::new("Debug", true);
 
-        // ── Overlays submenu ─────────────────────────────────────────────────
-        // Toggles and modal panels that live on top of the gameplay view.
+        // ── Overlays ─────────────────────────────────────────────────────────
+        // On-screen HUD toggles, visibility panels, and overlay smoke tests.
         let overlays_sub = Submenu::new("Overlays", true);
 
         let fps_item = MenuItem::new("Show FPS", true, None);
         mappings.push((fps_item.id().clone(), DebugAction::ToggleShowFps));
         let _ = overlays_sub.append(&fps_item);
 
-        let visibility_item = MenuItem::new("Visibility...", true, None);
+        let visibility_item = MenuItem::new("Gameplay Visibility...", true, None);
         mappings.push((
             visibility_item.id().clone(),
             DebugAction::OpenDebugVisibility,
         ));
         let _ = overlays_sub.append(&visibility_item);
 
-        let axes_item = MenuItem::new("World Axes Overlay", true, None);
+        let axes_item = MenuItem::new("World Axes", true, None);
         mappings.push((axes_item.id().clone(), DebugAction::ToggleWorldAxes));
         let _ = overlays_sub.append(&axes_item);
 
+        let test_overlay_item = MenuItem::new("Test Overlay", true, None);
+        mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
+        let _ = overlays_sub.append(&test_overlay_item);
+
         let _ = debug_menu.append(&overlays_sub);
 
-        // ── Tuning submenu ───────────────────────────────────────────────────
-        // Live-editable parameter panels for FX / camera / materials.
+        // ── Tuning ───────────────────────────────────────────────────────────
+        // Live parameter panels, grouped by domain.
         let tuning_sub = Submenu::new("Tuning", true);
 
-        let tuning_item = MenuItem::new("Cascade...", true, None);
-        mappings.push((tuning_item.id().clone(), DebugAction::OpenTuning));
-        let _ = tuning_sub.append(&tuning_item);
+        let tuning_gameplay_sub = Submenu::new("Gameplay", true);
+        let _ = tuning_sub.append(&tuning_gameplay_sub);
 
+        let tuning_camera_sub = Submenu::new("Camera & Look", true);
         let camera_item = MenuItem::new("Camera...", true, None);
         mappings.push((camera_item.id().clone(), DebugAction::OpenCameraDebug));
-        let _ = tuning_sub.append(&camera_item);
-
-        let scene_look_item = MenuItem::new("Scene look (per scene)...", true, None);
+        let _ = tuning_camera_sub.append(&camera_item);
+        let scene_look_item = MenuItem::new("Scene Look (per scene)...", true, None);
         mappings.push((
             scene_look_item.id().clone(),
             DebugAction::OpenSceneLookDebug,
         ));
-        let _ = tuning_sub.append(&scene_look_item);
+        let _ = tuning_camera_sub.append(&scene_look_item);
+        let _ = tuning_sub.append(&tuning_camera_sub);
 
+        let tuning_env_sub = Submenu::new("Environment", true);
         let rain_item = MenuItem::new("Rain (main menu)...", true, None);
         mappings.push((rain_item.id().clone(), DebugAction::OpenRainDebug));
-        let _ = tuning_sub.append(&rain_item);
-
-        let hall_fx_item = MenuItem::new("Hallway vertex warp…", true, None);
+        let _ = tuning_env_sub.append(&rain_item);
+        let flame_item = MenuItem::new("Candle Flames (shop / gameplay)...", true, None);
+        mappings.push((flame_item.id().clone(), DebugAction::OpenFlameDebug));
+        let _ = tuning_env_sub.append(&flame_item);
+        let hall_fx_item = MenuItem::new("Hallway Vertex Warp...", true, None);
         mappings.push((
             hall_fx_item.id().clone(),
             DebugAction::OpenHallwayHallFxDebug,
         ));
-        let _ = tuning_sub.append(&hall_fx_item);
+        let _ = tuning_env_sub.append(&hall_fx_item);
+        let pride_rainbow_item = MenuItem::new("Main Menu Pride Rainbow", true, None);
+        mappings.push((
+            pride_rainbow_item.id().clone(),
+            DebugAction::ToggleMainMenuPrideRainbow,
+        ));
+        let _ = tuning_env_sub.append(&pride_rainbow_item);
+        let _ = tuning_sub.append(&tuning_env_sub);
 
+        let tuning_audio_sub = Submenu::new("Audio", true);
         let sfx_item = MenuItem::new("Sound Effects Test...", true, None);
         mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));
-        let _ = tuning_sub.append(&sfx_item);
+        let _ = tuning_audio_sub.append(&sfx_item);
+        let _ = tuning_sub.append(&tuning_audio_sub);
 
         let _ = debug_menu.append(&tuning_sub);
 
-        // ── Tools submenu ────────────────────────────────────────────────────
-        // One-shot dev tools: profiling, picking, layout capture.
-        let tools_sub = Submenu::new("Tools", true);
+        // ── Profiling ────────────────────────────────────────────────────────
+        let profiling_sub = Submenu::new("Profiling", true);
 
-        let profile_cpu_item = MenuItem::new("Profile CPU (100 frames)", true, None);
+        let profile_cpu_item = MenuItem::new("CPU (100 frames)", true, None);
         mappings.push((profile_cpu_item.id().clone(), DebugAction::ProfileCpu));
-        let _ = tools_sub.append(&profile_cpu_item);
+        let _ = profiling_sub.append(&profile_cpu_item);
 
-        let profile_gpu_item = MenuItem::new("Profile GPU (100 frames)", true, None);
+        let profile_gpu_item = MenuItem::new("GPU (100 frames)", true, None);
         mappings.push((profile_gpu_item.id().clone(), DebugAction::ProfileGpu));
-        let _ = tools_sub.append(&profile_gpu_item);
+        let _ = profiling_sub.append(&profile_gpu_item);
 
-        let _ = debug_menu.append(&tools_sub);
+        let _ = debug_menu.append(&profiling_sub);
 
-        // ── Scene Jumps submenu ──────────────────────────────────────────────
-        // Jump to scenes or push test overlays without playing through.
-        let jumps_sub = Submenu::new("Scene Jumps", true);
-
-        let victory_item = MenuItem::new("Show Victory Screen", true, None);
-        mappings.push((victory_item.id().clone(), DebugAction::ShowVictoryScreen));
-        let _ = jumps_sub.append(&victory_item);
-
-        let defeat_item = MenuItem::new("Show Defeat Screen", true, None);
-        mappings.push((defeat_item.id().clone(), DebugAction::ShowDefeatScreen));
-        let _ = jumps_sub.append(&defeat_item);
-
-        let material_viewer_item = MenuItem::new("Material Viewer...", true, None);
-        mappings.push((
-            material_viewer_item.id().clone(),
-            DebugAction::OpenMaterialViewer,
-        ));
-        let _ = jumps_sub.append(&material_viewer_item);
-
-        let transition_playground_item = MenuItem::new("Transition Playground...", true, None);
-        mappings.push((
-            transition_playground_item.id().clone(),
-            DebugAction::OpenTransitionPlayground,
-        ));
-        let _ = jumps_sub.append(&transition_playground_item);
-
-        let animation_lab_item = MenuItem::new("Animation Lab...", true, None);
-        mappings.push((
-            animation_lab_item.id().clone(),
-            DebugAction::OpenAnimationLab,
-        ));
-        let _ = jumps_sub.append(&animation_lab_item);
-
-        let rumble_lab_item = MenuItem::new("Rumble Lab...", true, None);
-        mappings.push((rumble_lab_item.id().clone(), DebugAction::OpenRumbleLab));
-        let _ = jumps_sub.append(&rumble_lab_item);
-
-        let tile_anchor_lab_item = MenuItem::new("Tile Anchor Lab...", true, None);
-        mappings.push((
-            tile_anchor_lab_item.id().clone(),
-            DebugAction::OpenTileAnchorLab,
-        ));
-        let _ = jumps_sub.append(&tile_anchor_lab_item);
-
-        let button_aabb_lab_item = MenuItem::new("Button AABB Lab...", true, None);
-        mappings.push((
-            button_aabb_lab_item.id().clone(),
-            DebugAction::OpenButtonAabbLab,
-        ));
-        let _ = jumps_sub.append(&button_aabb_lab_item);
-
-        let tixels_item = MenuItem::new("Tixels...", true, None);
-        mappings.push((tixels_item.id().clone(), DebugAction::OpenTixels));
-        let _ = jumps_sub.append(&tixels_item);
-
-        let test_overlay_item = MenuItem::new("Test Overlay", true, None);
-        mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
-        let _ = jumps_sub.append(&test_overlay_item);
-
-        let _ = debug_menu.append(&jumps_sub);
-
-        // ── Cheats submenu ───────────────────────────────────────────────────
-        // Gameplay-affecting shortcuts: free items, set resources, force state.
-        let cheats_sub = Submenu::new("Cheats", true);
+        // ── Run ──────────────────────────────────────────────────────────────
+        // In-run shortcuts: shop, FX demos, and direct state overrides.
+        let run_sub = Submenu::new("Run", true);
 
         let reroll_item = MenuItem::new("Reroll Shop", true, None);
         mappings.push((reroll_item.id().clone(), DebugAction::RerollShop));
-        let _ = cheats_sub.append(&reroll_item);
+        let _ = run_sub.append(&reroll_item);
 
         let open_pack_item = MenuItem::new("Open Tile Pack", true, None);
         mappings.push((open_pack_item.id().clone(), DebugAction::OpenPack));
-        let _ = cheats_sub.append(&open_pack_item);
-
-        let eyeball_travel_item = MenuItem::new("Start Eyeball Travel (Shop)", true, None);
-        mappings.push((
-            eyeball_travel_item.id().clone(),
-            DebugAction::StartShopEyeballTravel,
-        ));
-        let _ = cheats_sub.append(&eyeball_travel_item);
-
-        let eyeball_pause_item = MenuItem::new("Pause/Resume Eyeball Travel (Shop)", true, None);
-        mappings.push((
-            eyeball_pause_item.id().clone(),
-            DebugAction::TogglePauseShopEyeballTravel,
-        ));
-        let _ = cheats_sub.append(&eyeball_pause_item);
-
-        let eyeball_restart_item = MenuItem::new("Restart Eyeball Travel (Shop)", true, None);
-        mappings.push((
-            eyeball_restart_item.id().clone(),
-            DebugAction::RestartShopEyeballTravel,
-        ));
-        let _ = cheats_sub.append(&eyeball_restart_item);
+        let _ = run_sub.append(&open_pack_item);
 
         let demo_cascade_item = MenuItem::new("Demo Score Cascade", true, None);
         mappings.push((demo_cascade_item.id().clone(), DebugAction::DemoCascade));
-        let _ = cheats_sub.append(&demo_cascade_item);
+        let _ = run_sub.append(&demo_cascade_item);
 
-        let wind_item = MenuItem::new("Blow Wind Gust", true, None);
-        mappings.push((wind_item.id().clone(), DebugAction::BlowWindGust));
-        let _ = cheats_sub.append(&wind_item);
+        let _ = run_sub.append(&PredefinedMenuItem::separator());
 
-        let unlock_transforms_item =
-            MenuItem::new("Unlock Transformations & Successors", true, None);
-        mappings.push((
-            unlock_transforms_item.id().clone(),
-            DebugAction::UnlockAllTransformationsAndSuccessors,
-        ));
-        let _ = cheats_sub.append(&unlock_transforms_item);
+        let gold_sub = Submenu::new("Set Gold", true);
+        for &amount in &[0u32, 10, 50, 100, 500, 9999] {
+            let item = MenuItem::new(format!("{amount} Gold"), true, None);
+            mappings.push((item.id().clone(), DebugAction::SetYen(amount)));
+            let _ = gold_sub.append(&item);
+        }
+        let _ = run_sub.append(&gold_sub);
 
-        let reveal_kokushi_item = MenuItem::new("Reveal Kokushi Musō", true, None);
-        mappings.push((
-            reveal_kokushi_item.id().clone(),
-            DebugAction::RevealKokushiMusou,
-        ));
-        let _ = cheats_sub.append(&reveal_kokushi_item);
-
-        let _ = cheats_sub.append(&PredefinedMenuItem::separator());
-
-        // Set depth submenu (depths I–XIV).
         let level_sub = Submenu::new("Set Player Depth", true);
         for lvl in 1..=14u32 {
             let item = MenuItem::new(
@@ -360,80 +283,16 @@ impl DebugMenuBar {
             mappings.push((item.id().clone(), DebugAction::SetLevel(lvl)));
             let _ = level_sub.append(&item);
         }
-        let _ = cheats_sub.append(&level_sub);
+        let _ = run_sub.append(&level_sub);
 
-        let chronicle_sub = Submenu::new("Seed Chronicle (bot runs)", true);
-        for &n in &[5u32, 15, 30, 60] {
-            let item = MenuItem::new(format!("{n} bot runs"), true, None);
-            mappings.push((item.id().clone(), DebugAction::SeedChronicleFromBotRuns(n)));
-            let _ = chronicle_sub.append(&item);
-        }
-        let _ = cheats_sub.append(&chronicle_sub);
-
-        // Set Gold submenu.
-        let gold_sub = Submenu::new("Set Gold", true);
-        for &amount in &[0u32, 10, 50, 100, 500, 9999] {
-            let item = MenuItem::new(format!("{amount} Gold"), true, None);
-            mappings.push((item.id().clone(), DebugAction::SetYen(amount)));
-            let _ = gold_sub.append(&item);
-        }
-        let _ = cheats_sub.append(&gold_sub);
-
-        // Relic Inventory submenu.
-        let relic_sub = Submenu::new("Relic Inventory", true);
-        let clear_item = MenuItem::new("Clear All Relics", true, None);
-        mappings.push((clear_item.id().clone(), DebugAction::ClearRelics));
-        let _ = relic_sub.append(&clear_item);
-
-        let add_sub = Submenu::new("Add Relic", true);
-        for def in all_relic_defs() {
-            let item = MenuItem::new(def.name, true, None);
-            mappings.push((item.id().clone(), DebugAction::AddRelic(def.id)));
-            let _ = add_sub.append(&item);
-        }
-        let _ = relic_sub.append(&add_sub);
-        let _ = cheats_sub.append(&relic_sub);
-
-        // Consumable Inventory submenu — talismans + zodiacs share slots, so
-        // expose both under one parent. Capacity is auto-expanded when full,
-        // mirroring the relic add behavior above.
-        let consumable_sub = Submenu::new("Consumable Inventory", true);
-        let clear_cons_item = MenuItem::new("Clear All Consumables", true, None);
-        mappings.push((clear_cons_item.id().clone(), DebugAction::ClearConsumables));
-        let _ = consumable_sub.append(&clear_cons_item);
-
-        let add_talisman_sub = Submenu::new("Add Talisman", true);
-        for &kind in TalismanKind::all() {
-            let item = MenuItem::new(kind.name(), true, None);
-            mappings.push((item.id().clone(), DebugAction::AddTalisman(kind)));
-            let _ = add_talisman_sub.append(&item);
-        }
-        let _ = consumable_sub.append(&add_talisman_sub);
-
-        let add_zodiac_sub = Submenu::new("Add Zodiac", true);
-        for &kind in ZodiacKind::all() {
-            let item = MenuItem::new(kind.name(), true, None);
-            mappings.push((item.id().clone(), DebugAction::AddZodiac(kind)));
-            let _ = add_zodiac_sub.append(&item);
-        }
-        let _ = consumable_sub.append(&add_zodiac_sub);
-        let _ = cheats_sub.append(&consumable_sub);
-
-        // Boss override submenu — pick any boss (regular or final) and the
-        // current ante's upcoming_ordeal is replaced + re-resolved. Useful for
-        // testing reactive bosses (Mirror, Tax Collector) against specific
-        // run states without rerolling antes until the right boss appears.
         let boss_sub = Submenu::new("Set Current Boss", true);
         for def in all_ordeals().iter().chain(final_ordeals().iter()) {
             let item = MenuItem::new(def.name, true, None);
             mappings.push((item.id().clone(), DebugAction::SetOrdeal(def.kind)));
             let _ = boss_sub.append(&item);
         }
-        let _ = cheats_sub.append(&boss_sub);
+        let _ = run_sub.append(&boss_sub);
 
-        // Set Dora submenu — pick any non-bonus tile face (number suits,
-        // winds, dragons) and the current dora indicator is replaced.
-        // Grouped into sub-submenus per suit to keep the list browsable.
         let dora_sub = Submenu::new("Set Dora", true);
         for (suit_label, suit, max_rank) in [
             ("Manzu (m)", Suit::Manzu, 9u8),
@@ -451,9 +310,149 @@ impl DebugMenuBar {
             }
             let _ = dora_sub.append(&suit_sub);
         }
-        let _ = cheats_sub.append(&dora_sub);
+        let _ = run_sub.append(&dora_sub);
 
-        let _ = debug_menu.append(&cheats_sub);
+        let relic_sub = Submenu::new("Relic Inventory", true);
+        let clear_item = MenuItem::new("Clear All Relics", true, None);
+        mappings.push((clear_item.id().clone(), DebugAction::ClearRelics));
+        let _ = relic_sub.append(&clear_item);
+        let add_sub = Submenu::new("Add Relic", true);
+        for def in all_relic_defs() {
+            let item = MenuItem::new(def.name, true, None);
+            mappings.push((item.id().clone(), DebugAction::AddRelic(def.id)));
+            let _ = add_sub.append(&item);
+        }
+        let _ = relic_sub.append(&add_sub);
+        let _ = run_sub.append(&relic_sub);
+
+        let consumable_sub = Submenu::new("Consumable Inventory", true);
+        let clear_cons_item = MenuItem::new("Clear All Consumables", true, None);
+        mappings.push((clear_cons_item.id().clone(), DebugAction::ClearConsumables));
+        let _ = consumable_sub.append(&clear_cons_item);
+        let add_talisman_sub = Submenu::new("Add Talisman", true);
+        for &kind in TalismanKind::all() {
+            let item = MenuItem::new(kind.name(), true, None);
+            mappings.push((item.id().clone(), DebugAction::AddTalisman(kind)));
+            let _ = add_talisman_sub.append(&item);
+        }
+        let _ = consumable_sub.append(&add_talisman_sub);
+        let add_zodiac_sub = Submenu::new("Add Zodiac", true);
+        for &kind in ZodiacKind::all() {
+            let item = MenuItem::new(kind.name(), true, None);
+            mappings.push((item.id().clone(), DebugAction::AddZodiac(kind)));
+            let _ = add_zodiac_sub.append(&item);
+        }
+        let _ = consumable_sub.append(&add_zodiac_sub);
+        let _ = run_sub.append(&consumable_sub);
+
+        let _ = debug_menu.append(&run_sub);
+
+        // ── Labs ─────────────────────────────────────────────────────────────
+        // Standalone pushdown scenes for layout, animation, and asset review.
+        let labs_sub = Submenu::new("Labs", true);
+
+        let animation_lab_item = MenuItem::new("Animation Lab...", true, None);
+        mappings.push((
+            animation_lab_item.id().clone(),
+            DebugAction::OpenAnimationLab,
+        ));
+        let _ = labs_sub.append(&animation_lab_item);
+
+        let button_aabb_lab_item = MenuItem::new("Button AABB Lab...", true, None);
+        mappings.push((
+            button_aabb_lab_item.id().clone(),
+            DebugAction::OpenButtonAabbLab,
+        ));
+        let _ = labs_sub.append(&button_aabb_lab_item);
+
+        let material_viewer_item = MenuItem::new("Material Viewer...", true, None);
+        mappings.push((
+            material_viewer_item.id().clone(),
+            DebugAction::OpenMaterialViewer,
+        ));
+        let _ = labs_sub.append(&material_viewer_item);
+
+        let roller_lab_item = MenuItem::new("Roller Lab...", true, None);
+        mappings.push((roller_lab_item.id().clone(), DebugAction::OpenRollerLab));
+        let _ = labs_sub.append(&roller_lab_item);
+
+        let cascade_lab_item = MenuItem::new("Cascade Lab...", true, None);
+        mappings.push((cascade_lab_item.id().clone(), DebugAction::OpenCascadeLab));
+        let _ = labs_sub.append(&cascade_lab_item);
+
+        let rumble_lab_item = MenuItem::new("Rumble Lab...", true, None);
+        mappings.push((rumble_lab_item.id().clone(), DebugAction::OpenRumbleLab));
+        let _ = labs_sub.append(&rumble_lab_item);
+
+        let tile_anchor_lab_item = MenuItem::new("Tile Anchor Lab...", true, None);
+        mappings.push((
+            tile_anchor_lab_item.id().clone(),
+            DebugAction::OpenTileAnchorLab,
+        ));
+        let _ = labs_sub.append(&tile_anchor_lab_item);
+
+        let tixels_item = MenuItem::new("Tixels...", true, None);
+        mappings.push((tixels_item.id().clone(), DebugAction::OpenTixels));
+        let _ = labs_sub.append(&tixels_item);
+
+        let transition_playground_item = MenuItem::new("Transition Playground...", true, None);
+        mappings.push((
+            transition_playground_item.id().clone(),
+            DebugAction::OpenTransitionPlayground,
+        ));
+        let _ = labs_sub.append(&transition_playground_item);
+
+        let _ = debug_menu.append(&labs_sub);
+
+        // ── Screens ──────────────────────────────────────────────────────────
+        // Jump to end-of-run presentation without playing through.
+        let screens_sub = Submenu::new("Screens", true);
+
+        let victory_item = MenuItem::new("Victory", true, None);
+        mappings.push((victory_item.id().clone(), DebugAction::ShowVictoryScreen));
+        let _ = screens_sub.append(&victory_item);
+
+        let defeat_item = MenuItem::new("Defeat", true, None);
+        mappings.push((defeat_item.id().clone(), DebugAction::ShowDefeatScreen));
+        let _ = screens_sub.append(&defeat_item);
+
+        let _ = debug_menu.append(&screens_sub);
+
+        // ── Profile ──────────────────────────────────────────────────────────
+        // Persistent meta / career cheats (saved to the active profile).
+        let profile_sub = Submenu::new("Profile", true);
+
+        let unlock_transforms_item =
+            MenuItem::new("Unlock Transformations & Successors", true, None);
+        mappings.push((
+            unlock_transforms_item.id().clone(),
+            DebugAction::UnlockAllTransformationsAndSuccessors,
+        ));
+        let _ = profile_sub.append(&unlock_transforms_item);
+
+        let reveal_kokushi_item = MenuItem::new("Reveal Kokushi Musō", true, None);
+        mappings.push((
+            reveal_kokushi_item.id().clone(),
+            DebugAction::RevealKokushiMusou,
+        ));
+        let _ = profile_sub.append(&reveal_kokushi_item);
+
+        let unlock_tilesets_item = MenuItem::new("Unlock All Tilesets & Seasons", true, None);
+        mappings.push((
+            unlock_tilesets_item.id().clone(),
+            DebugAction::UnlockAllTilesetsAndSeasons,
+        ));
+        let _ = profile_sub.append(&unlock_tilesets_item);
+
+        let chronicle_sub = Submenu::new("Seed Chronicle (bot runs)", true);
+        for &n in &[5u32, 15, 30, 60] {
+            let item = MenuItem::new(format!("{n} bot runs"), true, None);
+            mappings.push((item.id().clone(), DebugAction::SeedChronicleFromBotRuns(n)));
+            let _ = chronicle_sub.append(&item);
+        }
+        let _ = profile_sub.append(&chronicle_sub);
+
+        let _ = debug_menu.append(&profile_sub);
 
         let _ = menu.append(&debug_menu);
 

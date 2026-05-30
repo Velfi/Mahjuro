@@ -14,32 +14,46 @@ use mahjuro_core::core::scoring::StepKind;
 use crate::draw_cmd::{GlyphMaterial, Object3d, Object3dKind};
 use crate::theme::typography;
 use crate::wgpu_renderer::{TextAlign, TextLabel};
+use crate::world_space::LayoutAnchorPx;
 
-/// Total lifetime of a popup from spawn to despawn (seconds).
-const LIFETIME: f32 = 1.18;
+/// Per-popup motion timing (seconds + overshoot fraction).
+#[derive(Clone, Copy, Debug)]
+pub struct PopupMotionTiming {
+    pub pop_secs: f32,
+    pub loiter_secs: f32,
+    pub fly_secs: f32,
+    pub overshoot: f32,
+}
 
-/// Phase boundaries on the [0, 1] normalised lifetime axis. Streaming popups
-/// spend a brief moment at their source (birth + hover), then arc toward the
-/// score reel and shrink into it during the stream phase.
-const T_BIRTH_END: f32 = 0.08;
-const T_HOVER_END: f32 = 0.36;
+impl PopupMotionTiming {
+    pub fn lifetime_secs(self) -> f32 {
+        self.pop_secs + self.loiter_secs + self.fly_secs
+    }
+
+    pub fn shipping_default() -> Self {
+        Self {
+            pop_secs: 0.14,
+            loiter_secs: 0.32,
+            fly_secs: 0.46,
+            overshoot: 0.22,
+        }
+    }
+}
 
 /// Slight per-popup yaw jitter so a chain of popups doesn't read as a
 /// stamped row of identical objects.
 const YAW_JITTER: f32 = 0.07;
 
-/// World-units height the popup floats above the table plane while in
-/// flight. The hover phase drifts this slightly upward; the stream phase
-/// arcs higher still via the bezier control point.
+/// World-units height for modifier-strip / screen-layout popup sources.
+/// Object-anchored popups use each object's median center Z instead.
 const LIFT_BASE: f32 = 450.0;
-const LIFT_HOVER: f32 = 135.0;
-/// Extra lift applied at the midpoint of the streaming arc. Drives the
-/// "over the top" feel of popups flying into the reel. Kept modest so
-/// the arc stays within the camera frustum across screen sizes.
+/// Extra lift applied at the midpoint of the streaming arc.
 const LIFT_ARC_PEAK: f32 = 148.0;
 
-/// Sky-blue base tint for Chips popups. The Polychrome shader adds a
-/// rainbow thin-film sheen on top of this as the light sweeps across.
+/// Table-hover Z for modifier-strip / screen-layout popup sources (no 3D object).
+pub const TABLE_POPUP_LIFT_Z: f32 = LIFT_BASE;
+
+/// Sky-blue base tint for Chips popups.
 const CHIPS_COLOR: [f32; 4] = crate::theme::color::score_cascade::CHIPS;
 /// Red base tint for Mult popups.
 const MULT_COLOR: [f32; 4] = crate::theme::color::score_cascade::MULT;
@@ -52,27 +66,22 @@ const FINAL_COLOR: [f32; 4] = crate::theme::color::score_cascade::FINAL;
 struct ScorePopup {
     label: Arc<str>,
     born_at: Instant,
-    source_xy: (f32, f32),
+    /// Object3d anchor triple at the scoring object's median center.
+    source_pos: [f32; 3],
     dest_xy: (f32, f32),
-    /// World-Z lift the stream phase eases toward at landing. Source lift
-    /// is always `LIFT_BASE`; the stream sample interpolates up to this so
-    /// popups land *at* the reel's depth instead of on the table plane.
     dest_lift: f32,
     base_scale: f32,
     color: [f32; 4],
     yaw: f32,
     motion: PopupMotion,
     material: GlyphMaterial,
+    timing: PopupMotionTiming,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PopupMotion {
-    /// Stream from source to dest along a lifted bezier arc, shrinking to
-    /// zero as it lands in the reel. Used for Chips / Mult / Yen.
-    Stream,
-    /// Stay at source, fade out in place. Used for the Final landing beat
-    /// (which already spawns at the reel).
-    Settle,
+    /// Pop at source, loiter, then fly into the score roller.
+    FlyToReel,
     /// Shake in place, then fade. Used for debuff X warnings.
     Shake,
 }
@@ -86,25 +95,23 @@ impl ScorePopupSystem {
         Self { popups: Vec::new() }
     }
 
-    /// Spawn a new popup. `magnitude` scales the object so more important
-    /// beats can land with a little more visual weight. `dest_lift` is the
-    /// world-Z the streaming phase eases toward — pass the reel's lift so
-    /// popups land *at* the reel's depth rather than on the table plane.
-    /// `None` falls back to `LIFT_BASE` (the old behavior).
+    /// Spawn a score popup that grows from zero, loiters at the source, then
+    /// flies into the score roller.
     pub fn spawn(
         &mut self,
         label: impl Into<Arc<str>>,
-        source_xy: (f32, f32),
+        source: LayoutAnchorPx,
         dest_xy: (f32, f32),
         dest_lift: Option<f32>,
         kind: StepKind,
         magnitude: f32,
+        timing: PopupMotionTiming,
     ) {
-        let (color, material, motion) = match kind {
-            StepKind::Chips => (CHIPS_COLOR, GlyphMaterial::Polychrome, PopupMotion::Stream),
-            StepKind::Mult => (MULT_COLOR, GlyphMaterial::Polychrome, PopupMotion::Stream),
-            StepKind::Yen => (GOLD_COLOR, GlyphMaterial::Polychrome, PopupMotion::Stream),
-            StepKind::Final => (FINAL_COLOR, GlyphMaterial::Polychrome, PopupMotion::Settle),
+        let (color, material) = match kind {
+            StepKind::Chips => (CHIPS_COLOR, GlyphMaterial::Polychrome),
+            StepKind::Mult => (MULT_COLOR, GlyphMaterial::Polychrome),
+            StepKind::Yen => (GOLD_COLOR, GlyphMaterial::Polychrome),
+            StepKind::Final => (FINAL_COLOR, GlyphMaterial::Polychrome),
         };
         let mag = magnitude.abs().max(1.0);
         let scale = 198.0 * (1.0 + (mag.log2() / 12.0).clamp(0.0, 0.48));
@@ -113,45 +120,47 @@ impl ScorePopupSystem {
         self.popups.push(ScorePopup {
             label: label.into(),
             born_at: Instant::now(),
-            source_xy,
+            source_pos: source.to_draw_cmd_triple(),
             dest_xy,
             dest_lift: dest_lift.unwrap_or(LIFT_BASE),
             base_scale: scale,
             color,
             yaw,
-            motion,
+            motion: PopupMotion::FlyToReel,
             material,
+            timing,
         });
     }
 
-    /// Spawn a red warning X that shakes in place over a debuffed scorer as
-    /// it is being evaluated by the cascade.
-    pub fn spawn_debuff_x(&mut self, source_xy: (f32, f32), magnitude: f32) {
+    /// Spawn a red warning X that shakes in place over a debuffed scorer.
+    pub fn spawn_debuff_x(&mut self, source: LayoutAnchorPx, magnitude: f32) {
         let mag = magnitude.abs().max(1.0);
         let scale = 180.0 * (1.0 + (mag.log2() / 10.0).clamp(0.0, 0.35));
         let mut rng = rand::rng();
         let yaw = (rng.random::<f32>() - 0.5) * (YAW_JITTER * 0.6);
+        let source_pos = source.to_draw_cmd_triple();
         self.popups.push(ScorePopup {
             label: Arc::from("X"),
             born_at: Instant::now(),
-            source_xy,
-            dest_xy: source_xy,
-            dest_lift: LIFT_BASE,
+            source_pos,
+            dest_xy: (source_pos[0], source_pos[1]),
+            dest_lift: source_pos[2],
             base_scale: scale,
             color: [0.96, 0.24, 0.20, 1.0],
             yaw,
             motion: PopupMotion::Shake,
             material: GlyphMaterial::Polychrome,
+            timing: PopupMotionTiming::shipping_default(),
         });
     }
 
-    /// Advance the system; despawn any popups whose lifetime has elapsed.
     pub fn update(&mut self, now: Instant) {
-        self.popups
-            .retain(|p| now.saturating_duration_since(p.born_at).as_secs_f32() < LIFETIME);
+        self.popups.retain(|p| {
+            let age = now.saturating_duration_since(p.born_at).as_secs_f32();
+            age < p.timing.lifetime_secs()
+        });
     }
 
-    /// Drop every popup immediately.
     pub fn clear(&mut self) {
         self.popups.clear();
     }
@@ -160,9 +169,6 @@ impl ScorePopupSystem {
         !self.popups.is_empty()
     }
 
-    /// Screen-space labels with the same timing as [`Self::placements`], for
-    /// the text-overlay pass (depth test Always) so shop celebrations read
-    /// above counter geometry.
     pub fn overlay_text_labels(
         &self,
         now: Instant,
@@ -195,12 +201,6 @@ impl ScorePopupSystem {
             .collect()
     }
 
-    /// Build the per-frame placement list the renderer consumes.
-    ///
-    /// `screen_scale` multiplies each popup's world-units scale so they stay
-    /// readable at the current window size. Callers derive this from
-    /// `min(window_w, window_h) / 1080.0` so small windows get proportionally
-    /// smaller popups.
     pub fn placements(&self, now: Instant, screen_scale: f32) -> Vec<Object3d> {
         self.popups
             .iter()
@@ -219,7 +219,6 @@ impl ScorePopupSystem {
                         scale: p.base_scale * scale_mul * screen_scale,
                         rotation_x: 0.08,
                         rotation_y: p.yaw,
-                        // Arc clone — refcount bump, no allocation.
                         label: Arc::clone(&p.label),
                         emissive,
                         material: p.material,
@@ -234,105 +233,87 @@ impl ScorePopupSystem {
 
 fn popup_frame_sample(p: &ScorePopup, now: Instant) -> (f32, f32, f32, f32, f32, f32) {
     let age = now.saturating_duration_since(p.born_at).as_secs_f32();
-    let t = (age / LIFETIME).clamp(0.0, 1.0);
     match p.motion {
-        PopupMotion::Stream => stream_sample(p, t),
-        PopupMotion::Settle => settle_sample(p, t),
-        PopupMotion::Shake => shake_sample(p, t),
+        PopupMotion::FlyToReel => fly_to_reel_sample(p, age),
+        PopupMotion::Shake => shake_sample(p, age),
     }
 }
 
-/// Streaming trajectory: brief birth/hover at source, then a lifted bezier
-/// arc into the destination, shrinking to zero as the popup lands in the
-/// reel. No separate fade phase — absorption into the reel replaces it.
-///
-/// Return tuple: `(world_x, world_y, world_z_lift, scale_mul, alpha, emissive)`.
-fn stream_sample(p: &ScorePopup, t: f32) -> (f32, f32, f32, f32, f32, f32) {
-    if t < T_BIRTH_END {
-        let local = t / T_BIRTH_END;
-        let s = (local * std::f32::consts::FRAC_PI_2).sin() * 1.22;
-        return (p.source_xy.0, p.source_xy.1, LIFT_BASE, s, 1.0, 1.05);
-    }
-    if t < T_HOVER_END {
-        let local = (t - T_BIRTH_END) / (T_HOVER_END - T_BIRTH_END);
-        let s = 1.22 + (1.0 - 1.22) * local;
-        let em = 1.05 - local * 0.55;
+fn fly_to_reel_sample(p: &ScorePopup, age: f32) -> (f32, f32, f32, f32, f32, f32) {
+    let t = p.timing;
+    let pop_end = t.pop_secs;
+    let loiter_end = pop_end + t.loiter_secs;
+    let fly_end = loiter_end + t.fly_secs;
+
+    if age < pop_end {
+        let local = (age / pop_end.max(1e-6)).clamp(0.0, 1.0);
+        let peak = 1.0 + t.overshoot;
+        let scale = if local < 0.72 {
+            let u = local / 0.72;
+            peak * (u * std::f32::consts::FRAC_PI_2).sin()
+        } else {
+            let u = (local - 0.72) / 0.28;
+            peak - (peak - 1.0) * u
+        };
         return (
-            p.source_xy.0,
-            p.source_xy.1,
-            LIFT_BASE + LIFT_HOVER * local,
-            s,
+            p.source_pos[0],
+            p.source_pos[1],
+            p.source_pos[2],
+            scale,
             1.0,
-            em,
+            1.05,
         );
     }
-    // Stream phase: t ∈ [T_HOVER_END, 1.0]
-    let local = (t - T_HOVER_END) / (1.0 - T_HOVER_END);
-    // Ease-in-out cubic so the popup accelerates off the source and
-    // decelerates as it nears the reel.
-    let eased = if local < 0.5 {
-        4.0 * local * local * local
-    } else {
-        1.0 - (-2.0 * local + 2.0).powi(3) * 0.5
-    };
-    // Quadratic bezier control point: biased slightly toward the destination
-    // so the arc reads as deliberately feeding the counter, not a symmetric hump.
-    let dx = p.dest_xy.0 - p.source_xy.0;
-    let dy = p.dest_xy.1 - p.source_xy.1;
-    let ctrl_x = (p.source_xy.0 + p.dest_xy.0) * 0.5 + dx * 0.11;
-    let ctrl_y = (p.source_xy.1 + p.dest_xy.1) * 0.5 + dy * 0.14;
-    let one_m = 1.0 - eased;
-    let px =
-        one_m * one_m * p.source_xy.0 + 2.0 * one_m * eased * ctrl_x + eased * eased * p.dest_xy.0;
-    let py =
-        one_m * one_m * p.source_xy.1 + 2.0 * one_m * eased * ctrl_y + eased * eased * p.dest_xy.1;
-    // Ease Z from (LIFT_BASE + LIFT_HOVER) at the start of the stream phase
-    // to `dest_lift` at landing, so the popup actually meets the reel's
-    // depth. The bezier arc adds an extra peak on top, via the one_m*eased
-    // envelope (peaks at 0.25 when eased == 0.5 → scale by 4.0).
-    let start_lift = LIFT_BASE + LIFT_HOVER;
-    let lerp_lift = start_lift + (p.dest_lift - start_lift) * eased;
-    let arc_env = 4.0 * one_m * eased;
-    let lift_z = lerp_lift + LIFT_ARC_PEAK * arc_env;
-    // Shrink to zero over the last 32% so the popup "lands into" the reel.
-    let shrink = if local < 0.68 {
-        1.0
-    } else {
-        ((1.0 - local) / 0.32).max(0.0)
-    };
-    // Emissive peaks mid-stream (thin-film read) then eases down into landing.
-    let stream_glow = 4.0 * one_m * eased;
-    let emissive = 0.48 + 0.52 * stream_glow;
-    (px, py, lift_z, shrink, 1.0, emissive)
-}
 
-/// In-place settle with fade-out. Used by the Final landing number.
-fn settle_sample(p: &ScorePopup, t: f32) -> (f32, f32, f32, f32, f32, f32) {
-    let (px, py) = p.source_xy;
-    if t < T_BIRTH_END {
-        let local = t / T_BIRTH_END;
-        let s = (local * std::f32::consts::FRAC_PI_2).sin() * 1.10;
-        return (px, py, LIFT_BASE, s, 1.0, 1.0);
+    if age < loiter_end {
+        return (p.source_pos[0], p.source_pos[1], p.source_pos[2], 1.0, 1.0, 0.92);
     }
-    let local = (t - T_BIRTH_END) / (1.0 - T_BIRTH_END);
-    let fade = if local < 0.6 {
-        1.0
-    } else {
-        ((1.0 - local) / 0.4).max(0.0)
-    };
-    let s = 1.10 + (1.0 - 1.10) * local.min(0.3) / 0.3;
-    let em = 1.0 - local.min(0.3) / 0.3 * 0.75;
-    (px, py, LIFT_BASE + LIFT_HOVER, s * fade.max(0.01), fade, em)
+
+    if age < fly_end {
+        let local = ((age - loiter_end) / t.fly_secs.max(1e-6)).clamp(0.0, 1.0);
+        let eased = if local < 0.5 {
+            4.0 * local * local * local
+        } else {
+            1.0 - (-2.0 * local + 2.0).powi(3) * 0.5
+        };
+        let dx = p.dest_xy.0 - p.source_pos[0];
+        let dy = p.dest_xy.1 - p.source_pos[1];
+        let ctrl_x = (p.source_pos[0] + p.dest_xy.0) * 0.5 + dx * 0.11;
+        let ctrl_y = (p.source_pos[1] + p.dest_xy.1) * 0.5 + dy * 0.14;
+        let one_m = 1.0 - eased;
+        let px = one_m * one_m * p.source_pos[0]
+            + 2.0 * one_m * eased * ctrl_x
+            + eased * eased * p.dest_xy.0;
+        let py = one_m * one_m * p.source_pos[1]
+            + 2.0 * one_m * eased * ctrl_y
+            + eased * eased * p.dest_xy.1;
+        let start_lift = p.source_pos[2];
+        let lerp_lift = start_lift + (p.dest_lift - start_lift) * eased;
+        let arc_env = 4.0 * one_m * eased;
+        let lift_z = lerp_lift + LIFT_ARC_PEAK * arc_env;
+        let shrink = if local < 0.68 {
+            1.0
+        } else {
+            ((1.0 - local) / 0.32).max(0.0)
+        };
+        let stream_glow = 4.0 * one_m * eased;
+        let emissive = 0.48 + 0.52 * stream_glow;
+        return (px, py, lift_z, shrink, 1.0, emissive);
+    }
+
+    (p.dest_xy.0, p.dest_xy.1, p.dest_lift, 0.0, 0.0, 0.0)
 }
 
-/// Shake-in-place for debuff X warnings.
-fn shake_sample(p: &ScorePopup, t: f32) -> (f32, f32, f32, f32, f32, f32) {
+fn shake_sample(p: &ScorePopup, age: f32) -> (f32, f32, f32, f32, f32, f32) {
+    let lifetime = 1.18;
+    let t = (age / lifetime).clamp(0.0, 1.0);
     let env = if t < 0.8 { 1.0 - t / 0.8 } else { 0.0 };
     let shake = env * p.base_scale * 0.05;
-    let px = p.source_xy.0 + (t * 55.0).sin() * shake;
-    let py = p.source_xy.1 + (t * 39.0).cos() * shake * 0.55;
-    let (scale_mul, alpha) = if t < T_BIRTH_END {
-        let local = t / T_BIRTH_END;
+    let px = p.source_pos[0] + (t * 55.0).sin() * shake;
+    let py = p.source_pos[1] + (t * 39.0).cos() * shake * 0.55;
+    let pop_end = 0.08 * lifetime;
+    let (scale_mul, alpha) = if t * lifetime < pop_end {
+        let local = (t * lifetime) / pop_end;
         ((local * std::f32::consts::FRAC_PI_2).sin() * 1.10, 1.0)
     } else if t < 0.85 {
         (1.0, 1.0)
@@ -340,7 +321,7 @@ fn shake_sample(p: &ScorePopup, t: f32) -> (f32, f32, f32, f32, f32, f32) {
         let local = (t - 0.85) / 0.15;
         ((1.0 - local).max(0.0), (1.0 - local).max(0.0))
     };
-    (px, py, LIFT_BASE, scale_mul, alpha, 0.9)
+    (px, py, p.source_pos[2], scale_mul, alpha, 0.9)
 }
 
 impl Default for ScorePopupSystem {

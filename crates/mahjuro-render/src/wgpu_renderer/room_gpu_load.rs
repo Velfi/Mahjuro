@@ -11,6 +11,10 @@ const ROOM_STAIRCASE: u8 = 1 << 2;
 const ROOM_ARCHIVE: u8 = 1 << 3;
 const ROOM_GAMEPLAY: u8 = 1 << 4;
 
+use crate::score_roller_layout::{
+    self, GAMEPLAY_SCORE_ROLLER_SLOT_COUNT,
+};
+
 fn require_room_environment_loaded(
     glb: &str,
     prims: &[TilePrimitiveGpu],
@@ -48,7 +52,7 @@ crate::room_glb::with_shop_glb_cpu(|cpu_opt| {
             );
             if !cpu.environment_primitives.is_empty() {
                 let mut room_tex_cache = RoomEnvTextureCache::new();
-                let (_white_tex, white_albedo_view) = white_albedo(&ctx.device, &ctx.queue);
+                let (_white_tex, white_albedo_view) = white_albedo(ctx.device, ctx.queue);
                 for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                     if env_prim.gltf_node_name.as_deref() == Some("Eyeball") {
                         shop_eyeball_prim_indices.push(i);
@@ -134,7 +138,7 @@ crate::room_glb::with_shop_glb_cpu(|cpu_opt| {
                         pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
                     });
                 }
-                let (_white_tex, shop_decal_view) = white_albedo(&ctx.device, &ctx.queue);
+                let (_white_tex, shop_decal_view) = white_albedo(ctx.device, ctx.queue);
                 let uniform_buffers = create_room_env_camera_uniform_buffers(
                     ctx.device,
                     prims.len(),
@@ -219,6 +223,7 @@ crate::room_glb::with_shop_glb_cpu(|cpu_opt| {
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
+                    archive_inspect_plaque_decal_texture: None,
                 });
                 if shop_eyeball_prim_indices.is_empty() {
                     if let Some(bindings) = shop_gltf_anim.clip_prim_bindings.get("eyeball_travel") {
@@ -250,7 +255,7 @@ crate::hallway_glb::with_hallway_glb_cpu(|cpu_opt| {
             };
             if !cpu.environment_primitives.is_empty() {
                 let mut room_tex_cache = RoomEnvTextureCache::new();
-                let (_white_tex, white_albedo_view) = white_albedo(&ctx.device, &ctx.queue);
+                let (_white_tex, white_albedo_view) = white_albedo(ctx.device, ctx.queue);
                 for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                     let prim = &env_prim.mesh;
                     let vb = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -333,7 +338,7 @@ crate::hallway_glb::with_hallway_glb_cpu(|cpu_opt| {
                         pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
                     });
                 }
-                let (_white_tex, hallway_decal_view) = white_albedo(&ctx.device, &ctx.queue);
+                let (_white_tex, hallway_decal_view) = white_albedo(ctx.device, ctx.queue);
                 let uniform_buffers = create_room_env_camera_uniform_buffers(
                     ctx.device,
                     prims.len(),
@@ -420,6 +425,7 @@ crate::hallway_glb::with_hallway_glb_cpu(|cpu_opt| {
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
+                    archive_inspect_plaque_decal_texture: None,
                 });
                 log::info!("hallway.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -436,7 +442,7 @@ crate::staircase_glb::with_staircase_glb_cpu(|cpu_opt| {
             };
             if !cpu.environment_primitives.is_empty() {
                 let mut room_tex_cache = RoomEnvTextureCache::new();
-                let (_white_tex, white_albedo_view) = white_albedo(&ctx.device, &ctx.queue);
+                let (_white_tex, white_albedo_view) = white_albedo(ctx.device, ctx.queue);
                 for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                     let prim = &env_prim.mesh;
                     let vb = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -519,7 +525,7 @@ crate::staircase_glb::with_staircase_glb_cpu(|cpu_opt| {
                         pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
                     });
                 }
-                let (_white_tex, staircase_decal_view) = white_albedo(&ctx.device, &ctx.queue);
+                let (_white_tex, staircase_decal_view) = white_albedo(ctx.device, ctx.queue);
                 let uniform_buffers = create_room_env_camera_uniform_buffers(
                     ctx.device,
                     prims.len(),
@@ -606,6 +612,7 @@ crate::staircase_glb::with_staircase_glb_cpu(|cpu_opt| {
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
+                    archive_inspect_plaque_decal_texture: None,
                 });
                 log::info!("staircase.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -613,12 +620,57 @@ crate::staircase_glb::with_staircase_glb_cpu(|cpu_opt| {
         })
 }
 
-fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>, Option<usize>, Option<usize>, Vec<usize>, Vec<usize>, Vec<bool>) {
+fn create_cleared_archive_decal_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    width: u32,
+    height: u32,
+) -> wgpu::Texture {
+    let clear = vec![0u8; (width * height * 4) as usize];
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &tex,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &clear,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * width),
+            rows_per_image: Some(height),
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    tex
+}
+
+fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>, Option<usize>, Option<usize>, Option<usize>, Vec<usize>, Vec<usize>, Vec<bool>) {
     crate::archive_glb::with_archive_glb_cpu(|cpu_opt| {
                 let mut prims = Vec::new();
                 let mut gpu_wrap = None;
                 let mut sign_l = None;
                 let mut sign_r = None;
+                let mut inspect_plaque = None;
                 let mut page_left = Vec::new();
                 let mut page_right = Vec::new();
                 let mut shadow_caster_mask = Vec::new();
@@ -628,6 +680,7 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                         gpu_wrap,
                         sign_l,
                         sign_r,
+                        inspect_plaque,
                         page_left,
                         page_right,
                         shadow_caster_mask,
@@ -635,13 +688,15 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                 };
                 if !cpu.environment_primitives.is_empty() {
                     let mut room_tex_cache = RoomEnvTextureCache::new();
-                    let (_white_tex, white_albedo_view) = white_albedo(&ctx.device, &ctx.queue);
+                    let (_white_tex, white_albedo_view) = white_albedo(ctx.device, ctx.queue);
                     for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                         if let Some(ref name) = env_prim.gltf_node_name {
                             if name == crate::archive_glb::SIGN_DESCRIPTION_LEFT {
                                 sign_l = Some(i);
                             } else if name == crate::archive_glb::SIGN_DESCRIPTION_RIGHT {
                                 sign_r = Some(i);
+                            } else if name == crate::archive_glb::INSPECT_PLAQUE {
+                                inspect_plaque = Some(i);
                             } else if name == crate::archive_glb::BTN_PAGE_LEFT {
                                 page_left.push(i);
                             } else if name == crate::archive_glb::BTN_PAGE_RIGHT {
@@ -734,48 +789,35 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                             pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
                         });
                     }
+                    let decal_layout = crate::primitive::DecalLayout::Fit {
+                        target_short_edge: crate::decal::PLAQUE_DECAL_HEIGHT,
+                    };
                     let (sign_decal_w, sign_decal_h) = crate::decal::decal_dimensions(
-                        &crate::primitive::DecalLayout::Fit {
-                            target_short_edge: crate::decal::PLAQUE_DECAL_HEIGHT,
-                        },
+                        &decal_layout,
                         crate::archive_glb::archive_sign_description_decal_extents_for(cpu),
                     );
-                    let sign_decal_clear = vec![0u8; (sign_decal_w * sign_decal_h * 4) as usize];
-                    let archive_sign_decal_tex = ctx.device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some("archive-sign-decal"),
-                        size: wgpu::Extent3d {
-                            width: sign_decal_w,
-                            height: sign_decal_h,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                        view_formats: &[],
-                    });
-                    ctx.queue.write_texture(
-                        wgpu::TexelCopyTextureInfo {
-                            texture: &archive_sign_decal_tex,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d::ZERO,
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        &sign_decal_clear,
-                        wgpu::TexelCopyBufferLayout {
-                            offset: 0,
-                            bytes_per_row: Some(4 * sign_decal_w),
-                            rows_per_image: Some(sign_decal_h),
-                        },
-                        wgpu::Extent3d {
-                            width: sign_decal_w,
-                            height: sign_decal_h,
-                            depth_or_array_layers: 1,
-                        },
+                    let (inspect_decal_w, inspect_decal_h) = crate::decal::decal_dimensions(
+                        &decal_layout,
+                        crate::archive_glb::archive_inspect_plaque_decal_extents_for(cpu),
                     );
-                    let archive_decal_view =
+                    let archive_sign_decal_tex = create_cleared_archive_decal_texture(
+                        ctx.device,
+                        ctx.queue,
+                        "archive-sign-decal",
+                        sign_decal_w,
+                        sign_decal_h,
+                    );
+                    let archive_inspect_decal_tex = create_cleared_archive_decal_texture(
+                        ctx.device,
+                        ctx.queue,
+                        "archive-inspect-plaque-decal",
+                        inspect_decal_w,
+                        inspect_decal_h,
+                    );
+                    let archive_sign_decal_view =
                         archive_sign_decal_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                    let archive_inspect_decal_view = archive_inspect_decal_tex
+                        .create_view(&wgpu::TextureViewDescriptor::default());
                     let uniform_buffers = create_room_env_camera_uniform_buffers(
                         ctx.device,
                         prims.len(),
@@ -793,10 +835,10 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                         .iter()
                         .enumerate()
                         .map(|(pi, p)| {
-                            // Only description boards sample the CPU decal atlas; other room
-                            // meshes bind a 1×1 white stub so a shared atlas cannot leak.
                             let decal_view = if sign_l == Some(pi) || sign_r == Some(pi) {
-                                &archive_decal_view
+                                &archive_sign_decal_view
+                            } else if inspect_plaque == Some(pi) {
+                                &archive_inspect_decal_view
                             } else {
                                 &white_albedo_view
                             };
@@ -867,6 +909,7 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                         shadow_warp_bind_group,
                         bind_groups,
                         archive_sign_decal_texture: Some(archive_sign_decal_tex),
+                        archive_inspect_plaque_decal_texture: Some(archive_inspect_decal_tex),
                     });
                     log::info!("archive.glb GPU: {} primitive draw(s)", prims.len());
                 }
@@ -875,6 +918,7 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                     gpu_wrap,
                     sign_l,
                     sign_r,
+                    inspect_plaque,
                     page_left,
                     page_right,
                     shadow_caster_mask,
@@ -882,23 +926,41 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
             })
 }
 
-fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>, Vec<usize>, Vec<bool>) {
+fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (
+    Vec<TilePrimitiveGpu>,
+    Option<ShopEnvironmentGpu>,
+    Vec<usize>,
+    Vec<Vec<usize>>,
+    Vec<[f32; 3]>,
+    Vec<[f32; 3]>,
+    Vec<bool>,
+) {
     crate::gameplay_glb::with_gameplay_glb_cpu(|cpu_opt| {
                 let mut prims = Vec::new();
                 let mut gpu_wrap = None;
                 let mut gameplay_cash_in_prim_indices = Vec::new();
+                let mut gameplay_score_roller_prim_groups =
+                    vec![Vec::new(); GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
+                let mut gameplay_score_roller_pivots_doc =
+                    vec![[0.0, 0.0, 0.0]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
+                let mut gameplay_score_roller_axes_doc =
+                    vec![[1.0, 0.0, 0.0]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
+                let mut gameplay_score_roller_found = [false; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
                 let mut gameplay_env_shadow_caster_mask = Vec::new();
                 let Some(cpu) = cpu_opt else {
                     return (
                         prims,
                         gpu_wrap,
                         gameplay_cash_in_prim_indices,
+                        gameplay_score_roller_prim_groups,
+                        gameplay_score_roller_pivots_doc,
+                        gameplay_score_roller_axes_doc,
                         gameplay_env_shadow_caster_mask,
                     );
                 };
                 if !cpu.environment_primitives.is_empty() {
                     let mut room_tex_cache = RoomEnvTextureCache::new();
-                    let (_white_tex, white_albedo_view) = white_albedo(&ctx.device, &ctx.queue);
+                    let (_white_tex, white_albedo_view) = white_albedo(ctx.device, ctx.queue);
                     for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                         if let Some(ref name) = env_prim.gltf_node_name {
                             if matches!(
@@ -907,6 +969,24 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, 
                                     | crate::gameplay_glb::LABEL_CASH_IN
                             ) {
                                 gameplay_cash_in_prim_indices.push(i);
+                            }
+                            if let Some(raw_idx) = score_roller_layout::gameplay_score_roller_raw_index(name)
+                                && let Some(slot) =
+                                    score_roller_layout::gameplay_score_roller_slot_remap(raw_idx)
+                            {
+                                gameplay_score_roller_prim_groups[slot].push(i);
+                                gameplay_score_roller_found[slot] = true;
+                                if let Some(bind) = cpu.node_bind_poses.get(name) {
+                                    let pivot = bind.bind_world_doc.w_axis.truncate();
+                                    gameplay_score_roller_pivots_doc[slot] = pivot.to_array();
+                                    let axis = bind
+                                        .bind_world_doc
+                                        .transform_vector3(glam::Vec3::X)
+                                        .normalize_or_zero();
+                                    let axis =
+                                        if axis.length_squared() > 1e-6 { axis } else { glam::Vec3::X };
+                                    gameplay_score_roller_axes_doc[slot] = axis.to_array();
+                                }
                             }
                         }
                         gameplay_env_shadow_caster_mask.push(
@@ -995,7 +1075,7 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, 
                             pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
                         });
                     }
-                    let (_white_tex, gameplay_decal_view) = white_albedo(&ctx.device, &ctx.queue);
+                    let (_white_tex, gameplay_decal_view) = white_albedo(ctx.device, ctx.queue);
                     let uniform_buffers = create_room_env_camera_uniform_buffers(
                         ctx.device,
                         prims.len(),
@@ -1082,12 +1162,26 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, 
                         shadow_warp_bind_group,
                         bind_groups,
                         archive_sign_decal_texture: None,
+                    archive_inspect_plaque_decal_texture: None,
                     });
                     log::info!("gameplay.glb GPU: {} primitive draw(s)", prims.len());
+                    let mapped_rolls = gameplay_score_roller_found.iter().filter(|&&b| b).count();
+                    log::debug!(
+                        "gameplay.glb score rollers: all_found={} ({mapped_rolls}/{GAMEPLAY_SCORE_ROLLER_SLOT_COUNT})",
+                        mapped_rolls == GAMEPLAY_SCORE_ROLLER_SLOT_COUNT
+                    );
+                    if mapped_rolls != GAMEPLAY_SCORE_ROLLER_SLOT_COUNT {
+                        log::warn!(
+                            "gameplay.glb score rollers missing: found {mapped_rolls}/{GAMEPLAY_SCORE_ROLLER_SLOT_COUNT}"
+                        );
+                    }
                     return (
                         prims,
                         gpu_wrap,
                         gameplay_cash_in_prim_indices,
+                        gameplay_score_roller_prim_groups,
+                        gameplay_score_roller_pivots_doc,
+                        gameplay_score_roller_axes_doc,
                         gameplay_env_shadow_caster_mask,
                     );
                 }
@@ -1095,6 +1189,9 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, 
                     prims,
                     gpu_wrap,
                     gameplay_cash_in_prim_indices,
+                    gameplay_score_roller_prim_groups,
+                    gameplay_score_roller_pivots_doc,
+                    gameplay_score_roller_axes_doc,
                     gameplay_env_shadow_caster_mask,
                 )
             })
@@ -1360,13 +1457,14 @@ impl WgpuRenderer {
             frame_dt_ms,
             || {
                 let ctx = self.room_gpu_upload_ctx();
-                let (prims, gpu_wrap, sign_l, sign_r, page_left, page_right, shadow_mask) =
+                let (prims, gpu_wrap, sign_l, sign_r, inspect_plaque, page_left, page_right, shadow_mask) =
                     load_archive_room_gpu(ctx);
                 require_room_environment_loaded("archive.glb", &prims, &gpu_wrap);
                 self.archive_env_primitives = prims;
                 self.archive_environment = gpu_wrap;
                 self.archive_sign_left_prim_idx = sign_l;
                 self.archive_sign_right_prim_idx = sign_r;
+                self.archive_inspect_plaque_prim_idx = inspect_plaque;
                 self.archive_page_left_prim_indices = page_left;
                 self.archive_page_right_prim_indices = page_right;
                 self.archive_env_shadow_caster_mask = shadow_mask;
@@ -1399,11 +1497,18 @@ impl WgpuRenderer {
             frame_dt_ms,
             || {
                 let ctx = self.room_gpu_upload_ctx();
-                let (prims, gpu_wrap, cash_in, shadow_mask) = load_gameplay_room_gpu(ctx);
+                let (prims, gpu_wrap, cash_in, roller_groups, roller_pivots, roller_axes, shadow_mask) =
+                    load_gameplay_room_gpu(ctx);
                 require_room_environment_loaded("gameplay.glb", &prims, &gpu_wrap);
                 self.gameplay_env_primitives = prims;
                 self.gameplay_environment = gpu_wrap;
                 self.gameplay_cash_in_prim_indices = cash_in;
+                self.gameplay_score_roller_prim_groups = roller_groups;
+                self.gameplay_score_roller_pivots_doc = roller_pivots;
+                self.gameplay_score_roller_axes_doc = roller_axes;
+                self.gameplay_score_roller_drive_initialized
+                    .replace([false; 2]);
+                *self.gameplay_score_roller_stopped.borrow_mut() = false;
                 self.gameplay_env_shadow_caster_mask = shadow_mask;
                 self.gameplay_env_collision_meshes =
                     crate::gameplay_glb::with_gameplay_glb_cpu(|o| {

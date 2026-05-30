@@ -5,8 +5,8 @@ use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay
 use crate::game::engine::GameEngine;
 use crate::scenes::shop::PackCelebration;
 use crate::scenes::{
-    ButtonAabbLabScene, ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter,
-    TixelsScene,
+    ButtonAabbLabScene, CascadeLabScene, RollerLabScene, ShowcasePresenter, ShowcaseScene, TileAnchorLabScene,
+    TilePackPresenter, TixelsScene,
 };
 use rand::RngExt;
 
@@ -66,6 +66,12 @@ impl App {
                     "Revealed Kokushi Musō (available_yaku + journal/guide + Qilin ribbon)"
                 );
             }
+            DebugAction::UnlockAllTilesetsAndSeasons => {
+                self.progress.cheat_unlock_all_tilesets_and_seasons();
+                self.run.apply_progression(&self.progress);
+                let _ = persistence::save_profile(self.active_profile, &self.progress);
+                log::debug!("Unlocked all tile materials and seasons");
+            }
             DebugAction::SetYen(amount) => {
                 self.run.set_run_yen_direct(amount as i32, None);
                 log::debug!("Set yen to {}", amount);
@@ -110,6 +116,18 @@ impl App {
             DebugAction::ToggleShowFps => {
                 self.debug.show_fps = !self.debug.show_fps;
                 log::debug!("Show FPS: {}", self.debug.show_fps);
+            }
+            DebugAction::ToggleMainMenuPrideRainbow => {
+                self.debug.main_menu_pride_rainbow_debug =
+                    !self.debug.main_menu_pride_rainbow_debug;
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.main_menu_pride_rainbow_debug =
+                        self.debug.main_menu_pride_rainbow_debug;
+                }
+                log::debug!(
+                    "Main menu pride rainbow debug: {}",
+                    self.debug.main_menu_pride_rainbow_debug
+                );
             }
             DebugAction::OpenDebugVisibility => {
                 if self.debug.visibility_overlay.is_some() {
@@ -184,6 +202,21 @@ impl App {
                     log::debug!("Opened hallway vertex warp debug overlay");
                 }
             }
+            DebugAction::OpenFlameDebug => {
+                if self.debug.flame_debug_overlay.is_some() {
+                    self.debug.flame_debug_overlay = None;
+                    log::debug!("Closed flame debug overlay");
+                } else {
+                    let tuning = self
+                        .renderer
+                        .as_ref()
+                        .map(|r| r.flame_tuning)
+                        .unwrap_or_else(crate::render::flame_tuning::FlameTuning::load);
+                    self.debug.flame_debug_overlay =
+                        Some(crate::render::flame_debug_overlay::FlameDebugOverlay::new(tuning));
+                    log::debug!("Opened flame debug overlay");
+                }
+            }
             DebugAction::ProfileGpu => {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.start_gpu_profile(100);
@@ -195,13 +228,6 @@ impl App {
             DebugAction::ProfileCpu => {
                 self.cpu_profiler.start(100);
                 log::debug!("CPU profile capture queued (100 frames)");
-            }
-            DebugAction::BlowWindGust => {
-                // Inject the same UiAction that pressing `B` would push,
-                // so the gameplay scene's existing wind-trigger branch
-                // picks it up on the next frame.
-                self.mouse_actions.push(UiAction::DebugBlowWind);
-                log::debug!("Blow wind gust queued");
             }
             DebugAction::ToggleWorldAxes => {
                 // Forward to the gameplay scene's existing toggle branch
@@ -215,52 +241,6 @@ impl App {
                     log::debug!("Rerolled shop stock (free)");
                 }
                 _ => log::warn!("Reroll Shop ignored — not in shop scene"),
-            },
-            DebugAction::StartShopEyeballTravel => match &mut self.scene {
-                Scene::Shop(s) => {
-                    let clip_loaded = crate::render::room_glb::with_shop_glb_cpu(|opt| {
-                        opt.is_some_and(|cpu| cpu.gltf_anim_library.has_clip("eyeball_travel"))
-                    });
-                    let gpu_clip_loaded = self
-                        .renderer
-                        .as_ref()
-                        .is_some_and(|r| r.shop_gltf_anim_has_clip("eyeball_travel"));
-                    let prim_index_loaded = self
-                        .renderer
-                        .as_ref()
-                        .is_some_and(|r| r.shop_eyeball_prim_index_loaded());
-                    if s.debug_start_eyeball_travel() {
-                        log::info!(
-                            "Started shop eyeball_travel playback at t={:.3}s (clip_loaded={clip_loaded}, gpu_clip_loaded={gpu_clip_loaded}, gpu_eyeball_prim_index_loaded={prim_index_loaded})",
-                            s.eyeball_travel_playback_sec().unwrap_or(0.0)
-                        );
-                    } else {
-                        log::warn!(
-                            "Play Eyeball Travel failed: clip_loaded={clip_loaded}, gpu_clip_loaded={gpu_clip_loaded}"
-                        );
-                    }
-                }
-                _ => log::warn!("Start Eyeball Travel ignored — not in shop scene"),
-            },
-            DebugAction::TogglePauseShopEyeballTravel => match &mut self.scene {
-                Scene::Shop(s) => match s.debug_toggle_pause_eyeball_travel() {
-                    Some(true) => log::info!("Paused shop eyeball_travel playback"),
-                    Some(false) => log::info!("Resumed shop eyeball_travel playback"),
-                    None => log::warn!(
-                        "Pause/Resume Eyeball Travel ignored — clip is not active (start it first)"
-                    ),
-                },
-                _ => log::warn!("Pause/Resume Eyeball Travel ignored — not in shop scene"),
-            },
-            DebugAction::RestartShopEyeballTravel => match &mut self.scene {
-                Scene::Shop(s) => {
-                    if s.debug_restart_eyeball_travel() {
-                        log::info!("Restarted shop eyeball_travel playback at t=0.000s");
-                    } else {
-                        log::warn!("Restart Eyeball Travel failed — clip is not loaded");
-                    }
-                }
-                _ => log::warn!("Restart Eyeball Travel ignored — not in shop scene"),
             },
             DebugAction::OpenPack => match &mut self.scene {
                 Scene::Shop(s) => {
@@ -306,6 +286,8 @@ impl App {
                         Scene::TutorialSummary(_) => "TutorialSummary",
                         Scene::TransitionPlayground(_) => "TransitionPlayground",
                         Scene::AnimationLab(_) => "AnimationLab",
+                        Scene::RollerLab(_) => "RollerLab",
+                        Scene::CascadeLab(_) => "CascadeLab",
                         Scene::RumbleLab(_) => "RumbleLab",
                         Scene::Tixels(_) => "Tixels",
                         Scene::YakuJournal(_) => "YakuJournal",
@@ -352,6 +334,17 @@ impl App {
                 self.overlay_stack
                     .push(Scene::AnimationLab(AnimationLabScene::new(true)));
                 log::debug!("Opened animation lab");
+            }
+            DebugAction::OpenRollerLab => {
+                self.overlay_stack
+                    .push(Scene::RollerLab(RollerLabScene::new(true)));
+                log::debug!("Opened roller lab");
+            }
+            DebugAction::OpenCascadeLab => {
+                self.overlay_stack.push(Scene::CascadeLab(Box::new(
+                    CascadeLabScene::new(true, self.cascade_tuning.clone()),
+                )));
+                log::debug!("Opened cascade lab");
             }
             DebugAction::OpenRumbleLab => {
                 self.overlay_stack

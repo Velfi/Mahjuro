@@ -32,7 +32,7 @@ impl WgpuRenderer {
     ) {
         use crate::draw_cmd::Object3dKind;
         use crate::scene_glue::bowl_model_matrix;
-        use mahjuro_types::shop_pick::YAKU_JOURNAL_BOOK_PICK_ID;
+        use mahjuro_types::shop_pick::{GUIDE_BOOK_PICK_ID, YAKU_JOURNAL_BOOK_PICK_ID};
 
         let w = camera.w;
         let h = camera.h;
@@ -89,6 +89,26 @@ impl WgpuRenderer {
                 .insert(YAKU_JOURNAL_BOOK_PICK_ID, model);
             self.proj.aux_dish_rects.push((
                 Some(YAKU_JOURNAL_BOOK_PICK_ID),
+                camera.project_unit_cube_rect(model),
+            ));
+        }
+        if let Some(book) = &picks.guidebook {
+            let center = pixel_to_world(
+                w,
+                h,
+                book.pos[0],
+                book.pos[1],
+                book.pos[2] + book.extents[1] * 0.5,
+            );
+            let model = translate_rot_scale(
+                center,
+                rot_fixed_axes_deg_matrix(book.rotation_matrix()),
+                glam::Vec3::from(book.extents),
+            );
+            self.last_primitive_pick_models
+                .insert(GUIDE_BOOK_PICK_ID, model);
+            self.proj.aux_dish_rects.push((
+                Some(GUIDE_BOOK_PICK_ID),
                 camera.project_unit_cube_rect(model),
             ));
         }
@@ -501,11 +521,13 @@ impl WgpuRenderer {
                             // the page surface; open_amount = 1 swings
                             // it ~170° to expose the page.
                             let cover_inst = &mut self.book_cover_instances[slot_i];
-                            let label_hash = tablet_label_hash(spine_label, 512, 192);
+                            let (decal_w, decal_h) =
+                                crate::scene_glue::book_cover_decal_dimensions();
+                            let label_hash = tablet_label_hash(spine_label, decal_w, decal_h);
                             if cover_inst.decal_texture.is_none()
                                 || cover_inst.decal_label_hash != label_hash
                             {
-                                let rgba = crate::decal::rasterize_wood_tablet_decal(
+                                let rgba = crate::decal::rasterize_book_cover_decal(
                                     spine_label,
                                     self.ui_font.as_ref(),
                                 );
@@ -518,8 +540,8 @@ impl WgpuRenderer {
                                         relief_view: &self.lit_mesh_relief_default_view,
                                     },
                                     &rgba,
-                                    512,
-                                    192,
+                                    decal_w,
+                                    decal_h,
                                 );
                                 cover_inst.decal_label_hash = label_hash;
                             }
@@ -852,12 +874,7 @@ impl WgpuRenderer {
                                 });
                             }
                             let _ = pick_id;
-                            self.push_object3d_draw(
-                                object3d_draw_list,
-                                object3d_shadow_draw_list,
-                                DrawKind::BossIcon,
-                                slot_i,
-                            );
+                            object3d_draw_list.push((DrawKind::BossIcon, slot_i));
                         }
                         Object3dKind::Pack { kind, pick_id } => {
                             if obj3d_pack_slot >= self.pack_instances.len() {

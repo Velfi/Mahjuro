@@ -1059,6 +1059,17 @@ fn push_pack_object3d_at(
     }]);
 }
 
+#[inline]
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0).max(1e-6)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+#[inline]
+fn ease_out_cubic(x: f32) -> f32 {
+    1.0 - (1.0 - x).powi(3)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1150,15 +1161,4 @@ mod tests {
             "pack center {center:?} should sit in front of the shop camera"
         );
     }
-}
-
-#[inline]
-fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
-    let t = ((x - edge0) / (edge1 - edge0).max(1e-6)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-#[inline]
-fn ease_out_cubic(x: f32) -> f32 {
-    1.0 - (1.0 - x).powi(3)
 }

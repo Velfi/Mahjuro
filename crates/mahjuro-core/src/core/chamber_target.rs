@@ -5,8 +5,8 @@
 
 use crate::core::rules::ChamberKind;
 
-/// Spring-stake chip base for wing 1 Small Chamber (`base_target` before stake mult).
-pub const DEFAULT_BASE_TARGET: u32 = 500;
+/// Spring-season chip base for wing 1 Small Chamber (`base_target` before season mult).
+pub const DEFAULT_BASE_TARGET: u32 = 300;
 
 /// Per-wing multiplier on the run's `base_target`.
 pub const TARGET_SCALING: f32 = 2.0;

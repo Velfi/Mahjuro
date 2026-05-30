@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::consumable::Consumable;
 use crate::core::rules::ChamberKind;
 use crate::core::scoring::{ScoreBreakdown, StepKind};
-use crate::core::stake::Stake;
+use crate::core::season::Season;
 use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::YakuKind;
 
@@ -63,7 +63,7 @@ pub struct ChronicleScoreSnapshot {
     pub dora_chips: i32,
     pub relic_chips: i32,
     pub boss_mult_factor: f64,
-    pub stake_mult_factor: f64,
+    pub season_mult_factor: f64,
     pub streak_mult_factor: f64,
     pub total: u64,
 }
@@ -286,8 +286,8 @@ impl RunChronicle {
         }
     }
 
-    pub fn set_terminal_breakdown(&mut self, breakdown: &ScoreBreakdown, stake: Stake) {
-        self.terminal_score = Some(score_snapshot_from_breakdown(breakdown, stake));
+    pub fn set_terminal_breakdown(&mut self, breakdown: &ScoreBreakdown, season: Season) {
+        self.terminal_score = Some(score_snapshot_from_breakdown(breakdown, season));
     }
 
     pub fn finalize_for_outcome(
@@ -361,7 +361,7 @@ pub fn signature_from_breakdown(breakdown: &ScoreBreakdown, tiles: &[Tile]) -> S
 
 fn score_snapshot_from_breakdown(
     breakdown: &ScoreBreakdown,
-    stake: Stake,
+    season: Season,
 ) -> ChronicleScoreSnapshot {
     let mut yaku_chips = 0i32;
     let mut dora_chips = 0i32;
@@ -404,7 +404,7 @@ fn score_snapshot_from_breakdown(
         dora_chips,
         relic_chips,
         boss_mult_factor: boss_mult,
-        stake_mult_factor: stake.base_target_mult() as f64,
+        season_mult_factor: season.base_target_mult() as f64,
         streak_mult_factor: streak_mult.max(1.0),
         total: breakdown.total,
     }

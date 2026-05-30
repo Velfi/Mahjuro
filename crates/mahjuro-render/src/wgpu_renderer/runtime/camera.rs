@@ -196,7 +196,7 @@ impl WgpuRenderer {
     }
 
     /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline` (`CameraUniform.hdr_tonemap`)
-    /// and `lit_mesh` (`SsrGlobals.felt`). Same `RoomEnvLightingTune` as the room.
+    /// and `lit_mesh` (`SsrGlobals.hdr_tonemap`). Same `RoomEnvLightingTune` as the room.
     pub(super) fn tile_hdr_tonemap(&self, frame: &crate::draw_cmd::UiFrame) -> [f32; 4] {
         use crate::draw_cmd::DrawCmd;
         let k = self.active_scene_key;
@@ -310,9 +310,9 @@ impl WgpuRenderer {
         frame: &crate::draw_cmd::UiFrame,
     ) -> SsrGlobals {
         let tm = self.tile_hdr_tonemap(frame);
-        let felt_y = tm[0];
-        let felt_z = if felt_y > 0.5 { tm[1] } else { 0.0 };
-        let felt_w = if felt_y > 0.5 { tm[2] } else { 0.0 };
+        let hdr_path = tm[0];
+        let linear_exposure = if hdr_path > 0.5 { tm[1] } else { 0.0 };
+        let ambient_scale = if hdr_path > 0.5 { tm[2] } else { 0.0 };
         let shop_like = self.active_scene_key == Some("shop")
             || (self.active_scene_key == Some("showcase")
                 && frame
@@ -345,7 +345,7 @@ impl WgpuRenderer {
                 ssr_stride,
                 ssr_max_steps,
             ],
-            felt: [self.felt_shader_lod, felt_y, felt_z, felt_w],
+            hdr_tonemap: [hdr_path, linear_exposure, ambient_scale, 0.0],
             shop_punctual: [shop_punctual_inv_doc, shop_punctual_display_case, 0.0, 0.0],
         }
     }
@@ -366,6 +366,8 @@ impl WgpuRenderer {
             bytemuck::bytes_of(&FlameViewUniform {
                 view_proj: cam.view_proj_arr,
                 view_pos: [cam.cam_pos.x, cam.cam_pos.y, cam.cam_pos.z, 1.0],
+                tuning: self.flame_tuning.shader_fields(),
+                _pad: [0.0; 3],
             }),
         );
     }

@@ -27,6 +27,19 @@ impl WgpuRenderer {
         let project_to_screen =
             |world: glam::Vec3| -> (f32, f32) { camera.project_to_screen(world) };
         use crate::primitive::{MeshId, resolve_material, shape_orientation};
+        if *shape == MeshId::Coin {
+            self.place_object3d_gltf_coin(
+                frame,
+                camera,
+                obj,
+                pick_id,
+                obj3d_primitive_slot,
+                object3d_draw_list,
+                object3d_shadow_draw_list,
+                shadow,
+            );
+            return;
+        }
         // Slot bookkeeping is per-shape so two
         // primitives of different shapes don't
         // fight for the same pool index.
@@ -261,5 +274,93 @@ impl WgpuRenderer {
                 rails_slot,
             );
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn place_object3d_gltf_coin(
+        &mut self,
+        frame: &crate::draw_cmd::UiFrame,
+        camera: &CameraFrame,
+        obj: &crate::draw_cmd::Object3d,
+        pick_id: &Option<u32>,
+        obj3d_primitive_slot: &mut rustc_hash::FxHashMap<crate::primitive::MeshId, usize>,
+        object3d_draw_list: &mut Vec<(DrawKind, usize)>,
+        object3d_shadow_draw_list: &mut Vec<(DrawKind, usize)>,
+        shadow: &mut Option<&mut super::shadow_setup::Object3dShadowCtx<'_>>,
+    ) {
+        use crate::gltf_prop::{GLTF_PROP_BODY_KIND, make_gltf_prop_gpu};
+        use crate::primitive::MeshId;
+
+        let cursor = obj3d_primitive_slot.entry(MeshId::Coin).or_insert(0);
+        let slot_i = *cursor;
+        *cursor += 1;
+
+        let orient = crate::primitive::shape_orientation(MeshId::Coin);
+        let model = translate_rot_scale(
+            pixel_to_world(camera.w, camera.h, obj.pos[0], obj.pos[1], obj.pos[2]),
+            obj.rotation_matrix() * orient,
+            glam::Vec3::from(obj.extents),
+        );
+        if let Some(pid) = pick_id {
+            self.last_primitive_pick_models.insert(*pid, model);
+        }
+
+        while self.coin_glb_instances.len() < slot_i + 1 {
+            self.coin_glb_instances.push(make_gltf_prop_gpu(
+                &self.device,
+                &self.tile_material_layout,
+                &self.shadow_caster_layout,
+                &self.coin_glb_primitives,
+                &self.lit_mesh_white_view,
+                &self.tile_env_distortion_placeholder,
+            ));
+        }
+
+        let mut hdr_tonemap = self.tile_hdr_tonemap(frame);
+        hdr_tonemap[3] =
+            self.room_punctual_inv_doc_scale(camera, frame.scene_lighting.embedded_gltf_punctual);
+        let inst = &mut self.coin_glb_instances[slot_i];
+        self.queue.write_buffer(
+            &inst.uniform_buffer,
+            0,
+            bytemuck::bytes_of(&super::super::CameraUniform {
+                view_proj: camera.view_proj_arr,
+                model: model.to_cols_array(),
+                base_color_factor: [
+                    obj.color[0],
+                    obj.color[1],
+                    obj.color[2],
+                    GLTF_PROP_BODY_KIND,
+                ],
+                cam_pos: camera.cam_pos.to_array(),
+                tile_seed: 0.0,
+                decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+                hdr_tonemap,
+            }),
+        );
+
+        let light_view_proj = shadow
+            .as_ref()
+            .map(|s| s.light_view_proj)
+            .unwrap_or(glam::Mat4::IDENTITY.to_cols_array());
+        let su = crate::lit_mesh::ShadowCasterUniform {
+            light_view_proj,
+            model: model.to_cols_array(),
+        };
+        if inst.cached_shadow_caster != su {
+            inst.cached_shadow_caster = su;
+            self.queue
+                .write_buffer(&inst.shadow_uniform_buffer, 0, bytemuck::bytes_of(&su));
+            if let Some(shadow) = shadow.as_mut() {
+                *shadow.changed = true;
+            }
+        }
+
+        self.push_object3d_draw(
+            object3d_draw_list,
+            object3d_shadow_draw_list,
+            DrawKind::GltfCoin,
+            slot_i,
+        );
     }
 }

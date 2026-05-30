@@ -19,7 +19,7 @@ Outputs `pack_manifest.json`, `mahjuro-pack-shared.zip`, `mahjuro-pack-gameplay.
 - **`music` (lazy):** background music + win/loss jingles under `audio/music/` (decoded on first play, not at `AudioManager::new`). Listed first so the `audio/music/` prefix wins over the `shared` pack's broader `audio/` prefix.
 - **`scene_main_menu` (lazy):** `textures/scenes/main_menu/` — hub façade art and future menu-only models. Listed before `shared`/`gameplay` so this prefix wins over the broader `textures/`.
 - **`shared` (eager):** `fonts/`, `textures/tile_sets/` (tile atlases), and the rest of `audio/` (sound effects) — needed across scenes.
-- **`gameplay` (eager):** `data/`, the rest of `textures/` (relics, talismans, packs, kenney input prompts, …), `steam_assets/`, and `3d/` (.glb models) shipped with the game.
+- **`gameplay` (eager):** `data/` (including pre-baked relic RLC1 under `data/relic_baked/`), the rest of `textures/` except source relic PNGs (`textures/relics/` — bake-time only), `steam_assets/`, and `3d/` (.glb models) shipped with the game.
 
 ### Bake options
 

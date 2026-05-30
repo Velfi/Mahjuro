@@ -423,7 +423,19 @@ impl App {
 
         // 3b. If the tuning overlay is open, intercept input.
         if let Some(ref mut overlay) = self.debug.tuning_overlay {
-            match overlay.update(&actions) {
+            let (ww, wh) = (
+                self.last_drawable_px.width as f32,
+                self.last_drawable_px.height as f32,
+            );
+            let mouse = self.input.as_ref().map(|i| {
+                (
+                    i.last_cursor.0,
+                    i.last_cursor.1,
+                    self.mouse_clicked,
+                    self.mouse_left_down,
+                )
+            });
+            match overlay.update(&actions, mouse, ww, wh) {
                 TuningResult::Stay => {
                     // Apply live tuning changes.
                     self.cascade_tuning = overlay.tuning.clone();
@@ -444,6 +456,7 @@ impl App {
                     }
                 }
             }
+            self.mouse_clicked = false;
             actions.clear();
             button_clicks.clear();
         }
@@ -452,7 +465,7 @@ impl App {
         if let Some(mut overlay) = self.debug.sfx_test_overlay.take() {
             let mouse = self.input.as_ref().map(|i| {
                 let (mx, my) = i.last_cursor;
-                (mx, my, self.mouse_clicked)
+                (mx, my, self.mouse_clicked, self.mouse_left_down)
             });
             let close = overlay.update(&actions, &mut self.audio, mouse);
             self.mouse_clicked = false;
@@ -467,8 +480,19 @@ impl App {
 
         // 3b'''. If the camera debug overlay is open, intercept input.
         if let Some(mut overlay) = self.debug.camera_debug_overlay.take() {
-            let wh = self.last_drawable_px.height as f32;
-            let close = overlay.update(&actions, wh);
+            let (ww, wh) = (
+                self.last_drawable_px.width as f32,
+                self.last_drawable_px.height as f32,
+            );
+            let mouse = self.input.as_ref().map(|i| {
+                (
+                    i.last_cursor.0,
+                    i.last_cursor.1,
+                    self.mouse_clicked,
+                    self.mouse_left_down,
+                )
+            });
+            let close = overlay.update(&actions, mouse, ww, wh);
             if !close {
                 self.debug.camera_debug_overlay = Some(overlay);
             } else {
@@ -617,12 +641,73 @@ impl App {
             button_clicks.clear();
         }
 
+        if let Some(mut overlay) = self.debug.flame_debug_overlay.take() {
+            use crate::render::flame_debug_overlay::FlameDebugResult;
+            use crate::render::flame_tuning::FlameTuning;
+            let (ww, wh) = (
+                self.last_drawable_px.width as f32,
+                self.last_drawable_px.height as f32,
+            );
+            let mouse = self.input.as_ref().map(|i| {
+                (
+                    i.last_cursor.0,
+                    i.last_cursor.1,
+                    self.mouse_clicked,
+                    self.mouse_left_down,
+                )
+            });
+            let mut close = false;
+            match overlay.update(&actions, mouse, ww, wh) {
+                FlameDebugResult::Stay => {}
+                FlameDebugResult::Reset => {
+                    overlay.tuning = FlameTuning::shipping_default();
+                    if let Err(e) = FlameTuning::clear_saved() {
+                        log::warn!("Failed to clear FlameTuning override: {e}");
+                    } else {
+                        log::debug!("Cleared FlameTuning override");
+                    }
+                }
+                FlameDebugResult::Save => {
+                    if let Err(e) = overlay.tuning.save() {
+                        log::warn!("Failed to save FlameTuning override: {e}");
+                    } else {
+                        log::debug!("Saved FlameTuning override");
+                    }
+                }
+                FlameDebugResult::Close => close = true,
+            }
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.flame_tuning = overlay.tuning;
+            }
+            self.mouse_clicked = false;
+            if !close {
+                self.debug.flame_debug_overlay = Some(overlay);
+            } else {
+                log::debug!("Closed flame debug overlay");
+            }
+            actions.clear();
+            button_clicks.clear();
+        }
+
         // 3b''. If the debug visibility overlay is open, intercept
         // input. Mirror the toggle state back to App fields each
         // frame so the gameplay scene + retain filter pick up live
         // changes immediately.
         if let Some(mut overlay) = self.debug.visibility_overlay.take() {
-            let result = overlay.update(&actions);
+            let (ww, wh) = (
+                self.last_drawable_px.width as f32,
+                self.last_drawable_px.height as f32,
+            );
+            let mouse = self.input.as_ref().map(|i| {
+                (
+                    i.last_cursor.0,
+                    i.last_cursor.1,
+                    self.mouse_clicked,
+                    self.mouse_left_down,
+                )
+            });
+            let result = overlay.update(&actions, mouse, ww, wh);
+            self.mouse_clicked = false;
             self.debug.visibility = overlay.vis;
             if result == DebugVisResult::Stay {
                 self.debug.visibility_overlay = Some(overlay);
@@ -692,12 +777,16 @@ impl App {
             .map(|i| i.last_cursor)
             .unwrap_or((0.0, 0.0));
         let loading_done = match &self.scene {
-            // Splash may dismiss as soon as the window has a renderer and every
-            // player tileset has its offline showcase decal atlas PNG on disk.
-            Scene::Splash(_) => self
-                .renderer
-                .as_ref()
-                .is_some_and(|r| r.showcase_decal_atlases_baked_for_all_player_tilesets()),
+            // Splash stays up until showcase atlases exist and the main-menu offline
+            // shadow map is on the GPU (lazy room shadows — see prepare_splash_hub_boot).
+            Scene::Splash(_) => {
+                if let Some(r) = self.renderer.as_mut() {
+                    r.prepare_splash_hub_boot();
+                }
+                self.renderer
+                    .as_ref()
+                    .is_some_and(|r| r.splash_hub_boot_ready())
+            }
             _ => self.renderer.as_ref().is_none_or(|r| !r.is_loading()),
         };
         // Compute every scene pick once per frame. The same four results
@@ -739,8 +828,25 @@ impl App {
             FramePicks::default()
         };
         let picked_shop_object = self.frame_picks.shop;
-        let picked_gameplay_object = self.frame_picks.gameplay;
-        let picked_hand_tile_for_update = self.frame_picks.hand;
+        let cascade_lab_open = self
+            .overlay_stack
+            .last()
+            .is_some_and(|s| matches!(s, Scene::CascadeLab(_)));
+        let picked_gameplay_object = if cascade_lab_open {
+            match self.frame_picks.gameplay {
+                Some(crate::render::wgpu_renderer::GameplayPick::CashInButton) => {
+                    Some(crate::render::wgpu_renderer::GameplayPick::CashInButton)
+                }
+                _ => None,
+            }
+        } else {
+            self.frame_picks.gameplay
+        };
+        let picked_hand_tile_for_update = if cascade_lab_open {
+            None
+        } else {
+            self.frame_picks.hand
+        };
         let mut scroll_lines = std::mem::take(&mut self.scroll_delta);
         // Right stick vertical scroll is opt-in by scene: Yaku Journal,
         // Chronicle dashboard/listing, and Credits. Other scenes keep right stick free.
@@ -778,6 +884,9 @@ impl App {
             .unwrap_or((0.0, 0.0));
         self.cpu_profiler
             .begin(crate::render::cpu_profiler::CpuStage::Update);
+        if let Some(scenes::Scene::CascadeLab(lab)) = self.overlay_stack.last_mut() {
+            self.cascade_tuning = lab.tuning.clone();
+        }
         let update_result = if self.overlay_stack.is_empty() {
             self.scene.update(UpdateCtx {
                 actions: &actions,
@@ -837,6 +946,11 @@ impl App {
                     .as_ref()
                     .map(|r| r.rain_tuning)
                     .unwrap_or_else(crate::render::rain_tuning::RainTuning::load),
+                flame_tuning: self
+                    .renderer
+                    .as_ref()
+                    .map(|r| r.flame_tuning)
+                    .unwrap_or_else(crate::render::flame_tuning::FlameTuning::load),
             })
         } else {
             let showcase_shop_inspect = self.overlay_stack.last().is_some_and(|top| {
@@ -924,10 +1038,16 @@ impl App {
                         .as_ref()
                         .map(|r| r.rain_tuning)
                         .unwrap_or_else(crate::render::rain_tuning::RainTuning::load),
+                    flame_tuning: self
+                        .renderer
+                        .as_ref()
+                        .map(|r| r.flame_tuning)
+                        .unwrap_or_else(crate::render::flame_tuning::FlameTuning::load),
                 })
         };
         if matches!(&self.scene, crate::scenes::Scene::MainMenuExterior(_)) {
             self.effect_layers.rain = true;
+            self.effect_layers.starfield = true;
         }
         self.cpu_profiler
             .end(crate::render::cpu_profiler::CpuStage::Update);
@@ -975,7 +1095,11 @@ impl App {
                 if was_credits {
                     let tag = SceneTag::from(&self.scene);
                     let gameplay_ordeal_chamber = tag == SceneTag::Gameplay
-                        && self.run.chamber == crate::core::rules::ChamberKind::Ordeal;
+                        && matches!(
+                            &self.scene,
+                            Scene::Gameplay(g) if g.music_chamber_kind(self.run.chamber)
+                                == crate::core::rules::ChamberKind::Ordeal
+                        );
                     sync_music_for_scene(&mut self.audio, tag, gameplay_ordeal_chamber);
                 }
             }
@@ -1103,12 +1227,20 @@ impl App {
         // the scoring cascade play out, fire it now that the gameplay
         // scene has gone idle.
         if self.deferred_round_end.is_some() {
-            let cascade_done = match &self.scene {
-                Scene::Gameplay(g) => !g.is_animating(),
-                _ => true,
-            };
-            if cascade_done && let Some(ev) = self.deferred_round_end.take() {
-                self.handle_round_end_event(ev);
+            let cascade_lab = self
+                .overlay_stack
+                .last()
+                .is_some_and(|s| matches!(s, Scene::CascadeLab(_)));
+            if self.run.suppress_chamber_resolution || cascade_lab {
+                self.deferred_round_end = None;
+            } else {
+                let cascade_done = match &self.scene {
+                    Scene::Gameplay(g) => !g.is_animating(),
+                    _ => true,
+                };
+                if cascade_done && let Some(ev) = self.deferred_round_end.take() {
+                    self.handle_round_end_event(ev);
+                }
             }
         }
 
@@ -1129,6 +1261,12 @@ impl App {
                     }
                     let from_tag = SceneTag::from(&self.scene);
                     let to_tag = SceneTag::from(&next);
+                    let gameplay_ordeal_chamber = to_tag == SceneTag::Gameplay
+                        && matches!(
+                            &next,
+                            Scene::Gameplay(g) if g.music_chamber_kind(self.run.chamber)
+                                == crate::core::rules::ChamberKind::Ordeal
+                        );
                     // Route the new scene to the target recorded
                     // when the transition started, not whatever is
                     // on top now — overlays may have been pushed
@@ -1150,8 +1288,6 @@ impl App {
                     if let Some(scene) = Self::saved_resume_scene_for(&self.scene) {
                         self.resume_scene = scene;
                     }
-                    let gameplay_ordeal_chamber = to_tag == SceneTag::Gameplay
-                        && self.run.chamber == crate::core::rules::ChamberKind::Ordeal;
                     apply_post_scene_transition_effects(PostSceneTransitionCtx {
                         from: from_tag,
                         to: to_tag,

@@ -192,8 +192,8 @@ impl Tile {
             Suit::Flower => match self.rank {
                 1 => "Plum Blossom".into(),
                 2 => "Orchid".into(),
-                3 => "Chrysanthemum".into(),
-                4 => "Lily Pad".into(),
+                3 => "Lily Pad".into(),
+                4 => "Chrysanthemum".into(),
                 _ => format!("Flower {}", self.rank),
             },
             Suit::Season => match self.rank {

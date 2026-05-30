@@ -1,16 +1,8 @@
-//! Relic PNG decode for the runtime renderer (embedded assets → [`DecodedRelicImage`]
-//! and 2D [`ImageQuad`](crate::draw_cmd::ImageQuad) icons).
+//! Relic load/decode for the runtime renderer and the offline RLC1 baker.
 //!
-//! File naming lives on [`RelicId`](mahjuro_core::core::relic::RelicId):
-//! - **Albedo (color):** `textures/relics/<slug>.png`, else `textures/relics/<slug>_object.png`.
-//!   Object PNGs ship with a seamless backdrop (the offline pipeline is
-//!   non-destructive — see `scripts/generate_relic_art.py`). This loader cuts
-//!   their alpha against the mask silhouette at decode time.
-//! - **Mesh silhouette:** `<slug>_mask.png` under `textures/relics/`.
-//!   Used both for extruded cap geometry and for cutting the albedo's alpha.
-//!   If missing, the albedo's own alpha channel is used as-is.
-//! - **Relief (linear height + specular):** `<slug>_height.png` with optional
-//!   `<slug>_specular.png` packed into the G channel, or a 1×1 mid-gray placeholder
+//! **Runtime** loads pre-baked `data/relic_baked/<slug>.rlc` only (see [`crate::relic_bake`]).
+//! Source PNGs under `textures/relics/` are bake-time inputs for `mahjuro-bake-relics` and are
+//! not shipped in release asset packs.
 
 use std::sync::mpsc;
 use std::time::Instant;
@@ -140,9 +132,8 @@ fn decode_relic_albedo_masked(id: RelicId) -> Option<(image::RgbaImage, Option<i
 
 /// Mask-cut relic albedo for 2D [`ImageQuad`](crate::draw_cmd::ImageQuad) icons.
 pub(crate) fn decode_relic_icon_rgba(id: RelicId) -> Option<(Vec<u8>, u32, u32)> {
-    let (img, _) = decode_relic_albedo_masked(id)?;
-    let (w, h) = img.dimensions();
-    Some((img.into_raw(), w, h))
+    let msg = crate::relic_bake::load_baked_relic(id).ok()?;
+    Some((msg.rgba, msg.width, msg.height))
 }
 
 fn load_relic_albedo_rgba(primary: &str, object: &str) -> Option<image::RgbaImage> {
@@ -158,7 +149,7 @@ fn load_relic_albedo_rgba(primary: &str, object: &str) -> Option<image::RgbaImag
     }
 }
 
-/// Decode one relic from embedded assets. Returns `None` if neither albedo path exists.
+/// Decode one relic from source PNGs. Used by `mahjuro-bake-relics` only — not at runtime.
 pub fn decode_relic_assets(
     id: RelicId,
     name: &'static str,
@@ -234,15 +225,7 @@ pub fn decode_relic_assets(
 
 /// Background thread: load every relic once, send [`DecodedRelicImage`] to the renderer.
 pub(crate) fn spawn_relic_loader() -> mpsc::Receiver<DecodedRelicImage> {
-    if crate::relic_bake::all_relic_bakes_available() {
-        spawn_relic_bake_loader()
-    } else {
-        log::warn!(
-            "relic RLC1 bakes missing — falling back to PNG decode; run \
-             `cargo build` (mahjuro-bake-relics) or `cargo run -p mahjuro-render --bin mahjuro-bake-relics`"
-        );
-        spawn_relic_png_loader()
-    }
+    spawn_relic_bake_loader()
 }
 
 fn spawn_relic_bake_loader() -> mpsc::Receiver<DecodedRelicImage> {
@@ -253,6 +236,7 @@ fn spawn_relic_bake_loader() -> mpsc::Receiver<DecodedRelicImage> {
             let t_thread = Instant::now();
             let mut decoded = 0usize;
             for d in all_relic_defs() {
+                let path = crate::relic_bake::baked_relic_asset_path(d.id);
                 match crate::relic_bake::load_baked_relic(d.id) {
                     Ok(msg) => {
                         decoded += 1;
@@ -261,10 +245,7 @@ fn spawn_relic_bake_loader() -> mpsc::Receiver<DecodedRelicImage> {
                         }
                     }
                     Err(e) => {
-                        log::warn!(
-                            "baked relic {:?} failed to load: {e:#}",
-                            d.id
-                        );
+                        log::error!("baked relic {path}: {e:#}");
                     }
                 }
             }
@@ -277,45 +258,5 @@ fn spawn_relic_bake_loader() -> mpsc::Receiver<DecodedRelicImage> {
             );
         })
         .expect("failed to spawn relic-loader thread");
-    rx
-}
-
-fn spawn_relic_png_loader() -> mpsc::Receiver<DecodedRelicImage> {
-    let (tx, rx) = mpsc::channel();
-
-    std::thread::Builder::new()
-        .name("relic-loader".into())
-        .spawn(move || {
-            let t_thread = Instant::now();
-            let mut decoded = 0usize;
-            let mut decode_time = std::time::Duration::ZERO;
-            let mut mesh_build_time = std::time::Duration::ZERO;
-            for d in all_relic_defs() {
-                let t0 = Instant::now();
-                let Some((msg, mesh_build)) = decode_relic_assets(d.id, d.name) else {
-                    log::warn!(
-                        "relic art not found in embedded assets: {} or {}",
-                        d.id.render_texture_path(),
-                        d.id.source_object_path(),
-                    );
-                    continue;
-                };
-                decode_time += t0.elapsed();
-                mesh_build_time += mesh_build;
-                decoded += 1;
-                if tx.send(msg).is_err() {
-                    break;
-                }
-            }
-            let thread_total = t_thread.elapsed();
-            crate::startup_profile::record("relic.decode_thread", thread_total);
-            crate::startup_profile::record("relic.decode_cpu", decode_time);
-            crate::startup_profile::record("relic.mesh_build_thread", mesh_build_time);
-            log::debug!(
-                "relic-loader (PNG) finished: decoded {decoded} images in {decode_time:?} (thread total {thread_total:?})",
-            );
-        })
-        .expect("failed to spawn relic-loader thread");
-
     rx
 }

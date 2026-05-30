@@ -111,6 +111,12 @@ pub struct AnimationController {
     now: Instant,
 }
 
+impl Default for AnimationController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnimationController {
     pub fn new() -> Self {
         Self {

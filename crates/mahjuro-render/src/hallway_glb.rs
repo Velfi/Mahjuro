@@ -212,8 +212,8 @@ fn loop_seed_hash(run_seed: u64, run_number: u32, wing: u32, blind: ChamberKind)
     let mut x = u32_from_seed64(
         run_seed
             ^ (run_number as u64).wrapping_mul(0x9E37_79B1_85EB_CA87)
-            ^ (wing as u64).wrapping_mul(0xC2B2_AE3D_27D4EB4F)
-            ^ (b as u64).wrapping_mul(0x1656_67B1_9E3779F9),
+            ^ (wing as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
+            ^ (b as u64).wrapping_mul(0x1656_67B1_9E37_79F9),
     );
     x ^= x << 13;
     x ^= x >> 17;

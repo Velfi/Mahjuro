@@ -31,6 +31,12 @@ pub struct SmoothScroll {
     last_tick: Cell<Instant>,
 }
 
+impl Default for SmoothScroll {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SmoothScroll {
     pub fn new() -> Self {
         Self {

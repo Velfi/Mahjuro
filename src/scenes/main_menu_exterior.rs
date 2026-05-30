@@ -22,7 +22,6 @@ use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::UiAction;
 
 use super::collection::CollectionScene;
-use super::gameplay::GameplayScene;
 use super::lamp_moths::{self, BUG_COUNT};
 use super::options::OptionsScene;
 use super::shop::ShopScene;
@@ -256,7 +255,7 @@ pub(crate) fn scene_from_resume(
     progress: &PlayerProgress,
 ) -> Scene {
     match resume_scene {
-        ResumeScene::Gameplay => Scene::Gameplay(Box::new(GameplayScene::new())),
+        ResumeScene::Gameplay => Scene::Gameplay(Box::default()),
         ResumeScene::Shop => {
             if GameEngine::resumes_to_tutorial_shop(run) {
                 Scene::Shop(ShopScene::new_tutorial(run))
@@ -278,6 +277,12 @@ pub struct MainMenuExteriorScene {
     age_secs: f32,
     bug_phases: [f32; BUG_COUNT],
     rain_field: RainField,
+}
+
+impl Default for MainMenuExteriorScene {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MainMenuExteriorScene {

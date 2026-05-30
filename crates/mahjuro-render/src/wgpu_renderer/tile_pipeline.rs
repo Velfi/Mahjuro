@@ -42,3 +42,11 @@ pub(crate) struct TilePrimitiveGpu {
     pub sampler: wgpu::Sampler,
     pub pipeline_key: TileGlbPipelineKey,
 }
+
+/// GPU resources for one player [`mahjuro_gfx_types::TileMaterial`] mesh variant.
+pub(crate) struct TileMeshGpuSet {
+    pub primitives: Vec<TilePrimitiveGpu>,
+    pub outline_vertex_buffer: wgpu::Buffer,
+    pub outline_index_buffer: wgpu::Buffer,
+    pub outline_index_count: u32,
+}

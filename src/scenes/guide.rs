@@ -4,8 +4,9 @@
 //! on page 4; yaku detail pages follow. Does not teach run flow, shop, relics,
 //! bosses, or zodiac leveling beyond scoring references.
 //!
-//! Opened from the pause menu (gameplay or shop), the tutorial summary, or
-//! in-shop help. The previous scene is suspended by `App` and restored when
+//! Opened from the gameplay-table guide book, the in-run `Help` shortcut
+//! (keyboard or controller Select / View / −), the tutorial summary, or
+//! shop help. The previous scene is suspended by `App` and restored when
 //! the player presses Back.
 
 use crate::sfx_id::SfxId;
@@ -107,6 +108,12 @@ pub struct GuideScene {
     tree: TreeState,
 }
 
+impl Default for GuideScene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GuideScene {
     pub fn new() -> Self {
         Self::with_page(0)
@@ -140,7 +147,7 @@ impl SceneBehavior for GuideScene {
         let pages = total_pages(ctx.progress);
 
         for a in ctx.actions {
-            if matches!(a, UiAction::Cancel | UiAction::Pause) {
+            if matches!(a, UiAction::Cancel | UiAction::Pause | UiAction::Help) {
                 return self.go_back(ctx.overlay_request);
             }
         }
@@ -229,7 +236,7 @@ impl SceneBehavior for GuideScene {
             &mut frame, &layout, &self.tree, self.page, pages, scale, w, h,
         );
         let content_floor = layout.content_bottom;
-        let cam = frame.camera_override.clone().expect("guide camera");
+        let cam = frame.camera_override.expect("guide camera");
 
         if self.page == PAGE_TILES {
             draw_tiles_page(
@@ -2410,7 +2417,6 @@ fn push_scoring_final_panel(
     }
 }
 
-/// Per-column copy rects for the four meld cards.
 // ── Tiles intro page (page 0) ─────────────────────────────────────────────
 
 fn draw_tiles_page(

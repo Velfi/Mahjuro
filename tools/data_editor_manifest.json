@@ -22,8 +22,8 @@
       { "key": "chip_bonus", "type": "number", "step": 1 }
     ]
   },
-  "stakes": {
-    "suggestedFilename": "stakes.json",
+  "seasons": {
+    "suggestedFilename": "seasons.json",
     "fields": [
       { "key": "id", "type": "string", "readonly": true },
       { "key": "label", "type": "string" },

@@ -1,7 +1,10 @@
 //! Small camera / layout helpers formerly on the game scene modules.
 
-pub const BOOK_FACE_WIDTH_FRAC: f32 = 0.042;
-pub const BOOK_FACE_HEIGHT_OVER_WIDTH: f32 = 1.52;
+pub const BOOK_FACE_WIDTH_FRAC: f32 = 0.0315;
+/// Cover depth (mesh Z → world Y) ÷ width (mesh X → world X). Table books lie
+/// cover-up in the XY plane (Z-up); screen width follows mesh X, so keep this
+/// well above 1.0 for a portrait silhouette after perspective foreshortening.
+pub const BOOK_FACE_HEIGHT_OVER_WIDTH: f32 = 3.04;
 pub const BOOK_SPINE_THICKNESS_MM: f32 = 7.0;
 
 #[inline]
@@ -9,6 +12,14 @@ pub fn book_cover_face_extents_xy(window_w: f32, zoom: f32) -> (f32, f32) {
     let face_w = window_w * BOOK_FACE_WIDTH_FRAC * zoom;
     let face_h = face_w * BOOK_FACE_HEIGHT_OVER_WIDTH;
     (face_w, face_h)
+}
+
+/// Portrait decal size for the book cover (+Y face: u → mesh X, v → mesh Z).
+#[inline]
+pub fn book_cover_decal_dimensions() -> (u32, u32) {
+    const SHORT_EDGE: u32 = 192;
+    let long = (SHORT_EDGE as f32 * BOOK_FACE_HEIGHT_OVER_WIDTH).round() as u32;
+    (SHORT_EDGE, long.max(SHORT_EDGE + 1))
 }
 
 use crate::draw_cmd::{CameraParams, Object3d};

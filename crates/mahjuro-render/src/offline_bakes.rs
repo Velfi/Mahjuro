@@ -1,14 +1,12 @@
-//! Required offline bakes (room GI / shadows, showcase decal atlases).
+//! Required offline bakes at renderer init (showcase decal atlases only).
+//!
+//! Room shadow/GI (`.msh`/`.mgi`) and relic RLC1 bakes are lazy-loaded at runtime;
+//! `build.rs` stamp checks enforce committed outputs at compile time.
 
-use crate::room_gi_bake::RoomGiRoom;
-use crate::{relic_bake, room_gi_bake, room_shadow_bake, showcase_decal_atlas};
+use crate::showcase_decal_atlas;
 
-/// Fail fast at renderer init when any shipped offline bake is missing or corrupt.
+/// Fail fast at renderer init when showcase decal atlases are missing.
 pub fn require_all_at_startup() -> anyhow::Result<()> {
-    for room in RoomGiRoom::ALL {
-        room_shadow_bake::require_room_shadow_bake(room)?;
-        room_gi_bake::require_room_gi_bake(room)?;
-    }
     for tileset in mahjuro_assets::asset_path::list_player_tilesets() {
         let path = showcase_decal_atlas::baked_atlas_asset_path(&tileset);
         anyhow::ensure!(
@@ -17,6 +15,5 @@ pub fn require_all_at_startup() -> anyhow::Result<()> {
              (needs mahjuro-bake-decal-atlases in target/<profile>/)"
         );
     }
-    relic_bake::require_all_relic_bakes()?;
     Ok(())
 }

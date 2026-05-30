@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use glam::{Mat4, Vec2, Vec3};
 use gltf::image::Format;
+use mahjuro_gfx_types::TileMaterial;
 
 pub use crate::gltf_helpers::{
     GltfAlphaMode, GltfSamplerCpu, apply_texture_transform, sampler_cpu_from_material,
@@ -99,6 +100,52 @@ pub(crate) fn release_loaded_primitive_gpu_source_buffers(prim: &mut LoadedPrimi
 /// All decoded primitives from the default scene (order: depth-first scene traversal).
 pub struct LoadedTile {
     pub primitives: Vec<LoadedPrimitive>,
+}
+
+/// glTF asset path under `assets/` for each player tile material mesh.
+pub fn tile_glb_asset_path(material: TileMaterial) -> &'static str {
+    match material {
+        TileMaterial::Bamboo => "3d/tile_bamboo_and_ivory.glb",
+        TileMaterial::Plastic => "3d/tile_plastic.glb",
+        TileMaterial::TortoiseShell => "3d/tile_tortoise_shell.glb",
+    }
+}
+
+/// Index into [`TileMaterial`] mesh tables (`[Bamboo, Plastic, TortoiseShell]`).
+pub fn tile_material_index(material: TileMaterial) -> usize {
+    match material {
+        TileMaterial::Bamboo => 0,
+        TileMaterial::Plastic => 1,
+        TileMaterial::TortoiseShell => 2,
+    }
+}
+
+pub const TILE_MATERIAL_MESH_COUNT: usize = 3;
+
+/// Material slot that receives the projected mahjong face decal.
+///
+/// Authoring convention: glTF material named **`Face`** on a flat quad (see
+/// `tile_bamboo_and_ivory.glb`: 4-vertex primitive, zero thickness). Blender may
+/// list three material **slots**, but the glTF exporter only writes materials that
+/// are assigned to faces — an empty slot 3 does not appear in the `.glb`.
+pub fn is_tile_face_material_name(name: Option<&str>) -> bool {
+    name.is_some_and(|name| name.eq_ignore_ascii_case("face"))
+}
+
+fn normalize_uv01(uvs: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    let mut min = [f32::MAX; 2];
+    let mut max = [f32::MIN; 2];
+    for uv in uvs {
+        min[0] = min[0].min(uv[0]);
+        max[0] = max[0].max(uv[0]);
+        min[1] = min[1].min(uv[1]);
+        max[1] = max[1].max(uv[1]);
+    }
+    let du = (max[0] - min[0]).max(1e-6);
+    let dv = (max[1] - min[1]).max(1e-6);
+    uvs.iter()
+        .map(|uv| [(uv[0] - min[0]) / du, (uv[1] - min[1]) / dv])
+        .collect()
 }
 
 /// Longest edge (width or height) allowed for glTF-decoded textures. Larger images are
@@ -390,10 +437,45 @@ pub fn compute_vertex_tangents(
     out
 }
 
+/// Apply a rotation to every vertex attribute on all primitives.
+fn apply_rotation_to_tile(tile: &mut LoadedTile, r: Mat4) {
+    for prim in &mut tile.primitives {
+        for v in &mut prim.vertices {
+            let p = r.transform_point3(Vec3::from_array(v.position));
+            v.position = p.to_array();
+            let n = r
+                .transform_vector3(Vec3::from_array(v.normal))
+                .normalize_or_zero();
+            v.normal = n.to_array();
+            let t3 = r.transform_vector3(Vec3::new(v.tangent[0], v.tangent[1], v.tangent[2]));
+            let tv = t3.normalize_or_zero();
+            v.tangent = [tv.x, tv.y, tv.z, v.tangent[3]];
+        }
+    }
+}
+
+/// After [`apply_rotation_to_tile`], flip 180° about +X when the **Face** slot points down.
+fn ensure_face_normal_points_up(tile: &mut LoadedTile) {
+    let mut sum_y = 0.0f32;
+    let mut count = 0u32;
+    for prim in &tile.primitives {
+        for v in &prim.vertices {
+            if v.color[3] > 0.5 {
+                sum_y += v.normal[1];
+                count += 1;
+            }
+        }
+    }
+    if count == 0 || sum_y / count as f32 >= 0.0 {
+        return;
+    }
+    apply_rotation_to_tile(tile, Mat4::from_rotation_x(std::f32::consts::PI));
+}
+
 /// [`tile_mesh_local_to_world`](crate::table_transform::tile_mesh_local_to_world) assumes
-/// **local +Y** is the thin thickness axis. If the glTF AABB’s **smallest** extent is on **Z** (typical
-/// for some Z-up Blender exports), apply **+90° about +X** so Y becomes thickness. No-op when Y is
-/// already thinnest.
+/// **local +Y** is the thin thickness axis / face normal. Z-up Blender glTF exports usually
+/// store thickness on **+Z** with the face normal on **+Z**; map that with **−90° about +X**
+/// so **+Y** is up. No-op when **+Y** is already the thinnest extent.
 fn ensure_tile_engine_local_axes(tile: &mut LoadedTile) {
     let mut min = [f32::MAX; 3];
     let mut max = [f32::MIN; 3];
@@ -418,24 +500,12 @@ fn ensure_tile_engine_local_axes(tile: &mut LoadedTile) {
     } else {
         2
     };
-    if i_min != 2 {
-        return;
+    let z_is_thinnest_or_tied = ex[2] <= ex[0] + 1e-5 && ex[2] <= ex[1] + 1e-5;
+    let rotate_z_thickness_to_y = i_min == 2 || (z_is_thinnest_or_tied && i_min != 1);
+    if rotate_z_thickness_to_y {
+        apply_rotation_to_tile(tile, Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2));
     }
-
-    let r = Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2);
-    for prim in &mut tile.primitives {
-        for v in &mut prim.vertices {
-            let p = r.transform_point3(Vec3::from_array(v.position));
-            v.position = p.to_array();
-            let n = r
-                .transform_vector3(Vec3::from_array(v.normal))
-                .normalize_or_zero();
-            v.normal = n.to_array();
-            let t3 = r.transform_vector3(Vec3::new(v.tangent[0], v.tangent[1], v.tangent[2]));
-            let tv = t3.normalize_or_zero();
-            v.tangent = [tv.x, tv.y, tv.z, v.tangent[3]];
-        }
-    }
+    ensure_face_normal_points_up(tile);
 }
 
 /// Center mesh at origin and scale so the largest AABB extent is 1.0.
@@ -508,6 +578,7 @@ fn decode_tile_primitive(
     );
 
     let pbr = material.pbr_metallic_roughness();
+    let is_face = is_tile_face_material_name(material.name());
 
     let base_tex_coord = pbr.base_color_texture().map(|t| t.tex_coord()).unwrap_or(0);
     let mut uvs: Vec<[f32; 2]> = if let Some(tc) = reader.read_tex_coords(base_tex_coord) {
@@ -524,6 +595,10 @@ fn decode_tile_primitive(
     if let Some(tex_info) = pbr.base_color_texture() {
         apply_texture_transform(&mut uvs, &tex_info);
     }
+
+    let face_uvs = reader
+        .read_tex_coords(1)
+        .map(|tc| tc.into_f32().collect::<Vec<[f32; 2]>>());
 
     let mut uv_emr = uvs.clone();
     let mut tangents_local: Vec<[f32; 4]> = if let Some(t_iter) = reader.read_tangents() {
@@ -553,6 +628,16 @@ fn decode_tile_primitive(
         }
     }
 
+    if is_face
+        && let Some(mut face) = face_uvs {
+            anyhow::ensure!(
+                face.len() == positions_local.len(),
+                "TEXCOORD_1 count does not match POSITION count on face primitive"
+            );
+            face = normalize_uv01(&face);
+            uv_emr = face;
+        }
+
     let indices: Vec<u32> = if let Some(ids) = reader.read_indices() {
         ids.into_u32().collect()
     } else {
@@ -570,6 +655,8 @@ fn decode_tile_primitive(
         Vec::new()
     };
 
+    let face_marker_a = if is_face { 1.0 } else { 0.0 };
+
     let vertices: Vec<Vertex3dTex> = (0..positions_local.len())
         .map(|i| {
             let p = node_world.transform_point3(Vec3::from(positions_local[i]));
@@ -580,7 +667,14 @@ fn decode_tile_primitive(
             let t_loc = Vec3::new(tl[0], tl[1], tl[2]);
             let w = tl[3];
             let t_w = node_world.transform_vector3(t_loc).normalize_or_zero();
-            let color = colors.get(i).copied().unwrap_or([1.0, 1.0, 1.0, 1.0]);
+            let mut color = colors.get(i).copied().unwrap_or([1.0, 1.0, 1.0, face_marker_a]);
+            if colors.is_empty() {
+                color[3] = face_marker_a;
+            } else if is_face {
+                color[3] = 1.0;
+            } else {
+                color[3] = 0.0;
+            }
             Vertex3dTex {
                 position: p.into(),
                 normal: n.into(),
@@ -627,6 +721,23 @@ fn decode_tile_primitive(
         images.get(img_index).and_then(gltf_image_to_rgba8)
     });
 
+    let normal_rgba = material.normal_texture().and_then(|nt| {
+        let img_index = nt.texture().source().index();
+        images.get(img_index).and_then(gltf_image_to_rgba8).map(|mut tex| {
+            if (nt.scale() - 1.0).abs() > 1e-6 {
+                apply_normal_scale_rgba8(&mut tex.0, nt.scale());
+            }
+            tex
+        })
+    });
+
+    if normal_rgba.is_none() && material.normal_texture().is_some() {
+        log::warn!(
+            "primitive {}: normal texture present but image could not be decoded",
+            primitive.index()
+        );
+    }
+
     let alpha_mode = GltfAlphaMode::from(material.alpha_mode());
     let alpha_cutoff = material.alpha_cutoff().unwrap_or(0.5);
 
@@ -635,7 +746,7 @@ fn decode_tile_primitive(
         indices,
         albedo_rgba,
         albedo_mip_chain: None,
-        normal_rgba: None,
+        normal_rgba,
         normal_mip_chain: None,
         metallic_roughness_rgba,
         metallic_roughness_mip_chain: None,
@@ -651,27 +762,39 @@ fn decode_tile_primitive(
     })
 }
 
-fn walk_tile_scene_nodes(
+fn walk_tile_scene_nodes_filtered(
     node: gltf::Node<'_>,
     parent: Mat4,
+    node_name: Option<&str>,
     out: &mut Vec<LoadedPrimitive>,
     buffers: &[gltf::buffer::Data],
     images: &[gltf::image::Data],
 ) -> anyhow::Result<()> {
     let local = Mat4::from_cols_array_2d(&node.transform().matrix());
     let world = parent * local;
-    if let Some(mesh) = node.mesh() {
-        for prim in mesh.primitives() {
-            out.push(decode_tile_primitive(prim, world, buffers, images)?);
+    let include_mesh = node_name.is_none_or(|name| node.name() == Some(name));
+    if include_mesh
+        && let Some(mesh) = node.mesh() {
+            for prim in mesh.primitives() {
+                out.push(decode_tile_primitive(prim, world, buffers, images)?);
+            }
         }
-    }
     for child in node.children() {
-        walk_tile_scene_nodes(child, world, out, buffers, images)?;
+        walk_tile_scene_nodes_filtered(child, world, node_name, out, buffers, images)?;
     }
     Ok(())
 }
 
 pub fn load_glb_tile_from_bytes(data: &[u8]) -> anyhow::Result<LoadedTile> {
+    load_glb_tile_from_node_name(data, None)
+}
+
+/// Decode mesh primitives from the default scene, optionally keeping only
+/// nodes whose glTF name matches `node_name`.
+pub fn load_glb_tile_from_node_name(
+    data: &[u8],
+    node_name: Option<&str>,
+) -> anyhow::Result<LoadedTile> {
     let (document, buffers, images) =
         gltf::import_slice(data).context("gltf::import_slice(tile mesh glb)")?;
 
@@ -682,12 +805,100 @@ pub fn load_glb_tile_from_bytes(data: &[u8]) -> anyhow::Result<LoadedTile> {
 
     let mut primitives = Vec::new();
     for node in scene.nodes() {
-        walk_tile_scene_nodes(node, Mat4::IDENTITY, &mut primitives, &buffers, &images)?;
+        walk_tile_scene_nodes_filtered(
+            node,
+            Mat4::IDENTITY,
+            node_name,
+            &mut primitives,
+            &buffers,
+            &images,
+        )?;
     }
 
     anyhow::ensure!(
         !primitives.is_empty(),
-        "default scene has no mesh primitives"
+        "default scene has no mesh primitives{}",
+        node_name
+            .map(|n| format!(" for node `{n}`"))
+            .unwrap_or_default()
     );
     Ok(LoadedTile { primitives })
+}
+
+/// Scale decoded tangent-space normal map texels (linear RGBA8).
+fn apply_normal_scale_rgba8(pixels: &mut [u8], scale: f32) {
+    if scale == 1.0 {
+        return;
+    }
+    for px in pixels.chunks_exact_mut(4) {
+        let nx = (px[0] as f32 / 255.0) * 2.0 - 1.0;
+        let ny = (px[1] as f32 / 255.0) * 2.0 - 1.0;
+        let nz = (px[2] as f32 / 255.0) * 2.0 - 1.0;
+        let snx = nx * scale;
+        let sny = ny * scale;
+        let len = (snx * snx + sny * sny + nz * nz).sqrt().max(1e-6);
+        px[0] = (((snx / len) * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8;
+        px[1] = (((sny / len) * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8;
+        px[2] = (((nz / len) * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mahjuro_gfx_types::TileMaterial;
+
+    fn face_primitive_count(mesh: &LoadedTile) -> usize {
+        mesh.primitives
+            .iter()
+            .filter(|p| p.vertices.iter().any(|v| v.color[3] > 0.5))
+            .count()
+    }
+
+    fn face_points_up(mesh: &LoadedTile) -> bool {
+        for prim in &mesh.primitives {
+            for v in &prim.vertices {
+                if v.color[3] > 0.5 && v.normal[1] > 0.5 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn player_tile_glbs_load_with_one_face_primitive_each() {
+        for material in [
+            TileMaterial::Bamboo,
+            TileMaterial::Plastic,
+            TileMaterial::TortoiseShell,
+        ] {
+            let path = tile_glb_asset_path(material);
+            let bytes = match path {
+                "3d/tile_bamboo_and_ivory.glb" => {
+                    include_bytes!("../../../assets/3d/tile_bamboo_and_ivory.glb").as_slice()
+                }
+                "3d/tile_plastic.glb" => include_bytes!("../../../assets/3d/tile_plastic.glb").as_slice(),
+                "3d/tile_tortoise_shell.glb" => {
+                    include_bytes!("../../../assets/3d/tile_tortoise_shell.glb").as_slice()
+                }
+                other => panic!("unexpected tile glb path: {other}"),
+            };
+            let mut mesh = load_glb_tile_from_bytes(bytes).expect(path);
+            normalize_mesh(&mut mesh);
+            assert!(
+                mesh.primitives.len() >= 2,
+                "{path}: expected body + face primitives"
+            );
+            assert_eq!(
+                face_primitive_count(&mesh),
+                1,
+                "{path}: expected exactly one Face-marked primitive"
+            );
+            assert!(
+                face_points_up(&mesh),
+                "{path}: face normal should point up (+local Y) after normalize_mesh"
+            );
+        }
+    }
 }

@@ -328,7 +328,7 @@ fn draw_hud(
             layout.panel[2] - 28.0 * scale,
             layout.panel[3] * 0.22,
         ],
-        text: format!("Animation Lab — {CLIP_NAME} (Eyeball, unlit)").into(),
+        text: format!("Animation Lab — {CLIP_NAME} (Eyeball, unlit)"),
         color: color::PARCHMENT,
         font_px: Some(typography::size(typography::H28, layout.panel[3] * 0.9)),
         align: TextAlign::Left,

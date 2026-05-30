@@ -21,6 +21,9 @@ pub enum MeshId {
     /// compose with [`shape_orientation`] which inserts the
     /// mesh-Y-thickness-to-Z-up matrix automatically.
     Cylinder,
+    /// Authored cash coin from [`coin.glb`](../../../assets/3d/coin.glb).
+    /// Y-up after load; pair with the Z-up rotation in [`shape_orientation`].
+    Coin,
     /// Existing square dish mesh (thin slab with a lip).
     DiscSquare,
     /// Existing round dish mesh.
@@ -133,6 +136,11 @@ impl MaterialSpec {
         }
     }
 
+    /// Shaded dielectric for the GLB coin albedo (texture carries the gold look).
+    pub fn coin_glb() -> Self {
+        Self::plain()
+    }
+
     /// Attach a decal to this material, returning the modified spec.
     pub fn with_decal(mut self, decal: DecalSpec) -> Self {
         self.decal = Some(decal);
@@ -190,7 +198,7 @@ pub fn resolve_material(
 /// mesh-Y-thickness-to-Z-up composition.
 pub fn shape_orientation(shape: MeshId) -> glam::Mat4 {
     match shape {
-        MeshId::Cylinder | MeshId::DiscRound => {
+        MeshId::Cylinder | MeshId::Coin | MeshId::DiscRound => {
             crate::table_transform::mesh_y_thickness_along_local_y_to_z_up()
         }
         _ => glam::Mat4::IDENTITY,

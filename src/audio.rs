@@ -299,6 +299,8 @@ impl crate::sfx_id::SfxId {
             SfxId::OrdealDefeated => "ordeal_defeated.ogg",
             SfxId::TalismanPurchased => "talisman_purchased.ogg",
             SfxId::TalismanUsed => "talisman_used.ogg",
+            SfxId::RollersSpin => "sfx/rollers.ogg",
+            SfxId::RollerStop => "sfx/freesound_community-doorslam-90782.mp3",
         }
     }
 }
@@ -329,9 +331,8 @@ pub struct AudioManager {
     handle: Option<OutputStreamHandle>,
     sfx_data: FxHashMap<SfxId, Arc<PcmClip>>,
     music_data: FxHashMap<MusicId, Arc<PcmClip>>,
-    /// Per-relic trigger samples loaded from `assets/audio/relics/<slug>.ogg`
-    /// at startup. Lookup is by `RelicId`; missing entries fall back to
-    /// [`SfxId::ScoreStep`] in [`AudioManager::play_relic_trigger`].
+    /// Per-relic trigger samples decoded on first [`Self::play_relic_trigger`].
+    /// Missing entries fall back to [`SfxId::ScoreStep`].
     relic_trigger_data: FxHashMap<crate::core::relic::RelicId, Arc<PcmClip>>,
     /// Live sinks, FIFO-ordered (oldest first). Finished sinks are swept
     /// each `play_sfx` call; when the cap is hit, the oldest is dropped.
@@ -356,9 +357,6 @@ pub struct AudioManager {
     /// `stop_background_music` defer their effect until it empties (handled in
     /// [`AudioManager::tick`]) so the sting isn't cut off by scene transitions.
     jingle_active: bool,
-    /// When [`Self::jingle_active`], win/loss jingles use [`Self::sfx_volume`];
-    /// round-start intros use [`Self::music_volume`].
-    music_one_shot_sfx_bus: bool,
     /// Background track to start once the active jingle finishes. `None`
     /// means "stop music when the jingle ends".
     pending_post_jingle_music: Option<MusicId>,
@@ -366,6 +364,10 @@ pub struct AudioManager {
     /// Dedicated sink for looping environmental beds (separate from BGM + SFX).
     ambient_sink: Option<Sink>,
     ambient_active: Option<AmbientId>,
+    /// Dedicated sink for looping one-shot SFX beds (e.g. score rollers).
+    sfx_loop_sink: Option<Sink>,
+    sfx_loop_active: Option<SfxId>,
+    sfx_loop_speed: f32,
 }
 
 impl AudioManager {
@@ -395,24 +397,6 @@ impl AudioManager {
             log::debug!("Loaded {} sound effect(s).", sfx_data.len());
         }
 
-        let mut relic_trigger_data = FxHashMap::default();
-        for def in crate::core::relic::all_relic_defs() {
-            let slug = def.id.asset_filename().trim_end_matches(".png");
-            let asset_path = format!("audio/relics/{slug}.ogg");
-            if let Some(file) = crate::asset_path::get(&asset_path) {
-                let label = asset_path.clone();
-                if let Some(clip) = decode_rodio(&label, file.data.as_ref()) {
-                    relic_trigger_data.insert(def.id, clip);
-                }
-            }
-        }
-        if !relic_trigger_data.is_empty() {
-            log::debug!(
-                "Loaded {} per-relic trigger sound(s).",
-                relic_trigger_data.len()
-            );
-        }
-
         let music_data = FxHashMap::default();
 
         Self {
@@ -420,22 +404,24 @@ impl AudioManager {
             handle,
             sfx_data,
             music_data,
-            relic_trigger_data,
+            relic_trigger_data: FxHashMap::default(),
             active_sinks: Vec::with_capacity(MAX_CONCURRENT_SFX),
             pending_sfx: Vec::new(),
-            master_volume: 0.7,
-            sfx_volume: 0.7,
-            music_volume: 0.7,
+            master_volume: crate::persistence::VOLUME_UNITY,
+            sfx_volume: crate::persistence::VOLUME_UNITY,
+            music_volume: crate::persistence::VOLUME_UNITY,
             sfx_enabled: true,
             music_sink: None,
             last_music: None,
             music_active_id: None,
             jingle_active: false,
-            music_one_shot_sfx_bus: false,
             pending_post_jingle_music: None,
             ambient_data: FxHashMap::default(),
             ambient_sink: None,
             ambient_active: None,
+            sfx_loop_sink: None,
+            sfx_loop_active: None,
+            sfx_loop_speed: 1.0,
         }
     }
 
@@ -472,7 +458,6 @@ impl AudioManager {
             let finished = self.music_sink.as_ref().map(|s| s.empty()).unwrap_or(true);
             if finished {
                 self.jingle_active = false;
-                self.music_one_shot_sfx_bus = false;
                 if let Some(sink) = self.music_sink.take() {
                     sink.stop();
                 }
@@ -493,12 +478,23 @@ impl AudioManager {
         self.play_clip(&format!("{id:?}"), clip, speed);
     }
 
+    /// Decode and cache a relic trigger clip on first use.
+    fn ensure_relic_trigger(&mut self, rid: crate::core::relic::RelicId) -> Option<Arc<PcmClip>> {
+        if let Some(clip) = self.relic_trigger_data.get(&rid) {
+            return Some(clip.clone());
+        }
+        let slug = rid.asset_filename().trim_end_matches(".png");
+        let asset_path = format!("audio/relics/{slug}.ogg");
+        let file = crate::asset_path::get(&asset_path)?;
+        let clip = decode_rodio(&asset_path, file.data.as_ref())?;
+        self.relic_trigger_data.insert(rid, clip.clone());
+        Some(clip)
+    }
+
     /// Play the per-relic trigger stinger for `rid`. Falls back to
-    /// [`SfxId::ScoreStep`] when no `audio/relics/<slug>.ogg` is loaded for
-    /// this relic, so new relics get a reasonable default until bespoke
-    /// audio is added.
+    /// [`SfxId::ScoreStep`] when no `audio/relics/<slug>.ogg` exists.
     pub fn play_relic_trigger(&mut self, rid: crate::core::relic::RelicId) {
-        if let Some(clip) = self.relic_trigger_data.get(&rid).cloned() {
+        if let Some(clip) = self.ensure_relic_trigger(rid) {
             self.play_clip(&format!("Relic({rid:?})"), clip, 1.0);
         } else {
             self.play_sfx(SfxId::ScoreStep);
@@ -542,22 +538,24 @@ impl AudioManager {
 
     /// Set the master volume (0.0 to 1.0).
     pub fn set_master_volume(&mut self, vol: f32) {
-        self.master_volume = vol.clamp(0.0, 1.0);
+        self.master_volume = crate::persistence::clamp_volume(vol);
         self.refresh_music_sink_volume();
         self.refresh_ambient_sink_volume();
+        self.refresh_sfx_loop_sink_volume();
     }
 
-    /// Set the sound effects volume (0.0 to 1.0). Also updates win/loss
-    /// jingles when one is playing on `music_sink`.
+    /// Set the sound effects volume. Also updates one-shots on `music_sink`
+    /// (win/loss stingers, round-start intros) and ambient beds.
     pub fn set_sfx_volume(&mut self, vol: f32) {
-        self.sfx_volume = vol.clamp(0.0, 1.0);
+        self.sfx_volume = crate::persistence::clamp_volume(vol);
         self.refresh_ambient_sink_volume();
+        self.refresh_sfx_loop_sink_volume();
         self.refresh_music_sink_volume();
     }
 
     /// Set the music volume (0.0 to 1.0).
     pub fn set_music_volume(&mut self, vol: f32) {
-        self.music_volume = vol.clamp(0.0, 1.0);
+        self.music_volume = crate::persistence::clamp_volume(vol);
         self.refresh_music_sink_volume();
     }
 
@@ -571,16 +569,20 @@ impl AudioManager {
             if let Some(id) = self.ambient_active {
                 self.start_ambient_track(id);
             }
+            if let Some(id) = self.sfx_loop_active {
+                self.start_sfx_loop(id, self.sfx_loop_speed);
+            }
         } else {
             self.stop_ambient_sink();
+            self.stop_sfx_loop_sink();
         }
         self.refresh_music_sink_volume();
     }
 
-    /// Volume for whatever is on `music_sink`: looping BGM + intros use the
-    /// music slider; win/loss jingles use the SFX slider.
+    /// Volume for whatever is on `music_sink`. Looping BGM uses the music
+    /// slider; one-shots (win/loss stingers, round-start intros) use SFX.
     fn music_sink_effective_volume(&self) -> f32 {
-        if self.jingle_active && self.music_one_shot_sfx_bus {
+        if self.jingle_active {
             if !self.sfx_enabled {
                 return 0.0;
             }
@@ -645,6 +647,10 @@ impl AudioManager {
     pub fn play_music_intro_then_loop(&mut self, intro: MusicId, loop_id: MusicId) {
         debug_assert_eq!(intro.loop_after_intro(), Some(loop_id));
         self.last_music = Some(loop_id);
+        if !self.sfx_enabled {
+            self.start_music_track(loop_id);
+            return;
+        }
         if self.jingle_active {
             self.pending_post_jingle_music = Some(loop_id);
             return;
@@ -665,7 +671,6 @@ impl AudioManager {
             log::warn!("play_music_intro_then_loop({intro:?}): sink creation failed");
             return;
         };
-        self.music_one_shot_sfx_bus = false;
         sink.set_volume(self.music_sink_effective_volume());
         let source = SharedPcmSource::new(clip);
         sink.append(source);
@@ -680,10 +685,10 @@ impl AudioManager {
     /// loop or sting is currently on the sink. Once the clip finishes, the
     /// deferred loop ([`Self::set_music_track`] / intro hand-off) resumes from
     /// the start — win/loss jingles use the last loop; round-start intros use
-    /// their paired loop. Win/loss jingles obey the SFX volume slider.
+    /// their paired loop. All one-shots obey the SFX volume slider.
     pub fn play_music_jingle(&mut self, id: MusicId) {
         debug_assert!(id.is_one_shot(), "use set_music_track for looping tracks");
-        if id.is_jingle() && !self.sfx_enabled {
+        if !self.sfx_enabled {
             return;
         }
         self.ensure_music_loaded(id);
@@ -701,7 +706,6 @@ impl AudioManager {
             log::warn!("play_music_jingle({id:?}): sink creation failed");
             return;
         };
-        self.music_one_shot_sfx_bus = id.is_jingle();
         sink.set_volume(self.music_sink_effective_volume());
         let resume_to = id
             .loop_after_intro()
@@ -755,7 +759,6 @@ impl AudioManager {
             log::warn!("start_music_track({id:?}): sink creation failed");
             return;
         };
-        self.music_one_shot_sfx_bus = false;
         sink.set_volume(self.music_sink_effective_volume());
         let source = LoopingPcmSource::new(clip);
         sink.append(source);
@@ -841,5 +844,74 @@ impl AudioManager {
         sink.append(LoopingPcmSource::new(clip));
         self.ambient_sink = Some(sink);
         self.ambient_active = Some(id);
+    }
+
+    /// Start or stop a looping SFX bed (uses the SFX volume slider).
+    pub fn set_sfx_loop(&mut self, id: Option<SfxId>, speed: f32) {
+        match id {
+            Some(id) => self.start_sfx_loop(id, speed.max(0.01)),
+            None => self.stop_sfx_loop(),
+        }
+    }
+
+    fn sfx_loop_effective_volume(&self) -> f32 {
+        if !self.sfx_enabled {
+            return 0.0;
+        }
+        self.master_volume * self.sfx_volume
+    }
+
+    fn refresh_sfx_loop_sink_volume(&mut self) {
+        let Some(sink) = self.sfx_loop_sink.as_ref() else {
+            return;
+        };
+        sink.set_volume(self.sfx_loop_effective_volume());
+    }
+
+    fn stop_sfx_loop_sink(&mut self) {
+        if let Some(sink) = self.sfx_loop_sink.take() {
+            sink.stop();
+        }
+    }
+
+    fn stop_sfx_loop(&mut self) {
+        self.sfx_loop_active = None;
+        self.sfx_loop_speed = 1.0;
+        self.stop_sfx_loop_sink();
+    }
+
+    fn start_sfx_loop(&mut self, id: SfxId, speed: f32) {
+        self.sfx_loop_active = Some(id);
+        self.sfx_loop_speed = speed;
+        if !self.sfx_enabled {
+            self.stop_sfx_loop_sink();
+            return;
+        }
+        let Some(clip) = self.sfx_data.get(&id).cloned() else {
+            log::debug!("start_sfx_loop({id:?}): no data");
+            return;
+        };
+        let Some(handle) = &self.handle else {
+            return;
+        };
+        if let Some(sink) = self.sfx_loop_sink.as_ref()
+            && !sink.empty()
+            && self.sfx_loop_active == Some(id)
+        {
+            sink.set_speed(speed);
+            self.refresh_sfx_loop_sink_volume();
+            return;
+        }
+        if let Some(sink) = self.sfx_loop_sink.take() {
+            sink.stop();
+        }
+        let Ok(sink) = Sink::try_new(handle) else {
+            log::warn!("start_sfx_loop({id:?}): sink creation failed");
+            return;
+        };
+        sink.set_volume(self.sfx_loop_effective_volume());
+        sink.set_speed(speed);
+        sink.append(LoopingPcmSource::new(clip));
+        self.sfx_loop_sink = Some(sink);
     }
 }

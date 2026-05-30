@@ -42,7 +42,7 @@ pub fn emit_rerun_if_changed() {
 
 pub fn ensure_committed_offline_bakes_current(repo: &Path, profile_dir: &Path) {
     if skip_committed_bake_freshness() {
-        println!("cargo:warning=skipping committed offline bake freshness checks");
+        println!("cargo:info=skipping committed offline bake freshness checks");
         return;
     }
 

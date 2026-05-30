@@ -72,6 +72,8 @@ pub const MEMORIAL_TALISMAN_TEXTURE_BASE: u8 = 128;
 /// Each live bug consumes one slot for body + two for live wings + two for
 /// blur-fan surrogates (L/R). The blur-fan slot pools share this same size.
 pub const MAX_BUG_SLOTS: usize = 8;
+/// Maximum yen / flying coins using [`coin.glb`](../../../assets/3d/coin.glb) PBR meshes.
+pub const MAX_COIN_GLTF_SLOTS: usize = 64;
 /// Maximum number of material-preview orbs rendered per frame. Only the
 /// material viewer debug scene uses these; 32 covers every `MaterialKind`
 /// with room to grow.

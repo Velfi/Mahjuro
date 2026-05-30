@@ -51,6 +51,25 @@ fn yaku_def(id: YakuKind) -> &'static YakuDef {
         .unwrap_or_else(|| panic!("yaku def missing for {id:?}"))
 }
 
+fn yaku_name_index() -> &'static FxHashMap<&'static str, YakuKind> {
+    static INDEX: OnceLock<FxHashMap<&'static str, YakuKind>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        const PATH: &str = "data/yaku.json";
+        let raw: Vec<YakuDefRaw> = load_json_asset(PATH, "yaku data");
+        raw.into_iter()
+            .map(|r| {
+                let name: &'static str = Box::leak(r.name.into_boxed_str());
+                (name, r.id)
+            })
+            .collect()
+    })
+}
+
+/// Resolve a cascade step `source` label to a yaku kind when it names a yaku.
+pub fn yaku_kind_by_display_name(name: &str) -> Option<YakuKind> {
+    yaku_name_index().get(name).copied()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum YakuKind {

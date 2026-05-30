@@ -25,6 +25,8 @@ const PREFETCH_DONE: u8 = 2;
 struct PrefetchSlot {
     state: AtomicU8,
     thread: Mutex<Option<JoinHandle<()>>>,
+    /// Set while a worker is in flight so `join_blocking` can skip self-join (macOS EDEADLK).
+    worker_tid: Mutex<Option<std::thread::ThreadId>>,
 }
 
 impl PrefetchSlot {
@@ -32,6 +34,7 @@ impl PrefetchSlot {
         Self {
             state: AtomicU8::new(PREFETCH_IDLE),
             thread: Mutex::new(None),
+            worker_tid: Mutex::new(None),
         }
     }
 
@@ -72,6 +75,7 @@ impl PrefetchSlot {
                 // Slot state is set to DONE after join in `try_drain`.
             })
             .unwrap_or_else(|e| panic!("failed to spawn {thread_name} prefetch thread: {e}"));
+        *self.worker_tid.lock() = Some(handle.thread().id());
         *self.thread.lock() = Some(handle);
         log::debug!("room preload: started {profile_room} CPU decode");
     }
@@ -89,18 +93,26 @@ impl PrefetchSlot {
         if let Err(e) = handle.join() {
             log::error!("room preload thread panicked: {e:?}");
         }
+        *self.worker_tid.lock() = None;
         self.state.store(PREFETCH_DONE, Ordering::Release);
     }
 
     fn join_blocking(&self) {
+        if self
+            .worker_tid
+            .lock()
+            .is_some_and(|tid| tid == std::thread::current().id())
+        {
+            return;
+        }
         self.try_drain();
         if self.state.load(Ordering::Acquire) == PREFETCH_IN_FLIGHT {
             let handle = self.thread.lock().take();
-            if let Some(handle) = handle {
-                if let Err(e) = handle.join() {
+            if let Some(handle) = handle
+                && let Err(e) = handle.join() {
                     log::error!("room preload thread panicked: {e:?}");
                 }
-            }
+            *self.worker_tid.lock() = None;
             self.state.store(PREFETCH_DONE, Ordering::Release);
         }
     }
@@ -160,13 +172,10 @@ pub fn start_gameplay_cpu_prefetch() {
         crate::gameplay_glb::gameplay_cpu_decoded(),
         || {
             crate::gameplay_glb::decode_gameplay_glb_into_cache();
-            if crate::gameplay_glb::gameplay_glb_load_state() != crate::gameplay_glb::GameplayGlbLoadState::Ready
-            {
+            let state = crate::gameplay_glb::peek_gameplay_glb_load_state();
+            if state != crate::gameplay_glb::GameplayGlbLoadState::Ready {
                 GAMEPLAY_PREFETCH_LOGGED.get_or_init(|| {
-                    log::warn!(
-                        "gameplay.glb prefetch finished but room is not ready ({:?})",
-                        crate::gameplay_glb::gameplay_glb_load_state()
-                    );
+                    log::warn!("gameplay.glb prefetch finished but room is not ready ({state:?})");
                 });
             }
         },

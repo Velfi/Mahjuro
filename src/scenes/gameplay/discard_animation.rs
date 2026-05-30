@@ -893,6 +893,52 @@ pub fn in_flight_placements(
     out
 }
 
+/// Build 3D placements for tiles resting in the discard river.
+pub fn settled_placements(
+    scene: &GameplayScene,
+    bowl_model: Option<glam::Mat4>,
+    layout: &crate::ui::layout::LayoutResult,
+    window_w: f32,
+    window_h: f32,
+    run: &crate::game::run::RunState,
+) -> Vec<ShowcaseTilePlacement> {
+    scene
+        .river_settled_tiles
+        .iter()
+        .map(|t| {
+            let (center, rotation, size_px) = river_pose(
+                bowl_model,
+                t.flow_t,
+                t.stream_lane,
+                t.size_px / RIVER_TILE_SIZE_FRAC,
+                layout,
+                window_w,
+                window_h,
+                t.center_pos,
+                t.rotation,
+            );
+            (center, rotation, size_px, t.tile)
+        })
+        .map(
+            |(center_pos, rotation, size_px, tile)| ShowcaseTilePlacement {
+                tile: GameplayScene::display_tile(tile, run),
+                center_pos,
+                rotation,
+                scale: 1.0,
+                size_px,
+                brightness: 1.0,
+                selected: false,
+                hovered: false,
+                outline: false,
+                glow: false,
+                glow_color: None,
+                pick_id: None,
+                overlay_rect_group: None,
+            },
+        )
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1152,50 +1198,4 @@ mod tests {
             45 + tuning.discard_lift_ms + tuning.discard_flight_ms + tuning.discard_landing_ms;
         assert_eq!(batch.total_duration(&tuning).as_millis(), expected as u128);
     }
-}
-
-/// Build 3D placements for tiles resting in the discard river.
-pub fn settled_placements(
-    scene: &GameplayScene,
-    bowl_model: Option<glam::Mat4>,
-    layout: &crate::ui::layout::LayoutResult,
-    window_w: f32,
-    window_h: f32,
-    run: &crate::game::run::RunState,
-) -> Vec<ShowcaseTilePlacement> {
-    scene
-        .river_settled_tiles
-        .iter()
-        .map(|t| {
-            let (center, rotation, size_px) = river_pose(
-                bowl_model,
-                t.flow_t,
-                t.stream_lane,
-                t.size_px / RIVER_TILE_SIZE_FRAC,
-                layout,
-                window_w,
-                window_h,
-                t.center_pos,
-                t.rotation,
-            );
-            (center, rotation, size_px, t.tile)
-        })
-        .map(
-            |(center_pos, rotation, size_px, tile)| ShowcaseTilePlacement {
-                tile: GameplayScene::display_tile(tile, run),
-                center_pos,
-                rotation,
-                scale: 1.0,
-                size_px,
-                brightness: 1.0,
-                selected: false,
-                hovered: false,
-                outline: false,
-                glow: false,
-                glow_color: None,
-                pick_id: None,
-                overlay_rect_group: None,
-            },
-        )
-        .collect()
 }

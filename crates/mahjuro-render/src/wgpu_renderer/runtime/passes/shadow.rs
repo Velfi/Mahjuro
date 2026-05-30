@@ -224,8 +224,9 @@ impl WgpuRenderer {
                             &self.gameplay_env_primitives,
                             gpu,
                             |pi| {
-                                !frame.gameplay_cash_in_button_visible
-                                    && self.gameplay_cash_in_prim_indices.contains(&pi)
+                                self.gameplay_env_skip_room_shadow_caster(pi)
+                                    || (!frame.gameplay_cash_in_button_visible
+                                        && self.gameplay_cash_in_prim_indices.contains(&pi))
                             },
                         );
                     }
@@ -244,10 +245,15 @@ impl WgpuRenderer {
             self.draw_object3d_shadow_entry(shadow_pass, frame, kind, slot_i);
         }
 
-        if !self.tile_primitives.is_empty() && self.tile_outline_index_count > 0 {
-            shadow_pass.set_vertex_buffer(0, self.tile_outline_vertex_buffer.slice(..));
+        if !self.active_tile_mesh().primitives.is_empty()
+            && self.active_tile_mesh().outline_index_count > 0
+        {
+            shadow_pass.set_vertex_buffer(
+                0,
+                self.active_tile_mesh().outline_vertex_buffer.slice(..),
+            );
             shadow_pass.set_index_buffer(
-                self.tile_outline_index_buffer.slice(..),
+                self.active_tile_mesh().outline_index_buffer.slice(..),
                 wgpu::IndexFormat::Uint32,
             );
             for (i, _) in tile_3d_rects.iter() {
@@ -256,7 +262,7 @@ impl WgpuRenderer {
                 };
                 shadow_pass.set_bind_group(0, &htg.shadow_bind_group, &[]);
                 shadow_pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
-                shadow_pass.draw_indexed(0..self.tile_outline_index_count, 0, 0..1);
+                shadow_pass.draw_indexed(0..self.active_tile_mesh().outline_index_count, 0, 0..1);
             }
 
             let total_showcase: usize = showcase_tile_batches
@@ -270,7 +276,7 @@ impl WgpuRenderer {
                 };
                 shadow_pass.set_bind_group(0, &stg.shadow_bind_group, &[]);
                 shadow_pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
-                shadow_pass.draw_indexed(0..self.tile_outline_index_count, 0, 0..1);
+                shadow_pass.draw_indexed(0..self.active_tile_mesh().outline_index_count, 0, 0..1);
             }
         }
     }
@@ -433,6 +439,18 @@ impl WgpuRenderer {
                     return;
                 };
                 self.draw_lit_mesh_shadow(pass, mesh, inst);
+            }
+            DrawKind::GltfCoin => {
+                let Some(inst) = self.coin_glb_instances.get(slot_i) else {
+                    return;
+                };
+                for prim in &self.coin_glb_primitives {
+                    pass.set_bind_group(0, &inst.shadow_bind_group, &[]);
+                    pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
+                }
             }
             DrawKind::Primitive(shape) => {
                 let (Some(mesh), Some(inst)) = (

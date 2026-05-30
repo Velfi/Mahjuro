@@ -57,6 +57,8 @@ pub(super) enum FocusTarget {
     DiscardUndo,
     /// Yaku journal on the table (`player_yaku_journal` empty).
     Journal,
+    /// Guide book on the table (`player_guidebook` empty).
+    Guidebook,
 }
 
 pub(super) const ALL_BUTTONS: [GameplayButton; 3] = [
@@ -159,7 +161,9 @@ pub(super) fn focus_kind(f: Option<FocusTarget>) -> Option<FocusKind> {
         FocusTarget::Dora => Some(FocusKind::Dora),
         FocusTarget::Ordeal => Some(FocusKind::Ordeal),
         FocusTarget::RoundWind => Some(FocusKind::RoundWind),
-        FocusTarget::DiscardUndo | FocusTarget::Journal => Some(FocusKind::Button),
+        FocusTarget::DiscardUndo | FocusTarget::Journal | FocusTarget::Guidebook => {
+            Some(FocusKind::Button)
+        }
     }
 }
 

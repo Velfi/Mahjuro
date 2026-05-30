@@ -18,7 +18,6 @@ use super::{ButtonDef, Scene, SceneTransition, UpdateCtx};
 enum PauseAction {
     Resume,
     Restart,
-    Guide,
     Options,
     MainMenu,
     Exit,
@@ -62,12 +61,14 @@ pub struct PauseMenu {
     /// pause menu — input and draw are delegated to it until the user
     /// chooses Back, at which point we drop back to the pause root.
     options_overlay: Option<OptionsScene>,
-    /// One-shot flag set when the user picks "Guide" from the menu.
-    /// The owning scene drains it via `take_guide_request()` after
-    /// `handle()` returns and transitions to the Guide scene.
-    guide_requested: bool,
     /// One-shot flag set when the user opens Credits from the options overlay.
     credits_requested: bool,
+}
+
+impl Default for PauseMenu {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PauseMenu {
@@ -76,18 +77,8 @@ impl PauseMenu {
             paused: false,
             tree: TreeState::new(),
             options_overlay: None,
-            guide_requested: false,
             credits_requested: false,
         }
-    }
-
-    /// Drain the guide-open request flag. Returns `true` exactly once
-    /// after the user picks "Guide" from the pause menu; subsequent
-    /// calls return `false` until they re-open the menu and pick it again.
-    pub fn take_guide_request(&mut self) -> bool {
-        let v = self.guide_requested;
-        self.guide_requested = false;
-        v
     }
 
     /// Drain the credits-open request flag. Returns `true` exactly once
@@ -103,7 +94,6 @@ impl PauseMenu {
         self.paused = true;
         self.tree = TreeState::new();
         self.options_overlay = None;
-        self.guide_requested = false;
         self.credits_requested = false;
     }
 
@@ -119,7 +109,7 @@ impl PauseMenu {
         let scale = metrics::scene_scale(window_w, window_h);
         let btn_w = (220.0 * scale).min(window_w * 0.55);
         let btn_gap = (12.0 * scale).max(6.0);
-        let count = 6_f32;
+        let count = 5_f32;
         let title_h = typography::size(typography::H20, window_h);
         let title_gap = (24.0 * scale).max(10.0);
         // Cap button height so the full menu fits on screen.
@@ -144,12 +134,6 @@ impl PauseMenu {
                 PauseAction::Restart.id(),
                 "Restart",
                 PauseAction::Restart,
-                ButtonVariant::Default,
-            ),
-            wt::button_id(
-                PauseAction::Guide.id(),
-                "Guide",
-                PauseAction::Guide,
                 ButtonVariant::Default,
             ),
             wt::button_id(
@@ -343,16 +327,6 @@ impl PauseMenu {
             Some(PauseAction::Restart) => {
                 bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.do_restart(run, progress)
-            }
-            Some(PauseAction::Guide) => {
-                bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                // Set the one-shot flag and close the pause menu so the
-                // owning scene can transition to the Guide on the
-                // next frame. The scene drains the flag via
-                // `take_guide_request()` after `handle()` returns.
-                self.guide_requested = true;
-                self.paused = false;
-                PauseUpdate::Resume
             }
             Some(PauseAction::Options) => {
                 bus.push(GameEvent::UiSound(SfxId::UiConfirm));

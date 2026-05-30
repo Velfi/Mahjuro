@@ -197,21 +197,6 @@ pub fn load_baked_relic(id: RelicId) -> anyhow::Result<DecodedRelicImage> {
     decode_baked_relic(&file.data)
 }
 
-pub fn require_all_relic_bakes() -> anyhow::Result<()> {
-    for d in all_relic_defs() {
-        let path = baked_relic_asset_path(d.id);
-        anyhow::ensure!(
-            baked_relic_available(d.id),
-            "missing baked relic at {path}; run `cargo build` \
-             (needs mahjuro-bake-relics from mahjuro-render in target/<profile>/)"
-        );
-        let file = mahjuro_assets::asset_path::get(&path).unwrap();
-        decode_baked_relic(&file.data)
-            .with_context(|| format!("corrupt baked relic at {path}"))?;
-    }
-    Ok(())
-}
-
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct RelicBakeHeaderV1 {
@@ -245,8 +230,8 @@ fn material_kind_to_u32(kind: MaterialKind) -> u32 {
 }
 
 fn material_kind_from_u32(v: u32) -> MaterialKind {
-    if v <= MaterialKind::Chitin as u32 {
-        // SAFETY: `MaterialKind` is `#[repr(u32)]` with discriminants 0..=21.
+    if v <= MaterialKind::Unshaded as u32 {
+        // SAFETY: `MaterialKind` is `#[repr(u32)]` with discriminants 0..=22.
         unsafe { std::mem::transmute::<u32, MaterialKind>(v) }
     } else {
         MaterialKind::Plain

@@ -1,6 +1,6 @@
 use crate::core::consumable::ConsumableInventory;
 use crate::core::hand::DetectedMeld;
-use crate::core::tile::{Tile, cmp_sort_order};
+use crate::core::tile::Tile;
 use crate::core::yaku::YakuKind;
 use crate::game::run::RunState;
 use crate::ui::input::MarqueeSelect;
@@ -96,21 +96,6 @@ impl GameplayCoreState {
             .enumerate()
             .filter_map(|(i, selected)| (*selected).then_some(i))
             .collect()
-    }
-
-    pub fn sort_hand_by_suit(&mut self) {
-        self.hand.sort_by(cmp_sort_order);
-        self.selected = vec![false; self.hand.len()];
-    }
-
-    pub fn sort_hand_by_rank(&mut self) {
-        self.hand.sort_by(|a, b| {
-            a.rank
-                .cmp(&b.rank)
-                .then(a.suit.cmp(&b.suit))
-                .then(a.id.cmp(&b.id))
-        });
-        self.selected = vec![false; self.hand.len()];
     }
 
     pub fn begin_marquee_selection(&mut self, index: usize) -> Option<(MarqueeSelect, (u32, u32))> {
@@ -243,14 +228,17 @@ mod tests {
         run.yen = 42;
 
         let mut core = GameplayCoreState::from_run(&run);
-        core.sort_hand_by_rank();
+        core.finalize_hand_after_draw();
         core.yen += 5;
         core.write_back(&mut run);
 
         assert_eq!(run.yen, 47);
         assert_eq!(run.selected_slice(), &[false, false, false]);
+        assert_eq!(run.hand()[0].suit, Suit::Manzu);
         assert_eq!(run.hand()[0].rank, 2);
+        assert_eq!(run.hand()[1].suit, Suit::Souzu);
         assert_eq!(run.hand()[1].rank, 4);
+        assert_eq!(run.hand()[2].suit, Suit::Pinzu);
         assert_eq!(run.hand()[2].rank, 9);
     }
 

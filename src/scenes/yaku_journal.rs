@@ -15,10 +15,15 @@
 use crate::core::tile::Tile;
 use crate::core::yaku::YakuKind;
 use crate::game::engine::GameEngine;
+use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{CameraParams, ShowcaseTilePlacement, UiFrame};
-use crate::render::theme::{color, typography};
+use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::sfx_id::SfxId;
+use crate::ui::focus_nav;
 use crate::ui::input::UiAction;
+use crate::ui::widget;
+use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use std::time::Instant;
 
 use super::{
@@ -26,6 +31,90 @@ use super::{
 };
 
 const CLICK_ROW_BASE: u32 = 0xE100;
+
+#[derive(Clone, Copy)]
+struct JournalScrollbar {
+    track: [f32; 4],
+    thumb: [f32; 4],
+    /// Wider than the painted track so the thumb is easier to grab.
+    hit_track: [f32; 4],
+    thumb_travel: f32,
+}
+
+#[inline]
+fn point_in_rect(mx: f32, my: f32, r: [f32; 4]) -> bool {
+    mx >= r[0] && mx <= r[0] + r[2] && my >= r[1] && my <= r[1] + r[3]
+}
+
+fn journal_scrollbar(
+    table: &JournalTableLayout,
+    body_top: f32,
+    jr: f32,
+    total_rows: usize,
+    scroll: f32,
+    max_scroll: f32,
+) -> Option<JournalScrollbar> {
+    if max_scroll <= 0.0 {
+        return None;
+    }
+    let track_w = (6.0 * jr).max(4.0);
+    let track_x = table.table_x + table.table_w - track_w - 4.0 * jr;
+    let track_y = body_top + 3.0 * jr;
+    let track_h = table.table_h - table.header_h - 6.0 * jr;
+    let thumb_h = (track_h * (table.visible_rows as f32 / total_rows as f32)).clamp(24.0 * jr, track_h);
+    let thumb_travel = (track_h - thumb_h).max(0.0);
+    let thumb_t = scroll / max_scroll;
+    let thumb_y = track_y + thumb_travel * thumb_t;
+    let hit_pad_x = (8.0 * jr).max(6.0);
+    Some(JournalScrollbar {
+        track: [track_x, track_y, track_w, track_h],
+        thumb: [track_x, thumb_y, track_w, thumb_h],
+        hit_track: [
+            track_x - hit_pad_x,
+            track_y,
+            track_w + hit_pad_x * 2.0,
+            track_h,
+        ],
+        thumb_travel,
+    })
+}
+
+fn scroll_rows_from_thumb_top(thumb_top: f32, sb: &JournalScrollbar, max_scroll: f32) -> f32 {
+    if sb.thumb_travel <= 0.0 {
+        return 0.0;
+    }
+    let t = ((thumb_top - sb.track[1]) / sb.thumb_travel).clamp(0.0, 1.0);
+    t * max_scroll
+}
+
+fn scroll_rows_from_cursor(my: f32, grab_y: f32, sb: &JournalScrollbar, max_scroll: f32) -> f32 {
+    let thumb_top = (my - grab_y - sb.track[1]).clamp(0.0, sb.thumb_travel);
+    scroll_rows_from_thumb_top(thumb_top, sb, max_scroll)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JournalNav {
+    Back,
+}
+
+impl JournalNav {
+    fn id(self) -> FocusId {
+        FocusId(0xE0F0 + self as u32)
+    }
+}
+
+/// Upper-left Back control — same sizing as [`super::guide::GuideLayout::header_chrome`].
+fn journal_header_chrome(window_w: f32, window_h: f32) -> ([f32; 4], f32) {
+    let ui = (window_w / 1920.0)
+        .min(window_h / 1080.0)
+        .clamp(0.55, 1.35);
+    let margin = 48.0 * ui;
+    let header_btn_h = (window_h * 0.052).clamp(44.0, 72.0);
+    let back_w = (108.0 * (margin / 48.0)).clamp(88.0, 132.0);
+    let back = [margin, margin, back_w, header_btn_h];
+    let chrome_bottom = margin + header_btn_h + 12.0 * ui;
+    (back, chrome_bottom)
+}
 
 /// Couch / TV legibility: ramps up font floors and tile mins from ~720p
 /// short edge toward large displays (capped so UI doesn't balloon on 4K).
@@ -58,7 +147,8 @@ fn yaku_table_layout(
     jr: f32,
     jc: f32,
 ) -> (JournalTableLayout, f32, f32) {
-    let top_safe = window_h * (0.048 - 0.015 * jc);
+    let (_, chrome_bottom) = journal_header_chrome(window_w, window_h);
+    let top_safe = chrome_bottom + window_h * (0.008 - 0.005 * jc);
     let gap_below_plaque = window_h * (0.018 - 0.011 * jc);
     let plaque_h = window_h * (0.365 - 0.028 * jc);
     let bottom_safe = window_h * (0.012 - 0.006 * jc);
@@ -92,6 +182,16 @@ pub struct YakuJournalScene {
     scroll_rows: f32,
     target_scroll_rows: f32,
     scroll_last_tick: Instant,
+    tree: TreeState,
+    dragging_scrollbar: bool,
+    scroll_drag_grab_y: f32,
+    prev_mouse_down: bool,
+}
+
+impl Default for YakuJournalScene {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl YakuJournalScene {
@@ -101,7 +201,21 @@ impl YakuJournalScene {
             scroll_rows: 0.0,
             target_scroll_rows: 0.0,
             scroll_last_tick: Instant::now(),
+            tree: TreeState::new(),
+            dragging_scrollbar: false,
+            scroll_drag_grab_y: 0.0,
+            prev_mouse_down: false,
         }
+    }
+
+    fn flat_items(&self, w: f32, h: f32) -> Vec<FlatItem<JournalNav>> {
+        let (back, _) = journal_header_chrome(w, h);
+        vec![FlatItem::new(JournalNav::Back.id(), back, JournalNav::Back)]
+    }
+
+    fn go_back(overlay_request: &mut Option<OverlayRequest>) -> SceneTransition {
+        *overlay_request = Some(OverlayRequest::Pop);
+        None
     }
 
     fn max_scroll(total_rows: usize, visible_rows: usize) -> f32 {
@@ -160,7 +274,49 @@ impl SceneBehavior for YakuJournalScene {
                 (self.target_scroll_rows + ctx.scroll_lines).clamp(0.0, max_scroll);
         }
 
+        let body_top = table.table_y + table.header_h;
+        let scroll = self.target_scroll_rows;
+        let scrollbar = journal_scrollbar(&table, body_top, jr, total_rows, scroll, max_scroll);
+        let (mx, my) = ctx.cursor_pos;
+        let mouse_down = ctx.mouse_left_down;
+        let mouse_click = mouse_down && !self.prev_mouse_down;
+        let scrollbar_hit = scrollbar
+            .as_ref()
+            .is_some_and(|sb| point_in_rect(mx, my, sb.hit_track));
+
+        if let Some(sb) = scrollbar {
+            if self.dragging_scrollbar && mouse_down {
+                let rows =
+                    scroll_rows_from_cursor(my, self.scroll_drag_grab_y, &sb, max_scroll);
+                self.target_scroll_rows = rows;
+                self.scroll_rows = rows;
+            } else if mouse_click {
+                if point_in_rect(mx, my, sb.thumb) {
+                    self.dragging_scrollbar = true;
+                    self.scroll_drag_grab_y = my - sb.thumb[1];
+                    let rows =
+                        scroll_rows_from_cursor(my, self.scroll_drag_grab_y, &sb, max_scroll);
+                    self.target_scroll_rows = rows;
+                    self.scroll_rows = rows;
+                } else if point_in_rect(mx, my, sb.hit_track) {
+                    self.dragging_scrollbar = true;
+                    self.scroll_drag_grab_y = sb.thumb[3] * 0.5;
+                    let rows =
+                        scroll_rows_from_cursor(my, self.scroll_drag_grab_y, &sb, max_scroll);
+                    self.target_scroll_rows = rows;
+                    self.scroll_rows = rows;
+                }
+            }
+        }
+        if !mouse_down {
+            self.dragging_scrollbar = false;
+        }
+        self.prev_mouse_down = mouse_down;
+
         for &cid in ctx.button_clicks {
+            if scrollbar_hit {
+                continue;
+            }
             if cid >= CLICK_ROW_BASE && cid < CLICK_ROW_BASE + total_rows as u32 {
                 self.selected = (cid - CLICK_ROW_BASE) as usize;
                 self.ensure_selected_visible(table.visible_rows, max_scroll);
@@ -169,11 +325,49 @@ impl SceneBehavior for YakuJournalScene {
         }
 
         for a in ctx.actions {
+            if matches!(a, UiAction::Cancel | UiAction::Pause | UiAction::Help) {
+                return Self::go_back(ctx.overlay_request);
+            }
+        }
+
+        let items = self.flat_items(w, h);
+        let nav_actions: Vec<UiAction> = ctx
+            .actions
+            .iter()
+            .copied()
+            .filter(|a| {
+                !matches!(
+                    a,
+                    UiAction::FocusUp
+                        | UiAction::FocusDown
+                        | UiAction::FocusPrev
+                        | UiAction::FocusNext
+                        | UiAction::PagePrev
+                        | UiAction::PageNext
+                )
+            })
+            .collect();
+        let nav_action = self.tree.update_flat(
+            &items,
+            TreeInput {
+                actions: &nav_actions,
+                button_clicks: ctx.button_clicks,
+                cursor_pos: ctx.cursor_pos,
+                window: (w, h),
+                input_mode: ctx.input_mode,
+                scroll_lines: 0.0,
+            },
+        );
+        if self.tree.take_focus_changed() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
+        if let Some(JournalNav::Back) = nav_action {
+            ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+            return Self::go_back(ctx.overlay_request);
+        }
+
+        for a in ctx.actions {
             match a {
-                UiAction::Cancel | UiAction::Pause | UiAction::Help => {
-                    *ctx.overlay_request = Some(OverlayRequest::Pop);
-                    return None;
-                }
                 UiAction::FocusUp | UiAction::FocusPrev => {
                     if total_rows > 0 {
                         self.selected = self.selected.saturating_sub(1);
@@ -254,6 +448,8 @@ impl SceneBehavior for YakuJournalScene {
             intensity: 1.2,
         });
 
+        push_journal_back_button(&mut frame, &self.tree, w, h);
+
         // ── Scrollable yaku table (sticky header) ────────────────
         let mut placements: Vec<ShowcaseTilePlacement> = Vec::new();
         let mut tile_id: u32 = 0;
@@ -328,9 +524,12 @@ impl SceneBehavior for YakuJournalScene {
             table.table_w,
             (body_bottom - body_top).max(0.0),
         ];
-        let scroll = self
-            .scroll_rows
-            .clamp(0.0, Self::max_scroll(total_rows, table.visible_rows));
+        let max_scroll = Self::max_scroll(total_rows, table.visible_rows);
+        let scroll = self.scroll_rows.clamp(0.0, max_scroll);
+        let scrollbar = journal_scrollbar(&table, body_top, jr, total_rows, scroll, max_scroll);
+        let row_click_w = scrollbar
+            .map(|sb| sb.hit_track[0] - table.table_x)
+            .unwrap_or(table.table_w);
         let first_row = scroll.floor() as usize;
         let row_offset = scroll - first_row as f32;
         let draw_rows = table.visible_rows + 2;
@@ -374,7 +573,7 @@ impl SceneBehavior for YakuJournalScene {
                 });
             }
             frame.buttons.push(ButtonDef::scene(
-                (table.table_x, clipped_row_top, table.table_w, clipped_row_h),
+                (table.table_x, clipped_row_top, row_click_w, clipped_row_h),
                 CLICK_ROW_BASE + idx as u32,
             ));
 
@@ -478,29 +677,16 @@ impl SceneBehavior for YakuJournalScene {
             });
         }
 
-        // Vertical scrollbar indicator.
-        let max_scroll = Self::max_scroll(total_rows, table.visible_rows);
-        if max_scroll > 0.0 {
-            let track_w = (6.0 * jr).max(4.0);
-            let track_x = table.table_x + table.table_w - track_w - 4.0 * jr;
-            let track_y = body_top + 3.0 * jr;
-            let track_h = table.table_h - table.header_h - 6.0 * jr;
+        if let Some(sb) = scrollbar {
             frame.quad(GpuInstance {
-                rect: [track_x, track_y, track_w, track_h],
+                rect: sb.track,
                 color: color::alpha(color::WALNUT_INK, 0.45),
                 user: 0,
             });
-            let thumb_h = (track_h * (table.visible_rows as f32 / total_rows as f32))
-                .clamp(24.0 * jr, track_h);
-            let thumb_t = if max_scroll > 0.001 {
-                scroll / max_scroll
-            } else {
-                0.0
-            };
-            let thumb_y = track_y + (track_h - thumb_h) * thumb_t;
+            let thumb_alpha = if self.dragging_scrollbar { 1.0 } else { 0.82 };
             frame.quad(GpuInstance {
-                rect: [track_x, thumb_y, track_w, thumb_h],
-                color: color::alpha(color::CHAMPAGNE, 0.82),
+                rect: sb.thumb,
+                color: color::alpha(color::CHAMPAGNE, thumb_alpha),
                 user: 0,
             });
         }
@@ -530,6 +716,40 @@ impl SceneBehavior for YakuJournalScene {
 
         frame
     }
+}
+
+fn push_journal_back_button(frame: &mut UiFrame, tree: &TreeState, w: f32, h: f32) {
+    let scale = (w.min(h)) / 600.0;
+    let (back, _) = journal_header_chrome(w, h);
+    let items = [FlatItem::new(JournalNav::Back.id(), back, JournalNav::Back)];
+    let focused = tree.focused() == Some(JournalNav::Back.id());
+    let mut nav_quads = Vec::new();
+    let mut nav_texts = Vec::new();
+    let mut junk_buttons = Vec::new();
+    widget::push_button(
+        &mut nav_quads,
+        &mut nav_texts,
+        &mut junk_buttons,
+        widget::ButtonSpec {
+            rect: back,
+            label: "Back",
+            variant: ButtonVariant::Default,
+            state: if focused {
+                ButtonState::Hover
+            } else {
+                ButtonState::Rest
+            },
+            action: UiAction::Confirm,
+        },
+    );
+    if focused {
+        focus_nav::push_focus_ring(back, scale, w, h, &mut nav_quads);
+    }
+    frame.quads(nav_quads);
+    for label in nav_texts {
+        frame.text(label);
+    }
+    tree.register_flat_buttons(&items, &mut frame.buttons);
 }
 
 /// Draw a "sealed" tablet where a tile strip would otherwise go: a warm

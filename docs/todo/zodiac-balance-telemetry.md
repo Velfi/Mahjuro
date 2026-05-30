@@ -44,4 +44,4 @@ Current defaults:
 - **Likely awkward to use:** repeated `low-use-per-acquire` alarms.
 - **Likely runaway scaling:** repeated `high-final-level` alarms.
 
-One batch can be noisy; compare at least 2-3 batches with similar run count and stake.
+One batch can be noisy; compare at least 2-3 batches with similar run count and season.

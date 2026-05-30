@@ -788,7 +788,7 @@ mod sparkline_tests {
     fn sparkline_points_span_full_plot_width() {
         let x = 10.0;
         let w = 100.0;
-        let values = vec![0.2, 0.5, 0.8];
+        let values = [0.2, 0.5, 0.8];
         let n = values.len();
         let (x0, _) = sparkline_point_xy(x, w, 0.0, 10.0, n, 0, values[0]);
         let (x1, _) = sparkline_point_xy(x, w, 0.0, 10.0, n, n - 1, values[n - 1]);

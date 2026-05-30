@@ -361,7 +361,7 @@ pub fn ensure_bake_current<K: BakeKind>(
             K::SKIP_ENV
         };
         println!(
-            "cargo:warning={via}: skipping {} freshness check",
+            "cargo:info={via}: skipping {} freshness check",
             K::LABEL
         );
         return;
@@ -375,7 +375,7 @@ pub fn ensure_bake_current<K: BakeKind>(
 
     if auto_offline_rebake_enabled() {
         println!(
-            "cargo:warning={}: inputs stale — auto-rebaking via pre-built tool (set {}=1 to disable)",
+            "cargo:info={}: inputs stale — auto-rebaking via pre-built tool (set {}=1 to disable)",
             K::LABEL,
             SKIP_AUTO_OFFLINE_REBAKE_ENV
         );
@@ -412,7 +412,7 @@ pub fn assert_bake_current<K: BakeKind>(repo: &Path) {
             K::SKIP_ENV
         };
         println!(
-            "cargo:warning={via}: skipping {} freshness check",
+            "cargo:info={via}: skipping {} freshness check",
             K::LABEL
         );
         return;

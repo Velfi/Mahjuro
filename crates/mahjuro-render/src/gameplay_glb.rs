@@ -11,7 +11,9 @@
 //! - `btn_cash_in` / `label_cash_in` — authored cash-in control (env mesh + label)
 //! - `player_relic` … `player_relic.004` — relic medallion slots
 //! - `player_consumables` / `.001` — consumable dish slots
-//! - `player_yaku_journal` — journal book anchor (opens yaku journal on click)
+//! - `player_yaku_journal` — yaku journal book anchor (opens yaku journal on click)
+//! - `player_guidebook` — guide book anchor (opens guide on click)
+//! - `score_pops_lerp_target` — cascade score-popup fly-to anchor
 //! - `default` — embedded glTF perspective camera (not a spawn empty)
 //!
 //! Static geometry (table, dishes, candles, score plaque, …) draws from the environment mesh.
@@ -24,18 +26,20 @@ use parking_lot::RwLock;
 use glam::{EulerRot, Mat4, Quat, Vec2, Vec3};
 
 use crate::draw_cmd::{CameraParams, Object3d, Object3dKind};
-use crate::flame_volume::{
-    FlameEmitter, shop_gltf_flame_emitter_scale, shop_gltf_wick_from_light,
-};
+use crate::flame_volume::FlameEmitter;
 use crate::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF};
 use crate::river_mesh::{RIVER_LOCAL_CENTER_Y, RIVER_LOCAL_HALF};
 use crate::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
 use crate::table_transform::{
-    compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad, translate_rot_scale,
+    compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad, tile_mesh_local_to_world,
+    translate_rot_scale,
 };
 use crate::wgpu_renderer::{PointLight, SpotLight};
-use crate::world_space::{pixel_to_world, surface_anchor_from_world_xyz};
+use crate::world_space::{
+    object3d_pos_triple_for_world_center, pixel_to_world, surface_anchor_from_world_xyz,
+    LayoutAnchorPx,
+};
 
 pub const HAND_TILES_LEFT: &str = "hand_tiles_left";
 pub const HAND_TILES_RIGHT: &str = "hand_tiles_right";
@@ -49,6 +53,11 @@ pub const PLAYER_GOLD: &str = "player_gold";
 pub const PLAYER_DISCARD_TALLY: &str = "player_discard_tally";
 pub const PLAYER_PLAY_TALLY: &str = "player_play_tally";
 pub const PLAYER_YAKU_JOURNAL: &str = "player_yaku_journal";
+pub const PLAYER_GUIDEBOOK: &str = "player_guidebook";
+/// Authored score odometer frame in `gameplay.glb` (roller bank housing).
+pub const SCORE_FRAME: &str = "frame";
+/// Fly-to anchor for cascade score popups (`+50`, `×3`, … streaming into the readout).
+pub const SCORE_POPS_LERP_TARGET: &str = "score_pops_lerp_target";
 /// Authored cash-in button mesh in `gameplay.glb` (draw + pick collision).
 pub const BTN_CASH_IN: &str = "btn_cash_in";
 /// Engraved label mesh parented to the cash-in control.
@@ -88,6 +97,8 @@ pub const REQUIRED_GAMEPLAY_MARKER_NODES: &[&str] = &[
     PLAYER_DISCARD_TALLY,
     PLAYER_PLAY_TALLY,
     PLAYER_YAKU_JOURNAL,
+    PLAYER_GUIDEBOOK,
+    SCORE_POPS_LERP_TARGET,
 ];
 
 enum GameplayGlbCache {
@@ -109,6 +120,11 @@ pub enum GameplayGlbLoadState {
 
 pub fn gameplay_glb_load_state() -> GameplayGlbLoadState {
     ensure_gameplay_glb_loaded();
+    peek_gameplay_glb_load_state()
+}
+
+/// Read cached load state without joining the prefetch worker (safe on the worker itself).
+pub fn peek_gameplay_glb_load_state() -> GameplayGlbLoadState {
     match &*GAMEPLAY_GLB_CPU.read() {
         GameplayGlbCache::Uninit => GameplayGlbLoadState::Missing,
         GameplayGlbCache::Missing => GameplayGlbLoadState::Missing,
@@ -206,6 +222,9 @@ pub fn validate_gameplay_glb(cpu: RoomGlbCpu) -> anyhow::Result<Box<RoomGlbCpu>>
     if !cpu.marker_mesh_bounds_doc.contains_key(BTN_CASH_IN) {
         anyhow::bail!("gameplay.glb missing authored cash-in mesh `{BTN_CASH_IN}`");
     }
+    if !cpu.marker_mesh_bounds_doc.contains_key(SCORE_FRAME) {
+        anyhow::bail!("gameplay.glb missing authored score frame mesh `{SCORE_FRAME}`");
+    }
     if gameplay_embedded_camera_doc(&cpu).is_none() {
         anyhow::bail!(
             "gameplay.glb missing glTF perspective camera node `{GAMEPLAY_CAMERA_NODE}` (assign a Camera object in Blender, export as glTF camera)"
@@ -255,6 +274,8 @@ fn is_gameplay_spawn_marker(name: &str) -> bool {
             | PLAYER_DISCARD_TALLY
             | PLAYER_PLAY_TALLY
             | PLAYER_YAKU_JOURNAL
+            | PLAYER_GUIDEBOOK
+            | SCORE_POPS_LERP_TARGET
     ) || PLAYER_RELIC_MARKERS.contains(&name)
         || PLAYER_CONSUMABLE_MARKERS.contains(&name)
         || TILE_PLINTH_MARKERS.contains(&name)
@@ -263,6 +284,12 @@ fn is_gameplay_spawn_marker(name: &str) -> bool {
 #[inline]
 fn is_gameplay_env_button_node(name: &str) -> bool {
     name == BTN_CASH_IN
+}
+
+/// Env meshes whose AABB is projected for score-cascade HUD alignment.
+#[inline]
+fn is_gameplay_score_cascade_bounds_node(name: &str) -> bool {
+    name == SCORE_FRAME
 }
 
 /// Static env meshes that should not cast into the punctual shadow atlas (or the
@@ -290,7 +317,7 @@ impl RoomEnvWalkHooks for GameplayRoomWalkHooks {
     fn mesh_policy(&self, name: &str) -> RoomMeshPolicy {
         if is_gameplay_spawn_marker(name) {
             RoomMeshPolicy::SkipDrawCollisionIfMarker
-        } else if is_gameplay_env_button_node(name) {
+        } else if is_gameplay_env_button_node(name) || is_gameplay_score_cascade_bounds_node(name) {
             RoomMeshPolicy::EnvironmentDrawWithCollision
         } else {
             RoomMeshPolicy::EnvironmentDraw
@@ -526,6 +553,24 @@ pub fn require_gameplay_marker_surface_anchor(
         .ok_or_else(|| anyhow::anyhow!("gameplay.glb missing required empty `{name}` (runtime)"))
 }
 
+/// Object3d anchor triple for extruded-glyph popups (`pixel_to_world` round-trip).
+pub fn gameplay_marker_popup_fly_anchor(
+    window_w: f32,
+    window_h: f32,
+    _cam: &CameraParams,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    name: &str,
+) -> Option<LayoutAnchorPx> {
+    let world = gameplay_marker_world(window_h, env_height_scale, cpu, name)?;
+    let triple = object3d_pos_triple_for_world_center(window_w, window_h, world);
+    Some(LayoutAnchorPx {
+        px: triple[0],
+        py: triple[1],
+        lift_z: triple[2],
+    })
+}
+
 #[inline]
 fn scale_extents(extents: [f32; 3], scale: [f32; 3]) -> [f32; 3] {
     [
@@ -580,33 +625,39 @@ pub fn gameplay_pick_discard_river(
     })
 }
 
-/// Pick-ray proxy for the journal book — position/rotation from `player_yaku_journal`.
-pub fn gameplay_pick_journal_book(
+/// Pick-ray proxy for a procedural table book at a gameplay spawn empty.
+fn gameplay_pick_table_book(
     window_w: f32,
     window_h: f32,
     env_height_scale: f32,
     cpu: &RoomGlbCpu,
+    marker: &str,
+    spine_label: &'static str,
+    pick_id: u32,
     open_amount: f32,
 ) -> anyhow::Result<Object3d> {
     use crate::scene_glue::{BOOK_SPINE_THICKNESS_MM, book_cover_face_extents_xy};
-    use mahjuro_types::shop_pick::YAKU_JOURNAL_BOOK_PICK_ID;
 
-    let pose = require_gameplay_marker_pose(
-        window_w,
-        window_h,
-        env_height_scale,
-        cpu,
-        PLAYER_YAKU_JOURNAL,
-    )?;
+    let pose = require_gameplay_marker_pose(window_w, window_h, env_height_scale, cpu, marker)?;
     let (face_w, face_h) = book_cover_face_extents_xy(window_w, 1.0);
     let spine_mm = layout_mm(window_h, BOOK_SPINE_THICKNESS_MM);
     let face_h_safe = face_h.max(1e-6);
+    // Cover extents are normalized to `face_h`, then multiplied by the marker's
+    // room-scaled glTF scale. Cancel that room/node scale and reapply `face_h`
+    // so [`book_cover_face_extents_xy`] sets absolute pixel size (not just
+    // aspect). Discard/mirror still use [`GAMEPLAY_ACTION_PICK_SHRINK_MUL`]
+    // because their meshes are unit-cube proxies, not pixel-sized covers.
+    let author_scale = pose
+        .uniform_author_scale(window_h, env_height_scale)
+        .max(1e-6);
+    let room = room_glb::room_env_world_scale(window_h, env_height_scale);
+    let visual_mul = face_h / (room * author_scale);
     let extents = scale_extents_uniform(
         scale_extents(
             [face_w / face_h_safe, spine_mm / face_h_safe, 1.0],
             pose.scale,
         ),
-        GAMEPLAY_ACTION_PICK_SHRINK_MUL,
+        visual_mul,
     );
     Ok(Object3d {
         pos: pose.anchor,
@@ -614,13 +665,54 @@ pub fn gameplay_pick_journal_book(
         rotation: rotate_marker_pose_x_180(pose.rotation_rad),
         color: [1.0, 1.0, 1.0, 1.0],
         kind: Object3dKind::Book {
-            spine_label: std::borrow::Cow::Borrowed("Journal"),
-            pick_id: Some(YAKU_JOURNAL_BOOK_PICK_ID),
+            spine_label: std::borrow::Cow::Borrowed(spine_label),
+            pick_id: Some(pick_id),
             open_amount,
         },
         hover_target: 0.0,
         anim_id: 0,
     })
+}
+
+/// Pick-ray proxy for the yaku journal book — position/rotation from `player_yaku_journal`.
+pub fn gameplay_pick_journal_book(
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    open_amount: f32,
+) -> anyhow::Result<Object3d> {
+    use mahjuro_types::shop_pick::YAKU_JOURNAL_BOOK_PICK_ID;
+    gameplay_pick_table_book(
+        window_w,
+        window_h,
+        env_height_scale,
+        cpu,
+        PLAYER_YAKU_JOURNAL,
+        "Yaku",
+        YAKU_JOURNAL_BOOK_PICK_ID,
+        open_amount,
+    )
+}
+
+/// Pick-ray proxy for the guide book — position/rotation from `player_guidebook`.
+pub fn gameplay_pick_guidebook(
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+) -> anyhow::Result<Object3d> {
+    use mahjuro_types::shop_pick::GUIDE_BOOK_PICK_ID;
+    gameplay_pick_table_book(
+        window_w,
+        window_h,
+        env_height_scale,
+        cpu,
+        PLAYER_GUIDEBOOK,
+        "Guide",
+        GUIDE_BOOK_PICK_ID,
+        0.0,
+    )
 }
 
 #[inline]
@@ -835,60 +927,33 @@ pub fn require_gameplay_marker_screen_rect(
     .ok_or_else(|| anyhow::anyhow!("gameplay.glb missing required empty `{name}` (runtime)"))
 }
 
-/// Billboards a [`Object3dKind::BossIcon`] toward the gameplay camera (mesh cap faces local **+Y**),
-/// then spins 90° about local **+Y** so atlas art reads upright on the plinth.
-pub fn gameplay_boss_icon_rotation(
-    window_w: f32,
-    window_h: f32,
-    cam: &CameraParams,
-    anchor: [f32; 3],
-) -> [f32; 3] {
-    use crate::draw_cmd::camera_facing_euler_xyz_rad;
-    use crate::world_space::layout_anchor_to_world;
-
-    let center = layout_anchor_to_world(
-        window_w,
-        window_h,
-        Some(cam),
-        anchor[0],
-        anchor[1],
-        anchor[2],
-        false,
+/// Orients a [`Object3dKind::BossIcon`] like dora / round-wind plinth tiles
+/// (`showcase_tiles.rs`: GLB empty euler + gameplay π-Z + [`tile_mesh_local_to_world`]),
+/// then +90° CCW about mesh **+Y** (face normal) so atlas art reads upright on the pin.
+pub fn gameplay_boss_icon_rotation(plinth: &GameplayMarkerPose) -> [f32; 3] {
+    let rz = plinth.rotation_rad[2] + std::f32::consts::PI;
+    let base = rot_euler_xyz_rad(
+        plinth.rotation_rad[0],
+        plinth.rotation_rad[1],
+        rz,
     );
-    let eye = Vec3::from_array(cam.eye);
-    let mut forward = eye - center;
-    if forward.length_squared() < 1e-8 {
-        let e = camera_facing_euler_xyz_rad(cam.eye, cam.target);
-        return compose_rotation_euler(
-            rot_euler_xyz_rad(e[0], e[1], e[2]),
-            [0.0, 90.0, 0.0],
-        );
-    }
-    forward = forward.normalize();
-    if forward.y.abs() > 0.97 {
-        let e = camera_facing_euler_xyz_rad(cam.eye, cam.target);
-        return compose_rotation_euler(
-            rot_euler_xyz_rad(e[0], e[1], e[2]),
-            [0.0, 90.0, 0.0],
-        );
-    }
-    let q = Quat::from_rotation_arc(Vec3::Y, forward);
-    compose_rotation_euler(Mat4::from_quat(q.normalize()), [0.0, 90.0, 0.0])
+    let oriented = base * tile_mesh_local_to_world();
+    mat4_to_euler_xyz_rad(oriented * Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2))
 }
 
 /// Boss ordeal token at `tile_plinth.002` — same footprint as plinth showcase tiles.
 pub fn gameplay_boss_ordeal_object3d(
     plinth: &GameplayMarkerPose,
-    window_w: f32,
+    _window_w: f32,
     window_h: f32,
     env_height_scale: f32,
-    cam: &CameraParams,
+    _cam: &CameraParams,
     icon_size_px: f32,
     kind: mahjuro_core::core::ordeal_kind::OrdealKind,
     glow: f32,
 ) -> Object3d {
     let scale = icon_size_px * plinth.uniform_author_scale(window_h, env_height_scale);
-    let rotation = gameplay_boss_icon_rotation(window_w, window_h, cam, plinth.anchor);
+    let rotation = gameplay_boss_icon_rotation(plinth);
     Object3d {
         pos: plinth.anchor,
         extents: [scale, scale * 0.04, scale],
@@ -915,8 +980,7 @@ pub fn gameplay_boss_ordeal_screen_rect(
 ) -> [f32; 4] {
     use crate::world_space::layout_anchor_to_world;
 
-    let icon_px = icon_size_px * plinth.uniform_author_scale(window_h, env_height_scale);
-    let half = icon_px * 0.5;
+    let scale = icon_size_px * plinth.uniform_author_scale(window_h, env_height_scale);
     let center = layout_anchor_to_world(
         window_w,
         window_h,
@@ -926,33 +990,24 @@ pub fn gameplay_boss_ordeal_screen_rect(
         plinth.anchor[2],
         false,
     );
-    let eye = Vec3::from_array(cam.eye);
-    let target = Vec3::from_array(cam.target);
-    let mut forward = eye - center;
-    if forward.length_squared() < 1e-8 {
-        forward = target - eye;
-    }
-    forward = forward.normalize();
-    let world_up = Vec3::Z;
-    let mut right = forward.cross(world_up);
-    if right.length_squared() < 1e-8 {
-        right = Vec3::X;
-    } else {
-        right = right.normalize();
-    }
-    let up = right.cross(forward).normalize();
-
+    let rotation = gameplay_boss_icon_rotation(plinth);
+    let model = translate_rot_scale(
+        center,
+        rot_euler_xyz_rad(rotation[0], rotation[1], rotation[2]),
+        Vec3::new(scale, scale * 0.04, scale),
+    );
+    let half = 0.5;
     let mut mn_x = f32::INFINITY;
     let mut mn_y = f32::INFINITY;
     let mut mx_x = f32::NEG_INFINITY;
     let mut mx_y = f32::NEG_INFINITY;
-    for offset in [
-        (-half, -half),
-        (half, -half),
-        (-half, half),
-        (half, half),
+    for corner in [
+        Vec3::new(-half, half, -half),
+        Vec3::new(half, half, -half),
+        Vec3::new(-half, half, half),
+        Vec3::new(half, half, half),
     ] {
-        let world = center + right * offset.0 + up * offset.1;
+        let world = model.transform_point3(corner);
         let (sx, sy) = cam.project_world_to_screen(window_w, window_h, world);
         mn_x = mn_x.min(sx);
         mn_y = mn_y.min(sy);
@@ -1029,6 +1084,7 @@ pub fn gameplay_embedded_point_lights_runtime(
     tune: &RoomEnvLightingTune,
     flame_time_s: f32,
     lamp_flicker: f32,
+    candle_flicker_amp: f32,
 ) -> Vec<PointLight> {
     with_gameplay_glb_cpu(|opt| {
         opt.map(|cpu| {
@@ -1041,6 +1097,7 @@ pub fn gameplay_embedded_point_lights_runtime(
                 crate::room_gltf_punctual::RoomPunctualProfile::ShopCandles {
                     flame_time_s,
                     lamp_flicker,
+                    flicker_amp: candle_flicker_amp,
                 },
                 "gameplay.glb",
             )
@@ -1075,6 +1132,7 @@ pub fn gameplay_gltf_candle_flame_emitters(
     h: f32,
     env_h: f32,
     lamp_flicker: f32,
+    tuning: &crate::flame_tuning::FlameTuning,
 ) -> Vec<FlameEmitter> {
     with_gameplay_glb_cpu(|opt| {
         let Some(cpu) = opt else {
@@ -1085,7 +1143,9 @@ pub fn gameplay_gltf_candle_flame_emitters(
             .environment_bounds_doc
             .map(|b| b.center())
             .unwrap_or(Vec3::ZERO);
-        let flame_scale = shop_gltf_flame_emitter_scale(s);
+        let flame_scale = tuning.emitter_scale(
+            crate::flame_volume::SHOP_GLTF_CANDLE_HEIGHT_DOC_M * s.max(1e-6),
+        );
         cpu.embedded_point_lights
             .iter()
             .filter(|l| l.is_candle)
@@ -1097,7 +1157,7 @@ pub fn gameplay_gltf_candle_flame_emitters(
                     .wrapping_add(0xC01A_C0FF);
                 let scale_jitter = 0.88 + (seed & 0x3f) as f32 / 63.0 * 0.24;
                 let emitter_scale = flame_scale * scale_jitter;
-                let world = shop_gltf_wick_from_light(light_world, emitter_scale);
+                let world = tuning.wick_from_light(light_world, emitter_scale);
                 let phase = (seed as f32 * 2.328_306e-10).fract();
                 FlameEmitter {
                     wick_world: world,
@@ -1105,7 +1165,7 @@ pub fn gameplay_gltf_candle_flame_emitters(
                     wind: glam::Vec2::ZERO,
                     brightness: lamp_flicker,
                     phase,
-                    flicker_amp: crate::flame_volume::SHOP_CANDLE_FLICKER_AMP,
+                    flicker_amp: tuning.candle_flicker_amp,
                 }
             })
             .collect()

@@ -50,8 +50,32 @@ class PackRule:
     root_globs: list[str]
 
 
+def parse_json_file(path: Path, *, label: str | None = None) -> object:
+    text = path.read_text(encoding="utf-8")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as err:
+        where = label or str(path)
+        lines = text.splitlines()
+        lineno = err.lineno
+        colno = err.colno
+        snippet: list[str] = []
+        for i in range(max(0, lineno - 2), min(len(lines), lineno + 1)):
+            marker = ">" if i == lineno - 1 else " "
+            snippet.append(f"  {marker} {i + 1:4d} | {lines[i]}")
+        if 1 <= lineno <= len(lines):
+            caret_col = len(f"  > {lineno:4d} | ") + colno
+            snippet.append(f"{' ' * caret_col}^")
+        print(
+            f"error: invalid JSON in {where}: {err.msg} (line {lineno}, column {colno})\n"
+            + "\n".join(snippet),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from err
+
+
 def load_rules() -> list[PackRule]:
-    raw = json.loads(RULES_PATH.read_text(encoding="utf-8"))
+    raw = parse_json_file(RULES_PATH)
     out: list[PackRule] = []
     for p in raw["packs"]:
         out.append(
@@ -142,6 +166,9 @@ def should_skip(rel: str) -> bool:
         ".bin",
     }:
         return True
+    # Source relic art — runtime loads pre-baked RLC1 under data/relic_baked/.
+    if rel.startswith("textures/relics/"):
+        return True
     return False
 
 
@@ -202,7 +229,7 @@ def process_file(src: Path, rel: str, tmp_out: Path, lossy: bool) -> None:
     if suf == ".glb" and maybe_resize_room_env_glb(src, tmp_out):
         return
     if suf == ".json":
-        data = json.loads(src.read_text(encoding="utf-8"))
+        data = parse_json_file(src, label=rel)
         tmp_out.write_bytes(json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
         return
 

@@ -85,6 +85,8 @@ impl From<&Scene> for SceneTag {
             Scene::TutorialSummary(_) => SceneTag::TutorialSummary,
             Scene::TransitionPlayground(_) => SceneTag::TransitionPlayground,
             Scene::AnimationLab(_) => SceneTag::AnimationLab,
+            Scene::RollerLab(_) => SceneTag::Gameplay,
+            Scene::CascadeLab(_) => SceneTag::Gameplay,
             Scene::RumbleLab(_) => SceneTag::RumbleLab,
             Scene::Tixels(_) => SceneTag::Tixels,
             Scene::YakuJournal(_) => SceneTag::YakuJournal,
@@ -188,7 +190,9 @@ pub(crate) fn should_clear_smoke_on_transition(from: SceneTag, to: SceneTag) -> 
 pub(crate) struct PostSceneTransitionCtx<'a> {
     pub from: SceneTag,
     pub to: SceneTag,
-    /// Current blind is a boss when transitioning into gameplay (round-start BGM).
+    /// Boss BGM when entering gameplay — uses the round being started
+    /// (`GameplayScene::pending_chamber`), not `run.chamber` (often still the
+    /// cleared blind until `apply_chamber` runs).
     pub gameplay_ordeal_chamber: bool,
     pub anim: &'a mut AnimationController,
     pub renderer: Option<&'a mut WgpuRenderer>,
@@ -240,6 +244,9 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
             }
             SceneTag::PickChamber => {
                 r.prefetch_room_chain_next(crate::render::room_preload::RoomSceneChain::Gameplay);
+            }
+            SceneTag::Gameplay => {
+                r.snap_gameplay_score_rollers();
             }
             _ => {}
         }

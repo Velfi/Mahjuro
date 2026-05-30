@@ -227,6 +227,12 @@ pub(super) fn make_image_quad_overlay_gpu(
         crate::draw_cmd::ImageQuadSource::Relic(id) => {
             crate::relic_pipeline::decode_relic_icon_rgba(*id)?
         }
+        crate::draw_cmd::ImageQuadSource::DebuffMarker => {
+            const W: u32 = 192;
+            const H: u32 = 256;
+            let rgba = crate::decal::rasterize_debuff_marker_overlay(W, H);
+            (rgba, W, H)
+        }
         crate::draw_cmd::ImageQuadSource::Filesystem(path) => {
             crate::kenney_svg::rasterize_filesystem_svg_or_png_rgba(path)?
         }

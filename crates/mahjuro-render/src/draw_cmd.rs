@@ -398,6 +398,8 @@ pub enum ImageQuadSource {
     Asset { path: &'static str },
     /// Relic icon: albedo + mask cut via [`crate::relic_pipeline`].
     Relic(mahjuro_core::core::relic::RelicId),
+    /// Procedural debuff X ([`crate::decal::rasterize_debuff_marker_overlay`]) — same mark as on tiles.
+    DebuffMarker,
     /// Absolute filesystem path to an SVG or PNG (rasterized at draw time).
     #[allow(dead_code)] // No current producer; renderer path kept for tooling / experiments.
     Filesystem(std::path::PathBuf),
@@ -410,6 +412,7 @@ impl ImageQuadSource {
             Self::PackedAtlas { sheet, name } => format!("packed-atlas:{sheet}:{name}"),
             Self::Asset { path } => format!("asset:{path}"),
             Self::Relic(id) => format!("relic:{id:?}"),
+            Self::DebuffMarker => "debuff-marker".to_string(),
             Self::Filesystem(path) => format!("file:{}", path.display()),
         }
     }
@@ -420,6 +423,22 @@ impl ImageQuadSource {
 pub struct ImageQuad {
     pub inst: GpuInstance,
     pub source: ImageQuadSource,
+}
+
+/// Screen-space debuff X centered on `anchor_rect` (matches relic/tile overlay sizing).
+pub fn debuff_marker_image_quad(anchor_rect: [f32; 4]) -> ImageQuad {
+    let [rx, ry, rw, rh] = anchor_rect;
+    let side = (rw.min(rh) * 0.42).max(14.0).min(rw.min(rh) * 0.92);
+    let cx = rx + rw * 0.5;
+    let cy = ry + rh * 0.48;
+    ImageQuad {
+        inst: GpuInstance {
+            rect: [cx - side * 0.5, cy - side * 0.5, side, side],
+            color: [1.0, 1.0, 1.0, 1.0],
+            user: 0,
+        },
+        source: ImageQuadSource::DebuffMarker,
+    }
 }
 
 // ── General-purpose 3D placement ─────────────────────────────────────────
@@ -518,10 +537,8 @@ pub enum Object3dKind {
         glow: f32,
         pick_id: Option<u32>,
     },
-    // (Coin is now modeled as `Primitive { shape: Cylinder,
-    // material: MaterialSpec::metal(), shadow_caster: true }`. The
-    // renderer registers the engraved-coin heightmap as a per-shape
-    // texture override for MeshId::Cylinder.)
+    // (Coin uses `Primitive { shape: Coin }` routed to [`DrawKind::GltfCoin`]
+    // and rendered with full glTF PBR from [`coin.glb`](../../../assets/3d/coin.glb).)
     // (GoldBar is now modeled as `Primitive { shape: Cube,
     // material: MaterialSpec::metal(), shadow_caster: true }`.)
     // (BrassRail is now modeled as `Primitive { shape: Cube,
@@ -784,6 +801,7 @@ pub struct GameplayActionPickProxies {
     pub bowl: Option<Object3d>,
     pub mirror: Option<Object3d>,
     pub journal: Option<Object3d>,
+    pub guidebook: Option<Object3d>,
     pub cash_in_tablet: Option<Object3d>,
 }
 
@@ -811,6 +829,8 @@ pub struct UiFrame {
     /// help disambiguate world-space directions when iterating on
     /// placements.
     pub debug_axes: bool,
+    /// Rain debug menu: draw emissive overlay on main-menu `rain_hit_*` collision shells.
+    pub debug_rain_hit_colliders: bool,
     /// When `Some`, overrides the tile material for this frame. Used by
     /// the tile-select scene to preview materials before a run starts.
     pub tile_material_override: Option<mahjuro_gfx_types::TileMaterial>,
@@ -847,9 +867,13 @@ pub struct UiFrame {
     /// GLB mesh is culled (e.g. first page hides left, last page hides right).
     pub archive_page_left_visible: bool,
     pub archive_page_right_visible: bool,
-    /// When set, description copy is rasterized into the archive room decal atlas and composited
-    /// on the `sign_description_left` / `sign_description_right` meshes in `room_glb.wgsl`.
+    /// When set, browse-mode copy is rasterized into the archive room decal atlas and composited
+    /// on the active `sign_description_*` mesh in `room_glb.wgsl`.
     pub archive_sign_description_decal_text: Option<String>,
+    /// Item inspect overlay: show the authored `inspect_plaque` mesh and rasterize copy onto it.
+    pub archive_inspect_plaque_visible: bool,
+    /// Inspect-mode description copy for [`archive_inspect_plaque_visible`].
+    pub archive_inspect_plaque_decal_text: Option<String>,
     /// Pick-blind hallway vertex warp (`room_glb.wgsl` @group(0) @binding(8)); `None` elsewhere.
     pub hallway_distortion: Option<crate::hallway_glb::HallwayDistortion>,
     /// When true, skip offline room GI probe bake and run dynamic `emissive-probe-update`.
@@ -870,6 +894,8 @@ pub struct UiFrame {
     pub shop_env_eyeball_only: bool,
     /// Animation lab: flat albedo + simple N·L in `room_glb.wgsl` (no punctual PBR).
     pub shop_env_unlit_debug: bool,
+    /// Gameplay score roller digits `(live_score, target_score)` when the HUD roller is active.
+    pub gameplay_score_roller_values: Option<(u64, u64)>,
 }
 
 impl UiFrame {
@@ -882,6 +908,7 @@ impl UiFrame {
             cursor_pos: None,
             camera_override: None,
             debug_axes: false,
+            debug_rain_hit_colliders: false,
             tile_material_override: None,
             buttons: Vec::new(),
             window_title: String::new(),
@@ -893,6 +920,8 @@ impl UiFrame {
             archive_page_left_visible: false,
             archive_page_right_visible: false,
             archive_sign_description_decal_text: None,
+            archive_inspect_plaque_visible: false,
+            archive_inspect_plaque_decal_text: None,
             hallway_distortion: None,
             room_gi_dynamic: false,
             shop_inspect_shadow_target: None,
@@ -902,6 +931,7 @@ impl UiFrame {
             shop_gltf_anim_samples: Vec::new(),
             shop_env_eyeball_only: false,
             shop_env_unlit_debug: false,
+            gameplay_score_roller_values: None,
         }
     }
 

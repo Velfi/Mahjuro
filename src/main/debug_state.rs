@@ -10,6 +10,7 @@ use crate::debug_overlays::{
     SceneLookDebugOverlay, SfxTestOverlay, TuningOverlay,
 };
 use crate::render::draw_cmd::CameraParams;
+use crate::render::flame_debug_overlay::FlameDebugOverlay;
 use crate::render::rain_debug_overlay::RainDebugOverlay;
 
 /// Debug-only state: overlays, visibility toggles, FPS counter, and the
@@ -28,6 +29,9 @@ pub struct DebugState {
     /// Pick-blind hallway vertex warp tuning (left panel).
     pub hallway_distortion_debug_overlay: Option<HallwayDistortionDebugOverlay>,
     pub rain_debug_overlay: Option<RainDebugOverlay>,
+    pub flame_debug_overlay: Option<FlameDebugOverlay>,
+    /// Debug → Tuning → Environment → Main Menu Pride Rainbow — preview June FX outside June.
+    pub main_menu_pride_rainbow_debug: bool,
     /// Effective 3D camera after the scene's `draw_frame` (override or table
     /// default), updated each paint — used to seed camera debug overlay.
     pub last_effective_camera: CameraParams,
@@ -47,6 +51,8 @@ impl DebugState {
             scene_look_debug_overlay: None,
             hallway_distortion_debug_overlay: None,
             rain_debug_overlay: None,
+            flame_debug_overlay: None,
+            main_menu_pride_rainbow_debug: false,
             last_effective_camera: CameraParams::default_table_camera(800.0),
         }
     }
@@ -59,6 +65,7 @@ impl DebugState {
             || self.scene_look_debug_overlay.is_some()
             || self.hallway_distortion_debug_overlay.is_some()
             || self.rain_debug_overlay.is_some()
+            || self.flame_debug_overlay.is_some()
             || self.visibility_overlay.is_some()
     }
 }

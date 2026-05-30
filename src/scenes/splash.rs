@@ -19,6 +19,12 @@ pub struct SplashScene {
     done: bool,
 }
 
+impl Default for SplashScene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SplashScene {
     pub fn new() -> Self {
         Self {
@@ -37,7 +43,7 @@ impl SceneBehavior for SplashScene {
         let elapsed = self.start.elapsed().as_secs_f32();
 
         // Wait for GPU/renderer readiness (see `loading_done` in `frame_tick`) and a short
-        // minimum time — do not block on relic or menu-backdrop decode; those finish in parallel.
+        // minimum time — do not block on relic decode; those finish in parallel.
         if ctx.loading_done && elapsed >= MIN_DISPLAY_SECS {
             self.done = true;
             log::info!("splash: transitioning to start screen after {elapsed:.2}s");

@@ -24,7 +24,7 @@ pub fn yen_coin_dims(mm: impl Fn(f32) -> f32) -> (f32, f32, f32) {
     (coin_radius, coin_thickness, scatter_half)
 }
 
-/// Settled metal coin cylinders on a dish floor — no procedural tray mesh (GLB or layout supplies the tray).
+/// Settled GLB coins on a dish floor — no procedural tray mesh (GLB or layout supplies the tray).
 ///
 /// When `window` is `Some((w, h))`, the anchor is a [`surface_anchor`](crate::world_space::surface_anchor_from_world_xyz)
 /// and scatter happens in world XY (for gameplay GLB `player_yen`). Otherwise the anchor is already
@@ -94,10 +94,10 @@ pub fn build_settled_yen_coin_pile(
             pos,
             extents: [coin_radius * 2.0, coin_thickness, coin_radius * 2.0],
             rotation: [0.0, rot_y, 0.0],
-            color: color::RELIC_GOLD,
+            color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::Primitive {
-                shape: MeshId::Cylinder,
-                material: MaterialSpec::metal(),
+                shape: MeshId::Coin,
+                material: MaterialSpec::coin_glb(),
                 pick_id: None,
                 shadow_caster: true,
                 silhouette: false,
@@ -120,7 +120,7 @@ pub fn push_yen_amount_label(
     let yen_text = format!("¥{}", yen.max(0));
     let credits_font_px = typography::size(typography::H20, window_h);
     let h_px = credits_font_px.max(1.0).round().max(1.0) as u32;
-    let (credits_rw, credits_rh) = if let Some(ref font) = load_ui_font() {
+    let (credits_rw, credits_rh) = if let Some(font) = load_ui_font() {
         let (_, _, advances) =
             measure_label_advances(font, &yen_text, 8192, h_px, Some(credits_font_px));
         let text_w: f32 = advances.iter().sum();

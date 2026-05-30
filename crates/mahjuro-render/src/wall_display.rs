@@ -20,7 +20,7 @@ pub fn push_wall_remaining_hud(
     let font_px = typography::size(typography::H20, window_h);
     let count_text = format!("{}", tiles_left);
     let h_px = font_px.max(1.0).round().max(1.0) as u32;
-    let text_w = if let Some(ref font) = load_ui_font() {
+    let text_w = if let Some(font) = load_ui_font() {
         let (_, _, advances) = measure_label_advances(font, &count_text, 8192, h_px, Some(font_px));
         advances.iter().sum::<f32>().max(font_px * 1.1)
     } else {

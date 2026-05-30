@@ -9,6 +9,7 @@
 //! Boolean `subtractor` meshes are culled at decode — see
 //! [`crate::room_env_gltf::skip_room_env_authoring_mesh_node_name`].
 
+use chrono::Datelike;
 use parking_lot::RwLock;
 
 use glam::Vec3;
@@ -127,6 +128,35 @@ pub fn main_menu_collision_meshes() -> Vec<crate::room_env_gltf::RoomCollisionMe
 
 /// Visible ground mesh node in [`main_menu.glb`](../../../assets/3d/main_menu.glb) (spawn fallback only).
 pub const MAIN_MENU_RAIN_GROUND_NODE: &str = "ground";
+
+/// Emissive moon mesh in [`main_menu.glb`](../../../assets/3d/main_menu.glb) (`MoonObject` node).
+pub const MAIN_MENU_MOON_MESH_NODE: &str = "MoonObject";
+
+/// Emissive star meshes (`star`, `star.001`, …) in [`main_menu.glb`](../../../assets/3d/main_menu.glb).
+pub const MAIN_MENU_STAR_MESH_NODE_PREFIX: &str = "star";
+
+#[inline]
+pub fn is_main_menu_moon_env_node(name: &str) -> bool {
+    name == MAIN_MENU_MOON_MESH_NODE
+}
+
+#[inline]
+pub fn is_main_menu_star_env_node(name: &str) -> bool {
+    name == MAIN_MENU_STAR_MESH_NODE_PREFIX || name.starts_with("star.")
+}
+
+/// Moon + star meshes that use the `rainbow_swirl_rgb` path in `room_glb.wgsl`.
+#[inline]
+pub fn is_main_menu_rainbow_emissive_env_node(name: &str) -> bool {
+    is_main_menu_moon_env_node(name) || is_main_menu_star_env_node(name)
+}
+
+/// Pride rainbow on main-menu moon / stars + starfield tint — active during June (local time),
+/// or when `debug_override` is true (Debug menu toggle).
+#[inline]
+pub fn main_menu_pride_rainbow_active(debug_override: bool) -> bool {
+    debug_override || chrono::Local::now().month() == 6
+}
 
 /// World-space spawn column for CPU rain — union of every `rain_hit_*` shell (deck, rocks, roof, …).
 pub fn main_menu_rain_hit_spawn_aabb(

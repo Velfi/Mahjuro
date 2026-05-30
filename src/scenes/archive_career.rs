@@ -154,7 +154,7 @@ pub fn chronicle_run_description(rec: &RunRecord) -> String {
         .map(|b| format!("{}\n", b.name()))
         .unwrap_or_default();
     format!(
-        "{outcome}\n{boss}Wing {} · {} chamber\nRound score {} / target {}\nRun total score {}\nBest hand: {} ({})\nMaterial {} · stake {}",
+        "{outcome}\n{boss}Wing {} · {} chamber\nRound score {} / target {}\nRun total score {}\nBest hand: {} ({})\nMaterial {} · season {}",
         rec.final_wing,
         rec.final_chamber.name(),
         rec.round_score,
@@ -163,7 +163,7 @@ pub fn chronicle_run_description(rec: &RunRecord) -> String {
         rec.best_structure_name,
         rec.best_structure_score,
         rec.tile_material.label(),
-        rec.stake.label(),
+        rec.season.label(),
     )
 }
 
@@ -597,8 +597,8 @@ pub fn run_detail_model(
             score_lines.push(format!("Relics +{}", snap.relic_chips));
         }
         score_lines.push(format!(
-            "Boss ×{:.2} · Stake ×{:.2}",
-            snap.boss_mult_factor, snap.stake_mult_factor
+            "Boss ×{:.2} · Season ×{:.2}",
+            snap.boss_mult_factor, snap.season_mult_factor
         ));
         score_lines.push(format!("Total {}", snap.total));
     } else {
@@ -611,7 +611,7 @@ pub fn run_detail_model(
     score_lines.push(format!(
         "{} · {}",
         rec.tile_material.label(),
-        rec.stake.label()
+        rec.season.label()
     ));
     if let Some(tier) = rec.chronicle.victory_tier {
         score_lines.push(format!("Victory tier · {}", tier.label()));
@@ -778,13 +778,41 @@ pub fn tile_image_source(tile: &Tile) -> Option<ImageQuadSource> {
     })
 }
 
+pub fn format_score(n: u64) -> String {
+    let s = n.to_string();
+    if s.len() <= 3 {
+        return s;
+    }
+    let mut out = String::new();
+    for (i, ch) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
+}
+
+/// Compact score for the narrow run-log column (full commas below 100k).
+pub fn format_run_log_score(n: u64) -> String {
+    if n >= 10_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000_000 {
+        format!("{:.2}M", n as f64 / 1_000_000.0)
+    } else if n >= 100_000 {
+        format!("{:.0}k", n as f64 / 1_000.0)
+    } else {
+        format_score(n)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{career_ordeal_records, format_run_ended_timestamp};
     use crate::core::ordeal::OrdealKind;
     use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};
     use crate::core::rules::ChamberKind;
-    use crate::core::stake::Stake;
+    use crate::core::season::Season;
     use crate::game::event_bus::GameOverReason;
     use crate::persistence::TileMaterial;
 
@@ -815,7 +843,7 @@ mod tests {
             relics_owned: vec![],
             consumables_owned: vec![],
             tile_material: TileMaterial::Bamboo,
-            stake: Stake::Spring,
+            season: Season::Spring,
             tutorial_run: false,
             memorial_kind: None,
             best_hand_tiles: vec![],
@@ -860,33 +888,5 @@ mod tests {
     #[test]
     fn run_ended_timestamp_unknown_when_zero() {
         assert_eq!(format_run_ended_timestamp(0), "Ended · time unknown");
-    }
-}
-
-pub fn format_score(n: u64) -> String {
-    let s = n.to_string();
-    if s.len() <= 3 {
-        return s;
-    }
-    let mut out = String::new();
-    for (i, ch) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out.chars().rev().collect()
-}
-
-/// Compact score for the narrow run-log column (full commas below 100k).
-pub fn format_run_log_score(n: u64) -> String {
-    if n >= 10_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000_000 {
-        format!("{:.2}M", n as f64 / 1_000_000.0)
-    } else if n >= 100_000 {
-        format!("{:.0}k", n as f64 / 1_000.0)
-    } else {
-        format_score(n)
     }
 }

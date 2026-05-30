@@ -13,9 +13,21 @@ struct Globals {
     time: f32,
     gamma: f32,
     cursor_pos: vec2<f32>,
+    transition_progress: f32,
+    quality_level: f32,
+    moon_phase: f32,
+    main_menu_pride_rainbow: f32,
+    _globals_pad: vec2<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
+
+fn starfield_tint(uv: vec2<f32>, time: f32) -> vec3<f32> {
+    if (globals.main_menu_pride_rainbow > 0.5) {
+        return rainbow_swirl_rgb(uv, time);
+    }
+    return vec3<f32>(1.0, 0.98, 0.95);
+}
 
 struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,
@@ -53,13 +65,20 @@ fn hash22(p: vec2<f32>) -> vec2<f32> {
 // ── Star layer ────────────────────────────────────────────────────────
 // Grid-based procedural stars. Each cell may contain one star whose
 // position, brightness, and twinkle phase are derived from hashes.
-fn star_layer(uv: vec2<f32>, scale: f32, density: f32, size: f32, time: f32) -> f32 {
+struct StarLayerSample {
+    brightness: f32,
+    tint: vec3<f32>,
+}
+
+fn star_layer(uv: vec2<f32>, scale: f32, density: f32, size: f32, time: f32) -> StarLayerSample {
     let grid_uv = uv * scale;
     let cell = floor(grid_uv);
     let frac_uv = fract(grid_uv);
 
     let rng = hash22(cell);
-    if rng.x > density { return 0.0; }
+    if rng.x > density {
+        return StarLayerSample(0.0, vec3<f32>(0.0));
+    }
 
     // Star position within cell (inset from edges to avoid clipping)
     let star_pos = vec2<f32>(0.2 + rng.x * 0.6, 0.2 + rng.y * 0.6);
@@ -73,7 +92,8 @@ fn star_layer(uv: vec2<f32>, scale: f32, density: f32, size: f32, time: f32) -> 
     let spd = 1.5 + rng.y * 2.0;
     let twinkle = 0.7 + 0.3 * sin(time * spd + phase);
 
-    return brightness * twinkle;
+    let tint = starfield_tint(cell * 0.11 + star_pos * 1.7, time);
+    return StarLayerSample(brightness * twinkle, tint);
 }
 
 // ── SDF line segment ──────────────────────────────────────────────────
@@ -242,7 +262,6 @@ fn constellation_center(c: u32) -> vec2<f32> {
 
 // ── Constellation rendering ───────────────────────────────────────────
 fn constellations(uv: vec2<f32>, cursor_uv: vec2<f32>, aspect: f32, time: f32) -> vec3<f32> {
-    let warm = vec3<f32>(1.0, 0.85, 0.4);
     var glow = vec3<f32>(0.0);
 
     for (var c = 0u; c < C_COUNT; c++) {
@@ -284,7 +303,8 @@ fn constellations(uv: vec2<f32>, cursor_uv: vec2<f32>, aspect: f32, time: f32) -
             star_brightness += smoothstep(0.008, 0.001, d_a);
         }
 
-        glow += warm * (line_brightness * 0.25 + star_brightness * 0.8) * alpha * breathe;
+        let tint = starfield_tint(center * 2.2 + vec2<f32>(f32(c) * 0.37, 0.0), time);
+        glow += tint * (line_brightness * 0.25 + star_brightness * 0.8) * alpha * breathe;
     }
 
     return glow;
@@ -341,12 +361,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let aspect = globals.screen.x / globals.screen.y;
     let cursor_uv = globals.cursor_pos / globals.screen;
 
-    // Subtle indigo ambient that tints the darkest table regions toward
-    // a midnight-blue sky feeling. Kept very low so it doesn't wash out
-    // the warm candlelight in the centre.
-    let center = vec2<f32>(0.5, 0.35);
-    let dist_center = length((uv - center) * vec2<f32>(aspect * 0.7, 1.0));
-    var color = vec3<f32>(0.012, 0.015, 0.04) * smoothstep(0.2, 0.8, dist_center);
+    // Additive stars only — keep interstitial space black.
+    var color = vec3<f32>(0.0);
 
     // ── Star layers with parallax ───────────────────────────────────
     let cursor_ndc = (cursor_uv - 0.5) * 2.0;
@@ -363,9 +379,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let uv2 = uv - cursor_ndc * 0.002;
     let s2 = star_layer(uv2, 140.0, 0.55, 0.010, t);
 
-    // Cool white-blue field stars
-    let star_tint = vec3<f32>(0.7, 0.8, 1.0);
-    color += star_tint * (s0 * 0.7 + s1 * 0.5 + s2 * 0.3);
+    color += s0.tint * s0.brightness * 0.7;
+    color += s1.tint * s1.brightness * 0.5;
+    color += s2.tint * s2.brightness * 0.3;
 
     // ── Constellations (mid-layer parallax) ─────────────────────────
     let c_uv = uv - cursor_ndc * 0.008;
@@ -373,7 +389,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // ── Shooting star ───────────────────────────────────────────────
     let shoot = shooting_star(uv, aspect, t);
-    color += vec3<f32>(1.0, 0.92, 0.65) * shoot;
+    color += starfield_tint(uv * 4.0, t) * shoot;
 
     // ── Vignette mask: fade to zero in the centre so the effect ────
     // frames the menu without competing with the UI.

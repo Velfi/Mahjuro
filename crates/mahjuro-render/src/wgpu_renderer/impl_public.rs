@@ -55,6 +55,20 @@ impl WgpuRenderer {
         })
     }
 
+    /// True when splash can hand off to the main-menu hub without a first-frame shadow hitch.
+    pub fn splash_hub_boot_ready(&self) -> bool {
+        self.showcase_decal_atlases_baked_for_all_player_tilesets()
+            && self
+                .room_baked_shadow_gpu
+                [crate::room_gi_bake::room_gi_room_index(crate::room_gi_bake::RoomGiRoom::MainMenu)]
+                .is_some()
+    }
+
+    /// Upload offline shadows the hub needs while the splash loading screen is still up.
+    pub fn prepare_splash_hub_boot(&mut self) {
+        self.ensure_room_baked_shadow_gpu(crate::room_gi_bake::RoomGiRoom::MainMenu);
+    }
+
     /// Load the active tileset showcase atlas from its baked PNG.
     pub fn ensure_active_showcase_decal_atlas(&mut self, active_tileset_name: &str) {
         self.ensure_showcase_decal_atlas(active_tileset_name);
@@ -113,14 +127,14 @@ impl WgpuRenderer {
         active_key: Option<&str>,
         tunes: &[(&'static str, crate::room_glb::RoomEnvFrameTune)],
     ) {
-        use crate::room_glb::RoomEnvFrameTune;
+        
         self.frame_env_tunes.clear();
         for (key, tune) in tunes {
             self.frame_env_tunes.insert(*key, *tune);
         }
         self.active_frame_env = active_key
             .and_then(|k| self.frame_env_tunes.get(k).copied())
-            .unwrap_or_else(RoomEnvFrameTune::default);
+            .unwrap_or_default();
     }
 
     #[inline]
@@ -136,18 +150,41 @@ impl WgpuRenderer {
         self.active_frame_env
     }
 
-    #[inline]
-    pub fn shop_gltf_anim_has_clip(&self, clip_name: &str) -> bool {
-        self.shop_gltf_anim.has_clip(clip_name)
-    }
-
-    #[inline]
-    pub fn shop_eyeball_prim_index_loaded(&self) -> bool {
-        !self.shop_eyeball_prim_indices.is_empty()
-            || self.shop_gltf_anim.has_clip("eyeball_travel")
-    }
-
     pub fn clear_smoke(&mut self) {
         self.prev_tile_world.clear();
+    }
+
+    /// Snap gameplay score/target odometer rollers to the next frame's HUD values
+    /// instead of animating from the previous round's drive state.
+    pub fn snap_gameplay_score_rollers(&self) {
+        *self
+            .gameplay_score_roller_drive_initialized
+            .borrow_mut() = [false; 2];
+        *self.gameplay_score_roller_roll_elapsed.borrow_mut() = 0.0;
+        *self.gameplay_score_roller_stopped.borrow_mut() = false;
+    }
+
+    /// True once since the last drain when both score/target odometer banks settled.
+    pub fn take_gameplay_score_roller_stop(&self) -> bool {
+        std::mem::take(&mut *self.gameplay_score_roller_stopped.borrow_mut())
+    }
+
+    /// True while either score/target odometer bank is still catching up to
+    /// `score` / `target` (used to drive the rollers spinning loop SFX).
+    pub fn gameplay_score_rollers_spinning(&self, score: u64, target: u64) -> bool {
+        let drive_values = self.gameplay_score_roller_drive_values.borrow();
+        let initialized = self.gameplay_score_roller_drive_initialized.borrow();
+        let goal = [score as f64, target as f64];
+        runtime::shop_environment::gameplay_score_roller_bank_moving(
+            &initialized,
+            &drive_values,
+            &goal,
+        )
+    }
+
+    /// Playback speed for the rollers loop SFX (gentler ramp than the visual drive).
+    pub fn gameplay_score_roller_loop_speed(&self) -> f32 {
+        let elapsed = *self.gameplay_score_roller_roll_elapsed.borrow();
+        runtime::shop_environment::gameplay_score_roller_loop_speed_multiplier(elapsed) as f32
     }
 }

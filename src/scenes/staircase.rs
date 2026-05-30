@@ -18,6 +18,12 @@ pub struct StaircaseScene {
     flavor: &'static [RelicFlavorSpan],
 }
 
+impl Default for StaircaseScene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StaircaseScene {
     pub fn new() -> Self {
         Self {

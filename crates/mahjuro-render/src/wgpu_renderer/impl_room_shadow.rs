@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::lit_mesh::{ShadowGlobals, create_shadow_sample_bind_group};
-use crate::room_gi_bake::RoomGiRoom;
+use crate::lit_mesh::{PunctualShadowSlotGpu, ShadowGlobals, create_shadow_sample_bind_group};
+use crate::punctual_shadow_atlas::{
+    MAX_PUNCTUAL_SHADOW_LIGHTS, PUNCTUAL_SHADOW_TILE_SIZE, PunctualShadowLightSetup,
+};
+use crate::room_gi_bake::{RoomGiRoom, room_gi_room_index};
 use crate::room_shadow_bake::{self, RoomShadowBake};
-use crate::wgpu_renderer::runtime::shadow_setup::{self, ActiveRoomEnv};
+use crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
 
 pub(crate) struct RoomBakedShadowGpu {
     pub sample_bind_group: wgpu::BindGroup,
@@ -26,38 +29,36 @@ impl WgpuRenderer {
         self.room_shadow_captured.take()
     }
 
-    pub(super) fn load_room_baked_shadows(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        shadow_sample_layout: &wgpu::BindGroupLayout,
-        dynamic_depth_view: &wgpu::TextureView,
-        compare_sampler: &wgpu::Sampler,
-        ao_sampler: &wgpu::Sampler,
-    ) -> [RoomBakedShadowGpu; crate::room_gi_bake::ROOM_GI_ROOM_COUNT] {
-        [
-            RoomGiRoom::Shop,
-            RoomGiRoom::Hallway,
-            RoomGiRoom::Archive,
-            RoomGiRoom::MainMenu,
-            RoomGiRoom::Staircase,
-            RoomGiRoom::Gameplay,
-        ]
-        .map(|room| {
-            let bake = room_shadow_bake::require_room_shadow_bake(room).unwrap_or_else(|e| {
-                panic!("{e}");
-            });
-            Self::upload_room_baked_shadow_gpu(
-                device,
-                queue,
-                shadow_sample_layout,
-                dynamic_depth_view,
-                compare_sampler,
-                ao_sampler,
-                room,
-                &bake,
-            )
-            .unwrap_or_else(|e| panic!("room shadow GPU upload for {room:?}: {e:#}"))
-        })
+    /// GPU-upload one room's offline `.msh` on first draw (lazy init at startup).
+    pub(super) fn ensure_room_baked_shadow_gpu(&mut self, room: RoomGiRoom) {
+        let idx = room_gi_room_index(room);
+        if self.room_baked_shadow_gpu[idx].is_some() {
+            return;
+        }
+        let Some(bake) = room_shadow_bake::cached_room_shadow_bake(room) else {
+            log::error!(
+                "missing room shadow bake at {}; run `cargo build` (mahjuro-bake)",
+                room.shadow_asset_path()
+            );
+            return;
+        };
+        match Self::upload_room_baked_shadow_gpu(
+            &self.device,
+            &self.queue,
+            &self.shadow_sample_layout,
+            &self.shadow_map_view,
+            &self.shadow_compare_sampler,
+            &self.shadow_ao_sampler,
+            room,
+            &bake,
+        ) {
+            Ok(gpu) => {
+                self.room_baked_shadow_gpu[idx] = Some(gpu);
+            }
+            Err(e) => {
+                log::error!("room shadow GPU upload for {room:?}: {e:#}");
+            }
+        }
     }
 
     fn upload_room_baked_shadow_gpu(
@@ -184,13 +185,18 @@ impl WgpuRenderer {
         queue: &wgpu::Queue,
         light_view_proj: [f32; 16],
         shadows_enabled: bool,
+        punctual_lights: &[PunctualShadowLightSetup],
     ) {
         let Some(room) = self.active_room_baked_shadow else {
             return;
         };
-        let gpu = &self.room_baked_shadow_gpu[crate::room_gi_bake::room_gi_room_index(room)];
+        let Some(gpu) = &self.room_baked_shadow_gpu[room_gi_room_index(room)] else {
+            return;
+        };
         let enabled = if shadows_enabled { 1.0 } else { 0.0 };
-        let baked_mode = if room == RoomGiRoom::Archive {
+        let gameplay_punctual = room == RoomGiRoom::Gameplay && !punctual_lights.is_empty();
+        let baked_mode = if room == RoomGiRoom::Archive || gameplay_punctual {
+            // Baked contact only — live depth holds per-candle atlas tiles, not key-light PCF.
             2.0
         } else {
             1.0
@@ -203,6 +209,21 @@ impl WgpuRenderer {
                 globals.light_view_proj = light_view_proj;
                 globals.params = [enabled, gpu.depth_bias, gpu.texel, baked_mode];
                 globals.room_baked_light_view_proj = gpu.baked_light_view_proj;
+                if gameplay_punctual && shadows_enabled {
+                    let tile_texel = 1.0 / PUNCTUAL_SHADOW_TILE_SIZE as f32;
+                    let count = punctual_lights.len().min(MAX_PUNCTUAL_SHADOW_LIGHTS) as f32;
+                    globals.punctual_params = [count, tile_texel, 1.0, 0.0];
+                    for (i, setup) in punctual_lights
+                        .iter()
+                        .take(MAX_PUNCTUAL_SHADOW_LIGHTS)
+                        .enumerate()
+                    {
+                        globals.punctual_lights[i] = PunctualShadowSlotGpu {
+                            light_view_proj: setup.light_view_proj.to_cols_array(),
+                            atlas_rect: setup.atlas_rect,
+                        };
+                    }
+                }
                 globals
             }),
         );
@@ -210,20 +231,29 @@ impl WgpuRenderer {
 
     pub(super) fn upload_active_room_baked_shadow_globals(&mut self, frame: &UiFrame) {
         let active_env = ActiveRoomEnv::from_frame(frame);
-        let loaded = active_env.and_then(|env| {
-            let room = env.to_room_gi()?;
-            Some(room)
-        });
-        self.active_room_baked_shadow = active_env.and_then(|env| {
-            shadow_setup::room_env_uses_offline_baked_shadow(Some(env), loaded).then_some(loaded?)
-        });
+        let Some(env) = active_env else {
+            self.active_room_baked_shadow = None;
+            return;
+        };
+        if env == ActiveRoomEnv::Archive {
+            self.active_room_baked_shadow = None;
+            return;
+        }
+        let Some(room) = env.to_room_gi() else {
+            self.active_room_baked_shadow = None;
+            return;
+        };
+        self.ensure_room_baked_shadow_gpu(room);
+        self.active_room_baked_shadow = self.room_baked_shadow_gpu[room_gi_room_index(room)]
+            .as_ref()
+            .map(|_| room);
     }
 
     pub(super) fn room_shadow_sample_bind_group(&self) -> &wgpu::BindGroup {
-        if let Some(room) = self.active_room_baked_shadow {
-            let gpu = &self.room_baked_shadow_gpu[crate::room_gi_bake::room_gi_room_index(room)];
-            return &gpu.sample_bind_group;
-        }
+        if let Some(room) = self.active_room_baked_shadow
+            && let Some(gpu) = &self.room_baked_shadow_gpu[room_gi_room_index(room)] {
+                return &gpu.sample_bind_group;
+            }
         &self.shadow_sample_bind_group
     }
 

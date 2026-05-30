@@ -118,11 +118,8 @@ pub enum MaterialKind {
     /// tan). Composites engraved decals via the same `has_decal` path
     /// as Plain/LacqueredWoodFlat.
     Leather = 18,
-    /// Mahjong-parlor green felt — procedural baize with anisotropic
-    /// fuzz (fibers oriented mostly along Y), broad low-strength sheen,
-    /// and slight tone variance across the surface. Routed by the
-    /// table-mesh draw when the user picks `SurfaceKind::GreenFelt`.
-    /// No clearcoat, no SSR — felt is a diffuse dielectric.
+    /// Legacy material slot (procedural green baize removed). Kept so
+    /// `#[repr(u32)]` discriminants stay stable.
     #[allow(dead_code)]
     FeltGreen = 19,
     /// Unlit emission added on top of the usual lit path. `specular_strength`
@@ -132,13 +129,16 @@ pub enum MaterialKind {
     /// mirror, view-swept sheen). `base_color` tints the foil; `material_params.w`
     /// is the talisman kind index. Uses the talisman heightmap for carved relief.
     Chitin = 21,
+    /// Flat texture read — boss ordeal icons and other extruded decals that should
+    /// match their 2D atlas art without scene lighting or specular.
+    Unshaded = 22,
 }
 
 /// Whether instances using this material should participate in the
 /// directional shadow map (lamps, filaments, and other pure emitters opt out).
 #[inline]
 pub fn material_casts_shadow(kind: MaterialKind) -> bool {
-    !matches!(kind, MaterialKind::Emissive)
+    !matches!(kind, MaterialKind::Emissive | MaterialKind::Unshaded)
 }
 
 /// `material_params.w` sentinel: portrait silk / readable decals must not catch
@@ -910,12 +910,10 @@ pub struct SsrGlobals {
     /// x = enabled (0/1), y = max_distance (world units), z = stride
     /// (world units per step), w = max_steps
     pub params: [f32; 4],
-    /// x = felt procedural LOD (`EffectsQuality::felt_shader_lod`): 0 =
-    /// minimal (effects Off), 1 = Low, 2 = Medium/High full detail.
-    /// y = ACES HDR path (`room_glb` / `tile_3d` match) when **1** (shop, gameplay, collection, …).
-    /// z = linear exposure before ACES (shop env tuning).
-    /// w = hemispheric ambient scale (shop env tuning).
-    pub felt: [f32; 4],
+    /// Matches [`crate::wgpu_renderer::uniforms::CameraUniform::hdr_tonemap`]:
+    /// x = ACES HDR path when **1**; y = linear exposure before ACES;
+    /// z = hemispheric ambient scale; w = reserved.
+    pub hdr_tonemap: [f32; 4],
     /// x = `1/room_env_world_scale` for embedded glTF punctual attenuation in `lit_mesh`
     /// (document-space distance; **0** = world-space / gameplay).
     /// y = shop display-case material tuning (1 = shop + embedded punctual only); zw unused.

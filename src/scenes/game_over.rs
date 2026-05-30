@@ -331,7 +331,7 @@ impl SceneBehavior for GameOverScene {
         let row_font_px = typography::size(typography::H36, h);
         let row_line_h = row_font_px * 1.35;
         let pad_v = row_font_px * 0.8;
-        let panel_w = w * 0.25;
+        let panel_w = if self.won { w * 0.38 } else { w * 0.25 };
         let inner_w = panel_w * 0.90;
         let label_col_w = inner_w * 0.48;
         let value_col_w = inner_w * 0.50;
@@ -350,7 +350,11 @@ impl SceneBehavior for GameOverScene {
             })
             .sum::<f32>();
         let panel_h = pad_v * 2.0 + level_block_h + level_block_gap + stats_h;
-        let panel_x = if self.won { w * 0.67 } else { w * 0.08 };
+        let panel_x = if self.won {
+            w - panel_w - w * 0.04
+        } else {
+            w * 0.08
+        };
 
         let gap = row_font_px * 0.5;
         let sub_font = typography::size(typography::H32, h);

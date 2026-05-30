@@ -120,6 +120,7 @@ use crate::core::debuff::{TileDebuff, TileDebuffClass};
             memorial_round: crate::core::memorial_talisman::MemorialRoundState::default(),
             defeat_memorial_kind: None,
             chronicle: crate::core::run_chronicle::RunChronicle::default(),
+            suppress_chamber_resolution: false,
         }
     }
 

@@ -226,10 +226,12 @@ Re-encoding a sample to itself is **idempotent only up to the encoder** — comm
 
 ### 4.5 Audio settings (player-facing)
 
-- **Master volume** — slider, 0.00–1.00, applies to SFX *and* music *and* (planned) ambience.
-- **Music volume** — slider, 0.00–1.00.
-- **SFX volume** — slider, 0.00–1.00.
+- **Master volume** — slider, 0–200% (stored gain `0.0`–`2.0`; `100%` = unity), applies to SFX *and* music *and* (planned) ambience.
+- **Music volume** — slider, 0–200%.
+- **SFX volume** — slider, 0–200%.
 - **Sound Effects ON/OFF** — toggle; mutes SFX only.
+
+**Routing:** looping BGM uses Master × Music. One-shots on the music sink (round-start intros, win/loss stingers), ambient beds, and all [`SfxId`] cues use Master × SFX (see [`AudioManager::music_sink_effective_volume`](../src/audio.rs)).
 
 Source: `Section::Audio` in [src/scenes/options.rs](../src/scenes/options.rs). Settings persist via `crate::persistence::{load_settings, save_settings}`. No mute-music toggle, no per-category mixer beyond Master / Music / SFX.
 

@@ -1668,7 +1668,7 @@
       dl.appendChild(dt);
       dl.appendChild(el('dd', null, value));
     }
-    modeRow('Stake', mode.stake != null ? String(mode.stake) : '—',
+    modeRow('Season', mode.season != null ? String(mode.season) : '—',
       'Difficulty tier: scales base target, shop prices, and boss floor.');
     modeRow('Base target', mode.base_target != null ? String(mode.base_target) : '—',
       'Ante-1 small-blind target before per-ante scaling.');
@@ -1685,7 +1685,7 @@
       'Bamboo +1 play, Plastic +1 discard, Tortoise Shell +10 starting gold.');
     if (mode.price_multiplier != null) {
       modeRow('Shop price mult.', Number(mode.price_multiplier).toFixed(2),
-        'Stake-driven shop multiplier baked into `GameMode`.');
+        'Season-driven shop multiplier baked into `GameMode`.');
     }
     if (mode.consumable_capacity != null) {
       modeRow('Consumable slots', String(mode.consumable_capacity), 'Base dish capacity before relic bonuses.');
@@ -1709,7 +1709,7 @@
 
     document.title = 'Mahjuro bot — ' + runs + ' runs';
 
-    const stake = mode.stake != null ? String(mode.stake) : '—';
+    const season = mode.season != null ? String(mode.season) : '—';
     const wins = sums.victories ?? 0;
     const losses = Math.max(0, runs - wins);
 
@@ -1736,7 +1736,7 @@
     header_chips.appendChild(el('span', 'chip chip--accent', 'schema v' + (data.schema_version ?? '?')));
     if (meta.crate_version) header_chips.appendChild(el('span', 'chip', meta.crate_version));
     header_chips.appendChild(el('span', 'chip chip--note', runs + ' runs'));
-    header_chips.appendChild(el('span', 'chip chip--warm', stake));
+    header_chips.appendChild(el('span', 'chip chip--warm', season));
     header_chips.appendChild(el('span', 'chip', 'target ' + (mode.base_target ?? '—')));
     if (mode.starting_gold != null) {
       header_chips.appendChild(el('span', 'chip', '¥' + mode.starting_gold + ' start'));
@@ -2074,7 +2074,7 @@
     const b2 = el('strong'); b2.textContent = 'Mode: ';
     s2.appendChild(b2);
     s2.appendChild(document.createTextNode(
-      stake + ' · target ' + (mode.base_target ?? '—') +
+      season + ' · target ' + (mode.base_target ?? '—') +
       ' · ¥' + (mode.starting_gold ?? '—') + ' start · ' +
       (mode.starting_plays ?? '—') + ' plays · ' +
       (mode.starting_discards ?? '—') + ' discards'));

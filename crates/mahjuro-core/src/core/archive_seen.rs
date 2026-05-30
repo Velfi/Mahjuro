@@ -202,7 +202,7 @@ mod tests {
             relics_owned: vec![],
             consumables_owned: vec![],
             tile_material: mahjuro_gfx_types::TileMaterial::Bamboo,
-            stake: crate::core::stake::Stake::Spring,
+            season: crate::core::season::Season::Spring,
             tutorial_run: false,
             memorial_kind: None,
             best_hand_tiles: Vec::new(),

@@ -20,6 +20,8 @@ pub mod bot;
 #[cfg(feature = "game")]
 mod crash_guard;
 #[cfg(feature = "game")]
+mod cascade_tuning_timeline;
+#[cfg(feature = "game")]
 mod debug_menu;
 #[cfg(feature = "game")]
 mod debug_overlays;

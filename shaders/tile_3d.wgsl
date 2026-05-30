@@ -356,7 +356,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // cam.base_color_factor.w — see `tile_body.rs`:
     //   0–2 = procedural tile body (`TileBodyShaderKind`),
     //   4 = sample bound base-color texture, no decal projection (shop room),
-    //   5 = sample bound base-color per primitive + mahjong decal on front (`tile.glb`).
+    //   5 = sample bound base-color per primitive + mahjong decal on **Face** material only.
     let body_kind = cam.base_color_factor.w;
     let use_textured_env = body_kind > 3.5 && body_kind < 4.5;
     let use_textured_tile_glb = body_kind > 4.5 && body_kind < 5.5;
@@ -442,18 +442,25 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         rgb = base_rgb;
     } else {
         // Project decal UVs from model-space position onto the front face.
+        // glTF **Face** quads use the same projection after `normalize_mesh`; authored
+        // TEXCOORD_1 is kept for MR/normal maps but not decal orientation (UVs do not
+        // rotate with the Z-up → engine +Y axis fix applied at load time).
         // The mesh's long face axis is local X (extent 1.0, mapped to screen-vertical
         // by the renderer); local Z is the short axis (extent 0.734, screen-horizontal).
         // Decal U follows local Z (horizontal on the face) and V follows local X
-        // (vertical). Invert U only so atlas glyphs match left-to-right reading;
-        // full `(1-u, 1-v)` over-corrects and mirrors the face horizontally.
+        // (vertical). Invert U only so atlas glyphs match left-to-right reading.
+        let use_glb_face = use_textured_tile_glb && in.v_color.a > 0.5;
         let raw_u = in.local_pos.z * 1.362 + 0.5;
         let raw_v = in.local_pos.x + 0.5;
-        let decal_uv_face = vec2<f32>(1.0 - raw_u, raw_v);
+        let proj_uv = vec2<f32>(1.0 - raw_u, raw_v);
+        let decal_uv_face = proj_uv;
         let decal_uv = decal_uv_face * cam.decal_atlas_uv.zw + cam.decal_atlas_uv.xy;
         let decal = textureSample(decal_tex, base_sampler, decal_uv);
         let in_uv = decal_uv_face.x >= 0.0 && decal_uv_face.x <= 1.0 && decal_uv_face.y >= 0.0 && decal_uv_face.y <= 1.0;
-        let decal_a = select(0.0, decal.a, is_front && in_uv);
+        // Imported tile meshes: decal only on the authored **Face** material (`v_color.a`).
+        // Do not fall back to procedural `is_front` on body / side-band primitives.
+        let decal_face = select(is_front, use_glb_face, use_textured_tile_glb);
+        let decal_a = select(0.0, decal.a, decal_face && in_uv);
         let decal_rgb = decal.rgb;
 
         // ── Carved-groove engraving (same technique as plaque text) ─────────
@@ -461,7 +468,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         // 1 = bottom of the carved channel. Finite-difference gradient gives
         // groove-wall normals that catch candlelight from one side and shadow
         // the other, exactly like CNC-routed tile faces.
-        if (is_front && in_uv) {
+        if (decal_face && in_uv) {
             let dim_d = vec2<f32>(textureDimensions(decal_tex, 0));
             let tx = vec2<f32>(1.0 / max(dim_d.x, 1.0), 1.0 / max(dim_d.y, 1.0));
             let a_l = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>(-tx.x, 0.0), 0.0).a;

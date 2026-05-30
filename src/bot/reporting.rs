@@ -68,12 +68,13 @@ pub struct BotConfig {
     /// Maximum proactive sells per shop visit. Default 2.
     pub sell_max_per_visit: Option<u32>,
     pub forced_relic: Option<RelicId>,
-    /// Difficulty stake used when building `GameMode`. `None` means Spring;
-    /// `Some(Stake)` applies that tier's target / shop / boss deltas. Exposed
-    /// on the CLI via `--stake` so balance snapshots can be stratified by
+    /// Difficulty season used when building `GameMode`. `None` means Spring;
+    /// `Some(Season)` applies that tier's target / shop / boss deltas. Exposed
+    /// on the CLI via `--season` so balance snapshots can be stratified by
     /// difficulty.
+    pub season: Option<crate::core::season::Season>,
+    /// In-blind expectimax depth (`0` = legacy greedy, `1` = one-ply unified default, `2` = two-ply, `3` = pruned).
     pub chamber_planner_depth: Option<u32>,
-    pub stake: Option<crate::core::stake::Stake>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -121,7 +122,7 @@ impl Default for BotStrategy {
             sell_enabled: false,
             sell_hold_threshold: 0,
             sell_max_per_visit: 2,
-            chamber_planner_depth: 2,
+            chamber_planner_depth: 1,
         }
     }
 }
@@ -285,13 +286,13 @@ fn write_bot_export(
 
 impl BotConfig {
     pub fn into_mode(self) -> GameMode {
-        // Start from the stake-aware preset so base_target / price_multiplier /
+        // Start from the season-aware preset so base_target / price_multiplier /
         // starting_rules reflect the chosen difficulty; the CLI overrides
         // below then apply *on top* of that (handy for A/B'ing individual
-        // knobs at a given stake).
-        let stake = self.stake.unwrap_or_default();
+        // knobs at a given season).
+        let season = self.season.unwrap_or_default();
         let mut mode =
-            GameMode::with_material_and_stake(crate::persistence::TileMaterial::default(), stake);
+            GameMode::with_material_and_season(crate::persistence::TileMaterial::default(), season);
         if let Some(v) = self.base_target {
             mode.base_target = v;
         }
@@ -666,7 +667,7 @@ impl StrategyDef {
             sell_hold_threshold: self.sell_hold_threshold,
             sell_max_per_visit: self.sell_max_per_visit,
             chamber_planner_depth: self.chamber_planner_depth,
-            stake: None,
+            season: None,
         }
     }
 }
@@ -1030,7 +1031,10 @@ pub fn append_bot_run_to_progress(
     progress.record_score(stats.total_score);
     if stats.victory {
         progress.has_won = true;
-        let _ = progress.record_stake_victory(run.mode.tile_material, run.mode.stake);
+        if run.mode.tile_material == crate::persistence::TileMaterial::Plastic {
+            progress.has_won_with_plastic = true;
+        }
+        let _ = progress.record_season_victory(run.mode.tile_material, run.mode.season);
     }
 
     for (&name, &count) in &stats.yaku_scored {
@@ -1108,7 +1112,7 @@ pub fn export_play_history_html(
         );
     }
     let last = records.last().expect("non-empty");
-    let mode = GameMode::with_material_and_stake(last.tile_material, last.stake);
+    let mode = GameMode::with_material_and_season(last.tile_material, last.season);
     let mut agg = AggregateStats::default();
     let mut run_stats: Vec<RunStats> = Vec::with_capacity(records.len());
     for rec in &records {

@@ -63,7 +63,7 @@ impl OpsFlags {
 }
 
 /// One contiguous slice of [`RenderOp`]s inside Pass A. `shop_inspect_hdr_upload` selects an
-/// optional [`SsrGlobals.felt`] upload **before** this slice's render pass.
+/// optional [`SsrGlobals.hdr_tonemap`] upload **before** this slice's render pass.
 struct PassAChunk<'a> {
     ops: &'a [RenderOp],
     shop_inspect_hdr_upload: PassAShopInspectHdrUpload,
@@ -271,6 +271,7 @@ impl WgpuRenderer {
 
         // ── Debug axes overlay ──────────────────────────────────────────
         self.write_debug_axes_uniforms(frame, &camera);
+        self.write_debug_rain_hit_uniforms(frame, &camera);
 
         // ── Flame emitters (world-space) ─────────────────────────────
         let flame_emitters = build_flame_emitters(frame, w, h);
@@ -1149,13 +1150,18 @@ impl WgpuRenderer {
                 &camera,
                 false,
                 (shadows_enabled && !room_uses_baked_shadow && !punctual_active)
-                    .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
         self.write_active_room_baked_shadow_globals(
             &self.queue,
             light_view_proj_arr,
             shadows_enabled,
+            if punctual_active {
+                &punctual_frame.lights
+            } else {
+                &[]
+            },
         );
 
         let mut encoder = self
@@ -1343,6 +1349,9 @@ impl WgpuRenderer {
                             $pass.set_bind_group(0, &inst.bind_group, &[]);
                             $pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
                         }
+                    }
+                    if frame.debug_rain_hit_colliders {
+                        self.draw_debug_rain_hit_colliders(&mut $pass);
                     }
                 }};
             }
@@ -1857,12 +1866,18 @@ impl WgpuRenderer {
                     // working in the meantime (also lets `mahjuro-bake`
                     // re-render the stale room instead of panicking on its
                     // own warmup frames).
-                    log::warn!(
-                        "room GI bake {room:?} AABB stale vs live room bounds; \
-                         falling back to dynamic GI for this frame"
-                    );
+                    if self.probe_gi_stale_aabb_warned_room != Some(room) {
+                        log::warn!(
+                            "room GI bake {room:?} AABB stale vs live room bounds; \
+                             falling back to dynamic GI until a fresh bake is loaded"
+                        );
+                        self.probe_gi_stale_aabb_warned_room = Some(room);
+                    }
                     false
                 } else {
+                    if self.probe_gi_stale_aabb_warned_room == Some(room) {
+                        self.probe_gi_stale_aabb_warned_room = None;
+                    }
                     if self.probe_gi_gpu_room != Some(room) {
                         gi_baked_upload =
                             Some((room, std::sync::Arc::clone(&bake.probe_sh_bytes)));

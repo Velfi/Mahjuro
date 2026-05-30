@@ -1,17 +1,17 @@
 //! "Choose Your Tiles" scene shown between the start screen and the first
-//! shop. Left/right arrows cycle through tile materials; each material
+//! shop. Prev/next arrows (or left/right) cycle tile materials; each material
 //! displays its name and gameplay bonus. Play starts the run.
 
 use crate::sfx_id::SfxId;
-use crate::core::stake::Stake;
+use crate::core::season::Season;
 use crate::core::tile::{Suit, Tile};
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::TileMaterial;
-use crate::render::theme::{ButtonVariant, color, metrics, typography};
+use crate::render::theme::{ButtonState, ButtonVariant, button_colors, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
-use crate::ui::input::UiAction;
+use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState};
 
@@ -27,7 +27,7 @@ enum ModalAction {
     Play,
     SkipTutorial,
     Back,
-    StakeSelect(Stake),
+    SeasonSelect(Season),
 }
 
 impl ModalAction {
@@ -36,22 +36,171 @@ impl ModalAction {
             ModalAction::Play => 0,
             ModalAction::SkipTutorial => 1,
             ModalAction::Back => 2,
-            ModalAction::StakeSelect(s) => {
-                3 + Stake::ALL.iter().position(|k| *k == s).unwrap_or(0) as u32
+            ModalAction::SeasonSelect(s) => {
+                3 + Season::ALL.iter().position(|k| *k == s).unwrap_or(0) as u32
             }
         };
         FocusId(0x2000_0000 + variant)
     }
 }
 
-/// Season emoji for the stake switcher tokens. Matches the seasonal naming
+/// Material row: mouse/touch prev/next arrows (registered before tree hit targets).
+const MATERIAL_ARROW_PREV_ID: u32 = 0xF221;
+const MATERIAL_ARROW_NEXT_ID: u32 = 0xF222;
+
+/// Shared left-column geometry for copy, material picker, and button stack.
+struct LeftPanelLayout {
+    x: f32,
+    w: f32,
+    scale: f32,
+    gap_sm: f32,
+    gap_lg: f32,
+    title_h: f32,
+    bonus_h: f32,
+    season_desc_h: f32,
+    hint_h: f32,
+    material_row_h: f32,
+    menu_gap: f32,
+    menu_y: f32,
+}
+
+impl LeftPanelLayout {
+    fn compute(
+        w: f32,
+        h: f32,
+        positions: &crate::ui::scene_layout::TileSelectPositions,
+        tutorial_mode: bool,
+    ) -> Self {
+        let scale = metrics::scene_scale(w, h);
+        let panel_w = w * 0.38;
+        let gap_sm = (16.0 * scale).max(8.0);
+        let gap_lg = (28.0 * scale).max(14.0);
+
+        let title_px = typography::size(typography::H16, h);
+        let bonus_px = typography::size(typography::H28, h);
+        let season_desc_px = typography::size(typography::H28, h);
+        let hint_px = typography::size(typography::H42, h);
+
+        let title_h = crate::ui::colored_keywords::colored_row_line_step(title_px);
+        let bonus_h = crate::ui::colored_keywords::colored_row_line_step(bonus_px);
+        let season_desc_h = crate::ui::colored_keywords::colored_row_line_step(season_desc_px);
+        let hint_h = crate::ui::colored_keywords::colored_row_line_step(hint_px);
+
+        let x = positions.left_panel.nx * w;
+        let content_w = panel_w * 0.90;
+        let material_row_h = (44.0 * scale).max(36.0);
+        let menu_gap = if tutorial_mode {
+            (10.0 * scale).max(6.0)
+        } else {
+            (12.0 * scale).max(6.0)
+        };
+
+        let mut content_y = positions.left_panel.ny * h;
+        if tutorial_mode {
+            content_y += 0.12 * h;
+        }
+        content_y += title_h + gap_lg;
+
+        let menu_y = if tutorial_mode {
+            positions.button_menu.ny * h + 0.02 * h
+        } else {
+            content_y += material_row_h + gap_sm * 0.5;
+            content_y += bonus_h + gap_lg;
+            content_y += hint_h + gap_sm * 0.25;
+            content_y += season_desc_h + gap_lg;
+            content_y
+        };
+
+        Self {
+            x,
+            w: content_w,
+            scale,
+            gap_sm,
+            gap_lg,
+            title_h,
+            bonus_h,
+            season_desc_h,
+            hint_h,
+            material_row_h,
+            menu_gap,
+            menu_y,
+        }
+    }
+
+    fn material_row_y(&self, h: f32, positions: &crate::ui::scene_layout::TileSelectPositions) -> f32 {
+        positions.left_panel.ny * h + self.title_h + self.gap_lg
+    }
+
+    fn material_row(&self, h: f32, positions: &crate::ui::scene_layout::TileSelectPositions) -> MaterialRowLayout {
+        let row_y = self.material_row_y(h, positions);
+        let row_h = self.material_row_h;
+        let gap = (4.0 * self.scale).max(2.0);
+        MaterialRowLayout {
+            prev: [self.x, row_y, row_h, row_h],
+            next: [self.x + self.w - row_h, row_y, row_h, row_h],
+            name: [self.x + row_h + gap, row_y, (self.w - 2.0 * (row_h + gap)).max(0.0), row_h],
+        }
+    }
+
+    fn menu_block_height(&self, tutorial_mode: bool) -> f32 {
+        let item_h = (38.0 * self.scale).max(24.0);
+        let rows = if tutorial_mode { 3.0 } else { 3.0 };
+        rows * item_h + (rows - 1.0) * self.menu_gap
+    }
+}
+
+struct MaterialRowLayout {
+    name: [f32; 4],
+    prev: [f32; 4],
+    next: [f32; 4],
+}
+
+fn point_in_rect((x, y): (f32, f32), rect: [f32; 4]) -> bool {
+    let [rx, ry, rw, rh] = rect;
+    x >= rx && x <= rx + rw && y >= ry && y <= ry + rh
+}
+
+fn push_material_arrow(
+    instances: &mut Vec<GpuInstance>,
+    text_labels: &mut Vec<TextLabel>,
+    buttons: &mut Vec<ButtonDef>,
+    rect: [f32; 4],
+    label: &str,
+    click_id: u32,
+    hovered: bool,
+) {
+    let state = if hovered {
+        ButtonState::Hover
+    } else {
+        ButtonState::Rest
+    };
+    let colors = button_colors(ButtonVariant::Default, state);
+    instances.push(GpuInstance {
+        rect,
+        color: colors.bg,
+        user: 0,
+    });
+    text_labels.push(TextLabel {
+        rect,
+        text: label.into(),
+        color: colors.text,
+        align: TextAlign::Center,
+        ..Default::default()
+    });
+    buttons.push(ButtonDef::scene(
+        (rect[0], rect[1], rect[2], rect[3]),
+        click_id,
+    ));
+}
+
+/// Season emoji for the season switcher tokens. Matches the seasonal naming
 /// scheme (Spring → Summer → Autumn → Winter).
-fn stake_glyph(stake: Stake) -> &'static str {
-    match stake {
-        Stake::Spring => "\u{1F331}",        // 🌱
-        Stake::Summer => "\u{2600}\u{FE0F}", // ☀️
-        Stake::Autumn => "\u{1F342}",        // 🍂
-        Stake::Winter => "\u{2744}\u{FE0F}", // ❄️
+fn season_glyph(season: Season) -> &'static str {
+    match season {
+        Season::Spring => "\u{1F331}",        // 🌱
+        Season::Summer => "\u{2600}\u{FE0F}", // ☀️
+        Season::Autumn => "\u{1F342}",        // 🍂
+        Season::Winter => "\u{2744}\u{FE0F}", // ❄️
     }
 }
 
@@ -59,13 +208,19 @@ pub struct TileSelectScene {
     tree: TreeState,
     pub positions: crate::ui::scene_layout::TileSelectPositions,
     material: TileMaterial,
-    /// Currently-selected difficulty stake. Cycled by StakePrev/StakeNext
-    /// buttons on the modal; gated by `PlayerProgress::stake_unlocked_for`
+    /// Currently-selected difficulty season. Cycled by SeasonPrev/SeasonNext
+    /// buttons on the modal; gated by `PlayerProgress::season_unlocked_for`
     /// per-material so a player can't pick Winter on Bamboo unless they've
     /// cleared Autumn on Bamboo.
-    stake: Stake,
+    season: Season,
     /// If true, the next run starts in tutorial mode instead of standard.
     tutorial_mode: bool,
+}
+
+impl Default for TileSelectScene {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TileSelectScene {
@@ -74,7 +229,7 @@ impl TileSelectScene {
             tree: TreeState::new(),
             positions: crate::ui::scene_layout::TileSelectPositions::default(),
             material: TileMaterial::default(),
-            stake: Stake::default(),
+            season: Season::default(),
             tutorial_mode: false,
         }
     }
@@ -85,18 +240,18 @@ impl TileSelectScene {
             tree: TreeState::new(),
             positions: crate::ui::scene_layout::TileSelectPositions::default(),
             material: TileMaterial::Bamboo,
-            stake: Stake::Spring,
+            season: Season::Spring,
             tutorial_mode: true,
         }
     }
 
-    /// Clamp the currently-selected stake back into the unlocked range for
+    /// Clamp the currently-selected season back into the unlocked range for
     /// the current material. Called after material cycles so a player who
     /// had Autumn selected on Bamboo doesn't carry it to Tortoiseshell when
     /// Tortoiseshell only has Summer unlocked.
-    fn clamp_stake_to_unlocks(&mut self, progress: &crate::core::progression::PlayerProgress) {
-        while !progress.stake_unlocked_for(self.material, self.stake) {
-            self.stake = match self.stake.previous() {
+    fn clamp_season_to_unlocks(&mut self, progress: &crate::core::progression::PlayerProgress) {
+        while !progress.season_unlocked_for(self.material, self.season) {
+            self.season = match self.season.previous() {
                 Some(prev) => prev,
                 None => {
                     // Spring is always unlocked; if we land here something
@@ -105,6 +260,14 @@ impl TileSelectScene {
                 }
             };
         }
+    }
+
+    fn clamp_material_to_unlocks(&mut self, progress: &crate::core::progression::PlayerProgress) {
+        if progress.material_unlocked(self.material) {
+            return;
+        }
+        self.material = TileMaterial::default();
+        self.clamp_season_to_unlocks(progress);
     }
 
     /// Build the button-only widget tree. Text labels are emitted separately
@@ -116,35 +279,12 @@ impl TileSelectScene {
         progress: &crate::core::progression::PlayerProgress,
         positions: &crate::ui::scene_layout::TileSelectPositions,
     ) -> Tree<ModalAction> {
-        let scale = metrics::scene_scale(window_w, window_h);
-        let panel_w = window_w * 0.38;
-        let btn_w = if self.tutorial_mode {
-            (220.0 * scale).min(panel_w * 0.78)
-        } else {
-            (260.0 * scale).min(panel_w * 0.85)
-        };
+        let panel = LeftPanelLayout::compute(window_w, window_h, positions, self.tutorial_mode);
+        let scale = panel.scale;
+        let btn_gap = panel.menu_gap;
+        let block_h = panel.menu_block_height(self.tutorial_mode);
 
-        let btn_h = if self.tutorial_mode {
-            (38.0 * scale).max(26.0)
-        } else {
-            (46.0 * scale).max(30.0)
-        };
-        let btn_gap = if self.tutorial_mode {
-            (10.0 * scale).max(6.0)
-        } else {
-            (12.0 * scale).max(6.0)
-        };
-
-        // Vertical offset matches the old tutorial vs standard split.
-        let start_y = positions.button_menu.ny * window_h
-            + if self.tutorial_mode {
-                0.02 * window_h
-            } else {
-                0.0
-            };
-        let menu_x = positions.button_menu.nx * window_w;
-
-        let (root, block_h) = if self.tutorial_mode {
+        let root = if self.tutorial_mode {
             let items = vec![
                 wt::button_id(
                     ModalAction::Play.id(),
@@ -165,24 +305,20 @@ impl TileSelectScene {
                     ButtonVariant::Default,
                 ),
             ];
-            let h = items.len() as f32 * btn_h + (items.len().saturating_sub(1) as f32) * btn_gap;
-            (
-                wt::Node::Column {
-                    gap: btn_gap,
-                    align: wt::HAlign::Stretch,
-                    children: items,
-                },
-                h,
-            )
+            wt::Node::Column {
+                gap: btn_gap,
+                align: wt::HAlign::Stretch,
+                children: items,
+            }
         } else {
-            // Stake token row: one focusable button per season. Selected
+            // Season token row: one focusable button per season. Selected
             // season gets Primary (gold) for the "select box" look; locked
             // seasons are disabled Subtle so focus traversal skips them.
-            let token_children: Vec<_> = Stake::ALL
+            let token_children: Vec<_> = Season::ALL
                 .iter()
                 .map(|&s| {
-                    let unlocked = progress.stake_unlocked_for(self.material, s);
-                    let variant = if s == self.stake {
+                    let unlocked = progress.season_unlocked_for(self.material, s);
+                    let variant = if s == self.season {
                         ButtonVariant::Primary
                     } else {
                         ButtonVariant::Subtle
@@ -190,14 +326,14 @@ impl TileSelectScene {
                     // Locked seasons rely on the disabled button-state
                     // desaturation (handled by the theme) — no padlock glyph,
                     // the dimmed treatment is enough to read "locked".
-                    let label = stake_glyph(s).to_string();
+                    let label = season_glyph(s).to_string();
                     wt::Node::Item(wt::Item {
-                        id: ModalAction::StakeSelect(s).id(),
+                        id: ModalAction::SeasonSelect(s).id(),
                         enabled: unlocked,
                         tooltip: None,
                         label,
                         variant,
-                        on_activate: ModalAction::StakeSelect(s),
+                        on_activate: ModalAction::SeasonSelect(s),
                     })
                 })
                 .collect();
@@ -222,20 +358,16 @@ impl TileSelectScene {
                     ButtonVariant::Default,
                 ),
             ];
-            let h = 3.0 * btn_h + 2.0 * btn_gap;
-            (
-                wt::Node::Column {
-                    gap: btn_gap,
-                    align: wt::HAlign::Stretch,
-                    children,
-                },
-                h,
-            )
+            wt::Node::Column {
+                gap: btn_gap,
+                align: wt::HAlign::Stretch,
+                children,
+            }
         };
 
         Tree {
             root,
-            anchor: Some([menu_x, start_y, btn_w, block_h]),
+            anchor: Some([panel.x, panel.menu_y, panel.w, block_h]),
         }
     }
 
@@ -251,10 +383,10 @@ impl TileSelectScene {
                 super::tutorial_campaign::TutorialCampaignScene::new(),
             ))
         } else {
-            GameEngine::start_run_with_material_and_stake(
+            GameEngine::start_run_with_material_and_season(
                 run,
                 self.material,
-                self.stake,
+                self.season,
                 progress,
                 &settings,
             );
@@ -352,20 +484,41 @@ impl SceneBehavior for TileSelectScene {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
 
+        if !self.tutorial_mode {
+            self.clamp_material_to_unlocks(ctx.progress);
+        }
+
         // Left/right cycle materials; filter them so the tree doesn't
-        // consume them as focus movement. Material changes re-clamp the stake
-        // so the player can't carry an unlocked-on-one-material stake to
+        // consume them as focus movement. Material changes re-clamp the season
+        // so the player can't carry an unlocked-on-one-material season to
         // another where they haven't earned it.
+        if !self.tutorial_mode {
+            for &cid in ctx.button_clicks {
+                if cid == MATERIAL_ARROW_PREV_ID {
+                    self.material = ctx.progress.prev_unlocked_material(self.material);
+                    self.clamp_season_to_unlocks(ctx.progress);
+                    ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                    return None;
+                }
+                if cid == MATERIAL_ARROW_NEXT_ID {
+                    self.material = ctx.progress.next_unlocked_material(self.material);
+                    self.clamp_season_to_unlocks(ctx.progress);
+                    ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                    return None;
+                }
+            }
+        }
+
         let mut filtered: Vec<UiAction> = Vec::new();
         for &a in ctx.actions {
             match a {
                 UiAction::FocusNext => {
-                    self.material = self.material.next();
-                    self.clamp_stake_to_unlocks(ctx.progress);
+                    self.material = ctx.progress.next_unlocked_material(self.material);
+                    self.clamp_season_to_unlocks(ctx.progress);
                 }
                 UiAction::FocusPrev => {
-                    self.material = self.material.prev();
-                    self.clamp_stake_to_unlocks(ctx.progress);
+                    self.material = ctx.progress.prev_unlocked_material(self.material);
+                    self.clamp_season_to_unlocks(ctx.progress);
                 }
                 UiAction::Cancel | UiAction::Pause => {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
@@ -420,14 +573,14 @@ impl SceneBehavior for TileSelectScene {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                 Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
             }
-            Some(ModalAction::StakeSelect(s)) => {
-                // Locked stakes are non-focusable + disabled, so activation
+            Some(ModalAction::SeasonSelect(s)) => {
+                // Locked seasons are non-focusable + disabled, so activation
                 // here should only ever arrive for unlocked seasons; guard
                 // anyway so a mouse click on a visible-but-locked token
                 // can't slip through.
-                if ctx.progress.stake_unlocked_for(self.material, s) {
-                    if self.stake != s {
-                        self.stake = s;
+                if ctx.progress.season_unlocked_for(self.material, s) {
+                    if self.season != s {
+                        self.season = s;
                         ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
                     }
                 } else {
@@ -447,29 +600,15 @@ impl SceneBehavior for TileSelectScene {
         let mut text_labels: Vec<TextLabel> = Vec::new();
         let mut buttons: Vec<ButtonDef> = Vec::new();
 
-        // ── Left panel text labels (manually laid out) ─────────────
-        let panel_w = w * 0.38;
-        let scale = metrics::scene_scale(w, h);
-        let gap_sm = (16.0 * scale).max(8.0);
-        let gap_lg = (28.0 * scale).max(14.0);
-
+        let panel = LeftPanelLayout::compute(w, h, &self.positions, self.tutorial_mode);
         let title_px = typography::size(typography::H16, h);
         let name_px = typography::size(typography::H20, h);
         let bonus_px = typography::size(typography::H28, h);
-        let stake_desc_px = typography::size(typography::H28, h);
+        let season_desc_px = typography::size(typography::H28, h);
         let hint_px = typography::size(typography::H42, h);
 
-        // Rect heights need room above the font size for line padding.
-        let title_h = crate::ui::colored_keywords::colored_row_line_step(title_px);
-        let name_h = crate::ui::colored_keywords::colored_row_line_step(name_px);
-        let bonus_h = crate::ui::colored_keywords::colored_row_line_step(bonus_px);
-        let stake_desc_h = crate::ui::colored_keywords::colored_row_line_step(stake_desc_px);
-        let hint_h = crate::ui::colored_keywords::colored_row_line_step(hint_px);
-
-        let text_x = self.positions.left_panel.nx * w;
         let mut cursor_y =
             self.positions.left_panel.ny * h + if self.tutorial_mode { 0.12 * h } else { 0.0 };
-        let text_w = panel_w * 0.90;
 
         let title_text = if self.tutorial_mode {
             "First-Time Tutorial"
@@ -477,19 +616,19 @@ impl SceneBehavior for TileSelectScene {
             "Choose Your Tiles"
         };
         text_labels.push(TextLabel {
-            rect: [text_x, cursor_y, text_w, title_h],
+            rect: [panel.x, cursor_y, panel.w, panel.title_h],
             text: title_text.into(),
             color: color::CHAMPAGNE,
             font_px: Some(title_px),
             ..Default::default()
         });
-        cursor_y += title_h + gap_lg;
+        cursor_y += panel.title_h + panel.gap_lg;
 
         if self.tutorial_mode {
-            let intro_h = 90.0 * scale;
+            let intro_h = 90.0 * panel.scale;
             widget::push_text_block(
                 &mut text_labels,
-                [text_x, cursor_y, text_w, intro_h],
+                [panel.x, cursor_y, panel.w, intro_h],
                 "A short guided campaign teaches melds, structure scoring, relics, bosses, and the shop before one final practice fight.",
                 TextStyle {
                     tier: typography::H28,
@@ -500,11 +639,11 @@ impl SceneBehavior for TileSelectScene {
                 },
                 h,
             );
-            cursor_y += intro_h + 10.0 * scale;
-            let skip_h = 50.0 * scale;
+            cursor_y += intro_h + 10.0 * panel.scale;
+            let skip_h = 50.0 * panel.scale;
             widget::push_text_block(
                 &mut text_labels,
-                [text_x, cursor_y, text_w, skip_h],
+                [panel.x, cursor_y, panel.w, skip_h],
                 "Skip marks the tutorial complete for this profile and starts a normal run immediately.",
                 TextStyle {
                     tier: typography::H42,
@@ -516,47 +655,68 @@ impl SceneBehavior for TileSelectScene {
                 h,
             );
         } else {
-            // Material block: name + bonus as a "stat" row (gold glyph + label).
+            let material_row = panel.material_row(h, &self.positions);
+
             text_labels.push(TextLabel {
-                rect: [text_x, cursor_y, text_w, name_h],
+                rect: material_row.name,
                 text: self.material.label().into(),
                 color: color::CHAMPAGNE,
                 font_px: Some(name_px),
+                align: TextAlign::Center,
                 ..Default::default()
             });
-            cursor_y += name_h + gap_sm * 0.5;
+            let cursor_pos = ctx.cursor_pos;
+            let hover_prev =
+                ctx.input_mode == InputMode::Cursor && point_in_rect(cursor_pos, material_row.prev);
+            let hover_next =
+                ctx.input_mode == InputMode::Cursor && point_in_rect(cursor_pos, material_row.next);
+            push_material_arrow(
+                &mut instances,
+                &mut text_labels,
+                &mut buttons,
+                material_row.prev,
+                "\u{25C0}",
+                MATERIAL_ARROW_PREV_ID,
+                hover_prev,
+            );
+            push_material_arrow(
+                &mut instances,
+                &mut text_labels,
+                &mut buttons,
+                material_row.next,
+                "\u{25B6}",
+                MATERIAL_ARROW_NEXT_ID,
+                hover_next,
+            );
+            cursor_y += panel.material_row_h + panel.gap_sm * 0.5;
 
             text_labels.push(TextLabel {
-                rect: [text_x, cursor_y, text_w, bonus_h],
+                rect: [panel.x, cursor_y, panel.w, panel.bonus_h],
                 text: format!("\u{2022}  {}", self.material.bonus_description()),
                 color: color::BRASS,
                 font_px: Some(bonus_px),
                 ..Default::default()
             });
-            cursor_y += bonus_h + gap_lg;
+            cursor_y += panel.bonus_h + panel.gap_lg;
 
-            // Stake description sits just above the season-token row so the
-            // player sees at a glance *what* their current pick does. The
-            // selected token itself names the season (via its gold highlight),
-            // so we don't repeat "Spring / Summer / …" here.
             text_labels.push(TextLabel {
-                rect: [text_x, cursor_y, text_w, hint_h],
-                text: "STAKE".into(),
+                rect: [panel.x, cursor_y, panel.w, panel.hint_h],
+                text: "SEASON".into(),
                 color: color::UMBER,
                 font_px: Some(hint_px),
                 ..Default::default()
             });
-            cursor_y += hint_h + gap_sm * 0.25;
+            cursor_y += panel.hint_h + panel.gap_sm * 0.25;
 
             text_labels.push(TextLabel {
-                rect: [text_x, cursor_y, text_w, stake_desc_h],
+                rect: [panel.x, cursor_y, panel.w, panel.season_desc_h],
                 text: format!(
                     "{} \u{2014} {}",
-                    self.stake.label(),
-                    self.stake.description()
+                    self.season.label(),
+                    self.season.description()
                 ),
                 color: color::STONE,
-                font_px: Some(stake_desc_px),
+                font_px: Some(season_desc_px),
                 ..Default::default()
             });
         }

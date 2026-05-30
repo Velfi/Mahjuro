@@ -180,6 +180,7 @@ impl RoomBakeApp {
             seed_archive_seen: &mut scratch.seed_archive_seen,
             archive_chronicle_last_seen: 0,
             rain_tuning: self.renderer.rain_tuning,
+            flame_tuning: self.renderer.flame_tuning,
         });
 
         let settings = persistence::load_settings();
@@ -226,6 +227,7 @@ impl RoomBakeApp {
             0,
             None,
             self.renderer.rain_tuning,
+            self.renderer.flame_tuning,
         );
         let frame: UiFrame = self.scene.draw_frame(ctx);
 
@@ -264,7 +266,10 @@ impl RoomBakeApp {
         self.run_warmup(warmup_frames);
         self.tick();
         self.renderer.take_room_gi_capture().ok_or_else(|| {
-            anyhow::anyhow!("room GI bake: GPU readback missing (was probe compute dispatched?)")
+            anyhow::anyhow!(
+                "room GI bake: GPU readback missing (was probe compute dispatched?) — rebake with \
+                 `cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds gi`"
+            )
         })
     }
 
