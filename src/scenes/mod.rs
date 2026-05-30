@@ -9,6 +9,7 @@ pub mod debug_visibility;
 pub(crate) mod flowers_intro_copy;
 pub mod game_over;
 mod game_over_tableau;
+mod run_summary_panel;
 pub mod gameplay;
 pub mod guide;
 pub mod journal_transition;
