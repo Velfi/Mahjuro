@@ -117,7 +117,10 @@ mod tests {
     fn winter_scales_target_and_price() {
         let m = GameMode::with_material_and_season(TileMaterial::Bamboo, Season::Winter);
         assert_eq!(m.season, Season::Winter);
-        assert_eq!(m.base_target, 750); // DEFAULT_BASE_TARGET * 1.5
+        assert_eq!(
+            m.base_target,
+            ((DEFAULT_BASE_TARGET as f32) * 1.5).round() as u32
+        );
         assert!((m.price_multiplier - 1.5).abs() < 1e-6);
         // scale_shop_price: 10 * 1.5 = 15
         assert_eq!(m.scale_shop_price(10), 15);

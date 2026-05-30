@@ -2,7 +2,7 @@
 """
 Generate skip-tag icons for Mahjuro and pack them into a sprite sheet.
 
-Each skip tag (`TagKind` in `src/core/tag.rs`) gets a distinct faceted low-poly
+Each skip tag (`TagKind` in `crates/mahjuro-core/src/core/tag.rs`) gets a distinct faceted low-poly
 inventory icon in the game's Walnut, Brass & Felt palette. The script calls
 Google's Nano Banana 2 (`gemini-3.1-flash-image-preview`) for per-tag source
 art, runs a light post-process (background strip, contrast boost, content fit,
@@ -17,7 +17,7 @@ via `_icon_atlas_postprocess.py` (same helpers as `generate_boss_icons.py`).
   • `atlas.toml` — cell size, columns, and layout ids (matches `TagKind::all()`)
 
 Tag order and ids MUST stay aligned with `assets/data/tags.json` and
-`TagKind::all()` in `src/core/tag.rs`.
+`TagKind::all()` in `crates/mahjuro-core/src/core/tag.rs`.
 
 Art direction: stylized low-poly vector icons (faceted planes, crisp edges,
 thin outline stroke) readable at ~64 px on screen.
@@ -73,7 +73,7 @@ except ImportError:
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TAG_JSON_PATH = REPO_ROOT / "assets" / "data" / "tags.json"
-TAG_RS_PATH = REPO_ROOT / "src" / "core" / "tag.rs"
+TAG_RS_PATH = REPO_ROOT / "crates" / "mahjuro-core" / "src" / "core" / "tag.rs"
 OUTPUT_DIR = REPO_ROOT / "assets" / "textures" / "skip_tags"
 SOURCE_DIR = OUTPUT_DIR / "source"
 PROCESSED_DIR = OUTPUT_DIR / "processed"
@@ -201,7 +201,7 @@ def pascal_to_snake(name: str) -> str:
 
 
 def load_tag_kind_order() -> list[str]:
-    """Parse `TagKind::all()` order from src/core/tag.rs."""
+    """Parse `TagKind::all()` order from crates/mahjuro-core/src/core/tag.rs."""
     if not TAG_RS_PATH.exists():
         raise SystemExit(f"Cannot read tag order: {TAG_RS_PATH} missing")
     text = TAG_RS_PATH.read_text(encoding="utf-8")
@@ -212,7 +212,7 @@ def load_tag_kind_order() -> list[str]:
     )
     if not m:
         raise SystemExit(
-            "Failed to parse TagKind::all() from src/core/tag.rs"
+            f"Failed to parse TagKind::all() from {TAG_RS_PATH.relative_to(REPO_ROOT)}"
         )
     kinds = re.findall(r"TagKind::(\w+)", m.group(1))
     if not kinds:

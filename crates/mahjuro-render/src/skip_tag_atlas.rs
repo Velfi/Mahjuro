@@ -207,6 +207,19 @@ mod tests {
     }
 
     #[test]
+    fn every_tag_kind_loads_skip_icon_sprite() {
+        for tag in TagKind::all() {
+            let got = extract_sprite_rgba("textures/skip_tags/atlas.png", tag.atlas_slug());
+            assert!(
+                got.is_some(),
+                "skip icon crop failed for {:?} ({})",
+                tag,
+                tag.atlas_slug()
+            );
+        }
+    }
+
+    #[test]
     fn every_ordeal_kind_has_ordeal_icon_atlas_cell() {
         use mahjuro_core::core::ordeal_kind::OrdealKind;
 
