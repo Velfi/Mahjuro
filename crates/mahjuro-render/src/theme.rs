@@ -290,6 +290,24 @@ mod typography_tests {
     }
 
     #[test]
+    fn tooltip_border_scales_with_resolution() {
+        use super::metrics;
+        assert!((metrics::tooltip_border_px(1280.0, 720.0) - 2.67).abs() < 0.05);
+        assert!((metrics::tooltip_border_px(3840.0, 2160.0) - 8.0).abs() < 0.01);
+        assert!((metrics::tooltip_border_px(1920.0, 1080.0) - 4.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn tooltip_panel_width_scales_with_resolution() {
+        use super::metrics;
+        let at_720 = metrics::tooltip_max_panel_px(1280.0, 720.0);
+        assert!(at_720 < 400.0, "720p cap was {at_720}");
+        let at_4k = metrics::tooltip_max_panel_px(3840.0, 2160.0);
+        assert!(at_4k > 800.0, "4K cap was {at_4k}");
+        assert!(at_4k > at_720 * 2.0);
+    }
+
+    #[test]
     fn tier_at_most_picks_largest_fitting_step() {
         let h = 1080.0;
         assert!(
@@ -307,6 +325,19 @@ pub mod metrics {
     /// Scene layout scale factor from the smaller window dimension.
     pub fn scene_scale(w: f32, h: f32) -> f32 {
         w.min(h) / 600.0
+    }
+
+    /// Brass rim drawn outside the walnut fill (~2.5 px @ 720p, up to ~8 px @ 4K).
+    pub fn tooltip_border_px(_w: f32, h: f32) -> f32 {
+        (h / 270.0).clamp(2.5, 8.0)
+    }
+
+    /// Max walnut fill width for focus / shop tooltips (~360 px @ 720p, ~870 px @ 4K).
+    pub fn tooltip_max_panel_px(w: f32, h: f32) -> f32 {
+        let scale = scene_scale(w, h);
+        (300.0 * scale)
+            .min(w * 0.42)
+            .min(400.0 + 130.0 * scale)
     }
 }
 
