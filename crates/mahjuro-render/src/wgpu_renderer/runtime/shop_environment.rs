@@ -408,12 +408,19 @@ impl WgpuRenderer {
             0.0
         };
         let mut hdr_tonemap = self.tile_hdr_tonemap(frame);
-        // `hdr_tonemap.w` is reserved / no-op now: `room_glb.wgsl::fs_main` and
-        // `fs_main_emissive` both write linear HDR to their target, and
-        // `tonemap_composite.wgsl` is the single ACES pass. `bloom_linear_hdr_output`
-        // is informational only — the emissive pre-pass uses the same uniforms.
+        // `bloom_linear_hdr_output` is informational only — the emissive pre-pass
+        // uses the same uniforms. Main-menu pride rainbow reuses `hdr_tonemap.w`
+        // as scene time for moon/star swirl meshes tagged in their PBR uniform.
         let _ = bloom_linear_hdr_output;
-        hdr_tonemap[3] = 1.0;
+        hdr_tonemap[3] = if main_menu_env
+            && crate::main_menu_glb::main_menu_pride_rainbow_active(
+                self.main_menu_pride_rainbow_debug,
+            )
+        {
+            self.creation_time.elapsed().as_secs_f32()
+        } else {
+            0.0
+        };
         let (exposure, ambient_x) = if embedded_gltf_punctual {
             let gameplay_table = matches!(env_scene_key, "gameplay" | "tutorial");
             // `gameplay.glb` room + tiles share `ROOM_GLB_LINEAR_EXPOSURE_BASE` × this mul via `tile_hdr_tonemap`.

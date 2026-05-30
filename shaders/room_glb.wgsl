@@ -22,8 +22,8 @@ struct CameraUniform {
     tile_seed: f32,
     decal_atlas_uv: vec4<f32>,
     /// Must match `wgpu_renderer::CameraUniform::hdr_tonemap` (layout parity with `lit_mesh`).
-    /// `w` is **reserved / no-op** — the fragment always writes linear HDR to
-    /// `scene_color`, and `tonemap_composite.wgsl` is the single ACES pass.
+    /// `w` = main-menu pride rainbow scene time when active (`0` = off); moon/star
+    /// meshes tagged via `pbr.emissive_factor.w`.
     hdr_tonemap: vec4<f32>,
 };
 
@@ -399,9 +399,9 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     var emissive = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb
         * pbr.emissive_factor.rgb
         * cam.decal_atlas_uv.z;
-    // Main-menu `MoonObject`: `emissive_factor.w` tags the rainbow swirl path;
-    // `hdr_tonemap.w` carries scene time (main menu only).
-    if (pbr.emissive_factor.w > 0.5) {
+    // Main-menu `MoonObject` / `star*`: `emissive_factor.w` tags the rainbow path;
+    // `hdr_tonemap.w` carries scene time while June pride (or debug override) is on.
+    if (pbr.emissive_factor.w > 0.5 && cam.hdr_tonemap.w > 0.0) {
         let mask = max(emissive.r, max(emissive.g, emissive.b));
         let swirl_uv = in.uv_emr * 0.65
             + vec2<f32>(in.world_pos.x, in.world_pos.y) * 0.004;

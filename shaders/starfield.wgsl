@@ -16,14 +16,16 @@ struct Globals {
     transition_progress: f32,
     quality_level: f32,
     moon_phase: f32,
-    main_menu_pride_rainbow: f32,
+    /// User Effects tier during cascade wipes (Rust `Globals._globals_pad[0]`).
+    cascade_quality_level: f32,
+    /// x = main-menu June pride rainbow (Rust `Globals._globals_pad[1]`).
     _globals_pad: vec2<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 
 fn starfield_tint(uv: vec2<f32>, time: f32) -> vec3<f32> {
-    if (globals.main_menu_pride_rainbow > 0.5) {
+    if (globals._globals_pad.x > 0.5) {
         return rainbow_swirl_rgb(uv, time);
     }
     return vec3<f32>(1.0, 0.98, 0.95);
