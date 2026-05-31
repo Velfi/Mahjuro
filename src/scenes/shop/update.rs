@@ -343,6 +343,16 @@ impl ShopScene {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
 
+        self.try_complete_west_sell_hold(
+            now,
+            &shop,
+            ctx.run,
+            ctx.bus,
+            ctx.cursor_pos,
+            ctx.overlay_request,
+            (w, h),
+        );
+
         for &a in ctx.actions {
             if matches!(a, UiAction::NorthFacePress) {
                 if let Some(f) = self.focus {
@@ -366,27 +376,7 @@ impl ShopScene {
                 continue;
             }
             if matches!(a, UiAction::WestFaceRelease) {
-                if let Some(start) = self.west_sell_hold_started.take() {
-                    let hold = super::SHOP_SELL_HOLD_SECONDS;
-                    if now.saturating_duration_since(start).as_secs_f32() >= hold
-                        && let Some(action) = focused_sell_action(
-                            self.focus,
-                            self.items.len(),
-                            &self.zodiac_items,
-                            &self.talisman_items,
-                            &shop,
-                        )
-                    {
-                        self.apply_sell_action(
-                            action,
-                            ctx.run,
-                            ctx.bus,
-                            ctx.cursor_pos,
-                            ctx.overlay_request,
-                            (w, h),
-                        );
-                    }
-                }
+                self.west_sell_hold_started = None;
                 continue;
             }
 

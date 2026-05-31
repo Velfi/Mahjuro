@@ -2,7 +2,7 @@
 //! prompt before the between-wing shop.
 
 use crate::core::relic::RelicFlavorSpan;
-use crate::render::draw_cmd::{ScenePunctualLight, UiFrame};
+use crate::render::draw_cmd::UiFrame;
 use crate::render::staircase_glb;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::PointLight;
@@ -105,20 +105,20 @@ impl SceneBehavior for StaircaseScene {
             } else {
                 Vec::new()
             };
-            let inverse_punctual: Vec<ScenePunctualLight> = if room_glb {
-                staircase_glb::staircase_embedded_point_lights_runtime(
-                    w,
-                    h,
-                    ctx.room_gltf_height_scale,
-                    &ctx.room_env_for("staircase").0,
+            let (inverse_punctual, punctual_gltf_nodes) = if room_glb {
+                crate::render::room_gltf_punctual::tagged_to_scene_punctual(
+                    staircase_glb::staircase_embedded_point_lights_runtime_tagged(
+                        w,
+                        h,
+                        ctx.room_gltf_height_scale,
+                        &ctx.room_env_for("staircase").0,
+                    ),
                 )
-                .into_iter()
-                .map(ScenePunctualLight::InverseSquare)
-                .collect()
             } else {
-                Vec::new()
+                (Vec::new(), Vec::new())
             };
             frame.scene_lighting.punctual = inverse_punctual;
+            frame.scene_lighting.punctual_gltf_nodes = punctual_gltf_nodes;
             if !room_glb {
                 frame.scene_lighting.set_smooth_points(vec![PointLight {
                     pos: [w * 0.5, h * 0.55, h * 0.35],

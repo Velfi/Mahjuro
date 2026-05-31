@@ -80,6 +80,104 @@ struct GltfRoomEnvUniformParams<'a> {
 }
 
 impl WgpuRenderer {
+    /// Document height scale for punctual shadow VP fit — must match the lit room path.
+    pub(super) fn room_env_shadow_height_scale(
+        &self,
+        env: crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv,
+    ) -> f32 {
+        use crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
+        match env {
+            ActiveRoomEnv::Shop => self.env_tune_for("shop").height_scale,
+            ActiveRoomEnv::Hallway => {
+                let key = if self.active_scene_key == Some("pick_chamber") {
+                    "pick_chamber"
+                } else {
+                    "hallway"
+                };
+                self.env_tune_for(key).height_scale
+            }
+            ActiveRoomEnv::Staircase => self.env_tune_for("staircase").height_scale,
+            ActiveRoomEnv::Archive => {
+                let key = if self.active_scene_key == Some("collection") {
+                    "collection"
+                } else {
+                    "archive"
+                };
+                self.env_tune_for(key).height_scale
+            }
+            ActiveRoomEnv::MainMenu => {
+                let h = self.env_tune_for("main_menu_exterior").height_scale;
+                crate::main_menu_glb::main_menu_env_height_scale(h)
+            }
+            ActiveRoomEnv::Gameplay => {
+                let key = if self.active_scene_key == Some("tutorial") {
+                    "tutorial"
+                } else {
+                    "gameplay"
+                };
+                self.env_tune_for(key).height_scale
+            }
+        }
+    }
+
+    /// Centered room model matrix for the shadow depth pass — same as lit `room_glb` draws.
+    pub(super) fn room_env_shadow_base_model(
+        &self,
+        env: crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv,
+        camera_h: f32,
+    ) -> glam::Mat4 {
+        use crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
+        let height = self.room_env_shadow_height_scale(env);
+        let s = crate::room_glb::room_env_world_scale(camera_h, height);
+        match env {
+            ActiveRoomEnv::Shop => crate::room_glb::with_shop_glb_cpu(|opt| {
+                opt.map(|cpu| {
+                    crate::room_glb::room_env_model_matrix_from_cpu(camera_h, height, cpu)
+                })
+            })
+            .unwrap_or_else(|| glam::Mat4::from_scale(glam::Vec3::splat(s))),
+            ActiveRoomEnv::Hallway => crate::hallway_glb::with_hallway_glb_cpu(|opt| {
+                opt.map(|cpu| {
+                    crate::room_glb::room_env_model_matrix_from_cpu(camera_h, height, cpu)
+                })
+            })
+            .unwrap_or_else(|| glam::Mat4::from_scale(glam::Vec3::splat(s))),
+            ActiveRoomEnv::Staircase => crate::staircase_glb::with_staircase_glb_cpu(|opt| {
+                opt.map(|cpu| {
+                    crate::room_glb::room_env_model_matrix_from_cpu(camera_h, height, cpu)
+                })
+            })
+            .unwrap_or_else(|| glam::Mat4::from_scale(glam::Vec3::splat(s))),
+            ActiveRoomEnv::Archive => crate::archive_glb::with_archive_glb_cpu(|opt| {
+                opt.map(|cpu| {
+                    crate::room_glb::room_env_model_matrix_from_cpu(camera_h, height, cpu)
+                })
+            })
+            .unwrap_or_else(|| glam::Mat4::from_scale(glam::Vec3::splat(s))),
+            ActiveRoomEnv::MainMenu => crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
+                opt.map(|cpu| {
+                    crate::room_glb::room_env_model_matrix_from_cpu(camera_h, height, cpu)
+                })
+            })
+            .unwrap_or_else(|| glam::Mat4::from_scale(glam::Vec3::splat(s))),
+            ActiveRoomEnv::Gameplay => {
+                let env_key = if self.active_scene_key == Some("tutorial") {
+                    "tutorial"
+                } else {
+                    "gameplay"
+                };
+                let height = self.env_tune_for(env_key).height_scale;
+                let s = crate::room_glb::room_env_world_scale(camera_h, height);
+                crate::gameplay_glb::with_gameplay_glb_cpu(|opt| {
+                    opt.map(|cpu| {
+                        crate::room_glb::room_env_model_matrix_from_cpu(camera_h, height, cpu)
+                    })
+                })
+                .unwrap_or_else(|| glam::Mat4::from_scale(glam::Vec3::splat(s)))
+            }
+        }
+    }
+
     fn shop_eyeball_prim_indices_for_draw(&self) -> Vec<usize> {
         if !self.shop_eyeball_prim_indices.is_empty() {
             return self.shop_eyeball_prim_indices.clone();
@@ -91,7 +189,7 @@ impl WgpuRenderer {
             .unwrap_or_default()
     }
 
-    fn shop_gltf_anim_prim_deltas(
+    pub(super) fn shop_gltf_anim_prim_deltas(
         &self,
         frame: &crate::draw_cmd::UiFrame,
     ) -> rustc_hash::FxHashMap<usize, glam::Mat4> {
@@ -172,7 +270,7 @@ impl WgpuRenderer {
         (visual_phase as f32) * (-std::f32::consts::TAU / 10.0)
     }
 
-    fn gameplay_score_roller_frame_state(
+    pub(super) fn gameplay_score_roller_frame_state(
         &self,
         frame: &crate::draw_cmd::UiFrame,
     ) -> rustc_hash::FxHashMap<usize, glam::Mat4> {
@@ -503,12 +601,13 @@ impl WgpuRenderer {
         prims: &[TilePrimitiveGpu],
         gpu: &ShopEnvironmentGpu,
         skip_prim: impl Fn(usize) -> bool,
-    ) {
+    ) -> u32 {
         if prims.is_empty() {
-            return;
+            return 0;
         }
         pass.set_pipeline(&self.shadow_pipeline_room_env);
         pass.set_bind_group(1, &gpu.shadow_warp_bind_group, &[]);
+        let mut draws = 0u32;
         for (pi, prim) in prims.iter().enumerate() {
             if skip_prim(pi) || prim.pipeline_key.is_blend() || prim.index_count == 0 {
                 continue;
@@ -523,16 +622,18 @@ impl WgpuRenderer {
             pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
             pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..prim.index_count, 0, 0..1);
+            draws += 1;
         }
+        draws
     }
 
     pub(super) fn draw_shop_environment_shadow(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         frame: &crate::draw_cmd::UiFrame,
-    ) {
+    ) -> u32 {
         let Some(ref gpu) = self.shop_environment else {
-            return;
+            return 0;
         };
         let eyeball_only = frame.shop_env_eyeball_only;
         let eyeball_indices = self.shop_eyeball_prim_indices_for_draw();
@@ -541,7 +642,7 @@ impl WgpuRenderer {
             &self.shop_env_primitives,
             gpu,
             |pi| eyeball_only && !eyeball_indices.is_empty() && !eyeball_indices.contains(&pi),
-        );
+        )
     }
 
     pub(super) fn write_shop_environment_uniforms(
@@ -1036,22 +1137,6 @@ impl WgpuRenderer {
         self.archive_env_is_inspect_plaque_prim(pi) && !frame.archive_inspect_plaque_visible
     }
 
-    /// Shadow pre-pass / offline bake: never cast from either sign — they are flat
-    /// decal boards and project hard silhouettes onto the featured pedestal.
-    #[inline]
-    pub(super) fn archive_env_skip_room_shadow_caster(&self, pi: usize) -> bool {
-        self.archive_env_shadow_caster_mask
-            .get(pi)
-            .is_some_and(|casts| !*casts)
-    }
-
-    /// Shadow pre-pass / offline bake: skip primitives opted out at glTF load.
-    #[inline]
-    pub(super) fn gameplay_env_skip_room_shadow_caster(&self, pi: usize) -> bool {
-        self.gameplay_env_shadow_caster_mask
-            .get(pi)
-            .is_some_and(|casts| !*casts)
-    }
 }
 
 #[cfg(test)]

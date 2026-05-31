@@ -25,5 +25,6 @@ use frame::RenderFrame;
 mod render;
 pub(crate) mod shadow_setup;
 pub(crate) mod shop_environment;
+mod shadow_debug_probe;
 mod showcase_tiles;
 mod surface;

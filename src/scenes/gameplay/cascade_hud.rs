@@ -26,29 +26,6 @@ pub(super) struct CascadeHudState {
     pub(super) flight_t: Option<f32>,
 }
 
-/// Edge tracker for the hand-off tween — lets us fire one-shot sounds on
-/// merge-start, launch (flight-start), and land (flight-end / reel-settled).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum CascadeHandoffStage {
-    /// Cascade not yet in the hand-off window (or no cascade active).
-    Pre,
-    /// Merge sub-phase in progress — merge sound has fired.
-    Merging,
-    /// Flight sub-phase in progress — launch sound has fired.
-    Flying,
-    /// Flight complete — land sound has fired.
-    Landed,
-}
-
-/// Screen-space geometry of the chips/mult accumulator tokens inside the
-/// modifier strip. Produced by `GameplayScene::cascade_token_layout` so the
-/// draw path and the popup streaming destinations can't drift apart.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct CascadeTokenLayout {
-    pub(super) chips_center: (f32, f32),
-    pub(super) mult_center: (f32, f32),
-}
-
 /// Build the extruded-glyph placements for the cascade HUD — the
 /// chips/×/mult trio that lives under the plaque and, during hand-off,
 /// merges into `= TOTAL` and physically flies up into the score reel.

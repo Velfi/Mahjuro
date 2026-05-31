@@ -12,7 +12,7 @@ use std::num::NonZeroU64;
 use wgpu::util::DeviceExt;
 
 use crate::theme::color;
-use crate::punctual_shadow_atlas::MAX_PUNCTUAL_SHADOW_LIGHTS;
+use crate::wgpu_renderer::{MAX_POINT_LIGHTS};
 use crate::tile_glb::Vertex3dTex;
 
 /// Axis-aligned box extents for the `push_box` family of mesh builders.
@@ -146,6 +146,21 @@ pub fn material_casts_shadow(kind: MaterialKind) -> bool {
 /// signs in `room_glb.wgsl`). Showcase zodiac ribbons set this in
 /// `object3d_ribbon.rs`.
 pub const LIT_MESH_PARAMS_W_SKIP_DIRECTIONAL_SHADOW: f32 = 3.0;
+
+/// Balance for props on the shop shelf when embedded punctual lights and HDR
+/// tonemap are active (`SsrGlobals.shop_punctual.y == DISPLAY_CASE_STOREROOM`).
+///
+/// Spec-forward materials (pack wrap, foil, talismans) pull back direct lit in
+/// `lit_mesh.wgsl`; art-forward materials (enamel relics, portrait silk) use
+/// [`AMBIENT_MUL`] and [`SHADOW_FLOOR`] instead.
+pub mod shop_catalog_balance {
+    /// `SsrGlobals.shop_punctual.y` — storeroom shelf row balance active.
+    pub const DISPLAY_CASE_STOREROOM: f32 = 1.0;
+    /// Hemispheric ambient multiplier for art-forward catalog props.
+    pub const AMBIENT_MUL: f32 = 0.22;
+    /// Minimum key-light visibility for art-forward catalog props.
+    pub const SHADOW_FLOOR: f32 = 0.62;
+}
 
 #[inline]
 pub fn lit_mesh_skips_directional_shadow_receive(params_w: f32) -> bool {
@@ -748,58 +763,100 @@ pub fn create_shadow_warp_bind_group(
     })
 }
 
-/// One tile in the punctual shadow depth atlas (`gameplay` candles).
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct PunctualShadowSlotGpu {
-    pub light_view_proj: [f32; 16],
-    /// xy = atlas UV origin, zw = atlas UV scale.
-    pub atlas_rect: [f32; 4],
-}
-
 /// Frame-shared shadow sampling uniform consumed by lit_mesh.wgsl /
-/// tile_3d.wgsl in the main pass via group 2. (`tile_outline` binds the
-/// same group for layout compatibility but does not sample the map.)
+/// tile_3d.wgsl / room_glb.wgsl in the main pass via group 2.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShadowGlobals {
-    /// Live shadow depth atlas (key light or punctual tiles); updated every frame.
-    pub light_view_proj: [f32; 16],
-    /// x = enabled (0/1), y = depth bias, z = texel size,
-    /// w = room shadow mode (`room_glb.wgsl` only): 0 = live, 1 = baked×live, 2 = baked contact only (archive).
+    /// x = enabled (0/1), y = depth bias, z = point texel size, w = unused.
     pub params: [f32; 4],
-    /// Offline `*.msh` room shadow; only read when `params.w > 0.5` (`room_glb.wgsl`).
-    pub room_baked_light_view_proj: [f32; 16],
-    /// x = punctual shadow count, y = punctual tile texel size, z = punctual atlas enabled, w = unused.
-    pub punctual_params: [f32; 4],
-    pub punctual_lights: [PunctualShadowSlotGpu; MAX_PUNCTUAL_SHADOW_LIGHTS],
+    /// x = shadow caster count, y/z/w = unused (spot shadows removed).
+    pub counts: [f32; 4],
+    /// Dense 0..caster_count-1 view-projection matrices.
+    pub point_view_proj: [[f32; 16]; MAX_POINT_LIGHTS],
+    /// Lighting index → shadow layer packed as four vec4 rows (std140 aligned), or -1.
+    pub point_light_layer: [[f32; 4]; 4],
+    /// Offline `.msh` contact-AO projection (independent of live point lights).
+    pub contact_ao_view_proj: [f32; 16],
 }
 
 impl ShadowGlobals {
-    pub fn empty_punctual() -> Self {
+    pub fn empty() -> Self {
         Self {
-            light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
-            params: [0.0, 0.0015, 0.0, 0.0],
-            room_baked_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
-            punctual_params: [0.0; 4],
-            punctual_lights: [PunctualShadowSlotGpu {
-                light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
-                atlas_rect: [0.0; 4],
-            }; MAX_PUNCTUAL_SHADOW_LIGHTS],
+            params: [0.0, 0.005, 0.0, 0.0],
+            counts: [0.0; 4],
+            point_view_proj: [[0.0; 16]; MAX_POINT_LIGHTS],
+            point_light_layer: [[-1.0; 4]; 4],
+            contact_ao_view_proj: [0.0; 16],
         }
     }
 }
 
+/// GPU depth 2D array for projected punctual shadows.
+pub struct ShadowDepthArrayGpu {
+    pub texture: wgpu::Texture,
+    pub layer_views: Vec<wgpu::TextureView>,
+    pub array_view: wgpu::TextureView,
+    pub size: u32,
+}
+
+pub fn create_shadow_depth_array(
+    device: &wgpu::Device,
+    label: &str,
+    size: u32,
+    layers: u32,
+) -> ShadowDepthArrayGpu {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: size.max(1),
+            height: size.max(1),
+            depth_or_array_layers: layers.max(1),
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let layer_views: Vec<_> = (0..layers)
+        .map(|layer| {
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some(&format!("{label}-layer-{layer}")),
+                format: Some(wgpu::TextureFormat::Depth32Float),
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                base_array_layer: layer,
+                array_layer_count: Some(1),
+                ..Default::default()
+            })
+        })
+        .collect();
+    let array_view = texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some(&format!("{label}-array")),
+        format: Some(wgpu::TextureFormat::Depth32Float),
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    });
+    ShadowDepthArrayGpu {
+        texture,
+        layer_views,
+        array_view,
+        size,
+    }
+}
+
 /// Bind-group layout for the shadow-sampling group (group 2) shared by
-/// all 3D scene shaders. Layout: uniform + depth texture + comparison
-/// sampler.
+/// all 3D scene shaders.
 pub fn create_shadow_sample_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("shadow-sample-layout"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -812,7 +869,7 @@ pub fn create_shadow_sample_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
+                    view_dimension: wgpu::TextureViewDimension::D2Array,
                     sample_type: wgpu::TextureSampleType::Depth,
                 },
                 count: None,
@@ -820,17 +877,17 @@ pub fn create_shadow_sample_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2Array,
+                    sample_type: wgpu::TextureSampleType::Depth,
+                },
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 3,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                },
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
@@ -853,15 +910,15 @@ pub fn create_shadow_sample_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
     })
 }
 
-/// Shared shadow-sampling bind group (dynamic map + optional baked room map / AO).
+/// Shared shadow-sampling bind group (projected point/spot arrays + contact AO).
 pub fn create_shadow_sample_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     label: &str,
     globals_buffer: &wgpu::Buffer,
-    dynamic_depth: &wgpu::TextureView,
+    point_depth: &wgpu::TextureView,
+    spot_depth: &wgpu::TextureView,
     compare_sampler: &wgpu::Sampler,
-    baked_depth: &wgpu::TextureView,
     ao_view: &wgpu::TextureView,
     ao_sampler: &wgpu::Sampler,
 ) -> wgpu::BindGroup {
@@ -875,15 +932,15 @@ pub fn create_shadow_sample_bind_group(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::TextureView(dynamic_depth),
+                resource: wgpu::BindingResource::TextureView(point_depth),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::Sampler(compare_sampler),
+                resource: wgpu::BindingResource::TextureView(spot_depth),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: wgpu::BindingResource::TextureView(baked_depth),
+                resource: wgpu::BindingResource::Sampler(compare_sampler),
             },
             wgpu::BindGroupEntry {
                 binding: 4,

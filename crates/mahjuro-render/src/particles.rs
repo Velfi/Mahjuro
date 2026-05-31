@@ -813,11 +813,33 @@ impl ParticleSystem {
             .collect()
     }
 
+    /// Screen-space particle instances with projected depth.
+    pub fn fill_instances_with_depth(
+        &self,
+        out: &mut Vec<([f32; 4], [f32; 4], f32)>,
+        proj: ScreenProjector,
+    ) {
+        out.reserve(self.particles.len());
+        for p in &self.particles {
+            let alpha = p.color[3] * p.life.max(0.0);
+            let (x, y, depth) = if let Some(world) = p.world_pos {
+                proj.project_with_depth(world)
+            } else {
+                (p.x, p.y, 0.5)
+            };
+            out.push((
+                [x - p.size * 0.5, y - p.size * 0.5, p.size, p.size],
+                [p.color[0], p.color[1], p.color[2], alpha],
+                depth,
+            ));
+        }
+    }
+
     /// World rain streaks projected to layout pixels (elongated quads along velocity).
     /// `streak_len_px` is the current tuning value so live slider edits apply to all drops.
     pub fn fill_world_instances(
         &self,
-        out: &mut Vec<([f32; 4], [f32; 4])>,
+        out: &mut Vec<([f32; 4], [f32; 4], f32)>,
         proj: ScreenProjector,
         cam: &CameraParams,
         streak_len_px: f32,
@@ -830,7 +852,7 @@ impl ParticleSystem {
         let h = proj.window_h();
         out.reserve(self.world_drops.len());
         for d in &self.world_drops {
-            let (sx, sy) = proj.project(d.pos);
+            let (sx, sy, depth) = proj.project_with_depth(d.pos);
             if sx < -margin || sy < -margin || sx > w + margin || sy > h + margin {
                 continue;
             }
@@ -859,7 +881,7 @@ impl ParticleSystem {
             // Axis-aligned quads: thin along X, long along Y (streaks read vertical on screen).
             let rect = [cx - half_w, cy - len * 0.5, half_w * 2.0, len];
             let alpha = drop_color[3];
-            out.push((rect, [rgb[0], rgb[1], rgb[2], alpha]));
+            out.push((rect, [rgb[0], rgb[1], rgb[2], alpha], depth));
         }
     }
 

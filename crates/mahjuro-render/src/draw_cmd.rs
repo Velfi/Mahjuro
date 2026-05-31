@@ -60,6 +60,8 @@ pub enum ScenePunctualLight {
 #[derive(Clone, Debug, Default)]
 pub struct SceneLighting {
     pub punctual: Vec<ScenePunctualLight>,
+    /// Parallel to [`Self::punctual`]: glTF node name when sourced from embedded room lights.
+    pub punctual_gltf_nodes: Vec<Option<String>>,
     pub spot_lights: Vec<SpotLight>,
     /// Room environment mesh uses `room_glb.wgsl` when true, else `tile_3d.wgsl`.
     pub room_glb_brdf: bool,
@@ -70,10 +72,33 @@ pub struct SceneLighting {
 impl SceneLighting {
     pub fn set_smooth_points(&mut self, v: Vec<PointLight>) {
         self.punctual = v.into_iter().map(ScenePunctualLight::Smooth).collect();
+        self.punctual_gltf_nodes = vec![None; self.punctual.len()];
     }
 
     pub fn push_smooth(&mut self, p: PointLight) {
         self.punctual.push(ScenePunctualLight::Smooth(p));
+        self.punctual_gltf_nodes.push(None);
+    }
+
+    pub fn push_inverse_square(&mut self, p: PointLight, gltf_node_name: Option<String>) {
+        self.punctual.push(ScenePunctualLight::InverseSquare(p));
+        self.punctual_gltf_nodes.push(gltf_node_name);
+    }
+
+    pub fn set_punctual_tagged(
+        &mut self,
+        entries: impl IntoIterator<Item = (ScenePunctualLight, Option<String>)>,
+    ) {
+        let tagged: Vec<_> = entries.into_iter().collect();
+        self.punctual = tagged.iter().map(|(e, _)| e.clone()).collect();
+        self.punctual_gltf_nodes = tagged.into_iter().map(|(_, n)| n).collect();
+    }
+
+    #[inline]
+    pub fn punctual_gltf_node(&self, index: usize) -> Option<&str> {
+        self.punctual_gltf_nodes
+            .get(index)
+            .and_then(|n| n.as_deref())
     }
 }
 
@@ -233,13 +258,20 @@ impl ScreenProjector {
 
     #[inline]
     pub fn project(&self, world: glam::Vec3) -> (f32, f32) {
+        let (sx, sy, _) = self.project_with_depth(world);
+        (sx, sy)
+    }
+
+    #[inline]
+    pub fn project_with_depth(&self, world: glam::Vec3) -> (f32, f32, f32) {
         let clip = self.view_proj * glam::Vec4::new(world.x, world.y, world.z, 1.0);
         let inv_w = 1.0 / clip.w.max(1e-6);
         let nx = clip.x * inv_w;
         let ny = clip.y * inv_w;
+        let depth = clip.z * inv_w;
         let sx = (nx * 0.5 + 0.5) * self.window_w;
         let sy = (1.0 - (ny * 0.5 + 0.5)) * self.window_h;
-        (sx, sy)
+        (sx, sy, depth)
     }
 }
 
@@ -763,6 +795,8 @@ pub enum DrawCmd {
     TileFaceQuad(TileFaceQuad),
     /// Generic 2D quad (panels, dimmers, borders…).
     Quad(GpuInstance),
+    /// Screen-space quad that reads scene depth (used by world-projected rain).
+    DepthQuad(GpuInstance),
     /// Screen-space quad drawn after tonemap (tooltip frames, etc.) so bright
     /// HDR bloom cannot paint over UI panels.
     OverlayQuad(GpuInstance),
@@ -831,6 +865,8 @@ pub struct UiFrame {
     pub debug_axes: bool,
     /// Rain debug menu: draw emissive overlay on main-menu `rain_hit_*` collision shells.
     pub debug_rain_hit_colliders: bool,
+    /// Rain debug menu: visualize rain quad depth as grayscale.
+    pub debug_rain_depth: bool,
     /// When `Some`, overrides the tile material for this frame. Used by
     /// the tile-select scene to preview materials before a run starts.
     pub tile_material_override: Option<mahjuro_gfx_types::TileMaterial>,
@@ -909,6 +945,7 @@ impl UiFrame {
             camera_override: None,
             debug_axes: false,
             debug_rain_hit_colliders: false,
+            debug_rain_depth: false,
             tile_material_override: None,
             buttons: Vec::new(),
             window_title: String::new(),
@@ -998,6 +1035,9 @@ impl UiFrame {
     pub fn quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Quad));
     }
+    pub fn depth_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
+        self.cmds.extend(iter.into_iter().map(DrawCmd::DepthQuad));
+    }
     pub fn overlay_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::OverlayQuad));
     }
@@ -1053,6 +1093,7 @@ impl UiFrame {
         for cmd in self.cmds.iter_mut() {
             match cmd {
                 DrawCmd::Quad(inst) => inst.color[3] *= alpha,
+                DrawCmd::DepthQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::OverlayQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::SquircleQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::TileFaceQuad(face) => face.inst.color[3] *= alpha,

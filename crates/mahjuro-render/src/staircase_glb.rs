@@ -162,15 +162,15 @@ pub fn staircase_glb_has_embedded_lights() -> bool {
     })
 }
 
-pub fn staircase_embedded_point_lights_runtime(
+pub fn staircase_embedded_point_lights_runtime_tagged(
     w: f32,
     h: f32,
     env_h: f32,
     tune: &RoomEnvLightingTune,
-) -> Vec<PointLight> {
+) -> Vec<crate::room_gltf_punctual::EmbeddedPointLightRuntime> {
     with_staircase_glb_cpu(|opt| {
         opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_point_lights_runtime(
+            crate::room_gltf_punctual::embedded_point_lights_runtime_tagged(
                 cpu,
                 w,
                 h,
@@ -182,6 +182,18 @@ pub fn staircase_embedded_point_lights_runtime(
         })
         .unwrap_or_default()
     })
+}
+
+pub fn staircase_embedded_point_lights_runtime(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    tune: &RoomEnvLightingTune,
+) -> Vec<PointLight> {
+    staircase_embedded_point_lights_runtime_tagged(w, h, env_h, tune)
+        .into_iter()
+        .map(|t| t.light)
+        .collect()
 }
 
 pub fn staircase_embedded_spot_lights_runtime(

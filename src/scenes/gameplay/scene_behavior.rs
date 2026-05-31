@@ -395,12 +395,6 @@ impl SceneBehavior for GameplayScene {
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
         let has_structure = gameplay.has_structure;
         let cascade_showcase_ref = self.cascade_queue.front().and_then(|(_, sc)| sc.as_ref());
-        let showcase_present = has_structure || cascade_showcase_ref.is_some();
-        let (yaku_panel_h, _, _) = super::glb_anchors::gameplay_hud_strip_heights(
-            layout.window_h,
-            layout_scale,
-            showcase_present,
-        );
         let glb_anchors = match super::glb_anchors::resolve_gameplay_glb_anchors(
             layout,
             interaction.hand_len,
@@ -408,7 +402,6 @@ impl SceneBehavior for GameplayScene {
             layout.window_h,
             &scene_camera,
             env_h,
-            yaku_panel_h,
         ) {
             Ok(anchors) => anchors,
             Err(e) => {
@@ -809,8 +802,8 @@ impl SceneBehavior for GameplayScene {
         frame.scene_lighting.room_glb_brdf = room_glb_lights;
         if room_glb_lights && !vis.hide_candle_lights {
             let lamp_flicker = self.light_ramp;
-            frame.scene_lighting.punctual =
-                crate::render::gameplay_glb::gameplay_embedded_point_lights_runtime(
+            let (punctual, nodes) = crate::render::room_gltf_punctual::tagged_to_scene_punctual(
+                crate::render::gameplay_glb::gameplay_embedded_point_lights_runtime_tagged(
                     layout.window_w,
                     layout.window_h,
                     env_h,
@@ -818,10 +811,10 @@ impl SceneBehavior for GameplayScene {
                     self.candle_time,
                     lamp_flicker,
                     ctx.flame_tuning.candle_flicker_amp,
-                )
-                .into_iter()
-                .map(crate::render::draw_cmd::ScenePunctualLight::InverseSquare)
-                .collect();
+                ),
+            );
+            frame.scene_lighting.punctual = punctual;
+            frame.scene_lighting.punctual_gltf_nodes = nodes;
             frame.scene_lighting.spot_lights =
                 crate::render::gameplay_glb::gameplay_embedded_spot_lights_runtime(
                     layout.window_w,

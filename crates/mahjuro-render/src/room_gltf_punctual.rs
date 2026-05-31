@@ -157,6 +157,13 @@ fn point_intensity(
     intensity
 }
 
+/// Runtime point light plus its glTF node name (for shadow caster policy).
+#[derive(Clone, Debug)]
+pub struct EmbeddedPointLightRuntime {
+    pub light: PointLight,
+    pub gltf_node_name: String,
+}
+
 /// Build point lights from decoded [`RoomGlbCpu`] punctual data.
 pub fn embedded_point_lights_runtime(
     cpu: &RoomGlbCpu,
@@ -167,6 +174,22 @@ pub fn embedded_point_lights_runtime(
     profile: RoomPunctualProfile,
     asset_label: &'static str,
 ) -> Vec<PointLight> {
+    embedded_point_lights_runtime_tagged(cpu, w, h, env_h, tune, profile, asset_label)
+        .into_iter()
+        .map(|t| t.light)
+        .collect()
+}
+
+/// Like [`embedded_point_lights_runtime`] but retains glTF node names.
+pub fn embedded_point_lights_runtime_tagged(
+    cpu: &RoomGlbCpu,
+    w: f32,
+    h: f32,
+    env_h: f32,
+    tune: &RoomEnvLightingTune,
+    profile: RoomPunctualProfile,
+    asset_label: &'static str,
+) -> Vec<EmbeddedPointLightRuntime> {
     if cpu.embedded_point_lights.is_empty() {
         return Vec::new();
     }
@@ -189,14 +212,31 @@ pub fn embedded_point_lights_runtime(
         .map(|l| {
             let world = (l.pos_doc - center_doc) * s;
             let radius = glb_punctual_range_world_upload(h, s, l.range_doc);
-            PointLight {
-                pos: surface_anchor_from_world_xyz(w, h, world),
-                radius,
-                color: point_color(profile, l, tune),
-                intensity: point_intensity(profile, l, tune, &mut candle_index),
+            EmbeddedPointLightRuntime {
+                light: PointLight {
+                    pos: surface_anchor_from_world_xyz(w, h, world),
+                    radius,
+                    color: point_color(profile, l, tune),
+                    intensity: point_intensity(profile, l, tune, &mut candle_index),
+                },
+                gltf_node_name: l.node_name.clone(),
             }
         })
         .collect()
+}
+
+pub fn tagged_to_scene_punctual(
+    tagged: Vec<EmbeddedPointLightRuntime>,
+) -> (Vec<crate::draw_cmd::ScenePunctualLight>, Vec<Option<String>>) {
+    tagged
+        .into_iter()
+        .map(|t| {
+            (
+                crate::draw_cmd::ScenePunctualLight::InverseSquare(t.light),
+                Some(t.gltf_node_name),
+            )
+        })
+        .unzip()
 }
 
 /// Build spotlights from decoded [`RoomGlbCpu`] punctual data.

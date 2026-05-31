@@ -46,6 +46,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let t_shaders = Instant::now();
     let super::super::init_phases::RendererShaderPack {
         quad: shader,
+        depth_quad: depth_quad_shader,
+        depth_quad_debug: depth_quad_debug_shader,
         tile: tile_shader,
         shop: shop_shader,
         text: text_shader,
@@ -394,29 +396,25 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         ],
     });
 
-    // ---- Shadow map resources (depth texture + sampler + layouts) ----
-    // Built up here so the shared sampling layout can be plumbed into
-    // both `tile_layout` and `lit_mesh_pl` below as group 2.
-    const SHADOW_MAP_SIZE: u32 =
-        crate::punctual_shadow_atlas::PUNCTUAL_SHADOW_ATLAS_SIZE;
-    let shadow_map_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("shadow-map"),
-        size: wgpu::Extent3d {
-            width: SHADOW_MAP_SIZE,
-            height: SHADOW_MAP_SIZE,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-            | wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let shadow_map_view = shadow_map_texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+    // ---- Shadow map resources (depth arrays + sampler + layouts) ----
+    use crate::lit_mesh::create_shadow_depth_array;
+    use crate::wgpu_renderer::constants::{MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS};
+    use mahjuro_gfx_types::ShadowQuality;
+
+    let default_shadow_quality = ShadowQuality::High;
+    let point_shadow_array = create_shadow_depth_array(
+        &device,
+        "point-shadow-array",
+        default_shadow_quality.point_map_size(),
+        MAX_POINT_LIGHTS as u32,
+    );
+    let spot_shadow_array = create_shadow_depth_array(
+        &device,
+        "spot-shadow-array",
+        default_shadow_quality.spot_map_size(),
+        MAX_SPOT_LIGHTS as u32,
+    );
+    let shadow_compare_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("shadow-sampler"),
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -443,7 +441,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let shadow_sample_layout = create_shadow_sample_layout(&device);
     let shadow_globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("shadow-globals"),
-        contents: bytemuck::bytes_of(&ShadowGlobals::empty_punctual()),
+        contents: bytemuck::bytes_of(&ShadowGlobals::empty()),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
     let shadow_ao_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -469,43 +467,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         view_formats: &[],
     });
     let shadow_ao_white_view = shadow_ao_white_texture.create_view(&Default::default());
-    let shadow_baked_depth_white_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("shadow-baked-depth-white"),
-        size: wgpu::Extent3d {
-            width: 4,
-            height: 4,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-    let shadow_baked_depth_white_view =
-        shadow_baked_depth_white_texture.create_view(&Default::default());
-    const BAKED_DEPTH_FAR: [u8; 4] = 0x3F80_0000u32.to_le_bytes();
-    let baked_depth_white_pixels: [u8; 64] = std::array::from_fn(|i| BAKED_DEPTH_FAR[i % 4]);
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &shadow_baked_depth_white_texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &baked_depth_white_pixels,
-        wgpu::TexelCopyBufferLayout {
-            bytes_per_row: Some(16),
-            rows_per_image: Some(4),
-            ..Default::default()
-        },
-        wgpu::Extent3d {
-            width: 4,
-            height: 4,
-            depth_or_array_layers: 1,
-        },
-    );
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &shadow_ao_white_texture,
@@ -530,9 +491,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         &shadow_sample_layout,
         "shadow-sample-bg",
         &shadow_globals_buffer,
-        &shadow_map_view,
-        &shadow_sampler,
-        &shadow_baked_depth_white_view,
+        &point_shadow_array.array_view,
+        &spot_shadow_array.array_view,
+        &shadow_compare_sampler,
         &shadow_ao_white_view,
         &shadow_ao_sampler,
     );
@@ -639,6 +600,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         stencil: wgpu::StencilState::default(),
         bias: wgpu::DepthBiasState::default(),
     };
+    let depth_ui_test = wgpu::DepthStencilState {
+        depth_compare: Some(wgpu::CompareFunction::LessEqual),
+        ..depth_ui.clone()
+    };
 
     let quad_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("quad-pipeline"),
@@ -696,6 +661,119 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         multiview_mask: None,
         cache: None,
     });
+    let depth_quad_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("depth-quad-pipeline"),
+        layout: Some(&quad_layout),
+        vertex: wgpu::VertexState {
+            module: &depth_quad_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[vertex_layout.clone(), instance_layout.clone()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &depth_quad_shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: scene_hdr_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: Some(depth_ui_test.clone()),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    let depth_quad_pipeline_display = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("depth-quad-pipeline-display"),
+        layout: Some(&quad_layout),
+        vertex: wgpu::VertexState {
+            module: &depth_quad_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[vertex_layout.clone(), instance_layout.clone()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &depth_quad_shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: Some(depth_ui_test.clone()),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    let depth_quad_debug_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("depth-quad-debug-pipeline"),
+        layout: Some(&quad_layout),
+        vertex: wgpu::VertexState {
+            module: &depth_quad_debug_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[vertex_layout.clone(), instance_layout.clone()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &depth_quad_debug_shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: scene_hdr_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: Some(depth_ui_test.clone()),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    let depth_quad_debug_pipeline_display =
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("depth-quad-debug-pipeline-display"),
+            layout: Some(&quad_layout),
+            vertex: wgpu::VertexState {
+                module: &depth_quad_debug_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[vertex_layout.clone(), instance_layout.clone()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &depth_quad_debug_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_ui_test.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
 
     // Gradient-quad pipeline — alpha-feathered panels behind HUD
     // content. Same `rect`/`color` payload as the base quad_pipeline
@@ -1793,11 +1871,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         depth_write_enabled: Some(true),
         depth_compare: Some(wgpu::CompareFunction::Less),
         stencil: wgpu::StencilState::default(),
-        // Slope-scaled bias to fight acne. The constant component is
-        // small because the lit shaders also subtract a depth bias.
+        // Bias lives in the lit shaders (`shadow_globals.params.y`); keep the
+        // depth pass un-biased so compare refs match stored texels.
         bias: wgpu::DepthBiasState {
-            constant: 2,
-            slope_scale: 2.5,
+            constant: 0,
+            slope_scale: 0.0,
             clamp: 0.0,
         },
     };
@@ -1825,7 +1903,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Front),
+            // Front-facing geometry toward the light (tile tops, table felt) must
+            // rasterize into the projected depth maps — culling front faces left
+            // maps cleared to 1.0 (always lit on sample).
+            cull_mode: Some(wgpu::Face::Back),
             ..Default::default()
         },
         depth_stencil: Some(shadow_depth_state.clone()),
@@ -2518,8 +2599,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         archive_inspect_plaque_prim_idx,
         archive_page_left_prim_indices,
         archive_page_right_prim_indices,
-        archive_env_shadow_caster_mask,
-    ) = (Vec::new(), None, None, None, None, Vec::new(), Vec::new(), Vec::new());
+    ) = (Vec::new(), None, None, None, None, Vec::new(), Vec::new());
     let (main_menu_env_primitives, main_menu_environment) = {
         let _menu = crate::startup_profile::scope("wgpu.room.main_menu");
         crate::main_menu_glb::with_main_menu_glb_cpu(|cpu_opt| {
@@ -2739,11 +2819,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         gameplay_score_roller_prim_groups,
         gameplay_score_roller_pivots_doc,
         gameplay_score_roller_axes_doc,
-        gameplay_env_shadow_caster_mask,
     ) = (
         Vec::new(),
         None,
-        Vec::new(),
         Vec::new(),
         Vec::new(),
         Vec::new(),
@@ -3171,6 +3249,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         depth_copy_staging_buffer,
         quad_pipeline,
         quad_pipeline_display,
+        depth_quad_pipeline,
+        depth_quad_pipeline_display,
+        depth_quad_debug_pipeline,
+        depth_quad_debug_pipeline_display,
         gradient_quad_pipeline,
         squircle_quad_pipeline,
         flame_pipeline,
@@ -3255,14 +3337,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         gameplay_score_roller_drive_initialized: std::cell::RefCell::new([false; 2]),
         gameplay_score_roller_roll_elapsed: std::cell::RefCell::new(0.0),
         gameplay_score_roller_stopped: std::cell::RefCell::new(false),
-        gameplay_env_shadow_caster_mask,
         gameplay_environment,
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,
         archive_inspect_plaque_prim_idx,
         archive_page_left_prim_indices,
         archive_page_right_prim_indices,
-        archive_env_shadow_caster_mask,
         archive_sign_decal_upload_key: 0,
         archive_inspect_plaque_decal_upload_key: 0,
         frame_env_tunes: rustc_hash::FxHashMap::default(),
@@ -3383,10 +3463,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         background_load_start,
         prev_tile_world: rustc_hash::FxHashMap::default(),
         tile_uid_scratch: rustc_hash::FxHashSet::default(),
-        prev_frame_shadows_enabled: false,
+        prev_shadow_quality: ShadowQuality::Off,
         cached_shadow_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
-        punctual_shadow_lights: Vec::new(),
-        cached_punctual_shadow_hash: 0,
+        projected_shadow_lights: Vec::new(),
+        cached_projected_shadow_hash: 0,
         shop_inspect_subject_shadow_slot: None,
         shadow_placement_anim_id: 0,
         placement_shadow_room: None,
@@ -3427,6 +3507,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         active_room_baked_shadow: None,
         room_shadow_capture_pending: None,
         room_shadow_captured: None,
+        shadow_probe_last_log: Instant::now(),
+        shadow_probe_last_caster_count: usize::MAX,
         emissive_gi_composite_pipeline,
         emissive_gi_composite_bind_group_layout,
         emissive_gi_composite_bind_group,
@@ -3487,11 +3569,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         pack_mesh,
         relic_meshes: rustc_hash::FxHashMap::default(),
         relic_instances,
-        shadow_map_texture,
-        shadow_map_view,
+        point_shadow_array,
+        spot_shadow_array,
         shadow_sample_layout,
-        shadow_compare_sampler: shadow_sampler,
+        shadow_compare_sampler,
         shadow_ao_sampler,
+        _shadow_ao_white_texture: shadow_ao_white_texture,
+        shadow_ao_white_view,
         shadow_caster_layout,
         shadow_warp_disabled_bind_group,
         shadow_globals_buffer,
@@ -3501,6 +3585,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         gpu_profiler,
         pending_screenshot: std::cell::Cell::new(None),
         acquire_telemetry: super::super::runtime::AcquireTelemetry::new(),
+        shadow_quality: default_shadow_quality,
         flame_tuning: crate::flame_tuning::FlameTuning::load(),
         main_menu_pride_rainbow_debug: false,
         main_menu_rain_hit_debug_mesh,

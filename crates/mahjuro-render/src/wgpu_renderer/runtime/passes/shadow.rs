@@ -1,64 +1,32 @@
 use super::*;
-use crate::punctual_shadow_atlas::{PunctualShadowLightSetup, atlas_tile_viewport_px};
+use crate::projected_light_shadow::ProjectedShadowLightSetup;
 use crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
 
 impl WgpuRenderer {
-    /// Shadow pre-pass — render room GLB + lit-mesh casters into the depth atlas.
+    /// Shadow pre-pass — one projected depth layer per point/spot light.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_shadow_pre_pass(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         frame: &UiFrame,
         camera_h: f32,
-        shadows_enabled: bool,
-        shadow_uniforms_changed: bool,
-        punctual_lights: &[PunctualShadowLightSetup],
+        shadow_quality: mahjuro_gfx_types::ShadowQuality,
+        _shadow_uniforms_changed: bool,
+        projected_lights: &[ProjectedShadowLightSetup],
         object3d_draw_list: &[(DrawKind, usize)],
         showcase_tile_batches: &[&[ShowcaseTilePlacement]],
         tile_3d_rects: &[(usize, [f32; 4])],
         tile_pick_models: &[(usize, glam::Mat4)],
     ) {
-        if !(shadows_enabled && shadow_uniforms_changed) {
+        if !shadow_quality.active() || projected_lights.is_empty() {
             return;
         }
 
-        let shadow_ts = self
-            .gpu_profiler
-            .pass_writes(crate::gpu_profiler::PassSlot::Shadow);
-        let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("shadow-pre-pass"),
-            color_attachments: &[],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.shadow_map_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            occlusion_query_set: None,
-            timestamp_writes: shadow_ts,
-            multiview_mask: None,
-        });
-
-        if punctual_lights.is_empty() {
-            shadow_pass.set_pipeline(&self.shadow_pipeline);
-            self.draw_shadow_casters(
-                &mut shadow_pass,
-                frame,
-                camera_h,
-                false,
-                object3d_draw_list,
-                showcase_tile_batches,
-                tile_3d_rects,
-                None,
-            );
-            return;
-        }
-
-        for (light_idx, light) in punctual_lights.iter().enumerate() {
-            let (vx, vy, vw, vh) = atlas_tile_viewport_px(light_idx);
-            shadow_pass.set_viewport(vx, vy, vw, vh, 0.0, 1.0);
+        for (light_i, light) in projected_lights.iter().enumerate() {
+            let depth_view = self.point_shadow_array.layer_views.get(light.layer_index as usize);
+            let Some(depth_view) = depth_view else {
+                continue;
+            };
             let lvp = light.light_view_proj.to_cols_array();
             self.rewrite_shadow_casters_for_light(
                 lvp,
@@ -66,17 +34,74 @@ impl WgpuRenderer {
                 tile_pick_models,
                 showcase_tile_batches,
             );
+            self.prepare_room_env_shadow_casters_for_light(frame, camera_h, lvp);
+
+            let shadow_ts = if light_i == 0 {
+                self.gpu_profiler
+                    .pass_writes(crate::gpu_profiler::PassSlot::Shadow)
+            } else {
+                None
+            };
+            let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shadow-pre-pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: shadow_ts,
+                multiview_mask: None,
+            });
             shadow_pass.set_pipeline(&self.shadow_pipeline);
-            self.draw_shadow_casters(
+            let room_draws = self.draw_shadow_casters(
                 &mut shadow_pass,
                 frame,
-                camera_h,
-                true,
                 object3d_draw_list,
                 showcase_tile_batches,
                 tile_3d_rects,
-                Some((lvp, light_idx)),
             );
+            let _ = room_draws;
+        }
+    }
+
+    /// Upload room-GLB shadow caster uniforms before the depth pass (queue writes
+    /// must not run inside an active render pass).
+    fn prepare_room_env_shadow_casters_for_light(
+        &self,
+        frame: &UiFrame,
+        camera_h: f32,
+        lvp: [f32; 16],
+    ) {
+        let Some(active_room_env) = super::shadow_setup::active_room_env(frame) else {
+            return;
+        };
+        if frame.shop_inspect_shadow_target.is_some()
+            && matches!(active_room_env, ActiveRoomEnv::Shop)
+        {
+            return;
+        }
+        let model = self.room_env_shadow_base_model(active_room_env, camera_h);
+        let prim_deltas = match active_room_env {
+            ActiveRoomEnv::Shop => self.shop_gltf_anim_prim_deltas(frame),
+            ActiveRoomEnv::Gameplay => self.gameplay_score_roller_frame_state(frame),
+            _ => rustc_hash::FxHashMap::default(),
+        };
+        let mut _changed = false;
+        let gpu = match active_room_env {
+            ActiveRoomEnv::Shop => self.shop_environment.as_ref(),
+            ActiveRoomEnv::Hallway => self.hallway_environment.as_ref(),
+            ActiveRoomEnv::Staircase => self.staircase_environment.as_ref(),
+            ActiveRoomEnv::Archive => self.archive_environment.as_ref(),
+            ActiveRoomEnv::MainMenu => self.main_menu_environment.as_ref(),
+            ActiveRoomEnv::Gameplay => self.gameplay_environment.as_ref(),
+        };
+        if let Some(gpu) = gpu {
+            self.write_room_env_shadow_caster(gpu, lvp, model, &prim_deltas, &mut _changed);
         }
     }
 
@@ -85,48 +110,21 @@ impl WgpuRenderer {
         &self,
         shadow_pass: &mut wgpu::RenderPass<'_>,
         frame: &UiFrame,
-        camera_h: f32,
-        force_room_env: bool,
         object3d_draw_list: &[(DrawKind, usize)],
         showcase_tile_batches: &[&[ShowcaseTilePlacement]],
         tile_3d_rects: &[(usize, [f32; 4])],
-        room_shadow_lvp: Option<([f32; 16], usize)>,
-    ) {
+    ) -> u32 {
         let shop_inspect_shadow_only = frame.shop_inspect_shadow_target.is_some();
-        let active_room_env = super::shadow_setup::active_room_env(frame);
-        let bake_capture = self.room_shadow_capture_pending.is_some();
-        let baked_loaded = active_room_env.and_then(|env| {
-            super::shadow_setup::room_baked_shadow_loaded(&self.room_baked_shadow_gpu, env)
-        });
-        let skip_room_dynamic = !force_room_env
-            && super::shadow_setup::skip_room_env_live_shadow_pass(
-                active_room_env,
-                baked_loaded,
-                bake_capture,
-            );
-        if !skip_room_dynamic {
-            let mut room_changed = false;
-            if let Some((lvp, _)) = room_shadow_lvp {
-                // Room env shadow matrix is rewritten per punctual light above.
-                let _ = lvp;
-            }
+        let mut room_draws = 0u32;
+        if let Some(active_room_env) = super::shadow_setup::active_room_env(frame) {
             match active_room_env {
-                Some(ActiveRoomEnv::Shop) if !shop_inspect_shadow_only => {
-                    self.draw_shop_environment_shadow(shadow_pass, frame);
+                ActiveRoomEnv::Shop if !shop_inspect_shadow_only => {
+                    room_draws += self.draw_shop_environment_shadow(shadow_pass, frame);
                 }
-                Some(ActiveRoomEnv::Shop) => {}
-                Some(ActiveRoomEnv::Hallway) => {
+                ActiveRoomEnv::Shop => {}
+                ActiveRoomEnv::Hallway => {
                     if let Some(ref gpu) = self.hallway_environment {
-                        if let Some((lvp, _)) = room_shadow_lvp {
-                            self.write_room_env_shadow_caster(
-                                gpu,
-                                lvp,
-                                glam::Mat4::IDENTITY,
-                                &rustc_hash::FxHashMap::default(),
-                                &mut room_changed,
-                            );
-                        }
-                        self.draw_gltf_room_env_shadow(
+                        room_draws += self.draw_gltf_room_env_shadow(
                             shadow_pass,
                             &self.hallway_env_primitives,
                             gpu,
@@ -134,18 +132,9 @@ impl WgpuRenderer {
                         );
                     }
                 }
-                Some(ActiveRoomEnv::Staircase) => {
+                ActiveRoomEnv::Staircase => {
                     if let Some(ref gpu) = self.staircase_environment {
-                        if let Some((lvp, _)) = room_shadow_lvp {
-                            self.write_room_env_shadow_caster(
-                                gpu,
-                                lvp,
-                                glam::Mat4::IDENTITY,
-                                &rustc_hash::FxHashMap::default(),
-                                &mut room_changed,
-                            );
-                        }
-                        self.draw_gltf_room_env_shadow(
+                        room_draws += self.draw_gltf_room_env_shadow(
                             shadow_pass,
                             &self.staircase_env_primitives,
                             gpu,
@@ -153,37 +142,19 @@ impl WgpuRenderer {
                         );
                     }
                 }
-                Some(ActiveRoomEnv::Archive) => {
+                ActiveRoomEnv::Archive => {
                     if let Some(ref gpu) = self.archive_environment {
-                        if let Some((lvp, _)) = room_shadow_lvp {
-                            self.write_room_env_shadow_caster(
-                                gpu,
-                                lvp,
-                                glam::Mat4::IDENTITY,
-                                &rustc_hash::FxHashMap::default(),
-                                &mut room_changed,
-                            );
-                        }
-                        self.draw_gltf_room_env_shadow(
+                        room_draws += self.draw_gltf_room_env_shadow(
                             shadow_pass,
                             &self.archive_env_primitives,
                             gpu,
-                            |pi| self.archive_env_skip_room_shadow_caster(pi),
+                            |_| false,
                         );
                     }
                 }
-                Some(ActiveRoomEnv::MainMenu) => {
+                ActiveRoomEnv::MainMenu => {
                     if let Some(ref gpu) = self.main_menu_environment {
-                        if let Some((lvp, _)) = room_shadow_lvp {
-                            self.write_room_env_shadow_caster(
-                                gpu,
-                                lvp,
-                                glam::Mat4::IDENTITY,
-                                &rustc_hash::FxHashMap::default(),
-                                &mut room_changed,
-                            );
-                        }
-                        self.draw_gltf_room_env_shadow(
+                        room_draws += self.draw_gltf_room_env_shadow(
                             shadow_pass,
                             &self.main_menu_env_primitives,
                             gpu,
@@ -191,47 +162,19 @@ impl WgpuRenderer {
                         );
                     }
                 }
-                Some(ActiveRoomEnv::Gameplay) => {
+                ActiveRoomEnv::Gameplay => {
                     if let Some(ref gpu) = self.gameplay_environment {
-                        if let Some((lvp, _)) = room_shadow_lvp {
-                            let env_key = if self.active_scene_key == Some("tutorial") {
-                                "tutorial"
-                            } else {
-                                "gameplay"
-                            };
-                            let height = self.env_tune_for(env_key).height_scale;
-                            let s = crate::room_glb::room_env_world_scale(camera_h, height);
-                            let model = crate::gameplay_glb::with_gameplay_glb_cpu(|opt| {
-                                opt.map(|cpu| {
-                                    crate::room_glb::room_env_model_matrix_from_cpu(
-                                        camera_h,
-                                        height,
-                                        cpu,
-                                    )
-                                })
-                            })
-                            .unwrap_or_else(|| glam::Mat4::from_scale(glam::Vec3::splat(s)));
-                            self.write_room_env_shadow_caster(
-                                gpu,
-                                lvp,
-                                model,
-                                &rustc_hash::FxHashMap::default(),
-                                &mut room_changed,
-                            );
-                        }
-                        self.draw_gltf_room_env_shadow(
+                        room_draws += self.draw_gltf_room_env_shadow(
                             shadow_pass,
                             &self.gameplay_env_primitives,
                             gpu,
                             |pi| {
-                                self.gameplay_env_skip_room_shadow_caster(pi)
-                                    || (!frame.gameplay_cash_in_button_visible
-                                        && self.gameplay_cash_in_prim_indices.contains(&pi))
+                                !frame.gameplay_cash_in_button_visible
+                                    && self.gameplay_cash_in_prim_indices.contains(&pi)
                             },
                         );
                     }
                 }
-                None => {}
             }
         }
 
@@ -274,11 +217,15 @@ impl WgpuRenderer {
                 let Some(stg) = self.showcase_tiles.get(slot_i) else {
                     break;
                 };
+                if !stg.casts_shadow {
+                    continue;
+                }
                 shadow_pass.set_bind_group(0, &stg.shadow_bind_group, &[]);
                 shadow_pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
                 shadow_pass.draw_indexed(0..self.active_tile_mesh().outline_index_count, 0, 0..1);
             }
         }
+        room_draws
     }
 
     fn draw_object3d_shadow_entry(

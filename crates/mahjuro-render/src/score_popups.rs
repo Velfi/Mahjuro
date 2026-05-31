@@ -34,7 +34,7 @@ impl PopupMotionTiming {
         Self {
             pop_secs: 0.14,
             loiter_secs: 0.32,
-            fly_secs: 0.46,
+            fly_secs: 0.92,
             overshoot: 0.22,
         }
     }
@@ -45,18 +45,21 @@ impl PopupMotionTiming {
 const YAW_JITTER: f32 = 0.07;
 
 /// World-units height for modifier-strip / screen-layout popup sources.
-/// Object-anchored popups use each object's median center Z instead.
 const LIFT_BASE: f32 = 450.0;
 /// Extra lift applied at the midpoint of the streaming arc.
 const LIFT_ARC_PEAK: f32 = 148.0;
+/// Lift above object-surface anchors (tiles, relics, yaku tablets) so the
+/// extruded glyph clears geometry during pop + loiter.
+const OBJECT_POPUP_CLEARANCE_SCALE: f32 = 0.58;
+const OBJECT_POPUP_CLEARANCE_BASE: f32 = 18.0;
 
 /// Table-hover Z for modifier-strip / screen-layout popup sources (no 3D object).
 pub const TABLE_POPUP_LIFT_Z: f32 = LIFT_BASE;
 
-/// Sky-blue base tint for Chips popups.
-const CHIPS_COLOR: [f32; 4] = crate::theme::color::score_cascade::CHIPS;
-/// Red base tint for Mult popups.
-const MULT_COLOR: [f32; 4] = crate::theme::color::score_cascade::MULT;
+/// Vivid electric blue for Chips score pops (#00a0ff).
+const CHIPS_COLOR: [f32; 4] = [0.0, 160.0 / 255.0, 1.0, 1.0];
+/// Vivid scarlet for Mult score pops (#ff0034).
+const MULT_COLOR: [f32; 4] = [1.0, 0.0, 52.0 / 255.0, 1.0];
 /// Warm gold base tint for Yen popups.
 const GOLD_COLOR: [f32; 4] = crate::theme::color::RELIC_GOLD;
 /// Cream tint for the Final landing number.
@@ -114,13 +117,13 @@ impl ScorePopupSystem {
             StepKind::Final => (FINAL_COLOR, GlyphMaterial::Polychrome),
         };
         let mag = magnitude.abs().max(1.0);
-        let scale = 198.0 * (1.0 + (mag.log2() / 12.0).clamp(0.0, 0.48));
+        let scale = 99.0 * (1.0 + (mag.log2() / 12.0).clamp(0.0, 0.48));
         let mut rng = rand::rng();
         let yaw = (rng.random::<f32>() - 0.5) * YAW_JITTER;
         self.popups.push(ScorePopup {
             label: label.into(),
             born_at: Instant::now(),
-            source_pos: source.to_draw_cmd_triple(),
+            source_pos: object_popup_source_triple(source, scale),
             dest_xy,
             dest_lift: dest_lift.unwrap_or(LIFT_BASE),
             base_scale: scale,
@@ -135,10 +138,10 @@ impl ScorePopupSystem {
     /// Spawn a red warning X that shakes in place over a debuffed scorer.
     pub fn spawn_debuff_x(&mut self, source: LayoutAnchorPx, magnitude: f32) {
         let mag = magnitude.abs().max(1.0);
-        let scale = 180.0 * (1.0 + (mag.log2() / 10.0).clamp(0.0, 0.35));
+        let scale = 90.0 * (1.0 + (mag.log2() / 10.0).clamp(0.0, 0.35));
         let mut rng = rand::rng();
         let yaw = (rng.random::<f32>() - 0.5) * (YAW_JITTER * 0.6);
-        let source_pos = source.to_draw_cmd_triple();
+        let source_pos = object_popup_source_triple(source, scale);
         self.popups.push(ScorePopup {
             label: Arc::from("X"),
             born_at: Instant::now(),
@@ -229,6 +232,17 @@ impl ScorePopupSystem {
             })
             .collect()
     }
+}
+
+/// Packed spawn triple with clearance above object-surface anchors.
+fn object_popup_source_triple(source: LayoutAnchorPx, glyph_base_scale: f32) -> [f32; 3] {
+    let mut triple = source.to_draw_cmd_triple();
+    // Modifier-strip / screen-layout sources already float at table-hover height.
+    if (source.lift_z - LIFT_BASE).abs() < 1.0 {
+        return triple;
+    }
+    triple[2] += glyph_base_scale * OBJECT_POPUP_CLEARANCE_SCALE + OBJECT_POPUP_CLEARANCE_BASE;
+    triple
 }
 
 fn popup_frame_sample(p: &ScorePopup, now: Instant) -> (f32, f32, f32, f32, f32, f32) {

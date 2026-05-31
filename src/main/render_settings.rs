@@ -7,7 +7,7 @@ pub struct RenderSettings {
     pub tile_material: crate::persistence::TileMaterial,
     pub tileset_name: String,
     pub gamma: f32,
-    pub shadows_enabled: bool,
+    pub shadow_quality: mahjuro_gfx_types::ShadowQuality,
     pub ssr_enabled: bool,
     pub hdr_enabled: bool,
     /// Master toggle for the per-scene VHS overlay (sourced from the

@@ -340,15 +340,15 @@ pub fn main_menu_light_door_object3d_anchor(w: f32, h: f32, env_h: f32) -> Optio
     })
 }
 
-pub fn main_menu_embedded_point_lights_runtime(
+pub fn main_menu_embedded_point_lights_runtime_tagged(
     w: f32,
     h: f32,
     env_h: f32,
     tune: &RoomEnvLightingTune,
-) -> Vec<PointLight> {
+) -> Vec<crate::room_gltf_punctual::EmbeddedPointLightRuntime> {
     with_main_menu_glb_cpu(|opt| {
         opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_point_lights_runtime(
+            crate::room_gltf_punctual::embedded_point_lights_runtime_tagged(
                 cpu,
                 w,
                 h,
@@ -360,6 +360,18 @@ pub fn main_menu_embedded_point_lights_runtime(
         })
         .unwrap_or_default()
     })
+}
+
+pub fn main_menu_embedded_point_lights_runtime(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    tune: &RoomEnvLightingTune,
+) -> Vec<PointLight> {
+    main_menu_embedded_point_lights_runtime_tagged(w, h, env_h, tune)
+        .into_iter()
+        .map(|t| t.light)
+        .collect()
 }
 
 pub fn main_menu_embedded_spot_lights_runtime(

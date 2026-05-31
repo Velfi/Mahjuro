@@ -11,6 +11,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::clip::intersect_rect;
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
+use std::cell::Cell;
 
 use crate::render::draw_cmd::UiFrame;
 
@@ -351,7 +352,7 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
                 "Windowed".into()
             },
         ),
-        Row::Shadows => ("Shadows", on_off(scene.shadows_enabled)),
+        Row::Shadows => ("Shadow quality", scene.shadow_quality.label().into()),
         Row::Ssr => ("Reflections", on_off(scene.ssr_enabled)),
         Row::Hdr => ("HDR", on_off(scene.hdr_enabled)),
         Row::SwapAb => ("Swap A/B", on_off(scene.swap_ab)),
@@ -507,10 +508,11 @@ pub struct OptionsScene {
     pub tileset_name: String,
     pub available_tilesets: Vec<String>,
     pub gamma: f32,
-    pub shadows_enabled: bool,
+    pub shadow_quality: crate::persistence::ShadowQuality,
     pub ssr_enabled: bool,
     pub hdr_enabled: bool,
     pub borderless_fullscreen: bool,
+    borderless_fullscreen_apply_armed: Cell<bool>,
     pub swap_ab: bool,
     pub swap_xy: bool,
     /// Mirrors `AppSettings::controller_layout_user_set`. Goes ON the moment
@@ -569,10 +571,11 @@ impl OptionsScene {
             tileset_name,
             available_tilesets,
             gamma: settings.gamma,
-            shadows_enabled: settings.shadows_enabled,
+            shadow_quality: settings.shadow_quality,
             ssr_enabled: settings.ssr_enabled,
             hdr_enabled: settings.hdr_enabled,
             borderless_fullscreen: settings.borderless_fullscreen,
+            borderless_fullscreen_apply_armed: Cell::new(false),
             swap_ab: settings.swap_ab,
             swap_xy: settings.swap_xy,
             controller_layout_user_set: settings.controller_layout_user_set,
@@ -600,6 +603,11 @@ impl OptionsScene {
         self.tileset_name = self.available_tilesets[next].clone();
     }
 
+    fn toggle_borderless_fullscreen(&mut self) {
+        self.borderless_fullscreen = !self.borderless_fullscreen;
+        self.borderless_fullscreen_apply_armed.set(true);
+    }
+
     fn save_settings(&self) {
         let mut settings = crate::persistence::load_settings();
         settings.master_volume = self.master_volume;
@@ -610,7 +618,7 @@ impl OptionsScene {
         settings.tile_preset = self.tile_preset;
         settings.tileset_name = self.tileset_name.clone();
         settings.gamma = self.gamma;
-        settings.shadows_enabled = self.shadows_enabled;
+        settings.shadow_quality = self.shadow_quality;
         settings.ssr_enabled = self.ssr_enabled;
         settings.hdr_enabled = self.hdr_enabled;
         settings.borderless_fullscreen = self.borderless_fullscreen;
@@ -630,6 +638,10 @@ impl OptionsScene {
         let changed = self.focus_changed;
         self.focus_changed = false;
         changed
+    }
+
+    pub fn take_borderless_fullscreen_apply_armed(&self) -> bool {
+        self.borderless_fullscreen_apply_armed.replace(false)
     }
 
     pub fn take_confirm_requested(&mut self) -> bool {
@@ -795,8 +807,8 @@ impl OptionsScene {
             Row::Effects => self.effects_quality = self.effects_quality.next(),
             Row::Tile => self.tile_preset = self.tile_preset.next(),
             Row::Tileset => self.cycle_tileset(1),
-            Row::BorderlessFullscreen => self.borderless_fullscreen = !self.borderless_fullscreen,
-            Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
+            Row::BorderlessFullscreen => self.toggle_borderless_fullscreen(),
+            Row::Shadows => self.shadow_quality = self.shadow_quality.next(),
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => {
@@ -833,8 +845,8 @@ impl OptionsScene {
             Row::Effects => self.effects_quality = self.effects_quality.prev(),
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
             Row::Tileset => self.cycle_tileset(-1),
-            Row::BorderlessFullscreen => self.borderless_fullscreen = !self.borderless_fullscreen,
-            Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
+            Row::BorderlessFullscreen => self.toggle_borderless_fullscreen(),
+            Row::Shadows => self.shadow_quality = self.shadow_quality.prev(),
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => {
@@ -893,11 +905,11 @@ impl OptionsScene {
                 self.save_settings();
             }
             Row::BorderlessFullscreen => {
-                self.borderless_fullscreen = !self.borderless_fullscreen;
+                self.toggle_borderless_fullscreen();
                 self.save_settings();
             }
             Row::Shadows => {
-                self.shadows_enabled = !self.shadows_enabled;
+                self.shadow_quality = self.shadow_quality.next();
                 self.save_settings();
             }
             Row::Ssr => {

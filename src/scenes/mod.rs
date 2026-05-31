@@ -509,8 +509,36 @@ pub fn active_scene_key(scene: &Scene) -> Option<&'static str> {
         Scene::CascadeLab(_) => Some("gameplay"),
         Scene::Tixels(_) => Some("tixels"),
         Scene::GameOver(_) => Some("gameplay"),
+        Scene::TileSelect(_) => Some("tile_select"),
         _ => None,
     }
+}
+
+/// Scene directly under `top` on the overlay stack (the suspended host when `top` is an overlay).
+pub fn overlay_renderer_parent<'a>(base: &'a Scene, overlay_stack: &'a [Scene]) -> Option<&'a Scene> {
+    if overlay_stack.is_empty() {
+        None
+    } else if overlay_stack.len() >= 2 {
+        Some(&overlay_stack[overlay_stack.len() - 2])
+    } else {
+        Some(base)
+    }
+}
+
+/// Renderer scene key for the frame being drawn. Item inspect overlays
+/// ([`ShowcasePresenter::ShopInspect`], [`ShowcasePresenter::CollectionInspect`]) inherit
+/// tonemap, punctual layout, and catalog balance from the suspended parent scene.
+pub fn active_scene_key_for_renderer(top: &Scene, parent: Option<&Scene>) -> Option<&'static str> {
+    if let Scene::Showcase(s) = top {
+        if matches!(
+            s.presenter,
+            ShowcasePresenter::ShopInspect(_) | ShowcasePresenter::CollectionInspect(_)
+        ) && let Some(key) = parent.and_then(active_scene_key)
+        {
+            return Some(key);
+        }
+    }
+    active_scene_key(top)
 }
 
 /// Return from profile picker to the Archive (collection) without a `profile_select` ↔ `collection` cycle.

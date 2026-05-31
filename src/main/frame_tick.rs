@@ -1168,10 +1168,12 @@ impl App {
             self.gfx.tile_preset = opts.tile_preset;
             self.gfx.tileset_name = opts.tileset_name.clone();
             self.gfx.gamma = opts.gamma;
-            self.gfx.shadows_enabled = opts.shadows_enabled;
+            self.gfx.shadow_quality = opts.shadow_quality;
             self.gfx.ssr_enabled = opts.ssr_enabled;
             self.gfx.hdr_enabled = opts.hdr_enabled;
-            if opts.borderless_fullscreen != shell.desktop_fullscreen_on() {
+            if opts.take_borderless_fullscreen_apply_armed()
+                && opts.borderless_fullscreen != shell.desktop_fullscreen_on()
+            {
                 let _ = shell.set_desktop_fullscreen(opts.borderless_fullscreen);
             }
             self.run

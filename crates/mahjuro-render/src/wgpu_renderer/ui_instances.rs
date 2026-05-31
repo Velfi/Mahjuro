@@ -25,7 +25,7 @@ pub struct RenderSettings {
     pub draw_settle_speed: f32,
     pub sort_settle_speed: f32,
     pub gamma: f32,
-    pub shadows_enabled: bool,
+    pub shadow_quality: mahjuro_gfx_types::ShadowQuality,
     pub ssr_enabled: bool,
     /// Master Options-toggle gate for the VHS overlay. The per-effect
     /// amounts (chromatic / scanline / grain / vignette) live on the

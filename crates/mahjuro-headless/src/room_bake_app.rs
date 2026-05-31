@@ -90,7 +90,7 @@ impl RoomBakeApp {
                 tile_material: settings.tile_material,
                 tileset_name: settings.tileset_name.clone(),
                 gamma: settings.gamma,
-                shadows_enabled: settings.shadows_enabled,
+                shadow_quality: settings.shadow_quality,
                 ssr_enabled: settings.ssr_enabled,
                 hdr_enabled: false,
                 vhs_enabled: false,

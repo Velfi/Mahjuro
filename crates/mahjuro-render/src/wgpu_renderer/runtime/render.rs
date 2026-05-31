@@ -1,4 +1,5 @@
 use super::*;
+use crate::room_gi_bake::room_gi_room_index;
 
 /// HDR scene buffer clear — uniform void behind the table / props.
 #[inline]
@@ -155,10 +156,11 @@ impl WgpuRenderer {
             draw_settle_speed,
             sort_settle_speed,
             gamma,
-            shadows_enabled,
+            shadow_quality,
             ssr_enabled,
             vhs_enabled,
         } = settings;
+        self.shadow_quality = shadow_quality;
         let flatten_time_text_fx = matches!(
             effects_quality,
             mahjuro_gfx_types::EffectsQuality::Off | mahjuro_gfx_types::EffectsQuality::Low
@@ -245,6 +247,7 @@ impl WgpuRenderer {
         // `tile_glow_pipeline` immediately after the 3D relic boxes so the
         // warm light blooms out around the box silhouette.
         let mut relic_glows: Vec<GpuInstance> = Vec::new();
+        let mut glyph_popup_glows: Vec<GpuInstance> = Vec::new();
         let mut relic_debuff_markers: Vec<GpuInstance> = Vec::new();
 
         // ── Person-at-the-table camera ──────────────────────────────────
@@ -549,6 +552,7 @@ impl WgpuRenderer {
         // `PoolSlice` is `(offset, byte_len)` into that single
         // persistent buffer. See `frame_pool.rs`.
         let mut quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
+        let mut depth_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
         let mut overlay_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
             Vec::new();
         let mut gradient_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
@@ -673,6 +677,22 @@ impl WgpuRenderer {
                     let buf_idx = quad_buffers.len();
                     quad_buffers.push(slice);
                     ops.push(RenderOp::QuadBatch {
+                        buf_idx,
+                        count: batch.len() as u32,
+                    });
+                }
+                DrawCmd::DepthQuad(_) => {
+                    let mut batch: Vec<GpuInstance> = Vec::new();
+                    while let Some(DrawCmd::DepthQuad(inst)) = frame.cmds.get(i) {
+                        batch.push(*inst);
+                        i += 1;
+                    }
+                    let slice = self
+                        .frame_buffer_pool
+                        .alloc(&self.device, &self.queue, &batch);
+                    let buf_idx = depth_quad_buffers.len();
+                    depth_quad_buffers.push(slice);
+                    ops.push(RenderOp::DepthQuadBatch {
                         buf_idx,
                         count: batch.len() as u32,
                     });
@@ -976,31 +996,43 @@ impl WgpuRenderer {
 
         // Wood tablets migrated to Object3dKind::WoodTablet.
 
-        let shadow_frame = self.setup_shadow_frame(&camera, shadows_enabled, frame);
-        let light_view_proj_arr = shadow_frame.light_view_proj_arr;
-        let punctual_frame =
-            self.prepare_punctual_shadow_frame(frame, &camera, shadows_enabled);
-        let punctual_active = !punctual_frame.lights.is_empty();
-        if punctual_active {
-            const PUNCTUAL_SHADOW_DEPTH_BIAS: f32 = 0.005;
-            self.upload_punctual_shadow_globals(
-                shadows_enabled,
-                PUNCTUAL_SHADOW_DEPTH_BIAS,
-                &punctual_frame.lights,
-            );
+        self.upload_active_room_baked_shadow_globals(frame);
+        if self.recreate_shadow_depth_arrays_if_needed(shadow_quality) {
+            self.cached_shadow_light_view_proj = [0.0; 16];
         }
-        let shadow_just_enabled = shadows_enabled && !self.prev_frame_shadows_enabled;
-        self.prev_frame_shadows_enabled = shadows_enabled;
+        let projected_frame =
+            self.prepare_projected_shadow_frame(frame, &camera, shadow_quality);
+        let active_room_env = super::shadow_setup::ActiveRoomEnv::from_frame(frame).or_else(|| {
+            self.active_scene_key
+                .and_then(super::shadow_setup::ActiveRoomEnv::from_scene_key)
+        });
+        self.warn_if_spot_lights_present(frame);
+        let light_view_proj_arr = projected_frame.first_light_view_proj;
+        let contact_ao_active = self.active_room_baked_shadow.is_some();
+        let contact_ao_view_proj = self
+            .active_room_baked_shadow
+            .and_then(|room| {
+                self.room_baked_shadow_gpu[room_gi_room_index(room)]
+                    .as_ref()
+                    .map(|gpu| gpu.baked_light_view_proj)
+            })
+            .unwrap_or([0.0; 16]);
+        let shadow_just_enabled =
+            shadow_quality.active() && !self.prev_shadow_quality.active();
+        let shadow_quality_changed = shadow_quality != self.prev_shadow_quality;
+        self.prev_shadow_quality = shadow_quality;
         let shadow_light_changed = self.cached_shadow_light_view_proj != light_view_proj_arr;
         self.cached_shadow_light_view_proj = light_view_proj_arr;
         let mut shadow_uniforms_changed = shadow_just_enabled
+            || shadow_quality_changed
             || shadow_light_changed
-            || punctual_frame.changed;
-        let mut object3d_shadow =
-            shadows_enabled.then_some(super::shadow_setup::Object3dShadowCtx {
+            || projected_frame.changed;
+        let mut object3d_shadow = shadow_quality.active().then_some(
+            super::shadow_setup::Object3dShadowCtx {
                 light_view_proj: light_view_proj_arr,
                 changed: &mut shadow_uniforms_changed,
-            });
+            },
+        );
 
         self.last_gameplay_cash_in_button_visible = frame.gameplay_cash_in_button_visible;
 
@@ -1017,6 +1049,7 @@ impl WgpuRenderer {
             &mut object3d_shadow_draw_list,
             &mut ops,
             &mut relic_glows,
+            &mut glyph_popup_glows,
             &mut relic_debuff_markers,
             object3d_shadow.as_mut(),
         );
@@ -1042,6 +1075,18 @@ impl WgpuRenderer {
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("relic-glow-instances"),
                         contents: bytemuck::cast_slice(&relic_glows),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            )
+        };
+        let glyph_popup_glow_buffer = if glyph_popup_glows.is_empty() {
+            None
+        } else {
+            Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("glyph-popup-glow-instances"),
+                        contents: bytemuck::cast_slice(&glyph_popup_glows),
                         usage: wgpu::BufferUsages::VERTEX,
                     }),
             )
@@ -1084,18 +1129,19 @@ impl WgpuRenderer {
             &mut shadow_uniforms_changed,
         );
 
-        self.upload_active_room_baked_shadow_globals(frame);
-        let active_env = super::shadow_setup::active_room_env(frame);
-        let baked_loaded = active_env.and_then(|env| {
-            super::shadow_setup::room_baked_shadow_loaded(&self.room_baked_shadow_gpu, env)
-        });
-        let room_uses_baked_shadow =
-            super::shadow_setup::room_env_uses_offline_baked_shadow(active_env, baked_loaded)
-                && self.room_shadow_capture_pending.is_none();
+        self.write_active_room_baked_shadow_globals(shadow_quality, &projected_frame.build);
+        if shadow_quality.active() {
+            self.upload_projected_shadow_globals(
+                shadow_quality,
+                &projected_frame.build,
+                contact_ao_active,
+                contact_ao_view_proj,
+            );
+        }
+        let room_shadow_active = shadow_quality.active();
         if ops_flags.shop_env {
-            let shop_room_shadow = (shadows_enabled
-                && frame.shop_inspect_shadow_target.is_none()
-                && !room_uses_baked_shadow)
+            let shop_room_shadow = (room_shadow_active
+                && frame.shop_inspect_shadow_target.is_none())
                 .then_some((light_view_proj_arr, &mut shadow_uniforms_changed));
             self.write_shop_environment_uniforms(frame, &camera, false, shop_room_shadow);
             if frame.scene_lighting.embedded_gltf_punctual {
@@ -1107,7 +1153,7 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                (shadows_enabled && !room_uses_baked_shadow)
+                room_shadow_active
                     .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
@@ -1116,7 +1162,7 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                (shadows_enabled && !room_uses_baked_shadow)
+                room_shadow_active
                     .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
@@ -1128,7 +1174,7 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                (shadows_enabled && !room_uses_baked_shadow)
+                room_shadow_active
                     .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
@@ -1137,7 +1183,7 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                (shadows_enabled && !room_uses_baked_shadow)
+                room_shadow_active
                     .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
             if frame.scene_lighting.embedded_gltf_punctual {
@@ -1149,20 +1195,10 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                (shadows_enabled && !room_uses_baked_shadow && !punctual_active)
+                room_shadow_active
                     .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
-        self.write_active_room_baked_shadow_globals(
-            &self.queue,
-            light_view_proj_arr,
-            shadows_enabled,
-            if punctual_active {
-                &punctual_frame.lights
-            } else {
-                &[]
-            },
-        );
 
         let mut encoder = self
             .device
@@ -1174,23 +1210,28 @@ impl WgpuRenderer {
             &mut encoder,
             frame,
             camera.h,
-            shadows_enabled,
+            shadow_quality,
             shadow_uniforms_changed,
-            &punctual_frame.lights,
+            &projected_frame.casters(),
             &object3d_shadow_draw_list,
             &showcase_tile_batches,
             &tile_3d_rects,
             &tile_pick_models,
         );
-
+        let shadow_probe_staging = self.schedule_shadow_probe_copy(
+            &mut encoder,
+            &projected_frame.build,
+            frame.scene_lighting.punctual.len(),
+            active_room_env,
+        );
         let room_shadow_capture_staging = self.room_shadow_capture_pending.map(|room| {
-            use crate::wgpu_renderer::runtime::shadow_setup::SHADOW_MAP_SIZE;
             const BIAS: f32 = 0.005;
+            let size = self.point_shadow_array.size;
             self.encode_room_shadow_capture_copy(
                 &mut encoder,
                 room,
-                SHADOW_MAP_SIZE as u32,
-                SHADOW_MAP_SIZE as u32,
+                size,
+                size,
                 light_view_proj_arr,
                 BIAS,
             )
@@ -1205,6 +1246,7 @@ impl WgpuRenderer {
             frame_pool_buffer: self.frame_buffer_pool.buffer(),
             bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
+            depth_quad_buffers: &depth_quad_buffers,
             overlay_quad_buffers: &overlay_quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
             squircle_quad_buffers: &squircle_quad_buffers,
@@ -1220,6 +1262,8 @@ impl WgpuRenderer {
             tile_glow_buffer: tile_glow_buffer.as_ref(),
             relic_glows: &relic_glows,
             relic_glow_buffer: relic_glow_buffer.as_ref(),
+            glyph_popup_glows: &glyph_popup_glows,
+            glyph_popup_glow_buffer: glyph_popup_glow_buffer.as_ref(),
             relic_debuff_markers: &relic_debuff_markers,
             relic_debuff_buffer: relic_debuff_buffer.as_ref(),
             scene_hdr_attachment: true,
@@ -1233,6 +1277,7 @@ impl WgpuRenderer {
             frame_pool_buffer: self.frame_buffer_pool.buffer(),
             bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
+            depth_quad_buffers: &depth_quad_buffers,
             overlay_quad_buffers: &overlay_quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
             squircle_quad_buffers: &squircle_quad_buffers,
@@ -1248,6 +1293,8 @@ impl WgpuRenderer {
             tile_glow_buffer: tile_glow_buffer.as_ref(),
             relic_glows: &relic_glows,
             relic_glow_buffer: relic_glow_buffer.as_ref(),
+            glyph_popup_glows: &glyph_popup_glows,
+            glyph_popup_glow_buffer: glyph_popup_glow_buffer.as_ref(),
             relic_debuff_markers: &relic_debuff_markers,
             relic_debuff_buffer: relic_debuff_buffer.as_ref(),
             scene_hdr_attachment: overlay_hdr,
@@ -1339,7 +1386,7 @@ impl WgpuRenderer {
                         $pass.set_pipeline(&self.lit_mesh_pipeline);
                         $pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
                         $pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                        $pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                        $pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
                         $pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
                         $pass.set_index_buffer(
                             self.relic_box_mesh.index_buffer.slice(..),
@@ -2468,7 +2515,9 @@ impl WgpuRenderer {
                 Err(e) => log::error!("room shadow capture readback failed: {e:?}"),
             }
         }
-
+        if let Some(staging) = shadow_probe_staging {
+            self.finalize_shadow_probe(staging);
+        }
         if let Some(sf) = surface_frame {
             sf.present();
         }

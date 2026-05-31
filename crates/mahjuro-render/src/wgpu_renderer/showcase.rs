@@ -121,6 +121,7 @@ pub(super) fn make_showcase_tile_gpu(
         shadow_bind_group,
         cached_shadow_caster: initial_shadow,
         tile_id: (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual),
+        casts_shadow: false,
     }
 }
 

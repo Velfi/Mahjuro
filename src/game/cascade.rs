@@ -96,7 +96,7 @@ fn default_popup_loiter_ms() -> u64 {
     320
 }
 fn default_popup_fly_ms() -> u64 {
-    460
+    920
 }
 fn default_popup_overshoot() -> f32 {
     0.22
@@ -145,7 +145,7 @@ impl Default for CascadeTuning {
             sort_settle_ms: 400,
             popup_pop_ms: 140,
             popup_loiter_ms: 320,
-            popup_fly_ms: 460,
+            popup_fly_ms: 920,
             popup_overshoot: 0.22,
         }
     }

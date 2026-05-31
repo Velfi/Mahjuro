@@ -120,114 +120,6 @@ struct SpotLights {
 };
 @group(3) @binding(0) var<uniform> spot_lights: SpotLights;
 
-struct PunctualShadowSlot {
-    light_view_proj: mat4x4<f32>,
-    atlas_rect: vec4<f32>,
-};
-
-struct ShadowGlobals {
-    light_view_proj: mat4x4<f32>,
-    params: vec4<f32>,
-    room_baked_light_view_proj: mat4x4<f32>,
-    punctual_params: vec4<f32>,
-    punctual_lights: array<PunctualShadowSlot, 8>,
-};
-@group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
-@group(2) @binding(1) var shadow_map: texture_depth_2d;
-@group(2) @binding(2) var shadow_samp: sampler_comparison;
-@group(2) @binding(3) var baked_shadow_map: texture_2d<f32>;
-@group(2) @binding(4) var baked_shadow_ao: texture_2d<f32>;
-@group(2) @binding(5) var baked_shadow_ao_samp: sampler;
-
-fn sample_shadow_pcf(
-    lvp: mat4x4<f32>,
-    depth_tex: texture_depth_2d,
-    world_pos: vec3<f32>,
-    bias: f32,
-    texel: f32,
-) -> f32 {
-    let lp = lvp * vec4<f32>(world_pos, 1.0);
-    let proj = lp.xyz / lp.w;
-    let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || proj.z < 0.0 || proj.z > 1.0) {
-        return 1.0;
-    }
-    let depth_ref = proj.z - bias;
-    var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy = dy + 1) {
-        for (var dx = -1; dx <= 1; dx = dx + 1) {
-            let off = vec2<f32>(f32(dx), f32(dy)) * texel;
-            sum = sum + textureSampleCompare(depth_tex, shadow_samp, uv + off, depth_ref);
-        }
-    }
-    return sum / 9.0;
-}
-
-fn sample_shadow_pcf_baked(lvp: mat4x4<f32>, world_pos: vec3<f32>, bias: f32, texel: f32) -> f32 {
-    let lp = lvp * vec4<f32>(world_pos, 1.0);
-    let proj = lp.xyz / lp.w;
-    let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || proj.z < 0.0 || proj.z > 1.0) {
-        return 1.0;
-    }
-    let depth_ref = proj.z - bias;
-    let dims = textureDimensions(baked_shadow_map, 0);
-    let center = vec2<i32>(uv * vec2<f32>(f32(dims.x), f32(dims.y)));
-    let texel_px = vec2<i32>(1);
-    var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy = dy + 1) {
-        for (var dx = -1; dx <= 1; dx = dx + 1) {
-            let px = center + vec2<i32>(dx, dy) * texel_px;
-            let stored = textureLoad(baked_shadow_map, px, 0).r;
-            sum = sum + select(0.0, 1.0, depth_ref <= stored);
-        }
-    }
-    return sum / 9.0;
-}
-
-fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
-    if (shadow_globals.params.x < 0.5) {
-        return 1.0;
-    }
-    let bias = shadow_globals.params.y;
-    let texel = shadow_globals.params.z;
-    if (shadow_globals.params.w < 0.5) {
-        return sample_shadow_pcf(
-            shadow_globals.light_view_proj,
-            shadow_map,
-            world_pos,
-            bias,
-            texel,
-        );
-    }
-    let baked_vis = sample_shadow_pcf_baked(
-        shadow_globals.room_baked_light_view_proj,
-        world_pos,
-        bias,
-        texel,
-    );
-    let lp = shadow_globals.room_baked_light_view_proj * vec4<f32>(world_pos, 1.0);
-    let proj = lp.xyz / lp.w;
-    let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
-    var vis = baked_vis;
-    if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
-        let ao = textureSample(baked_shadow_ao, baked_shadow_ao_samp, uv).r;
-        vis = vis * ao;
-    }
-    // Archive (`params.w >= 2`): caster/receiver split — room shell samples offline
-    // contact only; catalog props use `lit_mesh` + the live map (inspect subject).
-    if (shadow_globals.params.w < 1.5) {
-        vis = vis * sample_shadow_pcf(
-            shadow_globals.light_view_proj,
-            shadow_map,
-            world_pos,
-            bias,
-            texel,
-        );
-    }
-    return vis;
-}
-
 fn fresnel_schlick(cos_theta: f32, F0: vec3<f32>) -> vec3<f32> {
     return F0 + (vec3<f32>(1.0) - F0) * pow(max(1.0 - cos_theta, 0.0), 5.0);
 }
@@ -455,13 +347,11 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let kS = F;
         let kD = dielectric_kD(kS, metallic);
 
-        let has_room_occluders = select(0.0, 1.0, room_occluders.count.x > 0u);
-        let use_punctual_atlas = shadow_globals.punctual_params.z > 0.5;
-        let analytic_vis = mix(0.14, 1.0, room_punctual_occlusion(light_pos, in.world_pos, in.clip_pos.xy));
+        let projected_shadows_on = shadow_globals.params.x > 0.5;
         let punc_vis = select(
-            mix(1.0, analytic_vis, has_room_occluders),
+            1.0,
             punctual_shadow_vis(i, in.world_pos),
-            use_punctual_atlas,
+            projected_shadows_on,
         );
         let diffuse = kD * albedo / PI * radiance * NdotL * punc_vis;
 
@@ -505,8 +395,12 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let kS = F;
         let kD = dielectric_kD(kS, metallic);
 
-        let has_room_occluders = select(0.0, 1.0, room_occluders.count.x > 0u);
-        let punc_vis = mix(1.0, mix(0.14, 1.0, room_punctual_occlusion(s.pos.xyz, in.world_pos, in.clip_pos.xy)), has_room_occluders);
+        let projected_shadows_on = shadow_globals.params.x > 0.5;
+        let punc_vis = select(
+            1.0,
+            1.0,
+            projected_shadows_on,
+        );
         let diffuse = kD * albedo / PI * radiance * NdotL * punc_vis;
 
         let D = distribution_ggx(NdotH, roughness);
@@ -547,20 +441,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     // glTF light energy). Keep the runtime hemisphere fill in scene-linear units
     // so the Scene Look "Room ambient" slider remains visible.
     var lit_hdr = Lo * cam.tile_seed + ambient + metal_hemi;
-    // Shared directional shadow map (props + room self-shadow in key-light space).
-    // Archive signs + chrome/pedestal shells skip directional shadows (tags 2 / 3 in `room_env_gltf`).
-    // Gameplay punctual atlas replaces the single key-light map, but offline `.msh`
-    // contact still applies when `params.w >= 1.5` (baked-only mode).
-    let punctual_atlas = shadow_globals.punctual_params.z > 0.5;
-    let baked_contact_only = shadow_globals.params.w >= 1.5;
-    let shadow_vis = select(
-        sample_shadow_visibility(in.world_pos),
-        1.0,
-        (punctual_atlas && !baked_contact_only)
-            || is_archive_decal
-            || is_archive_no_dir_shadow,
-    );
-    lit_hdr = lit_hdr * shadow_vis;
+    // Per-light projected shadows are applied in the punctual / spot loops above.
     let hdr = lit_hdr + emissive;
     return ShopShaded(hdr, emissive, out_alpha);
 }

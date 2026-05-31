@@ -20,12 +20,14 @@ macro_rules! scene_pbr_with_hallway_warp {
             "\n",
             wgsl_file!($room_shader),
             "\n",
-            wgsl_file!("punctual_shadow_atlas.wgsl"),
+            wgsl_file!("projected_shadow.wgsl"),
         )
     };
 }
 
 pub const QUAD: &str = wgsl_file!("quad.wgsl");
+pub const DEPTH_QUAD: &str = wgsl_file!("depth_quad.wgsl");
+pub const DEPTH_QUAD_DEBUG: &str = wgsl_file!("depth_quad_debug.wgsl");
 pub const TEXT_QUAD: &str = wgsl_file!("text_quad.wgsl");
 pub const GRADIENT_QUAD: &str = wgsl_file!("gradient_quad.wgsl");
 pub const SQUIRCLE_QUAD: &str = wgsl_file!("squircle_quad.wgsl");
@@ -95,6 +97,6 @@ pub const LIT_MESH: &str = concat!(
     "\n",
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../shaders/punctual_shadow_atlas.wgsl"
+        "/../../shaders/projected_shadow.wgsl"
     )),
 );

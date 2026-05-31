@@ -19,10 +19,12 @@ const SPAWN_FIELD_COLS: usize = 26;
 const SPAWN_FIELD_ROWS: usize = 18;
 
 const RAIN_SHOW_HIT_ROW: usize = RAIN_DEBUG_SLIDER_COUNT;
-const RAIN_SAVE_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 1;
-const RAIN_RESET_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 2;
-const RAIN_CLOSE_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 3;
-const RAIN_ROW_COUNT: usize = RAIN_DEBUG_SLIDER_COUNT + 4;
+const RAIN_SHOW_DEPTH_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 1;
+const RAIN_HIDE_UI_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 2;
+const RAIN_SAVE_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 3;
+const RAIN_RESET_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 4;
+const RAIN_CLOSE_ROW: usize = RAIN_DEBUG_SLIDER_COUNT + 5;
+const RAIN_ROW_COUNT: usize = RAIN_DEBUG_SLIDER_COUNT + 6;
 const VISIBLE_ROWS: usize = 22;
 
 fn rain_view_forward(cam: &CameraParams) -> Vec3 {
@@ -766,6 +768,8 @@ pub struct RainDebugOverlay {
     cursor: usize,
     pub tuning: RainTuning,
     pub show_rain_hit_colliders: bool,
+    pub show_rain_depth: bool,
+    pub hide_all_ui: bool,
     scroll_row: usize,
     editing: bool,
     edit_buffer: String,
@@ -786,6 +790,8 @@ impl RainDebugOverlay {
             cursor: 0,
             tuning,
             show_rain_hit_colliders: false,
+            show_rain_depth: false,
+            hide_all_ui: false,
             scroll_row: 0,
             editing: false,
             edit_buffer: String::new(),
@@ -963,6 +969,13 @@ impl RainDebugOverlay {
     }
 
     pub fn feed_key_event(&mut self, scancode: Option<Scancode>, ctrl: bool) -> bool {
+        if self.hide_all_ui {
+            if scancode.is_some() {
+                self.hide_all_ui = false;
+                return true;
+            }
+            return false;
+        }
         let Some(code) = scancode else {
             return false;
         };
@@ -1016,6 +1029,11 @@ impl RainDebugOverlay {
         window_w: f32,
         window_h: f32,
     ) -> RainDebugResult {
+        if self.hide_all_ui {
+            self.dragging_slider = None;
+            self.pointer.clear_hover();
+            return RainDebugResult::Stay;
+        }
         self.ensure_scroll();
         let layout = RainDebugLayout::compute(window_w, window_h, self.scroll_row);
         self.pointer.sync_held(mouse);
@@ -1076,6 +1094,14 @@ impl RainDebugOverlay {
                                 self.show_rain_hit_colliders = !self.show_rain_hit_colliders;
                                 RainDebugResult::Stay
                             }
+                            RAIN_SHOW_DEPTH_ROW => {
+                                self.show_rain_depth = !self.show_rain_depth;
+                                RainDebugResult::Stay
+                            }
+                            RAIN_HIDE_UI_ROW => {
+                                self.hide_all_ui = true;
+                                RainDebugResult::Stay
+                            }
                             RAIN_SAVE_ROW => RainDebugResult::Save,
                             RAIN_RESET_ROW => RainDebugResult::Reset,
                             _ => RainDebugResult::Close,
@@ -1119,6 +1145,10 @@ impl RainDebugOverlay {
                         self.commit_edit();
                     } else if self.cursor == RAIN_SHOW_HIT_ROW {
                         self.show_rain_hit_colliders = !self.show_rain_hit_colliders;
+                    } else if self.cursor == RAIN_SHOW_DEPTH_ROW {
+                        self.show_rain_depth = !self.show_rain_depth;
+                    } else if self.cursor == RAIN_HIDE_UI_ROW {
+                        self.hide_all_ui = true;
                     } else if self.cursor == RAIN_SAVE_ROW {
                         return RainDebugResult::Save;
                     } else if self.cursor == RAIN_RESET_ROW {
@@ -1167,7 +1197,7 @@ impl RainDebugOverlay {
         let pad = (8.0 * layout.scale).max(5.0);
         let title_h = (22.0 * layout.scale).max(14.0);
         let hint_h = (13.0 * layout.scale).max(9.0);
-        let vis_h = VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + layout.row_h * 4.0;
+        let vis_h = VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + layout.row_h * 6.0;
         let panel_h = pad + title_h + pad + vis_h + pad + hint_h * 2.0 + pad * 2.0;
         let row_font = typography::tier_at_most(layout.row_h * 0.48, window_h);
 
@@ -1327,6 +1357,24 @@ impl RainDebugOverlay {
                     "Show rain_hit colliders [ON]"
                 } else {
                     "Show rain_hit colliders [OFF]"
+                },
+                ButtonVariant::Default,
+            ),
+            (
+                RAIN_SHOW_DEPTH_ROW,
+                if self.show_rain_depth {
+                    "Visualize rain depth [ON]"
+                } else {
+                    "Visualize rain depth [OFF]"
+                },
+                ButtonVariant::Default,
+            ),
+            (
+                RAIN_HIDE_UI_ROW,
+                if self.hide_all_ui {
+                    "Hide all UI [ON] (press any key)"
+                } else {
+                    "Hide all UI [OFF]"
                 },
                 ButtonVariant::Default,
             ),

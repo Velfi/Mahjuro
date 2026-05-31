@@ -765,16 +765,15 @@ pub fn hallway_glb_has_embedded_lights() -> bool {
     })
 }
 
-/// glTF punctual points merged into [`crate::draw_cmd::SceneLighting::punctual`] (hallway room).
-pub fn hallway_embedded_point_lights_runtime(
+pub fn hallway_embedded_point_lights_runtime_tagged(
     w: f32,
     h: f32,
     env_h: f32,
     tune: &RoomEnvLightingTune,
-) -> Vec<PointLight> {
+) -> Vec<crate::room_gltf_punctual::EmbeddedPointLightRuntime> {
     with_hallway_glb_cpu(|opt| {
         opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_point_lights_runtime(
+            crate::room_gltf_punctual::embedded_point_lights_runtime_tagged(
                 cpu,
                 w,
                 h,
@@ -786,6 +785,19 @@ pub fn hallway_embedded_point_lights_runtime(
         })
         .unwrap_or_default()
     })
+}
+
+/// glTF punctual points merged into [`crate::draw_cmd::SceneLighting::punctual`] (hallway room).
+pub fn hallway_embedded_point_lights_runtime(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    tune: &RoomEnvLightingTune,
+) -> Vec<PointLight> {
+    hallway_embedded_point_lights_runtime_tagged(w, h, env_h, tune)
+        .into_iter()
+        .map(|t| t.light)
+        .collect()
 }
 
 /// glTF spot lights for [`UiFrame::spot_lights`].
