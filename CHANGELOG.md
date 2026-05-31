@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-24 — 2026-05-31
+
+### Added
+- Wall Ledger shows the full round wall grouped by suit — open it from the tile count in the shop or during a run. Undrawn tiles stay vivid; tiles already drawn from the wall appear faded.
+
 ## 0.5.0-22 — 2026-05-28
 
 - maintenance, development, and bugfixes.
