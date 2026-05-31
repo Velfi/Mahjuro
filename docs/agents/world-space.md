@@ -2,6 +2,8 @@
 
 **World space** is the shared right-handed **Z-up** 3D frame for gameplay and shop. The **table** surface and props lie in the **XY** plane near **`z = 0`**. Meshes use packed [`WorldSurfaceAnchor`](../../src/render/draw_cmd.rs) values: `[pixel_x, pixel_y, lift]` where `lift` is height in world **+Z**. The renderer maps them with [`pixel_to_world`](../../src/render/world_space.rs). Lit-mesh model matrices use [`translate_rot_scale`](../../src/render/table_transform.rs) with world-space centers and rotations from the same helpers (no separate "Z-up wrapper" layer). Gameplay bottom-action pick proxies, yaku tablets, and structure showcase placement come from `gameplay.glb` empties via [`glb_anchors.rs`](../../src/scenes/gameplay/glb_anchors.rs) (projected each frame with the gameplay camera).
 
+**Cap-mesh local space** (relic pins, talisman silhouettes, pack cards) is separate from world placement — see [cap-mesh-coordinates.md](cap-mesh-coordinates.md).
+
 ## Screen vs world placement
 
 Saved props and catalog items use [`Placement`](../../src/ui/placement.rs) in **screen pixel space** (`w * 0.80` = right side of the window). [`pixel_to_world`](../../src/render/world_space.rs) applies sign conventions when projecting into the Z-up frame.

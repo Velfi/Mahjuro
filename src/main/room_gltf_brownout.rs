@@ -90,7 +90,7 @@ impl RoomGltfBrownout {
     pub fn scene_eligible(scene: &Scene) -> bool {
         matches!(
             scene,
-            Scene::Shop(_) | Scene::PickChamber(_) | Scene::Staircase(_) | Scene::Collection(_)
+            Scene::Shop(_) | Scene::Hallway(_) | Scene::Stairway(_) | Scene::Archive(_)
         )
     }
 

@@ -126,7 +126,6 @@ use crate::render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
 #[cfg(feature = "game")]
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 #[cfg(feature = "game")]
-use crate::scenes::game_over::GameOverScene;
 #[cfg(feature = "game")]
 use crate::scenes::gameplay::GameplayScene;
 #[cfg(feature = "game")]

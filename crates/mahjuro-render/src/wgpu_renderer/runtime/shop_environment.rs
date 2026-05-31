@@ -1,5 +1,6 @@
 use super::camera::CameraFrame;
 use super::*;
+use crate::scene_keys;
 
 struct GameplayScoreRollerDrive {
     drives: [f64; 2],
@@ -87,33 +88,19 @@ impl WgpuRenderer {
     ) -> f32 {
         use crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
         match env {
-            ActiveRoomEnv::Shop => self.env_tune_for("shop").height_scale,
-            ActiveRoomEnv::Hallway => {
-                let key = if self.active_scene_key == Some("pick_chamber") {
-                    "pick_chamber"
-                } else {
-                    "hallway"
-                };
-                self.env_tune_for(key).height_scale
-            }
-            ActiveRoomEnv::Staircase => self.env_tune_for("staircase").height_scale,
-            ActiveRoomEnv::Archive => {
-                let key = if self.active_scene_key == Some("collection") {
-                    "collection"
-                } else {
-                    "archive"
-                };
-                self.env_tune_for(key).height_scale
-            }
+            ActiveRoomEnv::Shop => self.env_tune_for(scene_keys::SHOP).height_scale,
+            ActiveRoomEnv::Hallway => self.env_tune_for(scene_keys::HALLWAY).height_scale,
+            ActiveRoomEnv::Stairway => self.env_tune_for(scene_keys::STAIRWAY).height_scale,
+            ActiveRoomEnv::Archive => self.env_tune_for(scene_keys::ARCHIVE).height_scale,
             ActiveRoomEnv::MainMenu => {
-                let h = self.env_tune_for("main_menu_exterior").height_scale;
+                let h = self.env_tune_for(scene_keys::MAIN_MENU).height_scale;
                 crate::main_menu_glb::main_menu_env_height_scale(h)
             }
             ActiveRoomEnv::Gameplay => {
                 let key = if self.active_scene_key == Some("tutorial") {
                     "tutorial"
                 } else {
-                    "gameplay"
+                    scene_keys::GAMEPLAY
                 };
                 self.env_tune_for(key).height_scale
             }
@@ -142,7 +129,7 @@ impl WgpuRenderer {
                 })
             })
             .unwrap_or_else(|| glam::Mat4::from_scale(glam::Vec3::splat(s))),
-            ActiveRoomEnv::Staircase => crate::staircase_glb::with_staircase_glb_cpu(|opt| {
+            ActiveRoomEnv::Stairway => crate::staircase_glb::with_staircase_glb_cpu(|opt| {
                 opt.map(|cpu| {
                     crate::room_glb::room_env_model_matrix_from_cpu(camera_h, height, cpu)
                 })
@@ -164,7 +151,7 @@ impl WgpuRenderer {
                 let env_key = if self.active_scene_key == Some("tutorial") {
                     "tutorial"
                 } else {
-                    "gameplay"
+                    scene_keys::GAMEPLAY
                 };
                 let height = self.env_tune_for(env_key).height_scale;
                 let s = crate::room_glb::room_env_world_scale(camera_h, height);
@@ -520,7 +507,7 @@ impl WgpuRenderer {
             0.0
         };
         let (exposure, ambient_x) = if embedded_gltf_punctual {
-            let gameplay_table = matches!(env_scene_key, "gameplay" | "tutorial");
+            let gameplay_table = matches!(env_scene_key, scene_keys::GAMEPLAY | "tutorial");
             // `gameplay.glb` room + tiles share `ROOM_GLB_LINEAR_EXPOSURE_BASE` × this mul via `tile_hdr_tonemap`.
             let mut e = env_tune.linear_exposure
                 * crate::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
@@ -655,7 +642,7 @@ impl WgpuRenderer {
         let Some(ref gpu) = self.shop_environment else {
             return;
         };
-        let height = self.env_tune_for("shop").height_scale;
+        let height = self.env_tune_for(scene_keys::SHOP).height_scale;
         let s = crate::room_glb::room_env_world_scale(camera.h, height);
         let model = crate::room_glb::with_shop_glb_cpu(|opt| {
             opt.map(|cpu| {
@@ -667,7 +654,7 @@ impl WgpuRenderer {
         self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
             frame,
             camera,
-            env_scene_key: "shop",
+            env_scene_key: scene_keys::SHOP,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: false,
             staircase_env: false,
@@ -732,7 +719,7 @@ impl WgpuRenderer {
         let Some(ref gpu) = self.hallway_environment else {
             return;
         };
-        let height = self.env_tune_for("pick_chamber").height_scale;
+        let height = self.env_tune_for(scene_keys::HALLWAY).height_scale;
         let s = crate::room_glb::room_env_world_scale(camera.h, height);
         let model = crate::hallway_glb::with_hallway_glb_cpu(|opt| {
             opt.map(|cpu| {
@@ -748,7 +735,7 @@ impl WgpuRenderer {
         self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
             frame,
             camera,
-            env_scene_key: "pick_chamber",
+            env_scene_key: scene_keys::HALLWAY,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: true,
             staircase_env: false,
@@ -776,7 +763,7 @@ impl WgpuRenderer {
         let Some(ref gpu) = self.staircase_environment else {
             return;
         };
-        let height = self.env_tune_for("staircase").height_scale;
+        let height = self.env_tune_for(scene_keys::STAIRWAY).height_scale;
         let s = crate::room_glb::room_env_world_scale(camera.h, height);
         let model = crate::staircase_glb::with_staircase_glb_cpu(|opt| {
             opt.map(|cpu| {
@@ -792,7 +779,7 @@ impl WgpuRenderer {
         self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
             frame,
             camera,
-            env_scene_key: "staircase",
+            env_scene_key: scene_keys::STAIRWAY,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: false,
             staircase_env: true,
@@ -918,7 +905,7 @@ impl WgpuRenderer {
         let Some(ref gpu) = self.archive_environment else {
             return;
         };
-        let height = self.env_tune_for("collection").height_scale;
+        let height = self.env_tune_for(scene_keys::ARCHIVE).height_scale;
         let s = crate::room_glb::room_env_world_scale(camera.h, height);
         let model = crate::archive_glb::with_archive_glb_cpu(|opt| {
             opt.map(|cpu| {
@@ -934,7 +921,7 @@ impl WgpuRenderer {
         self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
             frame,
             camera,
-            env_scene_key: "collection",
+            env_scene_key: scene_keys::ARCHIVE,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: false,
             staircase_env: false,
@@ -978,7 +965,7 @@ impl WgpuRenderer {
         let Some(ref gpu) = self.main_menu_environment else {
             return;
         };
-        let height = self.env_tune_for("main_menu_exterior").height_scale;
+        let height = self.env_tune_for(scene_keys::MAIN_MENU).height_scale;
         let env_h =
             crate::main_menu_glb::main_menu_env_height_scale(height);
         let s = crate::room_glb::room_env_world_scale(camera.h, env_h);
@@ -992,7 +979,7 @@ impl WgpuRenderer {
         self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
             frame,
             camera,
-            env_scene_key: "main_menu_exterior",
+            env_scene_key: scene_keys::MAIN_MENU,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: false,
             staircase_env: false,
@@ -1011,7 +998,7 @@ impl WgpuRenderer {
         if self.shop_env_collision_meshes.is_empty() {
             return;
         }
-        let height = self.env_tune_for("shop").height_scale;
+        let height = self.env_tune_for(scene_keys::SHOP).height_scale;
         let model = crate::room_glb::with_shop_glb_cpu(|opt| {
             opt.map(|cpu| {
                 crate::room_glb::room_env_model_matrix_from_cpu(
@@ -1024,7 +1011,7 @@ impl WgpuRenderer {
         .unwrap_or_else(|| {
             let s = crate::room_glb::room_env_world_scale(
                 camera.h,
-                self.env_tune_for("shop").height_scale,
+                self.env_tune_for(scene_keys::SHOP).height_scale,
             );
             glam::Mat4::from_scale(glam::Vec3::splat(s))
         });
@@ -1039,7 +1026,7 @@ impl WgpuRenderer {
         if self.main_menu_env_collision_meshes.is_empty() {
             return;
         }
-        let height = self.env_tune_for("main_menu_exterior").height_scale;
+        let height = self.env_tune_for(scene_keys::MAIN_MENU).height_scale;
         let env_h =
             crate::main_menu_glb::main_menu_env_height_scale(height);
         let model = crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
@@ -1089,6 +1076,33 @@ impl WgpuRenderer {
         self.archive_env_skip_description_prim(pi, frame)
             || self.archive_env_skip_inspect_plaque_prim(pi, frame)
             || self.archive_env_skip_page_button_prim(pi, frame)
+    }
+
+    /// Depth pass: shell geometry only — skip UI chrome and frame-culled boards.
+    #[inline]
+    pub(super) fn archive_env_skip_punctual_shadow_prim(
+        &self,
+        pi: usize,
+        frame: &crate::draw_cmd::UiFrame,
+    ) -> bool {
+        self.archive_punctual_shadow_skip_prims.contains(&pi)
+            || self.archive_env_skip_archive_prim(pi, frame)
+    }
+
+    pub(super) fn draw_archive_environment_shadow(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        frame: &crate::draw_cmd::UiFrame,
+    ) -> u32 {
+        let Some(ref gpu) = self.archive_environment else {
+            return 0;
+        };
+        self.draw_gltf_room_env_shadow(
+            pass,
+            &self.archive_env_primitives,
+            gpu,
+            |pi| self.archive_env_skip_punctual_shadow_prim(pi, frame),
+        )
     }
 
     #[inline]

@@ -166,6 +166,7 @@ impl WgpuRenderer {
         mut shadow: Option<&mut super::shadow_setup::Object3dShadowCtx<'_>>,
     ) {
         self.reset_shop_inspect_shadow_slot();
+        self.talisman_slot_kind.fill(None);
         let cam_pos = camera.cam_pos;
         let look_target = camera.look_target;
         let view_proj_arr = camera.view_proj_arr;

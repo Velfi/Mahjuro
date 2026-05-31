@@ -1,6 +1,6 @@
 //! Main-menu rain: CPU world-space field only ([`crate::rain_field::RainField`]).
 
-pub const RAIN_TUNING_SCENE_KEY: &str = "main_menu_exterior";
+pub const RAIN_TUNING_SCENE_KEY: &str = crate::scene_keys::MAIN_MENU;
 
 /// CPU rain-field simulation (world drops + splashes on `rain_hit_*` shells).
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

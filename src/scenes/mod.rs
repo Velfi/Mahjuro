@@ -3,24 +3,24 @@
 
 pub mod archive_career;
 pub mod celebration_overlay;
-pub mod collection;
+pub mod archive;
 pub mod credits;
 pub mod debug_visibility;
 pub(crate) mod flowers_intro_copy;
-pub mod game_over;
-mod game_over_tableau;
+pub mod run_summary;
+mod defeat_tableau;
 mod run_summary_panel;
 pub mod gameplay;
 pub mod guide;
 pub mod journal_transition;
 pub mod lamp_moths;
-pub mod main_menu_exterior;
+pub mod main_menu;
 pub mod material_viewer;
 pub(crate) mod melds_intro_copy;
 pub mod object3d_inspect;
 pub mod options;
 pub mod pause_menu;
-pub mod pick_chamber;
+pub mod hallway;
 pub mod profile_select;
 pub mod cascade_lab;
 pub mod roller_lab;
@@ -30,7 +30,7 @@ pub mod shop;
 pub mod showcase;
 pub mod showcase_stage;
 pub mod splash;
-pub mod staircase;
+pub mod stairway;
 pub mod start_game_modal;
 pub mod animation_lab;
 pub mod button_aabb_lab;
@@ -41,29 +41,30 @@ pub mod transition_playground;
 pub mod tutorial_campaign;
 pub mod tutorial_summary;
 pub mod yaku_journal;
-pub use collection::CollectionScene;
+pub mod wall_ledger;
+pub use archive::ArchiveScene;
 pub use credits::CreditsScene;
 use enum_dispatch::enum_dispatch;
-pub use game_over::GameOverScene;
+pub use run_summary::{DefeatScene, RunSummaryScene, VictoryScene};
 pub use gameplay::GameplayScene;
 pub use guide::GuideScene;
-pub use main_menu_exterior::MainMenuExteriorScene;
+pub use main_menu::MainMenuScene;
 pub use material_viewer::MaterialViewerScene;
 pub use options::OptionsScene;
-pub use pick_chamber::PickChamberScene;
+pub use hallway::HallwayScene;
 pub use profile_select::ProfileSelectScene;
 pub use cascade_lab::CascadeLabScene;
 pub use roller_lab::RollerLabScene;
 pub use rumble_lab::RumbleLabScene;
 pub use shop::ShopScene;
 pub use showcase::{
-    CollectionInspectPresenter, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
+    ArchiveInspectPresenter, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
     TilePackPresenter, ZodiacPresenter,
 };
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 pub use showcase::MetaLevelUpPresenter;
 pub use splash::SplashScene;
-pub use staircase::StaircaseScene;
+pub use stairway::StairwayScene;
 pub use start_game_modal::TileSelectScene;
 pub use animation_lab::AnimationLabScene;
 pub use button_aabb_lab::ButtonAabbLabScene;
@@ -73,12 +74,14 @@ pub use transition_playground::TransitionPlaygroundScene;
 pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_summary::TutorialSummaryScene;
 pub use yaku_journal::YakuJournalScene;
+pub use wall_ledger::WallLedgerScene;
 
 use crate::effect_layers::EffectLayers;
 use crate::game::cascade::CascadeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 use crate::persistence::ResumeScene;
+use crate::render::scene_keys;
 use crate::render::animation::AnimationController;
 use crate::render::draw_cmd::UiFrame;
 use crate::ui::input::{InputMode, RumbleLabOp, UiAction};
@@ -179,8 +182,8 @@ pub struct UpdateCtx<'a> {
     pub rumble_lab_ops: &'a mut Vec<RumbleLabOp>,
     /// [`ShopScene`] under shop showcase **inspect** presenter: orbit sync + focus cycling.
     pub suspended_shop: Option<&'a mut ShopScene>,
-    /// [`CollectionScene`] under archive showcase **inspect** presenter: focused artifact cycling.
-    pub suspended_collection: Option<&'a mut CollectionScene>,
+    /// [`ArchiveScene`] under archive showcase **inspect** presenter: focused artifact cycling.
+    pub suspended_collection: Option<&'a mut ArchiveScene>,
     /// Same as [`DrawCtx::room_gltf_height_scale`] — vertical scale for embedded glTF rooms vs window height.
     pub room_gltf_height_scale: f32,
     /// Archive scene sets this to `Some(progress.run_history.len())` when the player
@@ -253,7 +256,7 @@ pub struct DrawCtx<'a> {
     /// Frozen [`ShopScene`] under shop showcase inspect — drawn via [`crate::scenes::shop::render_shop_frame`] with orbit dolly.
     pub suspended_shop: Option<&'a ShopScene>,
     /// Suspended collection beneath collection showcase inspect for pedestal orbit.
-    pub suspended_collection: Option<&'a CollectionScene>,
+    pub suspended_collection: Option<&'a ArchiveScene>,
     /// Physical tile proportions for 3D layout (options / renderer settings).
     pub tile_preset: crate::persistence::TilePreset,
     /// True when Archive has unseen catalog entries or chronicle runs (this profile).
@@ -294,7 +297,7 @@ impl<'a> DrawCtx<'a> {
         input_mode: InputMode,
         glyphs: crate::ui::glyph_source::GlyphResolver,
         suspended_shop: Option<&'a ShopScene>,
-        suspended_collection: Option<&'a CollectionScene>,
+        suspended_collection: Option<&'a ArchiveScene>,
         tile_preset: crate::persistence::TilePreset,
         archive_has_new: bool,
         archive_chronicle_last_seen_run_len: u32,
@@ -461,16 +464,17 @@ impl<T: SceneBehavior + ?Sized> SceneBehavior for Box<T> {
 #[allow(clippy::large_enum_variant)]
 pub enum Scene {
     Splash(SplashScene),
-    MainMenuExterior(MainMenuExteriorScene),
+    MainMenu(MainMenuScene),
     TileSelect(TileSelectScene),
     ProfileSelect(ProfileSelectScene),
     Shop(ShopScene),
     Showcase(ShowcaseScene),
-    PickChamber(PickChamberScene),
-    Staircase(StaircaseScene),
+    Hallway(HallwayScene),
+    Stairway(StairwayScene),
     /// Boxed to keep the enum small; [`SceneBehavior`] for [`Box`] forwards to the inner scene.
     Gameplay(Box<GameplayScene>),
-    GameOver(GameOverScene),
+    Victory(VictoryScene),
+    Defeat(DefeatScene),
     Guide(GuideScene),
     MaterialViewer(MaterialViewerScene),
     TileAnchorLab(TileAnchorLabScene),
@@ -478,7 +482,7 @@ pub enum Scene {
     Tixels(TixelsScene),
     Options(OptionsScene),
     Credits(CreditsScene),
-    Collection(CollectionScene),
+    Archive(ArchiveScene),
     TutorialCampaign(TutorialCampaignScene),
     TutorialSummary(TutorialSummaryScene),
     TransitionPlayground(TransitionPlaygroundScene),
@@ -487,28 +491,32 @@ pub enum Scene {
     RollerLab(RollerLabScene),
     CascadeLab(Box<CascadeLabScene>),
     YakuJournal(YakuJournalScene),
+    WallLedger(WallLedgerScene),
 }
 
 /// Canonical renderer scene-key string for tonemap, shadows, and pick prefixes.
 pub fn active_scene_key(scene: &Scene) -> Option<&'static str> {
     match scene {
         Scene::Showcase(_) => Some("showcase"),
-        Scene::Shop(_) => Some("shop"),
-        Scene::Gameplay(_) => Some("gameplay"),
-        Scene::Collection(_) => Some("collection"),
-        Scene::PickChamber(_) => Some("pick_chamber"),
-        Scene::Staircase(_) => Some("staircase"),
-        Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
+        Scene::Shop(_) => Some(scene_keys::SHOP),
+        Scene::Gameplay(_) => Some(scene_keys::GAMEPLAY),
+        Scene::Archive(_) => Some(scene_keys::ARCHIVE),
+        Scene::Hallway(_) => Some(scene_keys::HALLWAY),
+        Scene::Stairway(_) => Some(scene_keys::STAIRWAY),
+        Scene::MainMenu(_) => Some(scene_keys::MAIN_MENU),
+        Scene::Options(_) => Some(scene_keys::OPTIONS),
+        Scene::Victory(_) => Some(scene_keys::VICTORY),
+        Scene::Defeat(_) => Some(scene_keys::DEFEAT),
         Scene::TutorialCampaign(_) => Some("tutorial"),
         Scene::Guide(_) => Some("guide"),
         Scene::YakuJournal(_) => Some("yaku_journal"),
+        Scene::WallLedger(_) => Some("wall_ledger"),
         Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
         Scene::ButtonAabbLab(_) => Some("button_aabb_lab"),
-        Scene::AnimationLab(_) => Some("shop"),
-        Scene::RollerLab(_) => Some("gameplay"),
-        Scene::CascadeLab(_) => Some("gameplay"),
+        Scene::AnimationLab(_) => Some(scene_keys::SHOP),
+        Scene::RollerLab(_) => Some(scene_keys::GAMEPLAY),
+        Scene::CascadeLab(_) => Some(scene_keys::GAMEPLAY),
         Scene::Tixels(_) => Some("tixels"),
-        Scene::GameOver(_) => Some("gameplay"),
         Scene::TileSelect(_) => Some("tile_select"),
         _ => None,
     }
@@ -526,13 +534,13 @@ pub fn overlay_renderer_parent<'a>(base: &'a Scene, overlay_stack: &'a [Scene]) 
 }
 
 /// Renderer scene key for the frame being drawn. Item inspect overlays
-/// ([`ShowcasePresenter::ShopInspect`], [`ShowcasePresenter::CollectionInspect`]) inherit
+/// ([`ShowcasePresenter::ShopInspect`], [`ShowcasePresenter::ArchiveInspect`]) inherit
 /// tonemap, punctual layout, and catalog balance from the suspended parent scene.
 pub fn active_scene_key_for_renderer(top: &Scene, parent: Option<&Scene>) -> Option<&'static str> {
     if let Scene::Showcase(s) = top {
         if matches!(
             s.presenter,
-            ShowcasePresenter::ShopInspect(_) | ShowcasePresenter::CollectionInspect(_)
+            ShowcasePresenter::ShopInspect(_) | ShowcasePresenter::ArchiveInspect(_)
         ) && let Some(key) = parent.and_then(active_scene_key)
         {
             return Some(key);
@@ -542,8 +550,8 @@ pub fn active_scene_key_for_renderer(top: &Scene, parent: Option<&Scene>) -> Opt
 }
 
 /// Return from profile picker to the Archive (collection) without a `profile_select` ↔ `collection` cycle.
-pub(crate) fn scene_collection_archive() -> Scene {
-    Scene::Collection(CollectionScene::new())
+pub(crate) fn scene_archive() -> Scene {
+    Scene::Archive(ArchiveScene::new())
 }
 
 #[cfg(test)]

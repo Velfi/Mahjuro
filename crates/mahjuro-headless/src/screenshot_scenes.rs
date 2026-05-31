@@ -1,6 +1,6 @@
 use mahjuro::game::run::RunState;
 use mahjuro::scenes::shop::ShopScene;
-use mahjuro::scenes::{GameOverScene, GameplayScene, Scene};
+use mahjuro::scenes::{DefeatScene, GameplayScene, Scene, VictoryScene};
 use mahjuro::scenes::{
     MetaLevelUpPresenter, ShowcasePresenter, ShowcaseScene, TilePackPresenter,
     TutorialCampaignScene, ZodiacPresenter,
@@ -64,10 +64,11 @@ pub(crate) fn validate_screenshot_cli(s: &crate::screenshot_cli::ScreenshotCli) 
             "--pack is only valid with --scene tile_pack_celebration or --scene showcase"
         );
     }
-    let defeat_like = matches!(s.scene.as_str(), "game_over_defeat" | "defeat");
+    let defeat_like = mahjuro::render::scene_keys::normalize_scene_key(&s.scene)
+        == mahjuro::render::scene_keys::DEFEAT;
     if (s.bot_play || s.from_run_history.is_some() || s.seed_bot_runs.is_some()) && !defeat_like {
         anyhow::bail!(
-            "--bot-play, --from-run-history, and --seed-bot-runs are only valid with --scene game_over_defeat"
+            "--bot-play, --from-run-history, and --seed-bot-runs are only valid with --scene defeat"
         );
     }
     if s.page.is_some() && !screenshot_scene_accepts_page(&s.scene) {
@@ -117,14 +118,14 @@ fn collection_screenshot_tab(scene: &str) -> Option<CollectionScreenshotTab> {
 }
 
 fn collection_scene(tab: CollectionScreenshotTab) -> Scene {
-    let mut coll = mahjuro::scenes::CollectionScene::new();
+    let mut coll = mahjuro::scenes::ArchiveScene::new();
     match tab {
         CollectionScreenshotTab::Relics => {}
         CollectionScreenshotTab::Chronicle => coll.prepare_chronicle_for_screenshot(),
         CollectionScreenshotTab::Ordeals => coll.prepare_ordeals_for_screenshot(),
         CollectionScreenshotTab::Talismans => coll.prepare_talismans_for_screenshot(),
     }
-    Scene::Collection(coll)
+    Scene::Archive(coll)
 }
 
 fn zodiac_from_cli(s: &crate::screenshot_cli::ScreenshotCli) -> anyhow::Result<mahjuro::core::zodiac::ZodiacKind> {
@@ -219,7 +220,7 @@ fn game_over_defeat_scene(
         GameOverReason::OutOfPlays
     };
 
-    Ok(Scene::GameOver(GameOverScene::new(run, reason)))
+    Ok(Scene::Defeat(DefeatScene::new(run, reason)))
 }
 
 pub(crate) struct ScreenshotSceneSetup {
@@ -270,11 +271,11 @@ pub(crate) fn resolve_screenshot_scene(
             hero_play = true;
             (Scene::Gameplay(Box::new(GameplayScene::new())), true)
         }
-        "pick_chamber" | "pick_blind" => (
-            Scene::PickChamber(mahjuro::scenes::PickChamberScene::new()),
+        "hallway" | "pick_chamber" | "pick_blind" => (
+            Scene::Hallway(mahjuro::scenes::HallwayScene::new()),
             true,
         ),
-        "staircase" => (Scene::Staircase(mahjuro::scenes::StaircaseScene::new()), true),
+        "stairway" | "staircase" => (Scene::Stairway(mahjuro::scenes::StairwayScene::new()), true),
         "shop" => {
             setup_shop_state(run);
             let mut shop = ShopScene::new(run, progress);
@@ -289,8 +290,8 @@ pub(crate) fn resolve_screenshot_scene(
             Scene::Credits(mahjuro::scenes::CreditsScene::from_options()),
             false,
         ),
-        "main_menu_exterior" | "start_screen" => (
-            Scene::MainMenuExterior(mahjuro::scenes::MainMenuExteriorScene::new()),
+        "main_menu" | "main_menu_exterior" | "start_screen" => (
+            Scene::MainMenu(mahjuro::scenes::MainMenuScene::new()),
             false,
         ),
         "tile_select" => (
@@ -331,7 +332,7 @@ pub(crate) fn resolve_screenshot_scene(
         "relic_unlock" => {
             force_relic_modal = true;
             (
-                Scene::MainMenuExterior(mahjuro::scenes::MainMenuExteriorScene::new()),
+                Scene::MainMenu(mahjuro::scenes::MainMenuScene::new()),
                 false,
             )
         }
@@ -368,17 +369,17 @@ pub(crate) fn resolve_screenshot_scene(
             prime_shop_stock(run, progress);
             (tile_pack_showcase_scene(run, s.pack.as_deref())?, true)
         }
-        "game_over_defeat" | "defeat" => (game_over_defeat_scene(s, run, progress)?, true),
-        "game_over_victory" | "victory" => {
+        "defeat" | "game_over_defeat" => (game_over_defeat_scene(s, run, progress)?, true),
+        "victory" | "game_over_victory" => {
             setup_victory_game_over_screenshot_state(run);
-            (Scene::GameOver(GameOverScene::victory(run)), true)
+            (Scene::Victory(VictoryScene::new(run)), true)
         }
         other => {
             anyhow::bail!(
-                "unsupported --scene '{other}' (supported: collection, archive, archive_ordeals, chronicle, \
-                yaku_journal, gameplay, gameplay_hero, pick_chamber, staircase, shop, options, \
-                main_menu_exterior, tile_select, guide, tutorial, transition_playground, \
-                material_viewer, tile_anchor_lab, tixels, relic_unlock, game_over_level_up, game_over_defeat, game_over_victory, meta_level_up, \
+                "unsupported --scene '{other}' (supported: archive, archive_ordeals, chronicle, \
+                yaku_journal, gameplay, gameplay_hero, hallway, stairway, shop, options, \
+                main_menu, tile_select, guide, tutorial, transition_playground, \
+                material_viewer, tile_anchor_lab, tixels, relic_unlock, game_over_level_up, defeat, victory, meta_level_up, \
                 showcase, zodiac_celebration, tile_pack_celebration)"
             )
         }

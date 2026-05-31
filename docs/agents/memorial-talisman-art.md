@@ -1,6 +1,6 @@
-# Talisman tablet art (shop + memorial)
+# Talisman carving art (shop + memorial)
 
-Octagonal talisman tablets share one mesh (`src/render/talisman_mesh.rs`) and `MaterialKind::Chitin`. Each kind has its own **grayscale heightmap** and a separate **octagon mask** — heightmaps are full mid-gray plates with carved relief (no black void outside the silhouette).
+Carved jade **relief** (not octagonal tablets). Each kind has a figurative subject from Chinese myth/nature, an organic asymmetric silhouette extruded from its mask, and a grayscale heightmap for deep relief carving.
 
 ## Files
 
@@ -18,33 +18,47 @@ pip install google-genai pillow
 export GEMINI_API_KEY="..."
 python scripts/generate_talisman_art.py                    # missing only, both sets
 python scripts/generate_talisman_art.py --force            # all shop + memorial
-python scripts/generate_talisman_art.py --set shop --force   # nine shop tablets
+python scripts/generate_talisman_art.py --set shop --force
 python scripts/generate_talisman_art.py --set memorial
-python scripts/generate_talisman_art.py --masks-only         # procedural masks only
-python scripts/generate_memorial_talisman_art.py --force     # memorial wrapper
+python scripts/generate_talisman_art.py --masks-only       # organic masks from heights
+python scripts/generate_memorial_talisman_art.py --force   # memorial wrapper
 ```
 
-Heightmaps align with `talisman_face_uv` (`v = 0` at +local Y, flat octagon edge at bottom of the image / −Y on the mesh). Masks are procedural octagons from `scripts/_talisman_art_common.py` (same angles as the mesh).
+Heightmaps: mid-gray jade with figurative high-relief carving. Masks: derived from heightmap via `--mask-method` (default `auto`):
+
+- **Flat heightfields** (black void at border): luminance threshold
+- **Sculpted renders** (gray studio background): border-connected plate-tone flood, then **interior plate-void punch** for piercings (wave gates, coin squares) that match studio gray but sit inside the jade; tiny carving speckles only are filled (`MAX_CARVING_PINHOLE_AREA`)
+- **Fallback**: local **rembg/u2net** (`pip install rembg onnxruntime`) when flood-fill ratio looks wrong
+
+```bash
+python scripts/generate_talisman_art.py --masks-only --mask-method auto   # recommended
+python scripts/generate_talisman_art.py --masks-only --mask-method rembg  # force ML matte
+```
+
+Postprocess exaggeration: **2.4** (shop) / **2.0** (memorial) via `--exaggerate-shop` / `--exaggerate-memorial`.
 
 ## Art direction
 
-- **Shop:** crisp merchant engraving on a mid-gray plate; premium, readable at thumbnail size.
-- **Memorial:** worn temple plaque / stone rubbing — solemn, not glossy shop foil.
-- **Motifs:** one pictorial idea per kind (`SHOP_MOTIFS` / `MEMORIAL_MOTIFS` in `scripts/generate_talisman_art.py`). No Latin text on the face.
-- **In-game tint:** JSON `accent` still tints the chitin foil; relief comes from the heightmap; silhouette discard uses the mask.
+- **Heightmap style:** orthographic top-down displacement plate — mid-gray (#808080) ground edge-to-edge; carving contour meets the canvas margin (no mat, frame, or bezel). Postprocess strips AI matte/frame bands before exaggeration.
+- **Shop:** moon rabbit, beetle on sycee, peacock, cicada on bamboo, coiled dragon (pinzu), pixiu, three honor dragons + east wind, lotus + kingfisher, twin mirror koi.
+- **Memorial:** ox, crane in ice, leaping carp, magpie on pouch, money toad, butterfly, bent jian + taotie, deer + lingzhi, nine-tailed fox, ofuda strips, nesting swallows, xuanwu on terraces.
+- **Motifs:** one unique figurative subject per kind (`SHOP_MOTIFS` / `MEMORIAL_MOTIFS`); prompts name the only scene to carve. Avoid repeating bats, coin stacks, phoenixes, lotus, or pixiu across kinds.
+- **In-game tint:** JSON `accent` tints nacre sheen; relief from heightmap (normal perturbation + iridescence); silhouette discard uses mask.
 
 ## Renderer
 
-`build.rs` loads `talisman_height_views` + `talisman_mask_views` and memorial counterparts. `Object3dKind::{Talisman,MemorialTalisman}` rebind height → `albedo_tex`, mask → `relief_tex`. Chitin fragments outside the mask are discarded in `lit_mesh.wgsl` (threshold 8/255, same as relic enamel).
+`build_talisman_mesh_from_mask()` extrudes each mask like enamel relic badges (caps on ±Z). Per-kind meshes cached in `talisman_meshes` / `memorial_talisman_meshes` (shelf and inspect orbit share the same mesh). Octagonal prism remains fallback.
+
+`Object3dKind::{Talisman,MemorialTalisman}` rebind height → `albedo_tex`, mask → `relief_tex`. Chitin fragments outside the mask are discarded in `lit_mesh.wgsl` (threshold 8/255). Shop tablets get lustrous mother-of-pearl; memorial tablets (`material_params.w >= 128`) get subdued stone-pearl.
 
 ## Defeat screenshot from bot / career data
 
-`screenshot --scene game_over_defeat` can hydrate stats from real runs instead of the baked fixture:
+`screenshot --scene defeat` can hydrate stats from real runs instead of the baked fixture:
 
 ```bash
-cargo run -p mahjuro-headless --bin mahjuro-screenshot --features screenshot --release -- --scene game_over_defeat --bot-play
-cargo run -p mahjuro-headless --bin mahjuro-screenshot --features screenshot --release -- --scene game_over_defeat --from-run-history 2 --profile 0
-cargo run -p mahjuro-headless --bin mahjuro-screenshot --features screenshot --release -- --scene game_over_defeat --seed-bot-runs 20 --from-run-history 15
+cargo run -p mahjuro-headless --bin mahjuro-screenshot --features screenshot --release -- --scene defeat --bot-play
+cargo run -p mahjuro-headless --bin mahjuro-screenshot --features screenshot --release -- --scene defeat --from-run-history 2 --profile 0
+cargo run -p mahjuro-headless --bin mahjuro-screenshot --features screenshot --release -- --scene defeat --seed-bot-runs 20 --from-run-history 15
 ```
 
 `RunRecord::hydrate_game_over_run` restores the fields `GameOverScene` reads.

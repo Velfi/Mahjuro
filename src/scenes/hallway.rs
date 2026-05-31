@@ -14,6 +14,7 @@ use crate::game::engine::{GameCommand, GameEngine};
 use crate::game::event_bus::GameEvent;
 use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{ImageQuad, ScenePunctualLight, UiFrame};
+use crate::render::scene_keys;
 use crate::render::hallway_glb::{self, BTN_SKIP_ROUND};
 use crate::render::room_glb;
 use crate::render::theme::{color, metrics, typography};
@@ -41,18 +42,18 @@ impl ChamberAction {
     }
 }
 
-pub struct PickChamberScene {
+pub struct HallwayScene {
     tree: TreeState,
     pause_menu: PauseMenu,
 }
 
-impl Default for PickChamberScene {
+impl Default for HallwayScene {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl PickChamberScene {
+impl HallwayScene {
     pub fn new() -> Self {
         let mut tree = TreeState::new();
         tree.set_focus(ChamberAction::PlayChamber.id());
@@ -230,7 +231,7 @@ fn inflate_hit_rect(rect: [f32; 4]) -> [f32; 4] {
     ]
 }
 
-impl SceneBehavior for PickChamberScene {
+impl SceneBehavior for HallwayScene {
     fn pause_options_overlay(&self) -> Option<&super::options::OptionsScene> {
         self.pause_menu.options_overlay()
     }
@@ -260,7 +261,7 @@ impl SceneBehavior for PickChamberScene {
         if ctx.run.upcoming_chamber == ChamberKind::Ordeal {
             ctx.run.ensure_ordeal_revealed();
         }
-        let pick = GameEngine::read_pick_chamber(ctx.run);
+        let pick = GameEngine::read_hallway(ctx.run);
         let upcoming = pick.upcoming_chamber;
         let upcoming_ordeal = upcoming == ChamberKind::Ordeal;
         let can_skip = Self::can_skip(upcoming);
@@ -313,7 +314,7 @@ impl SceneBehavior for PickChamberScene {
             Some(ChamberAction::SkipChamber) if can_skip => {
                 let mut engine = GameEngine::new(ctx.run, ctx.bus);
                 let _ = engine.dispatch(GameCommand::SkipUpcomingChamberWithTag);
-                Some(Scene::PickChamber(PickChamberScene::new()))
+                Some(Scene::Hallway(HallwayScene::new()))
             }
             Some(ChamberAction::PlayChamber) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::RoundStart));
@@ -335,7 +336,7 @@ impl SceneBehavior for PickChamberScene {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
 
-        let pick = GameEngine::read_pick_chamber(ctx.run);
+        let pick = GameEngine::read_hallway(ctx.run);
         let upcoming = pick.upcoming_chamber;
         let upcoming_ordeal = upcoming == ChamberKind::Ordeal;
         let can_skip = Self::can_skip(upcoming);
@@ -385,16 +386,16 @@ impl SceneBehavior for PickChamberScene {
             let room_glb = hallway_glb::hallway_glb_has_embedded_lights();
             frame.scene_lighting.embedded_gltf_punctual = room_glb;
             frame.scene_lighting.room_glb_brdf = room_glb;
-            frame.scene_lighting.spot_lights = if room_glb {
+            frame.scene_lighting.set_gltf_embedded_spot_lights(if room_glb {
                 hallway_glb::hallway_embedded_spot_lights_runtime(
                     w,
                     h,
                     ctx.room_gltf_height_scale,
-                    &ctx.room_env_for("pick_chamber").0,
+                    &ctx.room_env_for(scene_keys::HALLWAY).0,
                 )
             } else {
                 Vec::new()
-            };
+            });
             let (mut inverse_punctual, mut punctual_gltf_nodes): (Vec<ScenePunctualLight>, Vec<Option<String>>) =
                 if room_glb {
                     crate::render::room_gltf_punctual::tagged_to_scene_punctual(
@@ -402,7 +403,7 @@ impl SceneBehavior for PickChamberScene {
                             w,
                             h,
                             ctx.room_gltf_height_scale,
-                            &ctx.room_env_for("pick_chamber").0,
+                            &ctx.room_env_for(scene_keys::HALLWAY).0,
                         ),
                     )
                 } else {
@@ -468,7 +469,7 @@ impl SceneBehavior for PickChamberScene {
         } else {
             frame.scene_lighting.embedded_gltf_punctual = false;
             frame.scene_lighting.room_glb_brdf = false;
-            frame.scene_lighting.spot_lights.clear();
+            frame.scene_lighting.clear_spot_lights();
             frame.scene_lighting.set_smooth_points(vec![
                 PointLight {
                     pos: [w * 0.5, h * 0.40, h * 0.50],

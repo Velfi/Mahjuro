@@ -154,17 +154,18 @@ impl YakuKind {
         yaku_def(self).chip_bonus
     }
 
-    /// Leveled mult bonus: `base + YAKU_MULT_PER_LEVEL × (level - 1)`. Level starts
-    /// at 1 and rises when the player uses the zodiac card bound to this yaku.
-    /// `score_sets` passes the effective level; use `mult_bonus()` when level is
-    /// always 1.
+    /// Leveled mult bonus: `base + per-zodiac-mult × (level - 1)`, snapped to the
+    /// nearest half (1.0, 1.5, 2.0, …). Level starts at 1 and rises when the
+    /// player uses the zodiac card bound to this yaku. `score_sets` passes the
+    /// effective level; use `mult_bonus()` when level is always 1.
     pub fn mult_bonus_at(self, level: u32) -> f64 {
         let base = self.base_mult_bonus();
-        if level <= 1 {
+        let raw = if level <= 1 {
             base
         } else {
             base + self.level_up_mult_per_level() * (level - 1) as f64
-        }
+        };
+        snap_half_mult(raw)
     }
 
     /// Leveled chip bonus: `base + per-zodiac-chips × (level - 1)`.
@@ -821,6 +822,11 @@ fn is_full_hand(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
         .count();
     let pairs = sets.iter().filter(|s| s.kind == MeldKind::Pair).count();
     melds == 4 && pairs == 1
+}
+
+/// Round a yaku mult bonus to the nearest half (…, 1.0, 1.5, 2.0, …).
+fn snap_half_mult(v: f64) -> f64 {
+    (v * 2.0).round() / 2.0
 }
 
 #[cfg(test)]
@@ -1710,6 +1716,23 @@ mod tests {
         assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 7.0);
         assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 63);
         assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 287);
+    }
+
+    #[test]
+    fn mult_bonus_at_is_half_increment_at_every_level() {
+        for &yk in YakuKind::all() {
+            if yk == YakuKind::ChickenHand {
+                continue;
+            }
+            for level in 1..=12 {
+                let mult = yk.mult_bonus_at(level);
+                assert_eq!(
+                    mult,
+                    snap_half_mult(mult),
+                    "{yk:?} level {level} mult {mult} is not a half increment"
+                );
+            }
+        }
     }
 
     /// Force a panic on data drift. Touching every variant via the metadata

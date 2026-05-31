@@ -289,6 +289,8 @@ const GAMEPLAY_3D_HIT_ID: u32 = 0x9200;
 
 /// Click id for the optional post-discard Undo control (2D HUD button).
 const UNDO_DISCARD_CLICK_ID: u32 = 0x9280;
+/// Click id for the lower-right wall supply HUD.
+const WALL_HUD_CLICK_ID: u32 = 0x9281;
 
 /// Screen center of physical relic tray slot `idx` (`player_relic` empties).
 pub(crate) fn relic_tray_slot_screen_center(

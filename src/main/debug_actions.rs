@@ -5,8 +5,8 @@ use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay
 use crate::game::engine::GameEngine;
 use crate::scenes::shop::PackCelebration;
 use crate::scenes::{
-    ButtonAabbLabScene, CascadeLabScene, RollerLabScene, ShowcasePresenter, ShowcaseScene, TileAnchorLabScene,
-    TilePackPresenter, TixelsScene,
+    ButtonAabbLabScene, CascadeLabScene, DefeatScene, RollerLabScene, ShowcasePresenter, ShowcaseScene,
+    TileAnchorLabScene, TilePackPresenter, TixelsScene, VictoryScene,
 };
 use rand::RngExt;
 
@@ -266,22 +266,23 @@ impl App {
                 } else {
                     let name = match &self.scene {
                         Scene::Splash(_) => "Splash",
-                        Scene::MainMenuExterior(_) => "MainMenuExterior",
+                        Scene::MainMenu(_) => "MainMenu",
                         Scene::TileSelect(_) => "TileSelect",
                         Scene::ProfileSelect(_) => "ProfileSelect",
                         Scene::Shop(_) => "Shop",
                         Scene::Showcase(_) => "Showcase",
-                        Scene::PickChamber(_) => "PickChamber",
-                        Scene::Staircase(_) => "Staircase",
+                        Scene::Hallway(_) => "Hallway",
+                        Scene::Stairway(_) => "Stairway",
                         Scene::Gameplay(_) => "Gameplay",
-                        Scene::GameOver(_) => "GameOver",
+                        Scene::Victory(_) => "Victory",
+                        Scene::Defeat(_) => "Defeat",
                         Scene::Guide(_) => "Guide",
                         Scene::MaterialViewer(_) => "MaterialViewer",
                         Scene::TileAnchorLab(_) => "TileAnchorLab",
                         Scene::ButtonAabbLab(_) => "ButtonAabbLab",
                         Scene::Options(_) => "Options",
                         Scene::Credits(_) => "Credits",
-                        Scene::Collection(_) => "Collection",
+                        Scene::Archive(_) => "Collection",
                         Scene::TutorialCampaign(_) => "TutorialCampaign",
                         Scene::TutorialSummary(_) => "TutorialSummary",
                         Scene::TransitionPlayground(_) => "TransitionPlayground",
@@ -291,6 +292,7 @@ impl App {
                         Scene::RumbleLab(_) => "RumbleLab",
                         Scene::Tixels(_) => "Tixels",
                         Scene::YakuJournal(_) => "YakuJournal",
+                        Scene::WallLedger(_) => "WallLedger",
                     };
                     log::warn!("Demo Cascade ignored — current scene is {name}");
                 }
@@ -377,7 +379,7 @@ impl App {
             }
             DebugAction::ShowVictoryScreen => {
                 while self.modals.dismiss() {}
-                self.pending_scene = Some(Scene::GameOver(GameOverScene::victory(&self.run)));
+                self.pending_scene = Some(Scene::Victory(VictoryScene::new(&self.run)));
                 self.transition_alpha = 1.0;
                 log::debug!("Showing victory screen");
             }
@@ -391,7 +393,7 @@ impl App {
                 );
                 self.run.defeat_memorial_kind =
                     Some(crate::core::memorial_talisman::select_memorial(&snap));
-                self.pending_scene = Some(Scene::GameOver(GameOverScene::new(&self.run, reason)));
+                self.pending_scene = Some(Scene::Defeat(DefeatScene::new(&self.run, reason)));
                 self.transition_alpha = 1.0;
                 log::debug!("Showing defeat screen");
             }

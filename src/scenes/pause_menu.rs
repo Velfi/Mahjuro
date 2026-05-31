@@ -9,7 +9,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState};
 
-use super::main_menu_exterior::MainMenuExteriorScene;
+use super::main_menu::MainMenuScene;
 use super::options::OptionsScene;
 use super::shop::ShopScene;
 use super::{ButtonDef, Scene, SceneTransition, UpdateCtx};
@@ -335,8 +335,8 @@ impl PauseMenu {
             }
             Some(PauseAction::MainMenu) => {
                 bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                PauseUpdate::Transition(Box::new(Some(Scene::MainMenuExterior(
-                    MainMenuExteriorScene::new(),
+                PauseUpdate::Transition(Box::new(Some(Scene::MainMenu(
+                    MainMenuScene::new(),
                 ))))
             }
             Some(PauseAction::Exit) => {

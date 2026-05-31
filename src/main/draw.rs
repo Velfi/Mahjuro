@@ -2,6 +2,8 @@
 use super::*;
 
 #[cfg(feature = "game")]
+use crate::scenes::{DefeatScene, VictoryScene};
+#[cfg(feature = "game")]
 use crate::game::engine::GameEngine;
 #[cfg(feature = "game")]
 use crate::scene_transition::overlay_kind_for_transition;
@@ -269,11 +271,11 @@ impl App {
                         self.pending_post_game_over_level_up = Some(modal);
                     }
 
-                    Scene::GameOver(GameOverScene::victory(&self.run))
+                    Scene::Victory(VictoryScene::new(&self.run))
                 } else if cleared_ordeal && crate::render::staircase_glb::staircase_glb_loaded() {
                     self.run.grant_pending_memorial(&mut self.progress);
                     self.mark_profile_dirty();
-                    Scene::Staircase(crate::scenes::StaircaseScene::new())
+                    Scene::Stairway(crate::scenes::StairwayScene::new())
                 } else {
                     self.run.grant_pending_memorial(&mut self.progress);
                     self.mark_profile_dirty();
@@ -366,7 +368,7 @@ impl App {
                     audio::MusicId::ChamberLoss
                 };
                 self.audio.play_music_jingle(loss_jingle);
-                self.pending_scene = Some(Scene::GameOver(GameOverScene::new(&self.run, reason)));
+                self.pending_scene = Some(Scene::Defeat(DefeatScene::new(&self.run, reason)));
                 self.transition_alpha = 1.0;
             }
             _ => {}
@@ -432,7 +434,7 @@ impl App {
             _ => None,
         };
         let suspended_collection = match (&self.scene, showcase_orbit_top) {
-            (crate::scenes::Scene::Collection(c), true) => Some(c),
+            (crate::scenes::Scene::Archive(c), true) => Some(c),
             _ => None,
         };
 

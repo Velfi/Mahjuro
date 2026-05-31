@@ -3,6 +3,7 @@
 use std::time::Instant;
 
 use crate::lit_mesh::LitMeshInstance;
+use crate::lit_mesh::LitMeshGpu;
 use crate::relic_pipeline::spawn_relic_loader;
 use crate::wgpu_renderer::resources::load_metal_heightmap;
 use crate::wgpu_renderer::{
@@ -102,6 +103,40 @@ impl WgpuRenderer {
             self.memorial_talisman_mask_views.push(view);
         }
         self.talisman_textures_ready = true;
+        self.ensure_talisman_meshes();
+    }
+
+    pub(crate) fn ensure_talisman_meshes(&mut self) {
+        if self.talisman_meshes_ready {
+            return;
+        }
+        let _scope = crate::startup_profile::scope("wgpu.defer.talisman_meshes");
+        use crate::talisman_mesh::build_talisman_mesh_from_mask_asset;
+        for &kind in mahjuro_core::core::talisman::TalismanKind::all() {
+            let mask_path = kind.mask_asset_path();
+            let slug = kind.asset_slug();
+            if let Some(cpu) = build_talisman_mesh_from_mask_asset(mask_path) {
+                self.talisman_meshes.insert(
+                    kind,
+                    LitMeshGpu::new(&self.device, &cpu, &format!("talisman-mesh-{slug}")),
+                );
+            }
+        }
+        for &kind in mahjuro_core::core::memorial_talisman::MemorialTalismanKind::all() {
+            let mask_path = kind.mask_asset_path();
+            let slug = kind.asset_slug();
+            if let Some(cpu) = build_talisman_mesh_from_mask_asset(mask_path) {
+                self.memorial_talisman_meshes.insert(
+                    kind,
+                    LitMeshGpu::new(
+                        &self.device,
+                        &cpu,
+                        &format!("memorial-talisman-mesh-{slug}"),
+                    ),
+                );
+            }
+        }
+        self.talisman_meshes_ready = true;
     }
 
     pub(crate) fn ensure_orb_pool(&mut self) {

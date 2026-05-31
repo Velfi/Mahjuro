@@ -210,13 +210,15 @@ impl Wall {
     /// When `overflow` is true, 2 extra copies per tile face are added with
     /// IDs starting at [`OVERFLOW_TILE_ID_BASE`] so they can be stripped
     /// mid-round if the relic is lost.
-    pub fn from_filtered_with_packs(
+    /// Build the tile list for a round wall (standard + overflow + joker + packs,
+    /// minus permanently removed ids) without shuffling or wrapping in [`Wall`].
+    pub fn build_composition_tiles(
         removed: &rustc_hash::FxHashSet<u32>,
         packs: &[crate::core::tile_pack::TilePackKind],
         enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
         overflow: bool,
         joker_extras: &[(Suit, u8)],
-    ) -> Self {
+    ) -> Vec<Tile> {
         use crate::core::tile_pack::{PACK_ID_STRIDE, PACK_TILE_ID_BASE};
 
         let mut tiles = build_wall();
@@ -237,7 +239,50 @@ impl Wall {
         if !removed.is_empty() {
             tiles.retain(|t| !removed.contains(&t.id));
         }
-        Self::new(tiles)
+        tiles
+    }
+
+    pub fn from_filtered_with_packs(
+        removed: &rustc_hash::FxHashSet<u32>,
+        packs: &[crate::core::tile_pack::TilePackKind],
+        enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
+        overflow: bool,
+        joker_extras: &[(Suit, u8)],
+    ) -> Self {
+        Self::new(Self::build_composition_tiles(
+            removed,
+            packs,
+            enhancements,
+            overflow,
+            joker_extras,
+        ))
+    }
+
+    /// Unshuffled wall matching the next round's composition — for shop preview UI.
+    pub fn preview_composition(
+        removed: &rustc_hash::FxHashSet<u32>,
+        packs: &[crate::core::tile_pack::TilePackKind],
+        enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
+        overflow: bool,
+        joker_extras: &[(Suit, u8)],
+    ) -> Self {
+        Self::from_unshuffled(Self::build_composition_tiles(
+            removed,
+            packs,
+            enhancements,
+            overflow,
+            joker_extras,
+        ))
+    }
+
+    /// Full ordered deck for this round (drawn + undrawn).
+    pub fn all_tiles(&self) -> &[Tile] {
+        &self.tiles
+    }
+
+    /// Index of the next tile that would be drawn.
+    pub fn draw_cursor(&self) -> usize {
+        self.cursor
     }
 
     /// Insert `tile` into the undrawn portion of the wall at a random position.

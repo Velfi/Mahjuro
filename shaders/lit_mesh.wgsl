@@ -16,7 +16,7 @@
 //   13.0 = pearl      — pearlescent nacre, base_color tints the sheen
 //   14.0 = gold nugget — pitted metallic gold (procedural noise normals)
 //   15.0 = polychrome  — holographic thin-film rainbow
-//   21.0 = chitin      — holographic foil (talisman tablets)
+//   21.0 = chitin      — abalone talisman tablets (oily iridescence / memorial stone)
 //   20.0 = emissive    — additive self-illumination (strength in specular_strength)
 //
 // All material variants share the candle/spot point-light loop from the tile
@@ -376,7 +376,67 @@ fn themed_holo(theta: f32, accent: vec3<f32>) -> vec3<f32> {
     return clamp(mix(themed, vivid, 0.42), vec3<f32>(0.0), vec3<f32>(1.35));
 }
 
-// Holo phase driven by perturbed surface normal (heightmap carving) + view/light.
+// Decode shop kind index (0..8) vs memorial (`material_params.w >= 128`).
+fn talisman_kind_idx(params_w: f32) -> f32 {
+    return select(params_w, params_w - 128.0, params_w >= 127.5);
+}
+
+// Boost JSON accent chroma so pale kinds (Pearl) still read distinct.
+fn talisman_accent_vivid(accent: vec3<f32>, lustrous: bool) -> vec3<f32> {
+    let l = dot(accent, vec3(0.299, 0.587, 0.114));
+    let sat = select(1.45, 1.85, lustrous);
+    return mix(vec3(l), accent, sat) + vec3(0.08, 0.05, 0.07);
+}
+
+// Abalone iridescence — accent-hued interference; `kind_idx` skews hue per tablet.
+fn themed_abalone(theta: f32, accent: vec3<f32>, relief_h: f32, kind_idx: f32, lustrous: bool) -> vec3<f32> {
+    let accent_v = talisman_accent_vivid(accent, lustrous);
+    let kind_shift = kind_idx * 2.65;
+    let phase = theta * 1.10 + kind_shift;
+
+    let comp_a = vec3<f32>(
+        accent_v.g * 0.72 + accent_v.r * 0.28 + 0.10,
+        accent_v.b * 0.68 + accent_v.g * 0.22 + 0.08,
+        accent_v.r * 0.58 + accent_v.b * 0.38 + 0.10,
+    );
+    let comp_b = vec3<f32>(
+        accent_v.b * 0.70 + accent_v.g * 0.24 + 0.08,
+        accent_v.r * 0.62 + accent_v.b * 0.20 + 0.06,
+        accent_v.g * 0.58 + accent_v.r * 0.32 + 0.09,
+    );
+
+    let lobe_a = accent_v * (0.40 + 0.60 * cos(phase * 0.86 + 0.28))
+        + comp_a * (0.38 + 0.42 * cos(phase * 0.86 + 2.10));
+    let lobe_b = accent_v * (0.36 + 0.56 * cos(phase * 1.04 + 1.45))
+        + comp_b * (0.42 + 0.40 * cos(phase * 1.04 + 3.40));
+    let pool = 0.5 + 0.5 * sin(phase * 0.50 + relief_h * 2.2 + kind_idx * 0.18);
+    var irid = mix(lobe_a, lobe_b, pool);
+
+    let flash = vec3<f32>(
+        0.18 + 0.52 * cos(phase * 0.72 + accent_v.r * 3.0),
+        0.46 + 0.44 * cos(phase * 0.72 + accent_v.g * 3.0 + 1.75),
+        0.54 + 0.38 * cos(phase * 0.72 + accent_v.b * 3.0 + 3.15),
+    );
+    irid = mix(irid, flash, select(0.20, 0.14, lustrous));
+
+    let vivid = (irid - vec3<f32>(0.5)) * select(1.42, 1.82, lustrous) + vec3<f32>(0.5);
+    let accent_oil = mix(vivid, accent_v * 1.28 + vivid * 0.42, select(0.62, 0.82, lustrous));
+
+    let ridge = smoothstep(0.40, 0.78, relief_h);
+    let dark_shell = accent_v * 0.38 + vec3<f32>(0.04, 0.06, 0.07);
+    let lustrous_col = mix(dark_shell, accent_oil, (0.52 + 0.48 * ridge) * select(0.70, 0.96, lustrous));
+
+    let stone_irid = mix(
+        accent_v * 0.48 + vec3<f32>(0.16),
+        accent_oil * 0.78 + comp_a * 0.22,
+        0.38 + 0.48 * ridge,
+    );
+    let result = select(stone_irid, lustrous_col, lustrous);
+    let cap = select(vec3<f32>(1.10), vec3<f32>(1.48), lustrous);
+    return clamp(result, vec3<f32>(0.0), cap);
+}
+
+// Nacre phase: perturbed normal + view/light + heightmap relief sample.
 // `on_rim` uses a smoother phase so thin side faces don't sparkle when orbiting.
 fn talisman_holo_phase(
     n: vec3<f32>,
@@ -385,6 +445,8 @@ fn talisman_holo_phase(
     light_dir: vec3<f32>,
     kind_idx: f32,
     on_rim: bool,
+    relief_h: f32,
+    height_scale: f32,
 ) -> f32 {
     let ndv = max(dot(n, view_dir), 0.0);
     let nh = max(dot(n, half_vec), 0.0);
@@ -395,15 +457,24 @@ fn talisman_holo_phase(
     let film = dot(n, half_vec) * select(9.0, 3.5, on_rim)
         + nh * select(4.0, 1.2, on_rim);
     let light = dot(n, light_dir) * select(4.5, 1.8, on_rim);
-    return carve + view_sweep + film + light + kind_idx * 0.35;
+    let height_term = (relief_h - 0.5) * height_scale;
+    return carve + view_sweep + film + light + kind_idx * 1.25 + height_term;
 }
 
-fn talisman_holo_phase_view(n: vec3<f32>, view_dir: vec3<f32>, kind_idx: f32, on_rim: bool) -> f32 {
+fn talisman_holo_phase_view(
+    n: vec3<f32>,
+    view_dir: vec3<f32>,
+    kind_idx: f32,
+    on_rim: bool,
+    relief_h: f32,
+    height_scale: f32,
+) -> f32 {
     let ndv = max(dot(n, view_dir), 0.0);
     let carve = dot(n, vec3<f32>(5.8, 4.2, 6.8)) * select(8.5, 3.0, on_rim)
         + select((n.x * n.y + n.z * n.z - 0.25) * 14.0, 0.0, on_rim);
     let view_sweep = ndv * select(8.0, 4.5, on_rim);
-    return carve + view_sweep + kind_idx * 0.45;
+    let height_term = (relief_h - 0.5) * height_scale;
+    return carve + view_sweep + kind_idx * 1.55 + height_term;
 }
 
 // 4-octave fractal value noise.
@@ -417,6 +488,22 @@ fn fbm2(p_in: vec2<f32>) -> f32 {
         amp = amp * 0.5;
     }
     return f;
+}
+
+// Curved abalone growth bands — fbm-warped sweeps; band axis rotates per kind.
+fn abalone_shell_phase(uv: vec2<f32>, relief_h: f32, kind_idx: f32) -> f32 {
+    let seed = kind_idx * 5.11 + 0.35;
+    let kind_ang = kind_idx * 0.785398163;
+    let dir = vec2(cos(kind_ang), sin(kind_ang));
+    let ortho = vec2(-dir.y, dir.x);
+    let uv_band = vec2(dot(uv, dir), dot(uv, ortho));
+    let p = uv_band * vec2<f32>(4.2, 3.6) + vec2<f32>(seed * 0.31, seed * 0.67);
+    let warp_a = fbm2(p) * 2.0 - 1.0;
+    let warp_b = fbm2(p * 1.85 + vec2<f32>(3.7, 1.4)) * 2.0 - 1.0;
+    let band = uv_band.y * 5.8 + uv_band.x * 1.35 + warp_a * 1.15 + warp_b * 0.62;
+    let pool = fbm2(uv * vec2<f32>(2.4, 3.2) + vec2<f32>(seed * 0.5, band * 0.07));
+    let ridge_pull = (relief_h - 0.5) * 3.2;
+    return band * 1.75 + pool * 2.6 + ridge_pull + kind_idx * 1.05;
 }
 
 struct WoodSample {
@@ -638,8 +725,12 @@ fn fs_main(
     // Talisman tablets: beetle chitin + legacy gem kinds (material viewer).
     let is_talisman  = (is_chitin || is_jade || is_moonstone || is_pearl || is_goldnug || is_poly);
     // Chitin: classify by local normal — rim verts share |z| with caps but face outward.
-    let chitin_front_face = is_chitin && in.local_n.z > 0.9;
-    let chitin_rim_face = is_chitin && abs(in.local_n.z) <= 0.9;
+    // Displaced inspect caps tilt their normals; also accept +Z half-space by position.
+    let chitin_front_face = is_chitin && (in.local_n.z > 0.9 || in.local_pos.z > 0.01);
+    let chitin_rim_face = is_chitin && abs(in.local_n.z) <= 0.9 && in.local_pos.z <= 0.01;
+    let is_memorial_chitin = is_chitin && mesh.material_params.w >= 127.5;
+    let talisman_lustrous = is_chitin && !is_memorial_chitin;
+    var talisman_relief_h = 0.5;
 
     // Octagon mask on the carved front cap only (not rim planes or back).
     if (chitin_front_face) {
@@ -775,8 +866,11 @@ fn fs_main(
         albedo = mix(sleeve, albedo, front_face);
     }
     if (is_chitin) {
-        // Theme body only here; normal-warped holo is applied after heightmap perturb.
-        albedo = mesh.base_color.rgb * 0.62 + vec3<f32>(0.10, 0.10, 0.12);
+        // Accent-tinted shell undercoat; iridescence applied after heightmap perturb.
+        let accent = mesh.base_color.rgb;
+        albedo = talisman_accent_vivid(accent, talisman_lustrous) * 0.42 + vec3<f32>(0.05, 0.06, 0.07);
+        let stone_base = mix(albedo, accent * 0.55 + vec3<f32>(0.14), 0.52);
+        albedo = select(albedo, stone_base, is_memorial_chitin);
     }
     if (is_foil) {
         let front_face = smoothstep(-0.42, -0.48, in.local_pos.y);
@@ -1366,8 +1460,11 @@ fn fs_main(
             let h_r = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>( texel.x, 0.0), 0.0).r;
             let h_d = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0, -texel.y), 0.0).r;
             let h_u = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0,  texel.y), 0.0).r;
-            // Bump strength — chitin holo warps with relief; slightly stronger carve read.
-            let bump = select(10.0, 14.0, is_chitin);
+            if (is_chitin) {
+                talisman_relief_h = textureSampleLevel(albedo_tex, albedo_samp, in.uv, 0.0).r;
+            }
+            // Bump strength — chitin nacre warps with relief; 2× carve read vs legacy tablets.
+            let bump = select(10.0, 36.0, is_chitin);
             var dhdu = (h_r - h_l) * bump;
             var dhdv = (h_u - h_d) * bump;
             // Gold: subtle surface variation layered on top of the carved
@@ -1387,9 +1484,16 @@ fn fs_main(
             if (is_chitin) {
                 // Model-space tangent frame on the front cap — avoids dpdx flicker when
                 // the tablet rotates (screen-space tangents spin on flat surfaces).
-                // +dhdv: heightmap v grows toward −local Y (see `talisman_face_uv`).
-                let n_local = normalize(vec3(-dhdu, dhdv, 1.0));
-                n = normalize((mesh.model * vec4<f32>(n_local, 0.0)).xyz);
+                // +dhdv: CapExtrudeKind::TalismanZ — see cap_extrude.rs / docs/agents/cap-mesh-coordinates.md.
+                let shelf_flat_cap = abs(in.local_n.x) < 0.02
+                    && abs(in.local_n.y) < 0.02
+                    && in.local_n.z > 0.98;
+                if (shelf_flat_cap) {
+                    let n_local = normalize(vec3(-dhdu, dhdv, 1.0));
+                    n = normalize((mesh.model * vec4<f32>(n_local, 0.0)).xyz);
+                } else {
+                    n = normalize((mesh.model * vec4(in.local_n, 0.0)).xyz);
+                }
             } else {
                 // Screen-space derivative tangent basis: works for any
                 // orientation without needing explicit tangent attributes.
@@ -1402,6 +1506,17 @@ fn fs_main(
                 let perturbed = normalize(n + tangent * dhdu + bitangent * dhdv);
                 n = perturbed;
             }
+        }
+        if (is_chitin && chitin_front_face) {
+            let accent = mesh.base_color.rgb;
+            let kind_idx = talisman_kind_idx(mesh.material_params.w);
+            let shell_phase = abalone_shell_phase(in.uv, talisman_relief_h, kind_idx);
+            let carve_phase = shell_phase + talisman_relief_h * select(6.0, 10.0, talisman_lustrous);
+            let carve_abalone = themed_abalone(carve_phase, accent, talisman_relief_h, kind_idx, talisman_lustrous);
+            let relief_mix = select(0.38, 0.58, talisman_lustrous);
+            albedo = mix(albedo, carve_abalone, relief_mix);
+            let relief_tone = 0.88 + 0.24 * smoothstep(0.42, 0.78, talisman_relief_h);
+            albedo = albedo * relief_tone;
         }
     }
     var rgb = vec3<f32>(0.0);
@@ -1471,9 +1586,10 @@ fn fs_main(
         sss_strength = 0.30;
         sss_tint = select(vec3<f32>(0.75, 0.55, 0.95), mesh.base_color.rgb * 1.1, is_score_glyph);
     } else if (is_chitin) {
-        wrap = 0.42;
-        sss_strength = 0.28;
-        sss_tint = mix(vec3<f32>(0.88, 0.86, 0.92), mesh.base_color.rgb, 0.45);
+        wrap = select(0.50, 0.54, talisman_lustrous);
+        sss_strength = select(0.38, 0.48, talisman_lustrous);
+        let accent_v = talisman_accent_vivid(mesh.base_color.rgb, talisman_lustrous);
+        sss_tint = mix(accent_v * 1.05, accent_v * 0.65 + vec3<f32>(0.35, 0.55, 0.48), select(0.35, 0.22, talisman_lustrous));
     } else if (is_porcelain) {
         // Porcelain: soft warm wrap so the glazed ceramic reads as
         // lit-through rather than flat painted. Tint biases slightly
@@ -1744,7 +1860,7 @@ fn fs_main(
                     spec_acc = spec_acc + lc * intensity * atten * cand_vis * sheen * polish_tint;
                 }
             } else if (is_chitin) {
-                // Mirror + holo bands are in the talisman block below.
+                // Nacre sheen is in the talisman block below.
             } else {
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis;
             }
@@ -1779,38 +1895,61 @@ fn fs_main(
 
             if (is_chitin) {
                 let accent = mesh.base_color.rgb;
-                let kind_idx = mesh.material_params.w;
-                let holo_phase = talisman_holo_phase(
+                let kind_idx = talisman_kind_idx(mesh.material_params.w);
+                let height_scale = select(4.0, 9.0, talisman_lustrous);
+                let shell_phase = abalone_shell_phase(in.uv, talisman_relief_h, kind_idx);
+                let nacre_phase = talisman_holo_phase(
                     n, view_dir, h, l_dir, kind_idx, chitin_rim_face,
+                    talisman_relief_h, height_scale,
+                ) + shell_phase * select(0.45, 0.85, talisman_lustrous);
+                let abalone_col = themed_abalone(nacre_phase, accent, talisman_relief_h, kind_idx, talisman_lustrous);
+                let streak_wave = 0.62 + 0.38 * fbm2(in.uv * vec2<f32>(7.5, 5.2) + vec2<f32>(kind_idx * 0.4, shell_phase * 0.06));
+                let streak = select(
+                    1.0,
+                    mix(select(0.98, 1.14, chitin_rim_face), 1.24, streak_wave),
+                    talisman_lustrous,
                 );
-                let holo_col = themed_holo(holo_phase, accent);
-                let streak_wave = 0.5 + 0.5 * cos(in.uv.y * 38.0 + kind_idx * 0.4);
-                let streak = mix(select(0.92, 1.20, chitin_rim_face), 1.45, streak_wave);
-                let f0 = mix(accent, holo_col, select(0.68, 0.52, chitin_rim_face));
-                let f_foil = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, select(4.0, 5.0, chitin_rim_face));
-                let mirror_pow = select(72.0, 22.0, chitin_rim_face);
-                let mirror_lobe = pow(nh, mirror_pow) * select(2.0, 1.0, chitin_rim_face) * streak;
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * mirror_lobe * f_foil;
-                let broad_lobe = pow(nh, select(10.0, 6.0, chitin_rim_face)) * select(0.72, 0.38, chitin_rim_face) * streak;
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * broad_lobe * holo_col;
 
-                let band_phase = holo_phase + nh * select(2.5, 0.8, chitin_rim_face);
-                let band_tint = themed_holo(band_phase, accent);
-                let band_gain = (select(0.28, 0.18, chitin_rim_face)
-                    + select(0.58, 0.30, chitin_rim_face) * pow(1.0 - ndv, select(1.6, 2.4, chitin_rim_face)))
-                    * streak;
-                let band_lobe = pow(nh, select(12.0, 6.0, chitin_rim_face)) * select(1.05, 0.50, chitin_rim_face);
-                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
-                    * band_lobe * band_gain * band_tint;
+                if (talisman_lustrous) {
+                    let f0 = mix(accent * 0.55, abalone_col, select(0.72, 0.62, chitin_rim_face));
+                    let f_foil = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, select(3.2, 4.5, chitin_rim_face));
+                    let mirror_pow = select(64.0, 24.0, chitin_rim_face);
+                    let mirror_lobe = pow(nh, mirror_pow) * select(2.0, 0.85, chitin_rim_face) * streak;
+                    spec_acc = spec_acc + lc * intensity * atten * cand_vis * mirror_lobe * f_foil;
+                }
 
-                let fresnel = select(0.14 + 0.52 * pow(1.0 - ndv, 1.8), 0.10 + 0.30 * pow(1.0 - ndv, 2.6), chitin_rim_face);
-                let lobe = pow(nh, select(8.0, 5.0, chitin_rim_face)) * select(0.82, 0.32, chitin_rim_face)
-                    + broad * select(0.24, 0.10, chitin_rim_face);
+                let sheen_pow = select(3.5, select(10.0, 6.0, chitin_rim_face), talisman_lustrous);
+                let sheen_gain = select(0.62, select(1.35, 0.72, chitin_rim_face), talisman_lustrous);
+                let fresnel = select(
+                    0.14 + 0.42 * pow(1.0 - ndv, 1.8),
+                    select(0.20 + 0.68 * pow(1.0 - ndv, 1.4), 0.14 + 0.36 * pow(1.0 - ndv, 2.2), chitin_rim_face),
+                    talisman_lustrous,
+                );
+                let lobe = pow(nh, sheen_pow) * sheen_gain
+                    + broad * select(0.20, select(0.38, 0.16, chitin_rim_face), talisman_lustrous);
                 sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
-                    * lobe * fresnel * themed_holo(holo_phase + 1.8, accent);
-                if (chitin_front_face) {
+                    * lobe * fresnel * themed_abalone(nacre_phase + 0.9, accent, talisman_relief_h, kind_idx, talisman_lustrous) * streak;
+
+                let film_lobe = pow(nh, select(2.8, 5.5, talisman_lustrous))
+                    * select(0.38, 0.72, talisman_lustrous);
+                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
+                    * film_lobe * themed_abalone(nacre_phase + 1.8, accent, talisman_relief_h, kind_idx, talisman_lustrous);
+
+                // Oily wet clearcoat — tight highlight + strong grazing bloom.
+                let wet_fresnel = pow(1.0 - ndv, select(2.2, 1.2, talisman_lustrous));
+                let wet_pow = select(22.0, 72.0, talisman_lustrous);
+                let wet_lobe = pow(nh, wet_pow) * select(0.52, 1.25, talisman_lustrous) * streak;
+                let wet_tint = mix(
+                    themed_abalone(nacre_phase + 0.4, accent, talisman_relief_h, kind_idx, talisman_lustrous),
+                    vec3<f32>(0.92, 0.96, 1.0),
+                    select(0.22, 0.38, talisman_lustrous),
+                );
+                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
+                    * wet_lobe * wet_fresnel * wet_tint;
+
+                if (chitin_front_face && talisman_lustrous) {
                     sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
-                        * broad * 0.18 * themed_holo(holo_phase - 0.9, accent);
+                        * broad * 0.28 * themed_abalone(nacre_phase - 0.7, accent, talisman_relief_h, kind_idx, true);
                 }
             } else if (is_jade) {
                 // Jade: waxy vitreous luster — a broad green-tinted sheen
@@ -2098,7 +2237,7 @@ fn fs_main(
         diffuse_scale = 0.18;
     }
     if (is_chitin) {
-        diffuse_scale = 0.44;
+        diffuse_scale = select(0.48, 0.30, talisman_lustrous);
     }
     // Gold-painted fragments inside carved decals are conductors: almost
     // all energy goes into the tinted Fresnel spec lobe, very little
@@ -2137,8 +2276,8 @@ fn fs_main(
             spec_acc = spec_acc * 0.30;
             sheen_acc = sheen_acc * 0.30;
         } else if (is_chitin) {
-            spec_acc = spec_acc * 0.68;
-            sheen_acc = sheen_acc * 0.80;
+            spec_acc = spec_acc * 0.92;
+            sheen_acc = sheen_acc * 0.95;
         } else if (is_talisman) {
             spec_acc = spec_acc * 0.26;
             sheen_acc = sheen_acc * 0.26;
@@ -2152,19 +2291,31 @@ fn fs_main(
         let edge = 1.0 - ndv_view;
         if (is_chitin) {
             let accent = mesh.base_color.rgb;
-            let kind_idx = mesh.material_params.w;
-            let phase = talisman_holo_phase_view(n, view_dir, kind_idx, chitin_rim_face);
-            let holo = themed_holo(phase, accent);
-            let rim = pow(edge, select(1.4, 2.2, chitin_rim_face)) * select(0.34, 0.20, chitin_rim_face);
-            albedo = mix(albedo, holo * 0.82, rim);
+            let kind_idx = talisman_kind_idx(mesh.material_params.w);
+            let height_scale = select(4.0, 9.0, talisman_lustrous);
+            let shell_phase = abalone_shell_phase(in.uv, talisman_relief_h, kind_idx);
+            let phase = talisman_holo_phase_view(
+                n, view_dir, kind_idx, chitin_rim_face, talisman_relief_h, height_scale,
+            ) + shell_phase * select(0.45, 0.85, talisman_lustrous);
+            let abalone = themed_abalone(phase, accent, talisman_relief_h, kind_idx, talisman_lustrous);
+            let body_mix = select(0.50, 0.78, talisman_lustrous)
+                * (0.80 + 0.20 * pow(1.0 - ndv_view, 1.0));
+            albedo = mix(albedo, abalone * 1.15, body_mix);
+            let rim = pow(edge, select(1.4, select(1.0, 1.8, chitin_rim_face), talisman_lustrous))
+                * select(0.32, select(0.58, 0.34, chitin_rim_face), talisman_lustrous);
+            albedo = mix(albedo, themed_abalone(phase + 1.5, accent, talisman_relief_h, kind_idx, talisman_lustrous) * 1.12, rim);
             let face_mix = select(
-                0.30 * (1.0 - pow(ndv_view, 1.0)),
-                0.12 * (1.0 - pow(ndv_view, 1.4)),
-                chitin_rim_face,
+                0.26 * (1.0 - pow(ndv_view, 1.1)),
+                select(
+                    0.52 * (1.0 - pow(ndv_view, 0.75)),
+                    0.28 * (1.0 - pow(ndv_view, 1.2)),
+                    chitin_rim_face,
+                ),
+                talisman_lustrous,
             );
-            albedo = mix(albedo, themed_holo(phase + 2.1, accent) * 0.85, face_mix);
+            albedo = mix(albedo, themed_abalone(phase + 2.3, accent, talisman_relief_h, kind_idx, talisman_lustrous) * 1.10, face_mix);
             if (chitin_front_face) {
-                albedo = mix(albedo, accent * 0.45 + holo * 0.55, 0.18);
+                albedo = mix(albedo, accent * 0.15 + abalone * 0.85, select(0.32, 0.55, talisman_lustrous));
             }
         } else if (is_jade) {
             // Jade: edges brighten toward a cooler, lighter green.
@@ -2304,19 +2455,20 @@ fn fs_main(
         albedo = mix(albedo, warm_edge, rim);
     }
 
-    // Directional shadow map (mesh casters): PCF visibility in key-light
-    // space. Analytic candle AABB occlusion (`cand_vis` above) still gates
-    // each wick; this adds contact shadows from tall geometry onto the felt.
+    // Legacy combined min-shadow across all punctual depth layers. Per-light
+    // `punctual_shadow_vis` above already samples the correct layer per light;
+    // applying combined again double-darkens and reads misaligned maps as black slabs.
     // Shop catalog: spec-forward props get less direct diffuse; art-forward get shadow floor.
     var lit_display_case = lit;
     if (shop_spec_forward) {
         lit_display_case = lit_display_case * 0.42;
     }
+    let projected_shadows_on = shadow_globals.params.x > 0.5;
     // Portrait silk (zodiac ribbon): skip key-light shadow — same rule as archive decals.
     var shadow_vis = select(
         combined_mesh_shadow_vis(in.world_pos),
         1.0,
-        skip_directional_shadow,
+        skip_directional_shadow || projected_shadows_on,
     );
     if (shop_art_forward && shop_cat_shadow_floor > 0.001) {
         shadow_vis = max(shadow_vis, shop_cat_shadow_floor);

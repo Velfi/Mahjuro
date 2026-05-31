@@ -23,6 +23,7 @@ import io
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Iterable, Sequence, Union
 
@@ -190,33 +191,67 @@ def _coerce_ref(ref: RefImage):
     raise TypeError(f"unsupported ref type: {type(ref).__name__}")
 
 
-def generate_image_bytes(
+def _candidate_image_parts(candidate) -> list:
+    """Return inline image parts from one candidate, or [] if content is missing."""
+    content = getattr(candidate, "content", None)
+    if content is None:
+        return []
+    parts = getattr(content, "parts", None)
+    if not parts:
+        return []
+    return [
+        part
+        for part in parts
+        if getattr(getattr(part, "inline_data", None), "data", None)
+    ]
+
+
+def _describe_gemini_response(response, candidate=None) -> str:
+    """Summarise why a Gemini image response did not include usable bytes."""
+    details: list[str] = []
+
+    prompt_feedback = getattr(response, "prompt_feedback", None)
+    if prompt_feedback is not None:
+        block_reason = getattr(prompt_feedback, "block_reason", None)
+        if block_reason:
+            details.append(f"prompt block_reason={block_reason!r}")
+        block_message = getattr(prompt_feedback, "block_reason_message", None)
+        if block_message:
+            details.append(f"prompt block_message={block_message!r}")
+
+    if candidate is not None:
+        finish_reason = getattr(candidate, "finish_reason", None)
+        if finish_reason:
+            details.append(f"finish_reason={finish_reason!r}")
+        if getattr(candidate, "content", None) is None:
+            details.append("candidate content missing")
+        else:
+            parts = getattr(candidate.content, "parts", None)
+            if not parts:
+                details.append("candidate parts missing")
+
+        safety_ratings = getattr(candidate, "safety_ratings", None) or []
+        blocked = [
+            f"{getattr(r, 'category', '?')}={getattr(r, 'probability', '?')}"
+            for r in safety_ratings
+            if str(getattr(r, "probability", "")).endswith("HIGH")
+            or str(getattr(r, "blocked", False)).lower() == "true"
+        ]
+        if blocked:
+            details.append("safety: " + ", ".join(blocked))
+
+    return "; ".join(details) if details else "unknown failure"
+
+
+def _generate_image_bytes_once(
     client: "genai.Client",
     prompt: str,
     *,
-    model: str = DEFAULT_MODEL,
-    aspect_ratio: str = "1:1",
-    image_size: str | None = "1K",
-    refs: Sequence[RefImage] = (),
+    model: str,
+    aspect_ratio: str,
+    image_size: str | None,
+    refs: Sequence[RefImage],
 ) -> bytes:
-    """Run one Nano Banana 2 generation and return PNG bytes.
-
-    `refs` are appended to the prompt as additional content parts — use
-    for image-edit / reference flows (the previous OpenAI `images.edit`
-    pattern). Each ref may be PNG/JPEG bytes, a `PIL.Image`, or a `Path`.
-
-    `image_size` is silently ignored on older google-genai builds whose
-    `ImageConfig` only exposes `aspect_ratio`.
-    """
-    if genai_types is None:
-        raise RuntimeError("google-genai not installed")
-    if aspect_ratio not in GEMINI_ASPECT_RATIOS:
-        raise ValueError(
-            f"aspect_ratio {aspect_ratio!r} not supported; valid: "
-            f"{GEMINI_ASPECT_RATIOS}"
-        )
-    image_size = _normalize_image_size(image_size)
-
     contents: list = [prompt]
     for ref in refs:
         contents.append(_coerce_ref(ref))
@@ -236,9 +271,70 @@ def generate_image_bytes(
 
     candidates = getattr(response, "candidates", None) or []
     if not candidates:
-        raise RuntimeError("Gemini response had no candidates")
-    for part in candidates[0].content.parts:
-        inline = getattr(part, "inline_data", None)
-        if inline is not None and getattr(inline, "data", None):
-            return inline.data
-    raise RuntimeError("Gemini response had no inline image data")
+        detail = _describe_gemini_response(response)
+        raise RuntimeError(f"Gemini response had no candidates ({detail})")
+
+    for candidate in candidates:
+        for part in _candidate_image_parts(candidate):
+            return part.inline_data.data
+
+    detail = _describe_gemini_response(response, candidates[0])
+    raise RuntimeError(f"Gemini response had no inline image data ({detail})")
+
+
+def generate_image_bytes(
+    client: "genai.Client",
+    prompt: str,
+    *,
+    model: str = DEFAULT_MODEL,
+    aspect_ratio: str = "1:1",
+    image_size: str | None = "1K",
+    refs: Sequence[RefImage] = (),
+    max_attempts: int = 3,
+    retry_delay: float = 2.0,
+) -> bytes:
+    """Run one Nano Banana 2 generation and return PNG bytes.
+
+    `refs` are appended to the prompt as additional content parts — use
+    for image-edit / reference flows (the previous OpenAI `images.edit`
+    pattern). Each ref may be PNG/JPEG bytes, a `PIL.Image`, or a `Path`.
+
+    `image_size` is silently ignored on older google-genai builds whose
+    `ImageConfig` only exposes `aspect_ratio`.
+
+    Retries transient empty/blocked responses up to `max_attempts` times.
+    """
+    if genai_types is None:
+        raise RuntimeError("google-genai not installed")
+    if aspect_ratio not in GEMINI_ASPECT_RATIOS:
+        raise ValueError(
+            f"aspect_ratio {aspect_ratio!r} not supported; valid: "
+            f"{GEMINI_ASPECT_RATIOS}"
+        )
+    image_size = _normalize_image_size(image_size)
+
+    attempts = max(1, max_attempts)
+    last_error: RuntimeError | None = None
+    for attempt in range(attempts):
+        try:
+            return _generate_image_bytes_once(
+                client,
+                prompt,
+                model=model,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
+                refs=refs,
+            )
+        except RuntimeError as exc:
+            last_error = exc
+            if attempt + 1 >= attempts:
+                break
+            delay = retry_delay * (2**attempt)
+            print(
+                f"  Gemini image gen failed ({exc}); retrying in {delay:.1f}s …",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+
+    assert last_error is not None
+    raise last_error

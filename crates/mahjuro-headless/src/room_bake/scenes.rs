@@ -5,8 +5,8 @@ use mahjuro::game::run::RunState;
 use mahjuro::render::room_gi_bake::RoomGiRoom;
 use mahjuro::scenes::shop::ShopScene;
 use mahjuro::scenes::{
-    CollectionScene, GameplayScene, MainMenuExteriorScene, PickChamberScene, Scene,
-    StaircaseScene,
+    ArchiveScene, GameplayScene, MainMenuScene, HallwayScene, Scene,
+    StairwayScene,
 };
 
 use super::fixtures::{setup_gameplay_bake_state, setup_shop_state};
@@ -23,21 +23,21 @@ pub fn scene_for_room(
             (Scene::Shop(ShopScene::new(&mut run, progress)), run, false)
         }
         RoomGiRoom::Hallway => (
-            Scene::PickChamber(PickChamberScene::new()),
+            Scene::Hallway(HallwayScene::new()),
             run,
             true,
         ),
         RoomGiRoom::Archive => {
-            let coll = CollectionScene::new();
-            (Scene::Collection(coll), run, false)
+            let coll = ArchiveScene::new();
+            (Scene::Archive(coll), run, false)
         }
         RoomGiRoom::MainMenu => (
-            Scene::MainMenuExterior(MainMenuExteriorScene::new()),
+            Scene::MainMenu(MainMenuScene::new()),
             run,
             false,
         ),
-        RoomGiRoom::Staircase => (
-            Scene::Staircase(StaircaseScene::new()),
+        RoomGiRoom::Stairway => (
+            Scene::Stairway(StairwayScene::new()),
             run,
             false,
         ),

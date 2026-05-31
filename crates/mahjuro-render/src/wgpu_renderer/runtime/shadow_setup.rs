@@ -6,6 +6,7 @@ use crate::projected_light_shadow::{
     punctual_shadow_setups_changed,
 };
 use crate::room_gi_bake::RoomGiRoom;
+use crate::scene_keys;
 use mahjuro_gfx_types::ShadowQuality;
 
 /// Which imported room mesh is active this frame (at most one is drawn).
@@ -13,7 +14,7 @@ use mahjuro_gfx_types::ShadowQuality;
 pub(crate) enum ActiveRoomEnv {
     Shop,
     Hallway,
-    Staircase,
+    Stairway,
     Archive,
     MainMenu,
     Gameplay,
@@ -25,7 +26,7 @@ pub fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
         match cmd {
             DrawCmd::ShopEnvironment => return Some(ActiveRoomEnv::Shop),
             DrawCmd::HallwayEnvironment => return Some(ActiveRoomEnv::Hallway),
-            DrawCmd::StaircaseEnvironment => return Some(ActiveRoomEnv::Staircase),
+            DrawCmd::StaircaseEnvironment => return Some(ActiveRoomEnv::Stairway),
             DrawCmd::ArchiveEnvironment => return Some(ActiveRoomEnv::Archive),
             DrawCmd::MainMenuEnvironment => return Some(ActiveRoomEnv::MainMenu),
             DrawCmd::GameplayEnvironment => return Some(ActiveRoomEnv::Gameplay),
@@ -41,7 +42,7 @@ impl ActiveRoomEnv {
         match self {
             Self::Shop => Some(RoomGiRoom::Shop),
             Self::Hallway => Some(RoomGiRoom::Hallway),
-            Self::Staircase => Some(RoomGiRoom::Staircase),
+            Self::Stairway => Some(RoomGiRoom::Stairway),
             Self::Archive => Some(RoomGiRoom::Archive),
             Self::MainMenu => Some(RoomGiRoom::MainMenu),
             Self::Gameplay => Some(RoomGiRoom::Gameplay),
@@ -59,7 +60,7 @@ impl ActiveRoomEnv {
             Self::Hallway => {
                 crate::hallway_glb::with_hallway_glb_cpu(|o| o.and_then(|c| c.environment_bounds_doc))
             }
-            Self::Staircase => {
+            Self::Stairway => {
                 crate::staircase_glb::with_staircase_glb_cpu(|o| {
                     o.and_then(|c| c.environment_bounds_doc)
                 })
@@ -78,14 +79,23 @@ impl ActiveRoomEnv {
     /// Fallback when the frame has no room-environment draw cmd yet.
     pub fn from_scene_key(key: &str) -> Option<Self> {
         match key {
-            "shop" | "animation_lab" => Some(Self::Shop),
-            "hallway" | "pick_chamber" => Some(Self::Hallway),
-            "staircase" => Some(Self::Staircase),
-            "archive" | "collection" => Some(Self::Archive),
-            "main_menu" | "main_menu_exterior" => Some(Self::MainMenu),
-            "gameplay" | "tutorial" | "game_over" | "roller_lab" | "cascade_lab" => {
-                Some(Self::Gameplay)
-            }
+            scene_keys::SHOP | "animation_lab" => Some(Self::Shop),
+            scene_keys::HALLWAY => Some(Self::Hallway),
+            scene_keys::STAIRWAY => Some(Self::Stairway),
+            scene_keys::ARCHIVE => Some(Self::Archive),
+            scene_keys::MAIN_MENU => Some(Self::MainMenu),
+            scene_keys::GAMEPLAY
+            | scene_keys::VICTORY
+            | scene_keys::DEFEAT
+            | "tutorial"
+            | "roller_lab"
+            | "cascade_lab" => Some(Self::Gameplay),
+            // Legacy aliases (tuning overrides, screenshot CLI, old saves).
+            "pick_chamber" | "pick_blind" => Some(Self::Hallway),
+            "staircase" => Some(Self::Stairway),
+            "collection" => Some(Self::Archive),
+            "main_menu_exterior" => Some(Self::MainMenu),
+            "game_over" => Some(Self::Gameplay),
             _ => None,
         }
     }
@@ -101,29 +111,12 @@ impl ActiveRoomEnv {
             Self::Gameplay => crate::gameplay_glb::with_gameplay_glb_cpu(|o| o.map(node)).flatten(),
             Self::Shop => crate::room_glb::with_shop_glb_cpu(|o| o.map(node)).flatten(),
             Self::Hallway => crate::hallway_glb::with_hallway_glb_cpu(|o| o.map(node)).flatten(),
-            Self::Staircase => {
+            Self::Stairway => {
                 crate::staircase_glb::with_staircase_glb_cpu(|o| o.map(node)).flatten()
             }
             Self::Archive => crate::archive_glb::with_archive_glb_cpu(|o| o.map(node)).flatten(),
             Self::MainMenu => {
                 crate::main_menu_glb::with_main_menu_glb_cpu(|o| o.map(node)).flatten()
-            }
-        }
-    }
-
-    #[inline]
-    pub fn has_embedded_spot_lights(self) -> bool {
-        let has_spots = |cpu: &crate::room_glb::RoomGlbCpu| !cpu.embedded_spot_lights.is_empty();
-        match self {
-            Self::Gameplay => crate::gameplay_glb::with_gameplay_glb_cpu(|o| o.is_some_and(has_spots)),
-            Self::Shop => crate::room_glb::with_shop_glb_cpu(|o| o.is_some_and(has_spots)),
-            Self::Hallway => crate::hallway_glb::with_hallway_glb_cpu(|o| o.is_some_and(has_spots)),
-            Self::Staircase => {
-                crate::staircase_glb::with_staircase_glb_cpu(|o| o.is_some_and(has_spots))
-            }
-            Self::Archive => crate::archive_glb::with_archive_glb_cpu(|o| o.is_some_and(has_spots)),
-            Self::MainMenu => {
-                crate::main_menu_glb::with_main_menu_glb_cpu(|o| o.is_some_and(has_spots))
             }
         }
     }
@@ -198,8 +191,9 @@ impl WgpuRenderer {
         let env_height_scale = active_room_env
             .map(|e| self.room_env_shadow_height_scale(e))
             .unwrap_or_else(|| self.active_frame_env().height_scale);
-        let screen_w = self.size.width.max(1) as f32;
-        let screen_h = self.size.height.max(1) as f32;
+        // Match [`PointLightsBuf::from_scene_punctual`] — same window dims as [`CameraFrame`].
+        let screen_w = camera.w;
+        let screen_h = camera.h;
         let use_ray_plane = frame
             .showcase_render_hints
             .layout_uses_ray_plane(self.active_scene_key);
@@ -208,7 +202,7 @@ impl WgpuRenderer {
             active_room_env,
             screen_w,
             screen_h,
-            camera.h,
+            screen_h,
             env_height_scale,
             bounds_doc,
             frame.camera_override.as_ref(),
@@ -263,21 +257,17 @@ impl WgpuRenderer {
         );
     }
 
-    /// Realtime shadows are punctual-only; spot lights are a content error.
+    /// Realtime shadows are punctual-only; glTF spot lights are a content error.
     pub(super) fn warn_if_spot_lights_present(&self, frame: &UiFrame) {
-        if frame.scene_lighting.spot_lights.is_empty() {
-            return;
-        }
-        let active_room_env = active_room_env(frame)
-            .or_else(|| self.active_scene_key.and_then(ActiveRoomEnv::from_scene_key));
-        if !active_room_env.is_some_and(ActiveRoomEnv::has_embedded_spot_lights) {
-            // Programmatic/runtime spot lights are valid; only flag glTF-authored spot lights.
+        if frame.scene_lighting.spot_lights.is_empty() || !frame.scene_lighting.spot_lights_from_gltf
+        {
             return;
         }
         static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
             log::error!(
-                "scene submitted {} spot light(s); realtime spot shadows are unsupported (punctual-only shadow path)",
+                "scene submitted {} glTF spot light(s); remove embedded spots from the room \
+                 `.glb` or use programmatic spots only (realtime spot shadows are unsupported)",
                 frame.scene_lighting.spot_lights.len(),
             );
         }
@@ -477,14 +467,35 @@ pub(super) fn object3d_casts_dynamic_shadow(
     active_room: Option<ActiveRoomEnv>,
     anim_id: u64,
 ) -> bool {
-    let _ = anim_id;
     match active_room {
         None
         | Some(ActiveRoomEnv::Shop)
         | Some(ActiveRoomEnv::Hallway)
         | Some(ActiveRoomEnv::MainMenu)
         | Some(ActiveRoomEnv::Gameplay)
-        | Some(ActiveRoomEnv::Staircase)
-        | Some(ActiveRoomEnv::Archive) => true,
+        | Some(ActiveRoomEnv::Stairway) => true,
+        Some(ActiveRoomEnv::Archive) => anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID,
+    }
+}
+
+#[cfg(test)]
+mod object3d_shadow_tests {
+    use super::object3d_casts_dynamic_shadow;
+    use crate::draw_cmd::SHOP_INSPECT_SUBJECT_ANIM_ID;
+    use crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
+
+    #[test]
+    fn archive_grid_cubbies_do_not_cast_dynamic_shadow() {
+        let env = Some(ActiveRoomEnv::Archive);
+        assert!(!object3d_casts_dynamic_shadow(env, 0));
+        assert!(!object3d_casts_dynamic_shadow(env, 7));
+        assert!(!object3d_casts_dynamic_shadow(
+            env,
+            crate::draw_cmd::ARCHIVE_FEATURED_ANIM_ID
+        ));
+        assert!(object3d_casts_dynamic_shadow(
+            env,
+            SHOP_INSPECT_SUBJECT_ANIM_ID
+        ));
     }
 }

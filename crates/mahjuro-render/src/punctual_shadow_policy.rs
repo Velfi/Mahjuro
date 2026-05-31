@@ -23,7 +23,7 @@ pub(crate) fn punctual_light_casts_shadow(
         ActiveRoomEnv::Gameplay
         | ActiveRoomEnv::Archive
         | ActiveRoomEnv::Hallway
-        | ActiveRoomEnv::Staircase => true,
+        | ActiveRoomEnv::Stairway => true,
     }
 }
 

@@ -8,6 +8,7 @@
 //! Local space spans `-0.5..+0.5` on each axis so a per-instance scale matrix
 //! sizes it via the `OfudaPlacement.extents`.
 
+use crate::cap_extrude::parametric_cap_uv;
 use crate::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::tile_glb::Vertex3dTex;
 
@@ -39,10 +40,11 @@ pub fn build_ofuda_mesh() -> MeshCpu {
     //   v17 = (x1, y0, z1)  screen-right, screen-bottom → [1, 1]
     //   v18 = (x1, y1, z1)  screen-right, screen-top    → [1, 0]
     //   v19 = (x0, y1, z1)  screen-left,  screen-top    → [0, 0]
-    vertices[16].uv = [0.0, 1.0];
-    vertices[17].uv = [1.0, 1.0];
-    vertices[18].uv = [1.0, 0.0];
-    vertices[19].uv = [0.0, 0.0];
+    // +Z paper face: [`parametric_cap_uv`] (+Y screen-top → low v).
+    vertices[16].uv = parametric_cap_uv(-0.5, -0.5);
+    vertices[17].uv = parametric_cap_uv(0.5, -0.5);
+    vertices[18].uv = parametric_cap_uv(0.5, 0.5);
+    vertices[19].uv = parametric_cap_uv(-0.5, 0.5);
     // Every non-front face (including the -Z back) samples the transparent
     // (0,0) corner of the decal so the title/rule only appears on the +Z
     // paper face. The shader composites decal as `mix(albedo, tex_rgb,

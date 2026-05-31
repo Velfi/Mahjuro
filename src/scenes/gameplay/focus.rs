@@ -59,6 +59,8 @@ pub(super) enum FocusTarget {
     Journal,
     /// Guide book on the table (`player_guidebook` empty).
     Guidebook,
+    /// Lower-right wall supply HUD (opens Wall Ledger).
+    WallHud,
 }
 
 pub(super) const ALL_BUTTONS: [GameplayButton; 3] = [
@@ -106,16 +108,30 @@ pub(super) fn wrap_hand_tile_focus(
 /// in the focus graph.
 pub(super) fn focus_after_consumable_use(
     used_idx: usize,
-    remaining: usize,
+    remaining_consumables: usize,
+    hand_len: usize,
     focus_rects: &[(FocusTarget, [f32; 4])],
 ) -> Option<FocusTarget> {
-    if remaining > 0 {
-        let next = used_idx.min(remaining - 1);
+    if remaining_consumables > 0 {
+        let next = used_idx.min(remaining_consumables - 1);
         return Some(FocusTarget::Consumable(next));
+    }
+    default_hand_tile_focus(hand_len, focus_rects)
+}
+
+/// First hand tile in the focus graph, or slot 0 when the graph is not
+/// built yet (first frame after deal).
+pub(super) fn default_hand_tile_focus(
+    hand_len: usize,
+    focus_rects: &[(FocusTarget, [f32; 4])],
+) -> Option<FocusTarget> {
+    if hand_len == 0 {
+        return None;
     }
     focus_rects
         .iter()
         .find_map(|(t, _)| matches!(t, FocusTarget::HandTile(_)).then_some(*t))
+        .or(Some(FocusTarget::HandTile(0)))
 }
 
 pub(super) fn play_select_sfx(
@@ -161,7 +177,7 @@ pub(super) fn focus_kind(f: Option<FocusTarget>) -> Option<FocusKind> {
         FocusTarget::Dora => Some(FocusKind::Dora),
         FocusTarget::Ordeal => Some(FocusKind::Ordeal),
         FocusTarget::RoundWind => Some(FocusKind::RoundWind),
-        FocusTarget::DiscardUndo | FocusTarget::Journal | FocusTarget::Guidebook => {
+        FocusTarget::DiscardUndo | FocusTarget::Journal | FocusTarget::Guidebook | FocusTarget::WallHud => {
             Some(FocusKind::Button)
         }
     }

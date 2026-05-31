@@ -18,6 +18,8 @@
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
+use crate::scene_keys;
+
 /// Per-scene tonemap + VHS knobs. All terms are read by
 /// `shaders/tonemap_composite.wgsl`; ranges chosen so the slider in the
 /// debug overlay covers "off" through "obvious effect" without going
@@ -105,15 +107,18 @@ pub const FALLBACK_SCENE_KEY: &str = "_default";
 /// even when the player isn't currently in that scene (eventually) and
 /// so callers loading at boot can warm the right entries.
 pub const KNOWN_SCENE_KEYS: &[&str] = &[
-    "gameplay",
-    "shop",
-    "pick_chamber",
-    "main_menu_exterior",
+    scene_keys::MAIN_MENU,
+    scene_keys::SHOP,
+    scene_keys::HALLWAY,
+    scene_keys::GAMEPLAY,
+    scene_keys::ARCHIVE,
+    scene_keys::OPTIONS,
+    scene_keys::STAIRWAY,
+    scene_keys::VICTORY,
+    scene_keys::DEFEAT,
     "tutorial",
-    "collection",
     "showcase",
     "tile_pack_celebration",
-    "staircase",
     "guide",
     "yaku_journal",
 ];
@@ -137,13 +142,20 @@ impl TonemapTuningSet {
         );
         let mut per_scene = FxHashMap::default();
         for &key in KNOWN_SCENE_KEYS {
-            // `load_tuning_override` returns `T::default()` when the key
-            // is absent; we only want entries that actually live on disk
-            // so the overlay can show "(default)" for untouched scenes.
             if mahjuro_gfx_types::has_tuning_override(&storage_key(key)) {
                 let t =
                     mahjuro_gfx_types::load_tuning_override::<TonemapTuning>(&storage_key(key));
                 per_scene.insert(key.to_string(), t);
+                continue;
+            }
+            for &legacy in scene_keys::legacy_aliases(key) {
+                if mahjuro_gfx_types::has_tuning_override(&storage_key(legacy)) {
+                    let t = mahjuro_gfx_types::load_tuning_override::<TonemapTuning>(
+                        &storage_key(legacy),
+                    );
+                    per_scene.insert(key.to_string(), t);
+                    break;
+                }
             }
         }
         Self {

@@ -3,6 +3,7 @@
 
 use crate::core::relic::RelicFlavorSpan;
 use crate::render::draw_cmd::UiFrame;
+use crate::render::scene_keys;
 use crate::render::staircase_glb;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::PointLight;
@@ -14,17 +15,17 @@ use crate::ui::input::UiAction;
 
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
-pub struct StaircaseScene {
+pub struct StairwayScene {
     flavor: &'static [RelicFlavorSpan],
 }
 
-impl Default for StaircaseScene {
+impl Default for StairwayScene {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl StaircaseScene {
+impl StairwayScene {
     pub fn new() -> Self {
         Self {
             flavor: crate::core::staircase_flavor::random_entry_flavor(),
@@ -66,7 +67,7 @@ fn push_flavor_text(frame: &mut UiFrame, w: f32, h: f32, flavor: &'static [Relic
     });
 }
 
-impl SceneBehavior for StaircaseScene {
+impl SceneBehavior for StairwayScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         if ctx
             .actions
@@ -95,23 +96,23 @@ impl SceneBehavior for StaircaseScene {
             let room_glb = staircase_glb::staircase_glb_has_embedded_lights();
             frame.scene_lighting.embedded_gltf_punctual = room_glb;
             frame.scene_lighting.room_glb_brdf = room_glb;
-            frame.scene_lighting.spot_lights = if room_glb {
+            frame.scene_lighting.set_gltf_embedded_spot_lights(if room_glb {
                 staircase_glb::staircase_embedded_spot_lights_runtime(
                     w,
                     h,
                     ctx.room_gltf_height_scale,
-                    &ctx.room_env_for("staircase").0,
+                    &ctx.room_env_for(scene_keys::STAIRWAY).0,
                 )
             } else {
                 Vec::new()
-            };
+            });
             let (inverse_punctual, punctual_gltf_nodes) = if room_glb {
                 crate::render::room_gltf_punctual::tagged_to_scene_punctual(
                     staircase_glb::staircase_embedded_point_lights_runtime_tagged(
                         w,
                         h,
                         ctx.room_gltf_height_scale,
-                        &ctx.room_env_for("staircase").0,
+                        &ctx.room_env_for(scene_keys::STAIRWAY).0,
                     ),
                 )
             } else {

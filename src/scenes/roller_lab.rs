@@ -9,7 +9,7 @@ use crate::render::theme::{self, ButtonState, ButtonVariant, color, metrics, typ
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::main_menu_exterior::MainMenuExteriorScene;
+use super::main_menu::MainMenuScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const CLICK_PREV: u32 = 0xE210;
@@ -55,7 +55,7 @@ impl RollerLabScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
+            Some(Scene::MainMenu(MainMenuScene::new()))
         }
     }
 
@@ -145,10 +145,11 @@ impl SceneBehavior for RollerLabScene {
                 .into_iter()
                 .map(crate::render::draw_cmd::ScenePunctualLight::InverseSquare)
                 .collect();
-            frame.scene_lighting.spot_lights =
+            frame.scene_lighting.set_gltf_embedded_spot_lights(
                 crate::render::gameplay_glb::gameplay_embedded_spot_lights_runtime(
                     w, h, env_h, &tune,
-                );
+                ),
+            );
         }
 
         let btn_y = h * 0.92;

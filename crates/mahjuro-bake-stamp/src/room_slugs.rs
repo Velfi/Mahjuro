@@ -5,6 +5,6 @@ pub const ALL: &[&str] = &[
     "hallway",
     "archive",
     "main_menu",
-    "staircase",
+    "stairway",
     "gameplay",
 ];

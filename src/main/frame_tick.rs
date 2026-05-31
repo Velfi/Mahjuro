@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::render::scene_keys;
 use crate::scene_transition::{
     DEFAULT_QUICK_SPEC, PendingSceneDestination, PostSceneTransitionCtx, SceneTag,
     apply_post_scene_transition_effects, sync_music_for_scene, transition_spec_for_edge,
@@ -19,7 +20,7 @@ impl App {
             || self.transition_alpha < 1.0
             || self.modals.is_active()
             || !self.overlay_stack.is_empty()
-            || !matches!(self.scene, Scene::MainMenuExterior(_))
+            || !matches!(self.scene, Scene::MainMenu(_))
         {
             return;
         }
@@ -812,7 +813,7 @@ impl App {
                 },
                 shop: if matches!(
                     scene_key,
-                    Some("shop") | Some("showcase") | Some("pick_chamber")
+                    Some(scene_keys::SHOP) | Some("showcase") | Some(scene_keys::HALLWAY)
                 ) {
                     r.pick_shop_object(cursor_pos.0, cursor_pos.1)
                 } else {
@@ -854,7 +855,7 @@ impl App {
             let active_scene = self.overlay_stack.last().unwrap_or(&self.scene);
             match active_scene {
                 Scene::YakuJournal(_) => true,
-                Scene::Collection(scene) => scene.is_chronicle_tab(),
+                Scene::Archive(scene) => scene.is_chronicle_tab(),
                 Scene::Credits(_) => true,
                 _ => false,
             }
@@ -960,11 +961,11 @@ impl App {
                         if matches!(s.presenter, scenes::ShowcasePresenter::ShopInspect(_))
                 )
             });
-            let showcase_collection_inspect = self.overlay_stack.last().is_some_and(|top| {
+            let showcase_archive_inspect = self.overlay_stack.last().is_some_and(|top| {
                 matches!(
                     top,
                     Scene::Showcase(s)
-                        if matches!(s.presenter, scenes::ShowcasePresenter::CollectionInspect(_))
+                        if matches!(s.presenter, scenes::ShowcasePresenter::ArchiveInspect(_))
                 )
             });
             let (suspended_shop, suspended_collection) = match &mut self.scene {
@@ -972,7 +973,7 @@ impl App {
                     shop.tick_suspended_animation_clock();
                     (Some(shop), None)
                 }
-                Scene::Collection(collection) if showcase_collection_inspect => {
+                Scene::Archive(collection) if showcase_archive_inspect => {
                     (None, Some(collection))
                 }
                 _ => (None, None),
@@ -1045,7 +1046,7 @@ impl App {
                         .unwrap_or_else(crate::render::flame_tuning::FlameTuning::load),
                 })
         };
-        if matches!(&self.scene, crate::scenes::Scene::MainMenuExterior(_)) {
+        if matches!(&self.scene, crate::scenes::Scene::MainMenu(_)) {
             self.effect_layers.rain = true;
             self.effect_layers.starfield = true;
         }

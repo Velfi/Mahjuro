@@ -36,22 +36,23 @@ pub(crate) const DEFAULT_QUICK_SPEC: TransitionSpec = TransitionSpec {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum SceneTag {
     Splash,
-    MainMenuExterior,
+    MainMenu,
     TileSelect,
     ProfileSelect,
     Shop,
     Showcase,
-    PickChamber,
-    Staircase,
+    Hallway,
+    Stairway,
     Gameplay,
-    GameOver,
+    Victory,
+    Defeat,
     Guide,
     MaterialViewer,
     TileAnchorLab,
     ButtonAabbLab,
     Options,
     Credits,
-    Collection,
+    Archive,
     TutorialCampaign,
     TutorialSummary,
     TransitionPlayground,
@@ -59,28 +60,30 @@ pub(crate) enum SceneTag {
     RumbleLab,
     Tixels,
     YakuJournal,
+    WallLedger,
 }
 
 impl From<&Scene> for SceneTag {
     fn from(scene: &Scene) -> Self {
         match scene {
             Scene::Splash(_) => SceneTag::Splash,
-            Scene::MainMenuExterior(_) => SceneTag::MainMenuExterior,
+            Scene::MainMenu(_) => SceneTag::MainMenu,
             Scene::TileSelect(_) => SceneTag::TileSelect,
             Scene::ProfileSelect(_) => SceneTag::ProfileSelect,
             Scene::Shop(_) => SceneTag::Shop,
             Scene::Showcase(_) => SceneTag::Showcase,
-            Scene::PickChamber(_) => SceneTag::PickChamber,
-            Scene::Staircase(_) => SceneTag::Staircase,
+            Scene::Hallway(_) => SceneTag::Hallway,
+            Scene::Stairway(_) => SceneTag::Stairway,
             Scene::Gameplay(_) => SceneTag::Gameplay,
-            Scene::GameOver(_) => SceneTag::GameOver,
+            Scene::Victory(_) => SceneTag::Victory,
+            Scene::Defeat(_) => SceneTag::Defeat,
             Scene::Guide(_) => SceneTag::Guide,
             Scene::MaterialViewer(_) => SceneTag::MaterialViewer,
             Scene::TileAnchorLab(_) => SceneTag::TileAnchorLab,
             Scene::ButtonAabbLab(_) => SceneTag::ButtonAabbLab,
             Scene::Options(_) => SceneTag::Options,
             Scene::Credits(_) => SceneTag::Credits,
-            Scene::Collection(_) => SceneTag::Collection,
+            Scene::Archive(_) => SceneTag::Archive,
             Scene::TutorialCampaign(_) => SceneTag::TutorialCampaign,
             Scene::TutorialSummary(_) => SceneTag::TutorialSummary,
             Scene::TransitionPlayground(_) => SceneTag::TransitionPlayground,
@@ -90,6 +93,7 @@ impl From<&Scene> for SceneTag {
             Scene::RumbleLab(_) => SceneTag::RumbleLab,
             Scene::Tixels(_) => SceneTag::Tixels,
             Scene::YakuJournal(_) => SceneTag::YakuJournal,
+            Scene::WallLedger(_) => SceneTag::WallLedger,
         }
     }
 }
@@ -104,19 +108,19 @@ pub(crate) fn transition_spec_for_edge(from: SceneTag, to: SceneTag) -> Transiti
     use SceneTag::*;
 
     // Main menu hub ↔ satellite screens (legacy comment: "tile teeth"; shipped = ForestOfTiles).
-    if undirected_edge(from, to, MainMenuExterior, Collection) {
+    if undirected_edge(from, to, MainMenu, Archive) {
         return TransitionSpec {
             kind: TransitionKind::ForestOfTiles,
             speed: 0.035,
         };
     }
-    if undirected_edge(from, to, Collection, YakuJournal) {
+    if undirected_edge(from, to, Archive, YakuJournal) {
         return TransitionSpec {
             kind: TransitionKind::GalaxyOfTiles,
             speed: 0.032,
         };
     }
-    if undirected_edge(from, to, MainMenuExterior, Options)
+    if undirected_edge(from, to, MainMenu, Options)
         || undirected_edge(from, to, Options, Credits)
     {
         return TransitionSpec {
@@ -124,7 +128,7 @@ pub(crate) fn transition_spec_for_edge(from: SceneTag, to: SceneTag) -> Transiti
             speed: 0.032,
         };
     }
-    if undirected_edge(from, to, MainMenuExterior, ProfileSelect)
+    if undirected_edge(from, to, MainMenu, ProfileSelect)
         || undirected_edge(from, to, Options, ProfileSelect)
     {
         return TransitionSpec {
@@ -139,13 +143,13 @@ pub(crate) fn transition_spec_for_edge(from: SceneTag, to: SceneTag) -> Transiti
             speed: 0.025,
         };
     }
-    if (from, to) == (Gameplay, Staircase) {
+    if (from, to) == (Gameplay, Stairway) {
         return TransitionSpec {
             kind: TransitionKind::Quick,
             speed: 0.025,
         };
     }
-    if (from, to) == (Staircase, Shop) {
+    if (from, to) == (Stairway, Shop) {
         return TransitionSpec {
             kind: TransitionKind::Quick,
             speed: 0.03,
@@ -183,7 +187,7 @@ pub(crate) fn should_clear_smoke_on_transition(from: SceneTag, to: SceneTag) -> 
         (TileSelect, Shop)
             | (TutorialCampaign, Shop)
             | (TutorialCampaign, Gameplay)
-            | (Shop, PickChamber)
+            | (Shop, Hallway)
     )
 }
 
@@ -208,11 +212,11 @@ pub(crate) fn sync_music_for_scene(
 ) {
     use crate::audio::MusicId;
     match tag {
-        SceneTag::MainMenuExterior | SceneTag::Collection => {
+        SceneTag::MainMenu | SceneTag::Archive => {
             audio.set_music_track(MusicId::MainMenu)
         }
         SceneTag::Gameplay => audio.set_gameplay_music(gameplay_ordeal_chamber),
-        SceneTag::Shop | SceneTag::PickChamber | SceneTag::Staircase => {
+        SceneTag::Shop | SceneTag::Hallway | SceneTag::Stairway => {
             audio.set_music_track(MusicId::Shop)
         }
         SceneTag::Credits => audio.set_music_track(MusicId::Credits),
@@ -223,7 +227,7 @@ pub(crate) fn sync_music_for_scene(
 pub(crate) fn sync_ambient_for_scene(audio: &mut crate::audio::AudioManager, tag: SceneTag) {
     use crate::audio::AmbientId;
     match tag {
-        SceneTag::MainMenuExterior => {
+        SceneTag::MainMenu => {
             audio.set_ambient_track(Some(AmbientId::MainMenuRain));
         }
         _ => audio.set_ambient_track(None),
@@ -236,13 +240,13 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
             r.clear_smoke();
         }
         match ctx.to {
-            SceneTag::MainMenuExterior => {
+            SceneTag::MainMenu => {
                 r.prefetch_room_chain_next(crate::render::room_preload::RoomSceneChain::Shop);
             }
             SceneTag::Shop => {
                 r.prefetch_room_chain_next(crate::render::room_preload::RoomSceneChain::Hallway);
             }
-            SceneTag::PickChamber => {
+            SceneTag::Hallway => {
                 r.prefetch_room_chain_next(crate::render::room_preload::RoomSceneChain::Gameplay);
             }
             SceneTag::Gameplay => {
@@ -251,10 +255,10 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
             _ => {}
         }
     }
-    if ctx.to == SceneTag::MainMenuExterior {
+    if ctx.to == SceneTag::MainMenu {
         ctx.audio.play_sfx(crate::audio::SfxId::MainMenuEnter);
     }
-    if ctx.to == SceneTag::MainMenuExterior {
+    if ctx.to == SceneTag::MainMenu {
         crate::asset_path::prefetch_lazy_packs_after_menu_once();
     }
     sync_music_for_scene(ctx.audio, ctx.to, ctx.gameplay_ordeal_chamber);
@@ -274,10 +278,10 @@ mod tests {
 
     #[test]
     fn main_menu_collection_is_forest() {
-        let s = transition_spec_for_edge(SceneTag::MainMenuExterior, SceneTag::Collection);
+        let s = transition_spec_for_edge(SceneTag::MainMenu, SceneTag::Archive);
         assert_eq!(s.kind, TransitionKind::ForestOfTiles);
         assert!((s.speed - 0.035).abs() < 1e-6);
-        let s2 = transition_spec_for_edge(SceneTag::Collection, SceneTag::MainMenuExterior);
+        let s2 = transition_spec_for_edge(SceneTag::Archive, SceneTag::MainMenu);
         assert_eq!(s2.kind, TransitionKind::ForestOfTiles);
     }
 

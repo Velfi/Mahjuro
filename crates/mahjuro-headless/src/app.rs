@@ -284,11 +284,11 @@ impl HeadlessApp {
                         if matches!(s.presenter, mahjuro::scenes::ShowcasePresenter::ShopInspect(_))
                 )
             });
-            let showcase_collection_inspect = self.overlay_stack.last().is_some_and(|top| {
+            let showcase_archive_inspect = self.overlay_stack.last().is_some_and(|top| {
                 matches!(
                     top,
                     Scene::Showcase(s)
-                        if matches!(s.presenter, mahjuro::scenes::ShowcasePresenter::CollectionInspect(_))
+                        if matches!(s.presenter, mahjuro::scenes::ShowcasePresenter::ArchiveInspect(_))
                 )
             });
             let (suspended_shop, suspended_collection) = match &mut self.scene {
@@ -296,7 +296,7 @@ impl HeadlessApp {
                     shop.tick_suspended_animation_clock();
                     (Some(shop), None)
                 }
-                mahjuro::scenes::Scene::Collection(collection) if showcase_collection_inspect => {
+                mahjuro::scenes::Scene::Archive(collection) if showcase_archive_inspect => {
                     (None, Some(collection))
                 }
                 _ => (None, None),
@@ -365,7 +365,7 @@ impl HeadlessApp {
             _ => None,
         };
         let suspended_collection = match (&self.scene, showcase_orbit_top) {
-            (Scene::Collection(c), true) => Some(c),
+            (Scene::Archive(c), true) => Some(c),
             _ => None,
         };
 

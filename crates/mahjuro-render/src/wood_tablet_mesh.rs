@@ -7,6 +7,7 @@
 //! separate mesh so each can be sized + lit independently in the slot pool.
 //! Local space spans `-0.5..+0.5` on each axis.
 
+use crate::cap_extrude::planar_y_cap_uv_xz;
 use crate::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box, push_quad};
 use crate::tile_glb::Vertex3dTex;
 
@@ -40,10 +41,11 @@ pub fn build_wood_tablet_mesh() -> MeshCpu {
     //   v9  (-0.5, top, +0.5) screen-left,  screen-bottom → [0, 1]
     //   v10 (+0.5, top, +0.5) screen-right, screen-bottom → [1, 1]
     //   v11 (+0.5, top, -0.5) screen-right, screen-top    → [1, 0]
-    vertices[8].uv = [0.0, 0.0];
-    vertices[9].uv = [0.0, 1.0];
-    vertices[10].uv = [1.0, 1.0];
-    vertices[11].uv = [1.0, 0.0];
+    // +Y face UVs via [`planar_y_cap_uv_xz`] (screen-top = local −Z → v=0).
+    vertices[8].uv = planar_y_cap_uv_xz(-0.5, -0.5);
+    vertices[9].uv = planar_y_cap_uv_xz(-0.5, 0.5);
+    vertices[10].uv = planar_y_cap_uv_xz(0.5, 0.5);
+    vertices[11].uv = planar_y_cap_uv_xz(0.5, -0.5);
 
     // Chamfered bevel strips around the top-face perimeter. Each strip has a
     // 45° normal blending +Y with the respective side direction, so glancing

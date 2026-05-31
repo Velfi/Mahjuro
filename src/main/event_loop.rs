@@ -50,7 +50,7 @@ impl App {
                     renderer.prefetch_room_chain_next(RoomSceneChain::Hallway);
                     renderer.prefetch_room_chain_next(RoomSceneChain::Gameplay);
                 }
-                ResumeScene::PickChamber => {
+                ResumeScene::Hallway => {
                     renderer.prefetch_room_chain_next(RoomSceneChain::Hallway);
                     renderer.prefetch_room_chain_next(RoomSceneChain::Gameplay);
                 }
@@ -136,9 +136,9 @@ impl App {
                     }
                     if matches!(
                         self.scene,
-                        Scene::MainMenuExterior(_)
+                        Scene::MainMenu(_)
                             | Scene::Shop(_)
-                            | Scene::PickChamber(_)
+                            | Scene::Hallway(_)
                     ) {
                         renderer.poll_room_prefetch_gpu_uploads(
                             crate::scenes::active_scene_key(&self.scene),

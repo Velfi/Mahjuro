@@ -333,7 +333,7 @@ pub struct ShopReadModel {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct PickChamberReadModel {
+pub struct HallwayReadModel {
     pub upcoming_chamber: ChamberKind,
     /// Chronicle RNG seed — drives pick-blind hallway warp/tint.
     pub run_seed: u64,
@@ -568,7 +568,7 @@ impl<'a> GameEngine<'a> {
         run.tag_patron_gift > 0
     }
 
-    pub fn read_pick_chamber(run: &RunState) -> PickChamberReadModel {
+    pub fn read_hallway(run: &RunState) -> HallwayReadModel {
         let ordeal_kind = run.ordeal.upcoming;
         let (ordeal_name, ordeal_description) = if let Some(kind) = ordeal_kind {
             let def = kind.def();
@@ -582,7 +582,7 @@ impl<'a> GameEngine<'a> {
         } else {
             (None, None)
         };
-        PickChamberReadModel {
+        HallwayReadModel {
             upcoming_chamber: run.upcoming_chamber,
             run_seed: run.chronicle.seed,
             wing: run.wing,

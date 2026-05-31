@@ -399,7 +399,7 @@ pub struct HallwayDistortionDebugSnapshot {
     pub chamber_mode: u8,
     /// Chronicle RNG seed.
     pub run_seed: u64,
-    /// Blind counter within the run (see [`PickChamberReadModel::run_number`]).
+    /// Blind counter within the run (see [`HallwayReadModel::run_number`]).
     pub run_number: u32,
     /// Current wing / ante.
     pub wing: u32,

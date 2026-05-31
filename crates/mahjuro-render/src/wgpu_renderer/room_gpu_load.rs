@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::scene_keys;
+
 use crate::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
 use wgpu::util::DeviceExt;
 
@@ -664,7 +666,7 @@ fn create_cleared_archive_decal_texture(
     tex
 }
 
-fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>, Option<usize>, Option<usize>, Option<usize>, Vec<usize>, Vec<usize>) {
+fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>, Option<usize>, Option<usize>, Option<usize>, Vec<usize>, Vec<usize>, rustc_hash::FxHashSet<usize>) {
     crate::archive_glb::with_archive_glb_cpu(|cpu_opt| {
                 let mut prims = Vec::new();
                 let mut gpu_wrap = None;
@@ -673,6 +675,7 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                 let mut inspect_plaque = None;
                 let mut page_left = Vec::new();
                 let mut page_right = Vec::new();
+                let mut punctual_shadow_skip = rustc_hash::FxHashSet::default();
                 let Some(cpu) = cpu_opt else {
                     return (
                         prims,
@@ -682,6 +685,7 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                         inspect_plaque,
                         page_left,
                         page_right,
+                        punctual_shadow_skip,
                     );
                 };
                 if !cpu.environment_primitives.is_empty() {
@@ -699,6 +703,10 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                                 page_left.push(i);
                             } else if name == crate::archive_glb::BTN_PAGE_RIGHT {
                                 page_right.push(i);
+                            }
+                            if !crate::archive_glb::archive_env_prim_casts_punctual_shadow(Some(name))
+                            {
+                                punctual_shadow_skip.insert(i);
                             }
                         }
                         let prim = &env_prim.mesh;
@@ -914,6 +922,7 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                     inspect_plaque,
                     page_left,
                     page_right,
+                    punctual_shadow_skip,
                 )
             })
 }
@@ -1216,12 +1225,19 @@ impl WgpuRenderer {
     /// Preload room GPU data for picking before [`Self::render`] builds ops.
     pub fn ensure_rooms_for_scene_key(&mut self, key: Option<&str>) {
         match key {
-            Some("shop") | Some("showcase") | Some("pick_chamber") => {
+            Some(scene_keys::SHOP) | Some("showcase") | Some(scene_keys::HALLWAY) => {
                 self.ensure_shop_room_gpu();
             }
+            Some(scene_keys::STAIRWAY) => self.ensure_staircase_room_gpu(),
+            Some(scene_keys::ARCHIVE) => self.ensure_archive_room_gpu(),
+            Some(scene_keys::GAMEPLAY) | Some(scene_keys::VICTORY) | Some(scene_keys::DEFEAT) => {
+                self.ensure_gameplay_room_gpu()
+            }
+            // Legacy aliases
+            Some("pick_chamber") => self.ensure_shop_room_gpu(),
             Some("staircase") => self.ensure_staircase_room_gpu(),
             Some("collection") => self.ensure_archive_room_gpu(),
-            Some("gameplay") | Some("game_over") => self.ensure_gameplay_room_gpu(),
+            Some("game_over") => self.ensure_gameplay_room_gpu(),
             _ => {}
         }
     }
@@ -1279,7 +1295,7 @@ impl WgpuRenderer {
         };
 
         match scene_key {
-            Some("main_menu_exterior") => {
+            Some(scene_keys::MAIN_MENU) | Some("main_menu_exterior") => {
                 // CPU-only hub chain (shop → archive). Do not upload room environments
                 // on the menu — that blocks the main thread and pins ~1.5 GiB of textures
                 // while relics are still streaming.
@@ -1288,10 +1304,13 @@ impl WgpuRenderer {
                     upload_gameplay(self);
                 }
             }
-            Some("shop") | Some("showcase") | Some("pick_chamber") => {
+            Some(scene_keys::SHOP)
+            | Some("showcase")
+            | Some(scene_keys::HALLWAY)
+            | Some("pick_chamber") => {
                 upload_shop(self);
                 upload_hallway(self);
-                if scene_key == Some("pick_chamber") {
+                if matches!(scene_key, Some(scene_keys::HALLWAY) | Some("pick_chamber")) {
                     if self.rooms_gpu_loaded & ROOM_HALLWAY != 0
                         && self.rooms_gpu_loaded & ROOM_GAMEPLAY == 0
                     {
@@ -1300,8 +1319,12 @@ impl WgpuRenderer {
                     upload_gameplay(self);
                 }
             }
-            Some("collection") => upload_archive(self),
-            Some("gameplay") | Some("game_over") | Some("tutorial") => upload_gameplay(self),
+            Some(scene_keys::ARCHIVE) | Some("collection") => upload_archive(self),
+            Some(scene_keys::GAMEPLAY)
+            | Some(scene_keys::VICTORY)
+            | Some(scene_keys::DEFEAT)
+            | Some("game_over")
+            | Some("tutorial") => upload_gameplay(self),
             _ => {}
         }
     }
@@ -1439,8 +1462,16 @@ impl WgpuRenderer {
             frame_dt_ms,
             || {
                 let ctx = self.room_gpu_upload_ctx();
-                let (prims, gpu_wrap, sign_l, sign_r, inspect_plaque, page_left, page_right) =
-                    load_archive_room_gpu(ctx);
+                let (
+                    prims,
+                    gpu_wrap,
+                    sign_l,
+                    sign_r,
+                    inspect_plaque,
+                    page_left,
+                    page_right,
+                    punctual_shadow_skip,
+                ) = load_archive_room_gpu(ctx);
                 require_room_environment_loaded("archive.glb", &prims, &gpu_wrap);
                 self.archive_env_primitives = prims;
                 self.archive_environment = gpu_wrap;
@@ -1449,6 +1480,7 @@ impl WgpuRenderer {
                 self.archive_inspect_plaque_prim_idx = inspect_plaque;
                 self.archive_page_left_prim_indices = page_left;
                 self.archive_page_right_prim_indices = page_right;
+                self.archive_punctual_shadow_skip_prims = punctual_shadow_skip;
                 crate::archive_glb::release_archive_environment_cpu_sources_after_gpu_upload();
                 self.rooms_gpu_loaded |= ROOM_ARCHIVE;
             },

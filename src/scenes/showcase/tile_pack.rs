@@ -17,9 +17,8 @@ use crate::render::showcase_tile_layout::{
 };
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{
-    GpuInstance, GradientQuadInstance, PointLight, SpotLight, TextAlign, TextLabel,
+    GpuInstance, GradientQuadInstance, PointLight, TextAlign, TextLabel,
 };
-use crate::render::world_space::pixel_to_world;
 use crate::scenes::celebration_overlay::{
     CelebrationContentDrift, CelebrationOverlayScratch, CelebrationShowcaseIntroGate,
     ShootingStarCelebrationIntro,
@@ -518,14 +517,6 @@ impl TilePackPresenter {
                 &self.positions,
                 drift,
             ));
-        frame.scene_lighting.spot_lights = pack_celebration_spot_lights(
-            &self.celebration,
-            ctx.layout,
-            &cam,
-            &self.positions,
-            ctx.tile_preset,
-            drift,
-        );
 
         self.push_celebration_draw(
             &mut frame,
@@ -638,96 +629,6 @@ fn pack_hero_center(
         anchor.pos[2],
     ]);
     (p[0], p[1], p[2])
-}
-
-fn pack_celebration_spot_lights(
-    celeb: &PackCelebration,
-    screen: &LayoutResult,
-    cam: &CameraParams,
-    positions: &ShopPositions,
-    tile_preset: TilePreset,
-    drift: CelebrationContentDrift,
-) -> Vec<SpotLight> {
-    let w = screen.window_w;
-    let h = screen.window_h;
-    let (cos_outer, cos_inner, intensity) = match celeb.phase {
-        PackCelebPhase::Arrival => (
-            (38.0_f32).to_radians().cos(),
-            (24.0_f32).to_radians().cos(),
-            4.5,
-        ),
-        PackCelebPhase::Anticipation | PackCelebPhase::Unseal => (
-            (34.0_f32).to_radians().cos(),
-            (20.0_f32).to_radians().cos(),
-            7.0,
-        ),
-        PackCelebPhase::Deal => (
-            (34.0_f32).to_radians().cos(),
-            (20.0_f32).to_radians().cos(),
-            10.0,
-        ),
-    };
-    let warm = [1.0_f32, 0.93, 0.78];
-    let box_h = h * PACK_CELEB_BOX_H_FRAC;
-
-    let (cx, cy, lift) = match celeb.phase {
-        PackCelebPhase::Arrival => pack_hero_center(screen, positions, box_h * drift.scale, drift, (0.0, 0.0)),
-        PackCelebPhase::Anticipation | PackCelebPhase::Unseal => {
-            pack_hero_center(screen, positions, box_h, drift, (0.0, 0.0))
-        }
-        PackCelebPhase::Deal => {
-            let pack_a = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
-            let reveal_anchor = PlacementAnchor::new(
-                [w * 0.5, h * 0.5, 0.0],
-                Mat4::IDENTITY,
-                &positions.celeb_pack_reveal,
-                screen,
-            );
-            let n = celeb.tiles.len();
-            if n == 0 {
-                return Vec::new();
-            }
-            let row_lift = reveal_anchor.pos[2];
-            let rotation = pack_reveal_euler_rad(positions);
-            let row = compute_pack_reveal_row_layout(&PackRevealRowLayoutParams {
-                win_w: w,
-                win_h: h,
-                cam,
-                preset: tile_preset,
-                n,
-                row_lift,
-                nx: positions.celeb_pack_reveal.nx,
-                ny: positions.celeb_pack_reveal.ny,
-                rotation_xyz_rad: rotation,
-            });
-            let total_w = n as f32 * row.silhouette_w + (n.saturating_sub(1)) as f32 * row.gap_px;
-            let row_cx = row.row_x0 + total_w * 0.5;
-            let deal_t = (celeb.elapsed() / celeb.total_duration().max(0.01)).clamp(0.0, 1.0);
-            let cx = pack_a.pos[0] + (row_cx - pack_a.pos[0]) * deal_t;
-            (cx, reveal_anchor.pos[1], row_lift)
-        }
-    };
-
-    let light_lift = lift + h * 0.52 + box_h * 0.38;
-    let pos = [cx, cy - h * 0.14 - box_h * 0.06, light_lift];
-    let tw = pixel_to_world(w, h, cx, cy, lift);
-    let lw = pixel_to_world(w, h, pos[0], pos[1], pos[2]);
-    let dir = (tw - lw).normalize_or_zero();
-    let dir = if dir.length_squared() < 1e-4 {
-        Vec3::new(0.0, 0.5, -1.0).normalize()
-    } else {
-        dir
-    };
-    let _ = cam;
-    vec![SpotLight {
-        pos,
-        dir: dir.to_array(),
-        radius: h * 2.4 + box_h,
-        cos_outer,
-        cos_inner,
-        color: warm,
-        intensity,
-    }]
 }
 
 fn pack_celebration_point_lights(

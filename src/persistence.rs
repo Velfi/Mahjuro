@@ -88,8 +88,8 @@ pub enum ResumeScene {
     #[default]
     Gameplay,
     Shop,
-    #[serde(alias = "PickBlind")]
-    PickChamber,
+    #[serde(alias = "PickBlind", alias = "PickChamber")]
+    Hallway,
 }
 
 #[derive(Debug)]

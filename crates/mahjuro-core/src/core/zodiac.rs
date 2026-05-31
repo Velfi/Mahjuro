@@ -181,25 +181,25 @@ impl ZodiacKind {
     }
 
     /// Additive mult granted to each bound yaku level when this zodiac is
-    /// consumed. Tuned per-zodiac (Balatro-style planets), not global.
+    /// consumed. Tuned per-zodiac (Balatro-style planets), in 0.5 steps only.
     pub fn level_up_mult_per_level(self) -> f64 {
         match self {
-            ZodiacKind::Mouse => 0.82,
-            ZodiacKind::Rat => 0.78,
-            ZodiacKind::Ox => 1.00,
-            ZodiacKind::Tiger => 0.96,
-            ZodiacKind::Rabbit => 0.88,
-            ZodiacKind::Dragon => 0.90,
-            ZodiacKind::Snake => 0.86,
-            ZodiacKind::Horse => 0.92,
-            ZodiacKind::Goat => 0.84,
-            ZodiacKind::Monkey => 1.06,
-            ZodiacKind::Rooster => 1.10,
-            ZodiacKind::Dog => 0.98,
-            ZodiacKind::Pig => 0.94,
-            ZodiacKind::Qilin => 0.70,
-            ZodiacKind::Phoenix => 0.80,
-            ZodiacKind::Crane => 1.02,
+            ZodiacKind::Mouse => 1.0,
+            ZodiacKind::Rat => 1.0,
+            ZodiacKind::Ox => 1.0,
+            ZodiacKind::Tiger => 1.0,
+            ZodiacKind::Rabbit => 1.0,
+            ZodiacKind::Dragon => 1.0,
+            ZodiacKind::Snake => 1.0,
+            ZodiacKind::Horse => 1.0,
+            ZodiacKind::Goat => 1.0,
+            ZodiacKind::Monkey => 1.0,
+            ZodiacKind::Rooster => 1.0,
+            ZodiacKind::Dog => 1.0,
+            ZodiacKind::Pig => 1.0,
+            ZodiacKind::Qilin => 0.5,
+            ZodiacKind::Phoenix => 1.0,
+            ZodiacKind::Crane => 1.0,
         }
     }
 
@@ -417,14 +417,21 @@ mod tests {
     }
 
     #[test]
-    fn zodiac_level_up_bonuses_are_unique() {
-        let mut mult_values = std::collections::HashSet::new();
+    fn zodiac_level_up_mult_bonuses_are_half_increments() {
+        for &z in ZodiacKind::all() {
+            let mult = z.level_up_mult_per_level();
+            assert_eq!(
+                mult,
+                (mult * 2.0).round() / 2.0,
+                "{z:?} mult per level {mult} is not a half increment"
+            );
+        }
+    }
+
+    #[test]
+    fn zodiac_level_up_chip_bonuses_are_unique() {
         let mut chip_values = std::collections::HashSet::new();
         for &z in ZodiacKind::all() {
-            assert!(
-                mult_values.insert((z.level_up_mult_per_level() * 100.0).round() as i32),
-                "{z:?} mult bonus duplicates another zodiac"
-            );
             assert!(
                 chip_values.insert(z.level_up_chips_per_level()),
                 "{z:?} chip bonus duplicates another zodiac"

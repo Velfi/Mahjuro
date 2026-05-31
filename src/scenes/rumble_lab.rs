@@ -8,7 +8,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::{InputState, RumbleLabOp, UiAction};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::main_menu_exterior::MainMenuExteriorScene;
+use super::main_menu::MainMenuScene;
 use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,7 +134,7 @@ impl RumbleLabScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
+            Some(Scene::MainMenu(MainMenuScene::new()))
         }
     }
 

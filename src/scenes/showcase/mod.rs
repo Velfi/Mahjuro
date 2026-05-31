@@ -1,16 +1,16 @@
 //! Full-screen [`crate::scenes::Scene::Showcase`] overlay — one scene type for every flow below:
 //! - **Celebrations**: [`TilePackPresenter`], [`ZodiacPresenter`], [`MetaLevelUpPresenter`]
-//! - **Orbit inspect**: [`ShopInspectPresenter`] (storeroom), [`CollectionInspectPresenter`] (Archive)
+//! - **Orbit inspect**: [`ShopInspectPresenter`] (storeroom), [`ArchiveInspectPresenter`] (Archive)
 //!
 //! Presenters share [`ShowcaseRenderHints`](crate::render::draw_cmd::ShowcaseRenderHints) on [`UiFrame`].
 
-mod collection_inspect;
+mod archive_inspect;
 mod meta_level_up;
 mod shop_inspect;
 mod tile_pack;
 mod zodiac;
 
-pub use collection_inspect::CollectionInspectPresenter;
+pub use archive_inspect::ArchiveInspectPresenter;
 pub use meta_level_up::MetaLevelUpPresenter;
 pub use shop_inspect::ShopInspectPresenter;
 pub use tile_pack::TilePackPresenter;
@@ -24,12 +24,12 @@ pub enum ShowcasePresenter {
     Zodiac(ZodiacPresenter),
     MetaLevelUp(MetaLevelUpPresenter),
     ShopInspect(ShopInspectPresenter),
-    CollectionInspect(CollectionInspectPresenter),
+    ArchiveInspect(ArchiveInspectPresenter),
 }
 
 impl ShowcasePresenter {
     pub fn wants_orbit_input(&self) -> bool {
-        matches!(self, Self::ShopInspect(_) | Self::CollectionInspect(_))
+        matches!(self, Self::ShopInspect(_) | Self::ArchiveInspect(_))
     }
 
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
@@ -38,7 +38,7 @@ impl ShowcasePresenter {
             Self::Zodiac(p) => p.update(ctx),
             Self::MetaLevelUp(p) => p.update(ctx),
             Self::ShopInspect(p) => p.update(ctx),
-            Self::CollectionInspect(p) => p.update(ctx),
+            Self::ArchiveInspect(p) => p.update(ctx),
         }
     }
 
@@ -48,7 +48,7 @@ impl ShowcasePresenter {
             Self::Zodiac(p) => p.draw_frame(ctx),
             Self::MetaLevelUp(p) => p.draw_frame(ctx),
             Self::ShopInspect(p) => p.draw_frame(ctx),
-            Self::CollectionInspect(p) => p.draw_frame(ctx),
+            Self::ArchiveInspect(p) => p.draw_frame(ctx),
         }
     }
 }

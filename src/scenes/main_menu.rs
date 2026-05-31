@@ -10,6 +10,7 @@ use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::{self, ResumeScene, TileMaterial};
 use crate::render::draw_cmd::{CameraParams, ImageQuad, ImageQuadSource, ScenePunctualLight, UiFrame};
+use crate::render::scene_keys;
 use crate::render::main_menu_glb;
 use crate::render::rain_field::{RainField, main_menu_rain_spawn_volume};
 use crate::render::room_glb::{self, RoomEnvLightingTune};
@@ -21,7 +22,7 @@ use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextAlign
 use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::UiAction;
 
-use super::collection::CollectionScene;
+use super::archive::ArchiveScene;
 use super::lamp_moths::{self, BUG_COUNT};
 use super::options::OptionsScene;
 use super::shop::ShopScene;
@@ -45,7 +46,7 @@ fn push_main_menu_rain(
     let cam = frame
         .camera_override
         .unwrap_or_else(|| main_menu_glb::main_menu_camera_base(w, h, env_scale));
-    let tune = ctx.room_env_for("main_menu_exterior").0;
+    let tune = ctx.room_env_for(scene_keys::MAIN_MENU).0;
     let bundle = build_main_menu_rain_lighting(w, h, env_scale, &tune);
     let lighting = main_menu_rain_light_sample_ctx(w, h, env_scale, &cam, &tune, &bundle);
     let volume = main_menu_rain_spawn_volume(env_scale, h, &ctx.rain_tuning);
@@ -256,7 +257,7 @@ fn push_main_menu_room_frame(
     frame.scene_lighting.embedded_gltf_punctual = room_glb;
     frame.scene_lighting.room_glb_brdf = room_glb;
     let (punctual, nodes, spots) = main_menu_scene_punctual(w, h, env_scale, tune);
-    frame.scene_lighting.spot_lights = spots;
+    frame.scene_lighting.set_gltf_embedded_spot_lights(spots);
     frame.scene_lighting.punctual = punctual;
     frame.scene_lighting.punctual_gltf_nodes = nodes;
 }
@@ -275,13 +276,13 @@ pub(crate) fn scene_from_resume(
                 Scene::Shop(ShopScene::new(run, progress))
             }
         }
-        ResumeScene::PickChamber => {
-            Scene::PickChamber(super::pick_chamber::PickChamberScene::new())
+        ResumeScene::Hallway => {
+            Scene::Hallway(super::hallway::HallwayScene::new())
         }
     }
 }
 
-pub struct MainMenuExteriorScene {
+pub struct MainMenuScene {
     focus: Option<HubFocus>,
     last_focus_rects: RefCell<Vec<(HubFocus, [f32; 4])>>,
     cursor_pos: (f32, f32),
@@ -291,13 +292,13 @@ pub struct MainMenuExteriorScene {
     rain_field: RainField,
 }
 
-impl Default for MainMenuExteriorScene {
+impl Default for MainMenuScene {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl MainMenuExteriorScene {
+impl MainMenuScene {
     pub fn new() -> Self {
         Self {
             focus: None,
@@ -354,7 +355,7 @@ struct HubLayout {
     menu_rects: Vec<(HubFocus, [f32; 4])>,
 }
 
-impl SceneBehavior for MainMenuExteriorScene {
+impl SceneBehavior for MainMenuScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         self.cursor_pos = ctx.cursor_pos;
         let now = Instant::now();
@@ -481,7 +482,7 @@ impl SceneBehavior for MainMenuExteriorScene {
                     return Some(Scene::Shop(ShopScene::new(ctx.run, ctx.progress)));
                 }
                 Some(HubFocus::Archive) => {
-                    return Some(Scene::Collection(CollectionScene::new()));
+                    return Some(Scene::Archive(ArchiveScene::new()));
                 }
                 Some(HubFocus::Options) => {
                     return Some(Scene::Options(OptionsScene::new()));
@@ -512,7 +513,7 @@ impl SceneBehavior for MainMenuExteriorScene {
             frame.background(BackgroundId::Black);
             let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
             if main_menu_glb::main_menu_room_draw_ready() {
-                push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.room_env_for("main_menu_exterior").0);
+                push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.room_env_for(scene_keys::MAIN_MENU).0);
                 if let Some(light_door) =
                     main_menu_glb::main_menu_light_door_object3d_anchor(w, h, env_scale)
                 {
@@ -578,7 +579,7 @@ impl SceneBehavior for MainMenuExteriorScene {
         frame.background(BackgroundId::Black);
         let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
         if main_menu_glb::main_menu_room_draw_ready() {
-            push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.room_env_for("main_menu_exterior").0);
+            push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.room_env_for(scene_keys::MAIN_MENU).0);
             if let Some(light_door) =
                 main_menu_glb::main_menu_light_door_object3d_anchor(w, h, env_scale)
             {

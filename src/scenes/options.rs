@@ -16,7 +16,7 @@ use std::cell::Cell;
 use crate::render::draw_cmd::UiFrame;
 
 use super::credits::CreditsScene;
-use super::main_menu_exterior::MainMenuExteriorScene;
+use super::main_menu::MainMenuScene;
 use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -1600,7 +1600,7 @@ impl SceneBehavior for OptionsScene {
             if self.take_cancel_requested() {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
             }
-            return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
+            return Some(Scene::MainMenu(MainMenuScene::new()));
         }
         if self.take_focus_changed() {
             ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));

@@ -6,6 +6,11 @@
 //! is a unit cube spanning -0.5..+0.5 on each axis so a per-instance scale can
 //! turn it into rectangular prisms of varying sizes.
 
+use crate::cap_extrude::{
+    self, outward_wall_normal_for_silhouette_edge, parametric_cap_uv, parametric_cap_uv_mirror_u,
+    pixel_to_albedo_uv, pixel_to_cap_local, side_wall_quad_indices_oriented,
+    CapExtrudeKind, SilhouetteUnionBounds, CAP_REFERENCE_AREA,
+};
 use crate::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::theme::color;
 use crate::tile_glb::Vertex3dTex;
@@ -79,9 +84,7 @@ pub fn build_pack_mesh() -> MeshCpu {
     // the implicit straight segments are the chord between arc end and
     // next arc start, which the side-strip extrusion handles naturally.
 
-    // UV from silhouette xz: U = x + 0.5, V = 0.5 - z (matches the
-    // original -Y face mapping so pack textures read upright).
-    let uv_of = |p: [f32; 2]| [p[0] + 0.5, 0.5 - p[1]];
+    // UV from silhouette xz: see [`cap_extrude::parametric_cap_uv`] (+cap_vertical → low v).
 
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -102,7 +105,7 @@ pub fn build_pack_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [p[0], -0.5, p[1]],
             normal: [0.0, -1.0, 0.0],
-            uv: uv_of(*p),
+            uv: parametric_cap_uv(p[0], p[1]),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -134,8 +137,7 @@ pub fn build_pack_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [p[0], 0.5, p[1]],
             normal: [0.0, 1.0, 0.0],
-            // Mirror U so the back reads upright when rotated 180° about Z.
-            uv: [1.0 - (p[0] + 0.5), 0.5 - p[1]],
+            uv: parametric_cap_uv_mirror_u(p[0], p[1]),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -1185,16 +1187,22 @@ fn relic_front_cap_net_area_xz(vertices: &[Vertex3dTex], indices: &[u32]) -> f32
     sum
 }
 
-/// Target front-cap area in XZ used to equalize on-screen footprint across relics
-/// (disk of radius 0.5: same order as the legacy max-edge silhouette fit for a square).
-const RELIC_CAP_REFERENCE_AREA_XZ: f32 = std::f32::consts::PI * 0.25;
-
-fn scale_relic_mesh_vertex_positions(vertices: &mut [Vertex3dTex], scale: f32) {
-    for v in vertices.iter_mut() {
-        v.position[0] *= scale;
-        v.position[1] *= scale;
-        v.position[2] *= scale;
+fn silhouette_union_bounds(
+    polygons: &[SilhouettePolygon],
+    width: u32,
+    height: u32,
+) -> SilhouetteUnionBounds {
+    let (mut ux_min, mut uy_min) = (f32::INFINITY, f32::INFINITY);
+    let (mut ux_max, mut uy_max) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+    for poly in polygons {
+        for &(x, y) in &poly.outer {
+            ux_min = ux_min.min(x);
+            uy_min = uy_min.min(y);
+            ux_max = ux_max.max(x);
+            uy_max = uy_max.max(y);
+        }
     }
+    SilhouetteUnionBounds::from_bbox(ux_min, uy_min, ux_max, uy_max, width, height)
 }
 
 /// Alpha cutoff for boss-icon extrusion (processed atlas cells use real transparency).
@@ -1214,7 +1222,7 @@ const ORDEAL_ICON_ALPHA_SOLID_THRESH: u8 = 24;
 ///    front cap; the back cap mirrors those triangles with reversed winding,
 ///    and the side walls extrude every contour edge.
 /// 5. A uniform scale adjusts all vertices so the front-cap footprint in XZ
-///    matches [`RELIC_CAP_REFERENCE_AREA_XZ`] (equal apparent “pin” size across relics).
+///    matches [`cap_extrude::CAP_REFERENCE_AREA`] (equal apparent “pin” size across relics).
 pub fn build_relic_mesh_from_rgba(
     rgba: &[u8],
     width: u32,
@@ -1228,6 +1236,25 @@ pub fn build_relic_mesh_from_rgba(
     let h = height as usize;
     let solid = silhouette_solid_luma(rgba, w, h);
     build_extruded_pin_mesh_from_solid(&solid, width, height, source_label)
+}
+
+/// Build a talisman pendant mesh from a mask RGBA. Caps face **±Z** (carved face
+/// toward +Z); silhouette lies in local XY with **+Y toward the top of the image**
+/// (`v → 0` in heightmaps). Uses the same marching-squares + Lyon pipeline as relic
+/// pins but with talisman slab thickness [`crate::talisman_mesh::TALISMAN_HALF_THICKNESS`].
+pub fn build_talisman_mesh_from_rgba(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    source_label: &str,
+) -> Option<MeshCpu> {
+    if width == 0 || height == 0 || rgba.len() < (width as usize * height as usize * 4) {
+        return None;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let solid = silhouette_solid_luma(rgba, w, h);
+    build_extruded_talisman_mesh_from_solid(&solid, width, height, source_label)
 }
 
 /// Triangle soup for relic picking (world-space positions, built from [`MeshCpu`]).
@@ -1310,37 +1337,9 @@ fn build_extruded_pin_mesh_from_solid(
         return None;
     }
 
-    // Shared scale: normalise across the *union* of polygon bounding boxes so
-    // multi-part silhouettes keep their relative sizing instead of each island
-    // being blown up to fill ±0.5 independently.
-    let (mut ux_min, mut uy_min) = (f32::INFINITY, f32::INFINITY);
-    let (mut ux_max, mut uy_max) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
-    for poly in &polygons {
-        for &(x, y) in &poly.outer {
-            ux_min = ux_min.min(x);
-            uy_min = uy_min.min(y);
-            ux_max = ux_max.max(x);
-            uy_max = uy_max.max(y);
-        }
-    }
-    let union_cx = 0.5 * (ux_min + ux_max);
-    let union_cy = 0.5 * (uy_min + uy_max);
-    let union_extent = ((ux_max - ux_min).max(uy_max - uy_min) * 0.5).max(1.0);
-
-    let inv_w = 1.0 / width as f32;
-    let inv_h = 1.0 / height as f32;
+    let bounds = silhouette_union_bounds(&polygons, width, height);
+    const KIND: CapExtrudeKind = CapExtrudeKind::RelicPinY;
     const HALF_Y: f32 = 0.5;
-
-    // Pixel-space → mesh-local: center on the union centroid and scale so the
-    // wider of the two axes fills [-0.5, +0.5]. UVs come from raw pixel coords
-    // so the albedo is sampled from where the art actually lives in the image.
-    let to_local = |px_x: f32, px_y: f32| -> (f32, f32) {
-        (
-            (px_x - union_cx) * 0.5 / union_extent,
-            (px_y - union_cy) * 0.5 / union_extent,
-        )
-    };
-    let to_uv = |px_x: f32, px_y: f32| -> [f32; 2] { [px_x * inv_w, px_y * inv_h] };
 
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -1375,11 +1374,11 @@ fn build_extruded_pin_mesh_from_solid(
         // Front cap: emit each tessellation vertex with normal +Y.
         let base_front = vertices.len() as u32;
         for &(x, y) in &buffers.vertices {
-            let (lx, lz) = to_local(x, y);
+            let (lx, lz) = pixel_to_cap_local(x, y, bounds, KIND);
             vertices.push(Vertex3dTex {
                 position: [lx, HALF_Y, lz],
                 normal: [0.0, 1.0, 0.0],
-                uv: to_uv(x, y),
+                uv: pixel_to_albedo_uv(x, y, bounds),
                 tangent: Vertex3dTex::DEFAULT_TANGENT,
                 uv_emr: [0.0, 0.0],
                 color: [1.0, 1.0, 1.0, 1.0],
@@ -1397,11 +1396,11 @@ fn build_extruded_pin_mesh_from_solid(
         // so both caps are front-facing from their respective sides.
         let base_back = vertices.len() as u32;
         for &(x, y) in &buffers.vertices {
-            let (lx, lz) = to_local(x, y);
+            let (lx, lz) = pixel_to_cap_local(x, y, bounds, KIND);
             vertices.push(Vertex3dTex {
                 position: [lx, -HALF_Y, lz],
                 normal: [0.0, -1.0, 0.0],
-                uv: to_uv(x, y),
+                uv: pixel_to_albedo_uv(x, y, bounds),
                 tangent: Vertex3dTex::DEFAULT_TANGENT,
                 uv_emr: [0.0, 0.0],
                 color: [1.0, 1.0, 1.0, 1.0],
@@ -1425,54 +1424,55 @@ fn build_extruded_pin_mesh_from_solid(
             rings.push(hole);
         }
         for ring in rings {
-            let n = ring.len();
-            if n < 3 {
+            let n_pts = ring.len();
+            if n_pts < 3 {
                 continue;
             }
-            for i in 0..n {
+            for i in 0..n_pts {
                 let (x0, y0) = ring[i];
-                let (x1, y1) = ring[(i + 1) % n];
-                let (lx0, lz0) = to_local(x0, y0);
-                let (lx1, lz1) = to_local(x1, y1);
-                let edge = glam::Vec3::new(lx1 - lx0, 0.0, lz1 - lz0);
-                let normal = glam::Vec3::new(edge.z, 0.0, -edge.x).normalize_or_zero();
-                let uv0 = to_uv(x0, y0);
-                let uv1 = to_uv(x1, y1);
+                let (x1, y1) = ring[(i + 1) % n_pts];
+                let (lx0, lz0) = pixel_to_cap_local(x0, y0, bounds, KIND);
+                let (lx1, lz1) = pixel_to_cap_local(x1, y1, bounds, KIND);
+                let normal = outward_wall_normal_for_silhouette_edge(
+                    x0, y0, x1, y1, solid, w as i32, h as i32, bounds, KIND,
+                );
+                let uv0 = pixel_to_albedo_uv(x0, y0, bounds);
+                let uv1 = pixel_to_albedo_uv(x1, y1, bounds);
                 let base = vertices.len() as u32;
-                // Two bottom, two top (CCW when viewed from outside).
+                // bot0, top0, top1, bot1
                 vertices.push(Vertex3dTex {
                     position: [lx0, -HALF_Y, lz0],
-                    normal: [normal.x, normal.y, normal.z],
+                    normal: [normal[0], normal[1], normal[2]],
                     uv: uv0,
-                    tangent: Vertex3dTex::DEFAULT_TANGENT,
-                    uv_emr: [0.0, 0.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                });
-                vertices.push(Vertex3dTex {
-                    position: [lx1, -HALF_Y, lz1],
-                    normal: [normal.x, normal.y, normal.z],
-                    uv: uv1,
-                    tangent: Vertex3dTex::DEFAULT_TANGENT,
-                    uv_emr: [0.0, 0.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                });
-                vertices.push(Vertex3dTex {
-                    position: [lx1, HALF_Y, lz1],
-                    normal: [normal.x, normal.y, normal.z],
-                    uv: uv1,
                     tangent: Vertex3dTex::DEFAULT_TANGENT,
                     uv_emr: [0.0, 0.0],
                     color: [1.0, 1.0, 1.0, 1.0],
                 });
                 vertices.push(Vertex3dTex {
                     position: [lx0, HALF_Y, lz0],
-                    normal: [normal.x, normal.y, normal.z],
+                    normal: [normal[0], normal[1], normal[2]],
                     uv: uv0,
                     tangent: Vertex3dTex::DEFAULT_TANGENT,
                     uv_emr: [0.0, 0.0],
                     color: [1.0, 1.0, 1.0, 1.0],
                 });
-                indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                vertices.push(Vertex3dTex {
+                    position: [lx1, HALF_Y, lz1],
+                    normal: [normal[0], normal[1], normal[2]],
+                    uv: uv1,
+                    tangent: Vertex3dTex::DEFAULT_TANGENT,
+                    uv_emr: [0.0, 0.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
+                });
+                vertices.push(Vertex3dTex {
+                    position: [lx1, -HALF_Y, lz1],
+                    normal: [normal[0], normal[1], normal[2]],
+                    uv: uv1,
+                    tangent: Vertex3dTex::DEFAULT_TANGENT,
+                    uv_emr: [0.0, 0.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
+                });
+                indices.extend_from_slice(&side_wall_quad_indices_oriented(base, &vertices));
             }
         }
 
@@ -1487,11 +1487,11 @@ fn build_extruded_pin_mesh_from_solid(
     // scale up so each relic's front cap has a similar XZ area in mesh space.
     let cap_net = relic_front_cap_net_area_xz(&vertices, &indices);
     let cap_mag = cap_net.abs().max(1e-10);
-    let scale = (RELIC_CAP_REFERENCE_AREA_XZ / cap_mag)
+    let scale = (CAP_REFERENCE_AREA / cap_mag)
         .sqrt()
         .clamp(0.35_f32, 3.5_f32);
     if (scale - 1.0).abs() > 1e-4 {
-        scale_relic_mesh_vertex_positions(&mut vertices, scale);
+        cap_extrude::scale_mesh_uniform(&mut vertices, scale);
     }
 
     Some(MeshCpu {
@@ -1504,6 +1504,273 @@ fn build_extruded_pin_mesh_from_solid(
             specular_power: 28.0,
         },
     })
+}
+
+/// Sum signed areas of front-cap (+Z) triangles projected to XY.
+/// Position-based: front cap sits at +Z half of the slab.
+fn talisman_front_cap_net_area_xy(vertices: &[Vertex3dTex], indices: &[u32]) -> f32 {
+    let mut sum = 0.0_f32;
+    for tri in indices.chunks_exact(3) {
+        let v0 = &vertices[tri[0] as usize];
+        let v1 = &vertices[tri[1] as usize];
+        let v2 = &vertices[tri[2] as usize];
+        // Front cap (+Z half of the slab). Side walls always include a back rim
+        // vertex at z < 0; the back cap sits entirely below the midplane.
+        if v0.position[2] <= 0.0 || v1.position[2] <= 0.0 || v2.position[2] <= 0.0 {
+            continue;
+        }
+        let a = &v0.position;
+        let b = &v1.position;
+        let c = &v2.position;
+        let e1x = b[0] - a[0];
+        let e1y = b[1] - a[1];
+        let e2x = c[0] - a[0];
+        let e2y = c[1] - a[1];
+        sum += 0.5 * (e1x * e2y - e1y * e2x);
+    }
+    sum
+}
+
+fn build_extruded_talisman_mesh_from_solid(
+    solid: &[bool],
+    width: u32,
+    height: u32,
+    source_label: &str,
+) -> Option<MeshCpu> {
+    use crate::lit_mesh::MaterialKind;
+    use crate::theme::color;
+    use crate::talisman_mesh::TALISMAN_HALF_THICKNESS;
+
+    let w = width as usize;
+    let h = height as usize;
+
+    let contours = trace_silhouette_contours(solid, w as i32, h as i32);
+    let contours = filter_border_noise_loops(contours, width as f32, height as f32, source_label);
+    let polygons = group_contours_into_polygons(contours);
+    if polygons.is_empty() {
+        return None;
+    }
+
+    let bounds = silhouette_union_bounds(&polygons, width, height);
+    const KIND: CapExtrudeKind = CapExtrudeKind::TalismanZ;
+    let half_z = TALISMAN_HALF_THICKNESS;
+
+    let mut vertices: Vec<Vertex3dTex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let mut emitted_any = false;
+
+    for poly in &polygons {
+        let mut builder = Path::builder();
+        if !push_ring_to_lyon_path(&mut builder, &poly.outer) {
+            continue;
+        }
+        for hole in &poly.holes {
+            push_ring_to_lyon_path(&mut builder, hole);
+        }
+        let path = builder.build();
+
+        let mut buffers: VertexBuffers<(f32, f32), u32> = VertexBuffers::new();
+        let mut tess = FillTessellator::new();
+        let fill_options = FillOptions::tolerance(0.25).with_fill_rule(FillRule::NonZero);
+        let result = tess.tessellate_path(
+            &path,
+            &fill_options,
+            &mut BuffersBuilder::new(&mut buffers, |v: FillVertex| {
+                let p = v.position();
+                (p.x, p.y)
+            }),
+        );
+        if result.is_err() || buffers.indices.len() < 3 {
+            continue;
+        }
+
+        let base_front = vertices.len() as u32;
+        for &(x, y) in &buffers.vertices {
+            let (lx, ly) = pixel_to_cap_local(x, y, bounds, KIND);
+            vertices.push(Vertex3dTex {
+                position: [lx, ly, half_z],
+                normal: [0.0, 0.0, 1.0],
+                uv: pixel_to_albedo_uv(x, y, bounds),
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
+            });
+        }
+        for tri in buffers.indices.chunks_exact(3) {
+            indices.extend_from_slice(&[
+                base_front + tri[0],
+                base_front + tri[1],
+                base_front + tri[2],
+            ]);
+        }
+
+        let base_back = vertices.len() as u32;
+        for &(x, y) in &buffers.vertices {
+            let (lx, ly) = pixel_to_cap_local(x, y, bounds, KIND);
+            vertices.push(Vertex3dTex {
+                position: [lx, ly, -half_z],
+                normal: [0.0, 0.0, -1.0],
+                uv: pixel_to_albedo_uv(x, y, bounds),
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
+            });
+        }
+        for tri in buffers.indices.chunks_exact(3) {
+            indices.extend_from_slice(&[
+                base_back + tri[0],
+                base_back + tri[2],
+                base_back + tri[1],
+            ]);
+        }
+
+        let mut rings: Vec<&Vec<(f32, f32)>> = Vec::with_capacity(1 + poly.holes.len());
+        rings.push(&poly.outer);
+        for hole in &poly.holes {
+            rings.push(hole);
+        }
+        for ring in rings {
+            let n_pts = ring.len();
+            if n_pts < 3 {
+                continue;
+            }
+            for i in 0..n_pts {
+                let (x0, y0) = ring[i];
+                let (x1, y1) = ring[(i + 1) % n_pts];
+                let (lx0, ly0) = pixel_to_cap_local(x0, y0, bounds, KIND);
+                let (lx1, ly1) = pixel_to_cap_local(x1, y1, bounds, KIND);
+                let normal = outward_wall_normal_for_silhouette_edge(
+                    x0, y0, x1, y1, solid, w as i32, h as i32, bounds, KIND,
+                );
+                let uv0 = pixel_to_albedo_uv(x0, y0, bounds);
+                let uv1 = pixel_to_albedo_uv(x1, y1, bounds);
+                let base = vertices.len() as u32;
+                vertices.push(Vertex3dTex {
+                    position: [lx0, ly0, -half_z],
+                    normal: [normal[0], normal[1], normal[2]],
+                    uv: uv0,
+                    tangent: Vertex3dTex::DEFAULT_TANGENT,
+                    uv_emr: [0.0, 0.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
+                });
+                vertices.push(Vertex3dTex {
+                    position: [lx0, ly0, half_z],
+                    normal: [normal[0], normal[1], normal[2]],
+                    uv: uv0,
+                    tangent: Vertex3dTex::DEFAULT_TANGENT,
+                    uv_emr: [0.0, 0.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
+                });
+                vertices.push(Vertex3dTex {
+                    position: [lx1, ly1, half_z],
+                    normal: [normal[0], normal[1], normal[2]],
+                    uv: uv1,
+                    tangent: Vertex3dTex::DEFAULT_TANGENT,
+                    uv_emr: [0.0, 0.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
+                });
+                vertices.push(Vertex3dTex {
+                    position: [lx1, ly1, -half_z],
+                    normal: [normal[0], normal[1], normal[2]],
+                    uv: uv1,
+                    tangent: Vertex3dTex::DEFAULT_TANGENT,
+                    uv_emr: [0.0, 0.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
+                });
+                indices.extend_from_slice(&side_wall_quad_indices_oriented(base, &vertices));
+            }
+        }
+
+        emitted_any = true;
+    }
+
+    if !emitted_any {
+        return None;
+    }
+
+    let cap_net = talisman_front_cap_net_area_xy(&vertices, &indices);
+    let cap_mag = cap_net.abs().max(1e-10);
+    let scale = (CAP_REFERENCE_AREA / cap_mag)
+        .sqrt()
+        .clamp(0.35_f32, 3.5_f32);
+    if (scale - 1.0).abs() > 1e-4 {
+        cap_extrude::scale_mesh_xy(&mut vertices, scale);
+    }
+
+    Some(MeshCpu {
+        vertices,
+        indices,
+        default_material: MaterialParams {
+            kind: MaterialKind::Chitin,
+            base_color: color::PARCHMENT,
+            specular_strength: 0.78,
+            specular_power: 56.0,
+        },
+    })
+}
+
+#[cfg(test)]
+mod extruded_tests {
+    use super::*;
+
+    #[test]
+    fn talisman_mesh_from_filled_disk_has_front_cap_and_rim() {
+        let size = 32u32;
+        let mut rgba = vec![0u8; (size * size * 4) as usize];
+        let cx = size as f32 / 2.0;
+        let cy = size as f32 / 2.0;
+        let r = size as f32 * 0.35;
+        for y in 0..size {
+            for x in 0..size {
+                let dx = x as f32 + 0.5 - cx;
+                let dy = y as f32 + 0.5 - cy;
+                if dx * dx + dy * dy <= r * r {
+                    let i = ((y * size + x) * 4) as usize;
+                    rgba[i..i + 3].fill(255);
+                    rgba[i + 3] = 255;
+                }
+            }
+        }
+        let mesh = build_talisman_mesh_from_rgba(&rgba, size, size, "test-disk")
+            .expect("disk silhouette should extrude");
+        assert!(mesh.vertices.len() > 8);
+        assert!(mesh.indices.len() >= 3);
+        let has_front = mesh.vertices.iter().any(|v| v.position[2] > 0.01);
+        let has_back = mesh.vertices.iter().any(|v| v.position[2] < -0.01);
+        assert!(has_front && has_back);
+    }
+
+    #[test]
+    fn talisman_side_wall_face_normals_match_vertices() {
+        use crate::talisman_mesh::build_talisman_mesh_from_mask_asset;
+
+        let mesh = build_talisman_mesh_from_mask_asset("textures/talismans/talisman_wildflower_mask.png")
+            .expect("wildflower mesh");
+        let mut bad = 0usize;
+        for tri in mesh.indices.chunks_exact(3) {
+            let v = [
+                &mesh.vertices[tri[0] as usize],
+                &mesh.vertices[tri[1] as usize],
+                &mesh.vertices[tri[2] as usize],
+            ];
+            if v[0].normal[2].abs() > 0.05 {
+                continue;
+            }
+            let p0 = glam::Vec3::from(v[0].position);
+            let p1 = glam::Vec3::from(v[1].position);
+            let p2 = glam::Vec3::from(v[2].position);
+            let face_n = (p1 - p0).cross(p2 - p0);
+            if face_n.length_squared() < 1e-12 {
+                continue;
+            }
+            let face_n = face_n.normalize();
+            let vert_n = glam::Vec3::from(v[0].normal);
+            if face_n.dot(vert_n) < 0.5 {
+                bad += 1;
+            }
+        }
+        assert_eq!(bad, 0, "{bad} side-wall tris had reversed winding vs normals");
+    }
 }
 
 /// Drop marching-squares loops that ride the image border when at least one

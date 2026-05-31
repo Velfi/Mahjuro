@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Generate grayscale heightmaps and octagon silhouette masks for talisman tablets.
+Generate grayscale heightmaps and organic silhouette masks for carved jade talisman art.
 
 Outputs per kind:
   - Shop:     talisman_{slug}.png + talisman_{slug}_mask.png
   - Memorial: memorial_{slug}.png + memorial_{slug}_mask.png
 
-Heightmaps are full mid-gray plates with carved relief (no black void — the mask
-handles cutout). Masks are procedural octagons aligned with `talisman_face_uv`.
+Heightmaps are mid-gray jade plates with deep figurative carving (orthographic heightfield).
+Masks are derived via `--mask-method auto` (see _talisman_art_common.py).
 
 Usage:
     pip install google-genai pillow
@@ -17,7 +17,7 @@ Usage:
     python scripts/generate_talisman_art.py --set shop         # shop talismans only
     python scripts/generate_talisman_art.py --set memorial
     python scripts/generate_talisman_art.py --masks-only       # masks from existing heights
-    python scripts/generate_talisman_art.py --name pearl --set shop
+    python scripts/generate_talisman_art.py --name pinzu --set shop
 """
 
 from __future__ import annotations
@@ -26,11 +26,18 @@ import argparse
 import json
 import sys
 import time
+from io import BytesIO
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _image_gen import DEFAULT_MODEL, generate_image_bytes, init_client, parse_size  # noqa: E402
-from _talisman_art_common import postprocess_heightmap, write_octagon_mask  # noqa: E402
+from _talisman_art_common import (  # noqa: E402
+    MEMORIAL_EXAGGERATE,
+    SHOP_EXAGGERATE,
+    postprocess_heightmap,
+    strip_border_matte_frame,
+    write_mask_from_height,
+)
 
 try:
     from PIL import Image
@@ -44,136 +51,123 @@ SHOP_DATA = ROOT / "assets" / "data" / "talismans.json"
 MEMORIAL_DATA = ROOT / "assets" / "data" / "memorial_talismans.json"
 OUT_SIZE = 256
 
+CARVING_BASE = (
+    "Orthographic top-down grayscale heightmap of a jade relief carving. "
+    "Flat displacement field on a square canvas: tonal brightness equals carved height. "
+    "Straight-on view, even unlit stone, one continuous mid-gray jade plane (#808080).\n\n"
+    "Edge-to-edge composition: the figurative carving reaches the image margins — "
+    "petal tips, horns, coin rims, and wing tips shape the outer contour directly at the "
+    "canvas edge. Mid-gray jade continues behind the subject all the way to each side. "
+    "The subject silhouette is the only outer boundary on the square canvas.\n\n"
+    "Organic asymmetric silhouette, one clear figurative subject in deep relief, "
+    "readable at thumbnail size. Asymmetric composition with the top of the carving toward +Y.\n\n"
+    "Height tones: white peaks (#ffffff), light gray secondary planes (#e0–#f0), "
+    "mid-gray ground (#808080), dark gray grooves and undercuts (#30–#50)."
+)
+
 SHOP_STYLE = (
-    "A flat, top-down grayscale HEIGHTMAP texture for a single regular octagonal "
-    "jade merchant talisman (eight equal sides), centered and nearly filling a "
-    "square frame. A **flat horizontal edge** runs along the **bottom** of the "
-    "octagon (stop-sign resting on its edge, not a point). DISPLACEMENT MAP for "
-    "real-time 3D — tonal value is literal surface height.\n\n"
-    "Construction: crisp shop engraving on polished tablet. Raised motifs read "
-    "near-white; recessed field and groove moats read mid-gray (#808080). The "
-    "**entire square** stays on the mid-gray plate — **do not paint black outside "
-    "the octagon** (silhouette is a separate mask texture).\n\n"
-    "Tonal key (discrete plateaus):\n"
-    "  • #ffffff: highest relief peaks and rim highlights\n"
-    "  • #e0–#f0: secondary highs inside motifs\n"
-    "  • #808080: uniform flat field between motifs\n"
-    "  • #3a3a3a: narrow recess grooves outlining raised elements\n\n"
-    "No cast shadows, no specular, no perspective, no color, no Latin letters. "
-    "Orthographic heightfield only. Premium mahjong-house merchandise — readable "
-    "at thumbnail size."
+    f"{CARVING_BASE}\n\n"
+    "Polished merchant jade, crisp deep undercut carving."
 )
 
 MEMORIAL_STYLE = (
-    "A flat, top-down grayscale HEIGHTMAP texture for a single regular octagonal "
-    "jade memorial tablet (eight equal sides), centered and nearly filling a "
-    "square frame. A **flat horizontal edge** runs along the **bottom** of the "
-    "octagon (stop-sign resting on its edge, not a point). DISPLACEMENT MAP for "
-    "real-time 3D — tonal value is literal surface height.\n\n"
-    "Construction: shallow carved relief like an ancient stone rubbing or worn "
-    "temple plaque. Raised lines read near-white; recessed field and groove moats "
-    "read mid-gray (#808080). The **entire square** stays on the mid-gray plate — "
-    "**do not paint black outside the octagon** (silhouette is a separate mask).\n\n"
-    "Tonal key (discrete plateaus):\n"
-    "  • #ffffff: highest relief peaks and rim highlights\n"
-    "  • #e0–#f0: secondary highs inside motifs\n"
-    "  • #808080: uniform flat field between motifs\n"
-    "  • #3a3a3a: narrow recess grooves\n\n"
-    "No shading, no cast shadows, no specular, no perspective, no color, no "
-    "Latin letters. Worn, solemn memorial — not glossy shop merchandise."
+    f"{CARVING_BASE}\n\n"
+    "Worn temple-rubbing jade, shallower relief, one chipped tip, solemn matte finish."
 )
 
 SHOP_MOTIFS: dict[str, str] = {
     "pearl": (
-        "Motif — Pearl: a single large nacreous disk in the center with concentric "
-        "growth rings and a small raised boss, rimmed by a thin double-line octagon "
-        "border. Reads as lustrous pearl inlay."
+        "Moon rabbit (玉兔) crouched beside a raised pearl boss. Rabbit ears and haunch "
+        "break the organic outline; pearl is the highest interior peak. Rabbit faces pearl; "
+        "tail curl lower-left; ears and pearl boss upper-center."
     ),
     "gilded": (
-        "Motif — Gilded: three overlapping ancient coins with square holes, stacked "
-        "diagonally, each coin a raised ring with dark square recess. Suggests gold "
-        "payout on scored tiles."
+        "Prosperity beetle (金龟) climbing a single curved sycee ingot. Domed carapace "
+        "highest; legs grip the ingot bow; one ginkgo leaf under the ingot tip."
     ),
     "polychrome": (
-        "Motif — Polychrome: a six-point starburst mandala radiating from center, "
-        "each arm a raised wedge separated by groove moats, implying multicolor "
-        "mult bonus."
+        "Peacock in full fan display, tail feathers sweeping lower-right as the outer "
+        "contour. Crest upper-left; body in profile; each eye-spot a shallow groove."
     ),
     "souzu": (
-        "Motif — Souzu: three vertical bamboo stalks with joint nodes, simplified "
-        "segments, leaves as small raised chevrons at the top. Suit-transform tablet."
+        "Bamboo culm with three nodes and a cicada (蝉) on the middle node, wings "
+        "overlapping a leaf chevron. Left-heavy culm; cicada wing-tips break the right edge."
     ),
     "pinzu": (
-        "Motif — Pinzu: a large concentric circle target (one bold ring, one inner "
-        "disk) like a simplified pin / circle suit pip, centered on the tablet."
+        "Azure dragon (青龙) coiled around a bi disc void. Dragon head at top breaking "
+        "past the ring; horns, claw, and tail outside the ring define the contour. "
+        "Wave band at bottom."
     ),
     "manzu": (
-        "Motif — Manzu: a bold wan / character suit square frame in the center "
-        "with a raised horizontal bar and two side pillars — abstract, not a real "
-        "kanji glyph."
+        "Pixiu (貔貅) crouched winged-lion wealth beast holding a raised abstract "
+        "wan-frame tablet (horizontal bar and two pillars) in forepaws. Horn, wing-tip, "
+        "and haunch at the silhouette edge."
     ),
     "honors": (
-        "Motif — Honors: three small dragon-scale shields in a triangle arrangement, "
-        "each shield a raised teardrop with a central groove line."
+        "Three mahjong honor dragon tile faces in a loose triangle — red dragon (abstract "
+        "center-bar motif), green dragon (abstract fa-frame motif), white dragon (blank "
+        "frame with pearl boss) — plus one east-wind tile roundel linked by curling wind "
+        "bands. Tile corners and wind scroll tips break the contour. Abstract carved "
+        "tile-glyph shapes only."
     ),
     "wildflower": (
-        "Motif — Wildflower: a five-petal flower viewed from above, petals as raised "
-        "teardrops around a central stamen boss, stem groove curving to the bottom edge."
+        "Lotus bloom with five asymmetric scalloped petals and kingfisher (翠鸟) on "
+        "stem, beak toward stamen. Deep undercut between petals; bird tail adds a right bulge."
     ),
     "conformity": (
-        "Motif — Conformity: nine identical small squares in a 3×3 grid, each "
-        "square a raised tile blank, suggesting every tile becoming the same."
+        "Two mirror-image koi circling a central blank mahjong tile, bodies interlocked "
+        "head-to-tail. Shared scale texture; open water between their arcs."
     ),
 }
 
 MEMORIAL_MOTIFS: dict[str, str] = {
     "exhausted": (
-        "Motif — The Exhausted: concentric rings radiating from a small central "
-        "boss, like ripples fading to stillness. Outer rings broken and irregular."
+        "Sleeping ox curled on ground, head on forelegs, dull horns. Back arc defines "
+        "the upper edge; one horn tip at the contour. Shallow worn carving."
     ),
     "frozen_hand": (
-        "Motif — The Frozen Hand: stylized open handprint in the center, rimmed by "
-        "cracked ice facets and short fracture lines radiating outward."
+        "Crane standing on one leg, wing half-frozen; ice fracture lines radiating from "
+        "talon at base. S-curve neck breaks the top edge; jagged ice splinters on the lower edge."
     ),
     "skipper": (
-        "Motif — The Skipper: stepping stones along a winding path with gaps — "
-        "missing stones as dark recess voids between raised stones."
+        "Carp leaping over stylized wave gate (鱼跃龙门), body arched mid-jump, whiskers "
+        "forward, splash at tail. Dynamic diagonal; open gap under belly."
     ),
     "hoarder": (
-        "Motif — The Hoarder: stack of seven ancient coins with square holes piled "
-        "in the center, overlapping disks."
+        "Magpie (喜鹊) perched on a bulging silk money pouch, beak open, tail feather "
+        "sweeping left. Pouch knot and magpie wing-tip define the lumpy contour."
     ),
     "full_dish": (
-        "Motif — The Full Dish: wide shallow bowl from above, brim with three small "
-        "raised pebbles on the rim lip."
+        "Three-legged money toad (金蟾) on elliptical offering bowl rim, coin in mouth. "
+        "Toad bump, bowl rim, and coin tip at the edge."
     ),
     "discarded": (
-        "Motif — The Discarded: three blank mahjong tile rectangles tumbling "
-        "downward with trailing ripple grooves."
+        "Butterfly over fallen plum blossom and half-buried blank tile. Asymmetric wings; "
+        "upper wing tip top-right, lower wing lower-left."
     ),
     "boss_mark": (
-        "Motif — The Boss's Mark: heavy house seal / stern angular mask emblem "
-        "inside a thick circular ring with four radial tick marks."
+        "Bent jian sword (剑) diagonal; crossguard bears taotie (饕餮) bronze mask with "
+        "horns; small house seal square on blade flat. Blade arc and taotie horns at the edge."
     ),
     "buff_saint": (
-        "Motif — The Buff Saint: six small raised seal stamps in a ring around a "
-        "central dot, each a different simple geometric glyph."
+        "Deer with branching antlers and lingzhi fungus clusters at the hooves. Antler "
+        "tips and snout break the upper contour; worn memorial grooves on the flank."
     ),
     "transformer": (
-        "Motif — The Transformer: souzu stalk, pinzu circle, and manzu square in a "
-        "column connected by morphing groove lines."
+        "Nine-tailed fox (九尾狐) mid-transformation: fox head upper-left, fan of tail tips "
+        "lower-right showing bushy, scaled, and feathered tail forms. S-curve body."
     ),
     "tag_bearer": (
-        "Motif — The Tag Bearer: five rectangular house tokens fanning from a "
-        "central nail head."
+        "Five paper ofuda strips fanning from a central nail head; cloud-shaped cutouts "
+        "along each strip edge. Strip corners at the silhouette perimeter."
     ),
     "meld_mason": (
-        "Motif — The Meld Mason: interlocking triplet bar, sequence chain, and "
-        "pair block fitted like masonry."
+        "Pair of swallows building a nest under a tile-shaped eave lip; one bird carries "
+        "a reed strand. Nest cup, wing arcs, and eave corner at the contour."
     ),
     "deep_walker": (
-        "Motif — The Deep Walker: paired footprints along a coiled maze path from "
-        "rim toward center with depth tick marks."
+        "Xuanwu (玄武) tortoise with snake entwined climbing three rock terraces. Snake head "
+        "highest; shell dome breaks left; tall aspect ~1.4×. Footprint pairs on lowest terrace."
     ),
 }
 
@@ -200,6 +194,7 @@ def load_shop_entries() -> list[dict]:
                 "name": row["name"],
                 "style": SHOP_STYLE,
                 "motif": SHOP_MOTIFS[slug],
+                "exaggerate": SHOP_EXAGGERATE,
             }
         )
     return out
@@ -219,23 +214,30 @@ def load_memorial_entries() -> list[dict]:
                 "name": row["name"],
                 "style": MEMORIAL_STYLE,
                 "motif": MEMORIAL_MOTIFS[slug],
+                "exaggerate": MEMORIAL_EXAGGERATE,
             }
         )
     return out
 
 
 def build_prompt(entry: dict) -> str:
-    return f"{entry['style']}\n\n{entry['motif']}"
+    return (
+        f"{entry['style']}\n\n"
+        f"Subject — carve only this figurative scene:\n{entry['motif']}\n\n"
+        f"This subject is unique among all talismans; follow the Subject line exactly."
+    )
 
 
-def write_mask_for_entry(entry: dict, out_size: int) -> Path:
+def write_mask_for_entry(entry: dict, *, mask_method: str = "auto") -> Path:
     mpath = mask_path(entry["prefix"], entry["slug"])
-    write_octagon_mask(mpath, out_size)
+    hp = height_path(entry["prefix"], entry["slug"])
+    if not write_mask_from_height(hp, mpath, method=mask_method):
+        raise SystemExit(f"cannot write mask — missing heightmap {hp}")
     return mpath
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate talisman heightmaps and masks")
+    parser = argparse.ArgumentParser(description="Generate talisman carving heightmaps and masks")
     parser.add_argument(
         "--set",
         choices=("shop", "memorial", "all"),
@@ -247,7 +249,7 @@ def main() -> None:
     parser.add_argument(
         "--masks-only",
         action="store_true",
-        help="Write procedural octagon masks only (no API)",
+        help="Write organic masks from existing heightmaps (no API)",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print prompts only")
     parser.add_argument("--list", action="store_true", help="List slugs and exit")
@@ -255,6 +257,32 @@ def main() -> None:
     parser.add_argument("--size", type=str, default="1:1@1K")
     parser.add_argument("--out-size", type=int, default=OUT_SIZE)
     parser.add_argument("--sleep", type=float, default=2.0, help="Seconds between API calls")
+    parser.add_argument(
+        "--exaggerate-shop",
+        type=float,
+        default=SHOP_EXAGGERATE,
+        help="Relief exaggeration for shop heightmaps",
+    )
+    parser.add_argument(
+        "--repostprocess-only",
+        action="store_true",
+        help="Strip AI matte/frame bands from existing heightmaps and rewrite masks (no API)",
+    )
+    parser.add_argument(
+        "--exaggerate-memorial",
+        type=float,
+        default=MEMORIAL_EXAGGERATE,
+        help="Relief exaggeration for memorial heightmaps",
+    )
+    parser.add_argument(
+        "--mask-method",
+        choices=("auto", "luma", "flood", "rembg"),
+        default="auto",
+        help=(
+            "Silhouette extraction: auto (flat=luma, sculpted=flood, else rembg), "
+            "luma (legacy threshold), flood (border-connected bg), rembg (local u2net)"
+        ),
+    )
     args = parser.parse_args()
 
     entries: list[dict] = []
@@ -262,6 +290,12 @@ def main() -> None:
         entries.extend(load_shop_entries())
     if args.set in ("memorial", "all"):
         entries.extend(load_memorial_entries())
+
+    for e in entries:
+        if e["prefix"] == "talisman":
+            e["exaggerate"] = args.exaggerate_shop
+        else:
+            e["exaggerate"] = args.exaggerate_memorial
 
     if args.list:
         for e in entries:
@@ -287,9 +321,23 @@ def main() -> None:
 
     if args.masks_only:
         for e in entries:
-            mpath = write_mask_for_entry(e, args.out_size)
+            mpath = write_mask_for_entry(e, mask_method=args.mask_method)
             print(f"  mask {mpath.name}")
         print("Done (masks only).")
+        return
+
+    if args.repostprocess_only:
+        for e in entries:
+            hp = height_path(e["prefix"], e["slug"])
+            if not hp.is_file():
+                print(f"  skip {hp.name} (missing)")
+                continue
+            with Image.open(hp) as im:
+                cleaned = strip_border_matte_frame(im.convert("L"))
+            cleaned.save(hp, "PNG", optimize=True)
+            write_mask_for_entry(e, mask_method=args.mask_method)
+            print(f"  strip border {hp.name} + mask")
+        print("Done (repostprocess).")
         return
 
     client = init_client()
@@ -311,7 +359,7 @@ def main() -> None:
                 aspect_ratio=aspect_ratio,
                 image_size=image_size,
             )
-            cleaned = postprocess_heightmap(raw, args.out_size)
+            cleaned = postprocess_heightmap(raw, args.out_size, entry["exaggerate"])
             cleaned.save(hp, "PNG", optimize=True)
             print(f"  wrote {hp.name}")
             if i + 1 < len(entries) and args.sleep > 0:
@@ -322,7 +370,7 @@ def main() -> None:
             print(f"  skip {hp.name} (exists, mask pending)")
 
         if need_mask or need_height:
-            write_mask_for_entry(entry, args.out_size)
+            write_mask_for_entry(entry, mask_method=args.mask_method)
             print(f"  wrote {mp.name}")
 
     print("Done.")
