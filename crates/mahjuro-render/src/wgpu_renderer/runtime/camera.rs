@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::scene_keys;
+
 #[allow(dead_code)] // up_v/fov_y/aspect/view_mat/proj are exposed for downstream passes.
 pub(super) struct CameraFrame {
     pub cam_pos: glam::Vec3,
@@ -186,7 +188,7 @@ impl WgpuRenderer {
         if !enabled {
             return 0.0;
         }
-        let height_scale = if self.active_scene_key == Some("main_menu_exterior") {
+        let height_scale = if self.active_scene_key == Some(scene_keys::MAIN_MENU) {
             crate::main_menu_glb::main_menu_env_height_scale(self.active_frame_env().height_scale)
         } else {
             self.active_frame_env().height_scale
@@ -203,11 +205,14 @@ impl WgpuRenderer {
         let h = frame.showcase_render_hints;
         let table_like = matches!(
             k,
-            Some("gameplay") | Some("tutorial") | Some("pick_chamber") | Some("collection")
+            Some(scene_keys::GAMEPLAY)
+            | Some("tutorial")
+            | Some(scene_keys::HALLWAY)
+            | Some(scene_keys::ARCHIVE)
         ) || (k == Some("showcase") && h.collection_tonemap_context);
         let shop_scene =
-            k == Some("shop") || (k == Some("showcase") && h.shop_tonemap_and_lit_mesh_context);
-        let gameplay_glb_room = matches!(k, Some("gameplay") | Some("tutorial"))
+            k == Some(scene_keys::SHOP) || (k == Some("showcase") && h.shop_tonemap_and_lit_mesh_context);
+        let gameplay_glb_room = matches!(k, Some(scene_keys::GAMEPLAY) | Some("tutorial"))
             && frame.scene_lighting.embedded_gltf_punctual
             && frame
                 .cmds
@@ -280,19 +285,21 @@ impl WgpuRenderer {
                 * crate::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
             let mut a = self.active_frame_env().ambient_scale;
             match k {
-                Some("pick_chamber") => {
+                Some(scene_keys::HALLWAY) | Some("pick_chamber") => {
                     e *= crate::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
                     a = a.max(crate::hallway_glb::HALLWAY_ENV_AMBIENT_SCALE_MIN);
                 }
-                Some("main_menu_exterior") => {
+                Some(scene_keys::MAIN_MENU) | Some("main_menu_exterior") => {
                     e *= crate::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
                     a = a.max(crate::main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
                 }
-                Some("collection") | Some("showcase") if h.collection_tonemap_context => {
+                Some(scene_keys::ARCHIVE) | Some("collection") | Some("showcase")
+                    if h.collection_tonemap_context =>
+                {
                     e *= crate::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
                     a = a.max(crate::archive_glb::ARCHIVE_ENV_AMBIENT_SCALE_MIN);
                 }
-                Some("gameplay") | Some("tutorial") if gameplay_glb_room => {
+                Some(scene_keys::GAMEPLAY) | Some("tutorial") if gameplay_glb_room => {
                     e *= crate::gameplay_glb::GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL;
                 }
                 _ => {}
@@ -313,7 +320,7 @@ impl WgpuRenderer {
         let hdr_path = tm[0];
         let linear_exposure = if hdr_path > 0.5 { tm[1] } else { 0.0 };
         let ambient_scale = if hdr_path > 0.5 { tm[2] } else { 0.0 };
-        let shop_like = self.active_scene_key == Some("shop")
+        let shop_like = self.active_scene_key == Some(scene_keys::SHOP)
             || (self.active_scene_key == Some("showcase")
                 && frame
                     .showcase_render_hints

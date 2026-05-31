@@ -64,18 +64,15 @@ pub fn room_projected_shadow_half_xy(
     let s = room_env_world_scale(camera_h, env_height_scale);
     let ext = bounds.max - bounds.min;
     let half_xy = ext.x.max(ext.y) * s * 0.5;
-    window_half.min(half_xy).max(32.0)
+    window_half.max(half_xy).max(32.0)
 }
 
-/// Fit near/far for an RH ortho shadow camera. Uses room corners plus the look-at
-/// target so interior geometry is not clipped in front of the near plane.
-fn fit_ortho_depth_rh(
+fn shadow_fit_points(
     eye: Vec3,
     forward: Vec3,
-    view: Mat4,
     target: Vec3,
     corners_world: &[Vec3],
-) -> (f32, f32) {
+) -> Vec<Vec3> {
     let fwd = forward.normalize_or_zero();
     let mut fit_points: Vec<Vec3> = corners_world
         .iter()
@@ -86,10 +83,44 @@ fn fit_ortho_depth_rh(
         fit_points = corners_world.to_vec();
     }
     fit_points.push(target);
+    fit_points
+}
 
+/// Fit ortho left/right/top/bottom in light view space so room corners stay inside the depth map.
+fn fit_ortho_xy_rh(view: Mat4, fit_points: &[Vec3], fallback_half: f32) -> (f32, f32, f32, f32) {
+    let h = fallback_half.max(1.0);
+    if fit_points.is_empty() {
+        return (-h, h, -h, h);
+    }
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for &p in fit_points {
+        let v = view.transform_point3(p);
+        min_x = min_x.min(v.x);
+        max_x = max_x.max(v.x);
+        min_y = min_y.min(v.y);
+        max_y = max_y.max(v.y);
+    }
+    let pad = h * 0.04 + 8.0;
+    min_x -= pad;
+    max_x += pad;
+    min_y -= pad;
+    max_y += pad;
+    let cx = (min_x + max_x) * 0.5;
+    let cy = (min_y + max_y) * 0.5;
+    let hx = ((max_x - min_x) * 0.5).max(h);
+    let hy = ((max_y - min_y) * 0.5).max(h);
+    (cx - hx, cx + hx, cy - hy, cy + hy)
+}
+
+/// Fit near/far for an RH ortho shadow camera. Uses room corners plus the look-at
+/// target so interior geometry is not clipped in front of the near plane.
+fn fit_ortho_depth_rh(view: Mat4, fit_points: &[Vec3]) -> (f32, f32) {
     let mut min_z = f32::INFINITY;
     let mut max_z = f32::NEG_INFINITY;
-    for &p in &fit_points {
+    for &p in fit_points {
         let v = view.transform_point3(p);
         min_z = min_z.min(v.z);
         max_z = max_z.max(v.z);
@@ -97,11 +128,6 @@ fn fit_ortho_depth_rh(
     let near = (-max_z).max(0.05);
     let far = (-min_z).max(near + 0.5);
     (near, far)
-}
-
-fn ortho_shadow_proj_rh(fallback_half_xy: f32, near: f32, far: f32) -> Mat4 {
-    let h = fallback_half_xy.max(1.0);
-    Mat4::orthographic_rh(-h, h, -h, h, near, far)
 }
 
 pub fn point_light_shadow_view_proj(
@@ -128,12 +154,14 @@ pub fn point_light_shadow_view_proj_with_fit(
     let up = z_up_shadow_view_up(forward);
     let view = Mat4::look_at_rh(eye, target, up);
     let h = fallback_half_xy.max(1.0);
+    let fit_points = shadow_fit_points(eye, forward, target, scene_corners_world);
+    let (left, right, bottom, top) = fit_ortho_xy_rh(view, &fit_points, h);
     let (near, far) = if scene_corners_world.is_empty() {
         (0.05, fallback_depth.max(h * 2.0))
     } else {
-        fit_ortho_depth_rh(eye, forward, view, target, scene_corners_world)
+        fit_ortho_depth_rh(view, &fit_points)
     };
-    let proj = ortho_shadow_proj_rh(h, near, far);
+    let proj = Mat4::orthographic_rh(left, right, bottom, top, near, far);
     (proj * view, Some((h, h, near, far)))
 }
 
@@ -353,5 +381,28 @@ mod tests {
             ndc.z >= 0.0 && ndc.z <= 1.0,
             "room center ndc.z should be in [0,1], got {ndc:?}"
         );
+    }
+
+    #[test]
+    fn fitted_frustum_covers_room_corners_xy() {
+        let bounds = RoomEnvironmentBounds {
+            min: Vec3::new(-120.0, -80.0, 0.0),
+            max: Vec3::new(120.0, 80.0, 160.0),
+        };
+        let h = 800.0;
+        let env_h = 1.0;
+        let corners = room_world_bounds_corners_centered(bounds, h, env_h);
+        let max_corner_z = corners.iter().map(|c| c.z).fold(f32::NEG_INFINITY, f32::max);
+        let light = Vec3::new(50.0, -30.0, max_corner_z + 5000.0);
+        let fallback = room_projected_shadow_half_xy(h, env_h, Some(bounds));
+        let (vp, _) = point_light_shadow_view_proj_with_fit(light, &corners, fallback, 500.0);
+        for (i, &corner) in corners.iter().enumerate() {
+            let clip = vp * corner.extend(1.0);
+            let ndc = clip.truncate() / clip.w;
+            assert!(
+                ndc.x >= -1.05 && ndc.x <= 1.05 && ndc.y >= -1.05 && ndc.y <= 1.05,
+                "corner {i} should project inside shadow frustum, got ndc {ndc:?}"
+            );
+        }
     }
 }

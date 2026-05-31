@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::tuning::tonemap::{FALLBACK_SCENE_KEY, KNOWN_SCENE_KEYS, TonemapTuning};
 use crate::room_glb::{RoomEnvFrameTune, RoomEnvLightingTune, SHOP_ENV_HEIGHT_SCALE};
+use crate::scene_keys;
 
 /// Full-screen look for one scene: composite tonemap + `room_glb` / `lit_mesh` lighting.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -114,6 +115,14 @@ impl SceneLookTuningSet {
             let storage = storage_key(key);
             if mahjuro_gfx_types::has_tuning_override(&storage) {
                 per_scene.insert(key.to_string(), load_scene_look(key));
+                continue;
+            }
+            for &legacy in scene_keys::legacy_aliases(key) {
+                let legacy_storage = storage_key(legacy);
+                if mahjuro_gfx_types::has_tuning_override(&legacy_storage) {
+                    per_scene.insert(key.to_string(), load_scene_look(key));
+                    break;
+                }
             }
         }
         Self {
@@ -155,12 +164,12 @@ impl SceneLookTuningSet {
 /// Scene keys for embedded GLB room environments. Each gets its own
 /// [`RoomEnvFrameTune`] every frame (not the active scene's globals).
 pub const GLTF_ENV_SCENE_KEYS: &[&str] = &[
-    "shop",
-    "pick_chamber",
-    "staircase",
-    "collection",
-    "main_menu_exterior",
-    "gameplay",
+    scene_keys::SHOP,
+    scene_keys::HALLWAY,
+    scene_keys::STAIRWAY,
+    scene_keys::ARCHIVE,
+    scene_keys::MAIN_MENU,
+    scene_keys::GAMEPLAY,
     "tutorial",
 ];
 
@@ -207,12 +216,30 @@ fn load_scene_look(scene_key: &str) -> SceneLookTuning {
     if mahjuro_gfx_types::has_tuning_override(&unified) {
         return mahjuro_gfx_types::load_tuning_override(&unified);
     }
+    for &legacy in crate::scene_keys::legacy_aliases(scene_key) {
+        let legacy_unified = storage_key(legacy);
+        if mahjuro_gfx_types::has_tuning_override(&legacy_unified) {
+            return mahjuro_gfx_types::load_tuning_override(&legacy_unified);
+        }
+    }
     SceneLookTuning {
-        tonemap: mahjuro_gfx_types::load_tuning_override::<TonemapTuning>(
-            &crate::tuning::tonemap::storage_key(scene_key),
-        ),
+        tonemap: load_tonemap_with_legacy(scene_key),
         ..SceneLookTuning::default()
     }
+}
+
+fn load_tonemap_with_legacy(scene_key: &str) -> TonemapTuning {
+    let key = crate::tuning::tonemap::storage_key(scene_key);
+    if mahjuro_gfx_types::has_tuning_override(&key) {
+        return mahjuro_gfx_types::load_tuning_override(&key);
+    }
+    for &legacy in crate::scene_keys::legacy_aliases(scene_key) {
+        let legacy_key = crate::tuning::tonemap::storage_key(legacy);
+        if mahjuro_gfx_types::has_tuning_override(&legacy_key) {
+            return mahjuro_gfx_types::load_tuning_override(&legacy_key);
+        }
+    }
+    mahjuro_gfx_types::load_tuning_override(&key)
 }
 
 pub fn save_scene_look(scene_key: &str, look: &SceneLookTuning) -> anyhow::Result<()> {
@@ -226,17 +253,20 @@ pub fn clear_scene_look(scene_key: &str) -> anyhow::Result<()> {
 /// All scene keys available in the overlay scene picker (plus `_default`).
 pub const OVERLAY_SCENE_KEYS: &[&str] = &[
     FALLBACK_SCENE_KEY,
-    KNOWN_SCENE_KEYS[0],
-    KNOWN_SCENE_KEYS[1],
-    KNOWN_SCENE_KEYS[2],
-    KNOWN_SCENE_KEYS[3],
-    KNOWN_SCENE_KEYS[4],
-    KNOWN_SCENE_KEYS[5],
-    KNOWN_SCENE_KEYS[6],
-    KNOWN_SCENE_KEYS[7],
-    KNOWN_SCENE_KEYS[8],
-    KNOWN_SCENE_KEYS[9],
-    KNOWN_SCENE_KEYS[10],
+    scene_keys::MAIN_MENU,
+    scene_keys::SHOP,
+    scene_keys::HALLWAY,
+    scene_keys::GAMEPLAY,
+    scene_keys::ARCHIVE,
+    scene_keys::OPTIONS,
+    scene_keys::STAIRWAY,
+    scene_keys::VICTORY,
+    scene_keys::DEFEAT,
+    "tutorial",
+    "showcase",
+    "tile_pack_celebration",
+    "guide",
+    "yaku_journal",
 ];
 
 pub fn overlay_scene_keys() -> &'static [&'static str] {

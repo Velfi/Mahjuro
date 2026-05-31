@@ -10,7 +10,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::main_menu_exterior::MainMenuExteriorScene;
+use super::main_menu::MainMenuScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const MIN_DURATION_SECS: f32 = 0.25;
@@ -140,7 +140,7 @@ impl TransitionPlaygroundScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
+            Some(Scene::MainMenu(MainMenuScene::new()))
         }
     }
 

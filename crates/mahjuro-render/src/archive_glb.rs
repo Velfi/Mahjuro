@@ -1,4 +1,4 @@
-//! [`archive.glb`](../../../assets/3d/archive.glb) — Archive (`CollectionScene`) room.
+//! [`archive.glb`](../../../assets/3d/archive.glb) — Archive (`ArchiveScene`) room.
 //!
 //! ## Node names (Blender object names → glTF nodes)
 //!
@@ -15,7 +15,7 @@
 //! - `section_buttons_left_bound` / `section_buttons_right_bound` — legacy bounds (collision only when present).
 //! - `archive_spawn_focused_item` — large featured / inspect anchor.
 //!
-//! **Description copy:** name/body text is **CPU-rasterized** in [`CollectionScene`](../../scenes/collection.rs)
+//! **Description copy:** name/body text is **CPU-rasterized** in [`ArchiveScene`](../../scenes/collection.rs)
 //! into the archive decal texture (see `sync_archive_description_decal_texture`).
 //! [`archive_description_sign_use_left_for_ref_x`] picks the side (cursor X in
 //! [`crate::ui::input::InputMode::Cursor`]; projected focused-item X in keyboard / controller mode);
@@ -34,7 +34,7 @@ use glam::{Mat4, Vec3};
 use crate::draw_cmd::CameraParams;
 use crate::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
-use crate::wgpu_renderer::{PointLight, SpotLight};
+use crate::wgpu_renderer::PointLight;
 
 pub const SIGN_DESCRIPTION_LEFT: &str = "sign_description_left";
 pub const SIGN_DESCRIPTION_RIGHT: &str = "sign_description_right";
@@ -53,7 +53,7 @@ pub const BTN_SWITCH_SAVE: &str = "btn_switch_save";
 pub const BTN_PAGE_LEFT: &str = "btn_page_left";
 pub const BTN_PAGE_RIGHT: &str = "btn_page_right";
 
-/// Tab button glTF nodes in [`crate::scenes::collection::TABS`] order (Relics → Talismans → Yaku → Bosses → Chronicle).
+/// Tab button glTF nodes in [`crate::scenes::archive::TABS`] order (Relics → Talismans → Yaku → Bosses → Chronicle).
 pub const ARCHIVE_TAB_BUTTON_NODES: [&str; 5] = [
     BTN_RELICS_TAB,
     BTN_TALISMANS_TAB,
@@ -68,6 +68,22 @@ pub const ARCHIVE_TAB_BUTTON_NODES: [&str; 5] = [
 #[inline]
 pub fn archive_prim_casts_room_shadow(_node_name: Option<&str>) -> bool {
     false
+}
+
+/// Whether this archive room mesh should cast into the live punctual shadow depth pass.
+///
+/// Shell geometry (cubbies, fixture, shelves) casts; UI chrome (tabs, signs, text) does not.
+#[inline]
+pub fn archive_env_prim_casts_punctual_shadow(node_name: Option<&str>) -> bool {
+    let Some(name) = node_name else {
+        return true;
+    };
+    !is_archive_button_node(name)
+        && !matches!(
+            name,
+            SIGN_DESCRIPTION_LEFT | SIGN_DESCRIPTION_RIGHT | INSPECT_PLAQUE
+        )
+        && !name.starts_with("text_")
 }
 
 /// Fallback host extents for [`crate::decal::decal_dimensions`] when the archive `.glb`
@@ -532,27 +548,6 @@ pub fn archive_embedded_point_lights_runtime(
         .collect()
 }
 
-pub fn archive_embedded_spot_lights_runtime(
-    w: f32,
-    h: f32,
-    env_h: f32,
-    tune: &RoomEnvLightingTune,
-) -> Vec<SpotLight> {
-    with_archive_glb_cpu(|opt| {
-        opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu,
-                w,
-                h,
-                env_h,
-                tune,
-                "archive.glb",
-            )
-        })
-        .unwrap_or_default()
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,5 +601,14 @@ mod tests {
         assert!(!archive_env_skips_directional_room_shadow(
             SIGN_DESCRIPTION_LEFT
         ));
+    }
+
+    #[test]
+    fn archive_punctual_shadow_casters_are_shell_only() {
+        assert!(archive_env_prim_casts_punctual_shadow(Some("Cubby")));
+        assert!(archive_env_prim_casts_punctual_shadow(Some("main_fixture")));
+        assert!(!archive_env_prim_casts_punctual_shadow(Some(BTN_RELICS_TAB)));
+        assert!(!archive_env_prim_casts_punctual_shadow(Some(SIGN_DESCRIPTION_LEFT)));
+        assert!(!archive_env_prim_casts_punctual_shadow(Some("text_scene_title")));
     }
 }

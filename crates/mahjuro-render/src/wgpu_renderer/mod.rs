@@ -270,6 +270,8 @@ pub struct WgpuRenderer {
     /// All GPU primitive indices for `btn_page_left` / `btn_page_right` (multi-material meshes).
     archive_page_left_prim_indices: Vec<usize>,
     archive_page_right_prim_indices: Vec<usize>,
+    /// Archive UI chrome that must not cast into the punctual shadow depth pass.
+    archive_punctual_shadow_skip_prims: rustc_hash::FxHashSet<usize>,
     /// Last-uploaded browse-board decal; `u64::MAX` = cleared / none.
     archive_sign_decal_upload_key: u64,
     /// Last-uploaded inspect-plaque decal; `u64::MAX` = cleared / none.
@@ -582,12 +584,18 @@ pub struct WgpuRenderer {
     /// The talisman shader branch samples these as a
     /// grayscale heightfield to perturb the surface normal.
     talisman_height_views: Vec<wgpu::TextureView>,
-    /// Per-kind octagon masks for shop talisman tablets — [`TalismanKind::all()`] order.
+    /// Per-kind organic silhouette masks for shop talisman pendants — [`TalismanKind::all()`] order.
     talisman_mask_views: Vec<wgpu::TextureView>,
-    /// Per-kind heightmaps for memorial (remnant) tablets — [`MemorialTalismanKind::all()`] order.
+    /// Per-kind heightmaps for memorial (remnant) pendants — [`MemorialTalismanKind::all()`] order.
     memorial_talisman_height_views: Vec<wgpu::TextureView>,
-    /// Per-kind octagon masks for memorial tablets — [`MemorialTalismanKind::all()`] order.
+    /// Per-kind organic silhouette masks for memorial pendants — [`MemorialTalismanKind::all()`] order.
     memorial_talisman_mask_views: Vec<wgpu::TextureView>,
+    /// Per-kind mask-extruded pendant meshes (shop). Falls back to [`Self::talisman_mesh`].
+    talisman_meshes: rustc_hash::FxHashMap<mahjuro_core::core::talisman::TalismanKind, LitMeshGpu>,
+    /// Per-kind mask-extruded pendant meshes (memorial).
+    memorial_talisman_meshes:
+        rustc_hash::FxHashMap<mahjuro_core::core::memorial_talisman::MemorialTalismanKind, LitMeshGpu>,
+    talisman_meshes_ready: bool,
     /// Which heightmap is currently bound per talisman slot. Used to skip
     /// rebinding when the kind hasn't changed since last frame. Indexed
     /// parallel with `talisman_instances`; `None` means the white fallback

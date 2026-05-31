@@ -119,6 +119,10 @@ pub struct PlayerProgress {
     /// Talismans the player has focused in Archive since first purchased.
     #[serde(default)]
     pub archive_seen_talismans: HashSet<TalismanKind>,
+    /// Memorial remnants the player has focused in Archive since first carried.
+    #[serde(default)]
+    pub archive_seen_memorial_talismans:
+        HashSet<crate::core::memorial_talisman::MemorialTalismanKind>,
     /// Wall-clock seconds spent in the storeroom shop (profile-persistent).
     #[serde(default)]
     pub shop_storeroom_seconds: f64,
@@ -298,6 +302,7 @@ impl PlayerProgress {
             archive_seen_yaku: HashSet::default(),
             archive_seen_ordeals: HashSet::default(),
             archive_seen_talismans: HashSet::default(),
+            archive_seen_memorial_talismans: HashSet::default(),
             shop_storeroom_seconds: 0.0,
         }
     }

@@ -25,7 +25,7 @@ pub enum RoomGiRoom {
     Hallway = 1,
     Archive = 2,
     MainMenu = 3,
-    Staircase = 4,
+    Stairway = 4,
     Gameplay = 5,
 }
 
@@ -38,7 +38,7 @@ pub fn room_gi_room_index(room: RoomGiRoom) -> usize {
         RoomGiRoom::Hallway => 1,
         RoomGiRoom::Archive => 2,
         RoomGiRoom::MainMenu => 3,
-        RoomGiRoom::Staircase => 4,
+        RoomGiRoom::Stairway => 4,
         RoomGiRoom::Gameplay => 5,
     }
 }
@@ -49,7 +49,7 @@ impl RoomGiRoom {
         Self::Hallway,
         Self::Archive,
         Self::MainMenu,
-        Self::Staircase,
+        Self::Stairway,
         Self::Gameplay,
     ];
 
@@ -68,7 +68,7 @@ impl RoomGiRoom {
             Self::Hallway => "data/room_gi/hallway.mgi",
             Self::Archive => "data/room_gi/archive.mgi",
             Self::MainMenu => "data/room_gi/main_menu.mgi",
-            Self::Staircase => "data/room_gi/staircase.mgi",
+            Self::Stairway => "data/room_gi/stairway.mgi",
             Self::Gameplay => "data/room_gi/gameplay.mgi",
         }
     }
@@ -86,7 +86,7 @@ impl RoomGiRoom {
         } else if hallway {
             Some(Self::Hallway)
         } else if staircase {
-            Some(Self::Staircase)
+            Some(Self::Stairway)
         } else if archive {
             Some(Self::Archive)
         } else if main_menu {
@@ -188,7 +188,7 @@ impl RoomGiBake {
             1 => RoomGiRoom::Hallway,
             2 => RoomGiRoom::Archive,
             3 => RoomGiRoom::MainMenu,
-            4 => RoomGiRoom::Staircase,
+            4 => RoomGiRoom::Stairway,
             5 => RoomGiRoom::Gameplay,
             n => anyhow::bail!("room GI bake: unknown room id {n}"),
         };

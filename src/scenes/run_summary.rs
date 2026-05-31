@@ -19,7 +19,7 @@ use crate::render::wgpu_renderer::GpuInstance;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::archive_career::format_score;
-use super::main_menu_exterior::MainMenuExteriorScene;
+use super::main_menu::MainMenuScene;
 use super::run_summary_panel::{
     RunSummaryPanelContent, RunSummaryPanelLayout, RunSummaryPanelLevel, RunSummaryPanelScroll,
     RunSummaryPanelTheme, RunSummaryStats, push_run_summary_panel,
@@ -92,7 +92,7 @@ impl RunSummaryStats {
     }
 }
 
-pub struct GameOverScene {
+pub struct RunSummaryScene {
     pub final_score: u64,
     pub target_score: u32,
     pub won: bool,
@@ -110,8 +110,8 @@ pub struct GameOverScene {
 /// Delay between the game-over screen appearing and its outcome stinger.
 const OUTCOME_SFX_DELAY_SECS: f32 = 1.0;
 
-impl GameOverScene {
-    pub fn new(run: &RunState, reason: GameOverReason) -> Self {
+impl RunSummaryScene {
+    pub fn defeat(run: &RunState, reason: GameOverReason) -> Self {
         let gameplay = GameEngine::read(run);
         let snap = snapshot_from_run(&run.defeat_journal, reason, run);
         let memorial = run
@@ -237,7 +237,7 @@ impl GameOverScene {
     }
 }
 
-impl SceneBehavior for GameOverScene {
+impl SceneBehavior for RunSummaryScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         if ctx.headless {
             self.opened_at = Instant::now() - std::time::Duration::from_secs(2);
@@ -289,7 +289,7 @@ impl SceneBehavior for GameOverScene {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             let settings = persistence::load_settings();
             GameEngine::reset_to_demo(ctx.run, ctx.progress, &settings);
-            return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
+            return Some(Scene::MainMenu(MainMenuScene::new()));
         }
         None
     }
@@ -327,7 +327,7 @@ impl SceneBehavior for GameOverScene {
                 frame.moonlit_water();
             }
         } else if let Some(kind) = self.memorial_kind {
-            super::game_over_tableau::push_defeat_memorial_tableau(&mut frame, ctx.layout, kind);
+            super::defeat_tableau::push_defeat_memorial_tableau(&mut frame, ctx.layout, kind);
         } else if ctx.effect_layers.fullscreen_water_backdrop {
             frame.sunlit_water();
         }
@@ -348,5 +348,43 @@ impl SceneBehavior for GameOverScene {
             format!("Game Over — {} / {}", self.final_score, self.target_score)
         };
         frame
+    }
+}
+
+/// Victory run-end screen (`Scene::Victory`).
+pub struct VictoryScene(RunSummaryScene);
+
+impl VictoryScene {
+    pub fn new(run: &RunState) -> Self {
+        Self(RunSummaryScene::victory(run))
+    }
+}
+
+impl SceneBehavior for VictoryScene {
+    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        self.0.update(ctx)
+    }
+
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+        self.0.draw_frame(ctx)
+    }
+}
+
+/// Defeat run-end screen (`Scene::Defeat`).
+pub struct DefeatScene(RunSummaryScene);
+
+impl DefeatScene {
+    pub fn new(run: &RunState, reason: GameOverReason) -> Self {
+        Self(RunSummaryScene::defeat(run, reason))
+    }
+}
+
+impl SceneBehavior for DefeatScene {
+    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        self.0.update(ctx)
+    }
+
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+        self.0.draw_frame(ctx)
     }
 }

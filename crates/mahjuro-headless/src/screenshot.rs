@@ -9,7 +9,7 @@ use crate::screenshot_scenes::{
 use crate::slug::parse_ordeal_slug;
 use mahjuro::game::run::RunState;
 use mahjuro::scenes::{
-    CollectionInspectPresenter, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
+    ArchiveInspectPresenter, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
 };
 use mahjuro::scenes::Scene;
 use mahjuro::ui::input::{InputMode, UiAction};
@@ -84,7 +84,7 @@ fn push_item_inspect_overlay(app: &mut HeadlessApp, s: &ScreenshotCli) -> anyhow
                 ShowcasePresenter::ShopInspect(ShopInspectPresenter::new(orbit)),
             )));
         }
-        Scene::Collection(coll) => {
+        Scene::Archive(coll) => {
             let orbit = coll
                 .item_inspect_orbit_for_screenshot(w, h, &layout, &app.progress)
                 .ok_or_else(|| {
@@ -93,7 +93,7 @@ fn push_item_inspect_overlay(app: &mut HeadlessApp, s: &ScreenshotCli) -> anyhow
                     )
                 })?;
             app.overlay_stack.push(Scene::Showcase(ShowcaseScene::new(
-                ShowcasePresenter::CollectionInspect(CollectionInspectPresenter::new(orbit)),
+                ShowcasePresenter::ArchiveInspect(ArchiveInspectPresenter::new(orbit)),
             )));
         }
         _ => {}

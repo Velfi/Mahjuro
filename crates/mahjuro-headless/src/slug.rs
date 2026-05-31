@@ -70,10 +70,10 @@ pub(crate) fn parse_bake_room_slug(
         "main_menu" | "main-menu" | "main_menu_exterior" => {
             Ok(mahjuro::render::room_gi_bake::RoomGiRoom::MainMenu)
         }
-        "staircase" | "stairway" => Ok(mahjuro::render::room_gi_bake::RoomGiRoom::Staircase),
+        "staircase" | "stairway" => Ok(mahjuro::render::room_gi_bake::RoomGiRoom::Stairway),
         "gameplay" => Ok(mahjuro::render::room_gi_bake::RoomGiRoom::Gameplay),
         other => anyhow::bail!(
-            "unknown room '{other}' (try shop, hallway, staircase, archive, main_menu, gameplay)"
+            "unknown room '{other}' (try shop, hallway, stairway, archive, main_menu, gameplay)"
         ),
     }
 }

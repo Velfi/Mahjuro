@@ -317,7 +317,12 @@ impl WgpuRenderer {
                         DrawKind::Pack => (&self.pack_mesh, self.pack_instances.get(slot_i)),
                         DrawKind::Ribbon => (&self.ribbon_mesh, self.ribbon_instances.get(slot_i)),
                         DrawKind::Talisman => {
-                            (&self.talisman_mesh, self.talisman_instances.get(slot_i))
+                            let mesh = self
+                                .talisman_slot_kind
+                                .get(slot_i)
+                                .and_then(|k| k.map(|idx| self.talisman_mesh_for_kind_idx(idx)))
+                                .unwrap_or(&self.talisman_mesh);
+                            (mesh, self.talisman_instances.get(slot_i))
                         }
                         DrawKind::BugBody => {
                             (&self.bug_body_mesh, self.bug_body_instances.get(slot_i))

@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use crate::render::draw_cmd::{ShowcaseRenderHints, UiFrame};
-use crate::scenes::collection;
+use crate::scenes::archive;
 use crate::scenes::object3d_inspect::ItemInspectOrbitState;
 use crate::ui::focus_nav::FocusDir;
 use crate::ui::input::UiAction;
@@ -28,13 +28,13 @@ fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     ]
 }
 
-pub struct CollectionInspectPresenter {
+pub struct ArchiveInspectPresenter {
     pub orbit: ItemInspectOrbitState,
     last_frame: Instant,
     target_lerp: Option<OrbitTargetLerp>,
 }
 
-impl CollectionInspectPresenter {
+impl ArchiveInspectPresenter {
     pub fn new(orbit: ItemInspectOrbitState) -> Self {
         Self {
             orbit,
@@ -78,7 +78,7 @@ impl CollectionInspectPresenter {
         if self.target_lerp.is_none()
             && let Some(collection) = ctx.suspended_collection.as_deref_mut()
         {
-            collection::sync_item_inspect_orbit_target(
+            archive::sync_item_inspect_orbit_target(
                 &*collection,
                 ctx.layout.window_w,
                 ctx.layout.window_h,
@@ -122,7 +122,7 @@ impl CollectionInspectPresenter {
                     )
                 {
                     let from = self.orbit.target_world;
-                    collection::sync_item_inspect_orbit_target(
+                    archive::sync_item_inspect_orbit_target(
                         &*collection,
                         ctx.layout.window_w,
                         ctx.layout.window_h,

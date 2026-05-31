@@ -125,9 +125,9 @@ pub enum MaterialKind {
     /// Unlit emission added on top of the usual lit path. `specular_strength`
     /// scales `base_color.rgb` in the shader (`lit_mesh.wgsl` emissive term).
     Emissive = 20,
-    /// Talisman tablets — holographic trading-card foil (rainbow bands, metallic
-    /// mirror, view-swept sheen). `base_color` tints the foil; `material_params.w`
-    /// is the talisman kind index. Uses the talisman heightmap for carved relief.
+    /// Talisman tablets — abalone shell (oily iridescence / memorial stone-pearl).
+    /// `base_color` tints the sheen; `material_params.w` is the kind index (memorial
+    /// adds 128). Uses the talisman heightmap for carved relief and iridescence phase.
     Chitin = 21,
     /// Flat texture read — boss ordeal icons and other extruded decals that should
     /// match their 2D atlas art without scene lighting or specular.

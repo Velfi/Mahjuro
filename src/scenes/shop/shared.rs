@@ -56,6 +56,8 @@ pub(crate) enum ShopFocus {
     NextRound,
     /// The 2D "Reroll" button at the bottom of the screen — also maps to PICK_REROLL_PROP.
     Reroll,
+    /// Lower-right wall supply HUD (opens Wall Ledger overlay).
+    WallHud,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,6 +94,7 @@ impl ShopFocus {
             Self::Pack(id) => Some(ShopHit::TilePack(id)),
             Self::NextRound => Some(ShopHit::Dish(PICK_LEAVE_PROP)),
             Self::Reroll => Some(ShopHit::Dish(PICK_REROLL_PROP)),
+            Self::WallHud => None,
         }
     }
 }

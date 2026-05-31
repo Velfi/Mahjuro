@@ -1,4 +1,5 @@
 use super::*;
+use crate::scene_keys;
 
 impl WgpuRenderer {
     /// Emissive-red overlay for main-menu `rain_hit_*` shells (rain debug menu).
@@ -12,7 +13,7 @@ impl WgpuRenderer {
         let Some(ref inst) = self.main_menu_rain_hit_debug_instance else {
             return;
         };
-        let height = self.env_tune_for("main_menu_exterior").height_scale;
+        let height = self.env_tune_for(scene_keys::MAIN_MENU).height_scale;
         let env_h = crate::main_menu_glb::main_menu_env_height_scale(height);
         let model = crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
             opt.map(|cpu| {

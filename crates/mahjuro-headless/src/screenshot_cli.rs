@@ -6,8 +6,7 @@ use clap::{ArgAction, Parser};
 #[derive(Debug, Parser)]
 #[command(name = "mahjuro-screenshot", about = "Render one offscreen frame to a PNG")]
 pub struct ScreenshotCli {
-    /// Root scene id (e.g. `shop`, `gameplay`, `collection`, `showcase`,
-    /// `zodiac_celebration`, `tile_pack_celebration`, `main_menu_exterior`, …).
+    /// Root scene id (e.g. `main_menu`, `shop`, `hallway`, `archive`, `defeat`, `showcase`, …).
     #[arg(long)]
     pub scene: String,
     #[arg(long, default_value = "/tmp/mahjuro-screenshot.png")]
@@ -19,7 +18,7 @@ pub struct ScreenshotCli {
     /// Extra idle ticks before the capture frame (layout/asset settling).
     #[arg(long, default_value_t = 12)]
     pub warmup_frames: u32,
-    /// Ordeal slug for runs where gameplay ordeals matter (`gameplay`, `pick_chamber`, …).
+    /// Ordeal slug for runs where gameplay ordeals matter (`gameplay`, `hallway`, …).
     #[arg(long, alias = "boss")]
     pub ordeal: Option<String>,
     #[arg(long)]

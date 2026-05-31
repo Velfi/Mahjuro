@@ -23,7 +23,7 @@ use crate::ui::input::UiAction;
 use crate::ui::ordeal_icons::ordeal_icon_source;
 
 use super::gameplay::{relic_tray_slot_screen_center, GameplayScene};
-use super::main_menu_exterior::MainMenuExteriorScene;
+use super::main_menu::MainMenuScene;
 use super::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const RELIC_SLOT_COUNT: usize = PLAYER_RELIC_MARKERS.len();
@@ -411,7 +411,7 @@ impl CascadeLabScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
+            Some(Scene::MainMenu(MainMenuScene::new()))
         }
     }
 

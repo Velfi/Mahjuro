@@ -10,6 +10,7 @@
 //!
 //! UVs run 0→1 along y for future texturing/animation.
 
+use crate::cap_extrude::parametric_cap_uv;
 use crate::draw_cmd::{Object3d, Object3dEuler, Object3dKind};
 use crate::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::tile_glb::Vertex3dTex;
@@ -122,7 +123,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [-0.5, y0, HALF_THICKNESS],
             normal: front_normal,
-            uv: [0.0, v0],
+            uv: parametric_cap_uv(-0.5, y0),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -130,7 +131,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [0.5, y0, HALF_THICKNESS],
             normal: front_normal,
-            uv: [1.0, v0],
+            uv: parametric_cap_uv(0.5, y0),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -138,7 +139,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [0.5, y1, HALF_THICKNESS],
             normal: front_normal,
-            uv: [1.0, v1],
+            uv: parametric_cap_uv(0.5, y1),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -146,7 +147,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [-0.5, y1, HALF_THICKNESS],
             normal: front_normal,
-            uv: [0.0, v1],
+            uv: parametric_cap_uv(-0.5, y1),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],

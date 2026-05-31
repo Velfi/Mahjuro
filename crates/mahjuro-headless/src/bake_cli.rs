@@ -18,8 +18,8 @@ pub enum RoomBakeKind {
     about = "Bake offline room GI probes (.mgi) and shadow maps (.msh)"
 )]
 pub struct BakeRoomCli {
-    /// Room slug(s): `shop`, `hallway`, `staircase`, `archive`, `main_menu`, `gameplay`
-    /// (aliases: `pick_chamber`, `collection`, `main_menu_exterior`, `stairway`).
+    /// Room slug(s): `shop`, `hallway`, `stairway`, `archive`, `main_menu`, `gameplay`
+    /// (legacy aliases: `pick_chamber`, `collection`, `main_menu_exterior`, `staircase`).
     /// Omit to bake every static room.
     #[arg(value_name = "ROOM")]
     pub rooms: Vec<String>,

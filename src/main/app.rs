@@ -10,7 +10,7 @@ impl crate::App {
     pub(crate) fn saved_resume_scene_for(scene: &Scene) -> Option<crate::persistence::ResumeScene> {
         match scene {
             Scene::Shop(_) => Some(crate::persistence::ResumeScene::Shop),
-            Scene::PickChamber(_) => Some(crate::persistence::ResumeScene::PickChamber),
+            Scene::Hallway(_) => Some(crate::persistence::ResumeScene::Hallway),
             Scene::Gameplay(_) => Some(crate::persistence::ResumeScene::Gameplay),
             _ => None,
         }

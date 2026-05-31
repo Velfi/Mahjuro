@@ -5,33 +5,33 @@ use crate::draw_cmd::UiFrame;
 use crate::theme::{color, typography};
 use crate::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 
+/// Layout for the compact wall counter in the lower-right corner.
+#[derive(Clone, Copy, Debug)]
+pub struct WallHudLayout {
+    pub block_rect: [f32; 4],
+}
+
+/// Compute HUD geometry without drawing (for focus rects / hit tests).
+pub fn wall_hud_layout(window_w: f32, window_h: f32, count: usize) -> WallHudLayout {
+    let (block_left, block_top, block_w, block_h) =
+        wall_hud_block_metrics(window_w, window_h, count);
+    WallHudLayout {
+        block_rect: [block_left, block_top, block_w, block_h],
+    }
+}
+
 /// Compact wall counter: small tile icon + remaining count in the lower-right.
 pub fn push_wall_remaining_hud(
     frame: &mut UiFrame,
     window_w: f32,
     window_h: f32,
     tiles_left: usize,
-) {
-    let margin_x = window_w * 0.018;
-    let margin_y = window_h * 0.016;
+) -> WallHudLayout {
+    let layout = wall_hud_layout(window_w, window_h, tiles_left);
+    let [block_left, block_top, block_w, block_h] = layout.block_rect;
     let icon_w = (window_h * 0.030).clamp(24.0, 38.0);
     let icon_h = icon_w * 1.28;
-    let gap = icon_w * 0.22;
-    let font_px = typography::size(typography::H20, window_h);
-    let count_text = format!("{}", tiles_left);
-    let h_px = font_px.max(1.0).round().max(1.0) as u32;
-    let text_w = if let Some(font) = load_ui_font() {
-        let (_, _, advances) = measure_label_advances(font, &count_text, 8192, h_px, Some(font_px));
-        advances.iter().sum::<f32>().max(font_px * 1.1)
-    } else {
-        font_px * count_text.chars().count().max(1) as f32 * 0.62
-    };
-    let text_h = font_px * 1.32;
-    let pad = font_px * 0.22;
-    let block_w = pad * 2.0 + icon_w + gap + text_w;
-    let block_h = pad * 2.0 + icon_h.max(text_h);
-    let block_left = window_w - margin_x - block_w;
-    let block_top = window_h - margin_y - block_h;
+    let pad = typography::size(typography::H20, window_h) * 0.22;
 
     frame.quad(GpuInstance {
         rect: [
@@ -58,6 +58,17 @@ pub fn push_wall_remaining_hud(
     let icon_top = block_top + (block_h - icon_h) * 0.5;
     push_wall_tile_icon(frame, icon_left, icon_top, icon_w, icon_h);
 
+    let gap = icon_w * 0.22;
+    let font_px = typography::size(typography::H20, window_h);
+    let count_text = format!("{}", tiles_left);
+    let h_px = font_px.max(1.0).round().max(1.0) as u32;
+    let text_w = if let Some(font) = load_ui_font() {
+        let (_, _, advances) = measure_label_advances(font, &count_text, 8192, h_px, Some(font_px));
+        advances.iter().sum::<f32>().max(font_px * 1.1)
+    } else {
+        font_px * count_text.chars().count().max(1) as f32 * 0.62
+    };
+    let text_h = font_px * 1.32;
     let text_left = icon_left + icon_w + gap;
     let text_top = block_top + (block_h - text_h) * 0.5;
     frame.texts([TextLabel {
@@ -78,6 +89,31 @@ pub fn push_wall_remaining_hud(
         clip_rect: None,
         mono: false,
     }]);
+    layout
+}
+
+fn wall_hud_block_metrics(window_w: f32, window_h: f32, tiles_left: usize) -> (f32, f32, f32, f32) {
+    let margin_x = window_w * 0.018;
+    let margin_y = window_h * 0.016;
+    let icon_w = (window_h * 0.030).clamp(24.0, 38.0);
+    let icon_h = icon_w * 1.28;
+    let gap = icon_w * 0.22;
+    let font_px = typography::size(typography::H20, window_h);
+    let count_text = format!("{}", tiles_left);
+    let h_px = font_px.max(1.0).round().max(1.0) as u32;
+    let text_w = if let Some(font) = load_ui_font() {
+        let (_, _, advances) = measure_label_advances(font, &count_text, 8192, h_px, Some(font_px));
+        advances.iter().sum::<f32>().max(font_px * 1.1)
+    } else {
+        font_px * count_text.chars().count().max(1) as f32 * 0.62
+    };
+    let text_h = font_px * 1.32;
+    let pad = font_px * 0.22;
+    let block_w = pad * 2.0 + icon_w + gap + text_w;
+    let block_h = pad * 2.0 + icon_h.max(text_h);
+    let block_left = window_w - margin_x - block_w;
+    let block_top = window_h - margin_y - block_h;
+    (block_left, block_top, block_w, block_h)
 }
 
 fn push_wall_tile_icon(frame: &mut UiFrame, left: f32, top: f32, tile_w: f32, tile_h: f32) {

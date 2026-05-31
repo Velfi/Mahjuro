@@ -95,7 +95,7 @@ impl WgpuRenderer {
         let gpu = match active_room_env {
             ActiveRoomEnv::Shop => self.shop_environment.as_ref(),
             ActiveRoomEnv::Hallway => self.hallway_environment.as_ref(),
-            ActiveRoomEnv::Staircase => self.staircase_environment.as_ref(),
+            ActiveRoomEnv::Stairway => self.staircase_environment.as_ref(),
             ActiveRoomEnv::Archive => self.archive_environment.as_ref(),
             ActiveRoomEnv::MainMenu => self.main_menu_environment.as_ref(),
             ActiveRoomEnv::Gameplay => self.gameplay_environment.as_ref(),
@@ -132,7 +132,7 @@ impl WgpuRenderer {
                         );
                     }
                 }
-                ActiveRoomEnv::Staircase => {
+                ActiveRoomEnv::Stairway => {
                     if let Some(ref gpu) = self.staircase_environment {
                         room_draws += self.draw_gltf_room_env_shadow(
                             shadow_pass,
@@ -143,14 +143,7 @@ impl WgpuRenderer {
                     }
                 }
                 ActiveRoomEnv::Archive => {
-                    if let Some(ref gpu) = self.archive_environment {
-                        room_draws += self.draw_gltf_room_env_shadow(
-                            shadow_pass,
-                            &self.archive_env_primitives,
-                            gpu,
-                            |_| false,
-                        );
-                    }
+                    room_draws += self.draw_archive_environment_shadow(shadow_pass, frame);
                 }
                 ActiveRoomEnv::MainMenu => {
                     if let Some(ref gpu) = self.main_menu_environment {
@@ -296,7 +289,12 @@ impl WgpuRenderer {
                 let Some(inst) = self.talisman_instances.get(slot_i) else {
                     return;
                 };
-                self.draw_lit_mesh_shadow(pass, &self.talisman_mesh, inst);
+                let mesh = self
+                    .talisman_slot_kind
+                    .get(slot_i)
+                    .and_then(|k| k.map(|idx| self.talisman_mesh_for_kind_idx(idx)))
+                    .unwrap_or(&self.talisman_mesh);
+                self.draw_lit_mesh_shadow(pass, mesh, inst);
             }
             DrawKind::BugBody => {
                 let Some(inst) = self.bug_body_instances.get(slot_i) else {

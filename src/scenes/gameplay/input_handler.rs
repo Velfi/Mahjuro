@@ -8,8 +8,8 @@ use std::time::Instant;
 use super::GameplayScene;
 use super::cascade_hud::CascadeShowcase;
 use super::focus::{
-    FocusTarget, GameplayButton, focus_after_consumable_use, focus_kind, focus_kind_sfx,
-    play_select_sfx, wrap_hand_tile_focus,
+    FocusTarget, GameplayButton, default_hand_tile_focus, focus_after_consumable_use, focus_kind,
+    focus_kind_sfx, play_select_sfx, wrap_hand_tile_focus,
 };
 use crate::core::relic::relic_visual;
 use crate::core::scoring::StepKind;
@@ -19,7 +19,7 @@ use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind};
 use crate::scenes::gameplay::RELIC_GLOW_LIFETIME;
 use crate::scenes::journal_transition::{JournalDirection, JournalTransition};
-use crate::scenes::{GuideScene, OverlayRequest, Scene, SceneTransition, UpdateCtx, YakuJournalScene};
+use crate::scenes::{GuideScene, OverlayRequest, Scene, SceneTransition, UpdateCtx, WallLedgerScene, YakuJournalScene};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
 use crate::ui::input::{UiAction, apply_ui_actions};
 
@@ -122,6 +122,7 @@ pub(super) fn process_focus_and_actions(
             | FocusTarget::RoundWind => true,
             FocusTarget::Journal => scene.journal_transition.is_none(),
             FocusTarget::Guidebook => scene.journal_transition.is_none(),
+            FocusTarget::WallHud => true,
             FocusTarget::DiscardUndo => {
                 crate::persistence::load_settings().discard_undo_enabled
                     && scene.discard_undo.is_some()
@@ -159,6 +160,15 @@ pub(super) fn process_focus_and_actions(
     // controller had focus on a consumable still selects the tile —
     // the cursor sync overwrites the stale focus before Confirm runs.
     let focus_rects = scene.last_focus_rects.borrow().clone();
+    // Keyboard / controller: default to the first hand tile whenever nothing
+    // is focused and the rack is non-empty. Cursor mode keeps hover as focus
+    // (None over empty space is intentional there).
+    if scene.focus.is_none()
+        && ctx.input_mode != crate::ui::input::InputMode::Cursor
+        && let Some(target) = default_hand_tile_focus(interaction.hand_len, &focus_rects)
+    {
+        scene.focus = Some(target);
+    }
     if ctx.input_mode == crate::ui::input::InputMode::Cursor {
         let (cx, cy) = ctx.cursor_pos;
         let new_focus = if let Some(idx) = ctx.picked_hand_tile {
@@ -412,6 +422,12 @@ pub(super) fn process_focus_and_actions(
                         ))));
                         return Some(None);
                     }
+                    Some(FocusTarget::WallHud) => {
+                        *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
+                            Scene::WallLedger(WallLedgerScene::live()),
+                        )));
+                        return Some(None);
+                    }
                     Some(FocusTarget::Consumable(i)) => {
                         let outcome = {
                             let mut engine = GameEngine::new(ctx.run, ctx.bus);
@@ -468,8 +484,13 @@ pub(super) fn process_focus_and_actions(
                         {
                             scene.clear_discard_undo();
                         }
-                        let remaining = GameEngine::read_interaction(ctx.run).consumable_count;
-                        scene.focus = focus_after_consumable_use(i, remaining, &focus_rects);
+                        let post = GameEngine::read_interaction(ctx.run);
+                        scene.focus = focus_after_consumable_use(
+                            i,
+                            post.consumable_count,
+                            post.hand_len,
+                            &focus_rects,
+                        );
                     }
                     Some(FocusTarget::Peg(_))
                     | Some(FocusTarget::Gold)
@@ -500,9 +521,7 @@ pub(super) fn process_focus_and_actions(
             UiAction::Cancel => {
                 scene.held_relic_drag = None;
                 scene.marquee = None;
-                scene.focus = focus_rects
-                    .iter()
-                    .find_map(|(t, _)| matches!(t, FocusTarget::HandTile(_)).then_some(*t));
+                scene.focus = default_hand_tile_focus(interaction.hand_len, &focus_rects);
                 actions_for_scene.push(a);
                 continue;
             }
@@ -570,6 +589,12 @@ pub(super) fn process_focus_and_actions(
                 actions_for_scene.push(UiAction::UndoDiscard);
             }
             continue;
+        }
+        if cid == super::WALL_HUD_CLICK_ID {
+            *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::WallLedger(
+                WallLedgerScene::live(),
+            ))));
+            return Some(None);
         }
         if cid != super::GAMEPLAY_3D_HIT_ID {
             continue;

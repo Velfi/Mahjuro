@@ -15,7 +15,7 @@ use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState};
 
-use super::main_menu_exterior::MainMenuExteriorScene;
+use super::main_menu::MainMenuScene;
 use super::shop::ShopScene;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::world_space::{LayoutAnchorPx, layout_px_py_from_norm};
@@ -522,7 +522,7 @@ impl SceneBehavior for TileSelectScene {
                 }
                 UiAction::Cancel | UiAction::Pause => {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                    return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
+                    return Some(Scene::MainMenu(MainMenuScene::new()));
                 }
                 other => filtered.push(other),
             }
@@ -571,7 +571,7 @@ impl SceneBehavior for TileSelectScene {
             }
             Some(ModalAction::Back) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
+                Some(Scene::MainMenu(MainMenuScene::new()))
             }
             Some(ModalAction::SeasonSelect(s)) => {
                 // Locked seasons are non-focusable + disabled, so activation

@@ -820,6 +820,14 @@ pub fn load_room_glb_from_bytes(
     );
 
     let rain_surface_merged = renv::RoomCollisionMesh::merge_rain_surfaces(&rain_surface_meshes);
+    if !embedded_spot_lights.is_empty() {
+        log::error!(
+            "{}: {} embedded spot light(s) in glTF — remove spot nodes; use programmatic \
+             `SceneLighting::spot_lights` instead (punctual-only shadow path)",
+            hooks.log_asset_label(),
+            embedded_spot_lights.len(),
+        );
+    }
     Ok(RoomGlbCpu {
         markers,
         environment_primitives,

@@ -9,8 +9,7 @@ use crate::render::draw_cmd::{ShowcaseRenderHints, UiFrame};
 use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
 use crate::render::table_transform::rot_fixed_axes_deg_matrix;
 use crate::render::theme::color;
-use crate::render::wgpu_renderer::{PointLight, SpotLight};
-use crate::render::world_space::pixel_to_world;
+use crate::render::wgpu_renderer::PointLight;
 use crate::scenes::celebration_overlay;
 use crate::ui::input::UiAction;
 use crate::ui::placement::PlacementAnchor;
@@ -139,28 +138,6 @@ impl ZodiacPresenter {
                 intensity: 1.1,
             },
         ]);
-
-        let cos_outer = (36.0_f32).to_radians().cos();
-        let cos_inner = (22.0_f32).to_radians().cos();
-        let spot_lift = lift + h * 0.42;
-        let spot_pos = [cx, cy - h * 0.06, spot_lift];
-        let tw = pixel_to_world(w, h, cx, cy, lift);
-        let lw = pixel_to_world(w, h, spot_pos[0], spot_pos[1], spot_pos[2]);
-        let dir = (tw - lw).normalize_or_zero();
-        let dir = if dir.length_squared() < 1e-4 {
-            glam::Vec3::new(0.0, 0.4, -1.0).normalize()
-        } else {
-            dir
-        };
-        frame.scene_lighting.spot_lights = vec![SpotLight {
-            pos: spot_pos,
-            dir: dir.to_array(),
-            radius: w.max(h) * 2.2,
-            cos_outer,
-            cos_inner,
-            color: color::rgb(color::PARCHMENT),
-            intensity: 6.0,
-        }];
 
         frame.object3d_batch(vec![zodiac_ribbon_object3d(ZodiacRibbonSpec {
             pos: hero_pos,

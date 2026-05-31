@@ -341,7 +341,7 @@ impl ShopScene {
                 crate::core::rules::ChamberKind::Ordeal,
             )))
         } else {
-            Scene::PickChamber(PickChamberScene::new())
+            Scene::Hallway(HallwayScene::new())
         }
     }
 

@@ -4,10 +4,11 @@
 use crate::core::ordeal_kind::OrdealKind;
 use crate::core::progression::{PlayerProgress, is_transformation_successor_relic};
 use crate::core::relic::{RelicId, all_relic_defs};
+use crate::core::memorial_talisman::MemorialTalismanKind;
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
 
-/// Archive section tabs (matches [`crate::scenes::collection::Tab`] order).
+/// Archive section tabs (matches [`crate::scenes::archive::Tab`] order).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArchiveTab {
     Relics = 0,
@@ -23,6 +24,7 @@ pub enum ArchiveSeenMark {
     Yaku(YakuKind),
     Ordeal(OrdealKind),
     Talisman(TalismanKind),
+    MemorialTalisman(MemorialTalismanKind),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -63,10 +65,7 @@ pub fn archive_new_counts(
             .iter()
             .filter(|id| !progress.archive_seen_relics.contains(id))
             .count(),
-        talismans: visible_archive_talismans(progress)
-            .iter()
-            .filter(|id| !progress.archive_seen_talismans.contains(id))
-            .count(),
+        talismans: unseen_archive_shop_talismans(progress) + unseen_archive_memorial_talismans(progress),
         yaku: visible_archive_yaku(progress)
             .iter()
             .filter(|id| !progress.archive_seen_yaku.contains(id))
@@ -131,12 +130,35 @@ pub fn visible_archive_talismans(progress: &PlayerProgress) -> Vec<TalismanKind>
         .collect()
 }
 
+pub fn visible_archive_memorial_talismans(progress: &PlayerProgress) -> Vec<MemorialTalismanKind> {
+    MemorialTalismanKind::all()
+        .iter()
+        .copied()
+        .filter(|mk| progress.memorials_discovered.contains(mk))
+        .collect()
+}
+
+fn unseen_archive_shop_talismans(progress: &PlayerProgress) -> usize {
+    visible_archive_talismans(progress)
+        .iter()
+        .filter(|id| !progress.archive_seen_talismans.contains(id))
+        .count()
+}
+
+fn unseen_archive_memorial_talismans(progress: &PlayerProgress) -> usize {
+    visible_archive_memorial_talismans(progress)
+        .iter()
+        .filter(|id| !progress.archive_seen_memorial_talismans.contains(id))
+        .count()
+}
+
 pub fn archive_seen_needs_migration_seed(progress: &PlayerProgress) -> bool {
     progress.runs_completed > 0
         && progress.archive_seen_relics.is_empty()
         && progress.archive_seen_yaku.is_empty()
         && progress.archive_seen_ordeals.is_empty()
         && progress.archive_seen_talismans.is_empty()
+        && progress.archive_seen_memorial_talismans.is_empty()
 }
 
 pub fn archive_seen_migration_seed(progress: &mut PlayerProgress) {
@@ -155,6 +177,9 @@ pub fn archive_seen_migration_seed(progress: &mut PlayerProgress) {
     progress
         .archive_seen_talismans
         .extend(visible_archive_talismans(progress));
+    progress
+        .archive_seen_memorial_talismans
+        .extend(visible_archive_memorial_talismans(progress));
 }
 
 impl PlayerProgress {
@@ -164,6 +189,7 @@ impl PlayerProgress {
             ArchiveSeenMark::Yaku(yk) => self.archive_seen_yaku.insert(yk),
             ArchiveSeenMark::Ordeal(bk) => self.archive_seen_ordeals.insert(bk),
             ArchiveSeenMark::Talisman(tk) => self.archive_seen_talismans.insert(tk),
+            ArchiveSeenMark::MemorialTalisman(mk) => self.archive_seen_memorial_talismans.insert(mk),
         }
     }
 }

@@ -9,6 +9,7 @@ pub mod game_mode;
 pub mod onboarding;
 pub mod run;
 pub mod state;
+pub mod wall_ledger;
 pub mod scene_look_tuning {
     pub use mahjuro_render::tuning::scene_look::*;
 }

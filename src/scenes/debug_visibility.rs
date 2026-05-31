@@ -142,7 +142,7 @@ pub fn filter_gameplay_frame_cmds(
 
     if vis.hide_candle_lights {
         frame.scene_lighting.punctual.clear();
-        frame.scene_lighting.spot_lights.clear();
+        frame.scene_lighting.clear_spot_lights();
         frame.scene_lighting.embedded_gltf_punctual = false;
         frame.candle_light_count = 0;
         frame.procedural_flame_emitters.clear();

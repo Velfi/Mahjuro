@@ -9,6 +9,7 @@
 
 use std::f32::consts::TAU;
 
+use crate::cap_extrude::planar_y_cap_uv_xz;
 use crate::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::theme::color;
 use crate::tile_glb::Vertex3dTex;
@@ -46,7 +47,7 @@ pub fn build_coin_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [x, top_y, z],
             normal: top_normal,
-            uv: [x + 0.5, z + 0.5],
+            uv: planar_y_cap_uv_xz(x, z),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -75,7 +76,7 @@ pub fn build_coin_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [x, bot_y, z],
             normal: bot_normal,
-            uv: [x + 0.5, z + 0.5],
+            uv: planar_y_cap_uv_xz(x, z),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],

@@ -2,7 +2,7 @@
 //! subject mesh, and frame flags shared by shop, collection, and future hosts.
 //!
 //! Inspect inherits lighting from the host scene ([`crate::scenes::shop::render_shop_frame`],
-//! [`crate::scenes::collection::CollectionScene::draw_collection_frame`], …).
+//! [`crate::scenes::archive::ArchiveScene::draw_archive_frame`], …).
 //!
 //! ## Adding a new inspect host
 //!

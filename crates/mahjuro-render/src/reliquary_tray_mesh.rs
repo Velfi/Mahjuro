@@ -26,6 +26,7 @@
 //! Y-range (`BOT_Y..TOP_Y`) for the slab thickness. This matches the
 //! mirror/bowl convention so per-instance scale supplies the true size.
 
+use crate::cap_extrude::planar_y_cap_uv_xz_extents;
 use crate::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::theme::color;
 use crate::tile_glb::Vertex3dTex;
@@ -140,7 +141,7 @@ pub fn build_reliquary_tray_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [ox0, TOP_Y, oz0],
             normal: up,
-            uv: [ox0 / (2.0 * HALF_W) + 0.5, oz0 / (2.0 * HALF_D) + 0.5],
+            uv: planar_y_cap_uv_xz_extents(ox0, oz0, HALF_W, HALF_D),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -148,7 +149,7 @@ pub fn build_reliquary_tray_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [ox1, TOP_Y, oz1],
             normal: up,
-            uv: [ox1 / (2.0 * HALF_W) + 0.5, oz1 / (2.0 * HALF_D) + 0.5],
+            uv: planar_y_cap_uv_xz_extents(ox1, oz1, HALF_W, HALF_D),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -156,7 +157,7 @@ pub fn build_reliquary_tray_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [ix1, TOP_Y, iz1],
             normal: up,
-            uv: [ix1 / (2.0 * HALF_W) + 0.5, iz1 / (2.0 * HALF_D) + 0.5],
+            uv: planar_y_cap_uv_xz_extents(ix1, iz1, HALF_W, HALF_D),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -164,7 +165,7 @@ pub fn build_reliquary_tray_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [ix0, TOP_Y, iz0],
             normal: up,
-            uv: [ix0 / (2.0 * HALF_W) + 0.5, iz0 / (2.0 * HALF_D) + 0.5],
+            uv: planar_y_cap_uv_xz_extents(ix0, iz0, HALF_W, HALF_D),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -224,7 +225,7 @@ pub fn build_reliquary_tray_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [x, FACE_Y, z],
             normal: up,
-            uv: [x / (2.0 * HALF_W) + 0.5, z / (2.0 * HALF_D) + 0.5],
+            uv: planar_y_cap_uv_xz_extents(x, z, HALF_W, HALF_D),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -238,7 +239,7 @@ pub fn build_reliquary_tray_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [x, BOT_Y, z],
             normal: down,
-            uv: [x / (2.0 * HALF_W) + 0.5, z / (2.0 * HALF_D) + 0.5],
+            uv: planar_y_cap_uv_xz_extents(x, z, HALF_W, HALF_D),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],

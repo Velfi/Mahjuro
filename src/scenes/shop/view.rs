@@ -60,6 +60,7 @@ use super::shared::{focused_sell_action, shop_focus_inspectable};
 use super::{
     ConsumableShopItem, ShopFocus, ShopItem, ShopMode, ShopScene, TilePackShopItem, push_free_badge,
 };
+use crate::scenes::{OverlayRequest, Scene, WallLedgerScene};
 
 /// Matches [`super::RELIC_GLOW_LIFETIME`] — keep glow envelope in sync.
 const RELIC_GLOW_SECS: f32 = 0.9;
@@ -89,6 +90,7 @@ pub(in crate::scenes::shop) const SHOP_SPAWN_SLOT_COUNT: usize = 9;
 const SHOP_CLICK_JOURNAL: u32 = 0xD011;
 const SHOP_CLICK_REROLL: u32 = 0xD012;
 const SHOP_CLICK_LEAVE: u32 = 0xD013;
+const SHOP_CLICK_WALL: u32 = 0xD014;
 
 fn default_fill_point_lights(w: f32, h: f32) -> Vec<PointLight> {
     vec![
@@ -529,6 +531,12 @@ impl SceneBehavior for ShopScene {
         self.stash_focus_rects(w, h, ctx.run);
 
         for &cid in ctx.button_clicks {
+            if cid == SHOP_CLICK_WALL {
+                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
+                    Scene::WallLedger(WallLedgerScene::shop_preview()),
+                )));
+                return None;
+            }
             if let Some(hit) = map_shop_ui_click_to_hit(cid, self, &shop_rm)
                 && let Some(next) = self.dispatch_shop_pick_from_hit(hit, &mut ctx)
             {
@@ -558,7 +566,7 @@ impl ShopScene {
         let shop = GameEngine::read_shop(run);
         let env_h = self.drawn_room_gltf_height_scale.get();
         let cam = shop_camera_params(w, h, env_h);
-        *self.last_focus_rects.borrow_mut() = build_focus_rects(self, w, h, &cam, &shop);
+        *self.last_focus_rects.borrow_mut() = build_focus_rects(self, w, h, &cam, &shop, run);
     }
 }
 
@@ -722,7 +730,7 @@ pub(crate) fn render_shop_frame(
             match hit {
                 ShopHit::Relic(i) => {
                     let (px, py, wy) = if let Some((cx, cy)) =
-                        screen_xy_for_hit(hit, shop, &shop_rm, w, h, &cam)
+                        screen_xy_for_hit(hit, shop, &shop_rm, ctx.run, w, h, &cam)
                     {
                         (cx, cy, light_lift_at_screen_y(cy, h))
                     } else if let Some(si) = sale_slot_for_focus(shop, ShopFocus::Relic(i)) {
@@ -753,7 +761,7 @@ pub(crate) fn render_shop_frame(
                     });
                 }
                 ShopHit::Ribbon(_) | ShopHit::Talisman(_) => {
-                    if let Some((cx, cy)) = screen_xy_for_hit(hit, shop, &shop_rm, w, h, &cam) {
+                    if let Some((cx, cy)) = screen_xy_for_hit(hit, shop, &shop_rm, ctx.run, w, h, &cam) {
                         let wy = light_lift_at_screen_y(cy, h);
                         point_lights.push(PointLight {
                             pos: [cx, cy + 35.0, wy + 50.0],
@@ -777,7 +785,7 @@ pub(crate) fn render_shop_frame(
                     });
                 }
                 ShopHit::TilePack(id) => {
-                    if let Some((cx, cy)) = screen_xy_for_hit(hit, shop, &shop_rm, w, h, &cam) {
+                    if let Some((cx, cy)) = screen_xy_for_hit(hit, shop, &shop_rm, ctx.run, w, h, &cam) {
                         let wy = light_lift_at_screen_y(cy, h);
                         point_lights.push(PointLight {
                             pos: [cx, cy - 28.0, wy + 55.0],
@@ -814,8 +822,9 @@ pub(crate) fn render_shop_frame(
         punctual_gltf_nodes.extend(std::iter::repeat_n(None, proc_count));
         frame.scene_lighting.punctual = merged_punctual;
         frame.scene_lighting.punctual_gltf_nodes = punctual_gltf_nodes;
-        frame.scene_lighting.spot_lights =
-            shop_embedded_spot_lights_runtime(w, h, env_h, &ctx.room_env_for("shop").0);
+        frame.scene_lighting.set_gltf_embedded_spot_lights(
+            shop_embedded_spot_lights_runtime(w, h, env_h, &ctx.room_env_for("shop").0),
+        );
         if use_glb_lights {
             let candle_flames = shop_gltf_candle_flame_emitters(
                 w,
@@ -896,6 +905,17 @@ pub(crate) fn render_shop_frame(
             gold_label_center,
         )
     };
+
+    if !shop.pause_menu.paused && inspect.is_none() {
+        let wall_count = crate::game::wall_ledger::shop_wall_hud_count(ctx.run);
+        let wall_layout = crate::render::wall_display::push_wall_remaining_hud(
+            &mut frame,
+            w,
+            h,
+            wall_count,
+        );
+        let _ = wall_layout;
+    }
 
     // Shelf focus ring uses shelf-slot screen rects.
     if !shop.pause_menu.paused && inspect.is_none() {
@@ -1029,6 +1049,13 @@ pub(crate) fn render_shop_frame(
         frame.buttons.push(ButtonDef::scene(
             (lr[0], lr[1], lr[2], lr[3]),
             SHOP_CLICK_LEAVE,
+        ));
+        let wall_count = crate::game::wall_ledger::shop_wall_hud_count(ctx.run);
+        let wall = crate::render::wall_display::wall_hud_layout(w, h, wall_count);
+        let wr = wall.block_rect;
+        frame.buttons.push(ButtonDef::scene(
+            (wr[0], wr[1], wr[2], wr[3]),
+            SHOP_CLICK_WALL,
         ));
         // Catch-all for Object3D / GLB collision picks (inventory + props). Pushed
         // last so shelf + HUD rects win when they overlap the cursor.
@@ -1559,7 +1586,7 @@ fn ring_target_rect(
                     shop,
                 )?;
                 let foc = ShopFocus::from_hit(resolved);
-                build_focus_rects(scene, w, h, cam, shop)
+                build_focus_rects(scene, w, h, cam, shop, ctx.run)
                     .into_iter()
                     .find(|(t, _)| *t == foc)
                     .map(|(_, r)| r)
@@ -1567,7 +1594,7 @@ fn ring_target_rect(
         });
     }
     scene.focus.and_then(|f| {
-        build_focus_rects(scene, w, h, cam, shop)
+        build_focus_rects(scene, w, h, cam, shop, ctx.run)
             .into_iter()
             .find(|(t, _)| *t == f)
             .map(|(_, r)| r)
@@ -1595,12 +1622,13 @@ fn screen_xy_for_hit(
     hit: ShopHit,
     scene: &ShopScene,
     shop: &ShopReadModel,
+    run: &RunState,
     w: f32,
     h: f32,
     cam: &CameraParams,
 ) -> Option<(f32, f32)> {
     let focus = ShopFocus::from_hit(hit);
-    build_focus_rects(scene, w, h, cam, shop)
+    build_focus_rects(scene, w, h, cam, shop, run)
         .into_iter()
         .find(|(f, _)| *f == focus)
         .map(|(_, r)| (r[0] + r[2] * 0.5, r[1] + r[3] * 0.5))
@@ -2680,7 +2708,7 @@ pub(in crate::scenes::shop) fn snap_focus_after_shop_purchase(
     let shop = GameEngine::read_shop(run);
     let env_h = scene.drawn_room_gltf_height_scale.get();
     let cam = shop_camera_params(w, h, env_h);
-    let rects = build_focus_rects(scene, w, h, &cam, &shop);
+    let rects = build_focus_rects(scene, w, h, &cam, &shop, run);
 
     let from_center = prev_focus.and_then(|pf| {
         scene
@@ -2706,6 +2734,7 @@ fn build_focus_rects(
     h: f32,
     cam: &CameraParams,
     shop: &ShopReadModel,
+    run: &RunState,
 ) -> Vec<(ShopFocus, [f32; 4])> {
     let env_h = scene.drawn_room_gltf_height_scale.get();
     let mut v = Vec::new();
@@ -2727,6 +2756,9 @@ fn build_focus_rects(
     ));
     v.push((ShopFocus::Reroll, reroll_btn_rect(w, h, cam, env_h)));
     v.push((ShopFocus::NextRound, leave_btn_rect(w, h, cam, env_h)));
+    let wall_count = crate::game::wall_ledger::shop_wall_hud_count(run);
+    let wall = crate::render::wall_display::wall_hud_layout(w, h, wall_count);
+    v.push((ShopFocus::WallHud, wall.block_rect));
     v
 }
 

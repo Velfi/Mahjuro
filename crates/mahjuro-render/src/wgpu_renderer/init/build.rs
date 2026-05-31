@@ -2599,7 +2599,17 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         archive_inspect_plaque_prim_idx,
         archive_page_left_prim_indices,
         archive_page_right_prim_indices,
-    ) = (Vec::new(), None, None, None, None, Vec::new(), Vec::new());
+        archive_punctual_shadow_skip_prims,
+    ) = (
+        Vec::new(),
+        None,
+        None,
+        None,
+        None,
+        Vec::new(),
+        Vec::new(),
+        rustc_hash::FxHashSet::default(),
+    );
     let (main_menu_env_primitives, main_menu_environment) = {
         let _menu = crate::startup_profile::scope("wgpu.room.main_menu");
         crate::main_menu_glb::with_main_menu_glb_cpu(|cpu_opt| {
@@ -3343,6 +3353,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         archive_inspect_plaque_prim_idx,
         archive_page_left_prim_indices,
         archive_page_right_prim_indices,
+        archive_punctual_shadow_skip_prims,
         archive_sign_decal_upload_key: 0,
         archive_inspect_plaque_decal_upload_key: 0,
         frame_env_tunes: rustc_hash::FxHashMap::default(),
@@ -3562,6 +3573,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         talisman_mask_views,
         memorial_talisman_height_views,
         memorial_talisman_mask_views,
+        talisman_meshes: rustc_hash::FxHashMap::default(),
+        memorial_talisman_meshes: rustc_hash::FxHashMap::default(),
+        talisman_meshes_ready: false,
         talisman_slot_kind,
         relic_box_mesh,
         relic_box_tris,

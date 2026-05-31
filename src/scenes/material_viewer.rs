@@ -13,7 +13,7 @@ use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::main_menu_exterior::MainMenuExteriorScene;
+use super::main_menu::MainMenuScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const CLICK_BACK: u32 = 0xE001;
@@ -34,7 +34,7 @@ impl MaterialViewerScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
+            Some(Scene::MainMenu(MainMenuScene::new()))
         }
     }
 }
@@ -274,7 +274,7 @@ fn material_entries() -> Vec<MaterialEntry> {
             material: mk(Porcelain, [0.55, 0.52, 0.46], 0.7, 128.0),
         },
         MaterialEntry {
-            label: "Chitin",
+            label: "Chitin (Talisman)",
             material: mk(Chitin, [0.82, 0.55, 0.95], 0.90, 56.0),
         },
         MaterialEntry {

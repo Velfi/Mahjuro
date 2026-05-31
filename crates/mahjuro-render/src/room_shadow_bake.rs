@@ -85,7 +85,7 @@ impl RoomShadowBake {
             1 => RoomGiRoom::Hallway,
             2 => RoomGiRoom::Archive,
             3 => RoomGiRoom::MainMenu,
-            4 => RoomGiRoom::Staircase,
+            4 => RoomGiRoom::Stairway,
             5 => RoomGiRoom::Gameplay,
             _ => anyhow::bail!("room shadow bake: unknown room id {}", header.room),
         };
@@ -236,7 +236,7 @@ impl RoomGiRoom {
             Self::Hallway => "data/room_shadow/hallway.msh",
             Self::Archive => "data/room_shadow/archive.msh",
             Self::MainMenu => "data/room_shadow/main_menu.msh",
-            Self::Staircase => "data/room_shadow/staircase.msh",
+            Self::Stairway => "data/room_shadow/stairway.msh",
             Self::Gameplay => "data/room_shadow/gameplay.msh",
         }
     }

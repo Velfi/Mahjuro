@@ -15,9 +15,9 @@ use mahjuro_core::core::relic::RelicId;
 use mahjuro_core::core::tile::Tile;
 use mahjuro_core::core::tile_pack::TilePackKind;
 use crate::lit_mesh::MaterialParams;
+use crate::scene_keys;
 use crate::theme::color;
 use crate::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextLabel};
-use crate::world_space::pixel_to_world;
 use mahjuro_types::scene_draw::{BackgroundId, ButtonDef};
 use glam;
 use std::borrow::Cow;
@@ -63,6 +63,9 @@ pub struct SceneLighting {
     /// Parallel to [`Self::punctual`]: glTF node name when sourced from embedded room lights.
     pub punctual_gltf_nodes: Vec<Option<String>>,
     pub spot_lights: Vec<SpotLight>,
+    /// Set when [`Self::spot_lights`] were loaded from embedded glTF (`KHR_lights_punctual` spots).
+    /// Programmatic spots must not set this — see [`Self::set_gltf_embedded_spot_lights`].
+    pub spot_lights_from_gltf: bool,
     /// Room environment mesh uses `room_glb.wgsl` when true, else `tile_3d.wgsl`.
     pub room_glb_brdf: bool,
     /// Embedded `KHR_lights_punctual` active for this room (inverse-square lights + exposure path).
@@ -100,6 +103,18 @@ impl SceneLighting {
             .get(index)
             .and_then(|n| n.as_deref())
     }
+
+    /// Assign spot lights decoded from a room `.glb` (unsupported on the punctual shadow path).
+    pub fn set_gltf_embedded_spot_lights(&mut self, spots: Vec<SpotLight>) {
+        self.spot_lights = spots;
+        self.spot_lights_from_gltf = !self.spot_lights.is_empty();
+    }
+
+    #[inline]
+    pub fn clear_spot_lights(&mut self) {
+        self.spot_lights.clear();
+        self.spot_lights_from_gltf = false;
+    }
 }
 
 /// GPU / layout hints when the renderer scene key is `showcase` (showcase overlay).
@@ -126,7 +141,7 @@ impl ShowcaseRenderHints {
     /// Screen-pixel anchors: showcase tiles and smooth punctual lights.
     ///
     /// **Ray-plane:** guide, tutorial, shop lights/tiles, pick-blind, main menu, tile-pack, anchor lab.
-    /// **Pixel-to-world:** gameplay, yaku journal, archive collection.
+    /// **Pixel-to-world:** gameplay, yaku journal, wall ledger, archive collection.
     #[inline]
     pub fn layout_uses_ray_plane(self, active_scene_key: Option<&str>) -> bool {
         if self.modal_relic_staging {
@@ -135,19 +150,20 @@ impl ShowcaseRenderHints {
         if self.layout_use_ray_plane_z {
             return true;
         }
+        let key = active_scene_key.map(scene_keys::normalize_scene_key);
         if matches!(
-            active_scene_key,
-            Some("gameplay" | "yaku_journal" | "collection")
+            key,
+            Some(scene_keys::GAMEPLAY | "yaku_journal" | "wall_ledger" | scene_keys::ARCHIVE)
         ) {
             return false;
         }
         matches!(
-            active_scene_key,
+            key,
             Some(
-                "shop"
+                scene_keys::SHOP
                     | "tutorial"
-                    | "pick_chamber"
-                    | "main_menu_exterior"
+                    | scene_keys::HALLWAY
+                    | scene_keys::MAIN_MENU
                     | "tile_pack_celebration"
                     | "guide"
                     | "tile_anchor_lab"
@@ -676,7 +692,7 @@ pub enum Object3dKind {
 
 /// `Object3d::anim_id` on the inspected stock mesh — sole shadow caster during storeroom inspect.
 pub const SHOP_INSPECT_SUBJECT_ANIM_ID: u64 = 0x5348_4F50_5F49; // "SHOPI"
-/// Archive pedestal / HUD featured close-up (casts dynamic shadow; grid cubbies do not).
+/// Archive inspect-orbit subject only (grid featured close-up and cubbies do not cast).
 pub const ARCHIVE_FEATURED_ANIM_ID: u64 = 0x00C1_05E0;
 
 /// A single lit mesh placed in the world.
@@ -1188,31 +1204,6 @@ pub fn apply_modal_relic_staging(
             intensity: 1.0,
         },
     ]);
-    let relic = &modal_relic_objects[0];
-    let cx = relic.pos[0];
-    let cy = relic.pos[1];
-    let lift = relic.pos[2];
-    let cos_outer = (36.0_f32).to_radians().cos();
-    let cos_inner = (22.0_f32).to_radians().cos();
-    let spot_lift = lift + h * 0.42;
-    let spot_pos = [cx, cy - h * 0.06, spot_lift];
-    let tw = pixel_to_world(w, h, cx, cy, lift);
-    let lw = pixel_to_world(w, h, spot_pos[0], spot_pos[1], spot_pos[2]);
-    let dir = (tw - lw).normalize_or_zero();
-    let dir = if dir.length_squared() < 1e-4 {
-        glam::Vec3::new(0.0, 0.4, -1.0).normalize()
-    } else {
-        dir
-    };
-    frame.scene_lighting.spot_lights = vec![SpotLight {
-        pos: spot_pos,
-        dir: dir.to_array(),
-        radius: w.max(h) * 2.2,
-        cos_outer,
-        cos_inner,
-        color: color::rgb(color::PARCHMENT),
-        intensity: 6.0,
-    }];
     frame.object3d_batch(modal_relic_objects);
 }
 

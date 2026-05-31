@@ -2940,7 +2940,7 @@ fn play_run_with_options(
 
         run.advance_round(&mut bus);
 
-        // Shop visit happens after advance_round (matching Shop → PickChamber scene
+        // Shop visit happens after advance_round (matching Shop → Hallway scene
         // flow), so we evaluate purchases against the freshly-drawn next hand.
         match visit_shop(
             &mut run,

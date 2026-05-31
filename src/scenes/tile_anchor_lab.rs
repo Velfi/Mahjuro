@@ -12,7 +12,7 @@ use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::main_menu_exterior::MainMenuExteriorScene;
+use super::main_menu::MainMenuScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const CLICK_BACK: u32 = 0xE010;
@@ -148,7 +148,7 @@ impl TileAnchorLabScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
+            Some(Scene::MainMenu(MainMenuScene::new()))
         }
     }
 }

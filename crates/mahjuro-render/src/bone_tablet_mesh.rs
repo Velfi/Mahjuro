@@ -8,6 +8,7 @@
 //! across a shared vertex ring so the surface shades as a smooth glossy
 //! pillow rather than a faceted chamfer.
 
+use crate::cap_extrude::planar_y_cap_uv_xz;
 use crate::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::theme::color;
 use crate::tile_glb::Vertex3dTex;
@@ -34,9 +35,7 @@ const PILLOW_LAYERS: usize = 9;
 /// Build the bone tablet mesh as a smooth rounded pillow.
 ///
 /// The top cap is a flat rounded rectangle (so the engraved decal has a
-/// well-defined square-ish surface). UVs on the top cap follow
-/// `+u = +X`, `+v = +Z` so multi-letter yaku names read upright along
-/// the tablet's long screen-X axis.
+/// well-defined square-ish surface). UVs use [`planar_y_cap_uv_xz`] (+u = +X, +v = +Z).
 pub fn build_bone_tablet_mesh() -> MeshCpu {
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -293,8 +292,7 @@ fn emit_cap(
     let horiz = (1.0 - layer.tilt).max(0.0);
     let vert = layer.tilt;
 
-    // UVs on the top cap map the rounded-rectangle rim into [0,1]²,
-    // with (+u = +X, +v = +Z). Bottom cap UVs are zeroed (never used).
+    // UVs on the top cap: [`planar_y_cap_uv_xz`]. Bottom cap UVs are zeroed (never used).
     let centre_idx = vertices.len() as u32;
     vertices.push(Vertex3dTex {
         position: [0.0, layer.y, 0.0],
@@ -313,7 +311,11 @@ fn emit_cap(
         let ny = up_sign * vert;
         let nz = sample.nz * horiz;
         let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-5);
-        let uv = if up { [x + 0.5, z + 0.5] } else { [0.0, 0.0] };
+        let uv = if up {
+            planar_y_cap_uv_xz(x, z)
+        } else {
+            [0.0, 0.0]
+        };
         vertices.push(Vertex3dTex {
             position: [x, layer.y, z],
             normal: [nx / len, ny / len, nz / len],

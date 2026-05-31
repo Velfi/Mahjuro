@@ -14,6 +14,7 @@
 
 use std::f32::consts::TAU;
 
+use crate::cap_extrude::planar_y_cap_uv_xz;
 use crate::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::tile_glb::Vertex3dTex;
 
@@ -108,14 +109,7 @@ pub fn build_mirror_mesh() -> MeshCpu {
 
     // ── Top bronze rim ring (annulus at TOP_Y) ──
     //
-    // UVs are disc-projected (`x + 0.5, z + 0.5`) — the same scheme the
-    // recessed face plate uses below — so a single circular heightmap
-    // texture wraps continuously across rim + face as if projected from
-    // above. Each rim quad therefore samples the rim region of the
-    // heightmap (raised white in the four-spirit composition) instead of
-    // an arbitrary vertical strip; this is what keeps the metal-shader
-    // heightmap perturbation in lit_mesh.wgsl from twisting the bronze
-    // frame when it samples the texture on flat-up faces.
+    // UVs are disc-projected — see [`cap_extrude::planar_y_cap_uv_xz`].
     let up = [0.0, 1.0, 0.0];
     for i in 0..SIDES {
         let i1 = (i + 1) % SIDES;
@@ -127,7 +121,7 @@ pub fn build_mirror_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [ox0, TOP_Y, oz0],
             normal: up,
-            uv: [ox0 + 0.5, oz0 + 0.5],
+            uv: planar_y_cap_uv_xz(ox0, oz0),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -135,7 +129,7 @@ pub fn build_mirror_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [ox1, TOP_Y, oz1],
             normal: up,
-            uv: [ox1 + 0.5, oz1 + 0.5],
+            uv: planar_y_cap_uv_xz(ox1, oz1),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -143,7 +137,7 @@ pub fn build_mirror_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [ix1, TOP_Y, iz1],
             normal: up,
-            uv: [ix1 + 0.5, iz1 + 0.5],
+            uv: planar_y_cap_uv_xz(ix1, iz1),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -151,7 +145,7 @@ pub fn build_mirror_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [ix0, TOP_Y, iz0],
             normal: up,
-            uv: [ix0 + 0.5, iz0 + 0.5],
+            uv: planar_y_cap_uv_xz(ix0, iz0),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -228,7 +222,7 @@ pub fn build_mirror_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [x, FACE_Y, z],
             normal: up,
-            uv: [x + 0.5, z + 0.5],
+            uv: planar_y_cap_uv_xz(x, z),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -256,7 +250,7 @@ pub fn build_mirror_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [x, BOT_Y, z],
             normal: down,
-            uv: [x + 0.5, z + 0.5],
+            uv: planar_y_cap_uv_xz(x, z),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],

@@ -656,19 +656,6 @@ impl SceneBehavior for GameplayScene {
         // The glossary overlay path has its own early-return at the top of
         // this function, so it does not appear here.
 
-        let animation_state::CandleAndLightBuffers { spot_lights } = {
-            let _g = crate::render::cpu_profiler::scope("draw_frame.build_candles_and_spotlights");
-            animation_state::build_candles_and_spotlights(
-                self,
-                layout,
-                &gameplay,
-                glb_anchors.hand_world_slots.as_slice(),
-                &hint_indices,
-                &glb_anchors.tile_plinth_poses,
-                ctx.progress.dora_enabled(),
-            )
-        };
-
         // The 3D table + tiles + candles ARE the UI. Selection feedback is
         // now a true 3D gold-metal outline shell drawn by the renderer's
         // tile_outline_pipeline (which catches candlelight), so no 2D
@@ -815,13 +802,14 @@ impl SceneBehavior for GameplayScene {
             );
             frame.scene_lighting.punctual = punctual;
             frame.scene_lighting.punctual_gltf_nodes = nodes;
-            frame.scene_lighting.spot_lights =
+            frame.scene_lighting.set_gltf_embedded_spot_lights(
                 crate::render::gameplay_glb::gameplay_embedded_spot_lights_runtime(
                     layout.window_w,
                     layout.window_h,
                     env_h,
                     &ctx.room_env_for("gameplay").0,
-                );
+                ),
+            );
             let glb_flames = crate::render::gameplay_glb::gameplay_gltf_candle_flame_emitters(
                 layout.window_h,
                 env_h,
@@ -848,12 +836,20 @@ impl SceneBehavior for GameplayScene {
             )
         };
         if !vis.hide_wall_hud {
-            crate::render::wall_display::push_wall_remaining_hud(
+            let wall_layout = crate::render::wall_display::push_wall_remaining_hud(
                 &mut frame,
                 layout.window_w,
                 layout.window_h,
                 gameplay.tiles_left,
             );
+            let wr = wall_layout.block_rect;
+            focus_rect_graph.push((FocusTarget::WallHud, wr));
+            if !self.pause_menu.paused {
+                buttons.push(ButtonDef::scene(
+                    (wr[0], wr[1], wr[2], wr[3]),
+                    super::WALL_HUD_CLICK_ID,
+                ));
+            }
         }
 
         // Build hand tile placements for the showcase pipeline.
@@ -1238,7 +1234,6 @@ impl SceneBehavior for GameplayScene {
                 });
             }
         }
-        frame.scene_lighting.spot_lights.extend(spot_lights);
         if !frame.procedural_flame_emitters.is_empty() {
             // One `DrawCmd::Flame` triggers the volume batch (same path as shop).
             frame.flame_batch();
@@ -1568,6 +1563,24 @@ impl SceneBehavior for GameplayScene {
                                 desc: &desc,
                                 cta: &cta,
                                 accent_color: color::BRASS,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
+                    FocusTarget::WallHud => {
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: "Wall Ledger",
+                                desc: "Full tile supply for this round — vivid tiles remain in the wall.",
+                                cta: "Open",
+                                accent_color: color::CHAMPAGNE,
                                 hover_is_owned: false,
                                 skip_title_block: false,
                                 avoid_rect: None,

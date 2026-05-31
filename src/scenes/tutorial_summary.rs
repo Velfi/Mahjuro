@@ -12,7 +12,7 @@ use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::guide::GuideScene;
-use super::main_menu_exterior::MainMenuExteriorScene;
+use super::main_menu::MainMenuScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,7 +91,7 @@ impl SceneBehavior for TutorialSummaryScene {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 let settings = persistence::load_settings();
                 GameEngine::reset_to_demo(ctx.run, ctx.progress, &settings);
-                Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
+                Some(Scene::MainMenu(MainMenuScene::new()))
             }
             None => None,
         }

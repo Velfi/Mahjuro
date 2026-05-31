@@ -139,7 +139,7 @@ impl MemorialTalismanKind {
         }
     }
 
-    /// Grayscale relief heightmap for the octagonal tablet mesh (`lit_mesh` chitin).
+    /// Grayscale relief heightmap for the carved pendant mesh (`lit_mesh` chitin).
     pub fn heightmap_asset_path(self) -> &'static str {
         match self {
             Self::Exhausted => "textures/talismans/memorial_exhausted.png",
@@ -211,7 +211,7 @@ impl MemorialTalismanKind {
         ]
     }
 
-    /// Octagon silhouette mask (white = tablet, black = void) for chitin discard.
+    /// Organic pendant silhouette mask (white = jade, black = void) for chitin discard.
     pub fn mask_asset_path(self) -> &'static str {
         match self {
             Self::Exhausted => "textures/talismans/memorial_exhausted_mask.png",

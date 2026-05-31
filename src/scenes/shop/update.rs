@@ -2,7 +2,7 @@ use super::view::snap_focus_after_shop_purchase;
 use super::*;
 use crate::scenes::{
     GuideScene, OverlayRequest, Scene, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
-    YakuJournalScene, options,
+    WallLedgerScene, YakuJournalScene, options,
 };
 
 /// Player inventory row is hit-tested via 3D picks only; exclude its rects from
@@ -452,6 +452,12 @@ impl ShopScene {
                     {
                         self.reroll(ctx.run);
                         continue;
+                    }
+                    if matches!(focus, ShopFocus::WallHud) {
+                        *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
+                            Scene::WallLedger(WallLedgerScene::shop_preview()),
+                        )));
+                        return None;
                     }
                     if let Some(hit) = focus.to_hit() {
                         if let Some(action) = shop_action_for_hit(

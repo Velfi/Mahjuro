@@ -5,7 +5,7 @@ use crate::render::draw_cmd::{CameraParams, DrawCmd, Object3d, Object3dKind, UiF
 use crate::render::primitive::{MaterialSpec, MeshId};
 use crate::render::table_transform::rot_fixed_axes_deg;
 use crate::render::theme::color;
-use crate::render::wgpu_renderer::{PointLight, SpotLight};
+use crate::render::wgpu_renderer::PointLight;
 use crate::render::world_space::pixel_to_world;
 use crate::ui::placement::{Placement, PlacementAnchor};
 use glam::Vec3;
@@ -157,24 +157,4 @@ pub fn push_defeat_memorial_tableau(
             intensity: 2.2 * DEFEAT_LIGHT_SCALE,
         },
     ]);
-
-    let cos_outer = 30.0_f32.to_radians().cos();
-    let cos_inner = 10.0_f32.to_radians().cos();
-    let spot_pos = [tx, ty - h * 0.04, tz + h * 0.44];
-    let light_w = pixel_to_world(w, h, spot_pos[0], spot_pos[1], spot_pos[2]);
-    let mut dir = target_w - light_w;
-    if dir.length_squared() < 1e-6 {
-        dir = glam::Vec3::new(0.0, 0.38, -1.0);
-    } else {
-        dir = dir.normalize();
-    }
-    frame.scene_lighting.spot_lights = vec![SpotLight {
-        pos: spot_pos,
-        dir: dir.to_array(),
-        radius: w.max(h) * 3.0,
-        cos_outer,
-        cos_inner,
-        color: parchment,
-        intensity: 12.0 * DEFEAT_LIGHT_SCALE,
-    }];
 }

@@ -13,7 +13,7 @@ use crate::render::draw_cmd::UiFrame;
 
 use super::{
     DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx, archive_career,
-    scene_collection_archive,
+    scene_archive,
 };
 
 const PROFILE_COUNT: usize = 3;
@@ -220,7 +220,7 @@ impl ProfileSelectScene {
     }
 
     fn pop_return_scene(&self) -> Scene {
-        scene_collection_archive()
+        scene_archive()
     }
 
     fn cursor(&self) -> usize {
