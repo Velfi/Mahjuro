@@ -10,6 +10,7 @@ pub(super) struct ProcessOpCtx<'a> {
     pub frame_pool_buffer: &'a wgpu::Buffer,
     pub bg_inst_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
     pub quad_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
+    pub depth_quad_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
     pub overlay_quad_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
     pub gradient_quad_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
     pub squircle_quad_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
@@ -25,6 +26,8 @@ pub(super) struct ProcessOpCtx<'a> {
     pub tile_glow_buffer: Option<&'a wgpu::Buffer>,
     pub relic_glows: &'a [GpuInstance],
     pub relic_glow_buffer: Option<&'a wgpu::Buffer>,
+    pub glyph_popup_glows: &'a [GpuInstance],
+    pub glyph_popup_glow_buffer: Option<&'a wgpu::Buffer>,
     pub relic_debuff_markers: &'a [GpuInstance],
     pub relic_debuff_buffer: Option<&'a wgpu::Buffer>,
     /// True when the active render pass color attachment is linear HDR
@@ -46,6 +49,7 @@ impl WgpuRenderer {
         let frame = ctx.frame;
         let bg_inst_buffers = ctx.bg_inst_buffers;
         let quad_buffers = ctx.quad_buffers;
+        let depth_quad_buffers = ctx.depth_quad_buffers;
         let overlay_quad_buffers = ctx.overlay_quad_buffers;
         let gradient_quad_buffers = ctx.gradient_quad_buffers;
         let squircle_quad_buffers = ctx.squircle_quad_buffers;
@@ -60,6 +64,8 @@ impl WgpuRenderer {
         let tile_glows = ctx.tile_glows;
         let tile_glow_buffer = ctx.tile_glow_buffer;
         let relic_glows = ctx.relic_glows;
+        let glyph_popup_glows = ctx.glyph_popup_glows;
+        let glyph_popup_glow_buffer = ctx.glyph_popup_glow_buffer;
         let relic_glow_buffer = ctx.relic_glow_buffer;
         let relic_debuff_markers = ctx.relic_debuff_markers;
         let relic_debuff_buffer = ctx.relic_debuff_buffer;
@@ -149,7 +155,7 @@ impl WgpuRenderer {
                 pass.set_pipeline(&self.lit_mesh_pipeline);
                 pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
                 pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
                 let mut current_blended = false;
                 for &(kind, slot_i) in &object3d_draw_list[*start..*end] {
                     let want_blended = matches!(
@@ -231,6 +237,26 @@ impl WgpuRenderer {
                             (label, self.extruded_glyph_instances.get(slot_i))
                             && let Some(mesh) = self.extruded_glyph_meshes.get(lbl)
                         {
+                            if let Some(gpb) = glyph_popup_glow_buffer {
+                                if slot_i < glyph_popup_glows.len()
+                                    && glyph_popup_glows[slot_i].color[3] > 0.001
+                                {
+                                    pass.set_pipeline(&self.tile_glow_pipeline);
+                                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                                    pass.set_vertex_buffer(1, gpb.slice(..));
+                                    pass.set_index_buffer(
+                                        self.index_buffer.slice(..),
+                                        wgpu::IndexFormat::Uint16,
+                                    );
+                                    pass.draw_indexed(
+                                        0..6,
+                                        0,
+                                        slot_i as u32..slot_i as u32 + 1,
+                                    );
+                                }
+                            }
+                            pass.set_pipeline(&self.lit_mesh_pipeline);
                             pass.set_bind_group(0, &inst.bind_group, &[]);
                             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                             pass.set_index_buffer(
@@ -408,7 +434,7 @@ impl WgpuRenderer {
                     let batch = showcase_tile_batches[*batch_idx];
                     if !batch.is_empty() {
                         pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                        pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                        pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
                         pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
                         let start_slot: usize = showcase_tile_batches
                             .iter()
@@ -500,6 +526,33 @@ impl WgpuRenderer {
                     &self.quad_pipeline
                 } else {
                     &self.quad_pipeline_display
+                };
+                pass.set_pipeline(pipe);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                pass.set_vertex_buffer(
+                    1,
+                    ctx.frame_pool_buffer
+                        .slice(slice.offset..slice.offset + slice.byte_len),
+                );
+                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                pass.draw_indexed(0..6, 0, 0..*count);
+            }
+            RenderOp::DepthQuadBatch { buf_idx, count } => {
+                let slice = depth_quad_buffers[*buf_idx];
+                let show_rain_depth = ctx.frame.debug_rain_depth;
+                let pipe = if ctx.scene_hdr_attachment {
+                    if show_rain_depth {
+                        &self.depth_quad_debug_pipeline
+                    } else {
+                        &self.depth_quad_pipeline
+                    }
+                } else {
+                    if show_rain_depth {
+                        &self.depth_quad_debug_pipeline_display
+                    } else {
+                        &self.depth_quad_pipeline_display
+                    }
                 };
                 pass.set_pipeline(pipe);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);

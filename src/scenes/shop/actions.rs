@@ -390,6 +390,37 @@ impl ShopScene {
         }
     }
 
+    /// Sell as soon as the West hold-to-sell timer reaches its threshold (do not
+    /// wait for button release).
+    pub(super) fn try_complete_west_sell_hold(
+        &mut self,
+        now: std::time::Instant,
+        shop: &crate::game::engine::ShopReadModel,
+        run: &mut crate::game::run::RunState,
+        bus: &mut crate::game::event_bus::EventBus,
+        cursor_pos: (f32, f32),
+        overlay_request: &mut Option<OverlayRequest>,
+        window_wh: (f32, f32),
+    ) {
+        let Some(start) = self.west_sell_hold_started else {
+            return;
+        };
+        if now.saturating_duration_since(start).as_secs_f32() < super::SHOP_SELL_HOLD_SECONDS {
+            return;
+        }
+        let Some(action) = super::shared::focused_sell_action(
+            self.focus,
+            self.items.len(),
+            &self.zodiac_items,
+            &self.talisman_items,
+            shop,
+        ) else {
+            self.west_sell_hold_started = None;
+            return;
+        };
+        self.apply_sell_action(action, run, bus, cursor_pos, overlay_request, window_wh);
+    }
+
     /// Apply a sell action; on success, move focus like [`Self::apply_buy_action`]
     /// (nearest purchasable, or leave when the shelf is cleared).
     pub(super) fn apply_sell_action(

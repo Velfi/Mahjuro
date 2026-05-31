@@ -25,7 +25,7 @@ pub struct RainField {
     /// Avoids fixed 1.0 steps that align many births on the same frames ("waves").
     spawn_next_threshold: f32,
     quad_scratch: RefCell<Vec<GpuInstance>>,
-    instance_scratch: RefCell<Vec<([f32; 4], [f32; 4])>>,
+    instance_scratch: RefCell<Vec<([f32; 4], [f32; 4], f32)>>,
 }
 
 impl Default for RainField {
@@ -143,22 +143,20 @@ impl RainField {
             drop_color,
             lit.as_ref(),
         );
+        self.particles
+            .fill_instances_with_depth(&mut instance_scratch, proj);
         let mut quad_scratch = self.quad_scratch.borrow_mut();
         quad_scratch.clear();
         quad_scratch.reserve(instance_scratch.len() + 64);
-        for (rect, color) in instance_scratch
-            .iter()
-            .copied()
-            .chain(self.particles.instances())
-        {
+        for (rect, color, depth) in instance_scratch.iter().copied() {
             quad_scratch.push(GpuInstance {
                 rect,
                 color,
-                user: 0,
+                user: depth.to_bits(),
             });
         }
         if !quad_scratch.is_empty() {
-            frame.quads(std::mem::take(&mut *quad_scratch));
+            frame.depth_quads(std::mem::take(&mut *quad_scratch));
         }
     }
 }

@@ -25,7 +25,7 @@ use crate::render::room_glb::{
     player_gold_dish_marker_translation, player_relic_marker_name,
     room_camera_fit_fovy_for_corners, room_camera_with_room_clip_planes, room_env_world_scale,
     room_world_bounds_corners_centered, screen_rect_for_marker_mesh_bounds,
-    shop_camera_from_glb_if_present, shop_embedded_point_lights_runtime,
+    shop_camera_from_glb_if_present, shop_embedded_point_lights_runtime_tagged,
     shop_embedded_spot_lights_runtime, shop_glb_has_embedded_lights, spawn_relic_marker_name,
     with_shop_glb_cpu,
 };
@@ -677,8 +677,8 @@ pub(crate) fn render_shop_frame(
         frame.scene_lighting.embedded_gltf_punctual = room_glb_lights;
         frame.scene_lighting.room_glb_brdf = room_glb_lights;
         let use_glb_lights = room_glb_lights;
-        let mut merged_punctual: Vec<ScenePunctualLight> = if use_glb_lights {
-            shop_embedded_point_lights_runtime(
+        let embedded_tagged = if use_glb_lights {
+            shop_embedded_point_lights_runtime_tagged(
                 w,
                 h,
                 env_h,
@@ -687,12 +687,17 @@ pub(crate) fn render_shop_frame(
                 lamp_flicker,
                 ctx.flame_tuning.candle_flicker_amp,
             )
-            .into_iter()
-            .map(ScenePunctualLight::InverseSquare)
-            .collect()
         } else {
             Vec::new()
         };
+        let mut merged_punctual: Vec<ScenePunctualLight> = embedded_tagged
+            .iter()
+            .map(|t| ScenePunctualLight::InverseSquare(t.light))
+            .collect();
+        let mut punctual_gltf_nodes: Vec<Option<String>> = embedded_tagged
+            .into_iter()
+            .map(|t| Some(t.gltf_node_name))
+            .collect();
         let mut point_lights: Vec<PointLight> = if use_glb_lights {
             Vec::new()
         } else {
@@ -804,8 +809,11 @@ pub(crate) fn render_shop_frame(
             }
         }
 
+        let proc_count = point_lights.len();
         merged_punctual.extend(point_lights.into_iter().map(ScenePunctualLight::Smooth));
+        punctual_gltf_nodes.extend(std::iter::repeat_n(None, proc_count));
         frame.scene_lighting.punctual = merged_punctual;
+        frame.scene_lighting.punctual_gltf_nodes = punctual_gltf_nodes;
         frame.scene_lighting.spot_lights =
             shop_embedded_spot_lights_runtime(w, h, env_h, &ctx.room_env_for("shop").0);
         if use_glb_lights {

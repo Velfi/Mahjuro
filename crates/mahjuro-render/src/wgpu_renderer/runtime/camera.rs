@@ -321,16 +321,23 @@ impl WgpuRenderer {
         // `KHR_lights_punctual`: `.x` = inverse document scale for attenuation
         // (matches `room_glb` `decal_atlas_uv.y`) whenever embedded punctual is
         // on — archive/collection need this too, not only `shop_like` scenes.
-        // `.y` = shop display-case material tuning (albedo/ambient/shadow tweaks);
-        // keep that shop-only so archive relics do not stack extra fill on top
-        // of corrected punctual.
+        // `.y` = shop display-case tuning flag; `.z`/`.w` = art-forward ambient +
+        // shadow floor (see [`shop_catalog_balance`]).
         let shop_punctual_inv_doc =
             self.room_punctual_inv_doc_scale(cam, frame.scene_lighting.embedded_gltf_punctual);
-        let shop_punctual_display_case = if shop_like && frame.scene_lighting.embedded_gltf_punctual
-        {
-            1.0
+        let shop_punctual_display_case =
+            if shop_like && frame.scene_lighting.embedded_gltf_punctual {
+                crate::lit_mesh::shop_catalog_balance::DISPLAY_CASE_STOREROOM
+            } else {
+                0.0
+            };
+        let (shop_cat_amb, shop_cat_shadow_floor) = if shop_punctual_display_case > 0.5 {
+            (
+                crate::lit_mesh::shop_catalog_balance::AMBIENT_MUL,
+                crate::lit_mesh::shop_catalog_balance::SHADOW_FLOOR,
+            )
         } else {
-            0.0
+            (0.0, 0.0)
         };
         let ssr_max_distance = cam.h * 2.0;
         let ssr_stride = cam.h * 0.04;
@@ -346,7 +353,12 @@ impl WgpuRenderer {
                 ssr_max_steps,
             ],
             hdr_tonemap: [hdr_path, linear_exposure, ambient_scale, 0.0],
-            shop_punctual: [shop_punctual_inv_doc, shop_punctual_display_case, 0.0, 0.0],
+            shop_punctual: [
+                shop_punctual_inv_doc,
+                shop_punctual_display_case,
+                shop_cat_amb,
+                shop_cat_shadow_floor,
+            ],
         }
     }
 

@@ -44,7 +44,8 @@ pub mod picking;
 pub mod plaque_mesh;
 pub mod primitive;
 pub mod progress_meter_mesh;
-pub mod punctual_shadow_atlas;
+pub mod projected_light_shadow;
+pub mod punctual_shadow_policy;
 #[cfg(feature = "windowed")]
 pub mod rain_debug_overlay;
 pub mod rain_field;

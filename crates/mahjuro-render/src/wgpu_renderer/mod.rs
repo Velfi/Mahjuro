@@ -70,6 +70,7 @@ use crate::lit_mesh::{
     create_room_env_camera_uniform_buffers, create_room_env_shadow_gpu_batch,
     create_shadow_caster_layout, create_shadow_sample_layout,
     create_shadow_warp_bind_group, create_shadow_warp_layout,
+    ShadowDepthArrayGpu,
 };
 use crate::mirror_mesh::build_mirror_mesh;
 use crate::ofuda_mesh::build_ofuda_mesh;
@@ -120,6 +121,14 @@ pub struct WgpuRenderer {
     quad_pipeline: wgpu::RenderPipeline,
     /// Same shader as `quad_pipeline`, targeting the swapchain format (post-tonemap UI).
     quad_pipeline_display: wgpu::RenderPipeline,
+    /// Quad pipeline variant that reads per-instance depth from `GpuInstance.user`.
+    depth_quad_pipeline: wgpu::RenderPipeline,
+    /// Display-format twin of `depth_quad_pipeline`.
+    depth_quad_pipeline_display: wgpu::RenderPipeline,
+    /// Rain debug: depth-colored variant of `depth_quad_pipeline`.
+    depth_quad_debug_pipeline: wgpu::RenderPipeline,
+    /// Display-format twin of `depth_quad_debug_pipeline`.
+    depth_quad_debug_pipeline_display: wgpu::RenderPipeline,
     gradient_quad_pipeline: wgpu::RenderPipeline,
     squircle_quad_pipeline: wgpu::RenderPipeline,
     /// Volumetric candle flame pipeline (`shaders/flame.wgsl` + `blackbody.wgsl`).
@@ -252,8 +261,6 @@ pub struct WgpuRenderer {
     gameplay_score_roller_roll_elapsed: std::cell::RefCell<f64>,
     /// Set when both odometer banks finish a spin; drained by the app after render.
     gameplay_score_roller_stopped: std::cell::RefCell<bool>,
-    /// Per-primitive gameplay env shadow cast policy (see [`gameplay_prim_casts_room_shadow`]).
-    gameplay_env_shadow_caster_mask: Vec<bool>,
     gameplay_environment: Option<ShopEnvironmentGpu>,
     /// GPU primitive index of `inspect_plaque` in `archive_env_primitives` (inspect decal host).
     archive_inspect_plaque_prim_idx: Option<usize>,
@@ -263,8 +270,6 @@ pub struct WgpuRenderer {
     /// All GPU primitive indices for `btn_page_left` / `btn_page_right` (multi-material meshes).
     archive_page_left_prim_indices: Vec<usize>,
     archive_page_right_prim_indices: Vec<usize>,
-    /// Per-primitive shadow caster flags (parallel to `archive_env_primitives`).
-    archive_env_shadow_caster_mask: Vec<bool>,
     /// Last-uploaded browse-board decal; `u64::MAX` = cleared / none.
     archive_sign_decal_upload_key: u64,
     /// Last-uploaded inspect-plaque decal; `u64::MAX` = cleared / none.
@@ -403,13 +408,13 @@ pub struct WgpuRenderer {
     /// allocation amortizes across frames rather than churning a fresh
     /// `HashSet` every call.
     tile_uid_scratch: FxHashSet<u32>,
-    /// Previous frame's shadow toggle — forces a shadow-map redraw when shadows enable.
-    prev_frame_shadows_enabled: bool,
-    /// Last uploaded directional shadow matrix — redraw when the room frustum moves.
+    /// Previous frame's shadow quality — forces shadow-map redraw when shadows enable.
+    prev_shadow_quality: mahjuro_gfx_types::ShadowQuality,
+    /// Last uploaded first projected-light view-proj — redraw when lights move.
     cached_shadow_light_view_proj: [f32; 16],
-    /// Gameplay candle shadow atlas slots for the current frame.
-    punctual_shadow_lights: Vec<crate::punctual_shadow_atlas::PunctualShadowLightSetup>,
-    cached_punctual_shadow_hash: u64,
+    /// Projected shadow depth setups for the current frame.
+    projected_shadow_lights: Vec<crate::projected_light_shadow::ProjectedShadowLightSetup>,
+    cached_projected_shadow_hash: u64,
     /// Lit-mesh slot for [`crate::scenes::shop::shared::SHOP_INSPECT_SUBJECT_ANIM_ID`] this frame.
     shop_inspect_subject_shadow_slot: Option<(runtime::DrawKind, usize)>,
     /// Current `Object3d::anim_id` while [`runtime::object3d_placement::WgpuRenderer::run_object3d_placement`] walks a batch.
@@ -483,6 +488,8 @@ pub struct WgpuRenderer {
     active_room_baked_shadow: Option<crate::room_gi_bake::RoomGiRoom>,
     room_shadow_capture_pending: Option<crate::room_gi_bake::RoomGiRoom>,
     room_shadow_captured: Option<crate::room_shadow_bake::RoomShadowBake>,
+    shadow_probe_last_log: Instant,
+    shadow_probe_last_caster_count: usize,
     emissive_gi_composite_pipeline: wgpu::RenderPipeline,
     emissive_gi_composite_bind_group_layout: wgpu::BindGroupLayout,
     emissive_gi_composite_bind_group: wgpu::BindGroup,
@@ -768,13 +775,15 @@ pub struct WgpuRenderer {
     active_scene_key: Option<&'static str>,
 
     // ── Shadow mapping ─────────────────────────────────────────────────
-    /// Fixed-size depth texture written by the shadow pre-pass and sampled
-    /// by every 3D shader through `shadow_sample_bind_group`.
-    shadow_map_texture: wgpu::Texture,
-    shadow_map_view: wgpu::TextureView,
+    /// Per-point-light projected depth layers sampled by scene shaders.
+    point_shadow_array: ShadowDepthArrayGpu,
+    /// Per-spot-light projected depth layers sampled by scene shaders.
+    spot_shadow_array: ShadowDepthArrayGpu,
     shadow_sample_layout: wgpu::BindGroupLayout,
     shadow_compare_sampler: wgpu::Sampler,
     shadow_ao_sampler: wgpu::Sampler,
+    _shadow_ao_white_texture: wgpu::Texture,
+    shadow_ao_white_view: wgpu::TextureView,
     /// Bind-group layout for per-caster uniforms (group 0 of the shadow
     /// pipeline). Each `LitMeshInstance` and `HandTileGpu` owns one bind
     /// group built against this layout.
@@ -806,6 +815,8 @@ pub struct WgpuRenderer {
     /// (Outdated, Timeout, etc.) and self-emits a one-shot info summary
     /// after warmup. See [`runtime::AcquireTelemetry`].
     acquire_telemetry: runtime::AcquireTelemetry,
+    /// Live shadow quality tier (mirrors per-frame render settings).
+    shadow_quality: mahjuro_gfx_types::ShadowQuality,
     /// Live candle flame tuning (shader + placement); synced from scene / debug overlay.
     pub flame_tuning: crate::flame_tuning::FlameTuning,
     /// Debug menu: force main-menu pride rainbow on moon / stars outside June.
@@ -842,6 +853,8 @@ pub use ui_instances::{GpuInstance, GradientQuadInstance, RenderSettings};
 pub(crate) use constants::clamp_render_physical_size;
 pub(crate) use hash_util::tablet_label_hash;
 pub use lighting_buffers::{PointLight, SpotLight};
+pub(crate) use runtime::shadow_setup::ActiveRoomEnv;
+
 pub(crate) use lighting_buffers::{
     PointLightsBuf, PunctualLightBakeParams, PunctualLightBakeShopCameraParams, SpotLightsBuf,
     TileOccluderGpu, TileOccludersBuf,

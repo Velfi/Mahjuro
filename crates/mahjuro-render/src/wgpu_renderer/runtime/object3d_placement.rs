@@ -161,6 +161,7 @@ impl WgpuRenderer {
         object3d_shadow_draw_list: &mut Vec<(DrawKind, usize)>,
         ops: &mut [RenderOp],
         relic_glows: &mut Vec<GpuInstance>,
+        glyph_popup_glows: &mut Vec<GpuInstance>,
         relic_debuff_markers: &mut Vec<GpuInstance>,
         mut shadow: Option<&mut super::shadow_setup::Object3dShadowCtx<'_>>,
     ) {
@@ -1402,6 +1403,47 @@ impl WgpuRenderer {
                                 DrawKind::ExtrudedGlyph,
                                 slot_i,
                             );
+                            let halo_strength = if matches!(
+                                g_mat,
+                                crate::draw_cmd::GlyphMaterial::Polychrome
+                            ) && *emissive > 0.65
+                            {
+                                ((*emissive - 0.65) / 0.35).clamp(0.0, 1.0) * obj.color[3]
+                            } else {
+                                0.0
+                            };
+                            if halo_strength > 0.01 {
+                                let projected =
+                                    project_aabb_rect(glyph_model, [0.52, 0.48, 0.035], 0.0);
+                                let [rx, ry, rw, rh] = projected;
+                                let pad_x = rw * 1.05;
+                                let pad_y = rh * 1.12;
+                                if glyph_popup_glows.len() <= slot_i {
+                                    glyph_popup_glows.resize(
+                                        slot_i + 1,
+                                        GpuInstance {
+                                            rect: [0.0; 4],
+                                            color: [0.0; 4],
+                                            user: 0,
+                                        },
+                                    );
+                                }
+                                glyph_popup_glows[slot_i] = GpuInstance {
+                                    rect: [
+                                        rx - pad_x,
+                                        ry - pad_y,
+                                        rw + pad_x * 2.0,
+                                        rh + pad_y * 2.0,
+                                    ],
+                                    color: [
+                                        obj.color[0],
+                                        obj.color[1],
+                                        obj.color[2],
+                                        0.34 * halo_strength,
+                                    ],
+                                    user: 0,
+                                };
+                            }
                         }
                         Object3dKind::TallyFan {
                             stick_len,

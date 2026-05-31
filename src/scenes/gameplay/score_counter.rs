@@ -12,8 +12,6 @@ use crate::render::world_space::LayoutAnchorPx;
 use crate::ui::layout::LayoutResult;
 use crate::ui::scene_layout::GameplayPositions;
 
-use super::cascade_hud::CascadeTokenLayout;
-
 /// Vertical placement hint for cascade / 3D anchors relative to the score frame.
 pub mod readout_2d {
     /// Fraction down the projected frame rect for the fly-to anchor.
@@ -31,11 +29,10 @@ pub struct ScoreCounterLayout {
     pub plaque_w: f32,
 }
 
-/// Combined cascade geometry: score counter + modifier-strip token destinations.
+/// Combined cascade geometry: score counter plaque + pad anchors.
 #[derive(Clone, Copy, Debug)]
 pub struct ScoreCascadeLayout {
     pub counter: ScoreCounterLayout,
-    pub tokens: CascadeTokenLayout,
 }
 
 #[inline]
@@ -53,7 +50,6 @@ fn score_cascade_layout_from_frame_rect(
     let reel_py = fy + fh * readout_2d::ANCHOR_Y_FRAC;
     let pad_py = fy + fh + fh * readout_2d::PAD_Y_FRAC;
     let pad_lift = plaque_lift * 0.6;
-    let token_y = pad_py;
     ScoreCascadeLayout {
         counter: ScoreCounterLayout {
             reel: LayoutAnchorPx {
@@ -68,10 +64,6 @@ fn score_cascade_layout_from_frame_rect(
             },
             glyph_scale: glyph_scale_for(layout),
             plaque_w: fw,
-        },
-        tokens: CascadeTokenLayout {
-            chips_center: (fx + fw * 0.30, token_y),
-            mult_center: (fx + fw * 0.70, token_y),
         },
     }
 }
@@ -197,7 +189,6 @@ mod tests {
             "GLB frame reel should differ from legacy score_panel center ({reel:?} vs panel {sp:?})"
         );
         assert!(cascade.counter.plaque_w > 32.0);
-        assert!(cascade.tokens.chips_center.0 < cascade.tokens.mult_center.0);
     }
 
     #[test]

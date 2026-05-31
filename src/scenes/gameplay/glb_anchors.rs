@@ -15,31 +15,6 @@ pub type HandWorldSlot = ([f32; 3], f32, [f32; 3]);
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 
-/// Pixel heights for projecting `structure_*` / `yaku_tablets_*` marker pairs.
-pub fn gameplay_hud_strip_heights(
-    window_h: f32,
-    layout_scale: f32,
-    showcase_present: bool,
-) -> (f32, f32, f32) {
-    let yaku_panel_h = (33.0 * layout_scale).max(24.0).min(window_h * 0.10);
-    let structure_tag_h = if showcase_present {
-        (17.0 * layout_scale).max(14.0)
-    } else {
-        0.0
-    };
-    let structure_meld_h = if showcase_present {
-        (46.0 * layout_scale).max(38.0)
-    } else {
-        0.0
-    };
-    (yaku_panel_h, structure_tag_h, structure_meld_h)
-}
-
-#[inline]
-pub fn screen_rect_center(rect: (f32, f32, f32, f32)) -> (f32, f32) {
-    (rect.0 + rect.2 * 0.5, rect.1 + rect.3 * 0.5)
-}
-
 /// Discard / play / cash-in hit rects projected with the **same** camera used for this frame's
 /// render (`camera_override` after FOV pop, etc.). [`resolve_gameplay_glb_anchors`] runs earlier
 /// with a pre-pop camera; call this once the final [`CameraParams`] are known.
@@ -78,12 +53,8 @@ pub fn reproject_action_button_rects(
 pub fn try_resolve_gameplay_glb_anchors(
     layout: &crate::ui::layout::LayoutResult,
     hand_len: usize,
-    showcase_present: bool,
     env_height_scale: f32,
 ) -> Option<GameplayGlbAnchors> {
-    let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
-    let (yaku_panel_h, _, _) =
-        gameplay_hud_strip_heights(layout.window_h, layout_scale, showcase_present);
     let cam = crate::render::gameplay_glb::gameplay_camera_from_glb_if_present(
         layout.window_h,
         env_height_scale,
@@ -95,7 +66,6 @@ pub fn try_resolve_gameplay_glb_anchors(
         layout.window_h,
         &cam,
         env_height_scale,
-        yaku_panel_h,
     )
     .ok()
 }
@@ -116,8 +86,6 @@ pub struct GameplayGlbAnchors {
     pub structure_marker_poses: [GameplayMarkerPose; 2],
     /// `yaku_tablets_left` / `yaku_tablets_right` — per-tablet anchor + rotation lerped along the row.
     pub yaku_marker_poses: [GameplayMarkerPose; 2],
-    /// Screen bounds for yaku focus / tooltips (derived from [`Self::yaku_marker_poses`]).
-    pub yaku_tablet_strip: (f32, f32, f32, f32),
     pub consumable_poses: [GameplayMarkerPose; 2],
     /// Procedural meshes + pick proxies at GLB marker empties (env pass skips marker geometry).
     pub discard_river_pick: Object3d,
@@ -243,22 +211,12 @@ pub fn resolve_gameplay_glb_anchors(
     h: f32,
     cam: &CameraParams,
     env_h: f32,
-    yaku_panel_h: f32,
 ) -> anyhow::Result<GameplayGlbAnchors> {
     gameplay_glb::with_gameplay_glb_cpu(|cpu| {
         let cpu = cpu.ok_or_else(|| {
             anyhow::anyhow!("gameplay.glb anchors requested but room GLB is not loaded")
         })?;
-        resolve_gameplay_glb_anchors_from_cpu(
-            cpu,
-            layout,
-            hand_len,
-            w,
-            h,
-            cam,
-            env_h,
-            yaku_panel_h,
-        )
+        resolve_gameplay_glb_anchors_from_cpu(cpu, layout, hand_len, w, h, cam, env_h)
     })
 }
 
@@ -270,7 +228,6 @@ fn resolve_gameplay_glb_anchors_from_cpu(
     h: f32,
     cam: &CameraParams,
     env_h: f32,
-    yaku_panel_h: f32,
 ) -> anyhow::Result<GameplayGlbAnchors> {
     let slot_h = layout.hand_strip.h;
     let hand_strip = require_marker_pair_screen_rect(
@@ -333,11 +290,6 @@ fn resolve_gameplay_glb_anchors_from_cpu(
         gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, YAKU_TABLETS_LEFT)?,
         gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, YAKU_TABLETS_RIGHT)?,
     ];
-    let yaku_tablet_strip = gameplay_glb::marker_pair_screen_rect_from_poses(
-        &yaku_marker_poses[0],
-        &yaku_marker_poses[1],
-        yaku_panel_h,
-    );
 
     let cash_in_w = (96.0 * layout_scale).max(72.0);
     let cash_in_h = (36.0 * layout_scale).max(24.0);
@@ -371,7 +323,6 @@ fn resolve_gameplay_glb_anchors_from_cpu(
         cash_in_btn_rect: cash_in_btn_rect.into(),
         structure_marker_poses,
         yaku_marker_poses,
-        yaku_tablet_strip,
         consumable_poses,
         discard_river_pick,
         play_mirror_pick,
@@ -486,7 +437,7 @@ mod tests {
             .expect("embedded gameplay camera");
         let hand_len = 14;
         let anchors = super::resolve_gameplay_glb_anchors_from_cpu(
-            &cpu, &layout, hand_len, w, h, &cam, env_h, 48.0,
+            &cpu, &layout, hand_len, w, h, &cam, env_h,
         )
         .expect("anchors");
         assert_eq!(anchors.hand_world_slots.len(), hand_len, "hand slots");
@@ -526,7 +477,7 @@ mod tests {
         assert!(anchors.hand_world_slots[0].1 > 0.0, "slot width");
 
         let short = super::resolve_gameplay_glb_anchors_from_cpu(
-            &cpu, &layout, 10, w, h, &cam, env_h, 48.0,
+            &cpu, &layout, 10, w, h, &cam, env_h,
         )
         .expect("anchors");
         let (short_first, short_w, _) = short.hand_world_slots.first().unwrap();

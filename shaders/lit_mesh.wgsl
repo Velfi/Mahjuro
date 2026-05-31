@@ -83,6 +83,21 @@ fn ign(p: vec2<f32>) -> f32 {
     return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
 }
 
+// Animated diagonal band tint for extruded score-pop glyphs. Polychrome
+// extruded glyphs pass spec_power >= 40 (see object3d_placement.rs); talisman
+// tablets use ~32 and keep the legacy rainbow polychrome look.
+fn score_glyph_band_albedo(local_pos: vec3<f32>, base: vec3<f32>, time: f32) -> vec3<f32> {
+    let drift = time * 1.6;
+    let warp = sin(time * 2.2 + local_pos.y * 7.0) * 0.28
+             + sin(time * 1.4 + local_pos.x * 5.5) * 0.18;
+    let coord = local_pos.x * 5.0 + local_pos.y * 3.2 + warp + drift;
+    let wave = 0.5 + 0.5 * sin(coord * 6.28318);
+    let band = smoothstep(0.32, 0.68, wave);
+    let bright = min(base * 1.55 + vec3<f32>(0.12), vec3<f32>(1.0));
+    let dark = base * 0.42;
+    return mix(dark, bright, band);
+}
+
 // Slab test: returns true if the segment from light_pos along `dir` (with
 // `dir = frag_pos - light_pos`) is interrupted by the AABB strictly between
 // the candle (t≈0) and the fragment (t≈1). The bias keeps tiles from
@@ -137,23 +152,7 @@ fn candle_occlusion(light_pos: vec3<f32>, frag_pos: vec3<f32>, frag_xy: vec2<f32
     return 1.0;
 }
 
-struct PunctualShadowSlot {
-    light_view_proj: mat4x4<f32>,
-    atlas_rect: vec4<f32>,
-};
-
-// ── Shadow sampling (group 2, shared frame-wide) ─────────────────────
-struct ShadowGlobals {
-    light_view_proj: mat4x4<f32>,
-    // x = enabled (0/1), y = depth bias, z = texel size, w = unused
-    params: vec4<f32>,
-    room_baked_light_view_proj: mat4x4<f32>,
-    punctual_params: vec4<f32>,
-    punctual_lights: array<PunctualShadowSlot, 8>,
-};
-@group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
-@group(2) @binding(1) var shadow_map: texture_depth_2d;
-@group(2) @binding(2) var shadow_samp: sampler_comparison;
+// ── Shadow sampling comes from `projected_shadow.wgsl` (group 2) ─────
 
 // Spotlights — same `SpotLights` buffer / layout as `tile_3d.wgsl` (group 3).
 struct SpotLight {
@@ -186,7 +185,8 @@ struct SsrGlobals {
     // z = ambient hemispheric scale; w = reserved.
     hdr_tonemap: vec4<f32>,
     // x = 1/shop_env_world_scale for embedded glTF punctual (document-space falloff); 0 = world units.
-    // y = shop display-case material tuning (1 = shop + embedded punctual); attenuation uses x only.
+    // y = shop catalog balance: 0 off, 1 storeroom shelf (`DISPLAY_CASE_STOREROOM`).
+    // z = art-forward ambient mul; w = art-forward shadow floor.
     shop_punctual: vec4<f32>,
 };
 @group(3) @binding(1) var<uniform> ssr_globals: SsrGlobals;
@@ -218,33 +218,6 @@ fn ssr_world_at(uv: vec2<f32>) -> vec3<f32> {
     let ndc = vec3<f32>(uv.x * 2.0 - 1.0, (1.0 - uv.y) * 2.0 - 1.0, d);
     let world = ssr_globals.inv_view_proj * vec4<f32>(ndc, 1.0);
     return world.xyz / max(world.w, 1e-6);
-}
-
-// Returns visibility in [0,1]: 1 = fully lit by the key direction,
-// 0 = fully occluded. Uses 3×3 PCF on the hardware comparison sampler.
-fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
-    if (shadow_globals.params.x < 0.5) {
-        return 1.0;
-    }
-    let lp = shadow_globals.light_view_proj * vec4<f32>(world_pos, 1.0);
-    let proj = lp.xyz / lp.w;
-    let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || proj.z < 0.0 || proj.z > 1.0) {
-        return 1.0;
-    }
-    let bias = shadow_globals.params.y;
-    let depth_ref = proj.z - bias;
-    let texel = shadow_globals.params.z;
-    var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy = dy + 1) {
-        for (var dx = -1; dx <= 1; dx = dx + 1) {
-            let off = vec2<f32>(f32(dx), f32(dy)) * texel;
-            sum = sum + textureSampleCompare(shadow_map, shadow_samp, uv + off, depth_ref);
-        }
-    }
-    let gs = sum / 9.0;
-    let phys_hdr = clamp(ssr_globals.hdr_tonemap.x, 0.0, 1.0);
-    return mix(gs, 1.0, phys_hdr);
 }
 
 struct VsOut {
@@ -644,6 +617,9 @@ fn fs_main(
     let is_pearl     = (kind > 12.5 && kind < 13.5);
     let is_goldnug   = (kind > 13.5 && kind < 14.5);
     let is_poly      = (kind > 14.5 && kind < 15.5);
+    // Extruded score-pop / cascade HUD glyphs (spec_power ~48). Talisman
+    // tablets share Polychrome but pass ~32 and keep the rainbow look.
+    let is_score_glyph = is_poly && spec_power >= 40.0;
     let is_porcelain = (kind > 15.5 && kind < 16.5);
     let is_brass     = (kind > 16.5 && kind < 17.5);
     let is_leather   = (kind > 17.5 && kind < 18.5);
@@ -651,7 +627,7 @@ fn fs_main(
     let is_chitin    = (kind > 20.5 && kind < 21.5);
     let is_unshaded  = (kind > 21.5 && kind < 22.5);
     let phys_hdr = clamp(ssr_globals.hdr_tonemap.x, 0.0, 1.0);
-    // Shop storeroom-only albedo / spec / ambient tweaks (see `shop_punctual.y` upload).
+    // Shop storeroom catalog balance (see `shop_catalog_balance` in lit_mesh.rs).
     let shop_display_case_tuning = phys_hdr > 0.5 && ssr_globals.shop_punctual.y > 0.5;
 
     // Brass is a conductor too; group with metal for the per-light
@@ -687,6 +663,16 @@ fn fs_main(
     // dedicated branch). `w ≈ 3` is reserved for portrait silk that skips
     // directional shadows (showcase zodiac ribbon).
     let skip_directional_shadow = abs(mesh.material_params.w - 3.0) < 0.01;
+    // ── Shop shelf catalog balance ─────────────────────────────────────
+    // Storeroom row (`shop_punctual.y == 1`, see `shop_catalog_balance` in lit_mesh.rs):
+    //   spec_forward — pack wrap, foil, talisman: gloss/holo-led pull-back.
+    //   art_forward  — enamel relic, portrait silk: ambient fill + shadow floor.
+    let shop_cat_amb = ssr_globals.shop_punctual.z;
+    let shop_cat_shadow_floor = ssr_globals.shop_punctual.w;
+    let shop_spec_forward = shop_display_case_tuning
+        && (is_pack_wrap || is_foil || is_talisman);
+    let shop_art_forward = shop_display_case_tuning
+        && (is_enamel || skip_directional_shadow);
     let has_decal = mesh.material_params.w > 0.5
         && !skip_directional_shadow
         && !is_talisman
@@ -822,7 +808,7 @@ fn fs_main(
         // dark tex reads as a black slab while foil/talisman spec stays hot. Tint caps
         // by `base_color` like the sides so material + rarity survive.
         if (shop_display_case_tuning) {
-            let tinted = mesh.base_color.rgb * tex_rgb;
+            let tinted = mesh.base_color.rgb * (tex_rgb * 1.10 + vec3<f32>(0.035));
             albedo = mix(mesh.base_color.rgb, tinted, relic_front_tex);
         } else {
             albedo = mix(mesh.base_color.rgb, tex_rgb, relic_front_tex);
@@ -1479,10 +1465,11 @@ fn fs_main(
         sss_strength = 0.20;
         sss_tint = vec3<f32>(1.0, 0.85, 0.45);
     } else if (is_poly) {
-        // Polychrome: cool violet-pink glow.
+        // Polychrome: cool violet-pink glow (talisman tablets); score glyphs
+        // override sss_tint with their own base colour below.
         wrap = 0.45;
         sss_strength = 0.30;
-        sss_tint = vec3<f32>(0.75, 0.55, 0.95);
+        sss_tint = select(vec3<f32>(0.75, 0.55, 0.95), mesh.base_color.rgb * 1.1, is_score_glyph);
     } else if (is_chitin) {
         wrap = 0.42;
         sss_strength = 0.28;
@@ -1543,7 +1530,7 @@ fn fs_main(
         back_tint = vec3<f32>(1.0, 0.82, 0.40);
     } else if (is_poly) {
         back_scale = 0.9;
-        back_tint = vec3<f32>(0.70, 0.50, 0.90);
+        back_tint = select(vec3<f32>(0.70, 0.50, 0.90), mesh.base_color.rgb * 1.15, is_score_glyph);
     } else if (is_chitin) {
         back_scale = 0.45;
         back_tint = mesh.base_color.rgb + vec3<f32>(0.18, 0.18, 0.20);
@@ -1605,8 +1592,8 @@ fn fs_main(
         let ndl_raw = dot(n, l_dir);
         let nl = max(ndl_raw, 0.0);
         let lambert = 0.35 + 0.65 * nl;
-        // Per-light shadow: punctual depth atlas on gameplay, else tile AABB occlusion.
-        let use_punctual_atlas = shadow_globals.punctual_params.z > 0.5;
+        // Per-light shadow: projected depth map on gameplay, else tile AABB occlusion.
+        let projected_shadows_on = shadow_globals.params.x > 0.5;
         let cand_vis = select(
             mix(
                 mix(0.18, 1.0, candle_occlusion(lp, in.world_pos, in.clip_pos.xy)),
@@ -1614,7 +1601,7 @@ fn fs_main(
                 phys_hdr,
             ),
             punctual_shadow_vis(i, in.world_pos),
-            use_punctual_atlas,
+            projected_shadows_on,
         );
         lit = lit + lc * intensity * atten * lambert * cand_vis;
 
@@ -1876,18 +1863,32 @@ fn fs_main(
                 let lobe = pow(nh, 64.0) * 1.8 + pow(nh, 12.0) * 0.35 + broad * 0.12;
                 sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * f_gold;
             } else if (is_poly) {
-                // Polychrome: holographic thin-film iridescence — rainbow
-                // hue driven by the normal-to-half angle so the spectrum
-                // shifts as the light sweeps across.
-                let film_angle = dot(n, h);
-                let theta = film_angle * 6.0 + ndv * 2.0;
-                let holo_r = 0.5 + 0.5 * cos(theta);
-                let holo_g = 0.5 + 0.5 * cos(theta + 2.094);
-                let holo_b = 0.5 + 0.5 * cos(theta + 4.189);
-                let holo_tint = vec3<f32>(holo_r, holo_g, holo_b);
-                let fresnel = 0.12 + 0.60 * pow(1.0 - ndv, 2.5);
-                let lobe = pow(nh, 10.0) * 0.8 + broad * 0.25;
-                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * holo_tint;
+                if (is_score_glyph) {
+                    // Score pops: band-swept sheen keyed to the popup tint.
+                    let time = lights.extras.y;
+                    let drift = time * 2.0;
+                    let coord = in.local_pos.x * 4.5 + in.local_pos.y * 3.0
+                              + sin(time * 2.8 + in.local_pos.y * 6.0) * 0.3;
+                    let wave = 0.5 + 0.5 * sin(coord * 6.28 - drift);
+                    let band = smoothstep(0.4, 0.6, wave);
+                    let sheen_tint = mesh.base_color.rgb * (1.2 + band * 0.8);
+                    let fresnel = 0.15 + 0.55 * pow(1.0 - ndv, 2.2);
+                    let lobe = pow(nh, 12.0) * (0.5 + band * 0.6) + broad * 0.2;
+                    sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * sheen_tint;
+                } else {
+                    // Polychrome: holographic thin-film iridescence — rainbow
+                    // hue driven by the normal-to-half angle so the spectrum
+                    // shifts as the light sweeps across.
+                    let film_angle = dot(n, h);
+                    let theta = film_angle * 6.0 + ndv * 2.0;
+                    let holo_r = 0.5 + 0.5 * cos(theta);
+                    let holo_g = 0.5 + 0.5 * cos(theta + 2.094);
+                    let holo_b = 0.5 + 0.5 * cos(theta + 4.189);
+                    let holo_tint = vec3<f32>(holo_r, holo_g, holo_b);
+                    let fresnel = 0.12 + 0.60 * pow(1.0 - ndv, 2.5);
+                    let lobe = pow(nh, 10.0) * 0.8 + broad * 0.25;
+                    sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * holo_tint;
+                }
             }
         }
 
@@ -2106,7 +2107,7 @@ fn fs_main(
         diffuse_scale = mix(diffuse_scale, 0.12, decal_metallic);
     }
     let shop_display_case_d = shop_display_case_tuning;
-    if (shop_display_case_d && is_foil) {
+    if (shop_spec_forward && (is_foil || is_pack_wrap)) {
         diffuse_scale = diffuse_scale * 0.58;
     }
     if (shop_display_case_d && is_talisman && !is_chitin) {
@@ -2130,18 +2131,18 @@ fn fs_main(
     if (shop_display_case_tuning && is_conductor) {
         spec_acc = spec_acc / (vec3<f32>(1.0) + spec_acc * 0.07);
     }
-    // Display case: foil packs + carved talismans keep extra spec/sheen lobes; pull them back so relic
-    // enamel (diffuse-led) isn't the only thing that looks under-lit.
-    let shop_display_case = shop_display_case_tuning;
-    if (shop_display_case && is_foil) {
-        spec_acc = spec_acc * 0.22;
-        sheen_acc = sheen_acc * 0.22;
-    } else if (shop_display_case && is_chitin) {
-        spec_acc = spec_acc * 0.68;
-        sheen_acc = sheen_acc * 0.80;
-    } else if (shop_display_case && is_talisman) {
-        spec_acc = spec_acc * 0.26;
-        sheen_acc = sheen_acc * 0.26;
+    // Shop catalog: pull spec-forward gloss/holo so art-forward relics and ribbons keep up.
+    if (shop_spec_forward) {
+        if (is_pack_wrap || is_foil) {
+            spec_acc = spec_acc * 0.30;
+            sheen_acc = sheen_acc * 0.30;
+        } else if (is_chitin) {
+            spec_acc = spec_acc * 0.68;
+            sheen_acc = sheen_acc * 0.80;
+        } else if (is_talisman) {
+            spec_acc = spec_acc * 0.26;
+            sheen_acc = sheen_acc * 0.26;
+        }
     }
     // ── Talisman Fresnel albedo tint ───────────────────────────────
     // View-dependent color shift baked into the surface albedo so it
@@ -2201,10 +2202,10 @@ fn fs_main(
             let pit = noise3(in.local_pos * 14.0) * 0.7 + noise3(in.local_pos * 30.0) * 0.3;
             let pit_signed = pit - 0.5;
             albedo = albedo * (1.0 + pit_signed * 0.12);
-        } else if (is_poly) {
-            // Polychrome: rainbow Fresnel shifts the surface hue at
-            // edges, giving a holographic color-change visible from
-            // any lighting angle.
+        } else if (is_poly && !is_score_glyph) {
+            // Polychrome talisman tablets: rainbow Fresnel shifts the
+            // surface hue at edges, giving a holographic color-change
+            // visible from any lighting angle.
             let rim = pow(edge, 1.5) * 0.45;
             let theta = ndv_view * 8.0;
             let holo = vec3<f32>(
@@ -2214,9 +2215,18 @@ fn fs_main(
             );
             albedo = mix(albedo, holo, rim);
         }
-        if (shop_display_case && !is_chitin) {
+        if (shop_display_case_tuning && !is_chitin) {
             albedo = albedo * 0.86;
         }
+    }
+    // Score-pop glyphs: animated vivid colour bands (chips blue, mult red).
+    if (is_score_glyph) {
+        let time = lights.extras.y;
+        albedo = score_glyph_band_albedo(in.local_pos, mesh.base_color.rgb, time);
+        let edge = 1.0 - ndv_view;
+        let rim = pow(edge, 1.8) * 0.35;
+        let rim_tint = mesh.base_color.rgb * 1.4 + vec3<f32>(0.08);
+        albedo = mix(albedo, rim_tint, rim);
     }
     if (is_enamel) {
         let rim_gold = mix(vec3<f32>(0.92, 0.76, 0.28), mesh.base_color.rgb, 0.35);
@@ -2224,6 +2234,10 @@ fn fs_main(
         let edge = 1.0 - ndv_view;
         let glaze = pow(edge, 2.4) * 0.12;
         albedo = mix(albedo, albedo * 1.10 + vec3<f32>(0.04, 0.04, 0.05), glaze);
+    }
+    // Portrait silk (zodiac ribbon): parchment lift under cubby punctual.
+    if (shop_art_forward && skip_directional_shadow && kind < 0.5) {
+        albedo = albedo * 1.08 + vec3<f32>(0.03, 0.025, 0.02);
     }
 
     if (is_pack_wrap) {
@@ -2293,24 +2307,19 @@ fn fs_main(
     // Directional shadow map (mesh casters): PCF visibility in key-light
     // space. Analytic candle AABB occlusion (`cand_vis` above) still gates
     // each wick; this adds contact shadows from tall geometry onto the felt.
-    let shop_display_case_shadow = shop_display_case_tuning;
+    // Shop catalog: spec-forward props get less direct diffuse; art-forward get shadow floor.
     var lit_display_case = lit;
-    if (shop_display_case_shadow && is_foil) {
-        lit_display_case = lit_display_case * 0.40;
+    if (shop_spec_forward) {
+        lit_display_case = lit_display_case * 0.42;
     }
-    if (shop_display_case_shadow && is_talisman) {
-        lit_display_case = lit_display_case * 0.45;
-    }
-    // Readable portrait silk (showcase zodiac ribbon): same rule as archive
-    // description decals — do not stain copy with the key-light shadow map.
-    let punctual_atlas = shadow_globals.punctual_params.z > 0.5;
+    // Portrait silk (zodiac ribbon): skip key-light shadow — same rule as archive decals.
     var shadow_vis = select(
-        sample_shadow_visibility(in.world_pos),
+        combined_mesh_shadow_vis(in.world_pos),
         1.0,
-        skip_directional_shadow || punctual_atlas,
+        skip_directional_shadow,
     );
-    if (shop_display_case_shadow && is_enamel) {
-        shadow_vis = max(shadow_vis, 0.58);
+    if (shop_art_forward && shop_cat_shadow_floor > 0.001) {
+        shadow_vis = max(shadow_vis, shop_cat_shadow_floor);
     }
     let lit_shadowed = lit_display_case * shadow_vis;
     // Reinhard-knee the coat accumulator on wood: with many candles
@@ -2448,8 +2457,8 @@ fn fs_main(
         // `lights.extras.x` gamma slider is intentionally a no-op here — display
         // encoding belongs at the composite stage now.
         var amb = ssr_globals.hdr_tonemap.z * 0.08;
-        if (ssr_globals.shop_punctual.y > 0.5 && is_enamel) {
-            amb = ssr_globals.hdr_tonemap.z * 0.20;
+        if (shop_art_forward && shop_cat_amb > 0.001) {
+            amb = ssr_globals.hdr_tonemap.z * shop_cat_amb;
         }
         if (is_unshaded) {
             // Flat atlas decals skip punctual lighting but still need to land in

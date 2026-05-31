@@ -126,7 +126,7 @@ const SHOP_HELP_BADGE_ID: u32 = 0x9100;
 /// update() routes the click based on `UpdateCtx::picked_shop_object`.
 pub const SHOP_3D_HIT_ID: u32 = 0x9200;
 /// Hold-to-sell duration (gamepad West / keyboard **Q**). Drives HUD ring + sell gate.
-pub(crate) const SHOP_SELL_HOLD_SECONDS: f32 = 0.5;
+pub(crate) const SHOP_SELL_HOLD_SECONDS: f32 = 1.0;
 /// Click id for the Leave / advance 2D button (kept for focus-nav compat).
 const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
 /// Click id for the Reroll 2D button (kept for focus-nav compat).

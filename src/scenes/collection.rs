@@ -17,7 +17,7 @@ use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::archive_glb;
 use crate::render::draw_cmd::{
-    CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame, camera_facing_euler_xyz_rad,
+    CameraParams, Object3d, Object3dKind, UiFrame, camera_facing_euler_xyz_rad,
 };
 use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
 use crate::render::room_glb;
@@ -661,21 +661,17 @@ impl CollectionScene {
             } else {
                 Vec::new()
             };
-            let inverse_punctual: Vec<ScenePunctualLight> = if room_glb {
-                archive_glb::archive_embedded_point_lights_runtime(
-                    w,
-                    h,
-                    env_scale,
-                    &ctx.room_env_for("collection").0,
-                )
-                .into_iter()
-                .map(ScenePunctualLight::InverseSquare)
-                .collect()
-            } else {
-                Vec::new()
-            };
             if room_glb {
-                frame.scene_lighting.punctual = inverse_punctual;
+                let (punctual, nodes) = crate::render::room_gltf_punctual::tagged_to_scene_punctual(
+                    archive_glb::archive_embedded_point_lights_runtime_tagged(
+                        w,
+                        h,
+                        env_scale,
+                        &ctx.room_env_for("collection").0,
+                    ),
+                );
+                frame.scene_lighting.punctual = punctual;
+                frame.scene_lighting.punctual_gltf_nodes = nodes;
             }
         }
 

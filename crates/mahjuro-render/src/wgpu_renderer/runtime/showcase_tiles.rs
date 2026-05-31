@@ -297,6 +297,7 @@ impl WgpuRenderer {
                     };
                     {
                         let stg_mut = &mut self.showcase_tiles[slot_cursor];
+                        stg_mut.casts_shadow = p.pick_id.is_some();
                         if stg_mut.cached_shadow_caster != su {
                             stg_mut.cached_shadow_caster = su;
                             self.queue.write_buffer(

@@ -1077,7 +1077,7 @@ pub fn gameplay_glb_has_embedded_lights() -> bool {
     })
 }
 
-pub fn gameplay_embedded_point_lights_runtime(
+pub fn gameplay_embedded_point_lights_runtime_tagged(
     w: f32,
     h: f32,
     env_h: f32,
@@ -1085,10 +1085,10 @@ pub fn gameplay_embedded_point_lights_runtime(
     flame_time_s: f32,
     lamp_flicker: f32,
     candle_flicker_amp: f32,
-) -> Vec<PointLight> {
+) -> Vec<crate::room_gltf_punctual::EmbeddedPointLightRuntime> {
     with_gameplay_glb_cpu(|opt| {
         opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_point_lights_runtime(
+            crate::room_gltf_punctual::embedded_point_lights_runtime_tagged(
                 cpu,
                 w,
                 h,
@@ -1104,6 +1104,29 @@ pub fn gameplay_embedded_point_lights_runtime(
         })
         .unwrap_or_default()
     })
+}
+
+pub fn gameplay_embedded_point_lights_runtime(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    tune: &RoomEnvLightingTune,
+    flame_time_s: f32,
+    lamp_flicker: f32,
+    candle_flicker_amp: f32,
+) -> Vec<PointLight> {
+    gameplay_embedded_point_lights_runtime_tagged(
+        w,
+        h,
+        env_h,
+        tune,
+        flame_time_s,
+        lamp_flicker,
+        candle_flicker_amp,
+    )
+    .into_iter()
+    .map(|t| t.light)
+    .collect()
 }
 
 pub fn gameplay_embedded_spot_lights_runtime(

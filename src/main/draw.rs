@@ -24,6 +24,23 @@ fn append_fullscreen_debug_panel(
 }
 
 #[cfg(feature = "game")]
+#[inline]
+fn hide_ui_draw_cmds(frame: &mut UiFrame) {
+    frame.cmds.retain(|cmd| {
+        !matches!(
+            cmd,
+            render::draw_cmd::DrawCmd::Quad(_)
+                | render::draw_cmd::DrawCmd::OverlayQuad(_)
+                | render::draw_cmd::DrawCmd::GradientQuad(_)
+                | render::draw_cmd::DrawCmd::SquircleQuad(_)
+                | render::draw_cmd::DrawCmd::Text(_)
+                | render::draw_cmd::DrawCmd::ImageQuad(_)
+                | render::draw_cmd::DrawCmd::TileFaceQuad(_)
+        )
+    });
+}
+
+#[cfg(feature = "game")]
 impl App {
     /// Canonical scene-key string for the renderer (`active_scene_key`).
     /// Mirrors the match in [`Self::draw`]; pulled out so the per-scene
@@ -32,8 +49,9 @@ impl App {
     /// for scenes that don't register one — those fall back to the
     /// `_default` slot in [`crate::game::scene_look_tuning::SceneLookTuningSet`].
     pub(super) fn active_scene_key_for_renderer(&self) -> Option<&'static str> {
-        let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
-        crate::scenes::active_scene_key(scene_for_renderer)
+        let top = self.overlay_stack.last().unwrap_or(&self.scene);
+        let parent = crate::scenes::overlay_renderer_parent(&self.scene, &self.overlay_stack);
+        crate::scenes::active_scene_key_for_renderer(top, parent)
     }
 
     /// Tonemap + room GLB look for the active scene. When the scene-look
@@ -559,6 +577,7 @@ impl App {
                 (size.width as f32, size.height as f32),
             );
         }
+        let mut hide_all_ui = false;
 
         self.modals.update();
         if let Some((
@@ -616,6 +635,8 @@ impl App {
 
         if let Some(ref overlay) = self.debug.rain_debug_overlay {
             frame.debug_rain_hit_colliders = overlay.show_rain_hit_colliders;
+            frame.debug_rain_depth = overlay.show_rain_depth;
+            hide_all_ui = overlay.hide_all_ui;
             let cam = frame
                 .camera_override
                 .unwrap_or(self.debug.last_effective_camera);
@@ -651,6 +672,12 @@ impl App {
         if let Some(ref overlay) = self.debug.visibility_overlay {
             let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
+        }
+
+        if hide_all_ui {
+            self.active_buttons.clear();
+            frame.buttons.clear();
+            hide_ui_draw_cmds(&mut frame);
         }
 
         // Cursor hover labels for `ButtonDef::hover_label`. Scan in vec order (same as
@@ -788,8 +815,9 @@ impl App {
         // Tell the renderer which scene is active so shared mesh pipelines
         // (Object3dKind::Ofuda, coin/gold piles, etc.) can emit correctly-
         // prefixed canonical pickable names.
-        let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
-        let active_scene_key = crate::scenes::active_scene_key(scene_for_renderer);
+        let top = self.overlay_stack.last().unwrap_or(&self.scene);
+        let parent = crate::scenes::overlay_renderer_parent(&self.scene, &self.overlay_stack);
+        let active_scene_key = crate::scenes::active_scene_key_for_renderer(top, parent);
         renderer.set_active_scene(active_scene_key);
 
         if matches!(active_scene_key, Some("gameplay") | Some("tutorial"))

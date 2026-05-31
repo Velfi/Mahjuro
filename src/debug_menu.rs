@@ -187,50 +187,47 @@ impl DebugMenuBar {
         let _ = debug_menu.append(&overlays_sub);
 
         // ── Tuning ───────────────────────────────────────────────────────────
-        // Live parameter panels, grouped by domain.
+        // Live parameter panels. Keep entries one level deep for faster access.
         let tuning_sub = Submenu::new("Tuning", true);
+        let cascade_tuning_item = MenuItem::new("Cascade Tuning...", true, None);
+        mappings.push((cascade_tuning_item.id().clone(), DebugAction::OpenTuning));
+        let _ = tuning_sub.append(&cascade_tuning_item);
+        let _ = tuning_sub.append(&PredefinedMenuItem::separator());
 
-        let tuning_gameplay_sub = Submenu::new("Gameplay", true);
-        let _ = tuning_sub.append(&tuning_gameplay_sub);
-
-        let tuning_camera_sub = Submenu::new("Camera & Look", true);
         let camera_item = MenuItem::new("Camera...", true, None);
         mappings.push((camera_item.id().clone(), DebugAction::OpenCameraDebug));
-        let _ = tuning_camera_sub.append(&camera_item);
+        let _ = tuning_sub.append(&camera_item);
         let scene_look_item = MenuItem::new("Scene Look (per scene)...", true, None);
         mappings.push((
             scene_look_item.id().clone(),
             DebugAction::OpenSceneLookDebug,
         ));
-        let _ = tuning_camera_sub.append(&scene_look_item);
-        let _ = tuning_sub.append(&tuning_camera_sub);
+        let _ = tuning_sub.append(&scene_look_item);
+        let _ = tuning_sub.append(&PredefinedMenuItem::separator());
 
-        let tuning_env_sub = Submenu::new("Environment", true);
         let rain_item = MenuItem::new("Rain (main menu)...", true, None);
         mappings.push((rain_item.id().clone(), DebugAction::OpenRainDebug));
-        let _ = tuning_env_sub.append(&rain_item);
+        let _ = tuning_sub.append(&rain_item);
         let flame_item = MenuItem::new("Candle Flames (shop / gameplay)...", true, None);
         mappings.push((flame_item.id().clone(), DebugAction::OpenFlameDebug));
-        let _ = tuning_env_sub.append(&flame_item);
+        let _ = tuning_sub.append(&flame_item);
         let hall_fx_item = MenuItem::new("Hallway Vertex Warp...", true, None);
         mappings.push((
             hall_fx_item.id().clone(),
             DebugAction::OpenHallwayHallFxDebug,
         ));
-        let _ = tuning_env_sub.append(&hall_fx_item);
+        let _ = tuning_sub.append(&hall_fx_item);
         let pride_rainbow_item = MenuItem::new("Main Menu Pride Rainbow", true, None);
         mappings.push((
             pride_rainbow_item.id().clone(),
             DebugAction::ToggleMainMenuPrideRainbow,
         ));
-        let _ = tuning_env_sub.append(&pride_rainbow_item);
-        let _ = tuning_sub.append(&tuning_env_sub);
+        let _ = tuning_sub.append(&pride_rainbow_item);
+        let _ = tuning_sub.append(&PredefinedMenuItem::separator());
 
-        let tuning_audio_sub = Submenu::new("Audio", true);
         let sfx_item = MenuItem::new("Sound Effects Test...", true, None);
         mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));
-        let _ = tuning_audio_sub.append(&sfx_item);
-        let _ = tuning_sub.append(&tuning_audio_sub);
+        let _ = tuning_sub.append(&sfx_item);
 
         let _ = debug_menu.append(&tuning_sub);
 
@@ -265,25 +262,27 @@ impl DebugMenuBar {
 
         let _ = run_sub.append(&PredefinedMenuItem::separator());
 
-        let gold_sub = Submenu::new("Set Gold", true);
+        // Direct "set" entries avoid extra submenu drilling.
         for &amount in &[0u32, 10, 50, 100, 500, 9999] {
-            let item = MenuItem::new(format!("{amount} Gold"), true, None);
+            let item = MenuItem::new(format!("Set Gold: {amount}"), true, None);
             mappings.push((item.id().clone(), DebugAction::SetYen(amount)));
-            let _ = gold_sub.append(&item);
+            let _ = run_sub.append(&item);
         }
-        let _ = run_sub.append(&gold_sub);
+        let _ = run_sub.append(&PredefinedMenuItem::separator());
 
-        let level_sub = Submenu::new("Set Player Depth", true);
         for lvl in 1..=14u32 {
             let item = MenuItem::new(
-                format!("Depth {}", crate::core::progression::meta_depth_roman(lvl)),
+                format!(
+                    "Set Player Depth: {}",
+                    crate::core::progression::meta_depth_roman(lvl)
+                ),
                 true,
                 None,
             );
             mappings.push((item.id().clone(), DebugAction::SetLevel(lvl)));
-            let _ = level_sub.append(&item);
+            let _ = run_sub.append(&item);
         }
-        let _ = run_sub.append(&level_sub);
+        let _ = run_sub.append(&PredefinedMenuItem::separator());
 
         let boss_sub = Submenu::new("Set Current Boss", true);
         for def in all_ordeals().iter().chain(final_ordeals().iter()) {
@@ -301,122 +300,118 @@ impl DebugMenuBar {
             ("Winds", Suit::Wind, 4u8),
             ("Dragons", Suit::Dragon, 3u8),
         ] {
-            let suit_sub = Submenu::new(suit_label, true);
             for rank in 1..=max_rank {
-                let label = Tile::new(suit, rank, 0).full_name();
-                let item = MenuItem::new(label, true, None);
+                let face = Tile::new(suit, rank, 0).full_name();
+                let item = MenuItem::new(format!("{suit_label}: {face}"), true, None);
                 mappings.push((item.id().clone(), DebugAction::SetDora(suit, rank)));
-                let _ = suit_sub.append(&item);
+                let _ = dora_sub.append(&item);
             }
-            let _ = dora_sub.append(&suit_sub);
+            if !matches!(suit, Suit::Dragon) {
+                let _ = dora_sub.append(&PredefinedMenuItem::separator());
+            }
         }
         let _ = run_sub.append(&dora_sub);
 
-        let relic_sub = Submenu::new("Relic Inventory", true);
         let clear_item = MenuItem::new("Clear All Relics", true, None);
         mappings.push((clear_item.id().clone(), DebugAction::ClearRelics));
-        let _ = relic_sub.append(&clear_item);
+        let _ = run_sub.append(&clear_item);
         let add_sub = Submenu::new("Add Relic", true);
         for def in all_relic_defs() {
             let item = MenuItem::new(def.name, true, None);
             mappings.push((item.id().clone(), DebugAction::AddRelic(def.id)));
             let _ = add_sub.append(&item);
         }
-        let _ = relic_sub.append(&add_sub);
-        let _ = run_sub.append(&relic_sub);
+        let _ = run_sub.append(&add_sub);
 
-        let consumable_sub = Submenu::new("Consumable Inventory", true);
+        let _ = run_sub.append(&PredefinedMenuItem::separator());
+
         let clear_cons_item = MenuItem::new("Clear All Consumables", true, None);
         mappings.push((clear_cons_item.id().clone(), DebugAction::ClearConsumables));
-        let _ = consumable_sub.append(&clear_cons_item);
+        let _ = run_sub.append(&clear_cons_item);
         let add_talisman_sub = Submenu::new("Add Talisman", true);
         for &kind in TalismanKind::all() {
             let item = MenuItem::new(kind.name(), true, None);
             mappings.push((item.id().clone(), DebugAction::AddTalisman(kind)));
             let _ = add_talisman_sub.append(&item);
         }
-        let _ = consumable_sub.append(&add_talisman_sub);
+        let _ = run_sub.append(&add_talisman_sub);
         let add_zodiac_sub = Submenu::new("Add Zodiac", true);
         for &kind in ZodiacKind::all() {
             let item = MenuItem::new(kind.name(), true, None);
             mappings.push((item.id().clone(), DebugAction::AddZodiac(kind)));
             let _ = add_zodiac_sub.append(&item);
         }
-        let _ = consumable_sub.append(&add_zodiac_sub);
-        let _ = run_sub.append(&consumable_sub);
+        let _ = run_sub.append(&add_zodiac_sub);
 
         let _ = debug_menu.append(&run_sub);
 
-        // ── Labs ─────────────────────────────────────────────────────────────
-        // Standalone pushdown scenes for layout, animation, and asset review.
-        let labs_sub = Submenu::new("Labs", true);
+        let _ = debug_menu.append(&PredefinedMenuItem::separator());
 
+        // ── Labs (direct entries) ────────────────────────────────────────────
+        // Standalone pushdown scenes for layout, animation, and asset review.
         let animation_lab_item = MenuItem::new("Animation Lab...", true, None);
         mappings.push((
             animation_lab_item.id().clone(),
             DebugAction::OpenAnimationLab,
         ));
-        let _ = labs_sub.append(&animation_lab_item);
+        let _ = debug_menu.append(&animation_lab_item);
 
         let button_aabb_lab_item = MenuItem::new("Button AABB Lab...", true, None);
         mappings.push((
             button_aabb_lab_item.id().clone(),
             DebugAction::OpenButtonAabbLab,
         ));
-        let _ = labs_sub.append(&button_aabb_lab_item);
+        let _ = debug_menu.append(&button_aabb_lab_item);
 
         let material_viewer_item = MenuItem::new("Material Viewer...", true, None);
         mappings.push((
             material_viewer_item.id().clone(),
             DebugAction::OpenMaterialViewer,
         ));
-        let _ = labs_sub.append(&material_viewer_item);
+        let _ = debug_menu.append(&material_viewer_item);
 
         let roller_lab_item = MenuItem::new("Roller Lab...", true, None);
         mappings.push((roller_lab_item.id().clone(), DebugAction::OpenRollerLab));
-        let _ = labs_sub.append(&roller_lab_item);
+        let _ = debug_menu.append(&roller_lab_item);
 
         let cascade_lab_item = MenuItem::new("Cascade Lab...", true, None);
         mappings.push((cascade_lab_item.id().clone(), DebugAction::OpenCascadeLab));
-        let _ = labs_sub.append(&cascade_lab_item);
+        let _ = debug_menu.append(&cascade_lab_item);
 
         let rumble_lab_item = MenuItem::new("Rumble Lab...", true, None);
         mappings.push((rumble_lab_item.id().clone(), DebugAction::OpenRumbleLab));
-        let _ = labs_sub.append(&rumble_lab_item);
+        let _ = debug_menu.append(&rumble_lab_item);
 
         let tile_anchor_lab_item = MenuItem::new("Tile Anchor Lab...", true, None);
         mappings.push((
             tile_anchor_lab_item.id().clone(),
             DebugAction::OpenTileAnchorLab,
         ));
-        let _ = labs_sub.append(&tile_anchor_lab_item);
+        let _ = debug_menu.append(&tile_anchor_lab_item);
 
         let tixels_item = MenuItem::new("Tixels...", true, None);
         mappings.push((tixels_item.id().clone(), DebugAction::OpenTixels));
-        let _ = labs_sub.append(&tixels_item);
+        let _ = debug_menu.append(&tixels_item);
 
         let transition_playground_item = MenuItem::new("Transition Playground...", true, None);
         mappings.push((
             transition_playground_item.id().clone(),
             DebugAction::OpenTransitionPlayground,
         ));
-        let _ = labs_sub.append(&transition_playground_item);
+        let _ = debug_menu.append(&transition_playground_item);
 
-        let _ = debug_menu.append(&labs_sub);
+        let _ = debug_menu.append(&PredefinedMenuItem::separator());
 
-        // ── Screens ──────────────────────────────────────────────────────────
+        // ── Screens (direct entries) ─────────────────────────────────────────
         // Jump to end-of-run presentation without playing through.
-        let screens_sub = Submenu::new("Screens", true);
-
         let victory_item = MenuItem::new("Victory", true, None);
         mappings.push((victory_item.id().clone(), DebugAction::ShowVictoryScreen));
-        let _ = screens_sub.append(&victory_item);
+        let _ = debug_menu.append(&victory_item);
 
         let defeat_item = MenuItem::new("Defeat", true, None);
         mappings.push((defeat_item.id().clone(), DebugAction::ShowDefeatScreen));
-        let _ = screens_sub.append(&defeat_item);
-
-        let _ = debug_menu.append(&screens_sub);
+        let _ = debug_menu.append(&defeat_item);
+        let _ = debug_menu.append(&PredefinedMenuItem::separator());
 
         // ── Profile ──────────────────────────────────────────────────────────
         // Persistent meta / career cheats (saved to the active profile).

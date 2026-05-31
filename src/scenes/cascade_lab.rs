@@ -69,7 +69,6 @@ const DORA_SLOT_MAX: usize = 2;
 const ROUND_WIND_SLOT_MAX: usize = 2;
 
 const TUNING_SLIDER_ROWS: usize = 8;
-const TUNING_ROW_COUNT: usize = TUNING_SLIDER_ROWS;
 
 const TUNING_ROW_META: [(&str, u64, u64, u64); TUNING_SLIDER_ROWS] = [
     ("Base hold (ms)", 50, 3000, 10),

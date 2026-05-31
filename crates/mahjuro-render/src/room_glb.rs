@@ -856,7 +856,7 @@ pub fn shop_glb_has_embedded_lights() -> bool {
 }
 
 /// glTF punctual points for the shop (candle flicker envelope).
-pub fn shop_embedded_point_lights_runtime(
+pub fn shop_embedded_point_lights_runtime_tagged(
     w: f32,
     h: f32,
     env_h: f32,
@@ -864,10 +864,10 @@ pub fn shop_embedded_point_lights_runtime(
     flame_time_s: f32,
     lamp_flicker: f32,
     candle_flicker_amp: f32,
-) -> Vec<crate::wgpu_renderer::PointLight> {
+) -> Vec<crate::room_gltf_punctual::EmbeddedPointLightRuntime> {
     with_shop_glb_cpu(|opt| {
         opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_point_lights_runtime(
+            crate::room_gltf_punctual::embedded_point_lights_runtime_tagged(
                 cpu,
                 w,
                 h,
@@ -883,6 +883,30 @@ pub fn shop_embedded_point_lights_runtime(
         })
         .unwrap_or_default()
     })
+}
+
+/// glTF punctual points for the shop (candle flicker envelope).
+pub fn shop_embedded_point_lights_runtime(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    tune: &RoomEnvLightingTune,
+    flame_time_s: f32,
+    lamp_flicker: f32,
+    candle_flicker_amp: f32,
+) -> Vec<crate::wgpu_renderer::PointLight> {
+    shop_embedded_point_lights_runtime_tagged(
+        w,
+        h,
+        env_h,
+        tune,
+        flame_time_s,
+        lamp_flicker,
+        candle_flicker_amp,
+    )
+    .into_iter()
+    .map(|t| t.light)
+    .collect()
 }
 
 /// glTF spot lights for the shop room.

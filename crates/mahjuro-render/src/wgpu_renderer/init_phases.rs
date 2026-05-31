@@ -52,6 +52,8 @@ fn win32_maybe_clear_vulkan_env_after_probe() {
 /// All WGSL `ShaderModule`s created during renderer init (no pipelines).
 pub(super) struct RendererShaderPack {
     pub quad: wgpu::ShaderModule,
+    pub depth_quad: wgpu::ShaderModule,
+    pub depth_quad_debug: wgpu::ShaderModule,
     pub tile: wgpu::ShaderModule,
     pub shop: wgpu::ShaderModule,
     pub text: wgpu::ShaderModule,
@@ -88,6 +90,14 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
         quad: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("quad-shader"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::QUAD.into()),
+        }),
+        depth_quad: device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("depth-quad-shader"),
+            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::DEPTH_QUAD.into()),
+        }),
+        depth_quad_debug: device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("depth-quad-debug-shader"),
+            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::DEPTH_QUAD_DEBUG.into()),
         }),
         tile: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tile-3d-shader"),

@@ -498,15 +498,15 @@ pub fn archive_glb_has_embedded_lights() -> bool {
     })
 }
 
-pub fn archive_embedded_point_lights_runtime(
+pub fn archive_embedded_point_lights_runtime_tagged(
     w: f32,
     h: f32,
     env_h: f32,
     tune: &RoomEnvLightingTune,
-) -> Vec<PointLight> {
+) -> Vec<crate::room_gltf_punctual::EmbeddedPointLightRuntime> {
     with_archive_glb_cpu(|opt| {
         opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_point_lights_runtime(
+            crate::room_gltf_punctual::embedded_point_lights_runtime_tagged(
                 cpu,
                 w,
                 h,
@@ -518,6 +518,18 @@ pub fn archive_embedded_point_lights_runtime(
         })
         .unwrap_or_default()
     })
+}
+
+pub fn archive_embedded_point_lights_runtime(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    tune: &RoomEnvLightingTune,
+) -> Vec<PointLight> {
+    archive_embedded_point_lights_runtime_tagged(w, h, env_h, tune)
+        .into_iter()
+        .map(|t| t.light)
+        .collect()
 }
 
 pub fn archive_embedded_spot_lights_runtime(

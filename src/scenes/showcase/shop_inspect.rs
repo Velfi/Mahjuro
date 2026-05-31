@@ -63,7 +63,7 @@ impl ShopInspectPresenter {
         ShowcaseRenderHints {
             layout_use_ray_plane_z: false,
             tile_pack_celebration_tonemap: false,
-            shop_tonemap_and_lit_mesh_context: true,
+            shop_tonemap_and_lit_mesh_context: false,
             collection_tonemap_context: false,
             modal_relic_staging: false,
         }

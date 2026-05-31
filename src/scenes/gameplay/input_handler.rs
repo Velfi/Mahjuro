@@ -28,21 +28,6 @@ const SCORE_WAVE_YAKU_MM: f32 = 4.0;
 const SCORE_WAVE_STRUCTURE_TILE_MM: f32 = 5.0;
 const RELIC_SCORE_VERTICAL_MM: f32 = 3.5;
 
-/// Screen-space center of the `idx`-th active relic (`player_relic` empties).
-pub(super) fn relic_tray_screen_center_xy(
-    layout: &crate::ui::layout::LayoutResult,
-    env_height_scale: f32,
-    idx: usize,
-) -> Option<(f32, f32)> {
-    super::glb_anchors::relic_tray_screen_center(
-        layout.window_w,
-        layout.window_h,
-        env_height_scale,
-        idx,
-    )
-    .ok()
-}
-
 /// Advances journal cover-open + zoom; pushes [`YakuJournalScene`] when the
 /// forward animation completes. Returns `true` when the overlay was pushed
 /// and `update()` should return immediately.

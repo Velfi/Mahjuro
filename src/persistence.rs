@@ -9,7 +9,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 pub use mahjuro_gfx_types::{
-    EffectsQuality, TileMaterial, TilePreset, clear_tuning_override, has_tuning_override,
+    EffectsQuality, ShadowQuality, TileMaterial, TilePreset, clear_tuning_override, has_tuning_override,
     load_tuning_override, save_tuning_override,
 };
 
@@ -115,6 +115,10 @@ fn data_dir() -> PathBuf {
     PathBuf::from(".")
 }
 
+fn default_shadow_quality() -> ShadowQuality {
+    ShadowQuality::High
+}
+
 fn default_effects_quality() -> EffectsQuality {
     EffectsQuality::High
 }
@@ -156,8 +160,8 @@ pub struct AppSettings {
     pub tileset_name: String,
     #[serde(default = "default_gamma")]
     pub gamma: f32,
-    #[serde(default = "default_true")]
-    pub shadows_enabled: bool,
+    #[serde(default = "default_shadow_quality")]
+    pub shadow_quality: ShadowQuality,
     #[serde(default = "default_true")]
     pub ssr_enabled: bool,
     #[serde(default)]
@@ -253,7 +257,7 @@ impl Default for AppSettings {
             tile_material: TileMaterial::Bamboo,
             tileset_name: default_tileset_name(),
             gamma: 1.0,
-            shadows_enabled: true,
+            shadow_quality: ShadowQuality::High,
             ssr_enabled: true,
             hdr_enabled: false,
             vhs_enabled: true,
@@ -313,6 +317,19 @@ fn load_settings_uncached() -> AppSettings {
         Err(_) => return AppSettings::default(),
     };
     let mut settings: AppSettings = serde_json::from_str(&data).unwrap_or_default();
+    if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&data)
+        && raw.get("shadow_quality").is_none()
+    {
+        settings.shadow_quality = if raw
+            .get("shadows_enabled")
+            .and_then(|v| v.as_bool())
+            == Some(false)
+        {
+            ShadowQuality::Off
+        } else {
+            ShadowQuality::High
+        };
+    }
     settings.active_profile = settings.active_profile.min(MAX_PROFILES - 1);
     if crate::asset_path::is_internal_only_tileset(&settings.tileset_name) {
         settings.tileset_name = default_tileset_name();

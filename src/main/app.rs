@@ -182,7 +182,7 @@ impl crate::App {
                 tile_material: settings.tile_material,
                 tileset_name: settings.tileset_name.clone(),
                 gamma: settings.gamma,
-                shadows_enabled: settings.shadows_enabled,
+                shadow_quality: settings.shadow_quality,
                 ssr_enabled: settings.ssr_enabled,
                 hdr_enabled: settings.hdr_enabled,
                 vhs_enabled: settings.vhs_enabled,

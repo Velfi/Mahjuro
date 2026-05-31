@@ -82,46 +82,7 @@ struct SpotLights {
 };
 @group(3) @binding(0) var<uniform> spot_lights: SpotLights;
 
-// ── Shadow sampling (group 2, shared frame-wide) ─────────────────────
-struct PunctualShadowSlot {
-    light_view_proj: mat4x4<f32>,
-    atlas_rect: vec4<f32>,
-};
-
-struct ShadowGlobals {
-    light_view_proj: mat4x4<f32>,
-    // x = enabled (0/1), y = depth bias, z = texel size, w = unused
-    params: vec4<f32>,
-    room_baked_light_view_proj: mat4x4<f32>,
-    punctual_params: vec4<f32>,
-    punctual_lights: array<PunctualShadowSlot, 8>,
-};
-@group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
-@group(2) @binding(1) var shadow_map: texture_depth_2d;
-@group(2) @binding(2) var shadow_samp: sampler_comparison;
-
-fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
-    if (shadow_globals.params.x < 0.5) {
-        return 1.0;
-    }
-    let lp = shadow_globals.light_view_proj * vec4<f32>(world_pos, 1.0);
-    let proj = lp.xyz / lp.w;
-    let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || proj.z < 0.0 || proj.z > 1.0) {
-        return 1.0;
-    }
-    let bias = shadow_globals.params.y;
-    let depth_ref = proj.z - bias;
-    let texel = shadow_globals.params.z;
-    var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy = dy + 1) {
-        for (var dx = -1; dx <= 1; dx = dx + 1) {
-            let off = vec2<f32>(f32(dx), f32(dy)) * texel;
-            sum = sum + textureSampleCompare(shadow_map, shadow_samp, uv + off, depth_ref);
-        }
-    }
-    return sum / 9.0;
-}
+// ── Shadow sampling comes from `projected_shadow.wgsl` (group 2) ─────
 
 // ── Procedural bamboo helpers ───────────────────────────────────────────
 // Cheap value-noise primitives used to build a bamboo wood-fiber texture
@@ -546,6 +507,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let intensity = lights.lights[i].color.a * select(1.0, lights.extras.w, kind > 0.5);
         let to_light = lp - in.world_pos;
         let dist = length(to_light);
+        // `hdr_tonemap.w` carries inverse document scale on tile draws (see
+        // `showcase_tiles.rs`); `decal_atlas_uv.y` is decal-atlas V — not inv_doc.
         let inv_doc = cam.hdr_tonemap.w;
         let atten = select(
             scene_smooth_point_atten(dist, radius),
@@ -631,8 +594,9 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         }
         let nl = max(dot(n_world, to_light), 0.0);
         let lambert = 0.35 + 0.65 * nl;
+        let spot_vis = 1.0;
         point_contrib = point_contrib
-            + s.color.rgb * punc_rgb_mul * s.color.a * atten * spot_factor * lambert;
+            + s.color.rgb * punc_rgb_mul * s.color.a * atten * spot_factor * lambert * spot_vis;
     }
 
     // ── Enhancement fresnel albedo tint ─────────────────────────────────
@@ -663,17 +627,10 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         }
     }
 
-    // Tile albedo × candle/spot contribution, modulated by the mesh shadow
-    // map so casters darken tiles on the table like the lit-mesh path.
-    // `use_textured_env` = imported shop room (`shop.glb`): same table shadow map
-    // mismatch as `room_glb.wgsl` — skip gameplay shadow for that path only.
-    // Embedded glTF punctual rooms already carry their authored room/baked shadows; procedural
-    // tiles use the candle/spot lights directly and skip the directional receiver map so they
-    // do not self-shadow into hard black under the room frustum.
-    let mesh_shadow_vis = sample_shadow_visibility(in.world_pos);
-    let embedded_gltf_punctual = cam.hdr_tonemap.w > 1e-8;
-    let mesh_shadow = select(mesh_shadow_vis, 1.0, use_textured_env || embedded_gltf_punctual);
-    var lit_rgb = (rgb * point_contrib + sheen_acc) * mesh_shadow;
+    // Per-light `punctual_shadow_vis` in the loop above — do not min all caster
+    // frustums here (misaligns for multi-light maps and crushes celebration /
+    // procedural scenes where `hdr_tonemap.w` is zero).
+    var lit_rgb = rgb * point_contrib + sheen_acc;
 
     // Tortoise shell: warm amber Fresnel rim at grazing angles.
     // Scaled by the local candle contribution so the rim only blooms
@@ -682,7 +639,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let edge = 1.0 - ndv_global;
         let rim = pow(edge, 3.0) * 0.35;
         let rim_tint = vec3<f32>(0.95, 0.60, 0.22);
-        lit_rgb = lit_rgb + rim_tint * rim * point_contrib * mesh_shadow;
+        lit_rgb = lit_rgb + rim_tint * rim * point_contrib;
     }
 
     // glTF metallic–roughness + emissive (linear), sampled on `uv_emr`.

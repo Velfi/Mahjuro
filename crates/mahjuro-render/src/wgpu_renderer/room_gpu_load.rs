@@ -664,7 +664,7 @@ fn create_cleared_archive_decal_texture(
     tex
 }
 
-fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>, Option<usize>, Option<usize>, Option<usize>, Vec<usize>, Vec<usize>, Vec<bool>) {
+fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>, Option<usize>, Option<usize>, Option<usize>, Vec<usize>, Vec<usize>) {
     crate::archive_glb::with_archive_glb_cpu(|cpu_opt| {
                 let mut prims = Vec::new();
                 let mut gpu_wrap = None;
@@ -673,7 +673,6 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                 let mut inspect_plaque = None;
                 let mut page_left = Vec::new();
                 let mut page_right = Vec::new();
-                let mut shadow_caster_mask = Vec::new();
                 let Some(cpu) = cpu_opt else {
                     return (
                         prims,
@@ -683,7 +682,6 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                         inspect_plaque,
                         page_left,
                         page_right,
-                        shadow_caster_mask,
                     );
                 };
                 if !cpu.environment_primitives.is_empty() {
@@ -771,11 +769,6 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                             });
                         let sampler =
                             ctx.device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
-                        shadow_caster_mask.push(
-                            crate::archive_glb::archive_prim_casts_room_shadow(
-                                env_prim.gltf_node_name.as_deref(),
-                            ),
-                        );
                         prims.push(TilePrimitiveGpu {
                             vertex_buffer: vb,
                             index_buffer: ib,
@@ -921,7 +914,6 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                     inspect_plaque,
                     page_left,
                     page_right,
-                    shadow_caster_mask,
                 )
             })
 }
@@ -933,7 +925,6 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (
     Vec<Vec<usize>>,
     Vec<[f32; 3]>,
     Vec<[f32; 3]>,
-    Vec<bool>,
 ) {
     crate::gameplay_glb::with_gameplay_glb_cpu(|cpu_opt| {
                 let mut prims = Vec::new();
@@ -946,7 +937,6 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (
                 let mut gameplay_score_roller_axes_doc =
                     vec![[1.0, 0.0, 0.0]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
                 let mut gameplay_score_roller_found = [false; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
-                let mut gameplay_env_shadow_caster_mask = Vec::new();
                 let Some(cpu) = cpu_opt else {
                     return (
                         prims,
@@ -955,7 +945,6 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (
                         gameplay_score_roller_prim_groups,
                         gameplay_score_roller_pivots_doc,
                         gameplay_score_roller_axes_doc,
-                        gameplay_env_shadow_caster_mask,
                     );
                 };
                 if !cpu.environment_primitives.is_empty() {
@@ -989,11 +978,6 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (
                                 }
                             }
                         }
-                        gameplay_env_shadow_caster_mask.push(
-                            crate::gameplay_glb::gameplay_prim_casts_room_shadow(
-                                env_prim.gltf_node_name.as_deref(),
-                            ),
-                        );
                         let prim = &env_prim.mesh;
                         let vb = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("gameplay-env-verts-{i}")),
@@ -1182,7 +1166,6 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (
                         gameplay_score_roller_prim_groups,
                         gameplay_score_roller_pivots_doc,
                         gameplay_score_roller_axes_doc,
-                        gameplay_env_shadow_caster_mask,
                     );
                 }
                 (
@@ -1192,7 +1175,6 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (
                     gameplay_score_roller_prim_groups,
                     gameplay_score_roller_pivots_doc,
                     gameplay_score_roller_axes_doc,
-                    gameplay_env_shadow_caster_mask,
                 )
             })
 }
@@ -1457,7 +1439,7 @@ impl WgpuRenderer {
             frame_dt_ms,
             || {
                 let ctx = self.room_gpu_upload_ctx();
-                let (prims, gpu_wrap, sign_l, sign_r, inspect_plaque, page_left, page_right, shadow_mask) =
+                let (prims, gpu_wrap, sign_l, sign_r, inspect_plaque, page_left, page_right) =
                     load_archive_room_gpu(ctx);
                 require_room_environment_loaded("archive.glb", &prims, &gpu_wrap);
                 self.archive_env_primitives = prims;
@@ -1467,7 +1449,6 @@ impl WgpuRenderer {
                 self.archive_inspect_plaque_prim_idx = inspect_plaque;
                 self.archive_page_left_prim_indices = page_left;
                 self.archive_page_right_prim_indices = page_right;
-                self.archive_env_shadow_caster_mask = shadow_mask;
                 crate::archive_glb::release_archive_environment_cpu_sources_after_gpu_upload();
                 self.rooms_gpu_loaded |= ROOM_ARCHIVE;
             },
@@ -1497,7 +1478,7 @@ impl WgpuRenderer {
             frame_dt_ms,
             || {
                 let ctx = self.room_gpu_upload_ctx();
-                let (prims, gpu_wrap, cash_in, roller_groups, roller_pivots, roller_axes, shadow_mask) =
+                let (prims, gpu_wrap, cash_in, roller_groups, roller_pivots, roller_axes) =
                     load_gameplay_room_gpu(ctx);
                 require_room_environment_loaded("gameplay.glb", &prims, &gpu_wrap);
                 self.gameplay_env_primitives = prims;
@@ -1509,7 +1490,6 @@ impl WgpuRenderer {
                 self.gameplay_score_roller_drive_initialized
                     .replace([false; 2]);
                 *self.gameplay_score_roller_stopped.borrow_mut() = false;
-                self.gameplay_env_shadow_caster_mask = shadow_mask;
                 self.gameplay_env_collision_meshes =
                     crate::gameplay_glb::with_gameplay_glb_cpu(|o| {
                         o.map(|c| c.collision_meshes.clone()).unwrap_or_default()

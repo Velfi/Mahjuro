@@ -395,19 +395,19 @@ impl SceneBehavior for PickChamberScene {
             } else {
                 Vec::new()
             };
-            let mut inverse_punctual: Vec<ScenePunctualLight> = if room_glb {
-                hallway_glb::hallway_embedded_point_lights_runtime(
-                    w,
-                    h,
-                    ctx.room_gltf_height_scale,
-                    &ctx.room_env_for("pick_chamber").0,
-                )
-                .into_iter()
-                .map(ScenePunctualLight::InverseSquare)
-                .collect()
-            } else {
-                Vec::new()
-            };
+            let (mut inverse_punctual, mut punctual_gltf_nodes): (Vec<ScenePunctualLight>, Vec<Option<String>>) =
+                if room_glb {
+                    crate::render::room_gltf_punctual::tagged_to_scene_punctual(
+                        hallway_glb::hallway_embedded_point_lights_runtime_tagged(
+                            w,
+                            h,
+                            ctx.room_gltf_height_scale,
+                            &ctx.room_env_for("pick_chamber").0,
+                        ),
+                    )
+                } else {
+                    (Vec::new(), Vec::new())
+                };
             let mut point_lights: Vec<PointLight> = if room_glb {
                 Vec::new()
             } else {
@@ -460,8 +460,11 @@ impl SceneBehavior for PickChamberScene {
                     intensity: (if room_glb { 0.36 } else { 1.05 }) * skip_b,
                 });
             }
+            let proc_count = point_lights.len();
             inverse_punctual.extend(point_lights.into_iter().map(ScenePunctualLight::Smooth));
+            punctual_gltf_nodes.extend(std::iter::repeat_n(None, proc_count));
             frame.scene_lighting.punctual = inverse_punctual;
+            frame.scene_lighting.punctual_gltf_nodes = punctual_gltf_nodes;
         } else {
             frame.scene_lighting.embedded_gltf_punctual = false;
             frame.scene_lighting.room_glb_brdf = false;

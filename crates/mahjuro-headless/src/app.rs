@@ -99,7 +99,7 @@ impl HeadlessApp {
                 tile_material: settings.tile_material,
                 tileset_name: settings.tileset_name.clone(),
                 gamma: settings.gamma,
-                shadows_enabled: settings.shadows_enabled,
+                shadow_quality: settings.shadow_quality,
                 ssr_enabled: settings.ssr_enabled,
                 hdr_enabled: false,
                 vhs_enabled: false,
@@ -444,8 +444,9 @@ impl HeadlessApp {
             }
         }
 
-        let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
-        let active_scene_key = mahjuro::scenes::active_scene_key(scene_for_renderer);
+        let top = self.overlay_stack.last().unwrap_or(&self.scene);
+        let parent = mahjuro::scenes::overlay_renderer_parent(&self.scene, &self.overlay_stack);
+        let active_scene_key = mahjuro::scenes::active_scene_key_for_renderer(top, parent);
         self.renderer.set_active_scene(active_scene_key);
         let look = self.scene_look.resolve(active_scene_key);
         self.renderer.set_tonemap_tuning(&look.tonemap);

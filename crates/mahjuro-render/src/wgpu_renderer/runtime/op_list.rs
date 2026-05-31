@@ -33,6 +33,11 @@ pub(super) enum RenderOp {
         buf_idx: usize,
         count: u32,
     },
+    /// Screen-space quad that depth-tests against the scene depth buffer.
+    DepthQuadBatch {
+        buf_idx: usize,
+        count: u32,
+    },
     /// Post-tonemap tooltip / inspect panels (`DrawCmd::OverlayQuad`).
     OverlayQuadBatch {
         buf_idx: usize,

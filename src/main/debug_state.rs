@@ -30,7 +30,7 @@ pub struct DebugState {
     pub hallway_distortion_debug_overlay: Option<HallwayDistortionDebugOverlay>,
     pub rain_debug_overlay: Option<RainDebugOverlay>,
     pub flame_debug_overlay: Option<FlameDebugOverlay>,
-    /// Debug → Tuning → Environment → Main Menu Pride Rainbow — preview June FX outside June.
+    /// Debug → Tuning → Main Menu Pride Rainbow — preview June FX outside June.
     pub main_menu_pride_rainbow_debug: bool,
     /// Effective 3D camera after the scene's `draw_frame` (override or table
     /// default), updated each paint — used to seed camera debug overlay.

@@ -1,25 +1,78 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::lit_mesh::{PunctualShadowSlotGpu, ShadowGlobals, create_shadow_sample_bind_group};
-use crate::punctual_shadow_atlas::{
-    MAX_PUNCTUAL_SHADOW_LIGHTS, PUNCTUAL_SHADOW_TILE_SIZE, PunctualShadowLightSetup,
-};
+use crate::lit_mesh::create_shadow_sample_bind_group;
 use crate::room_gi_bake::{RoomGiRoom, room_gi_room_index};
 use crate::room_shadow_bake::{self, RoomShadowBake};
-use crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
+use crate::wgpu_renderer::runtime::shadow_setup::{ActiveRoomEnv, build_shadow_globals};
+use mahjuro_gfx_types::ShadowQuality;
 
 pub(crate) struct RoomBakedShadowGpu {
     pub sample_bind_group: wgpu::BindGroup,
     pub globals_buffer: wgpu::Buffer,
     pub baked_light_view_proj: [f32; 16],
-    pub depth_bias: f32,
-    pub texel: f32,
-    _depth_texture: wgpu::Texture,
     _ao_texture: wgpu::Texture,
 }
 
 impl WgpuRenderer {
+    /// Recreate point/spot depth arrays when shadow quality tier changes resolution.
+    pub(super) fn recreate_shadow_depth_arrays_if_needed(
+        &mut self,
+        quality: ShadowQuality,
+    ) -> bool {
+        if !quality.active() {
+            return false;
+        }
+        let point_size = quality.point_map_size();
+        let spot_size = quality.spot_map_size();
+        if self.point_shadow_array.size == point_size && self.spot_shadow_array.size == spot_size {
+            return false;
+        }
+
+        use crate::lit_mesh::{create_shadow_depth_array, create_shadow_sample_bind_group};
+        use crate::wgpu_renderer::constants::{MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS};
+
+        self.point_shadow_array = create_shadow_depth_array(
+            &self.device,
+            "point-shadow-array",
+            point_size,
+            MAX_POINT_LIGHTS as u32,
+        );
+        self.spot_shadow_array = create_shadow_depth_array(
+            &self.device,
+            "spot-shadow-array",
+            spot_size,
+            MAX_SPOT_LIGHTS as u32,
+        );
+        self.shadow_sample_bind_group = create_shadow_sample_bind_group(
+            &self.device,
+            &self.shadow_sample_layout,
+            "shadow-sample-bg",
+            &self.shadow_globals_buffer,
+            &self.point_shadow_array.array_view,
+            &self.spot_shadow_array.array_view,
+            &self.shadow_compare_sampler,
+            &self.shadow_ao_white_view,
+            &self.shadow_ao_sampler,
+        );
+        for gpu in self.room_baked_shadow_gpu.iter_mut().flatten() {
+            let ao_view = gpu._ao_texture.create_view(&Default::default());
+            gpu.sample_bind_group = create_shadow_sample_bind_group(
+                &self.device,
+                &self.shadow_sample_layout,
+                "room-baked-shadow-sample-bg",
+                &gpu.globals_buffer,
+                &self.point_shadow_array.array_view,
+                &self.spot_shadow_array.array_view,
+                &self.shadow_compare_sampler,
+                &ao_view,
+                &self.shadow_ao_sampler,
+            );
+        }
+        self.cached_projected_shadow_hash = 0;
+        true
+    }
+
     pub fn request_room_shadow_capture(&mut self, room: RoomGiRoom) {
         self.room_shadow_capture_pending = Some(room);
         self.room_shadow_captured = None;
@@ -29,7 +82,7 @@ impl WgpuRenderer {
         self.room_shadow_captured.take()
     }
 
-    /// GPU-upload one room's offline `.msh` on first draw (lazy init at startup).
+    /// GPU-upload one room's offline `.msh` contact AO on first draw (lazy init at startup).
     pub(super) fn ensure_room_baked_shadow_gpu(&mut self, room: RoomGiRoom) {
         let idx = room_gi_room_index(room);
         if self.room_baked_shadow_gpu[idx].is_some() {
@@ -46,7 +99,8 @@ impl WgpuRenderer {
             &self.device,
             &self.queue,
             &self.shadow_sample_layout,
-            &self.shadow_map_view,
+            &self.point_shadow_array.array_view,
+            &self.spot_shadow_array.array_view,
             &self.shadow_compare_sampler,
             &self.shadow_ao_sampler,
             room,
@@ -65,7 +119,8 @@ impl WgpuRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         shadow_sample_layout: &wgpu::BindGroupLayout,
-        dynamic_depth_view: &wgpu::TextureView,
+        point_depth_view: &wgpu::TextureView,
+        spot_depth_view: &wgpu::TextureView,
         compare_sampler: &wgpu::Sampler,
         ao_sampler: &wgpu::Sampler,
         _room: RoomGiRoom,
@@ -73,40 +128,6 @@ impl WgpuRenderer {
     ) -> anyhow::Result<RoomBakedShadowGpu> {
         let w = bake.width;
         let h = bake.height;
-        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("room-baked-shadow-depth"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let depth_view = depth_texture.create_view(&Default::default());
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &depth_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &bake.depth_bytes,
-            wgpu::TexelCopyBufferLayout {
-                bytes_per_row: Some(4 * w),
-                rows_per_image: Some(h),
-                ..Default::default()
-            },
-            wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-        );
 
         let ao_bytes = bake
             .ao_bytes
@@ -147,11 +168,12 @@ impl WgpuRenderer {
             },
         );
 
-        let texel = 1.0 / w.max(h) as f32;
-        let mut globals = ShadowGlobals::empty_punctual();
-        globals.light_view_proj = glam::Mat4::IDENTITY.to_cols_array();
-        globals.params = [1.0, bake.depth_bias, texel, 1.0];
-        globals.room_baked_light_view_proj = bake.light_view_proj;
+        let globals = build_shadow_globals(
+            ShadowQuality::Medium,
+            &crate::projected_light_shadow::PunctualShadowBuild::empty(),
+            true,
+            bake.light_view_proj,
+        );
         let globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("room-baked-shadow-globals"),
             contents: bytemuck::bytes_of(&globals),
@@ -162,9 +184,9 @@ impl WgpuRenderer {
             shadow_sample_layout,
             "room-baked-shadow-sample-bg",
             &globals_buffer,
-            dynamic_depth_view,
+            point_depth_view,
+            spot_depth_view,
             compare_sampler,
-            &depth_view,
             &ao_view,
             ao_sampler,
         );
@@ -172,20 +194,15 @@ impl WgpuRenderer {
             sample_bind_group,
             globals_buffer,
             baked_light_view_proj: bake.light_view_proj,
-            depth_bias: bake.depth_bias,
-            texel,
-            _depth_texture: depth_texture,
             _ao_texture: ao_texture,
         })
     }
 
-    /// Keep baked room shadow sampling in sync with the live prop shadow pass.
+    /// Keep baked room contact AO in sync with the live projected shadow pass.
     pub(super) fn write_active_room_baked_shadow_globals(
         &self,
-        queue: &wgpu::Queue,
-        light_view_proj: [f32; 16],
-        shadows_enabled: bool,
-        punctual_lights: &[PunctualShadowLightSetup],
+        shadow_quality: ShadowQuality,
+        build: &crate::projected_light_shadow::PunctualShadowBuild,
     ) {
         let Some(room) = self.active_room_baked_shadow else {
             return;
@@ -193,39 +210,16 @@ impl WgpuRenderer {
         let Some(gpu) = &self.room_baked_shadow_gpu[room_gi_room_index(room)] else {
             return;
         };
-        let enabled = if shadows_enabled { 1.0 } else { 0.0 };
-        let gameplay_punctual = room == RoomGiRoom::Gameplay && !punctual_lights.is_empty();
-        let baked_mode = if room == RoomGiRoom::Archive || gameplay_punctual {
-            // Baked contact only — live depth holds per-candle atlas tiles, not key-light PCF.
-            2.0
-        } else {
-            1.0
-        };
-        queue.write_buffer(
+        let globals = build_shadow_globals(
+            shadow_quality,
+            build,
+            true,
+            gpu.baked_light_view_proj,
+        );
+        self.queue.write_buffer(
             &gpu.globals_buffer,
             0,
-            bytemuck::bytes_of(&{
-                let mut globals = ShadowGlobals::empty_punctual();
-                globals.light_view_proj = light_view_proj;
-                globals.params = [enabled, gpu.depth_bias, gpu.texel, baked_mode];
-                globals.room_baked_light_view_proj = gpu.baked_light_view_proj;
-                if gameplay_punctual && shadows_enabled {
-                    let tile_texel = 1.0 / PUNCTUAL_SHADOW_TILE_SIZE as f32;
-                    let count = punctual_lights.len().min(MAX_PUNCTUAL_SHADOW_LIGHTS) as f32;
-                    globals.punctual_params = [count, tile_texel, 1.0, 0.0];
-                    for (i, setup) in punctual_lights
-                        .iter()
-                        .take(MAX_PUNCTUAL_SHADOW_LIGHTS)
-                        .enumerate()
-                    {
-                        globals.punctual_lights[i] = PunctualShadowSlotGpu {
-                            light_view_proj: setup.light_view_proj.to_cols_array(),
-                            atlas_rect: setup.atlas_rect,
-                        };
-                    }
-                }
-                globals
-            }),
+            bytemuck::bytes_of(&globals),
         );
     }
 
@@ -275,9 +269,13 @@ impl WgpuRenderer {
         });
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
-                texture: &self.shadow_map_texture,
+                texture: &self.point_shadow_array.texture,
                 mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: 0,
+                },
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::TexelCopyBufferInfo {

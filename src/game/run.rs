@@ -665,7 +665,6 @@ impl RunState {
     }
 
     /// Set run yen to an absolute value (debug / tooling). Emits the net delta.
-    #[cfg(feature = "game")]
     pub(crate) fn set_run_yen_direct(&mut self, new_yen: i32, bus: Option<&mut EventBus>) {
         let old = self.yen;
         if new_yen == old {

@@ -497,6 +497,12 @@ impl App {
         repeat: bool,
     ) -> anyhow::Result<()> {
         self.modifiers = keymod;
+        if let Some(ref mut o) = self.debug.rain_debug_overlay
+            && o.hide_all_ui
+            && o.feed_key_event(scancode, false)
+        {
+            return Ok(());
+        }
         if self.wants_fullscreen_shortcut(scancode, keymod, repeat) {
             let _ = self.toggle_fullscreen(shell);
             return Ok(());

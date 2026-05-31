@@ -43,10 +43,7 @@ use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel, build_instances_from_layout};
 use crate::ui::input::UiAction;
 
-use cascade_hud::{
-    CascadeHandoffStage, CascadeHudState,
-    build_cascade_hud_placements,
-};
+use cascade_hud::{CascadeHudState, build_cascade_hud_placements};
 use focus::{FocusTarget, PegKind, focus_kind};
 use hand_layout::hand_slots_for_count;
 
@@ -171,9 +168,6 @@ pub struct GameplayScene {
     /// plaque and (during HandOff) tween it up into the score reel. `None`
     /// when no cascade is active.
     cascade_hud: Option<CascadeHudState>,
-    /// Sub-phase of the hand-off tween last observed, so we can fire
-    /// one-shot sounds on edges (merge-land, flight-start, reel-land).
-    cascade_handoff_stage: CascadeHandoffStage,
     /// Future timestamps at which a queued `DoraScored` chime should fire.
     /// Populated with one entry per dora tile when the cascade reveals a
     /// "Dora ×N" step, so multiple dora audibly play in sequence rather
@@ -537,7 +531,6 @@ impl GameplayScene {
             last_revealed_step: None,
             cascade_final_emitted: false,
             cascade_hud: None,
-            cascade_handoff_stage: CascadeHandoffStage::Pre,
             pending_dora_chimes: Vec::new(),
             prev_hand_len: 0,
             light_ramp: 0.0,
@@ -641,7 +634,6 @@ impl GameplayScene {
                     self.last_revealed_step = None;
                     self.cascade_final_emitted = false;
                     self.cascade_hud = None;
-                    self.cascade_handoff_stage = CascadeHandoffStage::Pre;
                     self.pending_dora_chimes.clear();
                 }
                 let (px, py) = score_counter::try_resolve_score_cascade_layout(
@@ -755,19 +747,16 @@ impl GameplayScene {
     fn yaku_popup_source(
         layout: &crate::ui::layout::LayoutResult,
         run: &crate::game::run::RunState,
-        cascade_showcase: Option<&CascadeShowcase>,
+        _cascade_showcase: Option<&CascadeShowcase>,
         yaku_name: &str,
     ) -> crate::render::world_space::LayoutAnchorPx {
         use crate::render::score_popups::TABLE_POPUP_LIFT_Z;
 
-        let gameplay = GameEngine::read(run);
         let interaction = GameEngine::read_interaction(run);
-        let showcase_present = gameplay.has_structure || cascade_showcase.is_some();
         let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
         if let Some(a) = glb_anchors::try_resolve_gameplay_glb_anchors(
             layout,
             interaction.hand_len,
-            showcase_present,
             env_h,
         ) {
             let mut active: Vec<_> = run.available_yaku.iter().copied().collect();
@@ -805,11 +794,9 @@ impl GameplayScene {
         tile_ids: &[u32],
     ) -> Option<crate::render::world_space::LayoutAnchorPx> {
         let interaction = GameEngine::read_interaction(run);
-        let gameplay = GameEngine::read(run);
         let anchors = glb_anchors::try_resolve_gameplay_glb_anchors(
             layout,
             interaction.hand_len,
-            gameplay.has_structure,
             env_height_scale,
         )?;
         let mut centers: Vec<[f32; 3]> = Vec::new();
@@ -842,13 +829,10 @@ impl GameplayScene {
         };
         let interaction = GameEngine::read_interaction(run);
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
-        let has_structure = gameplay.has_structure;
-        let showcase_present = has_structure || cascade_showcase.is_some();
         let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
         let anchors = glb_anchors::try_resolve_gameplay_glb_anchors(
             layout,
             interaction.hand_len,
-            showcase_present,
             env_h,
         )?;
         input_handler::structure_showcase_tile_popup_center(
@@ -857,7 +841,7 @@ impl GameplayScene {
             layout_scale,
             &showcase,
             tile_ids,
-            has_structure,
+            gameplay.has_structure,
             cascade_showcase.is_some(),
         )
     }
