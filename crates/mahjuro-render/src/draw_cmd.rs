@@ -924,7 +924,7 @@ pub struct UiFrame {
     /// When set, browse-mode copy is rasterized into the archive room decal atlas and composited
     /// on the active `sign_description_*` mesh in `room_glb.wgsl`.
     pub archive_sign_description_decal_text: Option<String>,
-    /// Item inspect overlay: show the authored `inspect_plaque` mesh and rasterize copy onto it.
+    /// Item inspect overlay: show `inspect_plaque` / `plaque_backing` and rasterize copy onto the plaque.
     pub archive_inspect_plaque_visible: bool,
     /// Inspect-mode description copy for [`archive_inspect_plaque_visible`].
     pub archive_inspect_plaque_decal_text: Option<String>,

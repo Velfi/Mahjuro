@@ -1,8 +1,8 @@
 //! Auto-rebake committed offline outputs from `build.rs` when stamps are stale (local dev).
 //!
-//! Never spawns nested `cargo` from the build script — that deadlocks on the target-dir /
-//! package-cache locks (see rust-lang/cargo#6412). Instead we run a bake binary if one
-//! already exists under the main or `target/offline-bake-tools/` profile dir.
+//! Missing bake binaries are compiled via nested `cargo` into `target/offline-bake-tools/`
+//! (a separate `CARGO_TARGET_DIR` so the main target-dir lock is not held — see
+//! rust-lang/cargo#6412). Then the baker is executed to refresh committed assets.
 
 use std::env;
 use std::io;
@@ -14,7 +14,8 @@ use mahjuro_bake_stamp::room_gi::RoomGi;
 use mahjuro_bake_stamp::room_shadow::RoomShadow;
 use mahjuro_bake_stamp::showcase_decal::ShowcaseDecal;
 use mahjuro_bake_stamp::{
-    ensure_bake_current, skip_committed_bake_checks, write_stamp_line, BakeKind,
+    auto_offline_rebake_enabled, ensure_bake_current, skip_committed_bake_checks,
+    write_stamp_line, BakeKind,
 };
 
 const EXPECTED_GI_STAMP_HASH_ENV: &str = "MAHJURO_EXPECT_ROOM_GI_STAMP_HASH";
@@ -24,10 +25,9 @@ struct BakeToolCtx {
     repo: PathBuf,
     assets: PathBuf,
     profile: String,
-    target_triple: String,
-    host_triple: String,
     main_profile_dir: PathBuf,
     tool_profile_dir: PathBuf,
+    tool_target_dir: PathBuf,
 }
 
 pub fn emit_rerun_if_changed() {
@@ -38,6 +38,7 @@ pub fn emit_rerun_if_changed() {
     println!("cargo:rerun-if-env-changed=CI");
     println!("cargo:rerun-if-env-changed=HOST");
     println!("cargo:rerun-if-env-changed=TARGET");
+    println!("cargo:rerun-if-changed=target/offline-bake-tools");
 }
 
 pub fn ensure_committed_offline_bakes_current(repo: &Path, profile_dir: &Path) {
@@ -57,37 +58,17 @@ pub fn ensure_committed_offline_bakes_current(repo: &Path, profile_dir: &Path) {
 
 impl BakeToolCtx {
     fn new(repo: &Path, profile_dir: &Path) -> Self {
-        let target_root = profile_dir
-            .parent()
-            .unwrap_or_else(|| Path::new("target"));
         let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".into());
-        let target_triple = env::var("TARGET").unwrap_or_default();
-        let host_triple = env::var("HOST").unwrap_or_default();
-        let tool_profile_dir = artifact_dir(
-            target_root.join("offline-bake-tools"),
-            &profile,
-            &target_triple,
-            &host_triple,
-        );
+        let tool_target_dir = repo.join("target").join("offline-bake-tools");
         Self {
             repo: repo.to_path_buf(),
             assets: repo.join("assets"),
-            profile,
-            target_triple,
-            host_triple,
+            profile: profile.clone(),
             main_profile_dir: profile_dir.to_path_buf(),
-            tool_profile_dir,
+            tool_profile_dir: tool_target_dir.join(&profile),
+            tool_target_dir,
         }
     }
-}
-
-fn artifact_dir(target_root: PathBuf, profile: &str, target_triple: &str, host_triple: &str) -> PathBuf {
-    let mut dir = target_root;
-    if !target_triple.is_empty() && target_triple != host_triple {
-        dir.push(target_triple);
-    }
-    dir.push(profile);
-    dir
 }
 
 fn bin_path(profile_dir: &Path, name: &str) -> PathBuf {
@@ -107,6 +88,69 @@ fn resolve_bake_binary(ctx: &BakeToolCtx, name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn ensure_bake_binary(ctx: &BakeToolCtx, bin_name: &str) -> Result<PathBuf, String> {
+    if !auto_offline_rebake_enabled() {
+        return resolve_bake_binary(ctx, bin_name)
+            .ok_or_else(|| missing_bake_tool_message(bin_name));
+    }
+    // Always `cargo build` the tool here: an existing `target/offline-bake-tools/` binary is
+    // not invalidated when `mahjuro-render` changes, so a stale baker can keep crashing
+    // after a source fix until the user deletes that tree manually.
+    if resolve_bake_binary(ctx, bin_name).is_some() {
+        println!(
+            "cargo:info=bake tool `{bin_name}` — refreshing in {} ({})",
+            ctx.tool_target_dir.display(),
+            ctx.profile
+        );
+    } else {
+        println!(
+            "cargo:info=bake tool `{bin_name}` missing — building into {} ({})",
+            ctx.tool_target_dir.display(),
+            ctx.profile
+        );
+    }
+    compile_bake_tool(ctx, bin_name)?;
+    resolve_bake_binary(ctx, bin_name).ok_or_else(|| missing_bake_tool_message(bin_name))
+}
+
+fn compile_bake_tool(ctx: &BakeToolCtx, bin_name: &str) -> Result<(), String> {
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let mut cmd = Command::new(&cargo);
+    cmd.current_dir(&ctx.repo);
+    cmd.env("CARGO_TARGET_DIR", &ctx.tool_target_dir);
+    cmd.env("MAHJURO_SKIP_COMMITTED_BAKE_CHECKS", "1");
+    cmd.env("MAHJURO_SKIP_OFFLINE_BAKES", "1");
+    cmd.arg("build");
+    if ctx.profile == "release" {
+        cmd.arg("--release");
+    }
+    match bin_name {
+        "mahjuro-bake" => {
+            cmd.args([
+                "-p",
+                "mahjuro-headless",
+                "--bin",
+                "mahjuro-bake",
+                "--features",
+                "bake",
+            ]);
+        }
+        "mahjuro-bake-decal-atlases" => {
+            cmd.args([
+                "-p",
+                "mahjuro-render",
+                "--bin",
+                "mahjuro-bake-decal-atlases",
+            ]);
+        }
+        "mahjuro-bake-relics" => {
+            cmd.args(["-p", "mahjuro-render", "--bin", "mahjuro-bake-relics"]);
+        }
+        other => return Err(format!("unknown bake tool `{other}`")),
+    }
+    run_command(cmd, &format!("cargo build --bin {bin_name}"))
 }
 
 fn skip_committed_bake_freshness() -> bool {
@@ -187,10 +231,9 @@ impl Clone for BakeToolCtx {
             repo: self.repo.clone(),
             assets: self.assets.clone(),
             profile: self.profile.clone(),
-            target_triple: self.target_triple.clone(),
-            host_triple: self.host_triple.clone(),
             main_profile_dir: self.main_profile_dir.clone(),
             tool_profile_dir: self.tool_profile_dir.clone(),
+            tool_target_dir: self.tool_target_dir.clone(),
         }
     }
 }
@@ -210,10 +253,8 @@ fn run_room_gpu_rebake(
         kinds.push("shadow");
     }
     let kinds_csv = kinds.join(",");
-    let mut cmd = Command::new(
-        resolve_bake_binary(ctx, "mahjuro-bake")
-            .ok_or_else(|| missing_bake_tool_message("mahjuro-bake"))?,
-    );
+    let bake_bin = ensure_bake_binary(ctx, "mahjuro-bake")?;
+    let mut cmd = Command::new(bake_bin);
     cmd.current_dir(&ctx.repo);
     cmd.env("MAHJURO_ASSETS", &ctx.assets);
     if let Some(hash) = expected_gi_hash {
@@ -227,11 +268,9 @@ fn run_room_gpu_rebake(
 }
 
 fn run_bake_tool(ctx: &BakeToolCtx, bin_name: &str, tool_args: &[&str]) -> Result<(), String> {
-    let Some(bin) = resolve_bake_binary(ctx, bin_name) else {
-        return Err(missing_bake_tool_message(bin_name));
-    };
+    let bin = ensure_bake_binary(ctx, bin_name)?;
 
-    let mut cmd = Command::new(&bin);
+    let mut cmd = Command::new(bin);
     cmd.current_dir(&ctx.repo);
     cmd.env("MAHJURO_ASSETS", &ctx.assets);
     cmd.args(tool_args);
@@ -242,8 +281,8 @@ fn missing_bake_tool_message(bin_name: &str) -> String {
     format!(
         "bake binary `{bin_name}` not found under target/{{profile}}/ or \
          target/offline-bake-tools/{{profile}}/.\n\
-         Build it once outside this build script (nested cargo from build.rs deadlocks — \
-         rust-lang/cargo#6412):\n\
+         Auto-build is disabled (CI/cross-compile) or failed. If a bake crashed after a \
+         render fix, remove `target/offline-bake-tools/` and retry, or run:\n\
          scripts/rebake-offline.sh\n\
          or: cargo build -p mahjuro-headless --bin mahjuro-bake --features bake"
     )

@@ -813,14 +813,9 @@ impl WgpuRenderer {
         let Some(tex) = gpu.archive_sign_decal_texture.as_ref() else {
             return;
         };
-        use crate::archive_glb::archive_sign_description_decal_extents;
-        use crate::decal::{PLAQUE_DECAL_HEIGHT, decal_dimensions};
-        use crate::primitive::DecalLayout;
-
-        let layout = DecalLayout::Fit {
-            target_short_edge: PLAQUE_DECAL_HEIGHT,
+        let Some((dw, dh)) = gpu.archive_sign_decal_size else {
+            return;
         };
-        let (dw, dh) = decal_dimensions(&layout, archive_sign_description_decal_extents());
         let key = match frame.archive_sign_description_decal_text.as_ref() {
             None => u64::MAX,
             Some(t) => super::super::tablet_label_hash(t, dw, dh),
@@ -839,14 +834,9 @@ impl WgpuRenderer {
         let Some(tex) = gpu.archive_inspect_plaque_decal_texture.as_ref() else {
             return;
         };
-        use crate::archive_glb::archive_inspect_plaque_decal_extents;
-        use crate::decal::{PLAQUE_DECAL_HEIGHT, decal_dimensions};
-        use crate::primitive::DecalLayout;
-
-        let layout = DecalLayout::Fit {
-            target_short_edge: PLAQUE_DECAL_HEIGHT,
+        let Some((dw, dh)) = gpu.archive_inspect_plaque_decal_size else {
+            return;
         };
-        let (dw, dh) = decal_dimensions(&layout, archive_inspect_plaque_decal_extents());
         let key = match frame.archive_inspect_plaque_decal_text.as_ref() {
             None => u64::MAX,
             Some(t) => super::super::tablet_label_hash(t, dw, dh),
@@ -878,25 +868,7 @@ impl WgpuRenderer {
                 PlaqueDecalStyle::WalnutInkOnLight,
             ),
         };
-        self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: tex,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &rgba,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * dw),
-                rows_per_image: Some(dh),
-            },
-            wgpu::Extent3d {
-                width: dw,
-                height: dh,
-                depth_or_array_layers: 1,
-            },
-        );
+        crate::wgpu_renderer::resources::write_rgba8_texture(&self.queue, tex, dw, dh, &rgba);
     }
 
     pub(super) fn write_archive_environment_uniforms(
@@ -1070,6 +1042,22 @@ impl WgpuRenderer {
         self.archive_inspect_plaque_prim_idx == Some(pi)
     }
 
+    #[inline]
+    fn archive_env_is_plaque_backing_prim(&self, pi: usize) -> bool {
+        self.archive_plaque_backing_prim_idx == Some(pi)
+    }
+
+    /// Lit pass: inspect overlay meshes (`inspect_plaque`, `plaque_backing`).
+    #[inline]
+    fn archive_env_skip_inspect_overlay_prim(
+        &self,
+        pi: usize,
+        frame: &crate::draw_cmd::UiFrame,
+    ) -> bool {
+        (self.archive_env_is_inspect_plaque_prim(pi) || self.archive_env_is_plaque_backing_prim(pi))
+            && !frame.archive_inspect_plaque_visible
+    }
+
     /// Lit pass: draw only the active description board (opposite the focus ref).
     #[inline]
     pub(super) fn archive_env_skip_archive_prim(
@@ -1078,7 +1066,7 @@ impl WgpuRenderer {
         frame: &crate::draw_cmd::UiFrame,
     ) -> bool {
         self.archive_env_skip_description_prim(pi, frame)
-            || self.archive_env_skip_inspect_plaque_prim(pi, frame)
+            || self.archive_env_skip_inspect_overlay_prim(pi, frame)
             || self.archive_env_skip_page_button_prim(pi, frame)
     }
 
@@ -1145,17 +1133,8 @@ impl WgpuRenderer {
         }
     }
 
-    /// Lit pass: `inspect_plaque` only while item inspect is active.
-    #[inline]
-    pub(super) fn archive_env_skip_inspect_plaque_prim(
-        &self,
-        pi: usize,
-        frame: &crate::draw_cmd::UiFrame,
-    ) -> bool {
-        self.archive_env_is_inspect_plaque_prim(pi) && !frame.archive_inspect_plaque_visible
-    }
-
 }
+
 
 #[cfg(test)]
 mod gameplay_score_roller_tests {

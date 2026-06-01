@@ -83,6 +83,8 @@ pub struct RoomEnvPrimitiveCpu {
     /// glTF node name for this primitive (per-node mesh), when known.
     pub gltf_node_name: Option<String>,
     pub mesh: LoadedPrimitive,
+    /// Archive decal atlas width÷height from authored UV (1.0 when not a description board).
+    pub archive_decal_face_aspect: f32,
 }
 
 /// CPU triangle soup for one named GLB node (typically invisible anchor geometry).
@@ -126,6 +128,30 @@ impl RoomCollisionMesh {
 #[cfg(test)]
 mod collision_mesh_tests {
     use super::*;
+
+    #[test]
+    fn inspect_plaque_authored_uv_runs_u_along_local_y() {
+        let positions = [
+            [-0.103_f32, -0.285, 0.0],
+            [0.103, -0.285, 0.0],
+            [-0.103, 0.285, 0.0],
+            [0.103, 0.285, 0.0],
+        ];
+        let uvs = [
+            [1.0, 0.999],
+            [1.0, 0.703],
+            [0.0, 0.999],
+            [0.0, 0.703],
+        ];
+        assert!(decal_texel_u_runs_along_local_y(&positions, &uvs));
+        let span_u = 1.0_f32;
+        let span_v = 0.999 - 0.703;
+        let portrait_aspect = (span_v / span_u).clamp(0.5, 12.0);
+        assert!(
+            portrait_aspect < 1.0,
+            "inspect_plaque UV footprint should be portrait: {portrait_aspect}"
+        );
+    }
 
     #[test]
     fn merge_rain_surfaces_concatenates_tris() {
@@ -461,6 +487,44 @@ pub fn room_camera_fit_clip_planes(mut cam: CameraParams, corners_world: &[Vec3]
     cam.clip_near = Some(near);
     cam.clip_far = Some(far);
     cam
+}
+
+/// True when authored UV **u** correlates more with local **Y** than **X** on a decal board.
+///
+/// Archive `inspect_plaque` ships with u along the plaque height; sign boards use u along width.
+/// When true, [`decode_env_primitive`] remaps decal UV as `(v, u)` so rasterized copy reads horizontally.
+pub fn decal_texel_u_runs_along_local_y(positions: &[[f32; 3]], uvs: &[[f32; 2]]) -> bool {
+    if positions.len() < 3 || positions.len() != uvs.len() {
+        return false;
+    }
+    let n = positions.len() as f32;
+    let mut cu = 0.0f32;
+    let mut cx = 0.0f32;
+    let mut cy = 0.0f32;
+    for (p, uv) in positions.iter().zip(uvs.iter()) {
+        cu += uv[0];
+        cx += p[0];
+        cy += p[1];
+    }
+    cu /= n;
+    cx /= n;
+    cy /= n;
+    let mut uuy = 0.0f32;
+    let mut uux = 0.0f32;
+    let mut yy = 0.0f32;
+    let mut xx = 0.0f32;
+    for (p, uv) in positions.iter().zip(uvs.iter()) {
+        let du = uv[0] - cu;
+        let dx = p[0] - cx;
+        let dy = p[1] - cy;
+        uuy += du * dy;
+        uux += du * dx;
+        yy += dy * dy;
+        xx += dx * dx;
+    }
+    let corr_y = if yy > 1e-12 { uuy.abs() / yy.sqrt() } else { 0.0 };
+    let corr_x = if xx > 1e-12 { uux.abs() / xx.sqrt() } else { 0.0 };
+    corr_y > corr_x
 }
 
 /// Document-space AABB for one named environment draw mesh (e.g. main-menu `ground`).
@@ -828,7 +892,10 @@ pub fn decode_env_primitive(
         gltf_node_name,
         "sign_description_left" | "sign_description_right" | "inspect_plaque"
     );
-    let uv_remap = if is_archive_sign {
+    let swap_archive_decal_uv_axes =
+        gltf_node_name == "inspect_plaque"
+            && decal_texel_u_runs_along_local_y(&positions_local, &uvs);
+    let (uv_remap, archive_decal_face_aspect) = if is_archive_sign {
         let mut min = Vec2::splat(f32::INFINITY);
         let mut max = Vec2::splat(f32::NEG_INFINITY);
         for uv in &uvs {
@@ -848,9 +915,14 @@ pub fn decode_env_primitive(
                 0.0
             },
         );
-        Some((min, inv))
+        let aspect = if swap_archive_decal_uv_axes {
+            (span.y / span.x.max(1e-6)).clamp(0.5, 12.0)
+        } else {
+            (span.x / span.y.max(1e-6)).clamp(0.5, 12.0)
+        };
+        (Some((min, inv)), aspect)
     } else {
-        None
+        (None, 1.0)
     };
 
     let mut vertices: Vec<Vertex3dTex> = (0..positions_local.len())
@@ -867,7 +939,11 @@ pub fn decode_env_primitive(
             let uv = if let Some((min, inv)) = uv_remap {
                 let u = Vec2::from_array(uvs[i]);
                 let n = (u - min) * inv;
-                [n.x, n.y]
+                if swap_archive_decal_uv_axes {
+                    [n.y, n.x]
+                } else {
+                    [n.x, n.y]
+                }
             } else {
                 uvs[i]
             };
@@ -998,6 +1074,7 @@ pub fn decode_env_primitive(
             double_sided: material.double_sided(),
             sampler: sampler_cpu,
         },
+        archive_decal_face_aspect,
     })
 }
 
