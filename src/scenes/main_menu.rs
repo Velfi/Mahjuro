@@ -522,7 +522,7 @@ impl SceneBehavior for MainMenuScene {
             }
         }
 
-        let moon_clicked = ctx.button_clicks.iter().any(|&id| id == MAIN_MENU_PICK_MOON);
+        let moon_clicked = ctx.button_clicks.contains(&MAIN_MENU_PICK_MOON);
         if moon_clicked {
             if self.moon_quip_visible {
                 self.moon_quip_visible = false;
