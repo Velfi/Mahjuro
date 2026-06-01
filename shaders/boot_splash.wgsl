@@ -51,8 +51,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     if in.mode == 2u {
-        let sample = textureSample(t_logo, s_logo, in.uv);
-        let lum = dot(sample.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let logo = textureSample(t_logo, s_logo, in.uv);
+        let lum = dot(logo.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
         let a = lum * in.color.a;
         if a < 0.004 {
             discard;
@@ -62,7 +62,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     let atlas_uv = mix(globals.msdf_uv_min, globals.msdf_uv_max, in.uv);
     let d = textureSample(t_msdf, s_msdf, atlas_uv).r;
-    let w = globals.spread / max(textureDimensions(t_msdf).x, 1u);
+    let tex_w = f32(max(textureDimensions(t_msdf).x, 1u));
+    let w = globals.spread / tex_w;
     let alpha = smoothstep(0.5 - w, 0.5 + w, d) * in.color.a;
     if alpha < 0.004 {
         discard;
