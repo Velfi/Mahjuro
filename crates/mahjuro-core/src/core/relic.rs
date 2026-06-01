@@ -1130,9 +1130,9 @@ pub struct ScoreEconomyBundle {
 /// Cash-ins counted toward Kindling across the run (stack cap).
 pub const KINDLING_STACK_CAP: i32 = 30;
 /// Mult added per prior cash-in (run-total) on Kindling.
-pub const KINDLING_MULT_PER_CASHIN: f64 = 0.3;
+pub const KINDLING_MULT_PER_CASHIN: f64 = 0.4;
 /// Maximum mult Kindling can add on a cash-in.
-pub const KINDLING_MULT_CAP: f64 = 9.0;
+pub const KINDLING_MULT_CAP: f64 = 10.0;
 
 /// Cleared blinds counted toward Snowball (cap).
 pub const SNOWBALL_STACK_CAP: i32 = 15;
@@ -1231,7 +1231,7 @@ mod tests {
     #[test]
     fn kindling_mult_scales_per_cashin_and_caps() {
         assert_eq!(kindling_mult_bonus(0), 0.0);
-        assert_eq!(kindling_mult_bonus(2), 0.6);
+        assert_eq!(kindling_mult_bonus(2), 0.8);
         assert_eq!(kindling_mult_bonus(KINDLING_STACK_CAP), KINDLING_MULT_CAP);
         assert_eq!(kindling_mult_bonus(KINDLING_STACK_CAP + 10), KINDLING_MULT_CAP);
     }

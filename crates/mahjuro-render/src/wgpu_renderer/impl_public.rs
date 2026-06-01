@@ -115,25 +115,6 @@ impl WgpuRenderer {
         self.poll_relic_textures();
         self.poll_background_textures();
     }
-    /// Returns true while any tile animation (spin or lift lerp) is still running.
-    #[allow(dead_code)] // Was used for redraw gating; kept for diagnostics / future idle paths.
-    pub fn is_spinning(&self) -> bool {
-        const SPIN_SECS: f32 = 0.4;
-        let spin_active = if let Some((_slot, start)) = self.focus_spin {
-            start.elapsed().as_secs_f32() < SPIN_SECS
-        } else {
-            false
-        };
-        // Also keep animating while any tile's focus_t hasn't settled.
-        let lerp_active = self.focus_t.iter().enumerate().any(|(i, &ft)| {
-            let target = if i == self.last_focus { 1.0 } else { 0.0 };
-            (ft - target).abs() > 0.001
-        });
-        // Keep animating while any tile is sliding into position.
-        let slide_active = self.tile_anim_y.iter().any(|&y| y.abs() > 0.5)
-            || self.tile_anim_x.iter().any(|&x| x.abs() > 0.01);
-        spin_active || lerp_active || slide_active || !self.hand_tiles.is_empty()
-    }
 
     /// Per-hand-tile screen-space rects after the perspective projection,
     /// captured at the end of the previous frame. Indexed by hand position.

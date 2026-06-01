@@ -308,7 +308,6 @@ pub fn push_colored_rows_left(
             color: fallback_color,
             font_px: Some(font_px),
             align: TextAlign::Left,
-            no_glossary: true,
             ..Default::default()
         });
         return;
@@ -325,7 +324,6 @@ pub fn push_colored_rows_left(
                 color: *c,
                 font_px: Some(font_px),
                 align: TextAlign::Left,
-                no_glossary: true,
                 ..Default::default()
             });
             cx += piece_w;
@@ -360,7 +358,6 @@ pub fn push_colored_rows_in_width(
             color: fallback_color,
             font_px: Some(font_px),
             align,
-            no_glossary: true,
             ..Default::default()
         });
         return;
@@ -386,7 +383,6 @@ pub fn push_colored_rows_in_width(
                 color: *c,
                 font_px: Some(font_px),
                 align: TextAlign::Left,
-                no_glossary: true,
                 ..Default::default()
             });
             cx += piece_w;

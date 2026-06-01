@@ -33,8 +33,7 @@
 //! the third value is **+Z** lift above the felt.
 //!
 //! **Saved props** use [`crate::ui::placement::Placement`] — see
-//! `docs/agents/world-space.md`. This module’s [`PlacementAnchor`] is only
-//! for lightweight HUD-style anchors (reel, glyphs), not `ui::placement::PlacementAnchor`.
+//! `docs/agents/world-space.md`.
 
 use glam::{Mat4, Vec3, Vec4};
 
@@ -160,20 +159,6 @@ pub fn object3d_pos_for_screen_at_world_z(
     object3d_pos_triple_for_world_center(window_w, window_h, c)
 }
 
-/// Top edge **`py`** (top-down layout pixels, `py` increases downward) for a rectangle
-/// with height `rect_h_px` and an empty band `margin_bottom_px` below it to the window bottom.
-///
-/// Not every caller needs this helper (some scenes pin both corners via layout anchors).
-#[allow(dead_code)]
-#[inline]
-pub fn layout_py_top_from_bottom_margin(
-    window_h: f32,
-    rect_h_px: f32,
-    margin_bottom_px: f32,
-) -> f32 {
-    window_h - margin_bottom_px - rect_h_px
-}
-
 /// Normalized horizontal / vertical fractions → layout **`px`**, **`py`** (top-down).
 ///
 /// - **`nx`** — `0` = left edge, `1` = right edge (maps to `px = nx * window_w`).
@@ -203,31 +188,9 @@ impl LayoutAnchorPx {
     }
 }
 
-/// Full placement for 3D helpers that position, orient, and size a prop:
-/// the layout-space anchor plus yaw (camera-facing rotation inherited from
-/// the parent face) and a uniform scale multiplier. Shared by score reel,
-/// tooltip panels, and cascade HUD placements so each one doesn't reinvent
-/// its own 5-field param list.
-#[allow(dead_code)] // Built by `ScoreReel::placements` when the 3D reel draw path is enabled.
-#[derive(Clone, Copy, Debug)]
-pub struct PlacementAnchor {
-    pub anchor: LayoutAnchorPx,
-    pub rot_y: f32,
-    pub scale: f32,
-}
-
 #[cfg(test)]
 mod layout_helpers_tests {
     use super::*;
-
-    #[test]
-    fn layout_py_top_from_bottom_margin_matches_explicit() {
-        let h = 800.0;
-        let rect_h = 600.0;
-        let m = 128.0;
-        let got = layout_py_top_from_bottom_margin(h, rect_h, m);
-        assert!((got - (h - m - rect_h)).abs() < 1e-5);
-    }
 
     #[test]
     fn layout_px_py_from_norm_scales_window() {

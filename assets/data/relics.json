@@ -80,7 +80,7 @@
   {
     "id": "kindling",
     "name": "Kindling",
-    "description": "Cashing in a structure: this relic accumulates +0.3 mult (max +9 mult)",
+    "description": "Cashing in a structure: this relic accumulates +0.4 mult (max +10 mult)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1148,7 +1148,7 @@
   {
     "id": "cracked_tile",
     "name": "Cracked Tile",
-    "description": "Cashing in a structure: random +1 to +6 mult",
+    "description": "Cashing in a structure: random +2 to +8 mult",
     "rarity": "common",
     "flavor_spans": [
       {

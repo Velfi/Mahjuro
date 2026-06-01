@@ -327,13 +327,6 @@ impl ArchiveScene {
         enter_tab(self, TABS[next], progress, chronicle_last_seen, bus);
     }
 
-    /// Whether the scene needs continuous redraws to animate 3D content.
-    /// During the rebuild the whole scene is 3D, so this is always true.
-    #[allow(dead_code)] // Was used for redraw gating when collection mixed 2D/3D tabs.
-    pub fn has_3d_tab(&self) -> bool {
-        true
-    }
-
     fn flat_items(
         &self,
         w: f32,
@@ -902,7 +895,6 @@ impl ArchiveScene {
                             shape: MeshId::BeveledSlab,
                             material: closeup_material,
                             pick_id: None,
-                            shadow_caster: false,
                             silhouette: false,
                         },
                         hover_target: 1.0,
@@ -2378,7 +2370,6 @@ fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
                         },
                     }),
                     pick_id: None,
-                    shadow_caster: false,
                     silhouette: false,
                 },
                 hover_target: if is_focus { 1.0 } else { 0.0 },

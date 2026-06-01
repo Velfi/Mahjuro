@@ -43,7 +43,6 @@ impl Vertex3dTex {
     pub const DEFAULT_TANGENT: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 
     /// Canonical constructor (fills `uv_emr = uv`, white `color`); kept for new call sites.
-    #[allow(dead_code)]
     #[inline]
     pub fn new(position: [f32; 3], normal: [f32; 3], uv: [f32; 2], tangent: [f32; 4]) -> Self {
         Self {

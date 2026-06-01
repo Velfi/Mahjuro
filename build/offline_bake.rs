@@ -81,7 +81,9 @@ fn bin_path(profile_dir: &Path, name: &str) -> PathBuf {
 }
 
 fn resolve_bake_binary(ctx: &BakeToolCtx, name: &str) -> Option<PathBuf> {
-    for dir in [&ctx.main_profile_dir, &ctx.tool_profile_dir] {
+    // Prefer offline-bake-tools: auto-rebake always refreshes there, while an older
+    // copy may linger in the main target dir from a prior manual build.
+    for dir in [&ctx.tool_profile_dir, &ctx.main_profile_dir] {
         let path = bin_path(dir, name);
         if path.is_file() {
             return Some(path);

@@ -473,13 +473,6 @@ pub fn room_env_world_scale(window_h: f32, height_scale: f32) -> f32 {
     renv::room_env_world_scale(window_h, height_scale)
 }
 
-/// `translate(-center_doc * s) * uniformScale(s)` — matches centered room mesh + picking.
-#[allow(dead_code)]
-#[inline]
-pub fn room_env_model_matrix(window_h: f32, height_scale: f32, center_doc: Vec3) -> Mat4 {
-    renv::room_env_model_matrix(window_h, height_scale, center_doc)
-}
-
 #[inline]
 pub fn room_env_model_matrix_from_cpu(window_h: f32, height_scale: f32, cpu: &RoomGlbCpu) -> Mat4 {
     room_env_model_matrix_from_bounds_doc(window_h, height_scale, cpu.environment_bounds_doc)
@@ -757,7 +750,6 @@ pub fn marker_mesh_bounds_reference_object3d(
             shape: MeshId::Cube,
             material: MaterialSpec::plain(),
             pick_id: None,
-            shadow_caster: false,
             silhouette: false,
         },
         hover_target: 0.0,

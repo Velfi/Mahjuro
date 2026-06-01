@@ -486,8 +486,8 @@ fn kindling_adds_mult_from_prior_cashins_this_chamber() {
         structure: None,
     };
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    // 2 prior cash-ins × 0.3 = 0.6 → base 1.0 + 0.6 = 1.6
-    assert_eq!(breakdown.final_mult, 1.6);
+    // 2 prior cash-ins × 0.4 = 0.8 → base 1.0 + 0.8 = 1.8
+    assert_eq!(breakdown.final_mult, 1.8);
     assert!(breakdown.steps.iter().any(|s| s.source == "Kindling"));
 }
 

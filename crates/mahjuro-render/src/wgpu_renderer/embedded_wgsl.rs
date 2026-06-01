@@ -28,6 +28,7 @@ macro_rules! scene_pbr_with_hallway_warp {
 }
 
 pub const QUAD: &str = wgsl_file!("quad.wgsl");
+#[cfg(feature = "windowed")]
 pub const BOOT_SPLASH: &str = wgsl_file!("boot_splash.wgsl");
 pub const DEPTH_QUAD: &str = wgsl_file!("depth_quad.wgsl");
 pub const DEPTH_QUAD_DEBUG: &str = wgsl_file!("depth_quad_debug.wgsl");
@@ -47,7 +48,6 @@ pub const STARFIELD: &str = concat!(
     "\n",
     wgsl_file!("starfield.wgsl"),
 );
-pub const EMBER_DRIFT: &str = wgsl_file!("ember_drift.wgsl");
 pub const GOLDEN_DUST: &str = wgsl_file!("golden_dust.wgsl");
 pub const MOONLIT_WATER: &str = wgsl_file!("moonlit_water.wgsl");
 pub const SUNLIT_WATER: &str = wgsl_file!("sunlit_water.wgsl");

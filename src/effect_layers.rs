@@ -28,8 +28,6 @@ pub struct EffectLayers {
     /// CPU world rain field (main menu exterior).
     pub rain: bool,
     pub golden_dust: bool,
-    #[allow(dead_code)]
-    pub ember_drift: bool,
     pub hdr: bool,
     pub transition_fullscreen_fx: bool,
     pub fullscreen_water_backdrop: bool,
@@ -43,7 +41,6 @@ impl EffectLayers {
         starfield: false,
         rain: false,
         golden_dust: false,
-        ember_drift: false,
         hdr: false,
         transition_fullscreen_fx: false,
         fullscreen_water_backdrop: true,

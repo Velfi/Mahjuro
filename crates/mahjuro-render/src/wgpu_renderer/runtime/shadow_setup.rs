@@ -284,46 +284,21 @@ impl WgpuRenderer {
         &mut self,
         _frame: &UiFrame,
         _camera: &CameraFrame,
-        light_view_proj_arr: [f32; 16],
-        tile_pick_models: &[(usize, glam::Mat4)],
-        shadow_uniforms_changed: &mut bool,
+        _light_view_proj_arr: [f32; 16],
+        _tile_pick_models: &[(usize, glam::Mat4)],
+        _shadow_uniforms_changed: &mut bool,
     ) {
-        for (i, model) in tile_pick_models {
-            if let Some(htg) = self.hand_tiles.get(*i) {
-                self.queue.write_buffer(
-                    &htg.shadow_uniform_buffer,
-                    0,
-                    bytemuck::bytes_of(&ShadowCasterUniform {
-                        light_view_proj: light_view_proj_arr,
-                        model: model.to_cols_array(),
-                    }),
-                );
-                *shadow_uniforms_changed = true;
-            }
-        }
     }
 
     pub(super) fn rewrite_shadow_casters_for_light(
         &self,
         light_view_proj_arr: [f32; 16],
         object3d_draw_list: &[(super::DrawKind, usize)],
-        tile_pick_models: &[(usize, glam::Mat4)],
+        _tile_pick_models: &[(usize, glam::Mat4)],
         showcase_tile_batches: &[&[super::ShowcaseTilePlacement]],
     ) {
         for &(kind, slot_i) in object3d_draw_list {
             self.rewrite_object3d_shadow_light(kind, slot_i, light_view_proj_arr);
-        }
-        for (i, model) in tile_pick_models {
-            if let Some(htg) = self.hand_tiles.get(*i) {
-                self.queue.write_buffer(
-                    &htg.shadow_uniform_buffer,
-                    0,
-                    bytemuck::bytes_of(&ShadowCasterUniform {
-                        light_view_proj: light_view_proj_arr,
-                        model: model.to_cols_array(),
-                    }),
-                );
-            }
         }
         let total_showcase: usize = showcase_tile_batches
             .iter()

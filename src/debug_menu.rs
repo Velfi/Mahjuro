@@ -1,9 +1,5 @@
 // When the debug menu is gated out (release builds without
-// `MAHJURO_DEBUG_MENU=1`), nothing in this module is instantiated.
-// The variants stay defined because `DebugAction` is matched in
-// `main/debug_actions.rs` and rustc would otherwise complain about unused
-// enum variants.
-#![cfg_attr(not(debug_menu_enabled), allow(dead_code))]
+// `MAHJURO_DEBUG_MENU=1`), only [`DebugAction`] is kept for keyboard routing.
 
 //! Native OS menubar "Debug" menu using muda.
 //!
@@ -20,15 +16,23 @@
 //!   programmatically-injected events) but is *not* attached to the window —
 //!   Linux users reach the same actions via in-app keyboard shortcuts instead.
 
+#[cfg(debug_menu_enabled)]
 use muda::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
-#[cfg(target_os = "windows")]
+#[cfg(all(debug_menu_enabled, target_os = "windows"))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+#[cfg(debug_menu_enabled)]
 use sdl3::video::Window;
 
-use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
-use crate::core::relic::{RelicId, all_relic_defs};
+use crate::core::ordeal::OrdealKind;
+#[cfg(debug_menu_enabled)]
+use crate::core::ordeal::{all_ordeals, final_ordeals};
+use crate::core::relic::RelicId;
+#[cfg(debug_menu_enabled)]
+use crate::core::relic::all_relic_defs;
 use crate::core::talisman::TalismanKind;
-use crate::core::tile::{Suit, Tile};
+use crate::core::tile::Suit;
+#[cfg(debug_menu_enabled)]
+use crate::core::tile::Tile;
 use crate::core::zodiac::ZodiacKind;
 
 /// Identifies which debug action was triggered.
@@ -108,7 +112,7 @@ pub enum DebugAction {
     OpenTixels,
     /// Open a simple in-app About modal. Used on macOS to avoid the native
     /// About panel's icon conversion path in `muda`.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg(target_os = "macos")]
     OpenAbout,
     /// Meta: discover all transformation successors; ensure progression lists
     /// all fragile primaries. Run: mark every burn chain as extinct so
@@ -124,6 +128,7 @@ pub enum DebugAction {
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
+#[cfg(debug_menu_enabled)]
 pub struct DebugMenuBar {
     // Must be retained for the lifetime of the installed native menubar.
     // On macOS, AppKit can invoke menu item actions long after
@@ -133,6 +138,7 @@ pub struct DebugMenuBar {
     mappings: Vec<(MenuId, DebugAction)>,
 }
 
+#[cfg(debug_menu_enabled)]
 impl DebugMenuBar {
     /// Build and install the debug menu bar. Must be called on the main thread,
     /// after the window is created (Windows needs the HWND).
@@ -467,12 +473,12 @@ impl DebugMenuBar {
 }
 
 /// Per-OS dispatch for attaching the menu to the active app/window.
-#[cfg(target_os = "macos")]
+#[cfg(all(debug_menu_enabled, target_os = "macos"))]
 fn install_menu(menu: &Menu, _window: &Window) {
     menu.init_for_nsapp();
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(debug_menu_enabled, target_os = "windows"))]
 fn install_menu(menu: &Menu, window: &Window) {
     let handle = match window.window_handle() {
         Ok(h) => h,
@@ -491,7 +497,7 @@ fn install_menu(menu: &Menu, window: &Window) {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(all(debug_menu_enabled, not(any(target_os = "macos", target_os = "windows"))))]
 fn install_menu(_menu: &Menu, _window: &Window) {
     // Linux/other: muda requires GTK on Linux. The menu object exists so
     // `poll()` stays valid, but it isn't attached to a window. Use the

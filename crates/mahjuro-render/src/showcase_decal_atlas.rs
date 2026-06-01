@@ -142,8 +142,7 @@ pub fn rasterize_showcase_decal_atlas_rgba(
 /// Build one RGBA atlas texture + lookup from `(suit, rank, enhancement, debuffed)` → UV rect.
 pub struct ShowcaseDecalAtlasGpu {
     /// Kept so the atlas stays allocated while bind groups reference `view`.
-    #[allow(dead_code)]
-    pub texture: wgpu::Texture,
+    pub _texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub lookup: FxHashMap<ShowcaseDecalKey, [f32; 4]>,
 }
@@ -192,7 +191,7 @@ pub fn upload_showcase_decal_atlas_rgba(
     );
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     ShowcaseDecalAtlasGpu {
-        texture,
+        _texture: texture,
         view,
         lookup: build_showcase_decal_lookup(),
     }

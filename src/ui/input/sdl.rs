@@ -436,6 +436,7 @@ impl InputState {
         self.item_inspect_orbit_stick = (0.0, 0.0);
         self.item_inspect_zoom_triggers = 0.0;
         self.right_stick_scroll_axis = 0.0;
+        self.left_stick_scroll_axis = 0.0;
 
         let before = actions.len();
         shell.prepare_gamepad_frame();
@@ -502,7 +503,8 @@ impl InputState {
             self.item_inspect_orbit_stick.1 =
                 (self.item_inspect_orbit_stick.1 + ky).clamp(-1.0, 1.0);
         }
-        self.right_stick_scroll_axis = Self::sample_right_stick_scroll_axis(shell);
+        self.right_stick_scroll_axis = Self::sample_stick_scroll_axis(shell, GpAxis::RightY);
+        self.left_stick_scroll_axis = Self::sample_stick_scroll_axis(shell, GpAxis::LeftY);
         Self::emit_held_navigation_repeats(
             shell,
             &mut self.dpad_repeat,
@@ -605,7 +607,7 @@ impl InputState {
         }
     }
 
-    fn sample_right_stick_scroll_axis(shell: &SdlShell) -> f32 {
+    fn sample_stick_scroll_axis(shell: &SdlShell, axis: GpAxis) -> f32 {
         const STICK_DZ: f32 = 0.22;
         let Ok(ids) = shell.gamepad.gamepads() else {
             return 0.0;
@@ -617,7 +619,7 @@ impl InputState {
             if !gp.connected() {
                 continue;
             }
-            let y = axis_norm(gp.axis(GpAxis::RightY));
+            let y = axis_norm(gp.axis(axis));
             return if y.abs() < STICK_DZ { 0.0 } else { y };
         }
         0.0

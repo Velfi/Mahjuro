@@ -7,6 +7,7 @@ use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::clip::intersect_rect;
+use crate::ui::input::InputMode;
 use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::widget::wrap_text;
 
@@ -128,11 +129,12 @@ impl RunSummaryPanelScroll {
         scroll_lines: f32,
         cursor: (f32, f32),
         layout: &RunSummaryPanelLayout,
+        input_mode: InputMode,
     ) {
         if scroll_lines.abs() <= 0.001 || layout.max_scroll_px <= 0.0 {
             return;
         }
-        if !cursor_over_scroll_area(cursor, layout) {
+        if input_mode == InputMode::Cursor && !cursor_over_scroll_area(cursor, layout) {
             return;
         }
         let line_h = layout.row_font_px * 1.35;

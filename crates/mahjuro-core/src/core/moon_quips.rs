@@ -54,8 +54,6 @@ fn leak_str(s: String) -> &'static str {
 
 struct MoonQuipEntry {
     text: &'static str,
-    #[allow(dead_code)]
-    category: &'static str,
     weight: f32,
 }
 
@@ -88,7 +86,6 @@ fn catalog() -> &'static MoonQuipsCatalog {
             let weight = line.weight.max(0.0);
             pride_entries.push(MoonQuipEntry {
                 text: leak_str(text.to_string()),
-                category: "pride",
                 weight: if weight > 0.0 { weight } else { 1.0 },
             });
         }
@@ -111,7 +108,6 @@ fn catalog() -> &'static MoonQuipsCatalog {
             let idx = entries.len();
             entries.push(MoonQuipEntry {
                 text: leak_str(text.to_string()),
-                category,
                 weight: if weight > 0.0 { weight } else { 1.0 },
             });
             by_category.entry(category).or_default().push(idx);

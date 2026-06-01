@@ -505,7 +505,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     if has(RelicId::CrackedTile) {
         use rand::RngExt;
         let mut rng = rand::rng();
-        let bonus: f64 = rng.random_range(1.0..=6.0);
+        let bonus: f64 = rng.random_range(2.0..=8.0);
         if bonus > 0.0 {
             push_mult(
                 steps,

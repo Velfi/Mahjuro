@@ -473,7 +473,7 @@ impl WgpuRenderer {
                     inner.insert(
                         cache_inner_key,
                         CachedTextLabel {
-                            tex,
+                            _tex: tex,
                             bind_group: bg,
                             last_used: frame_id,
                         },
@@ -606,12 +606,6 @@ impl WgpuRenderer {
                 DrawCmd::Starfield => {
                     if effects_quality >= mahjuro_gfx_types::EffectsQuality::Medium {
                         ops.push(RenderOp::Starfield);
-                    }
-                    i += 1;
-                }
-                DrawCmd::EmberDrift => {
-                    if effects_quality >= mahjuro_gfx_types::EffectsQuality::Medium {
-                        ops.push(RenderOp::EmberDrift);
                     }
                     i += 1;
                 }
@@ -951,7 +945,6 @@ impl WgpuRenderer {
                     color: *color,
                     font_px: Some(label_size),
                     align: TextAlign::Center,
-                    no_glossary: true,
                     ..Default::default()
                 };
                 let td = make_text_draw(

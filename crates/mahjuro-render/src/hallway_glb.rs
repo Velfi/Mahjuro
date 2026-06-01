@@ -131,7 +131,6 @@ pub const HALLWAY_WING_INTENSITY_AT_FINAL: f32 = 1.28;
 /// Wall barrel-bow displacement at the wall surface (world units; shader `bow.w`).
 pub const HALLWAY_BALLOON_AMOUNT: f32 = 0.065;
 /// World Z for vertical barrel midline in WGSL (`mix(floor, ceiling, 0.5)`); keep in sync with shaders.
-#[allow(dead_code)]
 pub const HALLWAY_BALLOON_FLOOR_Z: f32 = 0.08;
 
 // Left/right in `room_glb.wgsl` / `tile_3d.wgsl` (all use the same lateral frame):
@@ -679,7 +678,7 @@ pub fn hallway_marker_world(
 }
 
 /// First embedded perspective camera (shop preferred name or depth-first fallback).
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub fn hallway_camera_from_glb_if_present(
     window_h: f32,
     env_height_scale: f32,
@@ -753,7 +752,7 @@ pub fn hallway_camera_pick_chamber(
 }
 
 /// Legacy pick-blind camera (single embedded cam or bounds fit). Unit tests use this; gameplay uses [`hallway_camera_pick_chamber`].
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub fn hallway_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
     let from_glb = hallway_camera_from_glb_if_present(h, env_h);
     hallway_camera_resolve(w, h, env_h, from_glb)

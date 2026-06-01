@@ -89,7 +89,6 @@ pub(super) fn build_renderer_new(
         squircle: squircle_shader,
         flame: flame_shader,
         starfield: starfield_shader,
-        ember_drift: ember_drift_shader,
         golden_dust: golden_dust_shader,
         moonlit_water: moonlit_water_shader,
         sunlit_water: sunlit_water_shader,
@@ -1079,7 +1078,7 @@ pub(super) fn build_renderer_new(
     });
 
     // ── Fullscreen additive vignette pipelines ─────────────────────
-    // Starfield, ember-drift, and golden-dust all share the same
+    // Starfield and golden-dust share the same
     // layout: no vertex buffers, globals-only bind group, additive
     // blend onto the UI colour target.
     let vignette_pipeline = |label: &str, module: &wgpu::ShaderModule| -> wgpu::RenderPipeline {
@@ -1125,7 +1124,6 @@ pub(super) fn build_renderer_new(
     };
 
     let starfield_pipeline = vignette_pipeline("starfield-pipeline", &starfield_shader);
-    let ember_drift_pipeline = vignette_pipeline("ember-drift-pipeline", &ember_drift_shader);
     let golden_dust_pipeline = vignette_pipeline("golden-dust-pipeline", &golden_dust_shader);
     // moonlit_water gets its own pipeline so it can bind the moon albedo
     // texture alongside globals in a dedicated bind group layout.
@@ -1401,7 +1399,6 @@ pub(super) fn build_renderer_new(
         })
     };
 
-    let tile_pipeline_opaque_double = mk_tile_pipeline("tile-opaque-ds", None, &depth_3d, false);
     let tile_pipeline_opaque_cull = mk_tile_pipeline("tile-opaque-cull", None, &depth_3d, true);
     let tile_pipeline_blend_double = mk_tile_pipeline(
         "tile-blend-ds",
@@ -1457,7 +1454,6 @@ pub(super) fn build_renderer_new(
         })
     };
 
-    let shop_pipeline_opaque_double = mk_shop_pipeline("shop-opaque-ds", None, &depth_3d, false);
     let shop_pipeline_opaque_cull = mk_shop_pipeline("shop-opaque-cull", None, &depth_3d, true);
     let shop_pipeline_blend_double = mk_shop_pipeline(
         "shop-blend-ds",
@@ -1517,8 +1513,6 @@ pub(super) fn build_renderer_new(
         })
     };
 
-    let shop_pipeline_mrt_opaque_double =
-        mk_shop_mrt_pipeline("shop-emissive-opaque-ds", None, &depth_3d, false);
     let shop_pipeline_mrt_opaque_cull =
         mk_shop_mrt_pipeline("shop-emissive-opaque-cull", None, &depth_3d, true);
     let blend_mrt = Some(wgpu::BlendState::ALPHA_BLENDING);
@@ -3178,7 +3172,6 @@ pub(super) fn build_renderer_new(
         flame_view_bind_group,
         flame_instance_staging: Vec::with_capacity(32),
         starfield_pipeline,
-        ember_drift_pipeline,
         golden_dust_pipeline,
         moonlit_water_pipeline,
         moonlit_water_bind_group,
@@ -3192,15 +3185,12 @@ pub(super) fn build_renderer_new(
         cascade_composite_bind_group,
         scene_color_downsample_pipeline,
         scene_color_downsample_bind_group,
-        tile_pipeline_opaque_double,
         tile_pipeline_opaque_cull,
         tile_pipeline_blend_double,
         tile_pipeline_blend_cull,
-        shop_pipeline_opaque_double,
         shop_pipeline_opaque_cull,
         shop_pipeline_blend_double,
         shop_pipeline_blend_cull,
-        shop_pipeline_mrt_opaque_double,
         shop_pipeline_mrt_opaque_cull,
         shop_pipeline_mrt_blend_double,
         shop_pipeline_mrt_blend_cull,
@@ -3271,7 +3261,6 @@ pub(super) fn build_renderer_new(
         tile_base_color_factor,
         // Populated on first render() from RenderSettings.tileset_name.
         tile_set: None,
-        hand_tiles: Vec::new(),
         showcase_tiles: Vec::new(),
         tile_face_overlays: rustc_hash::FxHashMap::default(),
         image_quad_overlays: rustc_hash::FxHashMap::default(),
@@ -3294,9 +3283,6 @@ pub(super) fn build_renderer_new(
         ui_font_italic,
         mono_font,
         size,
-        last_focus: usize::MAX,
-        focus_spin: None,
-        focus_t: Vec::new(),
         tile_anim_y: Vec::new(),
         tile_anim_x: Vec::new(),
         tile_uids: Vec::new(),

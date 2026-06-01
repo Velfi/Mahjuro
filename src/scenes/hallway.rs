@@ -179,7 +179,6 @@ fn push_wrapped_column_line(line: WrappedColumnLine<'_>) {
         color,
         font_px: Some(font_px),
         align,
-        no_glossary: true,
         ..Default::default()
     });
     *y += block_h;

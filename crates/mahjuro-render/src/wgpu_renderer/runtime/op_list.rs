@@ -10,7 +10,6 @@ pub(super) struct TextDraw {
     pub inst_buf: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
     pub scissor_rect: Option<[f32; 4]>,
-    #[allow(dead_code)]
     pub _tex: Option<wgpu::Texture>,
 }
 
@@ -24,7 +23,6 @@ pub(super) enum RenderOp {
         buf_idx: usize,
     },
     Starfield,
-    EmberDrift,
     GoldenDust,
     MoonlitWater,
     SunlitWater,

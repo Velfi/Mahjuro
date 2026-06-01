@@ -366,19 +366,6 @@ pub fn load_archive_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
     Ok(cpu)
 }
 
-/// World-space marker translation (centered room basis), consistent with shop/hallway mesh.
-#[allow(dead_code)] // Public helper for tooling / future UI; collection uses `archive_marker_world_mat4`.
-pub fn archive_marker_world(
-    window_h: f32,
-    env_height_scale: f32,
-    cpu: &RoomGlbCpu,
-    name: &str,
-) -> Option<Vec3> {
-    let t = room_glb::marker_translation(cpu, name)?;
-    let s = room_glb::room_env_world_scale(window_h, env_height_scale);
-    Some(t * s)
-}
-
 /// Full transform of marker origin in **world** space (includes room model matrix).
 pub fn archive_marker_world_mat4(
     window_h: f32,

@@ -197,7 +197,6 @@ impl ScorePopupSystem {
                     color,
                     font_px: Some(font_px),
                     align: TextAlign::Center,
-                    no_glossary: true,
                     ..Default::default()
                 }
             })

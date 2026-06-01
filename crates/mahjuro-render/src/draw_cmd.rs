@@ -303,8 +303,7 @@ pub type WorldSurfaceAnchor = [f32; 3];
 //
 // Phase 1 wires up the mesh + draw cmd infrastructure but no scene actually
 // pushes these yet — phases 2-7 introduce the corresponding `gameplay.rs`
-// pushes one region at a time. The unused-field/variant warnings stay
-// suppressed via the `allow(dead_code)` until then.
+// pushes one region at a time.
 
 /// Hanging blind/score plaque suspended above the gameplay table.
 ///
@@ -353,8 +352,6 @@ pub struct WallStackPlacement {
 /// shader's `MaterialKind` branch at render time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GlyphMaterial {
-    #[allow(dead_code)] // Score-reel digits (3D path); renderer arm kept in sync.
-    Plain,
     Metal,
     Polychrome,
 }
@@ -448,9 +445,6 @@ pub enum ImageQuadSource {
     Relic(mahjuro_core::core::relic::RelicId),
     /// Procedural debuff X ([`crate::decal::rasterize_debuff_marker_overlay`]) — same mark as on tiles.
     DebuffMarker,
-    /// Absolute filesystem path to an SVG or PNG (rasterized at draw time).
-    #[allow(dead_code)] // No current producer; renderer path kept for tooling / experiments.
-    Filesystem(std::path::PathBuf),
 }
 
 impl ImageQuadSource {
@@ -461,7 +455,6 @@ impl ImageQuadSource {
             Self::Asset { path } => format!("asset:{path}"),
             Self::Relic(id) => format!("relic:{id:?}"),
             Self::DebuffMarker => "debuff-marker".to_string(),
-            Self::Filesystem(path) => format!("file:{}", path.display()),
         }
     }
 }
@@ -588,7 +581,7 @@ pub enum Object3dKind {
     // (Coin uses `Primitive { shape: Coin }` routed to [`DrawKind::GltfCoin`]
     // and rendered with full glTF PBR from [`coin.glb`](../../../assets/3d/coin.glb).)
     // (GoldBar is now modeled as `Primitive { shape: Cube,
-    // material: MaterialSpec::metal(), shadow_caster: true }`.)
+    // material: MaterialSpec::metal() }`.)
     // (BrassRail is now modeled as `Primitive { shape: Cube,
     // material: MaterialSpec::brass() }`.)
     // (Standing book was removed; the shop now uses an
@@ -599,8 +592,7 @@ pub enum Object3dKind {
     /// Bronze "play hand" mirror. Hover animation is driven by [`Object3d::hover_target`].
     Mirror,
     // (Dish is now modeled as `Primitive { shape: DiscSquare or
-    // DiscRound, material: MaterialSpec::plain(), shadow_caster: true
-    // }`. Callers set `pos[2]` to the dish center (base + extents[1] *
+    // DiscRound, material: MaterialSpec::plain() }`. Callers set `pos[2]` to the dish center (base + extents[1] *
     // 0.5) rather than the base, since the generic dispatch no longer
     // auto-lifts.)
     // (ShopActionProp is now modeled as `Primitive { shape:
@@ -678,11 +670,6 @@ pub enum Object3dKind {
         shape: crate::primitive::MeshId,
         material: crate::primitive::MaterialSpec,
         pick_id: Option<u32>,
-        /// Legacy flag — shadow participation is driven by
-        /// [`crate::lit_mesh::material_casts_shadow`] on `material.kind`
-        /// (everything except [`MaterialKind::Emissive`] casts).
-        #[allow(dead_code)]
-        shadow_caster: bool,
         /// When true, render as a near-black matte silhouette
         /// (locked-collection lock state). Decal and material kind
         /// are suppressed; `obj.color` alpha is preserved.
@@ -758,9 +745,6 @@ pub enum DrawCmd {
     Background(BackgroundId),
     /// Procedural constellation starfield (fullscreen triangle, no data).
     Starfield,
-    /// Procedural rising-ember vignette (fullscreen triangle, no data).
-    #[allow(dead_code)]
-    EmberDrift,
     /// Procedural golden-dust with god-rays vignette (fullscreen triangle, no data).
     GoldenDust,
     /// Procedural moon hovering above rippling water (fullscreen triangle, no data).
@@ -1031,10 +1015,6 @@ impl UiFrame {
     pub fn starfield(&mut self) {
         self.cmds.push(DrawCmd::Starfield);
     }
-    #[allow(dead_code)]
-    pub fn ember_drift(&mut self) {
-        self.cmds.push(DrawCmd::EmberDrift);
-    }
     pub fn golden_dust(&mut self) {
         self.cmds.push(DrawCmd::GoldenDust);
     }
@@ -1130,7 +1110,6 @@ impl UiFrame {
                 DrawCmd::Text(lbl) => lbl.color[3] *= alpha,
                 DrawCmd::Background(_)
                 | DrawCmd::Starfield
-                | DrawCmd::EmberDrift
                 | DrawCmd::GoldenDust
                 | DrawCmd::MoonlitWater
                 | DrawCmd::SunlitWater

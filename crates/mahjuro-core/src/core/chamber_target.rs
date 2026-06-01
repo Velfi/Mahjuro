@@ -6,10 +6,12 @@
 use crate::core::rules::ChamberKind;
 
 /// Spring-season chip base for wing 1 Small Chamber (`base_target` before season mult).
-pub const DEFAULT_BASE_TARGET: u32 = 500;
+pub const DEFAULT_BASE_TARGET: u32 = 432;
 
 /// Per-wing multiplier on the run's `base_target`.
-pub const TARGET_SCALING: f32 = 2.0;
+///
+/// Golden ratio φ = (1+√5)/2; decimal expansion [OEIS A001622](https://oeis.org/A001622).
+pub const TARGET_SCALING: f32 = 1.618_034;
 
 /// Small-chamber multiplier for the wing's chip base.
 pub const SMALL_MULT: f32 = 1.0;
@@ -57,13 +59,13 @@ mod tests {
             score_for(1, ChamberKind::Small, DEFAULT_BASE_TARGET),
             DEFAULT_BASE_TARGET
         );
-        assert_eq!(score_for(1, ChamberKind::Big, DEFAULT_BASE_TARGET), 750);
-        assert_eq!(score_for(1, ChamberKind::Ordeal, DEFAULT_BASE_TARGET), 1000);
+        assert_eq!(score_for(1, ChamberKind::Big, DEFAULT_BASE_TARGET), 648);
+        assert_eq!(score_for(1, ChamberKind::Ordeal, DEFAULT_BASE_TARGET), 864);
     }
 
     #[test]
     fn scales_exponentially_per_wing() {
-        assert_eq!(wing_chip_base(3, DEFAULT_BASE_TARGET), 2000);
-        assert_eq!(score_for(3, ChamberKind::Ordeal, DEFAULT_BASE_TARGET), 4000);
+        assert_eq!(wing_chip_base(3, DEFAULT_BASE_TARGET), 1131);
+        assert_eq!(score_for(3, ChamberKind::Ordeal, DEFAULT_BASE_TARGET), 2262);
     }
 }

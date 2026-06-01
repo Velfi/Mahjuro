@@ -124,11 +124,6 @@ impl WgpuRenderer {
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
-            RenderOp::EmberDrift => {
-                pass.set_pipeline(&self.ember_drift_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.draw(0..3, 0..1);
-            }
             RenderOp::GoldenDust => {
                 pass.set_pipeline(&self.golden_dust_pipeline);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);

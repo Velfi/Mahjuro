@@ -270,7 +270,6 @@ impl WgpuRenderer {
                             shape,
                             material,
                             pick_id,
-                            shadow_caster: _,
                             silhouette,
                         } => {
                             self.place_object3d_primitive(
@@ -1376,12 +1375,6 @@ impl WgpuRenderer {
                                         specular_power: 48.0,
                                     }
                                 }
-                                crate::draw_cmd::GlyphMaterial::Plain => MaterialParams {
-                                    kind: MaterialKind::Plain,
-                                    base_color: obj.color,
-                                    specular_strength: 0.35 + 0.20 * emissive.clamp(0.0, 1.0),
-                                    specular_power: 96.0,
-                                },
                             };
                             self.extruded_glyph_instances[slot_i].write_uniform(
                                 &self.queue,

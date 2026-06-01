@@ -42,7 +42,6 @@ struct ManifestPack {
 
 #[derive(Debug, Deserialize)]
 struct PackManifest {
-    #[allow(dead_code)]
     schema_version: u32,
     game_version: String,
     packs: Vec<ManifestPack>,
@@ -391,6 +390,14 @@ impl PacksState {
 }
 
 fn verify_manifest_version(manifest: &PackManifest) {
+    const EXPECTED_SCHEMA: u32 = 1;
+    if manifest.schema_version != EXPECTED_SCHEMA {
+        log::warn!(
+            "pack_manifest schema_version ({}) != expected {}",
+            manifest.schema_version,
+            EXPECTED_SCHEMA
+        );
+    }
     let expected = env!("CARGO_PKG_VERSION");
     if manifest.game_version != expected {
         if manifest.game_version == "0.0.0" {
