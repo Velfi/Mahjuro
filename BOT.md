@@ -11,6 +11,13 @@ selection from its hand to find the highest-scoring play. Treat its results as
 a **ceiling**, not as a typical-player baseline. If even the oracle can't clear
 Ante 2, no human will.
 
+Use **`player-fair`** mode (or `--player-fair`) for a player-realistic baseline:
+no wall-peek discards, capped shop sampling (up to 2 synthetic hands vs the
+oracle's 4), and no automatic relic-order optimization. Uses the default
+one-ply chamber planner. Pair with `--strategy player-fair` or
+`cargo run --release -- bot 200 --player-fair`. The default bot remains the
+tuning ceiling.
+
 ## Quick start
 
 ```bash
@@ -175,6 +182,11 @@ Per blind, in `play_run`:
 
 ## Limitations
 
+- **Oracle vs player-fair.** Default bot peeks the wall for discard rollouts,
+  samples up to four synthetic hands for shop valuation, and hill-climbs relic
+  order. The `player-fair` strategy / `--player-fair` flag turns those off
+  (shop uses at most two synthetic hands); it still brute-forces best plays
+  and runs the one-ply chamber planner unless overridden.
 - **Wall-mutating relics are under-valued.** `StrengthInNumbers`, `SetMagnet`, `QuickDraw`,
   `WildWinds`, `JokerTile` change the hand or wall in ways the marginal-value
   estimator can't see. Rarity tie-break partially compensates.

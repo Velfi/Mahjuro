@@ -165,6 +165,8 @@ pub enum SfxId {
     MainMenuEnter,
     /// Played when entering the post-run stairway scene.
     StairwayEnter,
+    /// Shop storeroom door chimes on entry (random variant).
+    ShopEnter,
     /// Generic level-up stinger.
     LevelUp,
     /// Tiles permanently destroyed (e.g. Taotie).
@@ -256,6 +258,7 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::NewGameStinger,
         SfxId::MainMenuEnter,
         SfxId::StairwayEnter,
+        SfxId::ShopEnter,
         SfxId::LevelUp,
         SfxId::TilesDestroyed,
         SfxId::OrdealEncountered,

@@ -265,6 +265,9 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
     if ctx.to == SceneTag::Stairway {
         ctx.audio.play_sfx(crate::audio::SfxId::StairwayEnter);
     }
+    if ctx.to == SceneTag::Shop {
+        ctx.audio.play_sfx(crate::audio::SfxId::ShopEnter);
+    }
     if ctx.to == SceneTag::MainMenu {
         crate::asset_path::prefetch_lazy_packs_after_menu_once();
     }

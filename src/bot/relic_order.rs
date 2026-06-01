@@ -42,7 +42,7 @@ pub(crate) fn bot_prepare_hypothetical_roster(
     mut relics: RelicState,
     base: &ShopMarginalBase,
 ) -> (RelicState, BTreeMap<RelicId, i32>) {
-    if !roster_is_order_sensitive(&relics) {
+    if !base.optimize_relic_order || !roster_is_order_sensitive(&relics) {
         return (relics, run.relic_counters.clone());
     }
     let mut counters = run.relic_counters.clone();

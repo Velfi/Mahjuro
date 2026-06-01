@@ -86,6 +86,9 @@ pub struct BotCli {
     /// Meta profile depth (1–14). Limits shop relic/rules pools to match player progression.
     #[arg(long)]
     pub meta_depth: Option<u32>,
+    /// Player-realistic bot: no wall-peek discards, synthetic shop hands, or auto relic reorder.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub player_fair: bool,
     /// Named bot strategy preset from a strategies JSON file (see `docs/strategies_example.json`).
     #[arg(long)]
     pub strategy: Option<String>,
@@ -156,6 +159,7 @@ impl BotCli {
             sell_max_per_visit: self.sell_max_per_visit,
             chamber_planner_depth: self.chamber_planner_depth,
             meta_depth: self.meta_depth,
+            player_fair: if self.player_fair { Some(true) } else { None },
             ..Default::default()
         }
     }

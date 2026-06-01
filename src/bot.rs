@@ -76,9 +76,11 @@ fn relic_display_name(id: RelicId) -> &'static str {
         .unwrap_or("?")
 }
 
-fn acquire_relic(run: &mut RunState, id: RelicId) {
+fn acquire_relic(run: &mut RunState, id: RelicId, strategy: &BotStrategy) {
     run.grant_relic(id);
-    relic_order::bot_optimize_relic_order(run);
+    if strategy.relic_order_optimization_enabled() {
+        relic_order::bot_optimize_relic_order(run);
+    }
 }
 
 /// Headless analogue of `ShopCommand::SellRelic`.
@@ -1089,7 +1091,37 @@ fn play_chamber(
         // bot from burning a discard for a marginal +1 swing.
         let can_discard = run.discards_remaining > 0 && run.plays_remaining > 1;
         let mut did_discard = false;
-        if can_discard {
+        if can_discard && !strategy.oracle_discards_enabled() {
+            let need = (run.target_score as u64).saturating_sub(run.round_score);
+            let cant_clear_pace = best_score == 0
+                || best_score.saturating_mul(run.plays_remaining as u64) < need;
+            if cant_clear_pace {
+                if let Some(indices) = discard_candidates(run.hand(), 1).into_iter().next() {
+                    bot_log!(
+                        log,
+                        "      action: heuristic discard {} (no wall peek)",
+                        fmt_indices(&indices),
+                    );
+                    run.clear_selection();
+                    for i in &indices {
+                        run.toggle_select(*i);
+                    }
+                    run.discard_selected(&mut bus);
+                    stats.discards_used += 1;
+                    stats.strategic_discards += 1;
+                    *stats
+                        .discards_by_chamber_slot
+                        .entry(chamber_slot_key(run))
+                        .or_insert(0) += 1;
+                    if drain_post_action_bus(run, &mut bus, stats)
+                        == Some(PlayChamberOutcome::SecondWindForfeit)
+                    {
+                        return (PlayChamberOutcome::SecondWindForfeit, turn);
+                    }
+                    did_discard = true;
+                }
+            }
+        } else if can_discard {
             let candidates = discard_candidates(run.hand(), 5);
             // Margin scales with how far we are from target — late in the round we
             // need bigger swings to be worth losing a play.
@@ -1847,7 +1879,7 @@ fn best_play_shop_value_for_hand(
 
 /// Synthetic random hands per shop valuation (plus the real current hand).
 /// Late antes use fewer samples — each one runs `best_play_in_hand`.
-fn relic_eval_sample_count(ante: u32) -> usize {
+pub(crate) fn relic_eval_sample_count(ante: u32) -> usize {
     if ante >= FINAL_WING {
         2
     } else if ante >= 5 {
@@ -1858,14 +1890,26 @@ fn relic_eval_sample_count(ante: u32) -> usize {
 }
 
 /// Cached hands and baseline best-play scores for one shop "next purchase" iteration.
-struct ShopMarginalBase {
-    hands: Vec<Vec<Tile>>,
+pub(crate) struct ShopMarginalBase {
+    pub(crate) hands: Vec<Vec<Tile>>,
     baseline: Vec<u64>,
+    pub(crate) optimize_relic_order: bool,
 }
 
 impl ShopMarginalBase {
     fn new(run: &RunState) -> Self {
-        let n = relic_eval_sample_count(run.wing);
+        Self::for_strategy(run, &BotStrategy::default())
+    }
+
+    fn for_strategy(run: &RunState, strategy: &BotStrategy) -> Self {
+        Self::with_synthetic_samples(
+            run,
+            strategy.shop_synthetic_sample_count(run.wing),
+            strategy.relic_order_optimization_enabled(),
+        )
+    }
+
+    fn with_synthetic_samples(run: &RunState, n: usize, optimize_relic_order: bool) -> Self {
         let size = crate::core::ordeal::effective_hand_size(run);
         let mut hands = Vec::with_capacity(n + 1);
         hands.push(run.hand().to_vec());
@@ -1876,7 +1920,11 @@ impl ShopMarginalBase {
             .iter()
             .map(|h| best_play_score_for_hand(run, h, None, None, None))
             .collect();
-        Self { hands, baseline }
+        Self {
+            hands,
+            baseline,
+            optimize_relic_order,
+        }
     }
 }
 
@@ -2309,14 +2357,16 @@ fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
 /// enrich the wall, so the benefit pays out across every future round —
 /// mirror the relic value model (sample several hands, scale by remaining
 /// antes) rather than the one-shot talisman model.
-fn pack_marginal_value(run: &RunState, kind: TilePackKind) -> i32 {
+fn pack_marginal_value(run: &RunState, kind: TilePackKind, strategy: &BotStrategy) -> i32 {
     let mut delta_sum: i64 = 0;
     let mut sample_count: i64 = 0;
     // Baseline samples the run's *current* wall (with any already-owned
     // packs mixed in); comparison samples the wall with the prospective
     // pack added. This captures diminishing returns — a second Flowers
     // Pack is worth much less than the first.
-    let pack_iters = relic_eval_sample_count(run.wing).saturating_add(1);
+    let pack_iters = strategy
+        .shop_synthetic_sample_count(run.wing)
+        .saturating_add(1);
     for _ in 0..pack_iters {
         let base_wall = Wall::from_filtered_with_packs(
             &run.removed_tile_ids,
@@ -2430,7 +2480,9 @@ fn visit_shop(
     deadline: Option<Instant>,
     bus: &mut crate::game::event_bus::EventBus,
 ) -> ShopVisitOutcome {
-    relic_order::bot_optimize_relic_order(run);
+    if strategy.relic_order_optimization_enabled() {
+        relic_order::bot_optimize_relic_order(run);
+    }
     // Consume tag-granted shop modifiers (headless analogue of ShopScene::new).
     let extra_relics: usize = (run.tag_rich_stock as usize * 2).max(run.tag_patron_gift as usize);
     let patron_gifts = run.tag_patron_gift;
@@ -2510,14 +2562,14 @@ fn visit_shop(
             return ShopVisitOutcome::TimedOut;
         }
         if shop.is_empty() {
-            let shop_base = ShopMarginalBase::new(run);
+            let shop_base = ShopMarginalBase::for_strategy(run, strategy);
             if sell_underperforming_relics(run, stats, log, strategy, &shop_base, bus) > 0 {
                 continue;
             }
             bot_log!(log, "    shop: leaving ({})", "no offerings left");
             break;
         }
-        let shop_base = ShopMarginalBase::new(run);
+        let shop_base = ShopMarginalBase::for_strategy(run, strategy);
         if sell_underperforming_relics(run, stats, log, strategy, &shop_base, bus) > 0 {
             continue;
         }
@@ -2580,7 +2632,7 @@ fn visit_shop(
                     if price_i32 > run.yen {
                         continue;
                     }
-                    pack_marginal_value(run, kind)
+                    pack_marginal_value(run, kind, strategy)
                 }
             };
             // Apply the strategy's category weight. weight = 0 zeros the
@@ -2600,7 +2652,7 @@ fn visit_shop(
             }
         }
         let Some((idx, marginal_value, sell_index)) = best else {
-            let shop_base = ShopMarginalBase::new(run);
+            let shop_base = ShopMarginalBase::for_strategy(run, strategy);
             if sell_underperforming_relics(run, stats, log, strategy, &shop_base, bus) > 0 {
                 continue;
             }
@@ -2631,7 +2683,7 @@ fn visit_shop(
                     }
                 }
                 run.apply_yen_delta(-(price as i32), Some(bus));
-                acquire_relic(run, id);
+                acquire_relic(run, id, strategy);
                 stats.relics_bought += 1;
                 let rname = relic_display_name(id);
                 relic_analytics::record_marginal_buy(stats, rname, marginal_value);
@@ -2811,7 +2863,7 @@ fn play_run_with_options(
     // free at run start so every run in the cell has the same build
     // starter. The bot then plays normally from there.
     if let Some(id) = forced_relic {
-        acquire_relic(&mut run, id);
+        acquire_relic(&mut run, id, &strategy);
         bot_log!(log, "  forced relic injection: {:?}", id);
     }
 

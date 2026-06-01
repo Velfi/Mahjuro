@@ -82,6 +82,10 @@ pub struct BotConfig {
     /// Meta profile depth (1–14). When set, shop relic/rules pools match
     /// [`PlayerProgress::available_relics`] at that depth instead of the full catalog.
     pub meta_depth: Option<u32>,
+    /// When true, disable bot-only advantages: wall-peek discards, synthetic shop
+    /// hands, and automatic relic-order hill-climbing. Use for a player-realistic
+    /// baseline; default oracle bot stays the tuning ceiling.
+    pub player_fair: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -98,6 +102,8 @@ pub struct BotStrategy {
     /// In-blind expectimax depth (`0` = legacy greedy pipeline, `1` = unified one-ply,
     /// `2` = recommended, `3` = pruned three-ply).
     pub chamber_planner_depth: u32,
+    /// Player-realistic mode: no wall peek, no synthetic shop samples, no auto reorder.
+    pub player_fair: bool,
 }
 
 impl BotStrategy {
@@ -118,6 +124,25 @@ impl BotStrategy {
             sell_hold_threshold: cfg.sell_hold_threshold.unwrap_or(d.sell_hold_threshold),
             sell_max_per_visit: cfg.sell_max_per_visit.unwrap_or(d.sell_max_per_visit),
             chamber_planner_depth: cfg.chamber_planner_depth.unwrap_or(d.chamber_planner_depth),
+            player_fair: cfg.player_fair.unwrap_or(d.player_fair),
+        }
+    }
+
+    pub fn oracle_discards_enabled(self) -> bool {
+        !self.player_fair
+    }
+
+    pub fn relic_order_optimization_enabled(self) -> bool {
+        !self.player_fair
+    }
+
+    pub fn shop_synthetic_sample_count(self, wing: u32) -> usize {
+        if self.player_fair {
+            // Few synthetic hands — enough to buy build-direction relics without
+            // the oracle's full expected-value batch (4→2 by wing).
+            super::relic_eval_sample_count(wing).min(2)
+        } else {
+            super::relic_eval_sample_count(wing)
         }
     }
 }
@@ -135,6 +160,7 @@ impl Default for BotStrategy {
             sell_hold_threshold: 0,
             sell_max_per_visit: 2,
             chamber_planner_depth: 1,
+            player_fair: false,
         }
     }
 }
@@ -325,6 +351,7 @@ impl BotConfig {
                 .chamber_planner_depth
                 .or(base.chamber_planner_depth),
             meta_depth: overlay.meta_depth.or(base.meta_depth),
+            player_fair: overlay.player_fair.or(base.player_fair),
         }
     }
 
@@ -730,6 +757,8 @@ pub struct StrategyDef {
     pub starting_discards: Option<u32>,
     #[serde(default)]
     pub starting_gold: Option<u32>,
+    #[serde(default)]
+    pub player_fair: Option<bool>,
 }
 
 impl StrategyDef {
@@ -752,6 +781,7 @@ impl StrategyDef {
             chamber_planner_depth: self.chamber_planner_depth,
             season: None,
             meta_depth: None,
+            player_fair: self.player_fair,
         }
     }
 }
@@ -1269,5 +1299,19 @@ mod strategy_config_tests {
     fn strategy_config_loads_named_preset() {
         let cfg = strategy_config_by_name("no-relics", &default_strategies_file()).unwrap();
         assert_eq!(cfg.no_relic_acquisition, Some(true));
+    }
+
+    #[test]
+    fn strategy_config_loads_player_fair_preset() {
+        let cfg = strategy_config_by_name("player-fair", &default_strategies_file()).unwrap();
+        assert_eq!(cfg.player_fair, Some(true));
+        assert_eq!(cfg.chamber_planner_depth, None);
+        assert_eq!(cfg.sell_enabled, Some(false));
+        let strategy = BotStrategy::from_config(&cfg);
+        assert!(strategy.player_fair);
+        assert_eq!(strategy.chamber_planner_depth, 1);
+        assert_eq!(strategy.shop_synthetic_sample_count(3), 2);
+        assert!(!strategy.oracle_discards_enabled());
+        assert!(!strategy.relic_order_optimization_enabled());
     }
 }
