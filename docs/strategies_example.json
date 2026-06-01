@@ -90,6 +90,12 @@
       "relic_weight": 2.5
     },
     {
+      "name": "player-fair",
+      "player_fair": true,
+      "sell_enabled": false,
+      "skip_threshold_multiplier": 99.0
+    },
+    {
       "name": "sell-and-heavy-relics",
       "sell_enabled": true,
       "sell_hold_threshold": 0,
