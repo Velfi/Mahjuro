@@ -36,7 +36,7 @@ Porcelain glaze · bamboo · felt / mahjong cloth · paper (thin folded for tali
 
 ## M1 — UI chrome
 
-Every Kenney UI sample is temporary. Shared design intent: **one base "focus tick" (a single soft pad press), with one short tail layer per category mixed at −12 dB under the base**, so navigation feels uniform with a "spice" layer that confirms what kind of thing was just focused.
+Kenney interface audio removed. Interim custom recordings ship today; the table below is the **future polish** target.
 
 | SFX | Context | Sound |
 |---|---|---|

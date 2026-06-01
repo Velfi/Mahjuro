@@ -37,6 +37,8 @@ pub enum MusicId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AmbientId {
     MainMenuRain,
+    /// Incandescent bulb hum in the pick-blind hallway.
+    HallwayBulbBuzz,
 }
 
 /// Sound effect identifiers.
@@ -100,6 +102,10 @@ pub enum SfxId {
     RoundStart,
     /// Player skipped a blind on pick_chamber (lights brownout).
     ChamberSkipped,
+    /// Brief bulb flicker + dip when room GLB lighting brownouts.
+    BrownoutFlicker,
+    /// Occasional floor/board creak in shop / hallway / archive rooms.
+    RoomCreak,
     /// The shooting-star cascade transition fires (dramatic scene change).
     StarShimmer,
     /// Relic / zodiac / talisman purchased in the shop.
@@ -212,6 +218,8 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::FocusDora,
         SfxId::RoundStart,
         SfxId::ChamberSkipped,
+        SfxId::BrownoutFlicker,
+        SfxId::RoomCreak,
         SfxId::StarShimmer,
         SfxId::Purchase,
         SfxId::Sell,

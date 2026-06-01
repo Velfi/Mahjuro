@@ -15,14 +15,14 @@
         { "name": "Ashley Alt", "role": "Tile Art (original)" },
         { "name": "Mari Topel", "role": "Tile Art (painted from scratch)" },
         { "name": "Caterina Gerbasi", "role": "Booster Pack Art" },
-        { "name": "Resvan", "role": "Main Menu Model" }
+        { "name": "Resvan", "role": "Main Menu Model" },
+        { "name": "Kenney", "role": "Input Prompt Icons" }
       ]
     },
     {
       "title": "Audio",
       "entries": [
-        { "name": "Bo Tiger", "role": "Music" },
-        { "name": "Kenney", "role": "Various UI and game audio" }
+        { "name": "Bo Tiger", "role": "Music" }
       ]
     },
     {

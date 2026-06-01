@@ -227,10 +227,14 @@ pub(crate) fn sync_music_for_scene(
 pub(crate) fn sync_ambient_for_scene(audio: &mut crate::audio::AudioManager, tag: SceneTag) {
     use crate::audio::AmbientId;
     match tag {
-        SceneTag::MainMenu => {
-            audio.set_ambient_track(Some(AmbientId::MainMenuRain));
+        SceneTag::MainMenu => audio.set_ambient_tracks(&[
+            AmbientId::MainMenuRain,
+            AmbientId::HallwayBulbBuzz,
+        ]),
+        SceneTag::Hallway => {
+            audio.set_ambient_tracks(&[AmbientId::HallwayBulbBuzz]);
         }
-        _ => audio.set_ambient_track(None),
+        _ => audio.set_ambient_tracks(&[]),
     }
 }
 
