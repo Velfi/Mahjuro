@@ -17,6 +17,7 @@ use rand::RngExt;
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -50,6 +51,7 @@ mod chamber_planner;
 mod chamber_sim;
 mod export_schema;
 mod relic_analytics;
+mod relic_order;
 mod reporting;
 mod stats;
 mod stats_derived;
@@ -58,8 +60,9 @@ mod stats_wilson;
 pub use reporting::{
     BotConfig, BotOutputFormat, BotOutputTarget, BotRunOptions, BotStrategy, BotTimeoutDiag,
     DEFAULT_BOT_RUN_TIMEOUT_SECS, HeadlessBotBatch, StrategyFile, append_bot_run_to_progress,
-    export_play_history_html, run_forced_relic_sweep, run_headless, run_headless_aggregate,
-    run_strategy_sweep, run_sweep, seed_progress_from_bot_runs,
+    default_strategies_file, export_play_history_html, read_strategies_file,
+    run_forced_relic_sweep, run_headless, run_headless_aggregate, run_strategy_sweep, run_sweep,
+    seed_progress_from_bot_runs, strategy_config_by_name,
 };
 use stats::clear_payout_breakdown;
 pub use stats::{AggregateStats, RunStats, RunTimeoutSnapshot};
@@ -75,6 +78,7 @@ fn relic_display_name(id: RelicId) -> &'static str {
 
 fn acquire_relic(run: &mut RunState, id: RelicId) {
     run.grant_relic(id);
+    relic_order::bot_optimize_relic_order(run);
 }
 
 /// Headless analogue of `ShopCommand::SellRelic`.
@@ -213,7 +217,7 @@ fn analyze_hand_options(run: &RunState, hand: &[Tile]) -> HandOptionAnalysis {
     }
 
     let mut analysis = HandOptionAnalysis::default();
-    let mut ctx = bot_score_context_base(run, &run.relics, None);
+    let mut ctx = bot_score_context_base(run, &run.relics, None, None);
     let base_set_len = run.structure_sets().len();
     let base_tile_len = run.structure_tiles().len();
     let mut merged_sets = run.structure_sets().to_vec();
@@ -306,13 +310,16 @@ fn bot_score_context_base<'a>(
     run: &'a RunState,
     relics: &'a RelicState,
     yaku_levels_override: Option<&YakuLevels>,
+    counters_override: Option<&BTreeMap<RelicId, i32>>,
 ) -> ScoreContext<'a> {
     let plays_rem_after = run.plays_remaining.saturating_sub(1);
     let plays_used_after = run.plays_max.saturating_sub(plays_rem_after);
     ScoreContext {
         relic: ScoreRelicBundle {
             roster: relics,
-            counters: run.relic_counters.clone(),
+            counters: counters_override
+                .cloned()
+                .unwrap_or_else(|| run.relic_counters.clone()),
         },
         tiles: ScoreTileBundle {
             debuffs: &run.tile_debuffs,
@@ -399,6 +406,7 @@ fn evaluate_play_masks_payoff(
     hand: &[Tile],
     relics_override: Option<&RelicState>,
     yaku_levels_override: Option<&YakuLevels>,
+    counters_override: Option<&BTreeMap<RelicId, i32>>,
     masks: &[u32],
 ) -> Option<(u64, i32, Vec<usize>)> {
     let n = hand.len();
@@ -406,7 +414,7 @@ fn evaluate_play_masks_payoff(
         return None;
     }
     let relics = relics_override.unwrap_or(&run.relics);
-    let mut ctx = bot_score_context_base(run, relics, yaku_levels_override);
+    let mut ctx = bot_score_context_base(run, relics, yaku_levels_override, counters_override);
     let base_set_len = run.structure_sets().len();
     let base_tile_len = run.structure_tiles().len();
     let mut merged_sets = run.structure_sets().to_vec();
@@ -458,7 +466,7 @@ pub(crate) fn evaluate_play_masks(
     yaku_levels_override: Option<&YakuLevels>,
     masks: &[u32],
 ) -> Option<(u64, Vec<usize>)> {
-    evaluate_play_masks_payoff(run, hand, relics_override, yaku_levels_override, masks)
+    evaluate_play_masks_payoff(run, hand, relics_override, yaku_levels_override, None, masks)
         .map(|(score, _, indices)| (score, indices))
 }
 
@@ -475,7 +483,7 @@ pub(crate) fn top_k_plays_in_hand(
     let commit_rules = run.validation_rules_for_structure_commits();
     let masks = enumerate_candidate_play_masks(hand, &commit_rules);
     let relics = &run.relics;
-    let mut ctx = bot_score_context_base(run, relics, None);
+    let mut ctx = bot_score_context_base(run, relics, None, None);
     let base_set_len = run.structure_sets().len();
     let base_tile_len = run.structure_tiles().len();
     let mut merged_sets = run.structure_sets().to_vec();
@@ -549,7 +557,7 @@ fn score_breakdown_for_play_indices(
     if !structure_commit_fits(run, scoring_tiles.len(), &sets) {
         return None;
     }
-    let mut ctx = bot_score_context_base(run, &run.relics, None);
+    let mut ctx = bot_score_context_base(run, &run.relics, None, None);
     let mut merged_sets = run.structure_sets().to_vec();
     let mut merged_tiles = run.structure_tiles().to_vec();
     merged_sets.extend(sets.iter().cloned());
@@ -707,7 +715,7 @@ fn masks_with_positive_score(
         return 0;
     }
     let relics = relics_override.unwrap_or(&run.relics);
-    let mut ctx = bot_score_context_base(run, relics, yaku_levels_override);
+    let mut ctx = bot_score_context_base(run, relics, yaku_levels_override, None);
     let base_set_len = run.structure_sets().len();
     let base_tile_len = run.structure_tiles().len();
     let mut merged_sets = run.structure_sets().to_vec();
@@ -745,17 +753,26 @@ fn best_play_in_hand(
     hand: &[Tile],
     relics_override: Option<&RelicState>,
     yaku_levels_override: Option<&YakuLevels>,
+    counters_override: Option<&BTreeMap<RelicId, i32>>,
 ) -> Option<(u64, Vec<usize>)> {
     let commit_rules = run.validation_rules_for_structure_commits();
     let masks = enumerate_candidate_play_masks(hand, &commit_rules);
-    evaluate_play_masks(run, hand, relics_override, yaku_levels_override, &masks)
+    evaluate_play_masks_payoff(
+        run,
+        hand,
+        relics_override,
+        yaku_levels_override,
+        counters_override,
+        &masks,
+    )
+    .map(|(score, _, indices)| (score, indices))
 }
 
 
 /// Search for the highest-scoring playable selection in the current hand.
 /// Returns `(score, indices)`, or `None` if no positive-scoring play exists.
 pub fn pick_best_play(run: &RunState) -> Option<(u64, Vec<usize>)> {
-    best_play_in_hand(run, run.hand(), None, None)
+    best_play_in_hand(run, run.hand(), None, None, None)
 }
 
 /// Demo [`RunState`] with `tiles` as the current hand (sorted). For benches/tests only.
@@ -864,7 +881,7 @@ fn rollout_post_discard_score(run: &RunState, discard_indices: &[usize]) -> u64 
         .collect();
     new_hand.extend_from_slice(peeked);
     new_hand.sort();
-    best_play_in_hand(run, &new_hand, None, None)
+    best_play_in_hand(run, &new_hand, None, None, None)
         .map(|(s, _)| s)
         .unwrap_or(0)
 }
@@ -1297,7 +1314,7 @@ mod tests {
             merged_sets.extend(sets.iter().cloned());
             let mut merged_tiles = run.structure_tiles().to_vec();
             merged_tiles.extend(scoring_tiles.iter().copied());
-            let mut ctx = super::bot_score_context_base(run, &run.relics, None);
+            let mut ctx = super::bot_score_context_base(run, &run.relics, None, None);
             ctx.structure = Some(super::StructureTriggerMeta {
                 meld_count: merged_sets.len() as u32,
                 inject_chicken_if_no_yaku: true,
@@ -1436,7 +1453,7 @@ mod tests {
             t(Suit::Flower, 2, 11),
         ];
         run.hand_mut().sort();
-        let new_best = best_play_in_hand(&run, run.hand(), None, None);
+        let new_best = best_play_in_hand(&run, run.hand(), None, None, None);
         let old_best = brute_force_best_play_in_hand(&run);
         assert_eq!(new_best, old_best);
     }
@@ -1484,7 +1501,7 @@ mod tests {
             .collect();
         run.hand_mut().sort();
         assert_eq!(
-            best_play_in_hand(&run, run.hand(), None, None),
+            best_play_in_hand(&run, run.hand(), None, None, None),
             brute_force_best_play_in_hand(&run)
         );
     }
@@ -1722,6 +1739,22 @@ mod tests {
         assert_eq!(run.relics.active, vec![RelicId::PairPower]);
         assert!(run.yen > 0);
     }
+
+    #[test]
+    fn no_relic_acquisition_strategy_blocks_relic_shop_offers() {
+        let strategy = BotStrategy {
+            no_relic_acquisition: true,
+            ..BotStrategy::default()
+        };
+        assert!(super::strategy_blocks_shop_offer(
+            &strategy,
+            super::ShopOffer::Relic(RelicId::PairPower)
+        ));
+        assert!(!super::strategy_blocks_shop_offer(
+            &strategy,
+            super::ShopOffer::Zodiac(ZodiacKind::Ox)
+        ));
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1730,6 +1763,10 @@ enum ShopOffer {
     Zodiac(ZodiacKind),
     Talisman(TalismanKind),
     Pack(TilePackKind),
+}
+
+fn strategy_blocks_shop_offer(strategy: &BotStrategy, offer: ShopOffer) -> bool {
+    strategy.no_relic_acquisition && matches!(offer, ShopOffer::Relic(_))
 }
 
 /// Draw a random 14-tile hand from a fresh shuffled wall. Used for relic value
@@ -1775,15 +1812,22 @@ fn sample_random_hand_with_extra_pack(
     hand
 }
 
-fn best_play_score_for_hand(
+pub(crate) fn best_play_score_for_hand(
     run: &RunState,
     hand: &[Tile],
     relics_override: Option<&RelicState>,
     yaku_levels_override: Option<&YakuLevels>,
+    counters_override: Option<&BTreeMap<RelicId, i32>>,
 ) -> u64 {
-    best_play_in_hand(run, hand, relics_override, yaku_levels_override)
-        .map(|(s, _)| s)
-        .unwrap_or(0)
+    best_play_in_hand(
+        run,
+        hand,
+        relics_override,
+        yaku_levels_override,
+        counters_override,
+    )
+    .map(|(s, _)| s)
+    .unwrap_or(0)
 }
 
 /// Best-play value for shop/talisman estimates: blind chips plus yen converted at
@@ -1796,7 +1840,7 @@ fn best_play_shop_value_for_hand(
 ) -> i64 {
     let commit_rules = run.validation_rules_for_structure_commits();
     let masks = enumerate_candidate_play_masks(hand, &commit_rules);
-    evaluate_play_masks_payoff(run, hand, relics_override, yaku_levels_override, &masks)
+    evaluate_play_masks_payoff(run, hand, relics_override, yaku_levels_override, None, &masks)
         .map(|(score, yen, _)| shop_payoff_units(run, score, yen))
         .unwrap_or(0)
 }
@@ -1830,7 +1874,7 @@ impl ShopMarginalBase {
         }
         let baseline: Vec<u64> = hands
             .iter()
-            .map(|h| best_play_score_for_hand(run, h, None, None))
+            .map(|h| best_play_score_for_hand(run, h, None, None, None))
             .collect();
         Self { hands, baseline }
     }
@@ -1885,10 +1929,13 @@ fn relic_marginal_value_with_base(
 
     let mut hypothetical = run.relics.clone();
     hypothetical.active.push(candidate);
+    let (hypothetical, counters) =
+        relic_order::bot_prepare_hypothetical_roster(run, hypothetical, base);
 
     let mut delta_sum: i64 = 0;
     for (h, hand) in base.hands.iter().enumerate() {
-        delta_sum += best_play_score_for_hand(run, hand, Some(&hypothetical), None) as i64
+        delta_sum += best_play_score_for_hand(run, hand, Some(&hypothetical), None, Some(&counters))
+            as i64
             - base.baseline[h] as i64;
     }
     let sample_count = base.hands.len() as i64;
@@ -1907,10 +1954,13 @@ fn relic_swap_marginal_value_with_base(
 
     let mut hypothetical = run.relics.clone();
     hypothetical.active[replace_index] = candidate;
+    let (hypothetical, counters) =
+        relic_order::bot_prepare_hypothetical_roster(run, hypothetical, base);
 
     let mut delta_sum: i64 = 0;
     for (h, hand) in base.hands.iter().enumerate() {
-        delta_sum += best_play_score_for_hand(run, hand, Some(&hypothetical), None) as i64
+        delta_sum += best_play_score_for_hand(run, hand, Some(&hypothetical), None, Some(&counters))
+            as i64
             - base.baseline[h] as i64;
     }
     let sample_count = base.hands.len() as i64;
@@ -1921,13 +1971,19 @@ fn relic_hold_value_with_base(run: &RunState, index: usize, base: &ShopMarginalB
     if index >= run.relics.active.len() {
         return 0;
     }
+    let (with, with_counters) =
+        relic_order::bot_prepare_hypothetical_roster(run, run.relics.clone(), base);
     let mut without = run.relics.clone();
     without.active.remove(index);
+    let (without, without_counters) =
+        relic_order::bot_prepare_hypothetical_roster(run, without, base);
 
     let mut delta_sum: i64 = 0;
     for hand in &base.hands {
-        delta_sum += best_play_score_for_hand(run, hand, Some(&run.relics), None) as i64
-            - best_play_score_for_hand(run, hand, Some(&without), None) as i64;
+        delta_sum += best_play_score_for_hand(run, hand, Some(&with), None, Some(&with_counters))
+            as i64
+            - best_play_score_for_hand(run, hand, Some(&without), None, Some(&without_counters))
+                as i64;
     }
     let sample_count = base.hands.len() as i64;
     if sample_count == 0 {
@@ -2042,7 +2098,7 @@ fn zodiac_marginal_value_with_base(
 
     let mut delta_sum: i64 = 0;
     for (h, hand) in base.hands.iter().enumerate() {
-        delta_sum += best_play_score_for_hand(run, hand, None, Some(&hypothetical)) as i64
+        delta_sum += best_play_score_for_hand(run, hand, None, Some(&hypothetical), None) as i64
             - base.baseline[h] as i64;
     }
     let sample_count = base.hands.len() as i64;
@@ -2061,7 +2117,7 @@ pub(crate) fn transform_talisman_lift_on_hand(
     if hand.is_empty() {
         return None;
     }
-    let base = best_play_score_for_hand(run, hand, None, None) as i64;
+    let base = best_play_score_for_hand(run, hand, None, None, None) as i64;
     match kind {
         // Suit-transforms rewrite selected numbered tiles to a target suit.
         // Convert all numbered tiles NOT already in the target suit and
@@ -2089,7 +2145,7 @@ pub(crate) fn transform_talisman_lift_on_hand(
                 }
             }
             simulated.sort();
-            let after = best_play_score_for_hand(run, &simulated, None, None) as i64;
+            let after = best_play_score_for_hand(run, &simulated, None, None, None) as i64;
             Some(after - base)
         }
         // Wildflower: selected tiles become flowers. Flood the hand and
@@ -2111,7 +2167,7 @@ pub(crate) fn transform_talisman_lift_on_hand(
                 simulated[i].rank = ((n % 4) + 1) as u8;
             }
             simulated.sort();
-            let after = best_play_score_for_hand(run, &simulated, None, None) as i64;
+            let after = best_play_score_for_hand(run, &simulated, None, None, None) as i64;
             Some(after - base)
         }
         // Conformity: every tile becomes a copy of a random hand tile. Since
@@ -2130,7 +2186,7 @@ pub(crate) fn transform_talisman_lift_on_hand(
                     t.rank = template.rank;
                 }
                 simulated.sort();
-                let after = best_play_score_for_hand(run, &simulated, None, None) as i64;
+                let after = best_play_score_for_hand(run, &simulated, None, None, None) as i64;
                 total_delta += after - base;
             }
             Some(total_delta / hand.len() as i64)
@@ -2164,7 +2220,7 @@ pub(crate) fn transform_talisman_lift_on_hand(
                     };
                 }
                 simulated.sort();
-                let after = best_play_score_for_hand(run, &simulated, None, None) as i64;
+                let after = best_play_score_for_hand(run, &simulated, None, None, None) as i64;
                 total_delta += after - base;
             }
             Some(total_delta / HONORS_SAMPLES)
@@ -2283,8 +2339,8 @@ fn pack_marginal_value(run: &RunState, kind: TilePackKind) -> i32 {
             kind,
             crate::core::ordeal::effective_hand_size(run),
         );
-        let base_score = best_play_score_for_hand(run, &base_hand, None, None) as i64;
-        let enriched = best_play_score_for_hand(run, &with, None, None) as i64;
+        let base_score = best_play_score_for_hand(run, &base_hand, None, None, None) as i64;
+        let enriched = best_play_score_for_hand(run, &with, None, None, None) as i64;
         delta_sum += enriched - base_score;
         sample_count += 1;
     }
@@ -2374,6 +2430,7 @@ fn visit_shop(
     deadline: Option<Instant>,
     bus: &mut crate::game::event_bus::EventBus,
 ) -> ShopVisitOutcome {
+    relic_order::bot_optimize_relic_order(run);
     // Consume tag-granted shop modifiers (headless analogue of ShopScene::new).
     let extra_relics: usize = (run.tag_rich_stock as usize * 2).max(run.tag_patron_gift as usize);
     let patron_gifts = run.tag_patron_gift;
@@ -2391,11 +2448,12 @@ fn visit_shop(
         .collect();
     pool.shuffle(&mut rand::rng());
     let mut rng = rand::rng();
+    let min_relic_slots = usize::from(!pool.is_empty());
     let crate::game::run::ShopOfferCounts {
         n_relics,
         n_zodiacs,
         n_talismans,
-    } = roll_shop_offer_counts(extra_relics, KIOSK_RELIC_SLOTS, &mut rng);
+    } = roll_shop_offer_counts(extra_relics, KIOSK_RELIC_SLOTS, min_relic_slots, &mut rng);
 
     let mut zodiac_pool = run.zodiac_spawn_pool();
     zodiac_pool.shuffle(&mut rng);
@@ -2466,6 +2524,9 @@ fn visit_shop(
         // Find the best affordable offer with positive marginal value.
         let mut best: Option<(usize, i32, Option<usize>)> = None;
         for (i, offer) in shop.iter().copied().enumerate() {
+            if strategy_blocks_shop_offer(strategy, offer) {
+                continue;
+            }
             let price = match offer {
                 ShopOffer::Relic(id) => {
                     if free_relics > 0 {
@@ -2664,12 +2725,20 @@ fn visit_shop(
     ShopVisitOutcome::Completed
 }
 
-/// Decide whether to skip the upcoming non-Boss blind. We skip when the bot can
-/// reasonably expect to clear the blind anyway *and* it can't, so the yen reward
-/// from skipping is more valuable than the yen reward from clearing. Specifically:
-/// the bot's projected total score (best play × plays_remaining) must comfortably
-/// exceed the blind's target so we'd be wasting plays clearing a trivially-easy
-/// blind. Boss blinds can never be skipped.
+/// Decide whether to skip the upcoming non-Boss blind.
+///
+/// Strategy-sweep data (200 runs/strategy, full pool) shows `never-skip` (37.5%)
+/// beats `baseline` (35%) beats `always-skip` (33.5%). Clearing a "trivially easy"
+/// blind yields ¥4–5 base + unused-play bonus + interest ≈ ¥7–10, while the
+/// expected skip-tag value is ~¥6.75 (weighted average across the tag pool) —
+/// so clearing is usually better on raw yen AND accumulates per-play relic stacks.
+///
+/// We only skip when BOTH conditions hold:
+/// 1. The skip tag's yen_value beats the estimated clear value (tag is worth it).
+/// 2. The projected score exceeds `skip_threshold_multiplier` × target (we're
+///    comfortably ahead and don't need the plays).
+///
+/// Boss blinds can never be skipped.
 fn should_skip_chamber(run: &RunState, blind: ChamberKind, strategy: &BotStrategy) -> bool {
     if matches!(blind, ChamberKind::Ordeal) {
         return false;
@@ -2679,11 +2748,25 @@ fn should_skip_chamber(run: &RunState, blind: ChamberKind, strategy: &BotStrateg
     if best == 0 {
         return false;
     }
-    // Optimistic projection: assume the bot can repeat its current best play for
-    // every remaining play (ignores discard refresh).
+
+    // Estimate the clear reward: base payout + expected unused plays (half of
+    // starting plays, conservatively) + capped interest.
+    let clear_base = blind.clear_reward();
+    let expected_unused_plays = run.plays_remaining / 2;
+    let interest = (run.yen.max(0) as u32 / 5).min(3);
+    let expected_clear_yen = clear_base + expected_unused_plays + interest;
+
+    // Only skip if the tag is worth more than clearing.
+    let tag_yen = run
+        .tag_for_chamber(blind)
+        .map(|t| t.yen_value())
+        .unwrap_or(0);
+    if tag_yen <= expected_clear_yen {
+        return false;
+    }
+
+    // Also require a comfortable score overshoot so we're not gambling.
     let projected = best.saturating_mul(run.plays_remaining as u64);
-    // Only skip if we'd over-shoot by `skip_threshold_multiplier` × target
-    // (default 2.0). Higher = never skip; lower = skip aggressively.
     let threshold = (target as f32 * strategy.skip_threshold_multiplier).max(0.0) as u64;
     projected >= threshold
 }
@@ -2704,8 +2787,17 @@ fn play_run_with_options(
 ) -> (RunState, RunStats) {
     let strategy = BotStrategy::from_config(&config);
     let forced_relic = config.forced_relic;
+    let meta_depth = config.meta_depth;
     let mode = config.into_mode();
     let mut run = RunState::new(mode);
+    if let Some(depth) = meta_depth {
+        let depth = depth.clamp(1, crate::core::progression::MAX_PROGRESS_LEVEL);
+        let mut progress = crate::core::progression::PlayerProgress::new();
+        progress.level_progress_points =
+            crate::core::progression::PlayerProgress::min_points_for_level(depth);
+        let _ = progress.check_level_up();
+        run.apply_progression(&progress);
+    }
     let mut stats = RunStats::default();
     let mut bus = EventBus::default();
     let log = options.log;

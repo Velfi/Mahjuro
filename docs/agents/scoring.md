@@ -1,4 +1,4 @@
-# Mahjuro scoring (simple version)
+# Mahjuro scoring
 
 ## The loop
 

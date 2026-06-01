@@ -52,6 +52,8 @@ pub(crate) const LOCAL_Z_EXTENT: f32 = 0.734;
 pub const MAIN_MENU_PICK_PLAY: u32 = 240;
 pub const MAIN_MENU_PICK_OPTIONS: u32 = 241;
 pub const MAIN_MENU_PICK_QUIT: u32 = 242;
+/// Main-menu 3D moon (`MoonObject`) — toggles the "quit that" quip bubble.
+pub const MAIN_MENU_PICK_MOON: u32 = 243;
 
 /// Maximum number of physical relic placeholders rendered in one batch. Must
 /// match the size of the `relic_instances` slot pool below; the renderer

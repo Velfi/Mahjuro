@@ -76,7 +76,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 *chips,
                 mult,
                 "Sequence Surge",
-                0.8 * seq_count as f64,
+                1.0 * seq_count as f64,
             );
         }
     }
@@ -84,14 +84,14 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     if has(RelicId::PairPower) {
         let pair_count = sets.iter().filter(|s| s.kind == MeldKind::Pair).count() as i32;
         if pair_count > 0 {
-            push_mult(steps, *chips, mult, "Pair Power", 1.5 * pair_count as f64);
+            push_mult(steps, *chips, mult, "Pair Power", 1.25 * pair_count as f64);
         }
     }
 
     if has(RelicId::KanDrum) {
         let kong_count = sets.iter().filter(|s| s.kind == MeldKind::Kong).count() as i32;
         if kong_count > 0 {
-            push_mult(steps, *chips, mult, "Kan Drum", 6.0 * kong_count as f64);
+            push_mult(steps, *chips, mult, "Kan Drum", 8.0 * kong_count as f64);
         }
     }
 
@@ -119,7 +119,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 *chips,
                 mult,
                 "Triplet Boost",
-                0.35 * trip_count as f64,
+                0.5 * trip_count as f64,
             );
         }
     }
@@ -193,18 +193,19 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .filter(|t| matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu) && t.rank == 7)
             .count();
         if count7 > 0 {
-            push_mult(steps, *chips, mult, "Lucky Seven", 3.0 * count7 as f64);
+            let bonus = (1.5 * count7 as f64).min(9.0);
+            push_mult(steps, *chips, mult, "Lucky Seven", bonus);
         }
     }
 
     for _ in 0..count(RelicId::PaperLantern) {
-        push_mult(steps, *chips, mult, "Paper Lantern", 6.0);
+        push_mult(steps, *chips, mult, "Paper Lantern", 4.0);
     }
 
     if has(RelicId::MultiplierMaster) {
         let n = ctx.relic.roster.len() as f64;
         if n > 0.0 {
-            push_mult(steps, *chips, mult, "Multiplier Master", n * 2.0);
+            push_mult(steps, *chips, mult, "Multiplier Master", n * 1.5);
         }
     }
 
@@ -261,7 +262,8 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         && sets.len() == 1
         && sets[0].kind != MeldKind::Single
     {
-        push_mult(steps, *chips, mult, "Minimalist", 6.0);
+        push_chips(steps, chips, *mult, "Minimalist", 120);
+        push_mult(steps, *chips, mult, "Minimalist", 2.0);
     }
 
     if has(RelicId::TurtleShell) && ctx.economy.yen > 0 {
@@ -336,14 +338,16 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .copied()
             .unwrap_or(0);
         if stacks > 0 {
-            push_mult(steps, *chips, mult, "Temperance", stacks as f64 / 8.0);
+            let bonus = (stacks as f64 / 8.0).min(10.0);
+            push_mult(steps, *chips, mult, "Temperance", bonus);
         }
     }
 
     if has(RelicId::Chastity) && !tiles.is_empty() {
         let all_unenhanced = tiles.iter().all(|t| t.enhancement.is_none());
         if all_unenhanced {
-            push_mult(steps, *chips, mult, "Chastity", 3.0);
+            push_chips(steps, chips, *mult, "Chastity", 80);
+            push_mult(steps, *chips, mult, "Chastity", 1.0);
         }
     }
 
@@ -396,7 +400,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .map(|id| crate::core::relic::relic_sell_price_live(id, &ctx.relic.counters))
             .sum();
         if bonus > 0 {
-            push_mult(steps, *chips, mult, "Curio Cabinet", bonus as f64);
+            push_mult(steps, *chips, mult, "Curio Cabinet", (bonus as f64).min(15.0));
         }
     }
 
@@ -408,7 +412,13 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .copied()
             .unwrap_or(0);
         if blooms > 0 {
-            push_mult(steps, *chips, mult, "Lotus Bloom", 0.75 * blooms as f64);
+            push_mult(
+                steps,
+                *chips,
+                mult,
+                "Lotus Bloom",
+                (0.75 * blooms as f64).min(12.0),
+            );
         }
     }
 
@@ -427,7 +437,13 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .max(0);
         let excess = overflow_extras + extra_added;
         if excess > 0 {
-            push_mult(steps, *chips, mult, "Wall Weaver", 0.35 * excess as f64);
+            push_mult(
+                steps,
+                *chips,
+                mult,
+                "Wall Weaver",
+                (0.35 * excess as f64).min(8.0),
+            );
         }
     }
 
@@ -440,7 +456,21 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .unwrap_or(0)
             .max(0);
         if bosses > 0 {
-            push_mult(steps, *chips, mult, "Heirloom", bosses as f64);
+            push_mult(steps, *chips, mult, "Heirloom", (bosses as f64).min(12.0));
+        }
+    }
+
+    if has(RelicId::Kindling) {
+        let total = ctx
+            .relic
+            .counters
+            .get(&RelicId::Kindling)
+            .copied()
+            .unwrap_or(0)
+            .max(0);
+        let bonus = crate::core::relic::kindling_mult_bonus(total);
+        if bonus > 0.0 {
+            push_mult(steps, *chips, mult, "Kindling", bonus);
         }
     }
 
@@ -468,14 +498,14 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         }
         let distinct = seen.iter().filter(|b| **b).count();
         if distinct > 0 {
-            push_mult(steps, *chips, mult, "Tourist", 4.0 * distinct as f64);
+            push_mult(steps, *chips, mult, "Tourist", 2.0 * distinct as f64);
         }
     }
 
     if has(RelicId::CrackedTile) {
         use rand::RngExt;
         let mut rng = rand::rng();
-        let bonus: f64 = rng.random_range(0.0..=12.0);
+        let bonus: f64 = rng.random_range(1.0..=6.0);
         if bonus > 0.0 {
             push_mult(
                 steps,
@@ -495,7 +525,13 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .copied()
             .unwrap_or(0);
         if perm_mult > 0 {
-            push_mult(steps, *chips, mult, "Hungry Ghost", perm_mult as f64 / 10.0);
+            push_mult(
+                steps,
+                *chips,
+                mult,
+                "Hungry Ghost",
+                (perm_mult as f64 / 10.0).min(20.0),
+            );
         }
     }
 
@@ -521,43 +557,41 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                     .filter_map(|id| tile_by_id(tiles, *id))
                     .all(|t| matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu));
             if all_same {
-                let delta = *mult * 2.5;
-                push_mult(steps, *chips, mult, "Way of Purity", delta);
+                push_mult(steps, *chips, mult, "Way of Purity", 6.0);
             }
         }
     }
 
-    if has(RelicId::WayOfPairs) && !sets.is_empty() && sets.iter().all(|s| s.kind == MeldKind::Pair)
-    {
-        let delta = *mult * 1.5;
-        push_mult(steps, *chips, mult, "Way of Pairs", delta);
+    if has(RelicId::WayOfPairs) {
+        let pair_count = sets.iter().filter(|s| s.kind == MeldKind::Pair).count();
+        if pair_count >= 3 {
+            push_mult(steps, *chips, mult, "Way of Pairs", 6.0);
+        }
     }
 
-    if has(RelicId::WayOfTriplets)
-        && !sets.is_empty()
-        && sets
+    if has(RelicId::WayOfTriplets) {
+        let triplet_like = sets
             .iter()
-            .all(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
-    {
-        let delta = *mult * 2.5;
-        push_mult(steps, *chips, mult, "Way of Triplets", delta);
+            .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
+            .count();
+        if triplet_like >= 2 {
+            push_mult(steps, *chips, mult, "Way of Triplets", 7.0);
+        }
     }
 
-    if has(RelicId::WayOfSequences)
-        && !sets.is_empty()
-        && sets.iter().all(|s| s.kind == MeldKind::Sequence)
-    {
-        let delta = *mult * 1.5;
-        push_mult(steps, *chips, mult, "Way of Sequences", delta);
+    if has(RelicId::WayOfSequences) {
+        let seq_count = sets.iter().filter(|s| s.kind == MeldKind::Sequence).count();
+        if seq_count >= 2 {
+            push_mult(steps, *chips, mult, "Way of Sequences", 5.0);
+        }
     }
 
     for _ in 0..count(RelicId::StoneLantern) {
-        let delta = *mult * 2.5;
+        let delta = *mult * 2.0;
         push_mult(steps, *chips, mult, "Stone Lantern", delta);
     }
 
     for _ in 0..count(RelicId::GlassCannon) {
-        let delta = *mult * 6.0;
-        push_mult(steps, *chips, mult, "Glass Cannon", delta);
+        push_mult(steps, *chips, mult, "Glass Cannon", 12.0);
     }
 }

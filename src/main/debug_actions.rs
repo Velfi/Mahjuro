@@ -117,18 +117,6 @@ impl App {
                 self.debug.show_fps = !self.debug.show_fps;
                 log::debug!("Show FPS: {}", self.debug.show_fps);
             }
-            DebugAction::ToggleMainMenuPrideRainbow => {
-                self.debug.main_menu_pride_rainbow_debug =
-                    !self.debug.main_menu_pride_rainbow_debug;
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.main_menu_pride_rainbow_debug =
-                        self.debug.main_menu_pride_rainbow_debug;
-                }
-                log::debug!(
-                    "Main menu pride rainbow debug: {}",
-                    self.debug.main_menu_pride_rainbow_debug
-                );
-            }
             DebugAction::OpenDebugVisibility => {
                 if self.debug.visibility_overlay.is_some() {
                     self.debug.visibility_overlay = None;
@@ -163,12 +151,15 @@ impl App {
                     let tuning = self
                         .renderer
                         .as_ref()
-                        .map(|r| r.rain_tuning)
-                        .unwrap_or_else(crate::render::rain_tuning::RainTuning::load);
+                        .map(|r| r.main_menu_effects)
+                        .unwrap_or_else(crate::render::main_menu_effects_tuning::MainMenuEffectsTuning::load);
                     self.debug.rain_debug_overlay = Some(
-                        crate::render::rain_debug_overlay::RainDebugOverlay::new(tuning),
+                        crate::render::main_menu_effects_debug_overlay::MainMenuEffectsDebugOverlay::new(
+                            tuning,
+                            self.debug.main_menu_pride_rainbow_debug,
+                        ),
                     );
-                    log::debug!("Opened rain debug overlay");
+                    log::debug!("Opened main menu effects debug overlay");
                 }
             }
             DebugAction::OpenSceneLookDebug => {

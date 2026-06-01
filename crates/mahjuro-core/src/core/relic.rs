@@ -60,6 +60,7 @@ pub enum RelicId {
     JadeSerpent,
     JokerTile,
     KanDrum,
+    Kindling,
     Kindness,
     Kintsugi,
     KongCollector,
@@ -232,6 +233,7 @@ impl RelicId {
             RelicId::JadeAbacus => "jade_abacus.png",
             RelicId::NestEgg => "nest_egg.png",
             RelicId::Patience => "patience.png",
+            RelicId::Kindling => "kindling.png",
             RelicId::Kindness => "kindness.png",
             RelicId::Temperance => "temperance.png",
             RelicId::Chastity => "chastity.png",
@@ -616,7 +618,10 @@ pub fn relic_description_live(
         }
         RelicId::Temperance => {
             let stacks = counters.get(&RelicId::Temperance).copied().unwrap_or(0);
-            format!("{base} [+{:.1} permanent mult]", stacks as f64 / 10.0)
+            format!(
+                "{base} [+{:.1} permanent mult, cap +10.0]",
+                (stacks as f64 / 8.0).min(10.0)
+            )
         }
         RelicId::Obsession => {
             let rounds = counters.get(&RelicId::Obsession).copied().unwrap_or(0);
@@ -632,7 +637,10 @@ pub fn relic_description_live(
         }
         RelicId::HungryGhost => {
             let perm = counters.get(&RelicId::HungryGhost).copied().unwrap_or(0);
-            format!("{base} [+{:.1} mult stored]", perm as f64 / 10.0)
+            format!(
+                "{base} [+{:.1} mult stored, cap +20.0]",
+                (perm as f64 / 10.0).min(20.0)
+            )
         }
         RelicId::NestEgg => {
             let rounds = counters.get(&RelicId::NestEgg).copied().unwrap_or(0);
@@ -640,6 +648,15 @@ pub fn relic_description_live(
             format!(
                 "{base} [held {rounds} round{}, sell ¥{sell}]",
                 if rounds == 1 { "" } else { "s" }
+            )
+        }
+        RelicId::Kindling => {
+            let total = counters.get(&RelicId::Kindling).copied().unwrap_or(0).max(0);
+            format!(
+                "{base} [{total} cash-in{}, +{:.1} mult (cap +{:.1})]",
+                if total == 1 { "" } else { "s" },
+                kindling_mult_bonus(total),
+                KINDLING_MULT_CAP
             )
         }
         RelicId::Snowball => {
@@ -662,14 +679,15 @@ pub fn relic_description_live(
                 .unwrap_or(0)
                 .max(0);
             format!(
-                "{base} [{blinds} blind{}, +{blinds} mult]",
+                "{base} [{blinds} blind{}, +{:.1} mult (cap +12.0)]",
                 if blinds == 1 { "" } else { "s" }
+                ,(blinds as f64).min(12.0)
             )
         }
         RelicId::GoldenEngine => {
             let held = gold.max(0);
             let bonus = golden_engine_mult_bonus(gold);
-            format!("{base} [{held}g held, +{bonus} mult]")
+            format!("{base} [{held}g held, +{bonus} mult (cap +12)]")
         }
         RelicId::BeggarsCup => {
             let ante = wing.unwrap_or(1).max(1);
@@ -690,7 +708,7 @@ pub fn relic_description_live(
             };
             let excess = overflow + added;
             if excess > 0 {
-                format!("{base} [+{:.1} mult]", 0.2 * excess as f64)
+                format!("{base} [+{:.1} mult (cap +8.0)]", (0.35 * excess as f64).min(8.0))
             } else {
                 base.to_string()
             }
@@ -704,7 +722,7 @@ pub fn relic_description_live(
                     .filter(|&rid| rid != RelicId::CurioCabinet)
                     .map(|rid| relic_sell_price_live(rid, counters))
                     .sum();
-                format!("{base} [+{bonus} mult]")
+                format!("{base} [+{:.1} mult (cap +15.0)]", (bonus as f64).min(15.0))
             } else {
                 base.to_string()
             }
@@ -724,7 +742,7 @@ pub fn relic_description_live(
         RelicId::MultiplierMaster => {
             if let Some((relics, _)) = inventory_focus {
                 let n = relics.len();
-                format!("{base} [+{} mult]", n * 2)
+                format!("{base} [+{:.1} mult]", n as f64 * 1.5)
             } else {
                 base.to_string()
             }
@@ -743,9 +761,9 @@ pub fn relic_description_live(
         RelicId::LotusBloom => {
             let blooms = counters.get(&RelicId::LotusBloom).copied().unwrap_or(0);
             format!(
-                "{base} [{blooms} flower{}, +{:.1} mult]",
+                "{base} [{blooms} flower{}, +{:.1} mult (cap +12.0)]",
                 if blooms == 1 { "" } else { "s" },
-                0.5 * blooms as f64
+                (0.75 * blooms as f64).min(12.0)
             )
         }
         RelicId::MirrorTile => {
@@ -1047,6 +1065,7 @@ fn relic_scoring_copy_dup_is_incompatible(target: RelicId) -> bool {
             | RelicId::JadeAbacus
             | RelicId::NestEgg
             | RelicId::Patience
+            | RelicId::Kindling
             | RelicId::Kindness
             | RelicId::Diligence
             | RelicId::Temperance
@@ -1108,6 +1127,13 @@ pub struct ScoreEconomyBundle {
     pub total_score: u64,
 }
 
+/// Cash-ins counted toward Kindling across the run (stack cap).
+pub const KINDLING_STACK_CAP: i32 = 30;
+/// Mult added per prior cash-in (run-total) on Kindling.
+pub const KINDLING_MULT_PER_CASHIN: f64 = 0.3;
+/// Maximum mult Kindling can add on a cash-in.
+pub const KINDLING_MULT_CAP: f64 = 9.0;
+
 /// Cleared blinds counted toward Snowball (cap).
 pub const SNOWBALL_STACK_CAP: i32 = 15;
 /// Chips added per scored hand for each blind clear counted on Snowball (before mult).
@@ -1138,7 +1164,17 @@ pub const TILE_POLISHER_CHIPS_PER_TILE: i32 = 5;
 /// Mult bonus from Golden Engine (+1 per 3 gold held at score time).
 #[inline]
 pub fn golden_engine_mult_bonus(gold: i32) -> i32 {
-    (gold.max(0) as f64 / 3.0).floor() as i32
+    ((gold.max(0) as f64 / 3.0).floor() as i32).min(12)
+}
+
+/// Mult from Kindling for one scored hand (`total_cash_ins` = run-total cash-ins while owned).
+#[inline]
+pub fn kindling_mult_bonus(total_cash_ins: i32) -> f64 {
+    if total_cash_ins <= 0 {
+        return 0.0;
+    }
+    let s = total_cash_ins.clamp(0, KINDLING_STACK_CAP) as f64;
+    (s * KINDLING_MULT_PER_CASHIN).min(KINDLING_MULT_CAP)
 }
 
 /// Chips from Snowball for one scored hand (`stacks` = blind clears while owned, capped).
@@ -1168,9 +1204,9 @@ pub struct ScoreContext<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        RelicId, RelicState, SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP,
-        apply_merchants_eye_discount, golden_engine_mult_bonus, relic_buy_price, relic_shop_price,
-        snowball_score_chips,
+        RelicId, RelicState, KINDLING_MULT_CAP, KINDLING_STACK_CAP, SNOWBALL_CHIPS_PER_CLEAR,
+        SNOWBALL_STACK_CAP, apply_merchants_eye_discount, golden_engine_mult_bonus,
+        kindling_mult_bonus, relic_buy_price, relic_shop_price, snowball_score_chips,
     };
 
     #[test]
@@ -1190,6 +1226,14 @@ mod tests {
             snowball_score_chips(SNOWBALL_STACK_CAP + 50),
             SNOWBALL_STACK_CAP * SNOWBALL_CHIPS_PER_CLEAR
         );
+    }
+
+    #[test]
+    fn kindling_mult_scales_per_cashin_and_caps() {
+        assert_eq!(kindling_mult_bonus(0), 0.0);
+        assert_eq!(kindling_mult_bonus(2), 0.6);
+        assert_eq!(kindling_mult_bonus(KINDLING_STACK_CAP), KINDLING_MULT_CAP);
+        assert_eq!(kindling_mult_bonus(KINDLING_STACK_CAP + 10), KINDLING_MULT_CAP);
     }
 
     #[test]
@@ -1306,6 +1350,7 @@ mod tests {
                     | RelicId::JadeAbacus
                     | RelicId::NestEgg
                     | RelicId::Patience
+                    | RelicId::Kindling
                     | RelicId::Kindness
                     | RelicId::Temperance
                     | RelicId::Chastity
@@ -1410,6 +1455,7 @@ mod tests {
                 RelicId::JadeAbacus,
                 RelicId::NestEgg,
                 RelicId::Patience,
+                RelicId::Kindling,
                 RelicId::Kindness,
                 RelicId::Temperance,
                 RelicId::Chastity,

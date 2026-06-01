@@ -2,7 +2,7 @@
   {
     "id": "triplet_boost",
     "name": "Triplet Boost",
-    "description": "Triplets/Kongs: +60 chips and +0.35 mult",
+    "description": "Triplets/Kongs: +50 chips and +0.5 mult",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -15,7 +15,7 @@
   {
     "id": "sequence_surge",
     "name": "Sequence Surge",
-    "description": "Sequences score an additional +40 chips and +0.8 mult",
+    "description": "Sequences score an additional +40 chips and +1.0 mult",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -28,7 +28,7 @@
   {
     "id": "pair_power",
     "name": "Pair Power",
-    "description": "Pairs score an additional +45 chips and +1.5 mult",
+    "description": "Pairs score an additional +45 chips and +1.25 mult",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -78,6 +78,19 @@
     ]
   },
   {
+    "id": "kindling",
+    "name": "Kindling",
+    "description": "Cashing in a structure: this relic accumulates +0.3 mult (max +9 mult)",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Every hand thrown feeds the fire. By the end, it roars.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
     "id": "white_dragons_hush",
     "name": "White Dragon's Hush",
     "description": "White dragon pairs score an additional +6 mult and grant a random Zodiac",
@@ -119,7 +132,7 @@
   {
     "id": "quick_draw",
     "name": "Quick Draw",
-    "description": "Draw +1 tile after each play",
+    "description": "Draw +2 tiles after each play",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -145,7 +158,7 @@
   {
     "id": "multiplier_master",
     "name": "Multiplier Master",
-    "description": "+2 mult per relic held",
+    "description": "+1.5 mult per relic held",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -207,7 +220,7 @@
   {
     "id": "kan_drum",
     "name": "Kan Drum",
-    "description": "Cashing in a structure with at least one kong: +1 play and +6 mult",
+    "description": "Cashing in a structure with at least one kong: +1 play and +8 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -439,7 +452,7 @@
   {
     "id": "i_got_a_guy",
     "name": "I Got A Guy",
-    "description": "The next 3 shop restocks a free",
+    "description": "The next 4 shop restocks are free",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -470,7 +483,7 @@
   {
     "id": "lucky_seven",
     "name": "Lucky Seven",
-    "description": "Rank-7 tiles in scored sets: +3 mult each",
+    "description": "Rank-7 tiles in scored sets: +1.5 mult each (max +9 mult)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -496,7 +509,7 @@
   {
     "id": "minimalist",
     "name": "Minimalist",
-    "description": "Cashing in a one-meld structure: +6 mult",
+    "description": "Cashing in a one-meld structure: +120 chips and +2 mult",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -540,7 +553,7 @@
   {
     "id": "golden_engine",
     "name": "Golden Engine",
-    "description": "+1 mult per 3 yen held",
+    "description": "+1 mult per 3 yen held (max +12 mult)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -604,8 +617,8 @@
   {
     "id": "glass_cannon",
     "name": "Glass Cannon",
-    "description": "Cashing in a structure: ×7 mult; destroyed after activation",
-    "rarity": "common",
+    "description": "Cashing in a structure: +12 mult; destroyed after activation",
+    "rarity": "rare",
     "flavor_spans": [
       {
         "text": "A quiet rumor follows Glass Cannon wherever it rests.",
@@ -643,7 +656,7 @@
   {
     "id": "paper_lantern",
     "name": "Paper Lantern",
-    "description": "+6 mult; 1-in-5 chance to be destroyed at round end",
+    "description": "+4 mult; 1-in-5 chance to be destroyed at round end",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -656,7 +669,7 @@
   {
     "id": "stone_lantern",
     "name": "Stone Lantern",
-    "description": "×3.5 final mult; 1-in-1000 chance to be destroyed at round end",
+    "description": "×3.0 final mult; 1-in-1000 chance to be destroyed at round end",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -692,7 +705,7 @@
   {
     "id": "way_of_purity",
     "name": "Way of Purity",
-    "description": "Structure is all one suit: ×3.5 mult",
+    "description": "Structure is all one suit: +6 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1031,7 +1044,7 @@
   {
     "id": "temperance",
     "name": "Temperance",
-    "description": "Chamber cleared: this relic accumulates +0.5 mult per unused play",
+    "description": "Chamber cleared: this relic accumulates +0.5 mult per unused play (max +10 mult)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1044,7 +1057,7 @@
   {
     "id": "chastity",
     "name": "Chastity",
-    "description": "Cashing in a structure: +3 mult if no scored tile has an enhancement",
+    "description": "Cashing in a structure: +80 chips and +1 mult if no scored tile has an enhancement",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1083,7 +1096,7 @@
   {
     "id": "way_of_pairs",
     "name": "Way of Pairs",
-    "description": "Cashing in a structure with a pair meld: ×2.5 mult",
+    "description": "Cashing in a structure with 3+ pair melds: +6 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1096,7 +1109,7 @@
   {
     "id": "way_of_triplets",
     "name": "Way of Triplets",
-    "description": "Cashing in a structure with a triplet/kong meld: ×3.5 mult",
+    "description": "Cashing in a structure with 2+ triplets/kongs: +7 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1109,7 +1122,7 @@
   {
     "id": "way_of_sequences",
     "name": "Way of Sequences",
-    "description": "Cashing in a structure with a sequence meld: ×2.5 mult",
+    "description": "Cashing in a structure with 2+ sequences: +5 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1135,7 +1148,7 @@
   {
     "id": "cracked_tile",
     "name": "Cracked Tile",
-    "description": "Cashing in a structure: random +0 to +12 mult",
+    "description": "Cashing in a structure: random +1 to +6 mult",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1161,7 +1174,7 @@
   {
     "id": "hungry_ghost",
     "name": "Hungry Ghost",
-    "description": "Round start: destroy the next relic in inventory. If a relic was destroyed this way, this relic accumulates +mult equal to the destroyed relic's sell value",
+    "description": "Round start: destroy the next relic in inventory. If a relic was destroyed this way, this relic accumulates +mult equal to the destroyed relic's sell value (max +20 mult)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1192,7 +1205,7 @@
   {
     "id": "curio_cabinet",
     "name": "Curio Cabinet",
-    "description": "+mult equal to the summed sell value of your other relics",
+    "description": "+mult equal to the summed sell value of your other relics (max +15 mult)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1205,7 +1218,7 @@
   {
     "id": "lotus_bloom",
     "name": "Lotus Bloom",
-    "description": "Drawing or scoring a flower tile: this relic accumulates +0.75 mult",
+    "description": "Drawing or scoring a flower tile: this relic accumulates +0.75 mult (max +12 mult)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1218,7 +1231,7 @@
   {
     "id": "wall_weaver",
     "name": "Wall Weaver",
-    "description": "+0.35 mult per tile in the wall beyond 140",
+    "description": "+0.35 mult per tile in the wall beyond 140 (max +8 mult)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1306,7 +1319,7 @@
   {
     "id": "heirloom",
     "name": "Heirloom",
-    "description": "Chamber cleared: this relic accumulates +1 mult.",
+    "description": "Chamber cleared: this relic accumulates +1 mult (max +12 mult).",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1329,7 +1342,7 @@
   {
     "id": "tourist",
     "name": "Tourist",
-    "description": "Cashing in a structure: +4 mult per distinct suit among tiles in the structure",
+    "description": "Cashing in a structure: +2 mult per distinct suit among tiles in the structure",
     "rarity": "uncommon",
     "flavor_spans": [
       {

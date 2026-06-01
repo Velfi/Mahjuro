@@ -145,7 +145,7 @@ impl RunState {
         let effective = ordeal::effective_hand_size(self);
         let draw_target = if copy_eff.has(&self.relics, RelicId::QuickDraw) {
             self.push_relic_activation(RelicId::QuickDraw);
-            effective + 1
+            effective + 2
         } else {
             effective
         };
@@ -460,6 +460,11 @@ impl RunState {
             } else {
                 self.relic_counters.insert(RelicId::TeaCeremony, phase + 1);
             }
+        }
+
+        if breakdown_total > 0 && self.relics.has(RelicId::Kindling) {
+            let e = self.relic_counters.entry(RelicId::Kindling).or_insert(0);
+            *e = (*e + 1).min(crate::core::relic::KINDLING_STACK_CAP);
         }
 
         if destroy_glass_cannon {

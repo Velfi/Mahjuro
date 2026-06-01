@@ -1,0 +1,16 @@
+{
+  "text": "loading...",
+  "font_px": 48,
+  "spread_px": 8.0,
+  "atlas_w": 202,
+  "atlas_h": 94,
+  "text_w": 154,
+  "text_h": 46,
+  "pad": 24,
+  "color_stone": [
+    0.716,
+    0.683,
+    0.645,
+    1.0
+  ]
+}

@@ -1,8 +1,4 @@
 //! Moths fluttering back and forth around the main-menu door light (`light_doorway` in `main_menu.glb`).
-//!
-//! Currently parked: the main-menu scene no longer spawns these. Kept available
-//! for re-enabling without restoring code.
-#![allow(dead_code)]
 
 use crate::render::draw_cmd::{Object3d, Object3dKind, UiFrame};
 use crate::render::table_transform::mat4_to_euler_xyz_rad;
@@ -32,9 +28,13 @@ pub fn initial_bug_phases() -> [f32; BUG_COUNT] {
     phases
 }
 
-pub fn advance_bug_phases(bug_phases: &mut [f32; BUG_COUNT], dt: f32) {
+pub fn advance_bug_phases(
+    bug_phases: &mut [f32; BUG_COUNT],
+    dt: f32,
+    tuning: &crate::render::main_menu_moth_tuning::MainMenuMothTuning,
+) {
     for (i, phase) in bug_phases.iter_mut().enumerate() {
-        *phase = (*phase + BUG_PARAMS[i].2 * dt) % std::f32::consts::TAU;
+        *phase = (*phase + BUG_PARAMS[i].2 * tuning.orbit_speed_mul * dt) % std::f32::consts::TAU;
     }
 }
 
@@ -48,27 +48,28 @@ pub fn push_moths_around_lamp(
     lamp_h: f32,
     t_now: f32,
     bug_phases: &[f32; BUG_COUNT],
+    tuning: &crate::render::main_menu_moth_tuning::MainMenuMothTuning,
 ) {
     let lp = lamp_center;
     let bulb_wz = lp[2];
     let bulb_wx = lp[0] - w * 0.5;
     let bulb_wy = h * 0.5 - lp[1];
-    let bug_body_len = h * 0.003;
-    let flap_hz: f32 = 25.0;
-    let flap_amp: f32 = 0.82;
+    let bug_body_len = h * 0.003 * tuning.body_size_mul;
+    let flap_hz = tuning.flap_hz;
+    let flap_amp = tuning.flap_amp;
 
     let sample_bug = |i: usize, t_back: f32| -> ([f32; 3], [f32; 3], Mat4, f32) {
         let (r_frac, z_frac, speed, size_frac) = BUG_PARAMS[i];
         let fi = i as f32;
         let t = t_now - t_back;
-        let phase = bug_phases[i] - speed * t_back;
+        let phase = bug_phases[i] - speed * tuning.orbit_speed_mul * t_back;
 
         let bob_freq = 2.3 + fi * 0.71;
         let drift_freq = 1.1 + fi * 0.43;
         let pitch_freq = 3.7 + fi * 0.57;
 
-        let bob = (t * bob_freq + fi * 1.3).sin() * lamp_h * 0.15;
-        let r_nom = lamp_w * r_frac;
+        let bob = (t * bob_freq + fi * 1.3).sin() * lamp_h * 0.15 * tuning.bob_amp_mul;
+        let r_nom = lamp_w * r_frac * tuning.orbit_radius_mul;
         let r_drift = (t * drift_freq + fi * 2.1).sin() * r_nom * 0.14;
         let bug_wz = bulb_wz + lamp_h * z_frac + bob;
 

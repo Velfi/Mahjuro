@@ -1,0 +1,45 @@
+{
+  "pride_lines": [
+    { "text": "Happy Pride!", "weight": 1 },
+    { "text": "the moon is gay. the tides are bi", "weight": 1 },
+    { "text": "shine on. I'll be here.", "weight": 1 },
+    { "text": "every phase is valid", "weight": 1 },
+    { "text": "proud of you. from orbit", "weight": 1 }
+  ],
+  "category_weights": {
+    "lunar": 3,
+    "mahjong": 4,
+    "ambient": 2,
+    "rare": 1
+  },
+  "lines": [
+    { "text": "quit that", "category": "rare", "weight": 0.5 },
+    { "text": "I'm waxing philosophical", "category": "lunar", "weight": 1 },
+    { "text": "nice night for tiles", "category": "ambient", "weight": 1 },
+    { "text": "shh. the moths are listening", "category": "ambient", "weight": 1 },
+    { "text": "you again?", "category": "lunar", "weight": 1 },
+    { "text": "I only judge tides, not hands", "category": "lunar", "weight": 1 },
+    { "text": "no yaku here sonny jim", "category": "lunar", "weight": 1 },
+    { "text": "the stars owe me money", "category": "rare", "weight": 0.4 },
+    { "text": "try discarding your worries", "category": "mahjong", "weight": 1 },
+    { "text": "full moon energy. don't waste it.", "category": "lunar", "weight": 1 },
+    { "text": "honor your sleep schedule", "category": "hub", "weight": 1 },
+    { "text": "I am literally just a rock", "category": "lunar", "weight": 1 },
+    { "text": "click the New Game button if you're lost", "category": "hub", "weight": 1 },
+    { "text": "I'm not a button", "category": "lunar", "weight": 1 },
+    { "text": "wax on. wax off. same moon.", "category": "lunar", "weight": 1 },
+    { "text": "my phase is none of your business", "category": "lunar", "weight": 1 },
+    { "text": "tides are just the ocean playing and discarding", "category": "lunar", "weight": 1 },
+    { "text": "what's on the other side of the wall?", "category": "mahjong", "weight": 1 },
+    { "text": "You call it luck. I call it gravity.", "category": "lunar", "weight": 1 },
+    { "text": "full-hand is a social construct", "category": "lunar", "weight": 1 },
+    { "text": "it sures rains a lot round these parts", "category": "ambient", "weight": 1 },
+    { "text": "the doorway light is doing its best", "category": "ambient", "weight": 1 },
+    { "text": "someone fed the moths again", "category": "ambient", "weight": 1 },
+    { "text": "I've been watching the whole time", "category": "rare", "weight": 0.4 },
+    { "text": "proud of you. quietly. from orbit", "category": "rare", "weight": 0.4 },
+    { "text": "the river is downstream of your choices", "category": "rare", "weight": 0.4 },
+    { "text": "THE MOON IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.", "category": "rare", "weight": 0.4 },
+    { "text": "THANK YOU FOR PLAYING MAHJURO", "category": "rare", "weight": 0.3 }
+  ]
+}

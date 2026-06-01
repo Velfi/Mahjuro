@@ -115,6 +115,7 @@ impl SceneBehavior for TutorialSummaryScene {
         };
         let bullets = [
             "Bank melds to your structure to form yaku. Cash in your structure to score (chips × mult).",
+            "Discarding tiles is essential to building large structures and scoring big.",
             "Full Hand and Chiitoitsu are good yaku to memorize first.",
             "Any time during a run: open the Guide book on the table for a review of mechanics, melds, and yaku.",
             "The more you play, the more the house will reveal to you. How far will you go?",

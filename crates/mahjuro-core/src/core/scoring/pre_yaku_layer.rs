@@ -59,7 +59,7 @@ pub(crate) fn apply_pre_yaku_scoring(
     for s in sets {
         match s.kind {
             MeldKind::Triplet | MeldKind::Kong if has_triplet_boost => {
-                push_chips(steps, chips, *mult, "Triplet Boost", 60);
+                push_chips(steps, chips, *mult, "Triplet Boost", 50);
             }
             MeldKind::Sequence if has_sequence_surge => {
                 push_chips(steps, chips, *mult, "Sequence Surge", 40);
@@ -350,17 +350,16 @@ pub(crate) fn apply_pre_yaku_scoring(
 
     {
         use crate::core::tile::TileEnhancement;
-        /// Flat chips per scored meld that includes ≥1 Pearl-stamped tile.
+        /// Flat chips per scored meld that includes >=1 Pearl-stamped tile.
         const PEARL_CHIPS_PER_MELD: i32 = 100;
-        /// Additive mult bonus per scored meld with Polychrome (1.0 + 0.25 = ×1.25).
-        const POLYCHROME_MULT_PER_MELD: f64 = 0.25;
+        /// Additive mult bonus per scored Polychrome-stamped tile.
+        const POLYCHROME_MULT_PER_TILE: f64 = 0.25;
         let mut pearl_melds = 0i32;
         let mut gilded_yen = 0i32;
-        let mut polychrome_melds = 0i32;
+        let mut polychrome_tiles = 0i32;
         for s in sets {
             let mut meld_has_pearl = false;
             let mut meld_has_gilded = false;
-            let mut meld_has_polychrome = false;
             for &tid in &s.tile_ids {
                 let Some(t) = tile_by_id(tiles, tid) else {
                     continue;
@@ -372,7 +371,7 @@ pub(crate) fn apply_pre_yaku_scoring(
                 match enh {
                     TileEnhancement::Pearl => meld_has_pearl = true,
                     TileEnhancement::Gilded => meld_has_gilded = true,
-                    TileEnhancement::Polychrome => meld_has_polychrome = true,
+                    TileEnhancement::Polychrome => polychrome_tiles += 1,
                 }
             }
             if meld_has_pearl {
@@ -380,9 +379,6 @@ pub(crate) fn apply_pre_yaku_scoring(
             }
             if meld_has_gilded {
                 gilded_yen += 1;
-            }
-            if meld_has_polychrome {
-                polychrome_melds += 1;
             }
         }
         for _ in 0..pearl_melds {
@@ -398,13 +394,13 @@ pub(crate) fn apply_pre_yaku_scoring(
                 gilded_yen,
             );
         }
-        for _ in 0..polychrome_melds {
+        for _ in 0..polychrome_tiles {
             push_mult(
                 steps,
                 *chips,
                 mult,
                 "Polychrome Talisman",
-                POLYCHROME_MULT_PER_MELD,
+                POLYCHROME_MULT_PER_TILE,
             );
         }
     }

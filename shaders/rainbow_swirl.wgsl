@@ -1,8 +1,7 @@
 // Shared pride-flag rainbow for main-menu moon/stars and the starfield overlay.
 //
-// `rainbow_swirl_rgb(uv, time)` returns saturated linear RGB (≈ six stairstepped
-// Gilbert Baker stripes). Callers multiply by an emissive mask so black space
-// stays black.
+// `rainbow_swirl_rgb` — hard Gilbert Baker stripes (hub moon).
+// `rainbow_swirl_smooth_rgb` — smooth crossfade between the same hues (stars / starfield).
 
 const RAINBOW_PRIDE_BAND_COUNT: f32 = 6.0;
 
@@ -46,4 +45,33 @@ fn rainbow_swirl_rgb(uv: vec2<f32>, time: f32) -> vec3<f32> {
     band = min(band, i32(RAINBOW_PRIDE_BAND_COUNT) - 1);
 
     return rainbow_pride_band_color(band);
+}
+
+/// Same domain warp as [`rainbow_swirl_rgb`], but smoothly mixes adjacent pride hues.
+fn rainbow_swirl_smooth_rgb(uv: vec2<f32>, time: f32) -> vec3<f32> {
+    let t = time * 0.14;
+
+    let c0 = cos(t * 0.18);
+    let s0 = sin(t * 0.18);
+    var p = vec2<f32>(c0 * uv.x - s0 * uv.y, s0 * uv.x + c0 * uv.y);
+
+    let w1 = vec2<f32>(
+        sin(p.y * 0.32 + t * 0.42 + sin(p.x * 0.24 - t * 0.22) * 0.55),
+        cos(p.x * 0.28 - t * 0.32 + cos(p.y * 0.36 + t * 0.18) * 0.45),
+    );
+    let w2 = vec2<f32>(
+        sin(p.x * 0.22 + t * 0.35 + w1.y * 0.48),
+        cos(p.y * 0.20 - t * 0.45 + w1.x * 0.40),
+    );
+    p += (w1 * 0.30 + w2 * 0.20);
+
+    let field = p.x * 0.38 + p.y * 0.24 - t * 0.05;
+    let stripe_pos = fract(field * 0.48 + 0.5);
+    let scaled = stripe_pos * RAINBOW_PRIDE_BAND_COUNT;
+    let band0 = i32(floor(scaled)) % i32(RAINBOW_PRIDE_BAND_COUNT);
+    let band1 = (band0 + 1) % i32(RAINBOW_PRIDE_BAND_COUNT);
+    let frac = fract(scaled);
+    let c_low = rainbow_pride_band_color(band0);
+    let c_high = rainbow_pride_band_color(band1);
+    return mix(c_low, c_high, smoothstep(0.0, 1.0, frac));
 }

@@ -1,5 +1,6 @@
 use super::*;
 
+use anyhow::Context;
 use clap::ValueEnum;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressIterator, ProgressStyle};
 
@@ -54,6 +55,9 @@ pub struct BotConfig {
     pub starting_discards: Option<u32>,
     pub starting_yen: Option<u32>,
     pub relic_weight: Option<f32>,
+    /// When true, bot never acquires relics from shop offers (including
+    /// skip-tag free relics such as PatronGift).
+    pub no_relic_acquisition: Option<bool>,
     pub zodiac_weight: Option<f32>,
     pub talisman_weight: Option<f32>,
     pub pack_weight: Option<f32>,
@@ -75,11 +79,15 @@ pub struct BotConfig {
     pub season: Option<crate::core::season::Season>,
     /// In-blind expectimax depth (`0` = legacy greedy, `1` = one-ply unified default, `2` = two-ply, `3` = pruned).
     pub chamber_planner_depth: Option<u32>,
+    /// Meta profile depth (1–14). When set, shop relic/rules pools match
+    /// [`PlayerProgress::available_relics`] at that depth instead of the full catalog.
+    pub meta_depth: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct BotStrategy {
     pub relic_weight: f32,
+    pub no_relic_acquisition: bool,
     pub zodiac_weight: f32,
     pub talisman_weight: f32,
     pub pack_weight: f32,
@@ -97,6 +105,9 @@ impl BotStrategy {
         let d = Self::default();
         Self {
             relic_weight: cfg.relic_weight.unwrap_or(d.relic_weight),
+            no_relic_acquisition: cfg
+                .no_relic_acquisition
+                .unwrap_or(d.no_relic_acquisition),
             zodiac_weight: cfg.zodiac_weight.unwrap_or(d.zodiac_weight),
             talisman_weight: cfg.talisman_weight.unwrap_or(d.talisman_weight),
             pack_weight: cfg.pack_weight.unwrap_or(d.pack_weight),
@@ -115,10 +126,11 @@ impl Default for BotStrategy {
     fn default() -> Self {
         Self {
             relic_weight: 2.0,
+            no_relic_acquisition: false,
             zodiac_weight: 0.5,
             talisman_weight: 0.5,
             pack_weight: 0.5,
-            skip_threshold_multiplier: 2.0,
+            skip_threshold_multiplier: 3.0,
             sell_enabled: false,
             sell_hold_threshold: 0,
             sell_max_per_visit: 2,
@@ -285,6 +297,37 @@ fn write_bot_export(
 }
 
 impl BotConfig {
+    /// Overlay wins for each field that is `Some`.
+    pub fn merge(base: Self, overlay: Self) -> Self {
+        Self {
+            base_target: overlay.base_target.or(base.base_target),
+            starting_plays: overlay.starting_plays.or(base.starting_plays),
+            starting_discards: overlay.starting_discards.or(base.starting_discards),
+            starting_yen: overlay.starting_yen.or(base.starting_yen),
+            relic_weight: overlay.relic_weight.or(base.relic_weight),
+            no_relic_acquisition: overlay
+                .no_relic_acquisition
+                .or(base.no_relic_acquisition),
+            zodiac_weight: overlay.zodiac_weight.or(base.zodiac_weight),
+            talisman_weight: overlay.talisman_weight.or(base.talisman_weight),
+            pack_weight: overlay.pack_weight.or(base.pack_weight),
+            skip_threshold_multiplier: overlay
+                .skip_threshold_multiplier
+                .or(base.skip_threshold_multiplier),
+            sell_enabled: overlay.sell_enabled.or(base.sell_enabled),
+            sell_hold_threshold: overlay
+                .sell_hold_threshold
+                .or(base.sell_hold_threshold),
+            sell_max_per_visit: overlay.sell_max_per_visit.or(base.sell_max_per_visit),
+            forced_relic: overlay.forced_relic.or(base.forced_relic),
+            season: overlay.season.or(base.season),
+            chamber_planner_depth: overlay
+                .chamber_planner_depth
+                .or(base.chamber_planner_depth),
+            meta_depth: overlay.meta_depth.or(base.meta_depth),
+        }
+    }
+
     pub fn into_mode(self) -> GameMode {
         // Start from the season-aware preset so base_target / price_multiplier /
         // starting_rules reflect the chosen difficulty; the CLI overrides
@@ -430,14 +473,19 @@ pub fn run_headless_aggregate(
         .run_timeout
         .map(|d| format!("{d:?}"))
         .unwrap_or_else(|| "off".to_string());
+    let meta_depth_label = config
+        .meta_depth
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "full pool".to_string());
     println!(
-        "Running bot for {} runs (base_target={}, target_scaling={}, plays={}, discards={}, gold={}, log={}, run_timeout={}, timeout_retries={})...",
+        "Running bot for {} runs (base_target={}, target_scaling={}, plays={}, discards={}, gold={}, meta_depth={}, log={}, run_timeout={}, timeout_retries={})...",
         n,
         mode.base_target,
         crate::core::chamber_target::TARGET_SCALING,
         mode.starting_plays,
         mode.starting_discards,
         mode.starting_yen,
+        meta_depth_label,
         options.log,
         timeout_label,
         options.timeout_retries,
@@ -614,6 +662,38 @@ pub(crate) fn human_readable_score(score: f64) -> String {
     formatter.format(score)
 }
 
+/// Default strategies catalog shipped with the repo (`docs/strategies_example.json`).
+pub fn default_strategies_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/strategies_example.json")
+}
+
+pub fn read_strategies_file(path: &Path) -> anyhow::Result<StrategyFile> {
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("failed to read strategies file {}", path.display()))?;
+    serde_json::from_slice(&bytes)
+        .with_context(|| format!("failed to parse strategies file {}", path.display()))
+}
+
+pub fn strategy_config_by_name(name: &str, path: &Path) -> anyhow::Result<BotConfig> {
+    let file = read_strategies_file(path)?;
+    let def = file
+        .strategies
+        .iter()
+        .find(|s| s.name == name)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "strategy {name:?} not found in {} (available: {})",
+                path.display(),
+                file.strategies
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?;
+    Ok(def.to_bot_config())
+}
+
 #[derive(serde::Deserialize)]
 pub struct StrategyFile {
     pub strategies: Vec<StrategyDef>,
@@ -624,6 +704,8 @@ pub struct StrategyDef {
     pub name: String,
     #[serde(default)]
     pub relic_weight: Option<f32>,
+    #[serde(default)]
+    pub no_relic_acquisition: Option<bool>,
     #[serde(default)]
     pub zodiac_weight: Option<f32>,
     #[serde(default)]
@@ -659,6 +741,7 @@ impl StrategyDef {
             starting_yen: self.starting_gold,
             forced_relic: None,
             relic_weight: self.relic_weight,
+            no_relic_acquisition: self.no_relic_acquisition,
             zodiac_weight: self.zodiac_weight,
             talisman_weight: self.talisman_weight,
             pack_weight: self.pack_weight,
@@ -668,6 +751,7 @@ impl StrategyDef {
             sell_max_per_visit: self.sell_max_per_visit,
             chamber_planner_depth: self.chamber_planner_depth,
             season: None,
+            meta_depth: None,
         }
     }
 }
@@ -796,15 +880,37 @@ struct ForcedRelicCellExport {
 #[derive(Serialize)]
 struct ForcedRelicExport {
     runs_per_relic: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meta_depth: Option<u32>,
     baseline_aggregate: AggregateStats,
     relics: Vec<ForcedRelicCellExport>,
 }
 
-pub fn run_forced_relic_sweep(runs_per_relic: u32, export_json: Option<&Path>) {
-    let relic_ids: Vec<RelicId> = all_relic_defs().iter().map(|d| d.id).collect();
+/// Relic ids eligible for shop stock at `meta_depth` (full catalog when `None`).
+pub fn relic_ids_for_meta_depth(meta_depth: Option<u32>) -> Vec<RelicId> {
+    let Some(depth) = meta_depth else {
+        return all_relic_defs().iter().map(|d| d.id).collect();
+    };
+    let depth = depth.clamp(1, crate::core::progression::MAX_PROGRESS_LEVEL);
+    let mut progress = crate::core::progression::PlayerProgress::new();
+    progress.level_progress_points =
+        crate::core::progression::PlayerProgress::min_points_for_level(depth);
+    let _ = progress.check_level_up();
+    progress.available_relics()
+}
+
+pub fn run_forced_relic_sweep(
+    runs_per_relic: u32,
+    meta_depth: Option<u32>,
+    export_json: Option<&Path>,
+) {
+    let relic_ids = relic_ids_for_meta_depth(meta_depth);
     let total = relic_ids.len() + 1;
+    let depth_label = meta_depth
+        .map(|d| format!("meta depth {d}"))
+        .unwrap_or_else(|| "full pool".to_string());
     println!(
-        "Forced-relic sweep: {} relics + 1 control × {} runs = {} total",
+        "Forced-relic sweep ({depth_label}): {} relics + 1 control × {} runs = {} total",
         relic_ids.len(),
         runs_per_relic,
         total * runs_per_relic as usize,
@@ -819,12 +925,18 @@ pub fn run_forced_relic_sweep(runs_per_relic: u32, export_json: Option<&Path>) {
         cells.push(Some(*id));
     }
 
+    let base_cfg = BotConfig {
+        meta_depth,
+        ..Default::default()
+    };
+
     let results: Vec<(Option<RelicId>, AggregateStats)> = cells
         .into_par_iter()
         .map(|forced| {
             let cfg = BotConfig {
                 forced_relic: forced,
-                ..Default::default()
+                meta_depth,
+                ..base_cfg.clone()
             };
             let agg = run_with_sequential(runs_per_relic, cfg, BotRunOptions::default());
             let finished = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
@@ -889,6 +1001,7 @@ pub fn run_forced_relic_sweep(runs_per_relic: u32, export_json: Option<&Path>) {
     if let Some(path) = export_json {
         let payload = ForcedRelicExport {
             runs_per_relic,
+            meta_depth,
             baseline_aggregate: baseline,
             relics: relic_rows
                 .into_iter()
@@ -1126,4 +1239,35 @@ pub fn export_play_history_html(
     let embedded = escape_json_for_html_script(&json_compact);
     write_bot_html(path, &embedded)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod strategy_config_tests {
+    use super::*;
+
+    #[test]
+    fn merge_prefers_overlay_fields() {
+        let base = BotConfig {
+            relic_weight: Some(2.0),
+            no_relic_acquisition: Some(true),
+            chamber_planner_depth: Some(2),
+            ..Default::default()
+        };
+        let overlay = BotConfig {
+            chamber_planner_depth: Some(0),
+            meta_depth: Some(1),
+            ..Default::default()
+        };
+        let merged = BotConfig::merge(base, overlay);
+        assert_eq!(merged.relic_weight, Some(2.0));
+        assert_eq!(merged.no_relic_acquisition, Some(true));
+        assert_eq!(merged.chamber_planner_depth, Some(0));
+        assert_eq!(merged.meta_depth, Some(1));
+    }
+
+    #[test]
+    fn strategy_config_loads_named_preset() {
+        let cfg = strategy_config_by_name("no-relics", &default_strategies_file()).unwrap();
+        assert_eq!(cfg.no_relic_acquisition, Some(true));
+    }
 }

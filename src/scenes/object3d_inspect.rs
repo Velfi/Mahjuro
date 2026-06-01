@@ -34,7 +34,8 @@ use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
 use crate::ui::input::UiAction;
 
 /// Inputs that dismiss a [`crate::scenes::ShowcasePresenter`] item-inspect overlay.
-pub const ITEM_INSPECT_OVERLAY_EXIT: [UiAction; 3] = [
+pub const ITEM_INSPECT_OVERLAY_EXIT: [UiAction; 4] = [
+    UiAction::Confirm,
     UiAction::NorthFacePress,
     UiAction::Cancel,
     UiAction::Pause,

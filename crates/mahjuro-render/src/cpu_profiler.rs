@@ -2,7 +2,7 @@
 //!
 //! Activated on demand from the Debug menu (same entry as the GPU profile).
 //! While a session is active the main loop wraps each major CPU stage —
-//! `update`, `draw_frame`, `render` — in [`CpuProfiler::begin`] /
+//! `update`, `draw_prep`, `draw_frame`, `render` — in [`CpuProfiler::begin`] /
 //! [`CpuProfiler::end`] calls and ticks [`CpuProfiler::end_frame`] once per
 //! rendered frame. After the requested frame count is reached, per-stage
 //! averages are emitted via `log::debug!`.
@@ -20,8 +20,8 @@ use std::time::Instant;
 
 use rustc_hash::FxHashMap;
 
-const NUM_STAGES: usize = 3;
-const STAGE_LABELS: [&str; NUM_STAGES] = ["update", "draw_frame", "render"];
+const NUM_STAGES: usize = 4;
+const STAGE_LABELS: [&str; NUM_STAGES] = ["update", "draw_prep", "draw_frame", "render"];
 
 /// Toggled on by [`CpuProfiler::start`] and off by [`CpuProfiler::report`].
 /// Read in [`ScopeGuard::drop`] so closing a scope outside a sampling window
@@ -79,8 +79,9 @@ impl Drop for ScopeGuard {
 #[derive(Copy, Clone)]
 pub enum CpuStage {
     Update = 0,
-    DrawFrame = 1,
-    Render = 2,
+    DrawPrep = 1,
+    DrawFrame = 2,
+    Render = 3,
 }
 
 pub struct CpuProfiler {

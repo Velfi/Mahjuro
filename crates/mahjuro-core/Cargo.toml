@@ -9,6 +9,7 @@ mahjuro-assets.workspace = true
 mahjuro-gfx-types.workspace = true
 mahjuro-types.workspace = true
 anyhow.workspace = true
+chrono.workspace = true
 glam.workspace = true
 log.workspace = true
 rand.workspace = true

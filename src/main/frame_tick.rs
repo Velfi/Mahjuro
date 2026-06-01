@@ -595,8 +595,8 @@ impl App {
         }
 
         if let Some(mut overlay) = self.debug.rain_debug_overlay.take() {
-            use crate::render::rain_debug_overlay::RainDebugResult;
-            use crate::render::rain_tuning::RainTuning;
+            use crate::render::main_menu_effects_debug_overlay::MainMenuEffectsDebugResult;
+            use crate::render::main_menu_effects_tuning::MainMenuEffectsTuning;
             let (ww, wh) = (
                 self.last_drawable_px.width as f32,
                 self.last_drawable_px.height as f32,
@@ -611,32 +611,34 @@ impl App {
             });
             let mut close = false;
             match overlay.update(&actions, mouse, ww, wh) {
-                RainDebugResult::Stay => {}
-                RainDebugResult::Reset => {
-                    overlay.tuning = RainTuning::shipping_default();
-                    if let Err(e) = RainTuning::clear_saved() {
-                        log::warn!("Failed to clear RainTuning override: {e}");
+                MainMenuEffectsDebugResult::Stay => {}
+                MainMenuEffectsDebugResult::Reset => {
+                    overlay.tuning = MainMenuEffectsTuning::shipping_default();
+                    if let Err(e) = MainMenuEffectsTuning::clear_saved() {
+                        log::warn!("Failed to clear MainMenuEffectsTuning override: {e}");
                     } else {
-                        log::debug!("Cleared RainTuning override");
+                        log::debug!("Cleared MainMenuEffectsTuning override");
                     }
                 }
-                RainDebugResult::Save => {
+                MainMenuEffectsDebugResult::Save => {
                     if let Err(e) = overlay.tuning.save() {
-                        log::warn!("Failed to save RainTuning override: {e}");
+                        log::warn!("Failed to save MainMenuEffectsTuning override: {e}");
                     } else {
-                        log::debug!("Saved RainTuning override");
+                        log::debug!("Saved MainMenuEffectsTuning override");
                     }
                 }
-                RainDebugResult::Close => close = true,
+                MainMenuEffectsDebugResult::Close => close = true,
             }
             if let Some(renderer) = self.renderer.as_mut() {
-                renderer.rain_tuning = overlay.tuning;
+                renderer.main_menu_effects = overlay.tuning;
+                renderer.main_menu_pride_rainbow_debug = overlay.pride_rainbow_debug;
             }
+            self.debug.main_menu_pride_rainbow_debug = overlay.pride_rainbow_debug;
             self.mouse_clicked = false;
             if !close {
                 self.debug.rain_debug_overlay = Some(overlay);
             } else {
-                log::debug!("Closed rain debug overlay");
+                log::debug!("Closed main menu effects debug overlay");
             }
             actions.clear();
             button_clicks.clear();
@@ -942,11 +944,11 @@ impl App {
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 seed_archive_seen: &mut seed_archive_seen,
                 archive_chronicle_last_seen,
-                rain_tuning: self
+                main_menu_effects: self
                     .renderer
                     .as_ref()
-                    .map(|r| r.rain_tuning)
-                    .unwrap_or_else(crate::render::rain_tuning::RainTuning::load),
+                    .map(|r| r.main_menu_effects)
+                    .unwrap_or_else(crate::render::main_menu_effects_tuning::MainMenuEffectsTuning::load),
                 flame_tuning: self
                     .renderer
                     .as_ref()
@@ -1034,11 +1036,11 @@ impl App {
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                     seed_archive_seen: &mut seed_archive_seen,
                     archive_chronicle_last_seen,
-                    rain_tuning: self
+                    main_menu_effects: self
                         .renderer
                         .as_ref()
-                        .map(|r| r.rain_tuning)
-                        .unwrap_or_else(crate::render::rain_tuning::RainTuning::load),
+                        .map(|r| r.main_menu_effects)
+                        .unwrap_or_else(crate::render::main_menu_effects_tuning::MainMenuEffectsTuning::load),
                     flame_tuning: self
                         .renderer
                         .as_ref()

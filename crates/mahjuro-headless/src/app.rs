@@ -274,7 +274,7 @@ impl HeadlessApp {
                 bump_archive_chronicle_seen: &mut scratch.bump_archive_chronicle_seen,
                 seed_archive_seen: &mut scratch.seed_archive_seen,
                 archive_chronicle_last_seen: 0,
-                rain_tuning: self.renderer.rain_tuning,
+                main_menu_effects: self.renderer.main_menu_effects,
             })
         } else {
             let showcase_shop_inspect = self.overlay_stack.last().is_some_and(|top| {
@@ -344,7 +344,7 @@ impl HeadlessApp {
                     bump_archive_chronicle_seen: &mut scratch.bump_archive_chronicle_seen,
                     seed_archive_seen: &mut scratch.seed_archive_seen,
                     archive_chronicle_last_seen: 0,
-                    rain_tuning: self.renderer.rain_tuning,
+                    main_menu_effects: self.renderer.main_menu_effects,
                 })
         };
         match scratch.overlay_request {
@@ -411,7 +411,8 @@ impl HeadlessApp {
             false,
             0,
             None,
-            self.renderer.rain_tuning,
+            1.0,
+            self.renderer.main_menu_effects,
         );
         let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
             top.draw_frame(ctx)

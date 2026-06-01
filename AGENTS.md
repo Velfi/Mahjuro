@@ -13,6 +13,7 @@ Short pointers to deeper context. Read the linked file before working in the are
 - [Room shadows & baking](docs/agents/room-shadows-and-baking.md) — offline `.msh` / `.mgi`, live prop shadows, rebake commands, headless tools, relic RLC1.
 - [macOS dylibs / app bundle](docs/agents/macos-dylibs.md) — `libsteam_api.dylib`, static SDL3, `@loader_path` / `@rpath`, CI vs `package-macos.sh`.
 - [Scoring](docs/agents/scoring.md) — play / cash-in loop, melds, chips, multipliers.
+- [Blind targets](docs/agents/blind-targets.md) — formula, multipliers, season scaling, current values.
 - [Gameplay table (`gameplay.glb`)](docs/agents/gameplay-glb.md) — authored room draw + spawn empties; required at runtime.
 - [Tile pack opening](docs/agents/tpos2-art-direction.md) — `Arrival` → `Anticipation` → `Unseal` → `Deal` celebration phases.
 - [Talisman carving art](docs/agents/memorial-talisman-art.md) — carved jade relief, heightmaps + organic masks, `scripts/generate_talisman_art.py`.

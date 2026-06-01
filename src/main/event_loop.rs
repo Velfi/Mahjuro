@@ -20,24 +20,63 @@ fn mod_gui(m: Mod) -> bool {
     m.contains(Mod::LGUIMOD | Mod::RGUIMOD)
 }
 
+use sdl3::gamepad::Button as GpButton;
+
+fn poll_loading_logo_skip(shell: &mut SdlShell) {
+    use crate::render::wgpu_renderer::loading_screen;
+
+    for event in shell.pump.poll_iter() {
+        match event {
+            Event::KeyDown {
+                scancode: Some(sc),
+                repeat: false,
+                ..
+            } if matches!(
+                sc,
+                Scancode::Space | Scancode::Return | Scancode::KpEnter | Scancode::Backspace
+            ) =>
+            {
+                loading_screen::request_skip();
+            }
+            Event::ControllerButtonDown {
+                button: GpButton::South | GpButton::East,
+                ..
+            } => {
+                loading_screen::request_skip();
+            }
+            _ => {}
+        }
+    }
+}
+
 impl App {
     pub fn run_sdl_main(mut self, shell: &mut SdlShell) -> anyhow::Result<()> {
-        // Keep the window hidden during heavy renderer startup. Showing it only
-        // once we're about to enter the pump avoids launch-time activation races
-        // where macOS reports Shown without input focus and never delivers FocusGained.
+        // macOS: hide during renderer init to avoid Shown-without-focus races. Elsewhere
+        // (Steam Deck / gamescope) keep the window visible and present a boot clear frame
+        // as soon as the swapchain exists so launch is not a blank screen for ~10s+.
+        #[cfg(target_os = "macos")]
         shell.window.hide();
+        #[cfg(not(target_os = "macos"))]
+        shell.window.show();
+
+        crate::render::room_preload::start_main_menu_cpu_prefetch();
+
         // Match [`draw::App::draw`]: HDR swapchain is only used when both the
         // options toggle and `EffectLayers::hdr` allow it. Baseline builds keep
         // `hdr` off, so seeding the surface from `gfx.hdr_enabled` alone forced
         // an HDR swapchain at init then an immediate SDR reconfigure on frame
         // 1 — a redundant Metal surface transition linked to intermittent black
         // startup frames on macOS.
+        let window = shell.window.clone();
         let renderer = {
             let _wgpu = crate::startup_profile::scope("wgpu.renderer_new");
-            WgpuRenderer::new(render::wgpu_renderer::TargetInit::Windowed {
-                window: shell.window.clone(),
-                hdr_enabled: self.effect_layers.hdr_enabled(&self.gfx),
-            })?
+            let mut poll_boot_skip = || poll_loading_logo_skip(shell);
+            WgpuRenderer::new_windowed(
+                window,
+                self.effect_layers.hdr_enabled(&self.gfx),
+                !cfg!(target_os = "macos"),
+                Some(&mut poll_boot_skip),
+            )?
         };
         self.renderer = Some(renderer);
         if let Some(renderer) = self.renderer.as_mut() {
@@ -68,6 +107,7 @@ impl App {
             self.debug.menu = Some(DebugMenuBar::new(&shell.window));
         }
         shell.window.show();
+        shell.raise_to_foreground();
         crate::startup_profile::report_sync_boot();
         if self.renderer.as_ref().is_some_and(|r| !r.is_loading()) {
             crate::startup_profile::note_async_boot_complete();
@@ -108,7 +148,8 @@ impl App {
             // starts unfocused can swap Splash -> MainMenu at `transition_alpha == 0` and then
             // stop ticking, leaving the menu covered by a frozen black fade until refocus.
             let transition_in_flight = self.pending_scene.is_some() || self.transition_alpha < 1.0;
-            if shell.window_is_foreground()
+            let window_foreground = shell.window_is_foreground();
+            if window_foreground
                 || matches!(self.scene, Scene::Splash(_))
                 || transition_in_flight
             {

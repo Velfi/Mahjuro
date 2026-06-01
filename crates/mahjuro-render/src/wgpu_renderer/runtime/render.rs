@@ -555,6 +555,8 @@ impl WgpuRenderer {
         let mut depth_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
         let mut overlay_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
             Vec::new();
+        let mut overlay_squircle_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
+            Vec::new();
         let mut gradient_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
             Vec::new();
         let mut squircle_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
@@ -709,6 +711,22 @@ impl WgpuRenderer {
                     let buf_idx = overlay_quad_buffers.len();
                     overlay_quad_buffers.push(slice);
                     ops.push(RenderOp::OverlayQuadBatch {
+                        buf_idx,
+                        count: batch.len() as u32,
+                    });
+                }
+                DrawCmd::OverlaySquircleQuad(_) => {
+                    let mut batch: Vec<GpuInstance> = Vec::new();
+                    while let Some(DrawCmd::OverlaySquircleQuad(inst)) = frame.cmds.get(i) {
+                        batch.push(*inst);
+                        i += 1;
+                    }
+                    let slice = self
+                        .frame_buffer_pool
+                        .alloc(&self.device, &self.queue, &batch);
+                    let buf_idx = overlay_squircle_quad_buffers.len();
+                    overlay_squircle_quad_buffers.push(slice);
+                    ops.push(RenderOp::OverlaySquircleQuadBatch {
                         buf_idx,
                         count: batch.len() as u32,
                     });
@@ -1248,6 +1266,7 @@ impl WgpuRenderer {
             quad_buffers: &quad_buffers,
             depth_quad_buffers: &depth_quad_buffers,
             overlay_quad_buffers: &overlay_quad_buffers,
+            overlay_squircle_quad_buffers: &overlay_squircle_quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
             squircle_quad_buffers: &squircle_quad_buffers,
             flame_buffers: &flame_buffers,
@@ -1279,6 +1298,7 @@ impl WgpuRenderer {
             quad_buffers: &quad_buffers,
             depth_quad_buffers: &depth_quad_buffers,
             overlay_quad_buffers: &overlay_quad_buffers,
+            overlay_squircle_quad_buffers: &overlay_squircle_quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
             squircle_quad_buffers: &squircle_quad_buffers,
             flame_buffers: &flame_buffers,
@@ -1356,6 +1376,7 @@ impl WgpuRenderer {
                             RenderOp::TextDraw(_)
                                 | RenderOp::ImageQuad(_)
                                 | RenderOp::OverlayQuadBatch { .. }
+                                | RenderOp::OverlaySquircleQuadBatch { .. }
                         ) {
                             continue;
                         }
@@ -1372,6 +1393,7 @@ impl WgpuRenderer {
                             RenderOp::TextDraw(_)
                                 | RenderOp::ImageQuad(_)
                                 | RenderOp::OverlayQuadBatch { .. }
+                                | RenderOp::OverlaySquircleQuadBatch { .. }
                         ) {
                             continue;
                         }
@@ -2410,6 +2432,7 @@ impl WgpuRenderer {
             matches!(
                 o,
                 RenderOp::TextDraw(_) | RenderOp::ImageQuad(_) | RenderOp::OverlayQuadBatch { .. }
+                    | RenderOp::OverlaySquircleQuadBatch { .. }
             )
         }) {
             let overlay_ts = self
@@ -2444,6 +2467,7 @@ impl WgpuRenderer {
                     RenderOp::TextDraw(_)
                         | RenderOp::ImageQuad(_)
                         | RenderOp::OverlayQuadBatch { .. }
+                        | RenderOp::OverlaySquircleQuadBatch { .. }
                 ) {
                     self.process_op(&mut pass, op, &process_ctx_overlay);
                 }

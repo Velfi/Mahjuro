@@ -3,11 +3,21 @@
     "subtitle": "Thanks to these asset creators for their work",
     "sections": [
       {
-        "title": "Art",
+        "title": "Sounds",
         "entries": [
           "printing press machine start running slow and fast various hums whines rollers.flac by kyles -- https://freesound.org/s/405009/ -- License: Creative Commons 0",
           "tile shuffle.wav by element4rt -- https://freesound.org/s/454848/ -- License: Creative Commons 0",
           "doorslam.wav by freesound_community -- https://freesound.org/s/90782/ -- License: Creative Commons 0"
+        ]
+      },
+      {
+        "title": "Fonts",
+        "entries": [
+          "Instrument Serif by Rodrigo Fuenzalida, Jordan Egstad -- https://fonts.google.com/specimen/Instrument+Serif -- License: SIL Open Font License 1.1",
+          "Noto Sans by Google -- https://fonts.google.com/noto -- License: SIL Open Font License 1.1",
+          "Xanh Mono by by Yellow Type, Lâm Bảo, Duy Dao -- https://fonts.google.com/specimen/Xanh+Mono -- License: SIL Open Font License 1.1",
+          "twoslice by Joe Fatula -- https://joefatula.com/twoslice.html -- License: CC BY-SA 4.0"
+
         ]
       }
     ],

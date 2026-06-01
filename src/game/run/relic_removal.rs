@@ -37,7 +37,7 @@ impl RunState {
                 self.relic_counters.insert(RelicId::MonarchButterfly, 0);
             }
             RelicId::IGotAGuy => {
-                self.relic_counters.insert(RelicId::IGotAGuy, 3);
+                self.relic_counters.insert(RelicId::IGotAGuy, 4);
             }
             RelicId::Rakuware => {}
             _ => {}

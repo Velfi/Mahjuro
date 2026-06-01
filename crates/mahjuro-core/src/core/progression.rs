@@ -153,7 +153,8 @@ pub enum RunOutcome {
     Defeat { reason: GameOverReason },
 }
 
-pub const POINTS_PER_LEVEL: u32 = 5;
+/// Meta depth pacing: four points per tier (~four losses or two wins per unlock).
+pub const POINTS_PER_LEVEL: u32 = 4;
 pub const LEVEL_UP_POINTS_FOR_WIN: u32 = 3;
 pub const LEVEL_UP_POINTS_FOR_LOSS: u32 = 1;
 pub const MAX_PROGRESS_LEVEL: u32 = 14;
@@ -275,9 +276,14 @@ impl PlayerProgress {
     }
 
     pub fn new() -> Self {
+        // L1 is the baseline state; pre-seed it so `check_level_up` never
+        // treats starter content as a newly-earned unlock.
+        let l1 = unlocks_for_level(1);
+        let unlocked_relics: HashSet<RelicId> = l1.relics.into_iter().collect();
+        let unlocked_rules: HashSet<RuleModifier> = l1.rules.into_iter().collect();
         Self {
-            unlocked_relics: HashSet::default(),
-            unlocked_rules: HashSet::default(),
+            unlocked_relics,
+            unlocked_rules,
             high_scores: Vec::new(),
             runs_completed: 0,
             level_progress_points: 0,
@@ -443,6 +449,17 @@ impl PlayerProgress {
         }
         // Old profiles may have runs counted but no run_history yet.
         self.level_progress_points = self.runs_completed;
+    }
+
+    /// Ensure L1 relics/rules are marked as already-known so `check_level_up`
+    /// never surfaces them as new-unlock modals on old saves. Idempotent.
+    pub fn backfill_level_1_unlocks(&mut self) {
+        let l1 = unlocks_for_level(1);
+        for relic in l1.relics {
+            if !is_transformation_successor_relic(relic) {
+                self.unlocked_relics.insert(relic);
+            }
+        }
     }
 
     /// Current progression level (1–14) based on progression points.
@@ -688,12 +705,17 @@ fn level_14_relics() -> Vec<RelicId> {
 
 fn unlocks_for_level(level: u32) -> LevelUnlocks {
     match level {
-        // ── L1: Set scoring intro + base rule modifiers ──────────────────
+        // ── L1: Meld intro, starter economy, scaling hooks + base rules ───
         1 => LevelUnlocks {
             relics: vec![
                 RelicId::TripletBoost,
                 RelicId::SequenceSurge,
                 RelicId::PairPower,
+                RelicId::NestEgg,
+                RelicId::GreenLuck,
+                RelicId::CrackedTile,
+                RelicId::MultiplierMaster,
+                RelicId::Kindling,
             ],
             rules: vec![
                 RuleModifier::PairDoubleScore,
@@ -712,7 +734,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::LapisSerpent,
                 RelicId::LowTide,
                 RelicId::HighTide,
-                RelicId::CrackedTile,
             ],
             rules: vec![],
             yaku: vec![],
@@ -723,11 +744,9 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
             relics: vec![
                 RelicId::GoldIdol,
                 RelicId::JadeAbacus,
-                RelicId::NestEgg,
                 RelicId::Patience,
                 RelicId::NoHonorButWealth,
                 RelicId::Sweepstakes,
-                RelicId::GreenLuck,
             ],
             rules: vec![],
             yaku: vec![YakuKind::Toitoi, YakuKind::Tanyao],
@@ -751,7 +770,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
         // ── L5: Set composition + Ikebana flower payoff + Iipeikou/Honitsu
         5 => LevelUnlocks {
             relics: vec![
-                RelicId::MultiplierMaster,
                 RelicId::SetMagnet,
                 RelicId::EdgeRunner,
                 RelicId::ChainReaction,
@@ -1139,15 +1157,15 @@ mod tests {
     fn level_progression() {
         let mut p = PlayerProgress::new();
         assert_eq!(p.current_level(), 1);
-        p.level_progress_points = 5;
+        p.level_progress_points = 4;
         assert_eq!(p.current_level(), 2);
-        p.level_progress_points = 20;
+        p.level_progress_points = 16;
         assert_eq!(p.current_level(), 5);
-        p.level_progress_points = 25;
+        p.level_progress_points = 20;
         assert_eq!(p.current_level(), 6);
-        p.level_progress_points = 45;
+        p.level_progress_points = 36;
         assert_eq!(p.current_level(), 10);
-        p.level_progress_points = 65;
+        p.level_progress_points = 52;
         assert_eq!(p.current_level(), 14);
         p.level_progress_points = 100;
         assert_eq!(p.current_level(), 14);
@@ -1162,8 +1180,8 @@ mod tests {
         assert!(result.is_some());
         let result = result.unwrap();
         assert_eq!(result.new_level, 5);
-        assert!(result.relics.contains(&RelicId::MultiplierMaster));
-        assert!(p.unlocked_relics.contains(&RelicId::MultiplierMaster));
+        assert!(result.relics.contains(&RelicId::SetMagnet));
+        assert!(p.unlocked_relics.contains(&RelicId::SetMagnet));
     }
 
     #[test]

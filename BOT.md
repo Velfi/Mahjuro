@@ -145,7 +145,7 @@ Per turn, in [src/bot.rs](src/bot.rs)::`play_blind`:
 Per blind, in `play_run`:
 
 1. **Skip strategy.** Skip Small/Big blinds when projected score
-   (`best_play × plays_remaining`) ≥ 2× the target — banks `skip_reward()` yen
+   (`best_play × plays_remaining`) ≥ 3× the target AND the tag's yen value exceeds the expected clear reward — banks `skip_reward()` yen
    without burning plays. Boss never skipped.
 2. **Apply blind, play it.** See above.
 3. **Shop marginal values (relics / zodiacs / talismans / packs).** For each
@@ -178,6 +178,10 @@ Per blind, in `play_run`:
 - **Wall-mutating relics are under-valued.** `StrengthInNumbers`, `SetMagnet`, `QuickDraw`,
   `WildWinds`, `JokerTile` change the hand or wall in ways the marginal-value
   estimator can't see. Rarity tie-break partially compensates.
+- **Position-sensitive relics (partial).** The bot reorders inventory for Mirror Tile,
+  Shadow Hand, and Hungry Ghost (copy target / round-start sacrifice) via hill-climbing
+  on sampled hands and applies Hungry Ghost feed when valuing shop offers. Other
+  order-dependent interactions are not modeled.
 - **No relic synergies.** The bot picks each relic in isolation; it doesn't
   notice that `TripletBoost + PairPower + WhiteDragonsHush` compound.
 - **No pre-play sorting / hand restructuring.** Some game modes might allow
@@ -210,6 +214,39 @@ Compare `antes_cleared` to the baseline.
 Iterate: pick the grid cell with the best `antes_cleared`, then re-sweep a
 finer grid around it. The bot is fast enough that 30 runs/cell × 32 cells
 finishes in well under a minute.
+
+**"Find overpowered / over-picked relics"**
+
+1. Export a bot batch, then run the OP scorecard script:
+
+```bash
+cargo run --release -- bot 500 --meta-depth 1 -o depth-1-bot.json --output-format json
+python3 scripts/bot_relic_op_scorecard.py depth-1-bot.json
+```
+
+The scorecard merges shop funnel (take rate), win Δ, depth split (ante Δ), and score
+share. Rows tagged `NERF?` hit three or more heuristics (high take + win lift + depth/score).
+
+2. Causal lift — forced starter relic within a meta pool:
+
+```bash
+cargo run --release -- forced-relic-sweep --runs 100 --meta-depth 1 --export-json forced-depth-1.json
+```
+
+Omit `--meta-depth` to sweep the full catalog. Each cell grants one relic free at run start;
+sort by **Δwin** vs the control row at the bottom of the table.
+
+3. Formal recurring audit (tier/price normalized):
+
+```bash
+python3 scripts/run_relic_balance_audit.py --runs-bot 250 --runs-forced 25
+```
+
+This emits a timestamped folder under `balance-audit/` with:
+- pool bot exports (`*-bot.json`)
+- pool forced sweeps (`*-forced.json`)
+- `relic_balance_metrics.csv`
+- `relic-balance-summary.md` (overtuned/undertuned candidates by rarity + price)
 
 ## Adding new tuning levers
 
