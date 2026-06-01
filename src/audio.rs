@@ -326,7 +326,9 @@ impl crate::sfx_id::SfxId {
             SfxId::Victory => "victory.ogg",
             SfxId::Victory2 => "victory2.ogg",
             SfxId::Defeat => "defeat.ogg",
+            SfxId::NewGameStinger => "sfx/gong_swell1.ogg",
             SfxId::MainMenuEnter => "mahjuro.ogg",
+            SfxId::StairwayEnter => "imgmidi-bell-transition-1-305458.mp3",
             SfxId::LevelUp => "levelup.ogg",
             SfxId::TilesDestroyed => "tiles_destroyed.ogg",
             SfxId::OrdealEncountered => "ordeal_encountered.ogg",
@@ -368,6 +370,13 @@ impl crate::sfx_id::SfxId {
                 "sfx/creak7.ogg",
                 "sfx/creak8.ogg",
                 "sfx/creak9.ogg",
+            ]),
+            SfxId::NewGameStinger => Some(&[
+                "sfx/gong_swell1.ogg",
+                "sfx/gong_swell2.ogg",
+                "sfx/gong_swell3.ogg",
+                "sfx/gong_swell4.ogg",
+                "sfx/gong_swell5.ogg",
             ]),
             SfxId::CashIn => Some(&[
                 "sfx/sfx30.ogg",

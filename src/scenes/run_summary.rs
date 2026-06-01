@@ -267,8 +267,12 @@ impl SceneBehavior for RunSummaryScene {
         };
         let layout = RunSummaryPanelLayout::compute(w, h, &content, &theme);
         self.panel_scroll.sync(&layout);
-        self.panel_scroll
-            .handle_wheel(ctx.scroll_lines, ctx.cursor_pos, &layout);
+        self.panel_scroll.handle_wheel(
+            ctx.scroll_lines,
+            ctx.cursor_pos,
+            &layout,
+            ctx.input_mode,
+        );
 
         let items = self.flat_items(w, h);
         let action = self.tree.update_flat(

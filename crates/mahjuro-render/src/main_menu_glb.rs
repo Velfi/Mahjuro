@@ -388,7 +388,6 @@ pub fn main_menu_moon_screen_hit_rect(w: f32, h: f32, env_h: f32) -> Option<[f32
 }
 
 /// Object3d anchor `[px, py, lift]` for the `light_doorway` punctual node in `main_menu.glb`.
-#[allow(dead_code)]
 pub fn main_menu_light_door_object3d_anchor(w: f32, h: f32, env_h: f32) -> Option<[f32; 3]> {
     with_main_menu_glb_cpu(|opt| {
         let cpu = opt?;

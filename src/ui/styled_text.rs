@@ -692,7 +692,6 @@ fn push_styled_visual_lines(
                 color: chunk.color,
                 font_px: Some(font_px),
                 align: TextAlign::Left,
-                no_glossary: true,
                 underline: chunk.underline,
                 text_effect: chunk.effect,
                 bold: chunk.bold,

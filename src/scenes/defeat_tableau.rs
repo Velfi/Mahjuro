@@ -103,7 +103,6 @@ pub fn push_defeat_memorial_tableau(
             shape: MeshId::Cube,
             material: MaterialSpec::lacquered_wood_flat(),
             pick_id: None,
-            shadow_caster: false,
             silhouette: false,
         },
         hover_target: 0.0,

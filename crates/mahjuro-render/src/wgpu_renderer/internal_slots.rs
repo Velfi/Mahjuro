@@ -1,15 +1,5 @@
 use mahjuro_core::core::tile::Suit;
 
-/// A relic icon to draw as a textured quad at a screen-space rect.
-/// (Struct retained for draw payloads; fields unused since glossary relic hovers were removed.)
-#[allow(dead_code)]
-pub struct RelicIcon {
-    /// Position in screen pixels: [x, y, w, h].
-    pub rect: [f32; 4],
-    /// Which relic image to display.
-    pub relic_id: mahjuro_core::core::relic::RelicId,
-}
-
 /// Horizontal alignment of text inside its rect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum TextAlign {
@@ -46,10 +36,6 @@ pub struct TextLabel {
     pub font_px: Option<f32>,
     /// Horizontal alignment within the rect.
     pub align: TextAlign,
-    /// Legacy flag from the removed glossary-hover pass; kept so call sites
-    /// stay stable.
-    #[allow(dead_code)]
-    pub no_glossary: bool,
     /// Horizontal scroll offset in pixels (for marquee-style text).
     /// Shifts the rasterised text leftward by this many pixels so the
     /// caller can animate it for overflow text.  Default 0.0.
@@ -86,7 +72,6 @@ impl Default for TextLabel {
             color: [1.0; 4],
             font_px: None,
             align: TextAlign::Center,
-            no_glossary: false,
             scroll_offset: 0.0,
             flavor_spans: None,
             bold: false,
@@ -134,31 +119,10 @@ pub(crate) struct TextLabelShapeKey {
 /// Cached GPU resources for a rasterized text label. The texture is owned
 /// here; the `bind_group` is cloned out into per-frame `TextDraw`s.
 pub(crate) struct CachedTextLabel {
-    #[allow(dead_code)]
-    pub tex: wgpu::Texture,
+    pub _tex: wgpu::Texture,
     pub bind_group: wgpu::BindGroup,
     /// Last frame on which this entry was used, used for TTL eviction.
     pub last_used: u64,
-}
-
-/// GPU resources for a single hand tile.
-///
-/// Each tile has its own uniform buffer (updated every frame with the per-tile
-/// model matrix) and bind group (holds the tile's rasterised decal texture).
-/// Storing them per-tile means all 14 `write_buffer` calls target distinct
-/// GPU allocations, so every tile's matrix is visible when the command buffer
-/// executes — no dynamic-offset trickery required.
-#[allow(dead_code)]
-pub(crate) struct HandTileGpu {
-    /// Written every frame with view_proj + model + base_color_factor.
-    pub uniform_buffer: wgpu::Buffer,
-    /// Per-tile shadow caster uniform (light_view_proj * model). Written
-    /// every frame in lockstep with `uniform_buffer` and consumed by the
-    /// shadow pre-pass via `shadow_bind_group`.
-    pub shadow_uniform_buffer: wgpu::Buffer,
-    pub shadow_bind_group: wgpu::BindGroup,
-    /// Cached to skip re-rasterisation when the tile hasn't changed.
-    pub tile_id: (Suit, u8, Option<mahjuro_core::core::tile::TileEnhancement>, bool),
 }
 
 /// GPU resources for an instanced standalone GLB prop (e.g. yen coins).

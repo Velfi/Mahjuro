@@ -548,8 +548,7 @@ pub(super) fn load_metal_heightmap(
 /// Indexed by position in `ZodiacKind::all()`.
 pub(super) struct ZodiacRibbonTextures {
     /// Keeps GPU textures alive so the views remain valid.
-    #[allow(dead_code)]
-    pub textures: Vec<wgpu::Texture>,
+    pub _textures: Vec<wgpu::Texture>,
     pub views: Vec<wgpu::TextureView>,
 }
 
@@ -582,7 +581,7 @@ pub(super) fn load_zodiac_ribbon_textures(
         textures.push(tex);
         views.push(view);
     }
-    ZodiacRibbonTextures { textures, views }
+    ZodiacRibbonTextures { _textures: textures, views }
 }
 
 /// Load tile-pack box art textures synchronously at init. There are at most 7

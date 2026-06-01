@@ -77,7 +77,6 @@ pub fn push_wall_remaining_hud(
         color: color::CHAMPAGNE,
         font_px: Some(font_px),
         align: TextAlign::Left,
-        no_glossary: false,
         scroll_offset: 0.0,
         flavor_spans: None,
         bold: false,

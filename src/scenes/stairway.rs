@@ -61,7 +61,6 @@ fn push_flavor_text(frame: &mut UiFrame, w: f32, h: f32, flavor: &'static [Relic
         color: color::CHAMPAGNE,
         font_px: Some(body_px),
         align: TextAlign::Center,
-        no_glossary: true,
         flavor_spans: Some(flavor),
         ..Default::default()
     });

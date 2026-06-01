@@ -234,9 +234,6 @@ pub(super) fn make_image_quad_overlay_gpu(
             let rgba = crate::decal::rasterize_debuff_marker_overlay(W, H);
             (rgba, W, H)
         }
-        crate::draw_cmd::ImageQuadSource::Filesystem(path) => {
-            crate::kenney_svg::rasterize_filesystem_svg_or_png_rgba(path)?
-        }
     };
     let (texture, view) = upload_rgba_texture(device, queue, "image-quad", &rgba, w, h);
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {

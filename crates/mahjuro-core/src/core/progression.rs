@@ -716,6 +716,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::CrackedTile,
                 RelicId::MultiplierMaster,
                 RelicId::Kindling,
+                RelicId::KanDrum,
             ],
             rules: vec![
                 RuleModifier::PairDoubleScore,
@@ -888,7 +889,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::GoldenEngine,
                 RelicId::Snowball,
                 RelicId::Obsession,
-                RelicId::KanDrum,
             ],
             rules: vec![],
             yaku: vec![],

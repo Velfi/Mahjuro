@@ -112,7 +112,7 @@ impl WgpuRenderer {
         frame: &UiFrame,
         object3d_draw_list: &[(DrawKind, usize)],
         showcase_tile_batches: &[&[ShowcaseTilePlacement]],
-        tile_3d_rects: &[(usize, [f32; 4])],
+        _tile_3d_rects: &[(usize, [f32; 4])],
     ) -> u32 {
         let shop_inspect_shadow_only = frame.shop_inspect_shadow_target.is_some();
         let mut room_draws = 0u32;
@@ -192,14 +192,6 @@ impl WgpuRenderer {
                 self.active_tile_mesh().outline_index_buffer.slice(..),
                 wgpu::IndexFormat::Uint32,
             );
-            for (i, _) in tile_3d_rects.iter() {
-                let Some(htg) = self.hand_tiles.get(*i) else {
-                    continue;
-                };
-                shadow_pass.set_bind_group(0, &htg.shadow_bind_group, &[]);
-                shadow_pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
-                shadow_pass.draw_indexed(0..self.active_tile_mesh().outline_index_count, 0, 0..1);
-            }
 
             let total_showcase: usize = showcase_tile_batches
                 .iter()

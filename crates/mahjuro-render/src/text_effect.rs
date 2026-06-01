@@ -30,17 +30,6 @@ impl TextEffectId {
         self.pack() | ((rotation_quarters.min(3) as u32) << 8)
     }
 
-    #[allow(dead_code)] // Reserved for CPU-side inspection / future tooling.
-    pub fn decode(packed: u32) -> Self {
-        match (packed & 0xff) as u8 {
-            1 => Self::Rainbow,
-            2 => Self::Pulse,
-            3 => Self::Shimmer,
-            4 => Self::GoldTint,
-            _ => Self::Flat,
-        }
-    }
-
     /// Resolve `effect:name` from safe markup (ASCII lower snake).
     pub fn from_markup_name(name: &str) -> Option<Self> {
         match name.trim() {

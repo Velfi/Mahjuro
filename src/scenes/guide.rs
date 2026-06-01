@@ -1227,7 +1227,6 @@ fn push_dense_text_lines_aligned(
                 color: *c,
                 font_px: Some(font_px),
                 align: TextAlign::Left,
-                no_glossary: true,
                 ..Default::default()
             });
             cx += piece_w;

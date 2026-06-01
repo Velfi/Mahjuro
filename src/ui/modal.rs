@@ -426,22 +426,6 @@ impl ModalQueue {
         !self.queue.is_empty()
     }
 
-    /// Whether the modal has active animations that need redraws.
-    #[allow(dead_code)] // Was used for global redraw gating; modals still tick every frame now.
-    pub fn needs_redraw(&self) -> bool {
-        if let Some(modal) = self.queue.first() {
-            if modal.opacity() < 1.0 {
-                return true;
-            }
-            if let Some(ref fw) = modal.fireworks
-                && fw.is_active()
-            {
-                return true;
-            }
-        }
-        false
-    }
-
     /// Tick firework particles on the active modal, and auto-advance pages
     /// while the player is holding the cancel/back key over a paginated
     /// modal (level-up celebration skim).

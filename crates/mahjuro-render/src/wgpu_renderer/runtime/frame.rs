@@ -84,7 +84,6 @@ impl WgpuRenderer {
 
         if self.active_tile_material != tile_material {
             self.active_tile_material = tile_material;
-            self.hand_tiles.clear();
             self.showcase_tiles.clear();
         }
 
@@ -95,7 +94,6 @@ impl WgpuRenderer {
             self.push_active_showcase_decal_atlas_to_cache();
             self.tile_set = Some(tileset_name.to_owned());
             self.tile_face_overlays.clear();
-            self.hand_tiles.clear();
             self.showcase_tiles.clear();
             let _ = self.activate_cached_showcase_decal_atlas(tileset_name);
         }
@@ -175,8 +173,6 @@ impl WgpuRenderer {
                     | DrawCmd::HallwayEnvironment
                     | DrawCmd::StaircaseEnvironment
                     | DrawCmd::ArchiveEnvironment
-                    // Main menu stars / emissive sky read too hot with full HDR bloom.
-                    | DrawCmd::EmberDrift
             )
         })
     }

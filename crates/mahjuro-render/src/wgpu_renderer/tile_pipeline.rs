@@ -1,8 +1,5 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TileGlbPipelineKey {
-    /// Not selected by [`Self::from_loaded_primitive`]; pipelines kept for symmetry.
-    #[allow(dead_code)]
-    OpaqueDoubleSided,
     OpaqueCullBack,
     BlendDoubleSided,
     BlendCullBack,

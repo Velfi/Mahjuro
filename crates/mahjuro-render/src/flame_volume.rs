@@ -8,11 +8,7 @@ use glam::{Vec2, Vec3};
 // ── Tuning (keep in sync with `shaders/flame.wgsl` / `shaders/blackbody.wgsl`) ──
 
 /// Godot base mesh height multiplier in `flame.wgsl` (`FLAME_HEIGHT = BASE * SCALE`).
-#[allow(dead_code)]
-pub const FLAME_MESH_HEIGHT_BASE: f32 = 1.72;
 pub const FLAME_MESH_HEIGHT_SCALE: f32 = 4.0;
-#[allow(dead_code)]
-pub const FLAME_MESH_WIDTH_MUL: f32 = 1.64;
 
 /// World scale factor applied to candle height for flame emitter size.
 pub const FLAME_EMITTER_SCALE_MUL: f32 = 0.22;

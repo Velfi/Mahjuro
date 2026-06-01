@@ -9,7 +9,7 @@
 //!
 //! **Content** — multi-line inspect uses [`crate::ui::inspect_plaque::push_focus_tooltip_panel_2d`]:
 //! title [`color::CHAMPAGNE`] (HEADING tier), optional accent line (price/tier — caller color),
-//! body [`color::PARCHMENT`] (BODY tier). Transient overlays set [`crate::render::wgpu_renderer::TextLabel::no_glossary`].
+//! body [`color::PARCHMENT`] (BODY tier).
 //!
 //! **Compact hovers** — single-line `ButtonDef::hover_label` tooltips (`main/draw.rs`) use
 //! [`push_tooltip_frame_quads`] with the same rim/fill and proportional body-sized text.

@@ -523,12 +523,6 @@ pub fn format_run_ended_timestamp(unix: u64) -> String {
 pub struct RunDetailModel {
     pub heading: String,
     pub timestamp_line: String,
-    #[allow(dead_code)] // Chronicle detail panel (concept layout) — wired when UI lands
-    pub seed_line: String,
-    #[allow(dead_code)]
-    pub duration_line: String,
-    #[allow(dead_code)]
-    pub milestones: Vec<String>,
     pub signature_name: String,
     pub signature_score: u64,
     pub tiles: Vec<Tile>,
@@ -538,8 +532,6 @@ pub struct RunDetailModel {
     pub wing_scores: Vec<(u32, u64)>,
     pub timeline: Vec<(u32, String, String)>,
     pub footer: Vec<(String, String)>,
-    #[allow(dead_code)]
-    pub discard_by_suit: crate::core::run_chronicle::DiscardBySuit,
 }
 
 pub fn run_detail_model(
@@ -547,17 +539,8 @@ pub fn run_detail_model(
     display_num: u32,
     rec: &RunRecord,
 ) -> RunDetailModel {
-    use crate::core::run_chronicle::format_run_seed;
-
     let heading = chronicle_run_log_title(progress, display_num, rec);
     let timestamp_line = format_run_ended_timestamp(rec.timestamp_unix);
-    let seed_line = if rec.chronicle.seed != 0 {
-        format_run_seed(rec.chronicle.seed)
-    } else {
-        "—".into()
-    };
-    let duration_line = format_duration(rec.duration_secs);
-    let milestones = rec.chronicle.milestones.clone();
 
     let mut tiles = rec
         .chronicle
@@ -647,9 +630,6 @@ pub fn run_detail_model(
     RunDetailModel {
         heading,
         timestamp_line,
-        seed_line,
-        duration_line,
-        milestones,
         signature_name: rec.best_structure_name.clone(),
         signature_score: rec.best_structure_score,
         tiles,
@@ -659,21 +639,6 @@ pub fn run_detail_model(
         wing_scores,
         timeline,
         footer,
-        discard_by_suit: c.discards_by_suit.clone(),
-    }
-}
-
-fn format_duration(secs: u32) -> String {
-    if secs == 0 {
-        return "—".into();
-    }
-    let h = secs / 3600;
-    let m = (secs % 3600) / 60;
-    let s = secs % 60;
-    if h > 0 {
-        format!("{h}h {m:02}m {s:02}s")
-    } else {
-        format!("{m}m {s:02}s")
     }
 }
 

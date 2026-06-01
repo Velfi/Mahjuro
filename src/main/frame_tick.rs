@@ -333,6 +333,7 @@ impl App {
         }
 
         // 1a. Poll debug menu actions.
+        #[cfg(debug_menu_enabled)]
         if let Some(ref debug_menu) = self.debug.menu {
             for action in debug_menu.poll() {
                 self.handle_debug_action(action);
@@ -860,25 +861,26 @@ impl App {
             self.frame_picks.hand
         };
         let mut scroll_lines = std::mem::take(&mut self.scroll_delta);
-        // Right stick vertical scroll is opt-in by scene: Yaku Journal,
-        // Chronicle dashboard/listing, and Credits. Other scenes keep right stick free.
-        let right_stick_scroll_enabled = {
+        // Stick vertical scroll is opt-in by scene. Yaku Journal, Chronicle,
+        // and Credits use the right stick; defeat/victory run summaries accept
+        // both sticks. Other scenes keep sticks free for gameplay / orbit.
+        let stick_scroll_axis = {
             let active_scene = self.overlay_stack.last().unwrap_or(&self.scene);
+            let input = self.input.as_ref();
+            let right = input.map(|i| i.right_stick_scroll_axis).unwrap_or(0.0);
             match active_scene {
-                Scene::YakuJournal(_) => true,
-                Scene::Archive(scene) => scene.is_chronicle_tab(),
-                Scene::Credits(_) => true,
-                _ => false,
+                Scene::YakuJournal(_) | Scene::Credits(_) => right,
+                Scene::Archive(scene) if scene.is_chronicle_tab() => right,
+                Scene::Defeat(_) | Scene::Victory(_) => {
+                    let left = input.map(|i| i.left_stick_scroll_axis).unwrap_or(0.0);
+                    right + left
+                }
+                _ => 0.0,
             }
         };
-        if right_stick_scroll_enabled {
+        if stick_scroll_axis.abs() > 0.0 {
             const STICK_SCROLL_LINES_PER_SEC: f32 = 24.0;
-            let axis = self
-                .input
-                .as_ref()
-                .map(|i| i.right_stick_scroll_axis)
-                .unwrap_or(0.0);
-            scroll_lines += axis * self.last_frame_dt * STICK_SCROLL_LINES_PER_SEC;
+            scroll_lines += stick_scroll_axis * self.last_frame_dt * STICK_SCROLL_LINES_PER_SEC;
         }
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
         let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();

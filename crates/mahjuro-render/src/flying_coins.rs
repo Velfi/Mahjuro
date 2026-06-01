@@ -272,7 +272,6 @@ impl FlyingCoinSystem {
                         shape: crate::primitive::MeshId::Coin,
                         material: crate::primitive::MaterialSpec::coin_glb(),
                         pick_id: None,
-                        shadow_caster: false,
                         silhouette: false,
                     },
                     hover_target: 0.0,

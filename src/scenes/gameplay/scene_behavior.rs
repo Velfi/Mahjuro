@@ -422,8 +422,6 @@ impl SceneBehavior for GameplayScene {
             .map(|(cascade, _)| cascade.frame(now));
 
         // Active relics are 3D medallions in a horizontal tray (`build_relic_tray_and_wind`).
-        // No 2D relic badge strip here — `RelicIcon` GPU path stays empty.
-        let relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = Vec::new();
 
         // Bottom button bar: discard bowl, bronze mirror, journal — rects from GLB markers.
         let selected_count = gameplay.selected_count;
@@ -676,7 +674,6 @@ impl SceneBehavior for GameplayScene {
         // ── Frame assembly ──────────────────────────────────────────────
         //
         // Now push every layer into a fresh `UiFrame` in canonical order.
-        let _ = relic_icons; // gameplay no longer renders 2D relic icons.
         let mut frame = UiFrame::new();
         let fov_pop_offset = self.final_tiles_fov_pop_offset_deg(now);
         // Keep authored GLB framing at rest; only apply temporary pop animation.
@@ -1259,7 +1256,6 @@ impl SceneBehavior for GameplayScene {
                     color: color::CHAMPAGNE,
                     font_px: Some(fs),
                     align: crate::render::wgpu_renderer::TextAlign::Center,
-                    no_glossary: true,
                     ..Default::default()
                 });
             };
@@ -1306,7 +1302,6 @@ impl SceneBehavior for GameplayScene {
                         color: color::CHAMPAGNE,
                         font_px: Some(fs),
                         align: crate::render::wgpu_renderer::TextAlign::Center,
-                        no_glossary: true,
                         ..Default::default()
                     });
                 }
@@ -1351,7 +1346,6 @@ impl SceneBehavior for GameplayScene {
                     },
                     font_px: Some(fs),
                     align: crate::render::wgpu_renderer::TextAlign::Center,
-                    no_glossary: true,
                     ..Default::default()
                 });
             }

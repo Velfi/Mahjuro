@@ -78,9 +78,6 @@ pub enum DecalLayout {
     /// the longer axis is derived from the host object's extents
     /// aspect ratio.
     Fit { target_short_edge: u32 },
-    /// Two-line title over body copy.
-    #[allow(dead_code)]
-    TitleRule { target_short_edge: u32 },
 }
 
 /// Decal rasterization recipe.
@@ -116,7 +113,6 @@ impl MaterialSpec {
     }
 
     /// Plain diffuse+specular dielectric.
-    #[allow(dead_code)]
     pub fn plain() -> Self {
         Self {
             kind: MaterialKind::Plain,
@@ -145,20 +141,6 @@ impl MaterialSpec {
     pub fn with_decal(mut self, decal: DecalSpec) -> Self {
         self.decal = Some(decal);
         self
-    }
-}
-
-/// Convenience: build a [`DecalSpec`] for the common gilded-gold
-/// auto-fit layout used by every plaque in the game. Pairs with
-/// [`MaterialSpec::lacquered_wood_flat`] to reproduce the legacy
-/// `Object3dKind::Plaque { text, … }` ergonomics.
-#[allow(dead_code)] // Used when building plaque-style decals from gameplay props.
-pub fn plaque_decal(text: impl Into<String>) -> DecalSpec {
-    DecalSpec {
-        text: text.into(),
-        layout: DecalLayout::Fit {
-            target_short_edge: crate::decal::PLAQUE_DECAL_HEIGHT,
-        },
     }
 }
 

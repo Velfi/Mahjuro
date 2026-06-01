@@ -359,6 +359,7 @@ impl App {
                     .push(Scene::Tixels(TixelsScene::new(true)));
                 log::debug!("Opened tixels scene");
             }
+            #[cfg(target_os = "macos")]
             DebugAction::OpenAbout => {
                 let body = format!(
                     "Mahjuro v{}\nA candlelit mahjong roguelike prototype.\n\nLocal icon asset: icon.png",

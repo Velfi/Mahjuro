@@ -249,27 +249,4 @@ impl AnimationController {
 
         t
     }
-
-    #[allow(dead_code)] // Was used for redraw gating; kept as an introspection helper.
-    pub fn is_idle(&self) -> bool {
-        self.tweens.is_empty()
-    }
-}
-
-/// Apply scale around rect center, with offset.
-#[allow(dead_code)] // Used when HUD text is transformed with the score-panel arrange tween.
-pub fn apply_transform_rect(
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    t: Transform2D,
-) -> (f32, f32, f32, f32) {
-    let cx = x + w * 0.5;
-    let cy = y + h * 0.5;
-    let nw = w * t.scale;
-    let nh = h * t.scale;
-    let nx = cx - nw * 0.5 + t.offset_x;
-    let ny = cy - nh * 0.5 + t.offset_y;
-    (nx, ny, nw, nh)
 }

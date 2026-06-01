@@ -245,7 +245,6 @@ pub fn push_floating_relic_flavor_labels(
         color: color::CHAMPAGNE,
         font_px: Some(body_px),
         align: TextAlign::Center,
-        no_glossary: true,
         scroll_offset: 0.0,
         flavor_spans: Some(flavor),
         bold: false,

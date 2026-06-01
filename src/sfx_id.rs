@@ -159,8 +159,12 @@ pub enum SfxId {
     Victory2,
     /// Played ~1 second after the defeat screen appears.
     Defeat,
+    /// Main-menu "New Game" / "Play" — random gong swell stinger.
+    NewGameStinger,
     /// Played whenever the main menu (start screen) is entered.
     MainMenuEnter,
+    /// Played when entering the post-run stairway scene.
+    StairwayEnter,
     /// Generic level-up stinger.
     LevelUp,
     /// Tiles permanently destroyed (e.g. Taotie).
@@ -249,7 +253,9 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::Victory,
         SfxId::Victory2,
         SfxId::Defeat,
+        SfxId::NewGameStinger,
         SfxId::MainMenuEnter,
+        SfxId::StairwayEnter,
         SfxId::LevelUp,
         SfxId::TilesDestroyed,
         SfxId::OrdealEncountered,

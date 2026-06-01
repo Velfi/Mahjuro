@@ -109,7 +109,6 @@ pub enum MaterialKind {
     /// than `Metal` and a touch more diffuse retained, so brass fittings
     /// read as bright polished metal in overhead light without going
     /// near-black off-axis. Use for hanging brass props (bells, rails).
-    #[allow(dead_code)]
     Brass = 17,
     /// Bookbinding leather — warm dielectric with procedural grain,
     /// broad soft sheen (no tight pinpoint), subtle Fresnel rim, and a
@@ -120,7 +119,6 @@ pub enum MaterialKind {
     Leather = 18,
     /// Legacy material slot (procedural green baize removed). Kept so
     /// `#[repr(u32)]` discriminants stay stable.
-    #[allow(dead_code)]
     FeltGreen = 19,
     /// Unlit emission added on top of the usual lit path. `specular_strength`
     /// scales `base_color.rgb` in the shader (`lit_mesh.wgsl` emissive term).

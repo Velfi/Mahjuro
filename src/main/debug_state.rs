@@ -4,6 +4,7 @@
 //! plumbing. Field access is intentionally `pub` because the rest of `main`
 //! mutates these fields directly during event handling and drawing.
 
+#[cfg(debug_menu_enabled)]
 use crate::debug_menu::DebugMenuBar;
 use crate::debug_overlays::{
     CameraDebugOverlay, DebugVisibilityOverlay, HallwayDistortionDebugOverlay,
@@ -16,6 +17,7 @@ use crate::render::rain_debug_overlay::RainDebugOverlay;
 /// Debug-only state: overlays, visibility toggles, FPS counter, and the
 /// one-shot object-hit-test picker.
 pub struct DebugState {
+    #[cfg(debug_menu_enabled)]
     pub menu: Option<DebugMenuBar>,
     pub show_fps: bool,
     pub fps_smoothed: f32,
@@ -40,6 +42,7 @@ pub struct DebugState {
 impl DebugState {
     pub fn new() -> Self {
         Self {
+            #[cfg(debug_menu_enabled)]
             menu: None,
             show_fps: false,
             fps_smoothed: 60.0,

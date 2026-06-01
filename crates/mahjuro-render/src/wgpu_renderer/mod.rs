@@ -2,6 +2,7 @@
 
 mod embedded_wgsl;
 mod frame_pool;
+#[cfg(feature = "windowed")]
 mod boot_splash;
 pub mod loading_screen;
 mod init;
@@ -147,7 +148,6 @@ pub struct WgpuRenderer {
     /// Reusable staging buffer for [`crate::flame_volume::GpuFlameInstance`].
     flame_instance_staging: Vec<crate::flame_volume::GpuFlameInstance>,
     starfield_pipeline: wgpu::RenderPipeline,
-    ember_drift_pipeline: wgpu::RenderPipeline,
     golden_dust_pipeline: wgpu::RenderPipeline,
     moonlit_water_pipeline: wgpu::RenderPipeline,
     // Owns the GPU resource that `moonlit_water_bind_group` samples from.
@@ -171,17 +171,14 @@ pub struct WgpuRenderer {
     /// `cascade_composite_sampler`. See `scene_color_downsample.wgsl`.
     scene_color_downsample_pipeline: wgpu::RenderPipeline,
     scene_color_downsample_bind_group: wgpu::BindGroup,
-    tile_pipeline_opaque_double: wgpu::RenderPipeline,
     tile_pipeline_opaque_cull: wgpu::RenderPipeline,
     tile_pipeline_blend_double: wgpu::RenderPipeline,
     tile_pipeline_blend_cull: wgpu::RenderPipeline,
     /// shop.glb only — glTF punctual + metallic-roughness + ACES (`room_glb.wgsl`).
-    shop_pipeline_opaque_double: wgpu::RenderPipeline,
     shop_pipeline_opaque_cull: wgpu::RenderPipeline,
     shop_pipeline_blend_double: wgpu::RenderPipeline,
     shop_pipeline_blend_cull: wgpu::RenderPipeline,
     /// Shop emissive-only pre-pass (`room_glb` `fs_main_emissive` → `room_emissive_view`).
-    shop_pipeline_mrt_opaque_double: wgpu::RenderPipeline,
     shop_pipeline_mrt_opaque_cull: wgpu::RenderPipeline,
     shop_pipeline_mrt_blend_double: wgpu::RenderPipeline,
     shop_pipeline_mrt_blend_cull: wgpu::RenderPipeline,
@@ -297,8 +294,6 @@ pub struct WgpuRenderer {
     /// Active tileset directory name (e.g. `"original"`). When `Some`, tile
     /// decals are loaded from `assets/textures/tile_sets/<name>/` instead of rasterized.
     tile_set: Option<String>,
-    /// Per-hand-tile GPU resources; kept in sync with the hand via `update_hand_tiles`.
-    hand_tiles: Vec<HandTileGpu>,
     /// Per-showcase-tile GPU resources (pack celebration, etc.). Grown on
     /// demand up to `MAX_SHOWCASE_TILE_SLOTS`; decals re-rasterised only
     /// when the tile identity changes.
@@ -343,12 +338,6 @@ pub struct WgpuRenderer {
     ui_font_italic: Option<fontdue::Font>,
     mono_font: Option<fontdue::Font>,
     pub size: crate::physical_size::PhysicalSize,
-    /// Last focused tile index — used to detect focus changes.
-    last_focus: usize,
-    /// When the focused tile changed: (slot_index, start_time). Drives the 360° spin.
-    focus_spin: Option<(usize, Instant)>,
-    /// Per-tile focus blend factor (0.0 = unfocused, 1.0 = focused). Lerped each frame.
-    focus_t: Vec<f32>,
     /// Per-tile Y animation offset (positive = below rest position). Lerped toward 0 each frame.
     tile_anim_y: Vec<f32>,
     /// Per-tile X animation offset (in slot-width units). Used for sort shuffle animations.
@@ -797,7 +786,7 @@ pub struct WgpuRenderer {
     _shadow_ao_white_texture: wgpu::Texture,
     shadow_ao_white_view: wgpu::TextureView,
     /// Bind-group layout for per-caster uniforms (group 0 of the shadow
-    /// pipeline). Each `LitMeshInstance` and `HandTileGpu` owns one bind
+    /// pipeline). Each `LitMeshInstance` owns one bind
     /// group built against this layout.
     shadow_caster_layout: wgpu::BindGroupLayout,
     /// Group 1 of the shadow VS — `HallwayDistortion` (zeroed ⇒ no warp). Bound for every shadow draw.
@@ -856,7 +845,7 @@ pub use constants::{
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
     MAX_YAKU_TABLET_SLOTS, MEMORIAL_TALISMAN_TEXTURE_BASE,
 };
-pub use internal_slots::{RelicIcon, TextAlign, TextLabel};
+pub use internal_slots::{TextAlign, TextLabel};
 pub use layout_instances::build_instances_from_layout;
 pub use picking_types::{GameplayPick, MainMenuPick, ShopHit};
 pub use projection::ProjectionCache;
@@ -888,6 +877,6 @@ pub(super) use constants::{
 pub(crate) use projection::PickCamera;
 
 pub(crate) use internal_slots::{
-    CachedTextLabel, GltfPropGpu, HandTileGpu, ShopEnvironmentGpu, ShowcaseTileGpu, TextLabelShapeKey,
+    CachedTextLabel, GltfPropGpu, ShopEnvironmentGpu, ShowcaseTileGpu, TextLabelShapeKey,
     TileFaceOverlayGpu,
 };

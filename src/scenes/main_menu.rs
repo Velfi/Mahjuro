@@ -559,7 +559,11 @@ impl SceneBehavior for MainMenuScene {
                 ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
                 return None;
             }
-            ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+            let confirm_sfx = match self.focus {
+                Some(HubFocus::NewGame) => SfxId::NewGameStinger,
+                _ => SfxId::UiConfirm,
+            };
+            ctx.bus.push(GameEvent::UiSound(confirm_sfx));
             match self.focus {
                 Some(HubFocus::Continue) => {
                     return Some(scene_from_resume(ctx.resume_scene, ctx.run, ctx.progress));

@@ -225,6 +225,8 @@ pub struct InputState {
     pub item_inspect_zoom_triggers: f32,
     /// Right stick vertical axis used for list/pane scroll scenes (`-1..1`).
     pub right_stick_scroll_axis: f32,
+    /// Left stick vertical axis used for list/pane scroll on run-end screens (`-1..1`).
+    pub left_stick_scroll_axis: f32,
     /// Controller family for on-screen button prompts (from USB vendor / name).
     pub gamepad_style: GamepadStyle,
     /// Last style we ran `apply_controller_layout_defaults_for_active_style`
@@ -272,6 +274,7 @@ impl InputState {
             shop_storeroom_mouse_orbit_px: (0.0, 0.0),
             item_inspect_zoom_triggers: 0.0,
             right_stick_scroll_axis: 0.0,
+            left_stick_scroll_axis: 0.0,
             gamepad_style: GamepadStyle::default(),
             #[cfg(any(feature = "game", feature = "headless-screenshot"))]
             last_seen_layout_style: None,

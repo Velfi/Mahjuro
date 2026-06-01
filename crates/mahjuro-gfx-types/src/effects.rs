@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-/// Controls the quality of fullscreen vignette effects (starfield, ember
-/// drift, golden dust, shooting-star cascade). Lower levels reduce or skip
+/// Controls the quality of fullscreen vignette effects (starfield, golden dust,
+/// shooting-star cascade). Lower levels reduce or skip
 /// procedural layers to save GPU ALU on weaker hardware.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum EffectsQuality {

@@ -2,15 +2,10 @@ use super::*;
 
 use crate::scene_keys;
 
-#[allow(dead_code)] // up_v/fov_y/aspect/view_mat/proj are exposed for downstream passes.
+#[derive(Clone, Copy, Debug)]
 pub(super) struct CameraFrame {
     pub cam_pos: glam::Vec3,
     pub look_target: glam::Vec3,
-    pub up_v: glam::Vec3,
-    pub fov_y: f32,
-    pub aspect: f32,
-    pub view_mat: Mat4,
-    pub proj: Mat4,
     pub view_proj: Mat4,
     pub view_proj_arr: [f32; 16],
     pub w: f32,
@@ -53,11 +48,6 @@ impl CameraFrame {
         Self {
             cam_pos,
             look_target,
-            up_v,
-            fov_y,
-            aspect,
-            view_mat,
-            proj,
             view_proj,
             view_proj_arr,
             w,
@@ -415,11 +405,6 @@ mod tests {
         CameraFrame {
             cam_pos,
             look_target,
-            up_v,
-            fov_y,
-            aspect,
-            view_mat,
-            proj,
             view_proj,
             view_proj_arr: view_proj.to_cols_array(),
             w,
