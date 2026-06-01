@@ -97,8 +97,8 @@ pub fn archive_sign_description_decal_extents_for(cpu: &RoomGlbCpu) -> [f32; 3] 
 /// Read the `inspect_plaque` mesh face aspect for the inspect decal atlas.
 ///
 /// When authored UV runs **u** along local **Y** (not **X** like the sign boards), decode applies
-/// [`crate::room_env_gltf::archive_inspect_plaque_decal_uv`] and this returns a **portrait** aspect
-/// (`extents[0] < 1`) so copy reads left-to-right on the copper face.
+/// [`crate::room_env_gltf::archive_inspect_plaque_decal_uv`] (decal **U** along local **+Y**) and this
+/// returns a **portrait** aspect (`extents[0] < 1`).
 pub fn archive_inspect_plaque_decal_extents_for(cpu: &RoomGlbCpu) -> [f32; 3] {
     if let Some(prim) = cpu
         .environment_primitives

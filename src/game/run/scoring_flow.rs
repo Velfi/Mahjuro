@@ -40,6 +40,7 @@ impl RunState {
     /// Returns points added this step (`0` or `1` success token for UI; real score is on trigger).
     pub fn commit_selection_to_structure(&mut self, bus: &mut EventBus) -> u64 {
         if self.plays_remaining == 0 || self.selected_count() == 0 {
+            self.resolve_round_end(bus);
             return 0;
         }
 
@@ -560,11 +561,18 @@ impl RunState {
         let _ = self.trigger_structure(StructureTriggerKind::AutoFull, bus);
     }
 
-    pub(super) fn emit_round_resolution_events(&mut self, bus: &mut EventBus) {
-        if self.suppress_chamber_resolution {
+    /// HUD refresh after a scoring mutation; does not evaluate chamber end.
+    pub(super) fn push_score_updated_event(&mut self, bus: &mut EventBus) {
+        if !self.suppress_chamber_resolution {
+            bus.push(GameEvent::ScoreUpdated);
+        }
+    }
+
+    /// Idempotent: enqueue blind clear / run loss when terminal predicates hold.
+    pub fn resolve_round_end(&mut self, bus: &mut EventBus) {
+        if self.suppress_chamber_resolution || self.round_end_queued {
             return;
         }
-        bus.push(GameEvent::ScoreUpdated);
         if self.round_score >= self.target_score as u64 {
             let base_reward = self.chamber.clear_reward();
             let unused_play_bonus = self.plays_remaining;
@@ -676,17 +684,25 @@ impl RunState {
                     total: gold_earned,
                 },
             });
+            self.round_end_queued = true;
             if self.chamber == ChamberKind::Ordeal
                 && let Some(bk) = self.ordeal.upcoming
             {
                 bus.push(GameEvent::OrdealDefeated(bk));
             }
-        } else if let Some(reason) = self.round_failure_reason()
-            && !self.try_second_wind_salvage(reason, bus)
-            && !self.try_talisman_salvage(reason, bus)
-        {
-            bus.push(GameEvent::GameOver { reason });
+        } else if let Some(reason) = self.round_failure_reason() {
+            if self.try_second_wind_salvage(reason, bus) {
+                self.round_end_queued = true;
+            } else if !self.try_talisman_salvage(reason, bus) {
+                bus.push(GameEvent::GameOver { reason });
+                self.round_end_queued = true;
+            }
         }
+    }
+
+    pub(super) fn emit_round_resolution_events(&mut self, bus: &mut EventBus) {
+        self.push_score_updated_event(bus);
+        self.resolve_round_end(bus);
     }
 
     /// When a round would end in defeat, consume a memorial talisman that grants

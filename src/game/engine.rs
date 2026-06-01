@@ -772,22 +772,26 @@ impl<'a> GameEngine<'a> {
         let data = match command {
             GameCommand::CommitSelection => {
                 if self.run.selected_count() == 0 {
-                    return CommandOutcome::rejected(
+                    return self.finish_dispatch(
                         command,
                         before,
-                        CommandRejection::EmptySelection,
+                        queue_start,
+                        CommandData::None,
+                        Some(CommandRejection::EmptySelection),
                     );
                 }
                 if self.run.plays_remaining == 0 {
-                    return CommandOutcome::rejected(
+                    return self.finish_dispatch(
                         command,
                         before,
-                        CommandRejection::NoPlaysRemaining,
+                        queue_start,
+                        CommandData::None,
+                        Some(CommandRejection::NoPlaysRemaining),
                     );
                 }
                 let step = self.run.commit_selection_to_structure(self.bus);
                 if step == 0 {
-                    return self.finish_outcome(
+                    return self.finish_dispatch(
                         command,
                         before,
                         queue_start,
@@ -799,15 +803,17 @@ impl<'a> GameEngine<'a> {
             }
             GameCommand::TriggerStructure => {
                 if !self.run.can_trigger_structure_now() {
-                    return CommandOutcome::rejected(
+                    return self.finish_dispatch(
                         command,
                         before,
-                        CommandRejection::TriggerUnavailable,
+                        queue_start,
+                        CommandData::None,
+                        Some(CommandRejection::TriggerUnavailable),
                     );
                 }
                 let earned = self.run.trigger_structure_manual(self.bus);
                 if earned == 0 {
-                    return self.finish_outcome(
+                    return self.finish_dispatch(
                         command,
                         before,
                         queue_start,
@@ -819,29 +825,35 @@ impl<'a> GameEngine<'a> {
             }
             GameCommand::DiscardSelectionNoRefill => {
                 if !self.run.onboarding_discard_allowed() {
-                    return CommandOutcome::rejected(
+                    return self.finish_dispatch(
                         command,
                         before,
-                        CommandRejection::NoDiscardsRemaining,
+                        queue_start,
+                        CommandData::None,
+                        Some(CommandRejection::NoDiscardsRemaining),
                     );
                 }
                 if self.run.discards_remaining == 0 {
-                    return CommandOutcome::rejected(
+                    return self.finish_dispatch(
                         command,
                         before,
-                        CommandRejection::NoDiscardsRemaining,
+                        queue_start,
+                        CommandData::None,
+                        Some(CommandRejection::NoDiscardsRemaining),
                     );
                 }
                 if self.run.selected_count() == 0 {
-                    return CommandOutcome::rejected(
+                    return self.finish_dispatch(
                         command,
                         before,
-                        CommandRejection::EmptySelection,
+                        queue_start,
+                        CommandData::None,
+                        Some(CommandRejection::EmptySelection),
                     );
                 }
                 let count = self.run.discard_selected_no_refill(self.bus);
                 if count == 0 {
-                    return self.finish_outcome(
+                    return self.finish_dispatch(
                         command,
                         before,
                         queue_start,
@@ -855,7 +867,7 @@ impl<'a> GameEngine<'a> {
                 let hand_before = self.run.hand().len();
                 self.run.refill_hand(self.bus);
                 if self.run.hand().len() == hand_before {
-                    return self.finish_outcome(
+                    return self.finish_dispatch(
                         command,
                         before,
                         queue_start,
@@ -867,14 +879,16 @@ impl<'a> GameEngine<'a> {
             }
             GameCommand::UseConsumable { index } => {
                 if self.run.consumables.items.get(index).is_none() {
-                    return CommandOutcome::rejected(
+                    return self.finish_dispatch(
                         command,
                         before,
-                        CommandRejection::ConsumableUnavailable,
+                        queue_start,
+                        CommandData::None,
+                        Some(CommandRejection::ConsumableUnavailable),
                     );
                 }
                 let Some(result) = self.run.use_consumable(index, self.bus) else {
-                    return self.finish_outcome(
+                    return self.finish_dispatch(
                         command,
                         before,
                         queue_start,
@@ -899,7 +913,19 @@ impl<'a> GameEngine<'a> {
             }
         };
 
-        self.finish_outcome(command, before, queue_start, data, None)
+        self.finish_dispatch(command, before, queue_start, data, None)
+    }
+
+    fn finish_dispatch(
+        &mut self,
+        command: GameCommand,
+        before: EngineSnapshot,
+        queue_start: usize,
+        data: CommandData,
+        rejection: Option<CommandRejection>,
+    ) -> CommandOutcome {
+        self.run.resolve_round_end(self.bus);
+        self.finish_outcome(command, before, queue_start, data, rejection)
     }
 
     pub fn dispatch_shop(&mut self, command: ShopCommand) -> ShopCommandOutcome {

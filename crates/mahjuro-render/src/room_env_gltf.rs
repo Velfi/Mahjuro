@@ -156,7 +156,7 @@ mod collision_mesh_tests {
     }
 
     #[test]
-    fn inspect_plaque_decal_uv_reads_left_to_right_and_top_down() {
+    fn inspect_plaque_decal_uv_maps_decal_u_along_local_y() {
         let positions = [
             [-0.103_f32, -0.285, 0.0],
             [0.103, -0.285, 0.0],
@@ -186,29 +186,29 @@ mod collision_mesh_tests {
             if px < 0.0 && py < 0.0 {
                 assert_eq!(i, 0, "left-bottom corner index");
                 assert!(
-                    corners[i].1[0] < 0.05 && corners[i].1[1] < 0.05,
-                    "left-bottom should map to bottom-left of decal: {:?}",
+                    corners[i].1[0] > 0.95 && corners[i].1[1] > 0.95,
+                    "left-bottom: {:?}",
                     corners[i].1
                 );
             } else if px > 0.0 && py < 0.0 {
                 assert_eq!(i, 1, "right-bottom corner index");
                 assert!(
                     corners[i].1[0] > 0.95 && corners[i].1[1] < 0.05,
-                    "right-bottom should map to bottom-right of decal: {:?}",
+                    "right-bottom: {:?}",
                     corners[i].1
                 );
             } else if px < 0.0 && py > 0.0 {
                 assert_eq!(i, 2, "left-top corner index");
                 assert!(
                     corners[i].1[0] < 0.05 && corners[i].1[1] > 0.95,
-                    "left-top should map to top-left of decal: {:?}",
+                    "left-top: {:?}",
                     corners[i].1
                 );
             } else if px > 0.0 && py > 0.0 {
                 assert_eq!(i, 3, "right-top corner index");
                 assert!(
-                    corners[i].1[0] > 0.95 && corners[i].1[1] > 0.95,
-                    "right-top should map to top-right of decal: {:?}",
+                    corners[i].1[0] < 0.05 && corners[i].1[1] < 0.05,
+                    "right-top: {:?}",
                     corners[i].1
                 );
             }
@@ -590,13 +590,15 @@ pub fn decal_texel_u_runs_along_local_y(positions: &[[f32; 3]], uvs: &[[f32; 2]]
     corr_y > corr_x
 }
 
-/// Normalized archive inspect plaque UV → decal atlas UV (90° from authored layout).
+/// Normalized archive inspect plaque UV → decal atlas UV.
 ///
-/// Authored texel **u** runs along local **+Y**; CPU copy is rasterized with **U** horizontal.
-/// A plain `(v, u)` swap mirrors left–right; this maps **U** along **+X** and **V** along **+Y**.
+/// Authored texel **u** runs along local **+Y** (plaque height). CPU copy is rasterized with decal
+/// **U** horizontal, so map **U** along **+Y** and **V** along **+X**. The plaque is tilted in the
+/// room (`plaque_backing` rotation); mapping **U** along local **X** made copy run vertically on
+/// screen when **U** was mapped along local **X**.
 #[inline]
 pub fn archive_inspect_plaque_decal_uv(n: glam::Vec2) -> [f32; 2] {
-    [1.0 - n.y, 1.0 - n.x]
+    [n.x, n.y]
 }
 
 /// Document-space AABB for one named environment draw mesh (e.g. main-menu `ground`).

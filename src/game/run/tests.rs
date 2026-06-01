@@ -121,6 +121,7 @@ use crate::core::debuff::{TileDebuff, TileDebuffClass};
             defeat_memorial_kind: None,
             chronicle: crate::core::run_chronicle::RunChronicle::default(),
             suppress_chamber_resolution: false,
+            round_end_queued: false,
         }
     }
 
@@ -1189,6 +1190,40 @@ use crate::core::debuff::{TileDebuff, TileDebuffClass};
 
         run.refill_hand(&mut bus);
 
+        assert!(matches!(
+            bus.queue.last(),
+            Some(GameEvent::GameOver {
+                reason: GameOverReason::NoActionsRemaining,
+            })
+        ));
+    }
+
+    fn game_over_queued(bus: &EventBus) -> bool {
+        bus.queue
+            .iter()
+            .any(|ev| matches!(ev, GameEvent::GameOver { .. }))
+    }
+
+    /// Regression: dead hand with discards spent but plays left (UI soft-lock) should
+    /// end the round when the player acts — not only after `refill_hand`.
+    #[test]
+    fn dead_hand_with_plays_left_queues_game_over_without_refill() {
+        let (mut run, mut bus) = dead_hand_no_actions_fixture();
+        run.plays_remaining = 1;
+
+        assert_eq!(
+            run.round_failure_reason(),
+            Some(GameOverReason::NoActionsRemaining)
+        );
+        assert!(!game_over_queued(&bus));
+
+        // Empty Play tap (or any commit attempt while stuck).
+        assert_eq!(run.commit_selection_to_structure(&mut bus), 0);
+
+        assert!(
+            game_over_queued(&bus),
+            "dead round should resolve without waiting for discard refill"
+        );
         assert!(matches!(
             bus.queue.last(),
             Some(GameEvent::GameOver {

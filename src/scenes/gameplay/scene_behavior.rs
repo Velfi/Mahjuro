@@ -308,6 +308,13 @@ impl SceneBehavior for GameplayScene {
         } {
             return t;
         }
+
+        // Terminal predicates can become true without another discard refill (dead hand
+        // with plays/discards exhausted). Reconcile once per idle frame like the bot loop.
+        if !self.is_animating() && self.pending_chamber.is_none() {
+            ctx.run.resolve_round_end(ctx.bus);
+        }
+
         None
     }
 
