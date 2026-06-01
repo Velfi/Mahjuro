@@ -25,6 +25,7 @@ impl RunState {
         if blind == ChamberKind::Ordeal {
             self.ensure_ordeal_revealed();
         }
+        self.round_end_queued = false;
         self.chamber = blind;
         self.round_score = 0;
         self.memorial_round.clear();

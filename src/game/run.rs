@@ -261,6 +261,10 @@ pub struct RunState {
     /// Debug labs: allow scoring past target without blind clear / run advance.
     #[serde(skip)]
     pub suppress_chamber_resolution: bool,
+    /// Set when [`RunState::resolve_round_end`] has queued `RoundComplete` or `GameOver`
+    /// for the current chamber. Cleared on [`RunState::apply_chamber`].
+    #[serde(skip)]
+    pub round_end_queued: bool,
     #[serde(default = "default_hints_enabled")]
     pub hints_enabled: bool,
     // ── Boss blind state ─────────────────────────────────────────────────
@@ -820,6 +824,7 @@ impl RunState {
             mode,
             auto_cash_in_on_full_structure: true,
             suppress_chamber_resolution: false,
+            round_end_queued: false,
             hints_enabled: false,
             ordeal: OrdealState {
                 pool_remaining: ordeal_pool_remaining,
