@@ -1780,7 +1780,6 @@ impl WgpuRenderer {
                 self.gameplay_score_roller_axes_doc = roller_axes;
                 self.gameplay_score_roller_drive_initialized
                     .replace([false; 2]);
-                *self.gameplay_score_roller_stopped.borrow_mut() = false;
                 self.gameplay_env_collision_meshes =
                     crate::gameplay_glb::with_gameplay_glb_cpu(|o| {
                         o.map(|c| c.collision_meshes.clone()).unwrap_or_default()

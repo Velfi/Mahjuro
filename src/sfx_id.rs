@@ -175,8 +175,6 @@ pub enum SfxId {
     TalismanUsed,
     /// Looping mechanical whir while gameplay score odometer rollers spin.
     RollersSpin,
-    /// Mechanical thunk when the score odometer rollers finish spinning.
-    RollerStop,
 }
 
 /// All SFX variants in display order. Single source of truth shared by the
@@ -259,7 +257,6 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::TalismanPurchased,
         SfxId::TalismanUsed,
         SfxId::RollersSpin,
-        SfxId::RollerStop,
     ]
 }
 

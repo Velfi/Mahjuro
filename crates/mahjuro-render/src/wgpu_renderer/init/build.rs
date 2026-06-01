@@ -3253,7 +3253,6 @@ pub(super) fn build_renderer_new(
         gameplay_score_roller_drive_values: std::cell::RefCell::new([0.0; 2]),
         gameplay_score_roller_drive_initialized: std::cell::RefCell::new([false; 2]),
         gameplay_score_roller_roll_elapsed: std::cell::RefCell::new(0.0),
-        gameplay_score_roller_stopped: std::cell::RefCell::new(false),
         gameplay_environment,
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,

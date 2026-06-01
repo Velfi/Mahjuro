@@ -184,12 +184,6 @@ impl WgpuRenderer {
             .gameplay_score_roller_drive_initialized
             .borrow_mut() = [false; 2];
         *self.gameplay_score_roller_roll_elapsed.borrow_mut() = 0.0;
-        *self.gameplay_score_roller_stopped.borrow_mut() = false;
-    }
-
-    /// True once since the last drain when both score/target odometer banks settled.
-    pub fn take_gameplay_score_roller_stop(&self) -> bool {
-        std::mem::take(&mut *self.gameplay_score_roller_stopped.borrow_mut())
     }
 
     /// True while either score/target odometer bank is still catching up to

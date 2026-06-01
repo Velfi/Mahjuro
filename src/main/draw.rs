@@ -897,9 +897,6 @@ impl App {
             Some((id, speed)) => self.audio.set_sfx_loop(Some(id), speed),
             None => self.audio.set_sfx_loop(None, 1.0),
         }
-        if renderer.take_gameplay_score_roller_stop() {
-            self.audio.play_sfx(crate::audio::SfxId::RollerStop);
-        }
         self.cpu_profiler
             .end(crate::render::cpu_profiler::CpuStage::Render);
         self.cpu_profiler.end_frame();

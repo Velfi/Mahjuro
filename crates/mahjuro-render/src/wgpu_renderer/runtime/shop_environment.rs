@@ -240,14 +240,9 @@ impl WgpuRenderer {
             *roll_elapsed = 0.0;
         }
         let drives = *drive_values;
-        let still_rolling =
-            gameplay_score_roller_bank_moving(&initialized, &drive_values, &goal);
         drop(roll_elapsed);
         drop(initialized);
         drop(drive_values);
-        if was_rolling && !still_rolling {
-            *self.gameplay_score_roller_stopped.borrow_mut() = true;
-        }
         Some(GameplayScoreRollerDrive { drives })
     }
 
