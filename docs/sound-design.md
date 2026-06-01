@@ -48,24 +48,21 @@ These cues are considered final. They define the identity that everything else m
 | Pack open | `audio/pack_open.ogg` | `SfxId::PackOpen` |
 | Zodiac acquire | `audio/zodiac_reveal.ogg` | `SfxId::ZodiacReveal` |
 | Talisman trigger | `audio/talisman_used.ogg` | `SfxId::TalismanUsed` |
-| Cash in | `audio/cash_in.ogg` | `SfxId::CashIn` |
+| Cash in | `audio/sfx/sfx30.ogg`–`sfx36.ogg` (variant pool) | `SfxId::CashIn` |
 | Tile discard sweep | `audio/freesound_community-tile-shuffle-99834.ogg` | `SfxId::TileDiscard` |
-| Tile click (mouse pick) | `audio/kenney_interface-sounds/Audio/drop_003.ogg` | `SfxId::TileClick` |
+| Tile click (mouse pick) | `audio/sfx/tile_click-01.ogg`–`tile_click-08.ogg` (variant pool) | `SfxId::TileClick` |
 | Per-relic activation stingers | `audio/relics/<slug>.ogg` (82 today) | `play_relic_trigger(rid)` |
 | Per-yaku scoring stingers | `audio/yaku_<kind>.ogg` (13 today) | `SfxId::Yaku*` via `SfxId::for_yaku` |
-
-`TileClick` overlapping the Kenney UI pack is intentional — the existing sample sits well next to the discard and the per-tile snap, so it stays even though its source kit is otherwise placeholder.
-
 ### 2.2 Hand & table (gameplay diegetic)
 
 The "table world." These sounds should feel like one physical object hitting another. Materials are porcelain glaze on a felt surface with bamboo edging.
 
 - **`TilePlace` / `CascadeLand`** — tile settles into hand or score reel. Today: `Snap.ogg`. Keep, but consider 3 randomized variants (`Snap_a/b/c.ogg`) at ±1 dB and ±2% speed to defeat the 200th-repeat fatigue. Selection logic: `play_clip` picks any of `Snap_*` if multiple exist (loader change in `src/audio.rs`).
-- **`TileSelect` / `TileDeselect`** — focus moves through the hand row. Today: `kenney_interface-sounds/tick_002.ogg` / `tick_004.ogg`. Replace with two **felt thumps** with a very short attack (≤5 ms) and ~30 ms decay. The select cue is one semitone above deselect to give directionality. Loudness: ≤ −18 LUFS short-term, well under `TilePlace`.
-- **`StructureCommit`** — meld locks into the mirror tray. Currently `confirmation_002.ogg` (placeholder). Design as a **soft chord-of-2 taps** (the meld is a set of tiles meeting): two `TilePlace`-adjacent samples played 18 ms apart in mono, mixed −3 dB below a single `TilePlace`. The closeness of the two taps reads as "they belong together."
-- **`InvalidAction`** — bad meld, full structure, no charges. Today: `invalid.ogg`. Acceptable, but the file is too long and slightly cartoony. Replace with a **muted, dampened tap** — like a tile half-rejected by the tray. ≤120 ms total. No descending pitch; the cue is "stopped," not "wrong."
+- **`TileSelect` / `TileDeselect`** — focus moves through the hand row. Shipped: `sfx/sfx1.ogg` / `sfx/sfx2.ogg`. Future polish: two **felt thumps** with a very short attack (≤5 ms) and ~30 ms decay; select one semitone above deselect.
+- **`StructureCommit`** — meld locks into the mirror tray. Shipped: `sfx/sfx5.ogg`. Future polish: **soft chord-of-2 taps** (two `TilePlace`-adjacent samples 18 ms apart).
+- **`InvalidAction`** — bad meld, full structure, no charges. Shipped: `sfx/metal_bonk1.ogg`–`metal_bonk5.ogg` (variant pool).
 - **`TilesDestroyed`** *(no asset yet — silently no-ops)*. Needed for Taotie / curse interactions where tiles are permanently removed. Design as a **dry shatter against cloth** — a single splintery crack followed by an immediate damped tail, ~250 ms. No glass tinkle; tiles in Mahjuro are porcelain *on felt*, not on stone.
-- **`CashIn`** — player commits the meld and the cascade begins. Today: `cash_in.ogg`. Keep, but plan to **duck music −3 dB for 250 ms** when it fires so the cascade reveal that follows has air.
+- **`CashIn`** — player commits the meld and the cascade begins. Shipped: `sfx/sfx30.ogg`–`sfx36.ogg` variant pool. Plan to **duck music −3 dB for 250 ms** when it fires so the cascade reveal that follows has air.
 
 ### 2.3 Scoring cascade (musical)
 
@@ -73,7 +70,7 @@ This is the only sustained musical sequence in the moment-to-moment loop. It is 
 
 1. **`ScoreReveal`** — `intake.ogg`. The inhale before the climb.
 2. **`ScoreTick`** layered with **`ScoreStep`** — per reveal beat. The eight-semitone chromatic climb on `ScoreTick` (`SCORE_TICK_PITCHES` in `src/audio.rs`) is the spine and should not be lost.
-3. **`DoraScored`** — per dora tile, 180 ms staggered. Today: `glass_002.ogg`. Replace with a **single struck-bell tine** at a fixed pitch (suggestion: a perfect fifth above the cascade root). It is a recurring decoration; pitch must be in-key with the music or the climb falls apart.
+3. **`DoraScored`** — per dora tile, 180 ms staggered. Shipped: `sfx/sfx10.ogg`. Future polish: **single struck-bell tine** at a fixed pitch in-key with the cascade.
 4. **`YakuTanyao..ChickenHand`** — per yaku, 200 ms staggered. The 13 existing stingers are locked. **`YakuKokushiMusou` is missing** — produce a final-tier stinger that is recognizably bigger than `YakuChinitsu` (the current top end) but still fits the 200 ms slot without bleeding into the next yaku.
 5. **`CascadeMerge` / `CascadeLaunch` / `CascadeLand`** — the chips × mult merge → fly → settle into the reel. Today: `vwomp1`, `intake`, `Snap`. Keep `CascadeLand = Snap` (the totals are a tile-sized object landing). `CascadeMerge` and `CascadeLaunch` are placeholder; design them as **one continuous gesture in two parts** — a pitched-up swirl that resolves into a release whoosh. Same instrument, two segments.
 6. **`ScoreCrescendo` + `ScoreFinal`** — the totals lock in. Both placeholders; design as a **single two-beat resolution** in the cascade's key, with `ScoreFinal` falling slightly off-beat to act as a comma rather than a period.
@@ -85,19 +82,19 @@ This is the only sustained musical sequence in the moment-to-moment loop. It is 
 
 - **`CoinDrop`** (also `Purchase`) — generic gold movement. Today: `coindrop.ogg`. Keep.
 - **`CashIn`** — see §2.2.
-- **`Sell`** — today: `confirmation_002.ogg`. Replace with **a single coin drop *into* a wooden box** (i.e. coin sample + soft wooden enclosure tail) so it is audibly distinguishable from `CoinDrop`. Sell is the player *receiving* gold; the timbre should reward.
-- **`PackBuy`** — wallet → counter. Today: `confirmation_003.ogg`. Replace with a **paper-wrapped slap on the counter** — one short hand-flesh-on-wood thump with a paper-rustle layer.
+- **`Sell`** — shipped: `sfx/sfx6.ogg`. Future polish: coin drop into a wooden box, audibly distinct from `CoinDrop`.
+- **`PackBuy`** — shipped: `sfx/sfx3.ogg`. Future polish: paper-wrapped slap on the counter.
 - **`PackOpen`** — paper tear. Shipped: `pack_open.ogg`.
-- **`PackTileReveal`** — per tile in the pack. Today: `pluck_001.ogg`. Replace with a **dry, soft tile flip** — a smaller cousin of `TilePlace`, half its body, more click than thump. This is recurring (up to 5 in a row) and must not fatigue.
+- **`PackTileReveal`** — per tile in the pack. Shipped: `sfx/sfx4.ogg`. Future polish: dry, soft tile flip — smaller cousin of `TilePlace`.
 - **`ZodiacReveal`** — close-up reveal of a zodiac ribbon. Shipped: `zodiac_reveal.ogg`.
 - **`ZodiacLevelUp`** — yaku permanently leveled. Today: `zodiac_jingle.ogg`. Keep — it is one of the few places the game gets to play a true jingle, and the current cue earns it.
-- **`StarShimmer`** — celebration scene transition. Today: `glass_005.ogg`. Acceptable; revisit only if it clashes with the cascade hand-off.
+- **`StarShimmer`** — celebration scene transition. Shipped: `sfx/sfx9.ogg`. Revisit only if it clashes with the cascade hand-off.
 - **`TalismanPurchased`** *(no asset yet)* — brush-stroke on paper + soft landing thump.
 - **`TalismanUsed`** — shipped: `talisman_used.ogg`.
 
 ### 2.5 Round / blind / run lifecycle
 
-- **`RoundStart`** — today: `confirmation_004.ogg`. Replace with a **gong-adjacent struck idiophone**, single soft hit, long resonant decay (~1.2 s). It is the curtain rising; it can afford length.
+- **`RoundStart`** — shipped: `sfx/sfx7.ogg`. Future polish: **gong-adjacent struck idiophone**, single soft hit, long resonant decay (~1.2 s).
 - **`RoundWin` / `Victory` / `Victory2`** — today: `roundwin.ogg`, `victory.ogg`, `victory2.ogg`. Keep; the two-victory randomization is the only randomization Mahjuro currently does and it is working.
 - **`GameOver` / `Defeat`** — today: `gameover.ogg`, `defeat.ogg`. Keep.
 - **`LevelUp`** — today: `levelup.ogg`. Keep.
@@ -107,11 +104,11 @@ This is the only sustained musical sequence in the moment-to-moment loop. It is 
 
 ### 2.6 UI / chrome
 
-This is the largest placeholder surface. Every `kenney_interface-sounds/*` cue is temporary.
+Kenney interface audio has been removed. Interim custom recordings ship today (`cash_in.ogg` for `UiConfirm`, `sfx/can_ping.ogg` for `UiCancel`, `sfx/sfx1.ogg`–`sfx29.ogg` for the rest). The design targets below remain for a future polish pass.
 
-- **`UiConfirm`** — every "OK / select / advance." Replace with a **single felt-against-bamboo tick**. Brighter than `TileSelect`. ≤80 ms. Loudness ≤ −20 LUFS short-term.
-- **`UiCancel`** — every back / dismiss. The inverse: same instrument, one semitone down, slightly shorter, no brightness boost.
-- **`FocusButton` / `FocusHandTile` / `FocusConsumable` / `FocusRelic` / `FocusPeg` / `FocusGold` / `FocusYakuTablet` / `FocusDora`** — currently eight different Kenney samples, one per focusable category. Mahjuro routes these through `Tree<A>::on_focus_changed`, so the system already exists; the **design intent** is "different categories of UI surface have different fingertips on them." Replacement plan:
+- **`UiConfirm`** — shipped: `cash_in.ogg`. Future polish: single felt-against-bamboo tick, ≤80 ms.
+- **`UiCancel`** — shipped: `sfx/can_ping.ogg`. Future polish: inverse of `UiConfirm` — same instrument, one semitone down, slightly shorter.
+- **`FocusButton` / `FocusHandTile` / `FocusConsumable` / `FocusRelic` / `FocusPeg` / `FocusGold` / `FocusYakuTablet` / `FocusDora`** — shipped: shared random pool from `sfx/sfx13.ogg`–`sfx29.ogg`. Future polish plan:
   - One **base "focus tick" sample** (a single soft pad press).
   - **One short tail layer per category**, mixed at −12 dB under the base:
     - `FocusButton` — clean tick, no tail.
@@ -123,8 +120,8 @@ This is the largest placeholder surface. Every `kenney_interface-sounds/*` cue i
     - `FocusYakuTablet` — same tick + a single stick-on-wood block tap.
     - `FocusDora` — same tick + the `DoraScored` chime at −15 dB.
 
-  This way every focus row has the same primary attack so navigation feels uniform, with a *spice* layer that confirms "what kind of thing I just moved onto." Replaces eight unrelated Kenney samples with one base + seven 100 ms tail layers.
-- **`Pause` / `Unpause`** — today: `minimize_003.ogg` / `maximize_003.ogg`. Replace with the **same instrument, two states**: a single damped tile-tap on pause (clipping the room), and a soft inhale-style swell on unpause. Both ≤200 ms.
+  This way every focus row has the same primary attack so navigation feels uniform, with a *spice* layer that confirms "what kind of thing I just moved onto."
+- **`Pause` / `Unpause`** — shipped: `sfx/sfx11.ogg` / `sfx/sfx12.ogg`. Future polish: same instrument, two states — damped tile-tap on pause, soft inhale swell on unpause. Both ≤200 ms.
 - **Slider drag tick** *(no SFX today)*. Add `SfxId::SliderTick`. Fire every ~5% of slider movement. Sample is a **tiny bamboo-on-bamboo tap**, mono, ≤30 ms, −24 dB. Must not be present on slider hover, only on value change.
 - **Settings saved** *(no SFX today)*. Add `SfxId::SettingsSaved`. Single soft `UiConfirm` variant pitched up 2 semitones. Plays once when leaving the options screen if any value changed.
 
@@ -180,7 +177,7 @@ The Shop and Pick-Blind tracks may modulate; cascade stingers do not play in tho
 
 ### 3.4 Out-of-palette (do not use)
 
-- Modern UI synth woosh kits (the kind that came with the Kenney pack we are replacing).
+- Modern UI synth woosh kits (generic placeholder UI packs).
 - Riser sweeps / DAW pre-built impacts.
 - Cinematic boomwhacker hits.
 - Voice (we have no VO budget and the game does not call for it; even non-lexical vocalizations conflict with the contemplative-table identity).
@@ -348,7 +345,7 @@ The audio device is the slow path of `AudioManager::new`. If a scene plays a cue
 
 | Milestone | Scope |
 |---|---|
-| **M1 — Replace UI chrome** | `UiConfirm`, `UiCancel`, the eight `Focus*` cues, `Pause`, `Unpause`. Removes every Kenney placeholder in the menu loop. |
+| **M1 — Replace UI chrome** | ~~Done (interim).~~ `UiConfirm`, `UiCancel`, the eight `Focus*` cues, `Pause`, `Unpause` — Kenney removed; custom thuds shipped. Future polish per §2.6. |
 | **M2 — Replace tile chrome** | `TileSelect`, `TileDeselect`, `StructureCommit`, `InvalidAction`. Locks the hand-row identity. |
 | **M3 — Cascade polish** | `CascadeMerge`, `CascadeLaunch`, `DoraScored`, `ScoreCrescendo`, `ScoreFinal`. Plus `YakuKokushiMusou`. Tightens the most-heard musical sequence. |
 | **M4 — Missing-asset cues** | `BossEncountered`, `BossDefeated`, `TilesDestroyed`, `TalismanPurchased`, `TalismanUsed`. Brings parity with already-wired events. |
@@ -379,11 +376,9 @@ M1–M5 are pure content. M6 requires one new sink. M7 is the largest dev work a
 
 This is the design-side view of the cue inventory. The implementation-side source of truth is `enum SfxId` + `SfxId::filename()` in [src/audio.rs](../src/audio.rs); when the two disagree, source wins and this doc should be updated.
 
-**Locked:** `MainMenu` BGM, `Gameplay` BGM, `Shop` BGM, `ChamberWin`/`ChamberLoss`/`BossWin`/`BossLoss` music stingers, `TileDiscard`, `TileClick`, all `Yaku*` (except `YakuKokushiMusou`), all `audio/relics/<slug>.ogg` that ship today, `MainMenuEnter`, `RoundWin`, `Victory`/`Victory2`, `GameOver`, `Defeat`, `LevelUp`, `ZodiacLevelUp`, `CashIn`, `CoinDrop`, `Purchase`, `CandleFlareWhoosh`, `CandleFlareImpact`.
+**Locked:** `MainMenu` BGM, `Gameplay` BGM, `Shop` BGM, `ChamberWin`/`ChamberLoss`/`BossWin`/`BossLoss` music stingers, `TileDiscard`, `TileClick`, all `Yaku*` (except `YakuKokushiMusou`), all `audio/relics/<slug>.ogg` that ship today, `MainMenuEnter`, `RoundWin`, `Victory`/`Victory2`, `GameOver`, `Defeat`, `LevelUp`, `ZodiacLevelUp`, `CoinDrop`, `Purchase`, `CandleFlareWhoosh`, `CandleFlareImpact`, `UiConfirm`, `UiCancel`, all `Focus*`, `Pause`, `Unpause`, `InvalidAction`, `CashIn`.
 
-**Placeholder — high priority replace (M1–M2):** `UiConfirm`, `UiCancel`, `FocusHandTile`, `FocusButton`, `FocusConsumable`, `FocusRelic`, `FocusPeg`, `FocusGold`, `FocusYakuTablet`, `FocusDora`, `TileSelect`, `TileDeselect`, `StructureCommit`, `InvalidAction`, `Pause`, `Unpause`.
-
-**Placeholder — medium priority (M3, M5):** `Sell`, `PackBuy`, `PackOpen`, `PackTileReveal`, `RoundStart`, `ZodiacReveal`, `StarShimmer`, `DoraScored`, `ScoreCrescendo`, `ScoreFinal`, `CascadeMerge`, `CascadeLaunch`, `CascadeLand`, `ScoreReveal`, `ScoreStep`, `ScoreTick` (base sample).
+**Shipped interim (polish pass still open):** `TileSelect`, `TileDeselect`, `StructureCommit`, `Sell`, `PackBuy`, `PackTileReveal`, `RoundStart`, `StarShimmer`, `DoraScored`, `ChamberSkipped`.
 
 **Missing — wire is live, asset is absent (M3–M4):** `YakuKokushiMusou`, `TilesDestroyed`, `BossEncountered`, `BossDefeated`, `TalismanPurchased`, `TalismanUsed`.
 

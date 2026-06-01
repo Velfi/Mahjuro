@@ -11,9 +11,20 @@ use rand::RngExt;
 const IDLE_MIN_SECS: f32 = 240.0;
 const IDLE_MAX_SECS: f32 = 420.0;
 
+/// Between random floor creaks while an eligible room scene is on-screen.
+const CREAK_MIN_SECS: f32 = 45.0;
+const CREAK_MAX_SECS: f32 = 120.0;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RoomGltfAmbienceTick {
+    pub brownout_started: bool,
+    pub play_creak: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct RoomGltfBrownout {
     secs_to_next: f32,
+    creak_secs_to_next: f32,
     active: Option<ActiveBrownout>,
 }
 
@@ -30,8 +41,14 @@ impl RoomGltfBrownout {
     pub fn new() -> Self {
         Self {
             secs_to_next: Self::roll_idle_delay(),
+            creak_secs_to_next: Self::roll_creak_delay(),
             active: None,
         }
+    }
+
+    fn roll_creak_delay() -> f32 {
+        let mut rng = rand::rng();
+        rng.random_range(CREAK_MIN_SECS..CREAK_MAX_SECS)
     }
 
     fn roll_idle_delay() -> f32 {
@@ -62,13 +79,21 @@ impl RoomGltfBrownout {
     }
 
     /// `freeze`: pause menu, shop lighting debug overlay, or scene blocking overlay.
-    pub fn tick(&mut self, dt: f32, room_scene_eligible: bool, freeze: bool) {
+    pub fn tick(&mut self, dt: f32, room_scene_eligible: bool, freeze: bool) -> RoomGltfAmbienceTick {
+        let mut out = RoomGltfAmbienceTick::default();
         if !room_scene_eligible {
             self.active = None;
-            return;
+            self.creak_secs_to_next = Self::roll_creak_delay();
+            return out;
         }
         if freeze {
-            return;
+            return out;
+        }
+
+        self.creak_secs_to_next -= dt;
+        if self.creak_secs_to_next <= 0.0 {
+            out.play_creak = true;
+            self.creak_secs_to_next = Self::roll_creak_delay();
         }
 
         if let Some(ref mut a) = self.active {
@@ -82,8 +107,10 @@ impl RoomGltfBrownout {
             if self.secs_to_next <= 0.0 {
                 self.active = Some(Self::roll_active());
                 self.secs_to_next = 0.0;
+                out.brownout_started = true;
             }
         }
+        out
     }
 
     #[inline]

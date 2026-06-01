@@ -154,12 +154,23 @@ impl crate::sfx_id::AmbientId {
     fn asset_path(self) -> &'static str {
         match self {
             AmbientId::MainMenuRain => "audio/ambient/main_menu_rain.ogg",
+            AmbientId::HallwayBulbBuzz => {
+                "audio/sfx/freesound_community-room-with-buzz-incandescent-light-bulb-23892.ogg"
+            }
+        }
+    }
+
+    fn gain(self) -> f32 {
+        match self {
+            AmbientId::MainMenuRain => AMBIENT_RAIN_GAIN,
+            AmbientId::HallwayBulbBuzz => AMBIENT_HALLWAY_BULB_GAIN,
         }
     }
 }
 
 /// Scales [`AmbientId::MainMenuRain`] under main-menu BGM.
 const AMBIENT_RAIN_GAIN: f32 = 0.32;
+const AMBIENT_HALLWAY_BULB_GAIN: f32 = 0.28;
 
 /// Loops a decoded clip without `repeat_infinite`'s extra buffering (important
 /// for long stereo tracks).
@@ -223,14 +234,35 @@ impl Source for LoopingPcmSource {
     }
 }
 
+/// Random thuds shared by all focus-navigation cues.
+const FOCUS_THUDS: &[&str] = &[
+    "sfx/sfx13.ogg",
+    "sfx/sfx14.ogg",
+    "sfx/sfx15.ogg",
+    "sfx/sfx16.ogg",
+    "sfx/sfx17.ogg",
+    "sfx/sfx18.ogg",
+    "sfx/sfx19.ogg",
+    "sfx/sfx20.ogg",
+    "sfx/sfx21.ogg",
+    "sfx/sfx22.ogg",
+    "sfx/sfx23.ogg",
+    "sfx/sfx24.ogg",
+    "sfx/sfx25.ogg",
+    "sfx/sfx26.ogg",
+    "sfx/sfx27.ogg",
+    "sfx/sfx28.ogg",
+    "sfx/sfx29.ogg",
+];
+
 impl crate::sfx_id::SfxId {
     pub(crate) fn filename(self) -> &'static str {
         match self {
-            SfxId::UiConfirm => "kenney_interface-sounds/Audio/confirmation_001.ogg",
-            SfxId::UiCancel => "kenney_interface-sounds/Audio/back_001.ogg",
-            SfxId::TileClick => "kenney_interface-sounds/Audio/drop_003.ogg",
-            SfxId::TileSelect => "kenney_interface-sounds/Audio/tick_002.ogg",
-            SfxId::TileDeselect => "kenney_interface-sounds/Audio/tick_004.ogg",
+            SfxId::UiConfirm => "cash_in.ogg",
+            SfxId::UiCancel => "sfx/can_ping.ogg",
+            SfxId::TileClick => "sfx/tile_click-01.ogg",
+            SfxId::TileSelect => "sfx/sfx1.ogg",
+            SfxId::TileDeselect => "sfx/sfx2.ogg",
             SfxId::TilePlace => "Snap.ogg",
             SfxId::TileDiscard => "freesound_community-tile-shuffle-99834.ogg",
             SfxId::ScoreReveal => "intake.ogg",
@@ -239,35 +271,37 @@ impl crate::sfx_id::SfxId {
             SfxId::ScoreCrescendo => "scorecrescendo.ogg",
             SfxId::ScoreFinal => "MixingBell.ogg",
             SfxId::RelicPickup => "relic_pickup.ogg",
-            SfxId::InvalidAction => "invalid.ogg",
+            SfxId::InvalidAction => "sfx/metal_bonk1.ogg",
             SfxId::CoinDrop => "coindrop.ogg",
             SfxId::RoundWin => "roundwin.ogg",
             SfxId::GameOver => "gameover.ogg",
-            SfxId::PackBuy => "kenney_interface-sounds/Audio/confirmation_003.ogg",
+            SfxId::PackBuy => "sfx/sfx3.ogg",
             SfxId::PackOpen => "pack_open.ogg",
-            SfxId::PackTileReveal => "kenney_interface-sounds/Audio/pluck_001.ogg",
+            SfxId::PackTileReveal => "sfx/sfx4.ogg",
             SfxId::ZodiacReveal => "zodiac_reveal.ogg",
             SfxId::ZodiacLevelUp => "zodiac_jingle.ogg",
             SfxId::CandleFlareWhoosh => "candle_flareup.ogg",
             SfxId::CandleFlareImpact => "candle_impact.ogg",
-            SfxId::StructureCommit => "kenney_interface-sounds/Audio/confirmation_002.ogg",
-            SfxId::FocusHandTile => "kenney_interface-sounds/Audio/select_001.ogg",
-            SfxId::FocusButton => "kenney_interface-sounds/Audio/select_004.ogg",
-            SfxId::FocusConsumable => "kenney_interface-sounds/Audio/pluck_002.ogg",
-            SfxId::FocusRelic => "kenney_interface-sounds/Audio/glass_003.ogg",
-            SfxId::FocusPeg => "kenney_interface-sounds/Audio/switch_002.ogg",
-            SfxId::FocusGold => "kenney_interface-sounds/Audio/bong_001.ogg",
-            SfxId::FocusYakuTablet => "kenney_interface-sounds/Audio/scroll_003.ogg",
-            SfxId::FocusDora => "kenney_interface-sounds/Audio/glass_001.ogg",
-            SfxId::RoundStart => "kenney_interface-sounds/Audio/confirmation_004.ogg",
-            SfxId::ChamberSkipped => "kenney_interface-sounds/Audio/glitch_004.ogg",
-            SfxId::StarShimmer => "kenney_interface-sounds/Audio/glass_005.ogg",
+            SfxId::StructureCommit => "sfx/sfx5.ogg",
+            SfxId::FocusHandTile => "sfx/sfx13.ogg",
+            SfxId::FocusButton => "sfx/sfx13.ogg",
+            SfxId::FocusConsumable => "sfx/sfx13.ogg",
+            SfxId::FocusRelic => "sfx/sfx13.ogg",
+            SfxId::FocusPeg => "sfx/sfx13.ogg",
+            SfxId::FocusGold => "sfx/sfx13.ogg",
+            SfxId::FocusYakuTablet => "sfx/sfx13.ogg",
+            SfxId::FocusDora => "sfx/sfx13.ogg",
+            SfxId::RoundStart => "sfx/sfx7.ogg",
+            SfxId::ChamberSkipped => "sfx/sfx8.ogg",
+            SfxId::BrownoutFlicker => "freesound_community-flickeringlight-90411.mp3",
+            SfxId::RoomCreak => "sfx/creak1.ogg",
+            SfxId::StarShimmer => "sfx/sfx9.ogg",
             SfxId::Purchase => "coindrop.ogg",
-            SfxId::Sell => "kenney_interface-sounds/Audio/confirmation_002.ogg",
-            SfxId::Pause => "kenney_interface-sounds/Audio/minimize_003.ogg",
-            SfxId::Unpause => "kenney_interface-sounds/Audio/maximize_003.ogg",
-            SfxId::DoraScored => "kenney_interface-sounds/Audio/glass_002.ogg",
-            SfxId::CashIn => "cash_in.ogg",
+            SfxId::Sell => "sfx/sfx6.ogg",
+            SfxId::Pause => "sfx/sfx11.ogg",
+            SfxId::Unpause => "sfx/sfx12.ogg",
+            SfxId::DoraScored => "sfx/sfx10.ogg",
+            SfxId::CashIn => "sfx/sfx30.ogg",
             SfxId::CascadeMerge => "vwomp1.ogg",
             SfxId::CascadeLaunch => "intake.ogg",
             SfxId::CascadeLand => "Snap.ogg",
@@ -303,6 +337,59 @@ impl crate::sfx_id::SfxId {
             SfxId::RollerStop => "sfx/freesound_community-doorslam-90782.mp3",
         }
     }
+
+    /// When set, [`AudioManager::play_sfx`] picks uniformly from this pool
+    /// (no immediate repeat of the same variant).
+    pub(crate) fn variant_filenames(self) -> Option<&'static [&'static str]> {
+        match self {
+            SfxId::TileClick => Some(&[
+                "sfx/tile_click-01.ogg",
+                "sfx/tile_click-02.ogg",
+                "sfx/tile_click-03.ogg",
+                "sfx/tile_click-04.ogg",
+                "sfx/tile_click-05.ogg",
+                "sfx/tile_click-06.ogg",
+                "sfx/tile_click-07.ogg",
+                "sfx/tile_click-08.ogg",
+            ]),
+            SfxId::InvalidAction => Some(&[
+                "sfx/metal_bonk1.ogg",
+                "sfx/metal_bonk2.ogg",
+                "sfx/metal_bonk3.ogg",
+                "sfx/metal_bonk4.ogg",
+                "sfx/metal_bonk5.ogg",
+            ]),
+            SfxId::RoomCreak => Some(&[
+                "sfx/creak1.ogg",
+                "sfx/creak2.ogg",
+                "sfx/creak3.ogg",
+                "sfx/creak4.ogg",
+                "sfx/creak5.ogg",
+                "sfx/creak6.ogg",
+                "sfx/creak7.ogg",
+                "sfx/creak8.ogg",
+                "sfx/creak9.ogg",
+            ]),
+            SfxId::CashIn => Some(&[
+                "sfx/sfx30.ogg",
+                "sfx/sfx31.ogg",
+                "sfx/sfx32.ogg",
+                "sfx/sfx33.ogg",
+                "sfx/sfx34.ogg",
+                "sfx/sfx35.ogg",
+                "sfx/sfx36.ogg",
+            ]),
+            SfxId::FocusHandTile
+            | SfxId::FocusButton
+            | SfxId::FocusConsumable
+            | SfxId::FocusRelic
+            | SfxId::FocusPeg
+            | SfxId::FocusGold
+            | SfxId::FocusYakuTablet
+            | SfxId::FocusDora => Some(FOCUS_THUDS),
+            _ => None,
+        }
+    }
 }
 
 /// Maximum number of SFX sinks allowed to ring simultaneously. Rodio mixes
@@ -330,6 +417,10 @@ pub struct AudioManager {
     _stream: Option<OutputStream>,
     handle: Option<OutputStreamHandle>,
     sfx_data: FxHashMap<SfxId, Arc<PcmClip>>,
+    /// Randomized variant pools (see [`SfxId::variant_filenames`]).
+    sfx_variant_data: FxHashMap<SfxId, Vec<Arc<PcmClip>>>,
+    /// Last variant index per pool — avoids back-to-back repeats.
+    sfx_last_variant: FxHashMap<SfxId, usize>,
     music_data: FxHashMap<MusicId, Arc<PcmClip>>,
     /// Per-relic trigger samples decoded on first [`Self::play_relic_trigger`].
     /// Missing entries fall back to [`SfxId::ScoreStep`].
@@ -361,9 +452,9 @@ pub struct AudioManager {
     /// means "stop music when the jingle ends".
     pending_post_jingle_music: Option<MusicId>,
     ambient_data: FxHashMap<AmbientId, Arc<PcmClip>>,
-    /// Dedicated sink for looping environmental beds (separate from BGM + SFX).
-    ambient_sink: Option<Sink>,
-    ambient_active: Option<AmbientId>,
+    /// Looping environmental beds (separate from BGM + SFX), one sink each.
+    ambient_sinks: FxHashMap<AmbientId, Sink>,
+    ambient_active: Vec<AmbientId>,
     /// Dedicated sink for looping one-shot SFX beds (e.g. score rollers).
     sfx_loop_sink: Option<Sink>,
     sfx_loop_active: Option<SfxId>,
@@ -381,8 +472,27 @@ impl AudioManager {
         };
 
         let mut sfx_data = FxHashMap::default();
+        let mut sfx_variant_data = FxHashMap::default();
         for &sfx_id in all_sfx_ids() {
+            if let Some(paths) = sfx_id.variant_filenames() {
+                let mut clips = Vec::with_capacity(paths.len());
+                for path in paths {
+                    let asset_path = format!("audio/{path}");
+                    if let Some(file) = crate::asset_path::get(&asset_path) {
+                        let label = format!("{asset_path} ({sfx_id:?} variant)");
+                        if let Some(clip) = decode_rodio(&label, file.data.as_ref()) {
+                            clips.push(clip);
+                        }
+                    }
+                }
+                if !clips.is_empty() {
+                    sfx_variant_data.insert(sfx_id, clips);
+                }
+            }
             let asset_path = format!("audio/{}", sfx_id.filename());
+            if sfx_id.variant_filenames().is_some() {
+                continue;
+            }
             if let Some(file) = crate::asset_path::get(&asset_path) {
                 let label = format!("{asset_path} ({sfx_id:?})");
                 if let Some(clip) = decode_rodio(&label, file.data.as_ref()) {
@@ -391,10 +501,14 @@ impl AudioManager {
             }
         }
 
-        if sfx_data.is_empty() {
+        if sfx_data.is_empty() && sfx_variant_data.is_empty() {
             log::warn!("No audio files found in assets/audio/. Sound effects disabled.");
         } else {
-            log::debug!("Loaded {} sound effect(s).", sfx_data.len());
+            log::debug!(
+                "Loaded {} sound effect(s) ({} with variants).",
+                sfx_data.len(),
+                sfx_variant_data.len(),
+            );
         }
 
         let music_data = FxHashMap::default();
@@ -403,6 +517,8 @@ impl AudioManager {
             _stream: stream,
             handle,
             sfx_data,
+            sfx_variant_data,
+            sfx_last_variant: FxHashMap::default(),
             music_data,
             relic_trigger_data: FxHashMap::default(),
             active_sinks: Vec::with_capacity(MAX_CONCURRENT_SFX),
@@ -417,8 +533,8 @@ impl AudioManager {
             jingle_active: false,
             pending_post_jingle_music: None,
             ambient_data: FxHashMap::default(),
-            ambient_sink: None,
-            ambient_active: None,
+            ambient_sinks: FxHashMap::default(),
+            ambient_active: Vec::new(),
             sfx_loop_sink: None,
             sfx_loop_active: None,
             sfx_loop_speed: 1.0,
@@ -471,11 +587,39 @@ impl AudioManager {
     }
 
     fn play_sfx_with_speed(&mut self, id: SfxId, speed: f32) {
+        if let Some(len) = self.sfx_variant_data.get(&id).map(|v| v.len()) {
+            if len == 0 {
+                log::debug!("play_sfx({id:?}): no variant data");
+                return;
+            }
+            let idx = self.pick_variant_index(id, len);
+            let Some(clip) = self.sfx_variant_data.get(&id).and_then(|v| v.get(idx)).cloned()
+            else {
+                log::debug!("play_sfx({id:?}): variant index out of range");
+                return;
+            };
+            self.play_clip(&format!("{id:?}[{idx}]"), clip, speed);
+            return;
+        }
         let Some(clip) = self.sfx_data.get(&id).cloned() else {
             log::debug!("play_sfx({id:?}): no data");
             return;
         };
         self.play_clip(&format!("{id:?}"), clip, speed);
+    }
+
+    fn pick_variant_index(&mut self, id: SfxId, len: usize) -> usize {
+        use rand::RngExt;
+        if len <= 1 {
+            return 0;
+        }
+        let mut rng = rand::rng();
+        let mut idx = rng.random_range(0..len);
+        if self.sfx_last_variant.get(&id).copied() == Some(idx) {
+            idx = (idx + 1) % len;
+        }
+        self.sfx_last_variant.insert(id, idx);
+        idx
     }
 
     /// Decode and cache a relic trigger clip on first use.
@@ -540,7 +684,7 @@ impl AudioManager {
     pub fn set_master_volume(&mut self, vol: f32) {
         self.master_volume = crate::persistence::clamp_volume(vol);
         self.refresh_music_sink_volume();
-        self.refresh_ambient_sink_volume();
+        self.refresh_all_ambient_sink_volumes();
         self.refresh_sfx_loop_sink_volume();
     }
 
@@ -548,7 +692,7 @@ impl AudioManager {
     /// (win/loss stingers, round-start intros) and ambient beds.
     pub fn set_sfx_volume(&mut self, vol: f32) {
         self.sfx_volume = crate::persistence::clamp_volume(vol);
-        self.refresh_ambient_sink_volume();
+        self.refresh_all_ambient_sink_volumes();
         self.refresh_sfx_loop_sink_volume();
         self.refresh_music_sink_volume();
     }
@@ -566,14 +710,13 @@ impl AudioManager {
         }
         self.sfx_enabled = enabled;
         if enabled {
-            if let Some(id) = self.ambient_active {
-                self.start_ambient_track(id);
-            }
+            let active = self.ambient_active.clone();
+            self.set_ambient_tracks(&active);
             if let Some(id) = self.sfx_loop_active {
                 self.start_sfx_loop(id, self.sfx_loop_speed);
             }
         } else {
-            self.stop_ambient_sink();
+            self.stop_all_ambient_sinks();
             self.stop_sfx_loop_sink();
         }
         self.refresh_music_sink_volume();
@@ -766,11 +909,28 @@ impl AudioManager {
         self.music_active_id = Some(id);
     }
 
-    /// Start or stop a looping environmental bed. `None` stops any active ambient.
-    pub fn set_ambient_track(&mut self, id: Option<AmbientId>) {
-        match id {
-            Some(id) => self.start_ambient_track(id),
-            None => self.stop_ambient_track(),
+    /// Replace the active ambient bed set (e.g. rain + bulb buzz on main menu).
+    pub fn set_ambient_tracks(&mut self, ids: &[AmbientId]) {
+        let desired: rustc_hash::FxHashSet<AmbientId> = ids.iter().copied().collect();
+        self.ambient_sinks.retain(|id, sink| {
+            if desired.contains(id) {
+                true
+            } else {
+                sink.stop();
+                false
+            }
+        });
+        self.ambient_active = ids.to_vec();
+        if !self.sfx_enabled {
+            self.stop_all_ambient_sinks();
+            return;
+        }
+        for &id in ids {
+            if self.ambient_sinks.contains_key(&id) {
+                self.refresh_ambient_sink_volume(id);
+            } else {
+                self.start_ambient_sink(id);
+            }
         }
     }
 
@@ -787,63 +947,58 @@ impl AudioManager {
         }
     }
 
-    fn ambient_effective_volume(&self) -> f32 {
+    fn ambient_effective_volume(&self, id: AmbientId) -> f32 {
         if !self.sfx_enabled {
             return 0.0;
         }
-        self.master_volume * self.sfx_volume * AMBIENT_RAIN_GAIN
+        self.master_volume * self.sfx_volume * id.gain()
     }
 
-    fn refresh_ambient_sink_volume(&mut self) {
-        let Some(sink) = self.ambient_sink.as_ref() else {
+    fn refresh_ambient_sink_volume(&mut self, id: AmbientId) {
+        let Some(sink) = self.ambient_sinks.get(&id) else {
             return;
         };
-        sink.set_volume(self.ambient_effective_volume());
+        sink.set_volume(self.ambient_effective_volume(id));
     }
 
-    fn stop_ambient_sink(&mut self) {
-        if let Some(sink) = self.ambient_sink.take() {
+    fn refresh_all_ambient_sink_volumes(&mut self) {
+        let ids: Vec<AmbientId> = self.ambient_sinks.keys().copied().collect();
+        for id in ids {
+            self.refresh_ambient_sink_volume(id);
+        }
+    }
+
+    fn stop_all_ambient_sinks(&mut self) {
+        for (_, sink) in self.ambient_sinks.drain() {
             sink.stop();
         }
     }
 
-    fn stop_ambient_track(&mut self) {
-        self.ambient_active = None;
-        self.stop_ambient_sink();
-    }
-
-    fn start_ambient_track(&mut self, id: AmbientId) {
-        self.ambient_active = Some(id);
-        if !self.sfx_enabled {
-            self.stop_ambient_sink();
-            return;
-        }
+    fn start_ambient_sink(&mut self, id: AmbientId) {
         self.ensure_ambient_loaded(id);
         let Some(clip) = self.ambient_data.get(&id).cloned() else {
-            log::debug!("start_ambient_track({id:?}): no data");
+            log::debug!("start_ambient_sink({id:?}): no data");
             return;
         };
         let Some(handle) = &self.handle else {
             return;
         };
-        if let Some(sink) = self.ambient_sink.as_ref()
+        if let Some(sink) = self.ambient_sinks.get(&id)
             && !sink.empty()
-            && self.ambient_active == Some(id)
         {
-            self.refresh_ambient_sink_volume();
+            self.refresh_ambient_sink_volume(id);
             return;
         }
-        if let Some(sink) = self.ambient_sink.take() {
+        if let Some(sink) = self.ambient_sinks.remove(&id) {
             sink.stop();
         }
         let Ok(sink) = Sink::try_new(handle) else {
-            log::warn!("start_ambient_track({id:?}): sink creation failed");
+            log::warn!("start_ambient_sink({id:?}): sink creation failed");
             return;
         };
-        sink.set_volume(self.ambient_effective_volume());
+        sink.set_volume(self.ambient_effective_volume(id));
         sink.append(LoopingPcmSource::new(clip));
-        self.ambient_sink = Some(sink);
-        self.ambient_active = Some(id);
+        self.ambient_sinks.insert(id, sink);
     }
 
     /// Start or stop a looping SFX bed (uses the SFX volume slider).

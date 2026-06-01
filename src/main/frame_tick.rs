@@ -109,8 +109,17 @@ impl App {
             || self.debug.rain_debug_overlay.is_some()
             || self.scene.has_blocking_overlay()
             || self.overlay_stack.iter().any(|s| s.has_blocking_overlay());
-        self.room_gltf_brownout
-            .tick(self.last_frame_dt, brownout_room, brownout_freeze);
+        let room_ambience = self.room_gltf_brownout.tick(
+            self.last_frame_dt,
+            brownout_room,
+            brownout_freeze,
+        );
+        if room_ambience.brownout_started {
+            self.audio.play_sfx(audio::SfxId::BrownoutFlicker);
+        }
+        if room_ambience.play_creak {
+            self.audio.play_sfx(audio::SfxId::RoomCreak);
+        }
 
         // Refresh opened gamepads before any rumble this frame. `tick_scoring_rumble_keepalive`
         // and bus handlers run before `gamepad_frame_tick`; without this, `shell.pads` can
@@ -318,7 +327,7 @@ impl App {
                 }
                 GameEvent::RoomGltfBrownout => {
                     self.room_gltf_brownout.trigger();
-                    self.audio.play_sfx(audio::SfxId::ChamberSkipped);
+                    self.audio.play_sfx(audio::SfxId::BrownoutFlicker);
                 }
             }
         }
