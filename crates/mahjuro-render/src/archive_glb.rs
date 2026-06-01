@@ -7,6 +7,7 @@
 //!   is away from the pointer; browse copy is CPU-rasterized into a shared decal atlas.
 //! - `inspect_plaque` — inspect-mode description board beside the turntable; same decal atlas
 //!   path (`COLOR_0.a = 2` in `decode_env_primitive`); hidden outside item inspect.
+//! - `plaque_backing` — ornate frame behind [`INSPECT_PLAQUE`]; hidden outside item inspect.
 //! - `archive_spawn_item.001` … `archive_spawn_item.021` — 21 item anchors (3×7 window into the tab catalogue).
 //! - `btn_relics_tab`, `btn_zodiacs_tab`, `btn_bosses_tab`, `btn_talismans_tab`, `btn_chronicle_tab` —
 //!   section tabs (meshes draw; hit rects project mesh AABBs like shop `exit_btn`).
@@ -39,6 +40,7 @@ use crate::wgpu_renderer::PointLight;
 pub const SIGN_DESCRIPTION_LEFT: &str = "sign_description_left";
 pub const SIGN_DESCRIPTION_RIGHT: &str = "sign_description_right";
 pub const INSPECT_PLAQUE: &str = "inspect_plaque";
+pub const PLAQUE_BACKING: &str = "plaque_backing";
 pub const SECTION_BUTTONS_LEFT_BOUND: &str = "section_buttons_left_bound";
 pub const SECTION_BUTTONS_RIGHT_BOUND: &str = "section_buttons_right_bound";
 pub const ARCHIVE_SPAWN_FOCUSED_ITEM: &str = "archive_spawn_focused_item";
@@ -81,7 +83,10 @@ pub fn archive_env_prim_casts_punctual_shadow(node_name: Option<&str>) -> bool {
     !is_archive_button_node(name)
         && !matches!(
             name,
-            SIGN_DESCRIPTION_LEFT | SIGN_DESCRIPTION_RIGHT | INSPECT_PLAQUE
+            SIGN_DESCRIPTION_LEFT
+                | SIGN_DESCRIPTION_RIGHT
+                | INSPECT_PLAQUE
+                | PLAQUE_BACKING
         )
         && !name.starts_with("text_")
 }
@@ -92,7 +97,12 @@ pub fn archive_env_prim_casts_punctual_shadow(node_name: Option<&str>) -> bool {
 pub const ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS: [f32; 3] = [1.0, 1.0, 1.0];
 
 fn archive_decal_host_extents_for_marker(cpu: &RoomGlbCpu, node: &str) -> Option<[f32; 3]> {
-    let bounds = cpu.marker_mesh_bounds_doc_for(node)?;
+    let bounds = cpu
+        .marker_mesh_bounds_doc_for(node)
+        .copied()
+        .or_else(|| {
+            crate::room_env_gltf::room_env_primitive_bounds_doc(&cpu.environment_primitives, node)
+        })?;
     let diag = bounds.max - bounds.min;
     let mut e = [diag.x.abs(), diag.y.abs(), diag.z.abs()];
     // Sort ascending so e[2] = longest face edge, e[1] = shorter face edge, e[0] = thickness.
@@ -111,9 +121,19 @@ pub fn archive_sign_description_decal_extents_for(cpu: &RoomGlbCpu) -> [f32; 3] 
         .unwrap_or(ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS)
 }
 
-/// Read the `inspect_plaque` mesh face aspect (authored UVs span ~0–1 × 0.61–1; remapped in
-/// [`crate::room_env_gltf`] so the decal maps once across the quad).
+/// Read the `inspect_plaque` mesh face aspect for the inspect decal atlas.
+///
+/// When authored UV runs **u** along local **Y** (not **X** like the sign boards), decode swaps
+/// vertex UV to `(v, u)` and this returns a **portrait** aspect (`extents[0] < 1`) so copy reads
+/// left-to-right on the copper face.
 pub fn archive_inspect_plaque_decal_extents_for(cpu: &RoomGlbCpu) -> [f32; 3] {
+    if let Some(prim) = cpu
+        .environment_primitives
+        .iter()
+        .find(|p| p.gltf_node_name.as_deref() == Some(INSPECT_PLAQUE))
+    {
+        return [prim.archive_decal_face_aspect, 1.0, 1.0];
+    }
     archive_decal_host_extents_for_marker(cpu, INSPECT_PLAQUE)
         .unwrap_or(ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS)
 }
@@ -574,18 +594,23 @@ mod tests {
 
     #[test]
     fn archive_inspect_plaque_has_decal_host_bounds() {
-        with_archive_glb_cpu(|opt| {
-            let cpu = opt.expect("archive.glb should load in tests");
-            let extents = archive_inspect_plaque_decal_extents_for(cpu);
-            assert!(
-                extents[0] > 1.0,
-                "inspect_plaque should be wider than tall: {extents:?}"
-            );
-            assert!(
-                cpu.marker_mesh_bounds_doc_for(INSPECT_PLAQUE).is_some(),
-                "missing mesh bounds for inspect_plaque"
-            );
-        });
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/3d/archive.glb");
+        let data = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let cpu = load_archive_glb_from_bytes(&data).expect("decode archive.glb");
+        let extents = archive_inspect_plaque_decal_extents_for(&cpu);
+        assert!(
+            extents[0] < 1.0,
+            "inspect_plaque decal atlas should be portrait (u authored along local Y): {extents:?}"
+        );
+        assert!(
+            cpu.marker_mesh_bounds_doc_for(INSPECT_PLAQUE).is_some()
+                || crate::room_env_gltf::room_env_primitive_bounds_doc(
+                    &cpu.environment_primitives,
+                    INSPECT_PLAQUE,
+                )
+                .is_some(),
+            "missing mesh bounds for inspect_plaque"
+        );
     }
 
     #[test]

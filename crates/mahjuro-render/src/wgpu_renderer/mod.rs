@@ -268,6 +268,8 @@ pub struct WgpuRenderer {
     gameplay_environment: Option<ShopEnvironmentGpu>,
     /// GPU primitive index of `inspect_plaque` in `archive_env_primitives` (inspect decal host).
     archive_inspect_plaque_prim_idx: Option<usize>,
+    /// GPU primitive index of `plaque_backing` (inspect overlay frame).
+    archive_plaque_backing_prim_idx: Option<usize>,
     /// GPU primitive index of `sign_description_left` in `archive_env_primitives` (for culling).
     archive_sign_left_prim_idx: Option<usize>,
     archive_sign_right_prim_idx: Option<usize>,

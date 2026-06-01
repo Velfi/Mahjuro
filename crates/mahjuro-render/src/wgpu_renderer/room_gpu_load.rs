@@ -226,7 +226,9 @@ crate::room_glb::with_shop_glb_cpu(|cpu_opt| {
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
+                    archive_sign_decal_size: None,
                     archive_inspect_plaque_decal_texture: None,
+                    archive_inspect_plaque_decal_size: None,
                 });
                 if shop_eyeball_prim_indices.is_empty() {
                     if let Some(bindings) = shop_gltf_anim.clip_prim_bindings.get("eyeball_travel") {
@@ -428,7 +430,9 @@ crate::hallway_glb::with_hallway_glb_cpu(|cpu_opt| {
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
+                    archive_sign_decal_size: None,
                     archive_inspect_plaque_decal_texture: None,
+                    archive_inspect_plaque_decal_size: None,
                 });
                 log::info!("hallway.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -626,7 +630,9 @@ fn load_main_menu_room_gpu(
                 shadow_warp_bind_group,
                 bind_groups,
                 archive_sign_decal_texture: None,
+                archive_sign_decal_size: None,
                 archive_inspect_plaque_decal_texture: None,
+                archive_inspect_plaque_decal_size: None,
             });
             log::info!("main_menu.glb GPU: {} primitive draw(s)", prims.len());
         }
@@ -813,7 +819,9 @@ crate::staircase_glb::with_staircase_glb_cpu(|cpu_opt| {
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
+                    archive_sign_decal_size: None,
                     archive_inspect_plaque_decal_texture: None,
+                    archive_inspect_plaque_decal_size: None,
                 });
                 log::info!("staircase.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -828,7 +836,6 @@ fn create_cleared_archive_decal_texture(
     width: u32,
     height: u32,
 ) -> wgpu::Texture {
-    let clear = vec![0u8; (width * height * 4) as usize];
     let tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {
@@ -843,6 +850,8 @@ fn create_cleared_archive_decal_texture(
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
+    let bytes_per_row = crate::wgpu_renderer::resources::rgba8_copy_bytes_per_row(width);
+    let clear = vec![0u8; (bytes_per_row * height) as usize];
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &tex,
@@ -853,7 +862,7 @@ fn create_cleared_archive_decal_texture(
         &clear,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(4 * width),
+            bytes_per_row: Some(bytes_per_row),
             rows_per_image: Some(height),
         },
         wgpu::Extent3d {
@@ -865,13 +874,14 @@ fn create_cleared_archive_decal_texture(
     tex
 }
 
-fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>, Option<usize>, Option<usize>, Option<usize>, Vec<usize>, Vec<usize>, rustc_hash::FxHashSet<usize>) {
+fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>, Option<usize>, Option<usize>, Option<usize>, Option<usize>, Vec<usize>, Vec<usize>, rustc_hash::FxHashSet<usize>) {
     crate::archive_glb::with_archive_glb_cpu(|cpu_opt| {
                 let mut prims = Vec::new();
                 let mut gpu_wrap = None;
                 let mut sign_l = None;
                 let mut sign_r = None;
                 let mut inspect_plaque = None;
+                let mut plaque_backing = None;
                 let mut page_left = Vec::new();
                 let mut page_right = Vec::new();
                 let mut punctual_shadow_skip = rustc_hash::FxHashSet::default();
@@ -882,6 +892,7 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                         sign_l,
                         sign_r,
                         inspect_plaque,
+                        plaque_backing,
                         page_left,
                         page_right,
                         punctual_shadow_skip,
@@ -898,6 +909,8 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                                 sign_r = Some(i);
                             } else if name == crate::archive_glb::INSPECT_PLAQUE {
                                 inspect_plaque = Some(i);
+                            } else if name == crate::archive_glb::PLAQUE_BACKING {
+                                plaque_backing = Some(i);
                             } else if name == crate::archive_glb::BTN_PAGE_LEFT {
                                 page_left.push(i);
                             } else if name == crate::archive_glb::BTN_PAGE_RIGHT {
@@ -1109,7 +1122,9 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                         shadow_warp_bind_group,
                         bind_groups,
                         archive_sign_decal_texture: Some(archive_sign_decal_tex),
+                        archive_sign_decal_size: Some((sign_decal_w, sign_decal_h)),
                         archive_inspect_plaque_decal_texture: Some(archive_inspect_decal_tex),
+                        archive_inspect_plaque_decal_size: Some((inspect_decal_w, inspect_decal_h)),
                     });
                     log::info!("archive.glb GPU: {} primitive draw(s)", prims.len());
                 }
@@ -1119,6 +1134,7 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                     sign_l,
                     sign_r,
                     inspect_plaque,
+                    plaque_backing,
                     page_left,
                     page_right,
                     punctual_shadow_skip,
@@ -1354,7 +1370,9 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (
                         shadow_warp_bind_group,
                         bind_groups,
                         archive_sign_decal_texture: None,
+                    archive_sign_decal_size: None,
                     archive_inspect_plaque_decal_texture: None,
+                    archive_inspect_plaque_decal_size: None,
                     });
                     log::info!("gameplay.glb GPU: {} primitive draw(s)", prims.len());
                     let mapped_rolls = gameplay_score_roller_found.iter().filter(|&&b| b).count();
@@ -1707,6 +1725,7 @@ impl WgpuRenderer {
                     sign_l,
                     sign_r,
                     inspect_plaque,
+                    plaque_backing,
                     page_left,
                     page_right,
                     punctual_shadow_skip,
@@ -1717,6 +1736,7 @@ impl WgpuRenderer {
                 self.archive_sign_left_prim_idx = sign_l;
                 self.archive_sign_right_prim_idx = sign_r;
                 self.archive_inspect_plaque_prim_idx = inspect_plaque;
+                self.archive_plaque_backing_prim_idx = plaque_backing;
                 self.archive_page_left_prim_indices = page_left;
                 self.archive_page_right_prim_indices = page_right;
                 self.archive_punctual_shadow_skip_prims = punctual_shadow_skip;

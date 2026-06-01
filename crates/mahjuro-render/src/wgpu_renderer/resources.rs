@@ -953,3 +953,69 @@ pub(crate) fn encode_copy_depth_to_r32float(
         extent,
     );
 }
+
+/// Row stride for `queue.write_texture` of tightly packed RGBA8 (`width` × 4 bytes).
+pub(crate) fn rgba8_copy_bytes_per_row(width: u32) -> u32 {
+    let unpadded = width.max(1) * 4;
+    unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
+}
+
+/// Upload tightly packed RGBA8 (`width * height * 4` bytes) into an `Rgba8*` texture.
+pub(crate) fn write_rgba8_texture(
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+    tight_rgba: &[u8],
+) {
+    let width = width.max(1);
+    let height = height.max(1);
+    let unpadded = width * 4;
+    let bytes_per_row = rgba8_copy_bytes_per_row(width);
+    let expected = (unpadded * height) as usize;
+    assert_eq!(
+        tight_rgba.len(),
+        expected,
+        "write_rgba8_texture: expected {expected} bytes, got {}",
+        tight_rgba.len()
+    );
+    let extent = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let layout = wgpu::TexelCopyBufferLayout {
+        offset: 0,
+        bytes_per_row: Some(bytes_per_row),
+        rows_per_image: Some(height),
+    };
+    let tex_info = wgpu::TexelCopyTextureInfo {
+        texture,
+        mip_level: 0,
+        origin: wgpu::Origin3d::ZERO,
+        aspect: wgpu::TextureAspect::All,
+    };
+    if bytes_per_row == unpadded {
+        queue.write_texture(tex_info, tight_rgba, layout, extent);
+        return;
+    }
+    let mut padded = vec![0u8; (bytes_per_row * height) as usize];
+    for y in 0..height {
+        let src = (y * unpadded) as usize;
+        let dst = (y * bytes_per_row) as usize;
+        padded[dst..dst + unpadded as usize].copy_from_slice(&tight_rgba[src..src + unpadded as usize]);
+    }
+    queue.write_texture(tex_info, &padded, layout, extent);
+}
+
+#[cfg(test)]
+mod rgba8_upload_tests {
+    use super::rgba8_copy_bytes_per_row;
+
+    #[test]
+    fn rgba8_copy_bytes_per_row_aligns_wide_archive_sign_decals() {
+        // 320px tall sign face with ~3.26:1 aspect → width 1045 (see decal_dimensions).
+        assert_eq!(rgba8_copy_bytes_per_row(1045), 4352);
+        assert_eq!(rgba8_copy_bytes_per_row(256), 1024);
+    }
+}

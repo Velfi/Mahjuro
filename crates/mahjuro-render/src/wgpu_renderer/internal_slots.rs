@@ -202,8 +202,12 @@ pub(crate) struct ShopEnvironmentGpu {
     pub bind_groups: Vec<wgpu::BindGroup>,
     /// Archive browse boards (`sign_description_*`): CPU-updated decal at `@group(0) @binding(3)`.
     pub archive_sign_decal_texture: Option<wgpu::Texture>,
+    /// Pixel size of [`Self::archive_sign_decal_texture`] (fixed at first GPU upload).
+    pub archive_sign_decal_size: Option<(u32, u32)>,
     /// Archive item inspect (`inspect_plaque`): separate atlas sized to that mesh aspect.
     pub archive_inspect_plaque_decal_texture: Option<wgpu::Texture>,
+    /// Pixel size of [`Self::archive_inspect_plaque_decal_texture`].
+    pub archive_inspect_plaque_decal_size: Option<(u32, u32)>,
 }
 
 pub(crate) struct TileFaceOverlayGpu {
