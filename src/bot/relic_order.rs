@@ -109,21 +109,17 @@ fn seed_relic_order_heuristics(relics: &mut RelicState) {
         .active
         .iter()
         .position(|&id| id == RelicId::MirrorTile)
-    {
-        if mirror_idx + 1 >= n && mirror_idx > 0 {
+        && mirror_idx + 1 >= n && mirror_idx > 0 {
             relics.swap_relics(mirror_idx, mirror_idx - 1);
         }
-    }
 
     if let Some(hg_idx) = relics
         .active
         .iter()
         .position(|&id| id == RelicId::HungryGhost)
-    {
-        if hg_idx + 1 >= n && hg_idx > 0 {
+        && hg_idx + 1 >= n && hg_idx > 0 {
             relics.swap_relics(hg_idx, hg_idx - 1);
         }
-    }
 }
 
 /// Score a pre-round roster: simulate Hungry Ghost feed, then average best-play lift.

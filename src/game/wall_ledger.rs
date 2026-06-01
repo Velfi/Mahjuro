@@ -37,7 +37,7 @@ pub struct WallLedgerReadModel {
 }
 
 fn is_pack_tile_id(id: u32) -> bool {
-    id >= PACK_TILE_ID_BASE && id < crate::core::deck::OVERFLOW_TILE_ID_BASE
+    (PACK_TILE_ID_BASE..crate::core::deck::OVERFLOW_TILE_ID_BASE).contains(&id)
 }
 
 fn group_tiles(tiles: &[(Tile, bool)]) -> (Vec<WallLedgerFaceGroup>, Vec<WallLedgerFaceGroup>) {

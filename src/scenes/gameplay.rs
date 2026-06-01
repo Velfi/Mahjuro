@@ -761,7 +761,7 @@ impl GameplayScene {
             interaction.hand_len,
             env_h,
         ) {
-            let mut active: Vec<_> = run.available_yaku.iter().copied().collect();
+            let mut active: Vec<_> = run.available_yaku.to_vec();
             active.sort();
             let idx = active
                 .iter()

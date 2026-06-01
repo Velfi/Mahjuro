@@ -541,15 +541,14 @@ pub fn overlay_renderer_parent<'a>(base: &'a Scene, overlay_stack: &'a [Scene]) 
 /// ([`ShowcasePresenter::ShopInspect`], [`ShowcasePresenter::ArchiveInspect`]) inherit
 /// tonemap, punctual layout, and catalog balance from the suspended parent scene.
 pub fn active_scene_key_for_renderer(top: &Scene, parent: Option<&Scene>) -> Option<&'static str> {
-    if let Scene::Showcase(s) = top {
-        if matches!(
+    if let Scene::Showcase(s) = top
+        && matches!(
             s.presenter,
             ShowcasePresenter::ShopInspect(_) | ShowcasePresenter::ArchiveInspect(_)
         ) && let Some(key) = parent.and_then(active_scene_key)
         {
             return Some(key);
         }
-    }
     active_scene_key(top)
 }
 
