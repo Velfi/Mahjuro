@@ -154,6 +154,66 @@ mod collision_mesh_tests {
     }
 
     #[test]
+    fn inspect_plaque_decal_uv_reads_left_to_right_and_top_down() {
+        let positions = [
+            [-0.103_f32, -0.285, 0.0],
+            [0.103, -0.285, 0.0],
+            [-0.103, 0.285, 0.0],
+            [0.103, 0.285, 0.0],
+        ];
+        let uvs = [
+            [1.0, 0.999],
+            [1.0, 0.703],
+            [0.0, 0.999],
+            [0.0, 0.703],
+        ];
+        let mut min = glam::Vec2::splat(f32::INFINITY);
+        let mut max = glam::Vec2::splat(f32::NEG_INFINITY);
+        for uv in &uvs {
+            let u = glam::Vec2::from_array(*uv);
+            min = min.min(u);
+            max = max.max(u);
+        }
+        let inv = (max - min).recip();
+        let mut corners = [(0usize, [0.0_f32; 2]); 4];
+        for (i, (p, uv)) in positions.iter().zip(uvs.iter()).enumerate() {
+            let n = (glam::Vec2::from_array(*uv) - min) * inv;
+            corners[i] = (i, archive_inspect_plaque_decal_uv(n));
+            let px = p[0];
+            let py = p[1];
+            if px < 0.0 && py < 0.0 {
+                assert_eq!(i, 0, "left-bottom corner index");
+                assert!(
+                    corners[i].1[0] < 0.05 && corners[i].1[1] < 0.05,
+                    "left-bottom should map to bottom-left of decal: {:?}",
+                    corners[i].1
+                );
+            } else if px > 0.0 && py < 0.0 {
+                assert_eq!(i, 1, "right-bottom corner index");
+                assert!(
+                    corners[i].1[0] > 0.95 && corners[i].1[1] < 0.05,
+                    "right-bottom should map to bottom-right of decal: {:?}",
+                    corners[i].1
+                );
+            } else if px < 0.0 && py > 0.0 {
+                assert_eq!(i, 2, "left-top corner index");
+                assert!(
+                    corners[i].1[0] < 0.05 && corners[i].1[1] > 0.95,
+                    "left-top should map to top-left of decal: {:?}",
+                    corners[i].1
+                );
+            } else if px > 0.0 && py > 0.0 {
+                assert_eq!(i, 3, "right-top corner index");
+                assert!(
+                    corners[i].1[0] > 0.95 && corners[i].1[1] > 0.95,
+                    "right-top should map to top-right of decal: {:?}",
+                    corners[i].1
+                );
+            }
+        }
+    }
+
+    #[test]
     fn merge_rain_surfaces_concatenates_tris() {
         let a = RoomCollisionMesh::from_triangles(
             "rain_hit_a",
@@ -492,7 +552,8 @@ pub fn room_camera_fit_clip_planes(mut cam: CameraParams, corners_world: &[Vec3]
 /// True when authored UV **u** correlates more with local **Y** than **X** on a decal board.
 ///
 /// Archive `inspect_plaque` ships with u along the plaque height; sign boards use u along width.
-/// When true, [`decode_env_primitive`] remaps decal UV as `(v, u)` so rasterized copy reads horizontally.
+/// When true, [`decode_env_primitive`] applies [`archive_inspect_plaque_decal_uv`] so rasterized copy
+/// reads left-to-right on the copper face.
 pub fn decal_texel_u_runs_along_local_y(positions: &[[f32; 3]], uvs: &[[f32; 2]]) -> bool {
     if positions.len() < 3 || positions.len() != uvs.len() {
         return false;
@@ -525,6 +586,15 @@ pub fn decal_texel_u_runs_along_local_y(positions: &[[f32; 3]], uvs: &[[f32; 2]]
     let corr_y = if yy > 1e-12 { uuy.abs() / yy.sqrt() } else { 0.0 };
     let corr_x = if xx > 1e-12 { uux.abs() / xx.sqrt() } else { 0.0 };
     corr_y > corr_x
+}
+
+/// Normalized archive inspect plaque UV → decal atlas UV (90° from authored layout).
+///
+/// Authored texel **u** runs along local **+Y**; CPU copy is rasterized with **U** horizontal.
+/// A plain `(v, u)` swap mirrors left–right; this maps **U** along **+X** and **V** along **+Y**.
+#[inline]
+pub fn archive_inspect_plaque_decal_uv(n: glam::Vec2) -> [f32; 2] {
+    [1.0 - n.y, 1.0 - n.x]
 }
 
 /// Document-space AABB for one named environment draw mesh (e.g. main-menu `ground`).
@@ -940,7 +1010,7 @@ pub fn decode_env_primitive(
                 let u = Vec2::from_array(uvs[i]);
                 let n = (u - min) * inv;
                 if swap_archive_decal_uv_axes {
-                    [n.y, n.x]
+                    archive_inspect_plaque_decal_uv(n)
                 } else {
                     [n.x, n.y]
                 }
