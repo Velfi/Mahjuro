@@ -25,6 +25,8 @@ const DRAWN_BRIGHTNESS: f32 = 0.32;
 const DRAWN_SCALE: f32 = 0.92;
 /// Breathing room below the flowers row inside the scroll panel.
 const GRID_BOTTOM_PAD_FRAC: f32 = 0.028;
+/// Show a corner badge (e.g. `×6`) when a face has more copies than the default wall.
+const STACK_COUNT_BADGE_MIN: usize = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LedgerNav {
@@ -282,6 +284,43 @@ fn push_cell_tiles(
     }
 }
 
+fn push_cell_stack_count_badge(
+    quads: &mut Vec<GpuInstance>,
+    texts: &mut Vec<TextLabel>,
+    count: usize,
+    cell: (f32, f32, f32, f32),
+    window_w: f32,
+    window_h: f32,
+) {
+    if count < STACK_COUNT_BADGE_MIN {
+        return;
+    }
+    let rect = [cell.0, cell.1, cell.2, cell.3];
+    let label = format!("×{count}");
+    crate::ui::corner_badge::push_corner_badge(quads, texts, rect, window_w, window_h, &label);
+}
+
+fn push_wall_ledger_cell(
+    placements: &mut Vec<ShowcaseTilePlacement>,
+    badge_quads: &mut Vec<GpuInstance>,
+    badge_texts: &mut Vec<TextLabel>,
+    entries: &[crate::game::wall_ledger::WallTileEntry],
+    cell: (f32, f32, f32, f32),
+    run: &crate::game::run::RunState,
+    window_w: f32,
+    window_h: f32,
+) {
+    push_cell_tiles(placements, entries, cell, run);
+    push_cell_stack_count_badge(
+        badge_quads,
+        badge_texts,
+        entries.len(),
+        cell,
+        window_w,
+        window_h,
+    );
+}
+
 impl SceneBehavior for WallLedgerScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         let w = ctx.layout.window_w;
@@ -485,6 +524,8 @@ impl SceneBehavior for WallLedgerScene {
         }
 
         let mut placements = Vec::new();
+        let mut stack_badges_quads = Vec::new();
+        let mut stack_badges_texts = Vec::new();
         for (face_idx, slot) in slots.iter().enumerate() {
             if slot.1 + slot.3 < clip[1] || slot.1 > clip[1] + clip[3] {
                 continue;
@@ -493,7 +534,16 @@ impl SceneBehavior for WallLedgerScene {
                 continue;
             };
             if let Some(group) = standard_by_face.get(&(suit, rank)) {
-                push_cell_tiles(&mut placements, &group.copies, *slot, ctx.run);
+                push_wall_ledger_cell(
+                    &mut placements,
+                    &mut stack_badges_quads,
+                    &mut stack_badges_texts,
+                    &group.copies,
+                    *slot,
+                    ctx.run,
+                    w,
+                    h,
+                );
             }
         }
 
@@ -529,13 +579,28 @@ impl SceneBehavior for WallLedgerScene {
                 for (col_i, group) in row_groups.iter().enumerate() {
                     let cell_x = layout.grid_x + col_i as f32 * slot_w;
                     let cell = (cell_x, row_y, slot_w, layout.slot_h);
-                    push_cell_tiles(&mut placements, &group.copies, cell, ctx.run);
+                    push_wall_ledger_cell(
+                        &mut placements,
+                        &mut stack_badges_quads,
+                        &mut stack_badges_texts,
+                        &group.copies,
+                        cell,
+                        ctx.run,
+                        w,
+                        h,
+                    );
                 }
             }
         }
 
         if !placements.is_empty() {
             frame.showcase_tile_batch(placements);
+        }
+        if !stack_badges_quads.is_empty() {
+            frame.quads(stack_badges_quads);
+        }
+        if !stack_badges_texts.is_empty() {
+            frame.texts(stack_badges_texts);
         }
 
         let (_, hints_bottom) = footer_hint_metrics(h, jr);

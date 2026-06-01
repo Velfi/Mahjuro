@@ -3,7 +3,6 @@
 use crate::core::deck::Wall;
 use crate::core::relic::RelicId;
 use crate::core::tile::{Suit, Tile, cmp_sort_order};
-use crate::core::tile_pack::PACK_TILE_ID_BASE;
 use crate::game::run::RunState;
 
 /// Whether the ledger reflects the live draw pile or a shop preview of the next round.
@@ -36,40 +35,33 @@ pub struct WallLedgerReadModel {
     pub subtitle: String,
 }
 
-fn is_pack_tile_id(id: u32) -> bool {
-    (PACK_TILE_ID_BASE..crate::core::deck::OVERFLOW_TILE_ID_BASE).contains(&id)
-}
-
+/// Group every wall tile by `(suit, rank)` so pack / overflow / joker extras stack
+/// in the same grid cell as the standard four copies.
 fn group_tiles(tiles: &[(Tile, bool)]) -> (Vec<WallLedgerFaceGroup>, Vec<WallLedgerFaceGroup>) {
     use std::collections::BTreeMap;
 
-    let mut standard: BTreeMap<(Suit, u8), Vec<WallTileEntry>> = BTreeMap::new();
-    let mut pack: BTreeMap<(Suit, u8), Vec<WallTileEntry>> = BTreeMap::new();
+    let mut by_face: BTreeMap<(Suit, u8), Vec<WallTileEntry>> = BTreeMap::new();
 
     for &(tile, drawn) in tiles {
-        let entry = WallTileEntry { tile, drawn };
-        let key = (tile.suit, tile.rank);
-        if is_pack_tile_id(tile.id) {
-            pack.entry(key).or_default().push(entry);
-        } else {
-            standard.entry(key).or_default().push(entry);
-        }
+        by_face
+            .entry((tile.suit, tile.rank))
+            .or_default()
+            .push(WallTileEntry { tile, drawn });
     }
 
-    let to_groups = |map: BTreeMap<(Suit, u8), Vec<WallTileEntry>>| {
-        map.into_iter()
-            .map(|((suit, rank), mut copies)| {
-                copies.sort_by(|a, b| cmp_sort_order(&a.tile, &b.tile));
-                WallLedgerFaceGroup {
-                    suit,
-                    rank,
-                    copies,
-                }
-            })
-            .collect()
-    };
+    let standard_groups = by_face
+        .into_iter()
+        .map(|((suit, rank), mut copies)| {
+            copies.sort_by(|a, b| cmp_sort_order(&a.tile, &b.tile));
+            WallLedgerFaceGroup {
+                suit,
+                rank,
+                copies,
+            }
+        })
+        .collect();
 
-    (to_groups(standard), to_groups(pack))
+    (standard_groups, Vec::new())
 }
 
 fn live_entries(wall: &Wall) -> Vec<(Tile, bool)> {
@@ -170,5 +162,22 @@ mod tests {
                 .flat_map(|g| &g.copies)
                 .all(|c| !c.drawn)
         );
+    }
+
+    #[test]
+    fn pack_tiles_merge_into_standard_face_groups() {
+        use crate::core::tile_pack::TilePackKind;
+
+        let mut run = RunState::new_with_material(crate::persistence::TileMaterial::Bamboo);
+        run.tile_packs.push(TilePackKind::Manzu);
+        let ledger = read_wall_ledger(&run, WallLedgerMode::ShopPreview);
+        assert!(ledger.pack_groups.is_empty());
+        let manzu_copies: usize = ledger
+            .standard_groups
+            .iter()
+            .filter(|g| g.suit == Suit::Manzu)
+            .map(|g| g.copies.len())
+            .sum();
+        assert_eq!(manzu_copies, 44, "36 base manzu + 8 from Manzu pack");
     }
 }
