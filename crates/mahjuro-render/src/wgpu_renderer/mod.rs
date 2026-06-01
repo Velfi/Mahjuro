@@ -263,8 +263,6 @@ pub struct WgpuRenderer {
     gameplay_score_roller_drive_initialized: std::cell::RefCell<[bool; 2]>,
     /// Continuous roll time while either bank is catching up (resets on stop, not retarget).
     gameplay_score_roller_roll_elapsed: std::cell::RefCell<f64>,
-    /// Set when both odometer banks finish a spin; drained by the app after render.
-    gameplay_score_roller_stopped: std::cell::RefCell<bool>,
     gameplay_environment: Option<ShopEnvironmentGpu>,
     /// GPU primitive index of `inspect_plaque` in `archive_env_primitives` (inspect decal host).
     archive_inspect_plaque_prim_idx: Option<usize>,

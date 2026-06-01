@@ -334,7 +334,6 @@ impl crate::sfx_id::SfxId {
             SfxId::TalismanPurchased => "talisman_purchased.ogg",
             SfxId::TalismanUsed => "talisman_used.ogg",
             SfxId::RollersSpin => "sfx/rollers.ogg",
-            SfxId::RollerStop => "sfx/freesound_community-doorslam-90782.mp3",
         }
     }
 
@@ -397,7 +396,7 @@ impl crate::sfx_id::SfxId {
 /// (e.g. a candle-flare whoosh + impact overlapping a burst of cascade
 /// ticks, each of which itself layers two sounds) clip and smear into mud.
 /// When the cap is hit, the oldest live sink is dropped to make room.
-const MAX_CONCURRENT_SFX: usize = 8;
+const MAX_CONCURRENT_SFX: usize = 16;
 
 /// Playback speeds used by [`AudioManager::play_score_tick`], cycling per
 /// cascade step. Each ratio is a semitone above the previous (2^(n/12)) so
