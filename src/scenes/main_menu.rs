@@ -4,7 +4,9 @@ use std::cell::RefCell;
 use std::time::Instant;
 
 use crate::sfx_id::SfxId;
+use crate::core::moon_quips;
 use crate::core::progression::PlayerProgress;
+use crate::ui::colored_keywords;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
@@ -18,7 +20,10 @@ use crate::render::scene_light_sample::{
     PunctualOccluderAabb, RainVolumetricLit, SceneLightSampleCtx,
 };
 use crate::render::theme::{color, metrics, typography};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{
+    GpuInstance, PointLight, SpotLight, TextAlign, TextLabel, MAIN_MENU_PICK_MOON,
+};
+use crate::ui::tooltip;
 use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::UiAction;
 
@@ -49,12 +54,12 @@ fn push_main_menu_rain(
     let tune = ctx.room_env_for(scene_keys::MAIN_MENU).0;
     let bundle = build_main_menu_rain_lighting(w, h, env_scale, &tune);
     let lighting = main_menu_rain_light_sample_ctx(w, h, env_scale, &cam, &tune, &bundle);
-    let volume = main_menu_rain_spawn_volume(env_scale, h, &ctx.rain_tuning);
+    let volume = main_menu_rain_spawn_volume(env_scale, h, &ctx.main_menu_effects.rain);
     let (d_min, d_max) = volume.frustum_depth_range(&cam);
     let base_rgb = [
-        ctx.rain_tuning.field.drop_color[0],
-        ctx.rain_tuning.field.drop_color[1],
-        ctx.rain_tuning.field.drop_color[2],
+        ctx.main_menu_effects.rain.field.drop_color[0],
+        ctx.main_menu_effects.rain.field.drop_color[1],
+        ctx.main_menu_effects.rain.field.drop_color[2],
     ];
     let lit = Some(RainVolumetricLit::build(
         &cam, base_rgb, d_min, d_max, &lighting,
@@ -64,8 +69,8 @@ fn push_main_menu_rain(
         &cam,
         w,
         h,
-        ctx.rain_tuning.field.streak_len_px,
-        ctx.rain_tuning.field.drop_color,
+        ctx.main_menu_effects.rain.field.streak_len_px,
+        ctx.main_menu_effects.rain.field.drop_color,
         lit,
     );
 }
@@ -290,6 +295,12 @@ pub struct MainMenuScene {
     age_secs: f32,
     bug_phases: [f32; BUG_COUNT],
     rain_field: RainField,
+    /// Speech bubble beside the hub moon after clicking it.
+    moon_quip_visible: bool,
+    /// Text for the current bubble (rolled when the bubble opens).
+    moon_quip_message: String,
+    /// Line indices not yet shown this hub visit (weighted pick, no repeat until exhausted).
+    moon_quip_remaining: Vec<usize>,
 }
 
 impl Default for MainMenuScene {
@@ -308,6 +319,13 @@ impl MainMenuScene {
             age_secs: 0.0,
             bug_phases: lamp_moths::initial_bug_phases(),
             rain_field: RainField::new(),
+            moon_quip_visible: false,
+            moon_quip_message: String::new(),
+            moon_quip_remaining: {
+                let mut bag = Vec::new();
+                moon_quips::refill_moon_quip_bag(&mut bag);
+                bag
+            },
         }
     }
 
@@ -355,6 +373,74 @@ struct HubLayout {
     menu_rects: Vec<(HubFocus, [f32; 4])>,
 }
 
+/// Walnut speech bubble beside the projected moon hit rect.
+fn push_moon_quip_bubble(
+    frame: &mut UiFrame,
+    moon_rect: [f32; 4],
+    message: &str,
+    w: f32,
+    h: f32,
+    scale: f32,
+) {
+    let [mx, my, mw, mh] = moon_rect;
+    let pad = (h * 0.012 * scale).max(8.0);
+    let border = metrics::tooltip_border_px(w, h);
+    let body_font = typography::size(typography::H28, h);
+    let line_h = body_font * 1.15;
+    let max_inner_w = metrics::tooltip_max_panel_px(w, h) * 0.72;
+    let inner_w = colored_keywords::colored_paragraph_preferred_width(message, line_h, max_inner_w)
+        .clamp(72.0, max_inner_w);
+    let lines = colored_keywords::wrap_colored_text_multiline(message, inner_w, line_h, color::PARCHMENT);
+    let inner_h = colored_keywords::colored_multiline_block_height(lines.len(), line_h);
+    let panel_w = inner_w + pad * 2.0;
+    let panel_h = inner_h + pad * 2.0;
+    let gap = (14.0 * scale).max(10.0);
+    let tail_base_half_w = (panel_h * 0.10).clamp(6.0, 14.0);
+
+    let moon_cx = mx + mw * 0.5;
+    let moon_cy = my + mh * 0.5;
+    let mut panel_x = mx + mw + gap;
+    let mut panel_y = moon_cy - panel_h * 0.5;
+    if panel_x + panel_w > w - pad {
+        panel_x = (mx - gap - panel_w).max(pad);
+    }
+    panel_y = panel_y.clamp(pad, (h - panel_h - pad).max(pad));
+
+    // Curved tail sweeps from the bubble lower-left toward the moon's lower edge.
+    let tail_tip = [moon_cx, my + mh * 0.78];
+
+    let mut quads = Vec::with_capacity(48);
+    let mut squircles = Vec::with_capacity(2);
+    tooltip::push_speech_bubble_overlay(
+        &mut quads,
+        &mut squircles,
+        panel_x,
+        panel_y,
+        panel_w,
+        panel_h,
+        border,
+        tail_tip,
+        tail_base_half_w,
+    );
+    frame.overlay_quads(quads);
+    frame.overlay_squircle_quads(squircles);
+    let mut texts = Vec::new();
+    colored_keywords::push_colored_rows_in_width(
+        &mut texts,
+        colored_keywords::ColoredRowsLayout {
+            text_left: panel_x + pad,
+            top_y: panel_y + pad,
+            inner_w,
+            line_h,
+            fallback_plain: message,
+            fallback_color: color::PARCHMENT,
+        },
+        &lines,
+        TextAlign::Center,
+    );
+    frame.texts(texts);
+}
+
 impl SceneBehavior for MainMenuScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         self.cursor_pos = ctx.cursor_pos;
@@ -362,7 +448,7 @@ impl SceneBehavior for MainMenuScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.age_secs += dt;
-        lamp_moths::advance_bug_phases(&mut self.bug_phases, dt);
+        lamp_moths::advance_bug_phases(&mut self.bug_phases, dt, &ctx.main_menu_effects.moths);
         if ctx.effect_layers.rain {
             let w = ctx.layout.window_w;
             let h = ctx.layout.window_h;
@@ -374,7 +460,7 @@ impl SceneBehavior for MainMenuScene {
             let rain_mesh = main_menu_glb::main_menu_rain_collision_mesh();
             self.rain_field.update(
                 dt,
-                &ctx.rain_tuning,
+                &ctx.main_menu_effects.rain,
                 &cam,
                 w,
                 h,
@@ -436,7 +522,20 @@ impl SceneBehavior for MainMenuScene {
             }
         }
 
+        let moon_clicked = ctx.button_clicks.iter().any(|&id| id == MAIN_MENU_PICK_MOON);
+        if moon_clicked {
+            if self.moon_quip_visible {
+                self.moon_quip_visible = false;
+            } else {
+                self.moon_quip_message =
+                    moon_quips::roll_moon_quip(&mut self.moon_quip_remaining).to_string();
+                self.moon_quip_visible = true;
+            }
+            ctx.bus.push(GameEvent::UiSound(SfxId::TileClick));
+        }
+
         if !ctx.button_clicks.is_empty()
+            && !moon_clicked
             && let Some(m) = pointer_pick
         {
             self.focus = Some(m);
@@ -526,6 +625,7 @@ impl SceneBehavior for MainMenuScene {
                         h * 0.20,
                         self.age_secs,
                         &self.bug_phases,
+                        &ctx.main_menu_effects.moths,
                     );
                 }
             }
@@ -573,11 +673,18 @@ impl SceneBehavior for MainMenuScene {
             });
         }
 
-        let buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), 0)];
+        let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
+        let mut buttons = Vec::new();
+        if let Some(moon_rect) = main_menu_glb::main_menu_moon_screen_hit_rect(w, h, env_scale) {
+            buttons.push(ButtonDef::scene(
+                (moon_rect[0], moon_rect[1], moon_rect[2], moon_rect[3]),
+                MAIN_MENU_PICK_MOON,
+            ));
+        }
+        buttons.push(ButtonDef::scene((0.0, 0.0, w, h), 0));
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
-        let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
         if main_menu_glb::main_menu_room_draw_ready() {
             push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.room_env_for(scene_keys::MAIN_MENU).0);
             if let Some(light_door) =
@@ -592,6 +699,7 @@ impl SceneBehavior for MainMenuScene {
                     h * 0.20,
                     self.age_secs,
                     &self.bug_phases,
+                    &ctx.main_menu_effects.moths,
                 );
             }
         }
@@ -611,6 +719,12 @@ impl SceneBehavior for MainMenuScene {
             },
         }]);
         frame.texts(text_labels);
+        if self.moon_quip_visible
+            && !self.moon_quip_message.is_empty()
+            && let Some(moon_rect) = main_menu_glb::main_menu_moon_screen_hit_rect(w, h, env_scale)
+        {
+            push_moon_quip_bubble(&mut frame, moon_rect, &self.moon_quip_message, w, h, scale);
+        }
         frame.buttons = buttons;
         frame.cursor_pos = Some(self.cursor_pos);
         frame.window_title = format!(

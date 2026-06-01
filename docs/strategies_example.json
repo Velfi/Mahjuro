@@ -69,6 +69,10 @@
       "talisman_weight": 0.5
     },
     {
+      "name": "no-relics",
+      "no_relic_acquisition": true
+    },
+    {
       "name": "swap-only",
       "sell_enabled": false
     },

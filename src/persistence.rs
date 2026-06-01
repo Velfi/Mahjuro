@@ -403,6 +403,9 @@ fn load_profile_uncached(index: usize) -> PlayerProgress {
     // Meta-level points landed after older profiles were already on disk.
     // Re-derive once from run history (or run count fallback) when absent.
     progress.backfill_level_progress_points_from_history();
+    // L1 content is the baseline — ensure it's marked as already-known so
+    // `check_level_up` never surfaces it as a new-unlock modal.
+    progress.backfill_level_1_unlocks();
     // Seasons landed after some profiles already had victories on disk. Re-derive
     // `unlocked_seasons` from history every load so older saves see the right
     // ladder without requiring a manual migration — the backfill is idempotent.

@@ -63,10 +63,8 @@ pub enum DebugAction {
     OpenCameraDebug,
     /// Per-scene tonemap / post-FX + room GLB lighting (right panel).
     OpenSceneLookDebug,
-    /// Main-menu rain (CPU world field) tuning overlay.
+    /// Main-menu moon / rain / moths tuning overlay.
     OpenRainDebug,
-    /// Force main-menu June pride rainbow on moon / stars (preview any month).
-    ToggleMainMenuPrideRainbow,
     /// Pick-blind hallway vertex warp (sliders; Ctrl+C copies a Rust snapshot).
     OpenHallwayHallFxDebug,
     /// Shop / gameplay candle flame shader + placement tuning.
@@ -205,7 +203,7 @@ impl DebugMenuBar {
         let _ = tuning_sub.append(&scene_look_item);
         let _ = tuning_sub.append(&PredefinedMenuItem::separator());
 
-        let rain_item = MenuItem::new("Rain (main menu)...", true, None);
+        let rain_item = MenuItem::new("Main Menu Effects...", true, None);
         mappings.push((rain_item.id().clone(), DebugAction::OpenRainDebug));
         let _ = tuning_sub.append(&rain_item);
         let flame_item = MenuItem::new("Candle Flames (shop / gameplay)...", true, None);
@@ -217,12 +215,6 @@ impl DebugMenuBar {
             DebugAction::OpenHallwayHallFxDebug,
         ));
         let _ = tuning_sub.append(&hall_fx_item);
-        let pride_rainbow_item = MenuItem::new("Main Menu Pride Rainbow", true, None);
-        mappings.push((
-            pride_rainbow_item.id().clone(),
-            DebugAction::ToggleMainMenuPrideRainbow,
-        ));
-        let _ = tuning_sub.append(&pride_rainbow_item);
         let _ = tuning_sub.append(&PredefinedMenuItem::separator());
 
         let sfx_item = MenuItem::new("Sound Effects Test...", true, None);

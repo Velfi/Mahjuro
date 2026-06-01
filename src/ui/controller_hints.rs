@@ -289,10 +289,13 @@ impl HintStyle {
 /// Kenney keyboard sprite for `action` when building inline inspect hints.
 fn inspect_overlay_exit_hint_key(input_mode: InputMode, action: UiAction) -> Option<HintKey> {
     match (input_mode, action) {
-        (InputMode::Controller, UiAction::Cancel | UiAction::NorthFacePress) => {
+        (InputMode::Controller, UiAction::Confirm | UiAction::Cancel | UiAction::NorthFacePress) => {
             Some(HintKey::Action(action))
         }
         (InputMode::Controller, UiAction::Pause) => None,
+        (InputMode::Keyboard | InputMode::Cursor, UiAction::Confirm) => {
+            Some(HintKey::Keyboard("keyboard_return"))
+        }
         (InputMode::Keyboard | InputMode::Cursor, UiAction::Cancel) => {
             Some(HintKey::Keyboard("keyboard_backspace"))
         }

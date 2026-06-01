@@ -179,7 +179,7 @@ impl RoomBakeApp {
             bump_archive_chronicle_seen: &mut scratch.bump_archive_chronicle_seen,
             seed_archive_seen: &mut scratch.seed_archive_seen,
             archive_chronicle_last_seen: 0,
-            rain_tuning: self.renderer.rain_tuning,
+            main_menu_effects: self.renderer.main_menu_effects,
             flame_tuning: self.renderer.flame_tuning,
         });
 
@@ -226,7 +226,8 @@ impl RoomBakeApp {
             false,
             0,
             None,
-            self.renderer.rain_tuning,
+            1.0,
+            self.renderer.main_menu_effects,
             self.renderer.flame_tuning,
         );
         let frame: UiFrame = self.scene.draw_frame(ctx);

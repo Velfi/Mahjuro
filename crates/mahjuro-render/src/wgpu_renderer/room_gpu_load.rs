@@ -12,6 +12,7 @@ const ROOM_HALLWAY: u8 = 1 << 1;
 const ROOM_STAIRCASE: u8 = 1 << 2;
 const ROOM_ARCHIVE: u8 = 1 << 3;
 const ROOM_GAMEPLAY: u8 = 1 << 4;
+const ROOM_MAIN_MENU: u8 = 1 << 5;
 
 use crate::score_roller_layout::{
     self, GAMEPLAY_SCORE_ROLLER_SLOT_COUNT,
@@ -433,6 +434,204 @@ crate::hallway_glb::with_hallway_glb_cpu(|cpu_opt| {
             }
             (prims, gpu_wrap)
         })
+}
+
+fn load_main_menu_room_gpu(
+    ctx: RoomGpuUploadCtx<'_>,
+) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>) {
+    crate::main_menu_glb::with_main_menu_glb_cpu(|cpu_opt| {
+        let mut prims = Vec::new();
+        let mut gpu_wrap = None;
+        let Some(cpu) = cpu_opt else {
+            return (prims, gpu_wrap);
+        };
+        if !cpu.environment_primitives.is_empty() {
+            let mut room_tex_cache = RoomEnvTextureCache::new();
+            let (_white_tex, white_albedo_view) = white_albedo(ctx.device, ctx.queue);
+            for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
+                let prim = &env_prim.mesh;
+                let vb = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("main_menu-env-verts-{i}")),
+                    contents: bytemuck::cast_slice(&prim.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                let ib = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("main_menu-env-idx-{i}")),
+                    contents: bytemuck::cast_slice(&prim.indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+                let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
+                let albedo_view = room_tex_cache.upload_slot(
+                    ctx.device,
+                    ctx.queue,
+                    format!("main_menu-env-albedo-{i}"),
+                    prim.albedo_rgba.as_ref(),
+                    prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
+                    wgpu::TextureFormat::Rgba8UnormSrgb,
+                    mips,
+                    &white_albedo_view,
+                );
+                let normal_view = room_tex_cache.upload_slot(
+                    ctx.device,
+                    ctx.queue,
+                    format!("main_menu-env-normal-{i}"),
+                    prim.normal_rgba.as_ref(),
+                    prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    mips,
+                    ctx.tile_default_normal_view,
+                );
+                let metallic_roughness_view = room_tex_cache.upload_slot(
+                    ctx.device,
+                    ctx.queue,
+                    format!("main_menu-env-mr-{i}"),
+                    prim.metallic_roughness_rgba.as_ref(),
+                    prim.metallic_roughness_mip_chain
+                        .as_deref()
+                        .map(|c| c.as_slice()),
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    mips,
+                    ctx.tile_glb_default_mr_view,
+                );
+                let emissive_view = room_tex_cache.upload_slot(
+                    ctx.device,
+                    ctx.queue,
+                    format!("main_menu-env-emissive-{i}"),
+                    prim.emissive_rgba.as_ref(),
+                    prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
+                    wgpu::TextureFormat::Rgba8UnormSrgb,
+                    mips,
+                    ctx.tile_glb_default_emissive_view,
+                );
+                let mut pbr_uniform = GltfPbrUniform::from_loaded(
+                    prim.metallic_factor,
+                    prim.roughness_factor,
+                    prim.emissive_factor,
+                    prim.alpha_mode,
+                    prim.alpha_cutoff,
+                );
+                if env_prim
+                    .gltf_node_name
+                    .as_deref()
+                    .is_some_and(crate::main_menu_glb::is_main_menu_moon_env_node)
+                {
+                    // `2.0` = hub moon phase shading + optional pride rainbow.
+                    pbr_uniform.emissive_factor[3] = 2.0;
+                } else if env_prim
+                    .gltf_node_name
+                    .as_deref()
+                    .is_some_and(crate::main_menu_glb::is_main_menu_star_env_node)
+                {
+                    // `1.0` = pride rainbow only (`room_glb.wgsl`).
+                    pbr_uniform.emissive_factor[3] = 1.0;
+                }
+                let pbr_uniform_buffer =
+                    ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("main_menu-pbr-{i}")),
+                        contents: bytemuck::bytes_of(&pbr_uniform),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+                let sampler = ctx
+                    .device
+                    .create_sampler(&build_sampler_descriptor(prim.sampler, None));
+                prims.push(TilePrimitiveGpu {
+                    vertex_buffer: vb,
+                    index_buffer: ib,
+                    index_count: prim.indices.len() as u32,
+                    albedo_view,
+                    normal_view,
+                    metallic_roughness_view,
+                    emissive_view,
+                    pbr_uniform_buffer,
+                    sampler,
+                    pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                });
+            }
+            let (_white_tex, main_menu_decal_view) = white_albedo(ctx.device, ctx.queue);
+            let uniform_buffers = create_room_env_camera_uniform_buffers(
+                ctx.device,
+                prims.len(),
+                "main_menu-env-uniform",
+            );
+            let distortion_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("main_menu-env-distortion"),
+                contents: bytemuck::bytes_of(&crate::hallway_glb::HallwayDistortion::default()),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bind_groups: Vec<wgpu::BindGroup> = prims
+                .iter()
+                .enumerate()
+                .map(|(pi, p)| {
+                    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("main_menu-env-bg"),
+                        layout: ctx.tile_material_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: uniform_buffers[pi].as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&p.albedo_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Sampler(&p.sampler),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::TextureView(&main_menu_decal_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: wgpu::BindingResource::TextureView(&p.normal_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: p.pbr_uniform_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 6,
+                                resource: wgpu::BindingResource::TextureView(&p.metallic_roughness_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 7,
+                                resource: wgpu::BindingResource::TextureView(&p.emissive_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 8,
+                                resource: distortion_buffer.as_entire_binding(),
+                            },
+                        ],
+                    })
+                })
+                .collect();
+            let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
+                ctx.device,
+                ctx.shadow_caster_layout,
+                prims.len(),
+                "main_menu-env-shadow",
+            );
+            let shadow_warp_bind_group = create_shadow_warp_bind_group(
+                ctx.device,
+                ctx.shadow_warp_layout,
+                &distortion_buffer,
+                "main_menu-env-shadow-warp",
+            );
+            gpu_wrap = Some(ShopEnvironmentGpu {
+                uniform_buffers,
+                distortion_buffer,
+                shadow_uniform_buffers,
+                shadow_bind_groups,
+                shadow_warp_bind_group,
+                bind_groups,
+                archive_sign_decal_texture: None,
+                archive_inspect_plaque_decal_texture: None,
+            });
+            log::info!("main_menu.glb GPU: {} primitive draw(s)", prims.len());
+        }
+        (prims, gpu_wrap)
+    })
 }
 
 fn load_staircase_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>) {
@@ -1225,6 +1424,9 @@ impl WgpuRenderer {
     /// Preload room GPU data for picking before [`Self::render`] builds ops.
     pub fn ensure_rooms_for_scene_key(&mut self, key: Option<&str>) {
         match key {
+            Some(scene_keys::MAIN_MENU) | Some("main_menu_exterior") => {
+                self.ensure_main_menu_room_gpu();
+            }
             Some(scene_keys::SHOP) | Some("showcase") | Some(scene_keys::HALLWAY) => {
                 self.ensure_shop_room_gpu();
             }
@@ -1296,9 +1498,10 @@ impl WgpuRenderer {
 
         match scene_key {
             Some(scene_keys::MAIN_MENU) | Some("main_menu_exterior") => {
-                // CPU-only hub chain (shop → archive). Do not upload room environments
-                // on the menu — that blocks the main thread and pins ~1.5 GiB of textures
-                // while relics are still streaming.
+                self.ensure_main_menu_room_gpu();
+                // CPU-only hub chain (shop → archive). Do not upload shop/archive
+                // environments on the menu — that blocks the main thread and pins
+                // ~1.5 GiB of textures while relics are still streaming.
                 crate::room_preload::advance_hub_cpu_prefetch_chain();
                 if warm_gameplay_for_resume {
                     upload_gameplay(self);
@@ -1340,6 +1543,42 @@ impl WgpuRenderer {
             tile_glb_default_mr_view: &self.tile_env_mr_view,
             tile_glb_default_emissive_view: &self.tile_env_emissive_view,
         }
+    }
+
+    pub(super) fn ensure_main_menu_room_gpu(&mut self) {
+        if self.rooms_gpu_loaded & ROOM_MAIN_MENU != 0 {
+            return;
+        }
+        if !crate::main_menu_glb::main_menu_cpu_ready_for_gpu_upload() {
+            crate::room_preload::join_main_menu_cpu_prefetch_blocking();
+            if !crate::main_menu_glb::main_menu_cpu_ready_for_gpu_upload() {
+                crate::main_menu_glb::decode_main_menu_glb_into_cache();
+            }
+        }
+        let payload = crate::main_menu_glb::with_main_menu_glb_cpu(|o| {
+            o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+                .unwrap_or_default()
+        });
+        let frame_dt_ms = self.room_profile_frame_dt_ms;
+        crate::room_gpu_profile::measure_gpu_upload(
+            "main_menu.glb",
+            "wgpu.room.main_menu",
+            payload,
+            frame_dt_ms,
+            || {
+                let ctx = self.room_gpu_upload_ctx();
+                let (prims, gpu_wrap) = load_main_menu_room_gpu(ctx);
+                require_room_environment_loaded("main_menu.glb", &prims, &gpu_wrap);
+                self.main_menu_env_primitives = prims;
+                self.main_menu_environment = gpu_wrap;
+                self.main_menu_env_collision_meshes =
+                    crate::main_menu_glb::with_main_menu_glb_cpu(|o| {
+                        o.map(|c| c.collision_meshes.clone()).unwrap_or_default()
+                    });
+                crate::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
+                self.rooms_gpu_loaded |= ROOM_MAIN_MENU;
+            },
+        );
     }
 
     pub(super) fn ensure_shop_room_gpu(&mut self) {

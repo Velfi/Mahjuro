@@ -1,22 +1,20 @@
-//! Splash screen — displayed immediately on app start before anything else.
+//! Splash screen — unified loading plate until the main-menu hub is ready.
 
-use std::time::Instant;
-
-use crate::render::theme::color;
-use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
+use crate::render::wgpu_renderer::loading_screen::{
+    self, append_splash_frame, current_splash_alphas, splash_logo_sequence_complete, request_skip,
+};
 
 use crate::render::draw_cmd::UiFrame;
+use crate::ui::input::UiAction;
 
 use super::main_menu::MainMenuScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
-const MIN_DISPLAY_SECS: f32 = 0.3;
-
 pub struct SplashScene {
-    /// When the splash was first shown.
-    start: Instant,
     /// Set once we've requested the transition so we don't repeat it.
     done: bool,
+    /// False until the first frame with a live renderer is drawn.
+    visible: bool,
 }
 
 impl Default for SplashScene {
@@ -28,9 +26,17 @@ impl Default for SplashScene {
 impl SplashScene {
     pub fn new() -> Self {
         Self {
-            start: Instant::now(),
             done: false,
+            visible: false,
         }
+    }
+
+    /// Mark the loading plate as on-screen and start the splash logo timeline.
+    pub fn mark_visible(&mut self) {
+        if !self.visible {
+            loading_screen::touch_splash_logo_frame();
+        }
+        self.visible = true;
     }
 }
 
@@ -40,13 +46,17 @@ impl SceneBehavior for SplashScene {
             return None;
         }
 
-        let elapsed = self.start.elapsed().as_secs_f32();
+        if ctx
+            .actions
+            .iter()
+            .any(|a| matches!(a, UiAction::Confirm | UiAction::Cancel))
+        {
+            request_skip();
+        }
 
-        // Wait for GPU/renderer readiness (see `loading_done` in `frame_tick`) and a short
-        // minimum time — do not block on relic decode; those finish in parallel.
-        if ctx.loading_done && elapsed >= MIN_DISPLAY_SECS {
+        if ctx.loading_done && self.visible && splash_logo_sequence_complete() {
             self.done = true;
-            log::info!("splash: transitioning to start screen after {elapsed:.2}s");
+            log::info!("splash: transitioning to start screen");
             return Some(Scene::MainMenu(MainMenuScene::new()));
         }
 
@@ -56,24 +66,18 @@ impl SceneBehavior for SplashScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let scale = (w.min(h)) / 600.0;
+        let alphas = current_splash_alphas();
+        let hub = ctx.loading_hub_progress;
+        let progress = loading_screen::combined_progress(hub);
 
         let mut frame = UiFrame::new();
-
-        frame.quad(GpuInstance {
-            rect: [0.0, 0.0, w, h],
-            color: [0.0, 0.0, 0.0, 1.0],
-            user: 0,
-        });
-
         if !ctx.modal_active {
-            let label_h = (32.0 * scale).max(18.0);
-            let label_y = (h - label_h) * 0.5;
-            frame.text(TextLabel {
-                rect: [0.0, label_y, w, label_h],
-                text: "loading...".into(),
-                color: color::STONE,
-                ..Default::default()
+            append_splash_frame(&mut frame, w, h, progress, alphas);
+        } else {
+            frame.quad(crate::render::wgpu_renderer::GpuInstance {
+                rect: [0.0, 0.0, w, h],
+                color: [0.0, 0.0, 0.0, 1.0],
+                user: 0,
             });
         }
 

@@ -12,6 +12,7 @@ pub(super) struct ProcessOpCtx<'a> {
     pub quad_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
     pub depth_quad_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
     pub overlay_quad_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
+    pub overlay_squircle_quad_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
     pub gradient_quad_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
     pub squircle_quad_buffers: &'a [crate::wgpu_renderer::frame_pool::PoolSlice],
     pub flame_buffers: &'a [wgpu::Buffer],
@@ -583,6 +584,19 @@ impl WgpuRenderer {
                 pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..6, 0, 0..*count);
             }
+            RenderOp::OverlaySquircleQuadBatch { buf_idx, count } => {
+                let slice = ctx.overlay_squircle_quad_buffers[*buf_idx];
+                pass.set_pipeline(&self.squircle_quad_pipeline_display);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                pass.set_vertex_buffer(
+                    1,
+                    ctx.frame_pool_buffer
+                        .slice(slice.offset..slice.offset + slice.byte_len),
+                );
+                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                pass.draw_indexed(0..6, 0, 0..*count);
+            }
             RenderOp::GradientQuadBatch { buf_idx, count } => {
                 let slice = gradient_quad_buffers[*buf_idx];
                 pass.set_pipeline(&self.gradient_quad_pipeline);
@@ -598,7 +612,12 @@ impl WgpuRenderer {
             }
             RenderOp::SquircleQuadBatch { buf_idx, count } => {
                 let slice = squircle_quad_buffers[*buf_idx];
-                pass.set_pipeline(&self.squircle_quad_pipeline);
+                let pipe = if ctx.scene_hdr_attachment {
+                    &self.squircle_quad_pipeline
+                } else {
+                    &self.squircle_quad_pipeline_display
+                };
+                pass.set_pipeline(pipe);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(

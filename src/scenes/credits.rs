@@ -1,6 +1,7 @@
 //! Full-screen credits roll loaded from `assets/data/credits.json`.
 
 use crate::sfx_id::SfxId;
+use crate::core::attribution::attribution_catalog;
 use crate::core::credits::{CreditEntry, credits_catalog};
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::UiFrame;
@@ -88,9 +89,25 @@ enum CreditLine {
     SectionHeader(String),
     Entry(CreditEntry),
     Footer(String),
+    BodyText {
+        text: String,
+        center: bool,
+    },
 }
 
-fn build_lines(catalog: &crate::core::credits::CreditsCatalog) -> Vec<CreditLine> {
+fn push_wrapped_text_lines(lines: &mut Vec<CreditLine>, text: &str, center: bool) {
+    if !text.is_empty() {
+        lines.push(CreditLine::BodyText {
+            text: text.to_owned(),
+            center,
+        });
+    }
+}
+
+fn build_lines(
+    catalog: &crate::core::credits::CreditsCatalog,
+    attribution: &crate::core::attribution::AttributionCatalog,
+) -> Vec<CreditLine> {
     let mut lines = Vec::new();
     for section in &catalog.sections {
         lines.push(CreditLine::SectionHeader(section.title.clone()));
@@ -101,6 +118,21 @@ fn build_lines(catalog: &crate::core::credits::CreditsCatalog) -> Vec<CreditLine
     if !catalog.footer.is_empty() {
         lines.push(CreditLine::Footer(catalog.footer.clone()));
     }
+
+    if attribution.sections.is_empty() && attribution.subtitle.is_empty() && attribution.footer.is_empty()
+    {
+        return lines;
+    }
+
+    lines.push(CreditLine::SectionHeader(attribution.title.clone()));
+    push_wrapped_text_lines(&mut lines, &attribution.subtitle, true);
+    for section in &attribution.sections {
+        lines.push(CreditLine::SectionHeader(section.title.clone()));
+        for entry in &section.entries {
+            push_wrapped_text_lines(&mut lines, entry, false);
+        }
+    }
+    push_wrapped_text_lines(&mut lines, &attribution.footer, true);
     lines
 }
 
@@ -131,7 +163,7 @@ impl CreditsScene {
             return_to,
             scroll: SmoothScroll::new(),
             back_focused: false,
-            lines: build_lines(credits_catalog()),
+            lines: build_lines(credits_catalog(), attribution_catalog()),
         }
     }
 
@@ -357,6 +389,41 @@ impl SceneBehavior for CreditsScene {
                             color: color::UMBER,
                             padding: 0.0,
                             align: TextAlign::Center,
+                            ..Default::default()
+                        },
+                        h,
+                    );
+                }
+                CreditLine::BodyText { text, center } => {
+                    let font = typography::size(typography::H36, h);
+                    let wrapped_h = widget::plain_text_block_height(
+                        text,
+                        layout.content_w,
+                        font,
+                        widget::PLAIN_TEXT_LINE_STEP_MUL,
+                    );
+                    widget::push_text_block(
+                        &mut texts,
+                        [
+                            layout.content_x,
+                            row_y,
+                            layout.content_w,
+                            wrapped_h.max(layout.slot_h),
+                        ],
+                        text,
+                        TextStyle {
+                            tier: typography::H36,
+                            color: if *center {
+                                color::UMBER
+                            } else {
+                                color::PARCHMENT
+                            },
+                            padding: 0.0,
+                            align: if *center {
+                                TextAlign::Center
+                            } else {
+                                TextAlign::Left
+                            },
                             ..Default::default()
                         },
                         h,

@@ -118,12 +118,23 @@ impl PrefetchSlot {
     }
 }
 
+static MAIN_MENU_PREFETCH: PrefetchSlot = PrefetchSlot::new();
 static SHOP_PREFETCH: PrefetchSlot = PrefetchSlot::new();
 static ARCHIVE_PREFETCH: PrefetchSlot = PrefetchSlot::new();
 static HALLWAY_PREFETCH: PrefetchSlot = PrefetchSlot::new();
 static GAMEPLAY_PREFETCH: PrefetchSlot = PrefetchSlot::new();
 
 static GAMEPLAY_PREFETCH_LOGGED: OnceLock<()> = OnceLock::new();
+
+/// Start decoding `main_menu.glb` on a worker thread (idempotent).
+pub fn start_main_menu_cpu_prefetch() {
+    MAIN_MENU_PREFETCH.try_start(
+        "mahjuro-main-menu-glb",
+        "main_menu.glb",
+        crate::main_menu_glb::main_menu_cpu_decoded(),
+        crate::main_menu_glb::decode_main_menu_glb_into_cache,
+    );
+}
 
 /// Start decoding `shop.glb` on a worker thread (idempotent).
 pub fn start_shop_cpu_prefetch() {
@@ -193,10 +204,15 @@ pub fn start_room_cpu_prefetch(scene: RoomSceneChain) {
 
 /// Join any finished prefetch workers without blocking on in-flight work.
 pub fn try_drain_room_cpu_prefetch_threads() {
+    MAIN_MENU_PREFETCH.try_drain();
     SHOP_PREFETCH.try_drain();
     ARCHIVE_PREFETCH.try_drain();
     HALLWAY_PREFETCH.try_drain();
     GAMEPLAY_PREFETCH.try_drain();
+}
+
+pub fn join_main_menu_cpu_prefetch_blocking() {
+    MAIN_MENU_PREFETCH.join_blocking();
 }
 
 pub fn join_shop_cpu_prefetch_blocking() {

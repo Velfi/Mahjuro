@@ -81,8 +81,17 @@ pub struct BotCli {
     #[arg(long)]
     pub sell_max_per_visit: Option<u32>,
     /// In-blind expectimax depth (`0` = legacy greedy, `1` = one-ply unified default, `2` = two-ply, `3` = pruned).
-    #[arg(long, default_value_t = 1)]
-    pub chamber_planner_depth: u32,
+    #[arg(long)]
+    pub chamber_planner_depth: Option<u32>,
+    /// Meta profile depth (1–14). Limits shop relic/rules pools to match player progression.
+    #[arg(long)]
+    pub meta_depth: Option<u32>,
+    /// Named bot strategy preset from a strategies JSON file (see `docs/strategies_example.json`).
+    #[arg(long)]
+    pub strategy: Option<String>,
+    /// Strategies catalog for `--strategy` (default: repo `docs/strategies_example.json`).
+    #[arg(long)]
+    pub strategies_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -114,10 +123,28 @@ pub struct ForcedRelicSweepCli {
     pub runs: u32,
     #[arg(long)]
     pub export_json: Option<PathBuf>,
+    /// Meta profile depth (1–14). Sweeps only relics in that tier's shop pool; control
+    /// runs use the same pool cap (full catalog when omitted).
+    #[arg(long)]
+    pub meta_depth: Option<u32>,
 }
 
 impl BotCli {
-    pub fn bot_config(&self) -> bot::BotConfig {
+    pub fn bot_config(&self) -> anyhow::Result<bot::BotConfig> {
+        let base = if let Some(name) = &self.strategy {
+            let default_file = bot::default_strategies_file();
+            let path = self
+                .strategies_file
+                .as_deref()
+                .unwrap_or(default_file.as_path());
+            bot::strategy_config_by_name(name, path)?
+        } else {
+            bot::BotConfig::default()
+        };
+        Ok(bot::BotConfig::merge(base, self.cli_overrides()))
+    }
+
+    fn cli_overrides(&self) -> bot::BotConfig {
         bot::BotConfig {
             base_target: self.base_target,
             starting_plays: self.plays,
@@ -127,7 +154,8 @@ impl BotCli {
             sell_enabled: if self.sell_enabled { Some(true) } else { None },
             sell_hold_threshold: self.sell_hold_threshold,
             sell_max_per_visit: self.sell_max_per_visit,
-            chamber_planner_depth: Some(self.chamber_planner_depth),
+            chamber_planner_depth: self.chamber_planner_depth,
+            meta_depth: self.meta_depth,
             ..Default::default()
         }
     }

@@ -7,6 +7,7 @@
 // - `decal_atlas_uv.x` = ambient scale (0 = punctual-only interior)
 // - `decal_atlas_uv.y` = 1/world_scale — inverse-square uses document-space distance (glTF units)
 // - `decal_atlas_uv.z` = glTF emissive strength multiplier (see `SHOP_GLTF_EMISSIVE_SCALE`)
+// - `decal_atlas_uv.w` = main-menu hub moon synodic phase (`0..1`; unused elsewhere)
 //
 // Point / spot `pos.w` = max light distance in **world units** (`KHR_lights_punctual` range),
 // or `0` for infinite range (pure inverse-square with a minimum distance clamp).
@@ -291,13 +292,24 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     var emissive = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb
         * pbr.emissive_factor.rgb
         * cam.decal_atlas_uv.z;
-    // Main-menu `MoonObject` / `star*`: `emissive_factor.w` tags the rainbow path;
+    // Main-menu `MoonObject` (`emissive_factor.w` ≈ 2): mesh albedo × synodic phase.
+    // Skipped during June pride / debug rainbow (`hdr_tonemap.w` > 0).
+    if (pbr.emissive_factor.w > 1.5 && cam.hdr_tonemap.w <= 0.0) {
+        let V = normalize(cam.cam_pos - in.world_pos);
+        emissive = moon_hub_phase_emissive(albedo, n_world, V, cam.decal_atlas_uv.w);
+        return ShopShaded(emissive, emissive, out_alpha);
+    }
+    // Main-menu `MoonObject` (`w` ≈ 2): hard pride stripes; `star*` (`w` ≈ 1): smooth fade.
     // `hdr_tonemap.w` carries scene time while June pride (or debug override) is on.
     if (pbr.emissive_factor.w > 0.5 && cam.hdr_tonemap.w > 0.0) {
         let mask = max(emissive.r, max(emissive.g, emissive.b));
         let swirl_uv = in.uv_emr * 0.65
             + vec2<f32>(in.world_pos.x, in.world_pos.y) * 0.004;
-        let rainbow = rainbow_swirl_rgb(swirl_uv, cam.hdr_tonemap.w);
+        let rainbow = select(
+            rainbow_swirl_smooth_rgb(swirl_uv, cam.hdr_tonemap.w),
+            rainbow_swirl_rgb(swirl_uv, cam.hdr_tonemap.w),
+            pbr.emissive_factor.w > 1.5,
+        );
         emissive = rainbow * mask;
     }
 

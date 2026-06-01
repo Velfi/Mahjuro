@@ -22,16 +22,6 @@ pub(super) fn generate_shop_stock(
 ) {
     let mut rng = rand::rng();
 
-    let crate::game::run::ShopOfferCounts {
-        n_relics,
-        n_zodiacs,
-        n_talismans,
-    } = crate::game::run::roll_shop_offer_counts(
-        extra_relics,
-        crate::game::run::KIOSK_RELIC_SLOTS,
-        &mut rng,
-    );
-
     let defs = all_relic_defs();
     // Some relics are never offered in the shop — they only appear via
     // duplication, run-wide burn swaps, etc. See
@@ -47,6 +37,19 @@ pub(super) fn generate_shop_stock(
             )
         })
         .collect();
+
+    let min_relic_slots = usize::from(!relic_pool.is_empty());
+    let crate::game::run::ShopOfferCounts {
+        n_relics,
+        n_zodiacs,
+        n_talismans,
+    } = crate::game::run::roll_shop_offer_counts(
+        extra_relics,
+        crate::game::run::KIOSK_RELIC_SLOTS,
+        min_relic_slots,
+        &mut rng,
+    );
+
     relic_pool.shuffle(&mut rng);
     let items: Vec<ShopItem> = relic_pool
         .into_iter()

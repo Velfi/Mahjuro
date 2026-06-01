@@ -1,0 +1,32 @@
+{
+  "thresholds": {
+    "overtuned": {
+      "take_rate_pct": 75.0,
+      "forced_win_lift_pct": 10.0,
+      "ante_lift": 1.0,
+      "score_share_pct": 5.0,
+      "price_efficiency_percentile": 0.9,
+      "min_hits": 2
+    },
+    "undertuned": {
+      "take_rate_pct": 20.0,
+      "forced_win_lift_pct": 2.0,
+      "ante_lift": 0.2,
+      "score_share_pct": 1.0,
+      "price_efficiency_percentile": 0.1,
+      "min_hits": 2
+    },
+    "min_offers": 10,
+    "min_bought_for_win_lift": 20
+  },
+  "price_by_rarity": {
+    "common": 6,
+    "uncommon": 8,
+    "rare": 10,
+    "legendary": 12
+  },
+  "pools": [
+    { "name": "depth-1", "meta_depth": 1 },
+    { "name": "full", "meta_depth": null }
+  ]
+}

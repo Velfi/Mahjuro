@@ -181,48 +181,35 @@ impl ZodiacKind {
     }
 
     /// Additive mult granted to each bound yaku level when this zodiac is
-    /// consumed. Tuned per-zodiac (Balatro-style planets), in 0.5 steps only.
+    /// consumed. Default is +0.5 mult per level; Rooster (Chicken Hand) is a
+    /// chips-only stabilizer and grants +0.0 mult.
     pub fn level_up_mult_per_level(self) -> f64 {
         match self {
-            ZodiacKind::Mouse => 1.0,
-            ZodiacKind::Rat => 1.0,
-            ZodiacKind::Ox => 1.0,
-            ZodiacKind::Tiger => 1.0,
-            ZodiacKind::Rabbit => 1.0,
-            ZodiacKind::Dragon => 1.0,
-            ZodiacKind::Snake => 1.0,
-            ZodiacKind::Horse => 1.0,
-            ZodiacKind::Goat => 1.0,
-            ZodiacKind::Monkey => 1.0,
-            ZodiacKind::Rooster => 1.0,
-            ZodiacKind::Dog => 1.0,
-            ZodiacKind::Pig => 1.0,
+            ZodiacKind::Rooster => 0.0,
+            ZodiacKind::Mouse => 0.5,
+            ZodiacKind::Rat => 0.5,
+            ZodiacKind::Ox => 0.5,
+            ZodiacKind::Tiger => 0.5,
+            ZodiacKind::Rabbit => 0.5,
+            ZodiacKind::Dragon => 0.5,
+            ZodiacKind::Snake => 0.5,
+            ZodiacKind::Horse => 0.5,
+            ZodiacKind::Goat => 0.5,
+            ZodiacKind::Monkey => 0.5,
+            ZodiacKind::Dog => 0.5,
+            ZodiacKind::Pig => 0.5,
             ZodiacKind::Qilin => 0.5,
-            ZodiacKind::Phoenix => 1.0,
-            ZodiacKind::Crane => 1.0,
+            ZodiacKind::Phoenix => 0.5,
+            ZodiacKind::Crane => 0.5,
         }
     }
 
     /// Additive chips granted to each bound yaku level when this zodiac is
-    /// consumed. Tuned per-zodiac (Balatro-style planets), not global.
+    /// consumed. Default is +30 chips; Rooster (Chicken Hand) gets +50 chips.
     pub fn level_up_chips_per_level(self) -> i32 {
         match self {
-            ZodiacKind::Mouse => 44,
-            ZodiacKind::Rat => 42,
-            ZodiacKind::Ox => 56,
-            ZodiacKind::Tiger => 54,
-            ZodiacKind::Rabbit => 48,
-            ZodiacKind::Dragon => 50,
-            ZodiacKind::Snake => 47,
-            ZodiacKind::Horse => 52,
-            ZodiacKind::Goat => 46,
-            ZodiacKind::Monkey => 58,
-            ZodiacKind::Rooster => 60,
-            ZodiacKind::Dog => 55,
-            ZodiacKind::Pig => 53,
-            ZodiacKind::Qilin => 38,
-            ZodiacKind::Phoenix => 45,
-            ZodiacKind::Crane => 57,
+            ZodiacKind::Rooster => 50,
+            _ => 30,
         }
     }
 
@@ -429,13 +416,13 @@ mod tests {
     }
 
     #[test]
-    fn zodiac_level_up_chip_bonuses_are_unique() {
-        let mut chip_values = std::collections::HashSet::new();
+    fn zodiac_level_up_chip_bonuses_match_default_and_rooster_exception() {
         for &z in ZodiacKind::all() {
-            assert!(
-                chip_values.insert(z.level_up_chips_per_level()),
-                "{z:?} chip bonus duplicates another zodiac"
-            );
+            if z == ZodiacKind::Rooster {
+                assert_eq!(z.level_up_chips_per_level(), 50);
+            } else {
+                assert_eq!(z.level_up_chips_per_level(), 30);
+            }
         }
     }
 }

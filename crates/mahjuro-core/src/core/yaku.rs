@@ -141,7 +141,13 @@ impl YakuKind {
     }
 
     fn base_mult_bonus(self) -> f64 {
-        yaku_def(self).mult_bonus
+        match self {
+            YakuKind::Tanyao => 1.5,
+            YakuKind::Yakuhai => 2.0,
+            YakuKind::Toitoi => 2.5,
+            YakuKind::Chanta => 3.5,
+            _ => yaku_def(self).mult_bonus,
+        }
     }
 
     /// Base chip bonus added when this yaku fires (separate from the mult
@@ -151,7 +157,15 @@ impl YakuKind {
     }
 
     fn base_chip_bonus(self) -> i32 {
-        yaku_def(self).chip_bonus
+        match self {
+            YakuKind::Tanyao => 60,
+            YakuKind::Yakuhai => 75,
+            YakuKind::Toitoi => 75,
+            YakuKind::Pinfu => 85,
+            YakuKind::Iipeikou => 85,
+            YakuKind::Chanta => 90,
+            _ => yaku_def(self).chip_bonus,
+        }
     }
 
     /// Leveled mult bonus: `base + per-zodiac-mult × (level - 1)`, snapped to the
@@ -1505,8 +1519,8 @@ mod tests {
 
     #[test]
     fn mult_bonus_values() {
-        assert_eq!(YakuKind::Toitoi.mult_bonus(), 3.0);
-        assert_eq!(YakuKind::Tanyao.mult_bonus(), 2.0);
+        assert_eq!(YakuKind::Toitoi.mult_bonus(), 2.5);
+        assert_eq!(YakuKind::Tanyao.mult_bonus(), 1.5);
         assert_eq!(YakuKind::FullHand.mult_bonus(), 5.0);
         assert_eq!(YakuKind::Chinitsu.mult_bonus(), 5.5);
     }
@@ -1711,11 +1725,11 @@ mod tests {
 
     #[test]
     fn mult_bonus_at_levels_up() {
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(1), 3.0);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(2), 4.0);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 7.0);
-        assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 63);
-        assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 287);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(1), 2.5);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(2), 3.0);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 4.5);
+        assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 75);
+        assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 195);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::OnceLock;
 
 impl WgpuRenderer {
     pub fn queue_screenshot(&self, path: std::path::PathBuf) {
@@ -49,24 +50,46 @@ impl WgpuRenderer {
 
     /// True when every player-visible tileset has an offline baked atlas on disk.
     pub fn showcase_decal_atlases_baked_for_all_player_tilesets(&self) -> bool {
-        let tilesets = mahjuro_assets::asset_path::list_player_tilesets();
-        tilesets.iter().all(|name| {
-            crate::showcase_decal_atlas::baked_showcase_decal_atlas_available(name)
+        static SHOWCASE_ATLAS_ALL_READY: OnceLock<bool> = OnceLock::new();
+        *SHOWCASE_ATLAS_ALL_READY.get_or_init(|| {
+            let tilesets = mahjuro_assets::asset_path::list_player_tilesets();
+            tilesets
+                .iter()
+                .all(|name| crate::showcase_decal_atlas::baked_showcase_decal_atlas_available(name))
         })
     }
 
     /// True when splash can hand off to the main-menu hub without a first-frame shadow hitch.
     pub fn splash_hub_boot_ready(&self) -> bool {
         self.showcase_decal_atlases_baked_for_all_player_tilesets()
+            && self.main_menu_environment.is_some()
             && self
                 .room_baked_shadow_gpu
                 [crate::room_gi_bake::room_gi_room_index(crate::room_gi_bake::RoomGiRoom::MainMenu)]
                 .is_some()
     }
 
-    /// Upload offline shadows the hub needs while the splash loading screen is still up.
+    /// Upload offline shadows and the hub room while the splash loading screen is still up.
     pub fn prepare_splash_hub_boot(&mut self) {
+        self.ensure_main_menu_room_gpu();
         self.ensure_room_baked_shadow_gpu(crate::room_gi_bake::RoomGiRoom::MainMenu);
+    }
+
+    /// Partial hub readiness for the unified loading progress bar (0–1).
+    pub fn splash_hub_boot_progress(&self) -> f32 {
+        let mut done = 0.0f32;
+        if self.showcase_decal_atlases_baked_for_all_player_tilesets() {
+            done += 1.0;
+        }
+        if self.main_menu_environment.is_some() {
+            done += 1.0;
+        }
+        let idx =
+            crate::room_gi_bake::room_gi_room_index(crate::room_gi_bake::RoomGiRoom::MainMenu);
+        if self.room_baked_shadow_gpu[idx].is_some() {
+            done += 1.0;
+        }
+        done / 3.0
     }
 
     /// Load the active tileset showcase atlas from its baked PNG.

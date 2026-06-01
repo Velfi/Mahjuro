@@ -125,6 +125,14 @@ impl SdlShell {
         self._sdl.mouse().show_cursor(show);
     }
 
+    /// Raise this window and request keyboard focus (SDL `SDL_RaiseWindow`).
+    ///
+    /// Terminal launches on macOS often leave the game visible but behind the
+    /// shell until the user clicks in; call after the window is shown.
+    pub fn raise_to_foreground(&mut self) {
+        let _ = self.window.raise();
+    }
+
     pub fn prepare_gamepad_frame(&mut self) {
         self.gamepad.update();
         self.joystick.update();

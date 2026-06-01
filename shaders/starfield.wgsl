@@ -26,7 +26,7 @@ struct Globals {
 
 fn starfield_tint(uv: vec2<f32>, time: f32) -> vec3<f32> {
     if (globals._globals_pad.x > 0.5) {
-        return rainbow_swirl_rgb(uv, time);
+        return rainbow_swirl_smooth_rgb(uv, time);
     }
     return vec3<f32>(1.0, 0.98, 0.95);
 }

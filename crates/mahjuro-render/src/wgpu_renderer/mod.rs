@@ -2,6 +2,8 @@
 
 mod embedded_wgsl;
 mod frame_pool;
+mod boot_splash;
+pub mod loading_screen;
 mod init;
 mod init_deferred;
 mod init_phases;
@@ -131,6 +133,8 @@ pub struct WgpuRenderer {
     depth_quad_debug_pipeline_display: wgpu::RenderPipeline,
     gradient_quad_pipeline: wgpu::RenderPipeline,
     squircle_quad_pipeline: wgpu::RenderPipeline,
+    /// Display-format twin of `squircle_quad_pipeline` (post-tonemap UI).
+    squircle_quad_pipeline_display: wgpu::RenderPipeline,
     /// Volumetric candle flame pipeline (`shaders/flame.wgsl` + `blackbody.wgsl`).
     flame_pipeline: wgpu::RenderPipeline,
     /// Shared revolved teardrop mesh; instanced once per candle.
@@ -566,7 +570,7 @@ pub struct WgpuRenderer {
     /// Increments each `render` call; re-rolls VHS tape grain without UV scroll.
     vhs_grain_frame: u32,
     /// Main-menu world rain tuning (CPU field). Live-tuned via Debug > Rain.
-    pub rain_tuning: crate::rain_tuning::RainTuning,
+    pub main_menu_effects: crate::main_menu_effects_tuning::MainMenuEffectsTuning,
     /// Pipeline for procedural scene props (candles, table). Shares the
     /// `point_lights_layout` (group 1) with the tile pipeline.
     lit_mesh_pipeline: wgpu::RenderPipeline,
@@ -827,7 +831,7 @@ pub struct WgpuRenderer {
     shadow_quality: mahjuro_gfx_types::ShadowQuality,
     /// Live candle flame tuning (shader + placement); synced from scene / debug overlay.
     pub flame_tuning: crate::flame_tuning::FlameTuning,
-    /// Debug menu: force main-menu pride rainbow on moon / stars outside June.
+    /// Main-menu moon tab: pride rainbow on moon / stars (defaults on in June).
     pub main_menu_pride_rainbow_debug: bool,
     /// Emissive overlay mesh for main-menu `rain_hit_*` shells (rain debug menu).
     pub(super) main_menu_rain_hit_debug_mesh: Option<LitMeshGpu>,
@@ -844,7 +848,8 @@ mod impl_room_shadow;
 mod impl_screenshot;
 
 pub use constants::{
-    MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MAX_BOOK_SLOTS,
+    MAIN_MENU_PICK_MOON, MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT,
+    MAX_BOOK_SLOTS,
     MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_COIN_GLTF_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS,
     MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_ORDEAL_ICON_SLOTS, MAX_POINT_LIGHTS, MAX_RELIC_SLOTS,
     MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,

@@ -43,6 +43,11 @@ pub(super) enum RenderOp {
         buf_idx: usize,
         count: u32,
     },
+    /// Post-tonemap squircle panels (`DrawCmd::OverlaySquircleQuad`).
+    OverlaySquircleQuadBatch {
+        buf_idx: usize,
+        count: u32,
+    },
     GradientQuadBatch {
         buf_idx: usize,
         count: u32,

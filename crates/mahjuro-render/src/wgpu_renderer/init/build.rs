@@ -1,11 +1,14 @@
 use super::super::*;
 
-use crate::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
 use crate::moths_to_a_light::{
     build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh,
 };
 
-pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<WgpuRenderer> {
+pub(super) fn build_renderer_new(
+    target_init: TargetInit,
+    #[cfg(feature = "windowed")] present_boot_frame: bool,
+    #[cfg(feature = "windowed")] boot_input_poll: Option<&mut dyn FnMut()>,
+) -> anyhow::Result<WgpuRenderer> {
     // Instance, adapter, device, surface/offscreen target, depth — see
     // `init_phases::early_gpu_and_depth`.
     let super::super::init_phases::EarlyGpuState {
@@ -29,6 +32,29 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         let _early = crate::startup_profile::scope("wgpu.early_gpu");
         super::super::init_phases::early_gpu_and_depth(target_init)?
     };
+    #[cfg(feature = "windowed")]
+    let mut boot_splash: Option<super::super::boot_splash::BootSplash<'_>> =
+        if present_boot_frame {
+            Some(super::super::boot_splash::BootSplash::new(
+                &device,
+                &queue,
+                format,
+                size.width,
+                size.height,
+            )?)
+        } else {
+            None
+        };
+    #[cfg(feature = "windowed")]
+    let mut boot_poll_slot = boot_input_poll;
+    #[cfg(feature = "windowed")]
+    super::super::boot_splash::boot_present(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.06,
+        &mut boot_poll_slot,
+    );
     let depth_copy_staging_buffer = super::super::resources::create_depth_copy_staging(
         &device,
         config.width.max(1),
@@ -39,6 +65,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         let _bakes = crate::startup_profile::scope("wgpu.offline_bakes");
         crate::offline_bakes::require_all_at_startup()?;
     }
+    #[cfg(feature = "windowed")]
+    super::super::boot_splash::boot_present(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.12,
+        &mut boot_poll_slot,
+    );
 
     // Linear HDR intermediate — main scene + bloom; tonemap maps to the swapchain format.
     let scene_hdr_format = SCENE_HDR_FORMAT;
@@ -859,6 +893,35 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         multiview_mask: None,
         cache: None,
     });
+    let squircle_quad_pipeline_display =
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("squircle-quad-pipeline-display"),
+            layout: Some(&quad_layout),
+            vertex: wgpu::VertexState {
+                module: &squircle_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[vertex_layout.clone(), instance_layout.clone()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &squircle_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_ui.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
 
     // Flame pipeline — 3D billboarded particle fire. The shader
     // reads per-particle world position + age from the instance
@@ -2476,6 +2539,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         ],
     });
     crate::startup_profile::record("wgpu.shaders_and_pipelines", t_shaders.elapsed());
+    #[cfg(feature = "windowed")]
+    super::super::boot_splash::boot_present(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.48,
+        &mut boot_poll_slot,
+    );
 
     let t_fonts = Instant::now();
     let ui_font = load_ui_font().cloned();
@@ -2498,6 +2569,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         log::warn!("No Noto Emoji font found; tile symbols may be blank.");
     }
     crate::startup_profile::record("wgpu.fonts", t_fonts.elapsed());
+    #[cfg(feature = "windowed")]
+    super::super::boot_splash::boot_present(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.55,
+        &mut boot_poll_slot,
+    );
 
     let quad_v: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
     let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2584,6 +2663,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         }
         sets.map(|slot| slot.expect("tile mesh slot filled above"))
     };
+    #[cfg(feature = "windowed")]
+    super::super::boot_splash::boot_present(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.66,
+        &mut boot_poll_slot,
+    );
 
     // Deferred room GPU uploads — see `room_gpu_load.rs` (`ensure_*_room_gpu`).
     let shop_gltf_anim = crate::room_gltf_anim::RoomGltfAnimGpu::default();
@@ -2610,218 +2697,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         Vec::new(),
         rustc_hash::FxHashSet::default(),
     );
-    let (main_menu_env_primitives, main_menu_environment) = {
-        let _menu = crate::startup_profile::scope("wgpu.room.main_menu");
-        crate::main_menu_glb::with_main_menu_glb_cpu(|cpu_opt| {
-            let mut prims = Vec::new();
-            let mut gpu_wrap = None;
-            let Some(cpu) = cpu_opt else {
-                return (prims, gpu_wrap);
-            };
-            if !cpu.environment_primitives.is_empty() {
-                let mut room_tex_cache = RoomEnvTextureCache::new();
-                let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
-                for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
-                    let prim = &env_prim.mesh;
-                    let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("main_menu-env-verts-{i}")),
-                        contents: bytemuck::cast_slice(&prim.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                    let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("main_menu-env-idx-{i}")),
-                        contents: bytemuck::cast_slice(&prim.indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
-                    let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                    let albedo_view = room_tex_cache.upload_slot(
-                        &device,
-                        &queue,
-                        format!("main_menu-env-albedo-{i}"),
-                        prim.albedo_rgba.as_ref(),
-                        prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
-                        wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                        &white_albedo_view,
-                    );
-                    let normal_view = room_tex_cache.upload_slot(
-                        &device,
-                        &queue,
-                        format!("main_menu-env-normal-{i}"),
-                        prim.normal_rgba.as_ref(),
-                        prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
-                        wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                        &tile_default_normal_view,
-                    );
-                    let metallic_roughness_view = room_tex_cache.upload_slot(
-                        &device,
-                        &queue,
-                        format!("main_menu-env-mr-{i}"),
-                        prim.metallic_roughness_rgba.as_ref(),
-                        prim.metallic_roughness_mip_chain
-                            .as_deref()
-                            .map(|c| c.as_slice()),
-                        wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                        &tile_glb_default_mr_view,
-                    );
-                    let emissive_view = room_tex_cache.upload_slot(
-                        &device,
-                        &queue,
-                        format!("main_menu-env-emissive-{i}"),
-                        prim.emissive_rgba.as_ref(),
-                        prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
-                        wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                        &tile_glb_default_emissive_view,
-                    );
-                    let mut pbr_uniform = GltfPbrUniform::from_loaded(
-                        prim.metallic_factor,
-                        prim.roughness_factor,
-                        prim.emissive_factor,
-                        prim.alpha_mode,
-                        prim.alpha_cutoff,
-                    );
-                    if env_prim
-                        .gltf_node_name
-                        .as_deref()
-                        .is_some_and(crate::main_menu_glb::is_main_menu_rainbow_emissive_env_node)
-                    {
-                        pbr_uniform.emissive_factor[3] = 1.0;
-                    }
-                    let pbr_uniform_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some(&format!("main_menu-pbr-{i}")),
-                            contents: bytemuck::bytes_of(&pbr_uniform),
-                            usage: wgpu::BufferUsages::UNIFORM,
-                        });
-                    let sampler =
-                        device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
-                    prims.push(TilePrimitiveGpu {
-                        vertex_buffer: vb,
-                        index_buffer: ib,
-                        index_count: prim.indices.len() as u32,
-                        albedo_view,
-                        normal_view,
-                        metallic_roughness_view,
-                        emissive_view,
-                        pbr_uniform_buffer,
-                        sampler,
-                        pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
-                    });
-                }
-                let (_white_tex, main_menu_decal_view) = white_albedo(&device, &queue);
-                let uniform_buffers = create_room_env_camera_uniform_buffers(
-                    &device,
-                    prims.len(),
-                    "main_menu-env-uniform",
-                );
-                let distortion_buffer =
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("main_menu-env-distortion"),
-                        contents: bytemuck::bytes_of(
-                            &crate::hallway_glb::HallwayDistortion::default(),
-                        ),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                let bind_groups: Vec<wgpu::BindGroup> = prims
-                    .iter()
-                    .enumerate()
-                    .map(|(pi, p)| {
-                        device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("main_menu-env-bg"),
-                            layout: &tile_material_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: uniform_buffers[pi].as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::TextureView(&p.albedo_view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 2,
-                                    resource: wgpu::BindingResource::Sampler(&p.sampler),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 3,
-                                    resource: wgpu::BindingResource::TextureView(
-                                        &main_menu_decal_view,
-                                    ),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 4,
-                                    resource: wgpu::BindingResource::TextureView(&p.normal_view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 5,
-                                    resource: p.pbr_uniform_buffer.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 6,
-                                    resource: wgpu::BindingResource::TextureView(
-                                        &p.metallic_roughness_view,
-                                    ),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 7,
-                                    resource: wgpu::BindingResource::TextureView(&p.emissive_view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 8,
-                                    resource: distortion_buffer.as_entire_binding(),
-                                },
-                            ],
-                        })
-                    })
-                    .collect();
-                let (shadow_uniform_buffers, shadow_bind_groups) =
-                    create_room_env_shadow_gpu_batch(
-                        &device,
-                        &shadow_caster_layout,
-                        prims.len(),
-                        "main_menu-env-shadow",
-                    );
-                let shadow_warp_bind_group = create_shadow_warp_bind_group(
-                    &device,
-                    &shadow_warp_layout,
-                    &distortion_buffer,
-                    "main_menu-env-shadow-warp",
-                );
-                gpu_wrap = Some(ShopEnvironmentGpu {
-                    uniform_buffers,
-                    distortion_buffer,
-                    shadow_uniform_buffers,
-                    shadow_bind_groups,
-                    shadow_warp_bind_group,
-                    bind_groups,
-                    archive_sign_decal_texture: None,
-                    archive_inspect_plaque_decal_texture: None,
-                });
-                log::info!("main_menu.glb GPU: {} primitive draw(s)", prims.len());
-            }
-            (prims, gpu_wrap)
-        })
-    };
-
-    let main_menu_env_collision_meshes =
-        crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
-            opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
-        });
-    crate::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
-
-    // Do not panic if main_menu.glb is missing/empty during headless bake.
-    if main_menu_environment.is_none() || main_menu_env_primitives.is_empty() {
-        if cfg!(feature = "bake") {
-            log::warn!(
-                "main_menu.glb failed to load (required at renderer init) - continuing without it"
-            );
-        } else {
-            anyhow::bail!("main_menu.glb failed to load (required at renderer init)");
-        }
-    }
+    let (main_menu_env_primitives, main_menu_environment) = (Vec::new(), None);
+    let main_menu_env_collision_meshes = Vec::new();
     let (
         gameplay_env_primitives,
         gameplay_environment,
@@ -2850,6 +2727,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         let _pack = crate::startup_profile::scope("wgpu.pack_textures");
         load_pack_textures(&device, &queue, &lit_mesh_relief_default_view)
     };
+    #[cfg(feature = "windowed")]
+    super::super::boot_splash::boot_present(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.72,
+        &mut boot_poll_slot,
+    );
     let (background_load_start, background_rx) =
         if super::resources::ASYNC_LOADED_BACKGROUNDS.is_empty() {
             (None, None)
@@ -3212,6 +3097,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let extruded_glyph_instances: Vec<LitMeshInstance> = Vec::new();
     let debug_axes_instances = make_pool(3);
     crate::startup_profile::record("wgpu.lit_meshes_and_pools", t_lit_meshes.elapsed());
+    #[cfg(feature = "windowed")]
+    super::super::boot_splash::boot_present(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.92,
+        &mut boot_poll_slot,
+    );
 
     // Build the GPU profiler up-front while we still have a borrow of
     // device/queue (the struct literal below moves them).
@@ -3245,6 +3138,17 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let frame_buffer_pool =
         super::super::frame_pool::FrameBufferPool::new(&device, "frame-buffer-pool", 1 << 20);
 
+    #[cfg(feature = "windowed")]
+    super::super::boot_splash::boot_present(
+        &mut boot_splash,
+        &target,
+        &config,
+        1.0,
+        &mut boot_poll_slot,
+    );
+    #[cfg(feature = "windowed")]
+    drop(boot_splash);
+
     Ok(WgpuRenderer {
         target,
         device,
@@ -3265,6 +3169,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         depth_quad_debug_pipeline_display,
         gradient_quad_pipeline,
         squircle_quad_pipeline,
+        squircle_quad_pipeline_display,
         flame_pipeline,
         flame_volume_mesh,
         flame_view_buffer,
@@ -3564,7 +3469,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tonemap_vhs_scanline: 0.040,
         tonemap_vhs_grain: 0.020,
         tonemap_vhs_vignette: 0.100,
-        rain_tuning: crate::rain_tuning::RainTuning::load(),
+        main_menu_effects: crate::main_menu_effects_tuning::MainMenuEffectsTuning::load(),
         lit_mesh_pipeline,
         lit_mesh_blended_pipeline,
         lit_mesh_white_view,
@@ -3601,7 +3506,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         acquire_telemetry: super::super::runtime::AcquireTelemetry::new(),
         shadow_quality: default_shadow_quality,
         flame_tuning: crate::flame_tuning::FlameTuning::load(),
-        main_menu_pride_rainbow_debug: false,
+        main_menu_pride_rainbow_debug: crate::main_menu_glb::main_menu_pride_rainbow_default_enabled(),
         main_menu_rain_hit_debug_mesh,
         main_menu_rain_hit_debug_instance,
         probe_gi_stale_aabb_warned_room: None,

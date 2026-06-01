@@ -816,6 +816,8 @@ pub enum DrawCmd {
     /// Screen-space quad drawn after tonemap (tooltip frames, etc.) so bright
     /// HDR bloom cannot paint over UI panels.
     OverlayQuad(GpuInstance),
+    /// Post-tonemap squircle panel — same payload as [`DrawCmd::SquircleQuad`].
+    OverlaySquircleQuad(GpuInstance),
     /// 2D quad with a superellipse (squircle) silhouette — same `GpuInstance`
     /// payload as [`DrawCmd::Quad`]. See `shaders/squircle_quad.wgsl`.
     SquircleQuad(GpuInstance),
@@ -1058,6 +1060,11 @@ impl UiFrame {
         self.cmds.extend(iter.into_iter().map(DrawCmd::OverlayQuad));
     }
 
+    pub fn overlay_squircle_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
+        self.cmds
+            .extend(iter.into_iter().map(DrawCmd::OverlaySquircleQuad));
+    }
+
     pub fn squircle_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
         self.cmds
             .extend(iter.into_iter().map(DrawCmd::SquircleQuad));
@@ -1111,6 +1118,7 @@ impl UiFrame {
                 DrawCmd::Quad(inst) => inst.color[3] *= alpha,
                 DrawCmd::DepthQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::OverlayQuad(inst) => inst.color[3] *= alpha,
+                DrawCmd::OverlaySquircleQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::SquircleQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::TileFaceQuad(face) => face.inst.color[3] *= alpha,
                 DrawCmd::ImageQuad(icon) => icon.inst.color[3] *= alpha,

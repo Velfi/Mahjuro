@@ -30,7 +30,7 @@ pub struct DebugState {
     pub hallway_distortion_debug_overlay: Option<HallwayDistortionDebugOverlay>,
     pub rain_debug_overlay: Option<RainDebugOverlay>,
     pub flame_debug_overlay: Option<FlameDebugOverlay>,
-    /// Debug → Tuning → Main Menu Pride Rainbow — preview June FX outside June.
+    /// Main menu moon tab — pride rainbow on moon / stars (defaults on in June).
     pub main_menu_pride_rainbow_debug: bool,
     /// Effective 3D camera after the scene's `draw_frame` (override or table
     /// default), updated each paint — used to seed camera debug overlay.
@@ -52,7 +52,7 @@ impl DebugState {
             hallway_distortion_debug_overlay: None,
             rain_debug_overlay: None,
             flame_debug_overlay: None,
-            main_menu_pride_rainbow_debug: false,
+            main_menu_pride_rainbow_debug: crate::render::main_menu_glb::main_menu_pride_rainbow_default_enabled(),
             last_effective_camera: CameraParams::default_table_camera(800.0),
         }
     }

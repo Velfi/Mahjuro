@@ -156,7 +156,7 @@ def style_prefix(rarity: str) -> str:
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-RELIC_RS_PATH = REPO_ROOT / "src" / "core" / "relic.rs"
+RELIC_RS_PATH = REPO_ROOT / "crates" / "mahjuro-core" / "src" / "core" / "relic.rs"
 RELIC_JSON_PATH = REPO_ROOT / "assets" / "data" / "relics.json"
 
 
@@ -1016,6 +1016,17 @@ RELICS = [
         "Warm aged ivory flesh and lamb wool, deep umber cross-hatch enamel, muted "
         "slate-blue demon, pale laurel-green wreath, soft cream wing feathers, cool "
         "iron rim highlights on the figures.",
+    ),
+    (
+        "kindling",
+        "Kindling",
+        "A small bundle of twigs tied with twine, a single ember glowing at "
+        "the base where a tiny flame is just catching. Each cash-in adds a "
+        "new twig to the growing pile — the pin's silhouette widens slightly "
+        "at the base like an accumulating stack. Cozy, organic, pre-fire "
+        "energy rather than full blaze.",
+        "Warm amber ember glow, tan-brown twig bundles, rust-red twine, "
+        "faint orange flame, dark ashy shadow base.",
     ),
     (
         "kindness",

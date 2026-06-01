@@ -33,6 +33,7 @@ fn hide_ui_draw_cmds(frame: &mut UiFrame) {
             cmd,
             render::draw_cmd::DrawCmd::Quad(_)
                 | render::draw_cmd::DrawCmd::OverlayQuad(_)
+                | render::draw_cmd::DrawCmd::OverlaySquircleQuad(_)
                 | render::draw_cmd::DrawCmd::GradientQuad(_)
                 | render::draw_cmd::DrawCmd::SquircleQuad(_)
                 | render::draw_cmd::DrawCmd::Text(_)
@@ -418,6 +419,11 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
+        self.cpu_profiler
+            .begin(crate::render::cpu_profiler::CpuStage::DrawPrep);
+        if let Scene::Splash(splash) = &mut self.scene {
+            splash.mark_visible();
+        }
         let size = self.last_drawable_px;
         let layout = self
             .layout_engine
@@ -480,6 +486,12 @@ impl App {
                 ),
             ));
         }
+        let loading_hub_progress = if matches!(self.scene, Scene::Splash(_)) {
+            let _g = crate::render::cpu_profiler::scope("draw_prep.loading_hub_progress");
+            renderer.splash_hub_boot_progress()
+        } else {
+            1.0
+        };
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -517,9 +529,12 @@ impl App {
                 .hallway_distortion_debug_overlay
                 .as_ref()
                 .map(|o| o.to_snapshot()),
-            renderer.rain_tuning,
+            loading_hub_progress,
+            renderer.main_menu_effects,
             renderer.flame_tuning,
         );
+        self.cpu_profiler
+            .end(crate::render::cpu_profiler::CpuStage::DrawPrep);
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
         // for legacy scenes the default impl forwards through `draw()` +

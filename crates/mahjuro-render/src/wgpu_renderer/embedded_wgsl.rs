@@ -18,6 +18,8 @@ macro_rules! scene_pbr_with_hallway_warp {
             "\n",
             wgsl_file!("rainbow_swirl.wgsl"),
             "\n",
+            wgsl_file!("moon_phase.wgsl"),
+            "\n",
             wgsl_file!($room_shader),
             "\n",
             wgsl_file!("projected_shadow.wgsl"),
@@ -26,6 +28,7 @@ macro_rules! scene_pbr_with_hallway_warp {
 }
 
 pub const QUAD: &str = wgsl_file!("quad.wgsl");
+pub const BOOT_SPLASH: &str = wgsl_file!("boot_splash.wgsl");
 pub const DEPTH_QUAD: &str = wgsl_file!("depth_quad.wgsl");
 pub const DEPTH_QUAD_DEBUG: &str = wgsl_file!("depth_quad_debug.wgsl");
 pub const TEXT_QUAD: &str = wgsl_file!("text_quad.wgsl");

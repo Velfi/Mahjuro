@@ -1,4 +1,5 @@
 pub mod archive_seen;
+pub mod attribution;
 pub mod chamber_target;
 pub mod consumable;
 pub mod credits;
@@ -8,6 +9,7 @@ pub mod hand;
 pub mod hand_intent;
 pub mod json_asset;
 pub mod memorial_talisman;
+pub mod moon_quips;
 pub mod ordeal_kind;
 pub use ordeal_kind::{OrdealKind, OrdealTier};
 pub mod progression;

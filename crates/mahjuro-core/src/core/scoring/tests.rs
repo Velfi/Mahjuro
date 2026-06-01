@@ -81,9 +81,9 @@ fn triplet_boost_adds_chips_to_triplet() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::TripletBoost]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 69);
-    assert_eq!(breakdown.final_mult, 1.35);
-    assert_eq!(breakdown.total, 93);
+    assert_eq!(breakdown.final_chips, 59);
+    assert_eq!(breakdown.final_mult, 1.5);
+    assert_eq!(breakdown.total, 88);
     assert!(breakdown.steps.iter().any(|s| s.source == "Triplet Boost"));
 }
 
@@ -101,6 +101,7 @@ fn sequence_surge_adds_chips_to_sequence() {
     let r = relics(vec![RelicId::SequenceSurge]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
     assert_eq!(breakdown.final_chips, 46);
+    assert_eq!(breakdown.final_mult, 2.0);
 }
 
 #[test]
@@ -196,8 +197,8 @@ fn pair_power_grants_chips_and_mult() {
     let r = relics(vec![RelicId::PairPower]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
     assert_eq!(breakdown.final_chips, 59);
-    assert_eq!(breakdown.final_mult, 2.5);
-    assert_eq!(breakdown.total, 147);
+    assert_eq!(breakdown.final_mult, 2.25);
+    assert_eq!(breakdown.total, 132);
 }
 
 #[test]
@@ -236,8 +237,8 @@ fn minimalist_mults_single_meld() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::Minimalist]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 9);
-    assert_eq!(breakdown.final_mult, 7.0);
+    assert_eq!(breakdown.final_chips, 129);
+    assert_eq!(breakdown.final_mult, 3.0);
     assert!(breakdown.steps.iter().any(|s| s.source == "Minimalist"));
 }
 
@@ -300,9 +301,9 @@ fn dragon_rage_mults_red_triplet() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::DragonRage]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 105);
-    assert_eq!(breakdown.final_mult, 12.0);
-    assert_eq!(breakdown.total, 1260);
+    assert_eq!(breakdown.final_chips, 120);
+    assert_eq!(breakdown.final_mult, 11.0);
+    assert_eq!(breakdown.total, 1320);
 }
 
 #[test]
@@ -319,7 +320,7 @@ fn dragon_rage_fires_on_any_dragon_triplet() {
 }
 
 #[test]
-fn multiplier_master_adds_two_mult_per_relic() {
+fn multiplier_master_adds_one_and_half_mult_per_relic() {
     let hand = vec![
         Tile::new(Suit::Manzu, 9, 0),
         Tile::new(Suit::Manzu, 9, 1),
@@ -328,16 +329,16 @@ fn multiplier_master_adds_two_mult_per_relic() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::MultiplierMaster]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_mult, 3.0);
+    assert_eq!(breakdown.final_mult, 2.5);
 
     let r2 = relics(vec![RelicId::MultiplierMaster, RelicId::ChainReaction]);
     let breakdown2 = score_sets(&hand, &sets, &ctx_with(&r2, false), &[]);
-    assert_eq!(breakdown2.final_mult, 5.0);
+    assert_eq!(breakdown2.final_mult, 4.0);
 
     let mut r3 = relics(vec![RelicId::MultiplierMaster, RelicId::ChainReaction]);
     r3.set_debuffed([RelicId::ChainReaction]);
     let breakdown3 = score_sets(&hand, &sets, &ctx_with(&r3, false), &[]);
-    assert_eq!(breakdown3.final_mult, 5.0);
+    assert_eq!(breakdown3.final_mult, 4.0);
 }
 
 #[test]
@@ -443,6 +444,51 @@ fn chain_reaction_inactive_when_not_scored_last_turn() {
     let r = relics(vec![RelicId::ChainReaction]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
     assert_eq!(breakdown.final_mult, 1.0);
+}
+
+#[test]
+fn kindling_adds_mult_from_prior_cashins_this_chamber() {
+    let hand = vec![
+        Tile::new(Suit::Manzu, 5, 0),
+        Tile::new(Suit::Manzu, 5, 1),
+        Tile::new(Suit::Manzu, 5, 2),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let r = relics(vec![RelicId::Kindling]);
+    let mut counters = std::collections::BTreeMap::new();
+    counters.insert(RelicId::Kindling, 2);
+    let ctx = ScoreContext {
+        relic: ScoreRelicBundle {
+            roster: &r,
+            counters,
+        },
+        tiles: ScoreTileBundle {
+            debuffs: &[],
+            hand_for_ghost: &[],
+        },
+        round: ScoreRoundBundle {
+            scored_last_turn: false,
+            plays_used: 0,
+            round_wind: None,
+            bonus_round_wind: None,
+            played_yaku_this_round: vec![],
+            is_final_play: false,
+        },
+        pattern: ScorePatternBundle {
+            dora_faces: vec![],
+            available_yaku: vec![],
+            yaku_levels: None,
+        },
+        economy: ScoreEconomyBundle {
+            yen: 0,
+            total_score: 0,
+        },
+        structure: None,
+    };
+    let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+    // 2 prior cash-ins × 0.3 = 0.6 → base 1.0 + 0.6 = 1.6
+    assert_eq!(breakdown.final_mult, 1.6);
+    assert!(breakdown.steps.iter().any(|s| s.source == "Kindling"));
 }
 
 #[test]
@@ -773,7 +819,7 @@ fn pearl_stamp_adds_100_chips_per_meld() {
 }
 
 #[test]
-fn polychrome_stamp_adds_0_25_mult_per_meld() {
+fn polychrome_stamp_adds_0_25_mult_per_tile() {
     let hand = vec![
         {
             let mut t = Tile::new(Suit::Manzu, 5, 0);
@@ -792,10 +838,100 @@ fn polychrome_stamp_adds_0_25_mult_per_meld() {
     }];
     let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
     assert!(
-        (breakdown.final_mult - 1.25).abs() < f64::EPSILON,
-        "expected ×1.25 mult from one polychrome meld, got {}",
+        (breakdown.final_mult - 1.5).abs() < f64::EPSILON,
+        "expected +0.25 mult per stamped tile (pair -> +0.5), got {}",
         breakdown.final_mult
     );
+}
+
+#[test]
+fn dragon_echo_does_not_retrigger_pearl_meld_bonus() {
+    let hand = vec![
+        {
+            let mut t = Tile::new(Suit::Dragon, 1, 0);
+            t.enhancement = Some(TileEnhancement::Pearl);
+            t
+        },
+        {
+            let mut t = Tile::new(Suit::Dragon, 1, 1);
+            t.enhancement = Some(TileEnhancement::Pearl);
+            t
+        },
+        {
+            let mut t = Tile::new(Suit::Dragon, 1, 2);
+            t.enhancement = Some(TileEnhancement::Pearl);
+            t
+        },
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let base = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_echo = score_sets(
+        &hand,
+        &sets,
+        &ctx_with(&relics(vec![RelicId::DragonEcho]), false),
+        &[],
+    );
+    assert_eq!(
+        base.steps
+            .iter()
+            .filter(|s| s.source == "Pearl Talisman")
+            .count(),
+        1
+    );
+    assert_eq!(
+        with_echo
+            .steps
+            .iter()
+            .filter(|s| s.source == "Pearl Talisman")
+            .count(),
+        1
+    );
+    assert_eq!(with_echo.final_chips, base.final_chips + 45);
+}
+
+#[test]
+fn dragon_echo_does_not_retrigger_polychrome_mult_bonus() {
+    let hand = vec![
+        {
+            let mut t = Tile::new(Suit::Dragon, 1, 0);
+            t.enhancement = Some(TileEnhancement::Polychrome);
+            t
+        },
+        {
+            let mut t = Tile::new(Suit::Dragon, 1, 1);
+            t.enhancement = Some(TileEnhancement::Polychrome);
+            t
+        },
+        {
+            let mut t = Tile::new(Suit::Dragon, 1, 2);
+            t.enhancement = Some(TileEnhancement::Polychrome);
+            t
+        },
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let base = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_echo = score_sets(
+        &hand,
+        &sets,
+        &ctx_with(&relics(vec![RelicId::DragonEcho]), false),
+        &[],
+    );
+    assert_eq!(
+        base.steps
+            .iter()
+            .filter(|s| s.source == "Polychrome Talisman")
+            .count(),
+        3
+    );
+    assert_eq!(
+        with_echo
+            .steps
+            .iter()
+            .filter(|s| s.source == "Polychrome Talisman")
+            .count(),
+        3
+    );
+    assert_eq!(with_echo.final_mult, base.final_mult);
 }
 
 #[test]

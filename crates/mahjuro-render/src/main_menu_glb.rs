@@ -16,7 +16,9 @@ use glam::Vec3;
 
 use crate::draw_cmd::CameraParams;
 use crate::room_env_gltf::{self, RoomEnvWalkHooks, RoomMeshPolicy};
-use crate::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
+use crate::room_glb::{
+    self, MarkerScreenRectParams, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes,
+};
 use crate::wgpu_renderer::{PointLight, SpotLight};
 use crate::world_space::surface_anchor_from_world_xyz;
 
@@ -129,7 +131,8 @@ pub fn main_menu_collision_meshes() -> Vec<crate::room_env_gltf::RoomCollisionMe
 /// Visible ground mesh node in [`main_menu.glb`](../../../assets/3d/main_menu.glb) (spawn fallback only).
 pub const MAIN_MENU_RAIN_GROUND_NODE: &str = "ground";
 
-/// Emissive moon mesh in [`main_menu.glb`](../../../assets/3d/main_menu.glb) (`MoonObject` node).
+/// Hub moon mesh in [`main_menu.glb`](../../../assets/3d/main_menu.glb) (`MoonObject` node).
+/// Base-color albedo is phase-shaded in `room_glb.wgsl` from [`current_moon_phase`](crate::wgpu_renderer::current_moon_phase).
 pub const MAIN_MENU_MOON_MESH_NODE: &str = "MoonObject";
 
 /// Emissive star meshes (`star`, `star.001`, …) in [`main_menu.glb`](../../../assets/3d/main_menu.glb).
@@ -145,17 +148,30 @@ pub fn is_main_menu_star_env_node(name: &str) -> bool {
     name == MAIN_MENU_STAR_MESH_NODE_PREFIX || name.starts_with("star.")
 }
 
-/// Moon + star meshes that use the `rainbow_swirl_rgb` path in `room_glb.wgsl`.
+/// Moon + star meshes that use the pride rainbow path in `room_glb.wgsl`
+/// (moon: hard stripes; stars: smooth fade).
 #[inline]
 pub fn is_main_menu_rainbow_emissive_env_node(name: &str) -> bool {
     is_main_menu_moon_env_node(name) || is_main_menu_star_env_node(name)
 }
 
-/// Pride rainbow on main-menu moon / stars + starfield tint — active during June (local time),
-/// or when `debug_override` is true (Debug menu toggle).
+/// June (local calendar) — default month for main-menu pride rainbow + moon quips.
 #[inline]
-pub fn main_menu_pride_rainbow_active(debug_override: bool) -> bool {
-    debug_override || chrono::Local::now().month() == 6
+pub fn main_menu_pride_month() -> bool {
+    chrono::Local::now().month() == 6
+}
+
+/// Default pride-rainbow state at startup (on in June, off otherwise).
+#[inline]
+pub fn main_menu_pride_rainbow_default_enabled() -> bool {
+    main_menu_pride_month()
+}
+
+/// Pride rainbow on main-menu moon / stars + starfield tint — driven by the moon
+/// debug-menu toggle (`main_menu_pride_rainbow_debug` / overlay `pride_rainbow_debug`).
+#[inline]
+pub fn main_menu_pride_rainbow_active(enabled: bool) -> bool {
+    enabled
 }
 
 /// World-space spawn column for CPU rain — union of every `rain_hit_*` shell (deck, rocks, roof, …).
@@ -209,6 +225,26 @@ pub fn with_main_menu_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R 
     }
 }
 
+/// True once `main_menu.glb` CPU decode finished (worker or main thread).
+pub fn main_menu_cpu_decoded() -> bool {
+    matches!(
+        *MAIN_MENU_GLB_CPU.read(),
+        MainMenuGlbCache::Ready(Some(_))
+    )
+}
+
+/// Idempotent CPU decode for background prefetch (see [`crate::room_preload`]).
+pub fn decode_main_menu_glb_into_cache() {
+    ensure_main_menu_glb_loaded();
+}
+
+/// True while environment mesh buffers are still on the CPU (ready for GPU upload).
+pub fn main_menu_cpu_ready_for_gpu_upload() -> bool {
+    with_main_menu_glb_cpu(|opt| {
+        opt.is_some_and(|c| !c.environment_primitives.is_empty())
+    })
+}
+
 pub fn release_main_menu_environment_cpu_sources_after_gpu_upload() {
     let mut g = MAIN_MENU_GLB_CPU.write();
     if let MainMenuGlbCache::Ready(Some(cpu)) = &mut *g {
@@ -229,8 +265,10 @@ fn is_main_menu_punctual_occluder_mesh(name: &str) -> bool {
 struct MainMenuRoomWalkHooks;
 
 impl RoomEnvWalkHooks for MainMenuRoomWalkHooks {
-    fn is_marker(&self, _name: &str) -> bool {
-        false
+    /// Moon (and other pick targets) need decoded mesh bounds for screen hit rects.
+    /// `EnvironmentDraw` only merges bounds when `is_marker` is true.
+    fn is_marker(&self, name: &str) -> bool {
+        is_main_menu_moon_env_node(name)
     }
 
     fn mesh_policy(&self, name: &str) -> RoomMeshPolicy {
@@ -321,6 +359,34 @@ pub fn main_menu_glb_has_embedded_lights() -> bool {
     })
 }
 
+/// Screen hit rect for the emissive moon mesh (`MoonObject`), for hub click targets.
+pub fn main_menu_moon_screen_hit_rect(w: f32, h: f32, env_h: f32) -> Option<[f32; 4]> {
+    if !main_menu_room_draw_ready() {
+        return None;
+    }
+    let cam = main_menu_camera_base(w, h, env_h);
+    let scale = (w.min(h)) / 720.0;
+    with_main_menu_glb_cpu(|opt| {
+        let cpu = opt?;
+        let params = MarkerScreenRectParams {
+            win_w: w,
+            win_h: h,
+            cam: &cam,
+            env_height_scale: env_h,
+            cpu,
+            node_name: MAIN_MENU_MOON_MESH_NODE,
+            min_rw: (48.0 * scale).max(32.0),
+            min_rh: (48.0 * scale).max(32.0),
+        };
+        room_glb::screen_rect_for_marker_mesh_bounds(&params).or_else(|| {
+            let center = room_glb::room_node_mesh_center_world(cpu, h, env_h, MAIN_MENU_MOON_MESH_NODE)?;
+            let (sx, sy) = cam.project_world_to_screen(w, h, center);
+            let r = (56.0 * scale).max(40.0);
+            Some([sx - r, sy - r, r * 2.0, r * 2.0])
+        })
+    })
+}
+
 /// Object3d anchor `[px, py, lift]` for the `light_doorway` punctual node in `main_menu.glb`.
 #[allow(dead_code)]
 pub fn main_menu_light_door_object3d_anchor(w: f32, h: f32, env_h: f32) -> Option<[f32; 3]> {
@@ -393,4 +459,23 @@ pub fn main_menu_embedded_spot_lights_runtime(
         })
         .unwrap_or_default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moon_object_has_screen_hit_bounds() {
+        let bytes = include_bytes!("../../../assets/3d/main_menu.glb");
+        let cpu = load_main_menu_glb_from_bytes(bytes).expect("decode main_menu.glb");
+        assert!(
+            cpu.marker_mesh_bounds_doc_for(MAIN_MENU_MOON_MESH_NODE).is_some(),
+            "MoonObject must merge mesh bounds for hub click targets"
+        );
+        let env_h = main_menu_env_height_scale(crate::room_glb::SHOP_ENV_HEIGHT_SCALE);
+        let rect = main_menu_moon_screen_hit_rect(1280.0, 720.0, env_h)
+            .expect("projected moon hit rect");
+        assert!(rect[2] > 0.0 && rect[3] > 0.0);
+    }
 }

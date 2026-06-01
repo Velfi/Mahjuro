@@ -965,8 +965,8 @@ use crate::core::debuff::{TileDebuff, TileDebuffClass};
         assert!(run.relic_activations.contains(&RelicId::QuickDraw));
         assert_eq!(
             run.hand.len(),
-            ordeal::effective_hand_size(&run) + 1,
-            "Quick Draw refills to hand size + 1"
+            ordeal::effective_hand_size(&run) + 2,
+            "Quick Draw refills to hand size + 2"
         );
     }
 

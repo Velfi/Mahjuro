@@ -2079,6 +2079,7 @@ name = "mahjuro-core"
 version = "0.5.0-24"
 dependencies = [
  "anyhow",
+ "chrono",
  "glam",
  "log",
  "mahjuro-assets",

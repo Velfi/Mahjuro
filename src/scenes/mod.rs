@@ -193,7 +193,7 @@ pub struct UpdateCtx<'a> {
     pub seed_archive_seen: &'a mut bool,
     /// Per-profile chronicle cursor from settings — stable for the Archive visit.
     pub archive_chronicle_last_seen: u32,
-    pub rain_tuning: crate::render::rain_tuning::RainTuning,
+    pub main_menu_effects: crate::render::main_menu_effects_tuning::MainMenuEffectsTuning,
     pub flame_tuning: crate::render::flame_tuning::FlameTuning,
 }
 
@@ -268,7 +268,9 @@ pub struct DrawCtx<'a> {
     /// [`HallwayDistortion::from_pick_chamber`] alone.
     pub hallway_distortion_debug:
         Option<crate::render::hallway_glb::HallwayDistortionDebugSnapshot>,
-    pub rain_tuning: crate::render::rain_tuning::RainTuning,
+    /// Splash hub decode progress in `[0, 1]` (main-menu room, shadow, atlases).
+    pub loading_hub_progress: f32,
+    pub main_menu_effects: crate::render::main_menu_effects_tuning::MainMenuEffectsTuning,
     pub flame_tuning: crate::render::flame_tuning::FlameTuning,
 }
 
@@ -304,7 +306,8 @@ impl<'a> DrawCtx<'a> {
         hallway_distortion_debug: Option<
             crate::render::hallway_glb::HallwayDistortionDebugSnapshot,
         >,
-        rain_tuning: crate::render::rain_tuning::RainTuning,
+        loading_hub_progress: f32,
+        main_menu_effects: crate::render::main_menu_effects_tuning::MainMenuEffectsTuning,
         flame_tuning: crate::render::flame_tuning::FlameTuning,
     ) -> Self {
         Self {
@@ -332,7 +335,8 @@ impl<'a> DrawCtx<'a> {
             archive_has_new,
             archive_chronicle_last_seen_run_len,
             hallway_distortion_debug,
-            rain_tuning,
+            loading_hub_progress,
+            main_menu_effects,
             flame_tuning,
         }
     }

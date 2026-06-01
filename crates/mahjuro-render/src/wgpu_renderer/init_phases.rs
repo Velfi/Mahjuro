@@ -627,6 +627,23 @@ fn select_present_mode(caps: &wgpu::SurfaceCapabilities) -> wgpu::PresentMode {
                 caps.present_modes
             );
         }
+
+        // On macOS, Fifo defers to ProMotion adaptive sync which can drop to
+        // 30 Hz on low-motion scenes. Prefer Mailbox to avoid that.
+        #[cfg(target_os = "macos")]
+        {
+            const PREFERENCE: &[wgpu::PresentMode] = &[
+                wgpu::PresentMode::Mailbox,
+                wgpu::PresentMode::FifoRelaxed,
+            ];
+            for &mode in PREFERENCE {
+                if caps.present_modes.contains(&mode) {
+                    log::info!("macOS: using present mode {mode:?} to avoid ProMotion throttle");
+                    return mode;
+                }
+            }
+        }
+
         wgpu::PresentMode::Fifo
     }
 }

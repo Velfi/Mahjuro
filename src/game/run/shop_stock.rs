@@ -14,12 +14,16 @@ pub struct ShopOfferCounts {
 }
 
 /// Roll how many relic / zodiac / talisman offerings appear this shop visit.
+/// When `min_relic_slots` is 1 and the eligible pool is non-empty, at least one
+/// relic slot is offered (early meta pools no longer whiff on zero relic rows).
 pub fn roll_shop_offer_counts(
     extra_relics: usize,
     max_relic_slots: usize,
+    min_relic_slots: usize,
     rng: &mut impl rand::Rng,
 ) -> ShopOfferCounts {
-    let mut n_relics = rng.random_range(0..=max_relic_slots) + extra_relics;
+    let lo = min_relic_slots.min(max_relic_slots);
+    let mut n_relics = rng.random_range(lo..=max_relic_slots) + extra_relics;
     let mut n_zodiacs = rng.random_range(1..=MAX_RIBBONS);
     let mut n_talismans = rng.random_range(1..=MAX_RIBBONS);
     if n_zodiacs + n_talismans > MAX_RIBBONS {

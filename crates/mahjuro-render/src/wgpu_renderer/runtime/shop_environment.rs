@@ -562,7 +562,11 @@ impl WgpuRenderer {
                 },
                 inv_doc_scale,
                 env_tune.gltf_emissive_scale,
-                1.0,
+                if main_menu_env {
+                    current_moon_phase()
+                } else {
+                    1.0
+                },
             ],
             hdr_tonemap,
         };

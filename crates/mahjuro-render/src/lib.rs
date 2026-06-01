@@ -47,6 +47,11 @@ pub mod primitive;
 pub mod progress_meter_mesh;
 pub mod projected_light_shadow;
 pub mod punctual_shadow_policy;
+pub mod main_menu_effects_tuning;
+pub mod main_menu_moon_tuning;
+pub mod main_menu_moth_tuning;
+#[cfg(feature = "windowed")]
+pub mod main_menu_effects_debug_overlay;
 #[cfg(feature = "windowed")]
 pub mod rain_debug_overlay;
 pub mod rain_field;

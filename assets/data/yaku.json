@@ -1,9 +1,9 @@
 [
-  { "id": "tanyao",          "name": "Tanyao",       "mult_bonus": 2.0, "chip_bonus": 45 },
-  { "id": "toitoi",          "name": "Toitoi",       "mult_bonus": 3.0, "chip_bonus": 63 },
+  { "id": "tanyao",          "name": "Tanyao",       "mult_bonus": 1.5, "chip_bonus": 60 },
+  { "id": "toitoi",          "name": "Toitoi",       "mult_bonus": 2.5, "chip_bonus": 75 },
   { "id": "full_hand",       "name": "Full Hand",    "mult_bonus": 5.0, "chip_bonus": 90 },
-  { "id": "yakuhai",         "name": "Yakuhai",      "mult_bonus": 3.0, "chip_bonus": 60 },
-  { "id": "iipeikou",        "name": "Iipeikou",     "mult_bonus": 4.0, "chip_bonus": 78 },
+  { "id": "yakuhai",         "name": "Yakuhai",      "mult_bonus": 2.0, "chip_bonus": 75 },
+  { "id": "iipeikou",        "name": "Iipeikou",     "mult_bonus": 4.0, "chip_bonus": 85 },
   { "id": "sanshoku_doujun", "name": "Sanshoku",     "mult_bonus": 7.0, "chip_bonus": 142 },
   { "id": "ittsu",           "name": "Ittsu",        "mult_bonus": 7.5, "chip_bonus": 150 },
   { "id": "honitsu",         "name": "Honitsu",      "mult_bonus": 4.0, "chip_bonus": 72 },
@@ -13,8 +13,8 @@
   { "id": "chiitoitsu",      "name": "Chiitoitsu",   "mult_bonus": 6.5, "chip_bonus": 127 },
   { "id": "kokushi_musou",   "name": "Kokushi Musō", "mult_bonus": 13.0, "chip_bonus": 225 },
   { "id": "chicken_hand",    "name": "Chicken Hand", "mult_bonus": 0.0, "chip_bonus":  0 },
-  { "id": "chanta",          "name": "Chanta",       "mult_bonus": 4.0, "chip_bonus": 75 },
+  { "id": "chanta",          "name": "Chanta",       "mult_bonus": 3.5, "chip_bonus": 90 },
   { "id": "ryanpeikou",      "name": "Ryanpeikou",   "mult_bonus": 7.0, "chip_bonus": 135 },
   { "id": "sanshoku_doukou", "name": "Sanshoku Doukou", "mult_bonus": 7.5, "chip_bonus": 150 },
-  { "id": "pinfu",           "name": "Pinfu",        "mult_bonus": 4.0, "chip_bonus": 75 }
+  { "id": "pinfu",           "name": "Pinfu",        "mult_bonus": 4.0, "chip_bonus": 85 }
 ]
