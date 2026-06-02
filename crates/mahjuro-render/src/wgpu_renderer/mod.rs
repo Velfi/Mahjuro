@@ -271,8 +271,6 @@ pub struct WgpuRenderer {
     /// All GPU primitive indices for `btn_page_left` / `btn_page_right` (multi-material meshes).
     archive_page_left_prim_indices: Vec<usize>,
     archive_page_right_prim_indices: Vec<usize>,
-    /// Archive UI chrome that must not cast into the punctual shadow depth pass.
-    archive_punctual_shadow_skip_prims: rustc_hash::FxHashSet<usize>,
     /// Last-uploaded browse-board decal; `u64::MAX` = cleared / none.
     archive_sign_decal_upload_key: u64,
     /// Last-uploaded inspect-plaque decal; `u64::MAX` = cleared / none.
@@ -410,15 +408,6 @@ pub struct WgpuRenderer {
     /// Projected shadow depth setups for the current frame.
     projected_shadow_lights: Vec<crate::projected_light_shadow::ProjectedShadowLightSetup>,
     cached_projected_shadow_hash: u64,
-    /// Lit-mesh slot for [`crate::scenes::shop::shared::SHOP_INSPECT_SUBJECT_ANIM_ID`] this frame.
-    shop_inspect_subject_shadow_slot: Option<(runtime::DrawKind, usize)>,
-    /// Current `Object3d::anim_id` while [`runtime::object3d_placement::WgpuRenderer::run_object3d_placement`] walks a batch.
-    shadow_placement_anim_id: u64,
-    /// Active imported room for per-frame Object3d shadow cast policy.
-    placement_shadow_room:
-        Option<crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv>,
-    /// Whether the current Object3d placement iteration casts into the dynamic shadow map.
-    placement_shadow_casts: bool,
     /// Pre-rasterized showcase tile decals + UV lookup (`showcase_decal_atlas.rs`).
     showcase_decal_atlas: Option<crate::showcase_decal_atlas::ShowcaseDecalAtlasGpu>,
     /// Tileset name the atlas was baked for; rebuilt when Options tileset changes.
@@ -481,6 +470,9 @@ pub struct WgpuRenderer {
     room_baked_shadow_gpu: [Option<impl_room_shadow::RoomBakedShadowGpu>;
         crate::room_gi_bake::ROOM_GI_ROOM_COUNT],
     active_room_baked_shadow: Option<crate::room_gi_bake::RoomGiRoom>,
+    /// Synthetic contact-AO bake for [`crate::shadow_ao_lab`] (layout, GPU resources).
+    lab_baked_shadow: Option<(crate::shadow_ao_lab::ShadowAoLabLayout, impl_room_shadow::RoomBakedShadowGpu)>,
+    active_lab_baked_shadow: bool,
     room_shadow_capture_pending: Option<crate::room_gi_bake::RoomGiRoom>,
     room_shadow_captured: Option<crate::room_shadow_bake::RoomShadowBake>,
     shadow_probe_last_log: Instant,
@@ -785,6 +777,8 @@ pub struct WgpuRenderer {
     shadow_ao_sampler: wgpu::Sampler,
     _shadow_ao_white_texture: wgpu::Texture,
     shadow_ao_white_view: wgpu::TextureView,
+    _shadow_baked_depth_dummy_texture: wgpu::Texture,
+    shadow_baked_depth_dummy_view: wgpu::TextureView,
     /// Bind-group layout for per-caster uniforms (group 0 of the shadow
     /// pipeline). Each `LitMeshInstance` owns one bind
     /// group built against this layout.
@@ -861,7 +855,7 @@ pub(crate) use runtime::shadow_setup::ActiveRoomEnv;
 
 pub(crate) use lighting_buffers::{
     PointLightsBuf, PunctualLightBakeParams, PunctualLightBakeShopCameraParams, SpotLightsBuf,
-    TileOccluderGpu, TileOccludersBuf,
+    TileOccludersBuf,
 };
 pub(crate) use moon::{current_moon_phase, main_menu_moon_phase_for_render};
 pub use moon::moon_phase_short_name;

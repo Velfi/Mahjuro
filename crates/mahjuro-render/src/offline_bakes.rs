@@ -1,19 +1,53 @@
-//! Required offline bakes at renderer init (showcase decal atlases only).
+//! Required offline bakes at renderer init.
 //!
-//! Room shadow/GI (`.msh`/`.mgi`) and relic RLC1 bakes are lazy-loaded at runtime;
-//! `build.rs` stamp checks enforce committed outputs at compile time.
+//! Showcase decal atlases, room `.mgi`/`.msh`, and relic RLC1 payloads are validated
+//! eagerly when committed bakes are required. `build.rs` stamp checks still enforce
+//! outputs at compile time; runtime checks catch missing assets in dev skips or bad packs.
 
-use crate::showcase_decal_atlas;
+use anyhow::Context;
 
-/// Fail fast at renderer init when showcase decal atlases are missing.
+use crate::room_gi_bake::RoomGiRoom;
+use crate::room_shadow_bake;
+
+/// Game runtime must load valid committed offline bakes. Offline bakers skip this so stale
+/// placeholders do not block capturing fresh bakes.
+pub fn committed_offline_bakes_required() -> bool {
+    if cfg!(feature = "bake") {
+        return false;
+    }
+    !mahjuro_bake_stamp::skip_committed_bake_checks()
+}
+
+/// Fail fast at renderer init when required offline bakes are missing or invalid.
 pub fn require_all_at_startup() -> anyhow::Result<()> {
+    if !committed_offline_bakes_required() {
+        return Ok(());
+    }
+
     for tileset in mahjuro_assets::asset_path::list_player_tilesets() {
-        let path = showcase_decal_atlas::baked_atlas_asset_path(&tileset);
+        let path = crate::showcase_decal_atlas::baked_atlas_asset_path(&tileset);
         anyhow::ensure!(
-            showcase_decal_atlas::baked_showcase_decal_atlas_available(&tileset),
+            crate::showcase_decal_atlas::baked_showcase_decal_atlas_available(&tileset),
             "missing baked showcase decal atlas at {path}; run `cargo build` \
              (needs mahjuro-bake-decal-atlases in target/<profile>/)"
         );
     }
+
+    for room in RoomGiRoom::ALL {
+        crate::room_gi_bake::require_room_gi_bake(room)
+            .with_context(|| format!("room GI bake {room:?}"))?;
+    }
+
+    for room in room_shadow_bake::runtime_required_room_shadow_bakes() {
+        room_shadow_bake::require_effective_room_shadow_bake(room)
+            .with_context(|| format!("room shadow bake {room:?}"))?;
+    }
+
+    for def in mahjuro_core::core::relic::all_relic_defs() {
+        let path = crate::relic_bake::baked_relic_asset_path(def.id);
+        crate::relic_bake::load_baked_relic(def.id)
+            .with_context(|| format!("baked relic at {path}"))?;
+    }
+
     Ok(())
 }

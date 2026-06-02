@@ -1007,12 +1007,6 @@ impl ArchiveScene {
                 format!("Mahjuro — Archive ({})", self.active_tab.label())
             }
         };
-        if inspect.is_some()
-            && let Some(tw) =
-                self.archive_inspect_target_world(w, h, bosses, ctx.layout, env_scale)
-        {
-            frame.shop_inspect_shadow_target = Some(tw);
-        }
         frame
     }
 

@@ -29,7 +29,10 @@ pub const BTN_SKIP_ROUND: &str = "btn_skip_round";
 pub const HALLWAY_WALLS_NODE: &str = "walls";
 
 /// `COLOR_0.a` on [`HALLWAY_WALLS_NODE`] — `room_glb.wgsl` multiplies albedo by `bow.rgb` (alpha treated as 1).
-pub const HALLWAY_WALL_TINT_COLOR_TAG: f32 = 3.0;
+/// Must differ from [`crate::room_env_gltf::ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW`]
+/// so hallway walls still receive punctual shadows.
+pub const HALLWAY_WALL_TINT_COLOR_TAG: f32 =
+    crate::room_env_gltf::ROOM_ENV_COLOR_A_HALLWAY_WALL_TINT;
 
 /// Linear RGB tints (blue, yellow, green, red, purple, orange, pink, brown).
 const HALLWAY_WALL_TINTS: [[f32; 3]; 8] = [
@@ -831,6 +834,47 @@ mod tests {
         HALLWAY_RIPPLE_AMOUNT, HALLWAY_RIPPLE_SPEED, HALLWAY_RIPPLE_WAVES, HallwayDistortion,
     };
     use crate::room_glb;
+
+    #[test]
+    fn hallway_env_and_light_node_inventory() {
+        let Some(file) = mahjuro_assets::asset_path::get("3d/hallway.glb") else {
+            eprintln!("skip: no hallway.glb");
+            return;
+        };
+        let cpu = load_hallway_glb_from_bytes(&file.data).expect("decode");
+        eprintln!("=== hallway environment_primitives ({}):", cpu.environment_primitives.len());
+        for ep in &cpu.environment_primitives {
+            eprintln!("  mesh {:?}", ep.gltf_node_name);
+        }
+        eprintln!("=== embedded_point_lights ({}):", cpu.embedded_point_lights.len());
+        for l in &cpu.embedded_point_lights {
+            eprintln!(
+                "  {:?} pos_doc={:?}",
+                l.node_name, l.pos_doc
+            );
+        }
+        if let Some(b) = cpu.environment_bounds_doc {
+            eprintln!("=== bounds min={:?} max={:?}", b.min, b.max);
+        }
+    }
+
+    #[test]
+    fn hallway_wall_tint_tag_does_not_disable_directional_shadows() {
+        use crate::room_env_gltf::{
+            ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW, ROOM_ENV_COLOR_A_HALLWAY_WALL_TINT,
+        };
+        assert!(
+            (super::HALLWAY_WALL_TINT_COLOR_TAG - ROOM_ENV_COLOR_A_HALLWAY_WALL_TINT).abs()
+                < 1e-6
+        );
+        assert!(
+            (super::HALLWAY_WALL_TINT_COLOR_TAG
+                - ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW)
+                .abs()
+                > 0.5,
+            "hallway wall tint must not reuse archive no-shadow tag"
+        );
+    }
 
     #[test]
     fn hallway_walls_vertices_have_ripple_wall_weight() {

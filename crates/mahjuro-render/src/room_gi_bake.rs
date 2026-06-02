@@ -265,18 +265,19 @@ impl RoomGiBake {
 }
 
 fn load_room_gi_bake(room: RoomGiRoom) -> Option<Arc<RoomGiBake>> {
+    if crate::offline_bakes::committed_offline_bakes_required() {
+        return Some(
+            require_room_gi_bake(room).unwrap_or_else(|e| panic!("{e:#}")),
+        );
+    }
     let file = asset_path::get(room.asset_path())?;
     RoomGiBake::decode_for_room(&file.data, room)
         .map(Arc::new)
-        .ok()
-        .or_else(|| {
-            log::warn!(
-                "room GI bake {:?} failed to parse ({})",
-                room,
-                room.asset_path()
-            );
-            None
+        .map_err(|e| {
+            log::warn!("{}: {e:#}", room.asset_path());
+            e
         })
+        .ok()
 }
 
 static BAKE_CACHE: [OnceLock<Option<Arc<RoomGiBake>>>; ROOM_GI_ROOM_COUNT] = [

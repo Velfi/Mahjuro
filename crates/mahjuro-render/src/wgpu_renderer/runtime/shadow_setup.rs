@@ -1,5 +1,5 @@
 use super::*;
-use crate::draw_cmd::{DrawCmd, SHOP_INSPECT_SUBJECT_ANIM_ID, UiFrame};
+use crate::draw_cmd::{DrawCmd, UiFrame};
 use crate::lit_mesh::{LitMeshInstance, MaterialKind, ShadowCasterUniform, ShadowGlobals, material_casts_shadow};
 use crate::projected_light_shadow::{
     ProjectedShadowLightSetup, PunctualShadowBuild, build_punctual_shadow_setups,
@@ -37,6 +37,7 @@ pub fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
 }
 
 impl ActiveRoomEnv {
+    #[allow(dead_code)]
     #[inline]
     pub fn to_room_gi(self) -> Option<RoomGiRoom> {
         match self {
@@ -90,6 +91,7 @@ impl ActiveRoomEnv {
             | "tutorial"
             | "roller_lab"
             | "cascade_lab" => Some(Self::Gameplay),
+            scene_keys::SHADOW_AO_LAB => None,
             // Legacy aliases (tuning overrides, screenshot CLI, old saves).
             "pick_chamber" | "pick_blind" => Some(Self::Hallway),
             "staircase" => Some(Self::Stairway),
@@ -140,6 +142,7 @@ pub(crate) fn build_shadow_globals(
     build: &PunctualShadowBuild,
     contact_ao_active: bool,
     contact_ao_view_proj: [f32; 16],
+    contact_ao_world_scale: f32,
 ) -> ShadowGlobals {
     let point_size = shadow_quality.point_map_size().max(1) as f32;
     let mut globals = ShadowGlobals::empty();
@@ -162,9 +165,17 @@ pub(crate) fn build_shadow_globals(
     }
     globals.counts = [
         build.casters.len() as f32,
-        0.0,
+        if contact_ao_active {
+            crate::room_shadow_bake::CONTACT_AO_DEPTH_COHERENCE_EPS
+        } else {
+            0.0
+        },
         if contact_ao_active { 1.0 } else { 0.0 },
-        0.0,
+        if contact_ao_active {
+            contact_ao_world_scale
+        } else {
+            0.0
+        },
     ];
     globals.contact_ao_view_proj = contact_ao_view_proj;
     globals
@@ -207,7 +218,6 @@ impl WgpuRenderer {
             bounds_doc,
             frame.camera_override.as_ref(),
             use_ray_plane,
-            frame.shop_inspect_shadow_target,
         );
         let (hash, changed) =
             punctual_shadow_setups_changed(&build, self.cached_projected_shadow_hash);
@@ -244,12 +254,21 @@ impl WgpuRenderer {
         build: &PunctualShadowBuild,
         contact_ao_active: bool,
         contact_ao_view_proj: [f32; 16],
+        window_h: f32,
     ) {
+        let ao_scale = if self.active_lab_baked_shadow {
+            crate::shadow_ao_lab::CONTACT_AO_WORLD_SCALE
+        } else if contact_ao_active {
+            crate::room_shadow_bake::contact_ao_world_scale_ratio(window_h)
+        } else {
+            1.0
+        };
         let globals = build_shadow_globals(
             shadow_quality,
             build,
             contact_ao_active,
             contact_ao_view_proj,
+            ao_scale,
         );
         self.queue.write_buffer(
             &self.shadow_globals_buffer,
@@ -370,28 +389,6 @@ impl WgpuRenderer {
     }
 
     #[inline]
-    pub(super) fn reset_shop_inspect_shadow_slot(&mut self) {
-        self.shop_inspect_subject_shadow_slot = None;
-    }
-
-    #[inline]
-    pub(super) fn register_placement_shadow_slot(
-        &mut self,
-        draw_kind: super::DrawKind,
-        slot_i: usize,
-    ) {
-        if self.shadow_placement_anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID {
-            self.shop_inspect_subject_shadow_slot = Some((draw_kind, slot_i));
-        }
-    }
-
-    #[inline]
-    pub(super) fn placement_shadow_writes(&self, frame: &UiFrame) -> bool {
-        frame.shop_inspect_shadow_target.is_none()
-            || self.shadow_placement_anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID
-    }
-
-    #[inline]
     pub(super) fn write_lit_mesh_shadow(
         &self,
         shadow: &mut Option<&mut Object3dShadowCtx<'_>>,
@@ -399,13 +396,7 @@ impl WgpuRenderer {
         model: glam::Mat4,
         material: MaterialKind,
     ) {
-        if let Some(shadow) = shadow.as_deref_mut()
-            && object3d_casts_dynamic_shadow(
-                self.placement_shadow_room,
-                self.shadow_placement_anim_id,
-            )
-            && material_casts_shadow(material)
-        {
+        if let Some(shadow) = shadow.as_deref_mut() && material_casts_shadow(material) {
             *shadow.changed |=
                 inst.write_shadow_uniform(&self.queue, shadow.light_view_proj, model);
         }
@@ -444,94 +435,8 @@ pub fn room_env_uses_offline_baked_shadow(env: ActiveRoomEnv) -> bool {
     env != ActiveRoomEnv::Archive
 }
 
-/// Static room shells skip the live depth pre-pass when offline contact AO is active,
-/// or during catalog inspect (props-only cast).
+/// Static room shells always participate in the live depth pre-pass when shadows are on.
 #[inline]
-pub fn skip_room_env_live_shadow_pass(
-    frame: &UiFrame,
-    env: ActiveRoomEnv,
-    offline_baked_loaded: bool,
-) -> bool {
-    if frame.shop_inspect_shadow_target.is_some() {
-        return true;
-    }
-    offline_baked_loaded && room_env_uses_offline_baked_shadow(env)
-}
-
-/// Whether room-env shadow caster uniforms should upload this frame.
-#[inline]
-pub fn room_env_shadow_upload_active(
-    shadow_quality_active: bool,
-    frame: &UiFrame,
-    env: ActiveRoomEnv,
-    offline_baked_loaded: bool,
-) -> bool {
-    shadow_quality_active && !skip_room_env_live_shadow_pass(frame, env, offline_baked_loaded)
-}
-
-/// Whether this catalog prop should cast into the live shadow map.
-#[inline]
-pub(super) fn object3d_casts_dynamic_shadow(
-    active_room: Option<ActiveRoomEnv>,
-    anim_id: u64,
-) -> bool {
-    match active_room {
-        None
-        | Some(ActiveRoomEnv::Shop)
-        | Some(ActiveRoomEnv::Hallway)
-        | Some(ActiveRoomEnv::MainMenu)
-        | Some(ActiveRoomEnv::Gameplay)
-        | Some(ActiveRoomEnv::Stairway) => true,
-        Some(ActiveRoomEnv::Archive) => anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID,
-    }
-}
-
-#[cfg(test)]
-mod object3d_shadow_tests {
-    use super::object3d_casts_dynamic_shadow;
-    use crate::draw_cmd::SHOP_INSPECT_SUBJECT_ANIM_ID;
-    use crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
-
-    #[test]
-    fn archive_grid_cubbies_do_not_cast_dynamic_shadow() {
-        let env = Some(ActiveRoomEnv::Archive);
-        assert!(!object3d_casts_dynamic_shadow(env, 0));
-        assert!(!object3d_casts_dynamic_shadow(env, 7));
-        assert!(!object3d_casts_dynamic_shadow(
-            env,
-            crate::draw_cmd::ARCHIVE_FEATURED_ANIM_ID
-        ));
-        assert!(object3d_casts_dynamic_shadow(
-            env,
-            SHOP_INSPECT_SUBJECT_ANIM_ID
-        ));
-    }
-
-    #[test]
-    fn offline_bake_skips_live_room_env_pass_except_archive() {
-        use super::{room_env_shadow_upload_active, skip_room_env_live_shadow_pass};
-        let mut frame = crate::draw_cmd::UiFrame::default();
-        assert!(skip_room_env_live_shadow_pass(
-            &frame,
-            ActiveRoomEnv::Shop,
-            true,
-        ));
-        assert!(!skip_room_env_live_shadow_pass(
-            &frame,
-            ActiveRoomEnv::Archive,
-            true,
-        ));
-        assert!(!room_env_shadow_upload_active(
-            true,
-            &frame,
-            ActiveRoomEnv::Shop,
-            true,
-        ));
-        frame.shop_inspect_shadow_target = Some([0.0, 0.0, 12.0]);
-        assert!(skip_room_env_live_shadow_pass(
-            &frame,
-            ActiveRoomEnv::Archive,
-            false,
-        ));
-    }
+pub fn room_env_shadow_upload_active(shadow_quality_active: bool) -> bool {
+    shadow_quality_active
 }

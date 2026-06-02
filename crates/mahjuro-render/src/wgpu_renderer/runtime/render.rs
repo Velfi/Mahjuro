@@ -1,5 +1,4 @@
 use super::*;
-use crate::room_gi_bake::room_gi_room_index;
 
 /// HDR scene buffer clear — uniform void behind the table / props.
 #[inline]
@@ -1019,15 +1018,16 @@ impl WgpuRenderer {
         });
         self.warn_if_spot_lights_present(frame);
         let light_view_proj_arr = projected_frame.first_light_view_proj;
-        let contact_ao_active = self.active_room_baked_shadow.is_some();
-        let contact_ao_view_proj = self
-            .active_room_baked_shadow
-            .and_then(|room| {
-                self.room_baked_shadow_gpu[room_gi_room_index(room)]
-                    .as_ref()
-                    .map(|gpu| gpu.baked_light_view_proj)
-            })
-            .unwrap_or([0.0; 16]);
+        let contact_ao_active =
+            shadow_quality.contact_ao() && self.active_lab_baked_shadow;
+        let contact_ao_view_proj = if self.active_lab_baked_shadow {
+            self.lab_baked_shadow
+                .as_ref()
+                .map(|(_, gpu)| gpu.baked_light_view_proj)
+                .unwrap_or([0.0; 16])
+        } else {
+            [0.0; 16]
+        };
         let shadow_just_enabled =
             shadow_quality.active() && !self.prev_shadow_quality.active();
         let shadow_quality_changed = shadow_quality != self.prev_shadow_quality;
@@ -1132,26 +1132,225 @@ impl WgpuRenderer {
             &mut shadow_uniforms_changed,
         );
 
-        self.write_active_room_baked_shadow_globals(shadow_quality, &projected_frame.build);
-        if shadow_quality.active() {
-            self.upload_projected_shadow_globals(
+        if self.active_lab_baked_shadow {
+            self.write_active_room_baked_shadow_globals(
                 shadow_quality,
                 &projected_frame.build,
-                contact_ao_active,
-                contact_ao_view_proj,
+                camera.h,
             );
         }
+        self.upload_projected_shadow_globals(
+            shadow_quality,
+            &projected_frame.build,
+            contact_ao_active,
+            contact_ao_view_proj,
+            camera.h,
+        );
         let room_shadow_active = shadow_quality.active();
-        let offline_room_baked_loaded = self.active_room_baked_shadow.is_some();
+        let offline_room_baked_loaded = false;
+        // #region agent log
+        {
+            use super::{
+                agent_shadow_log, probe_baked_ao_at_world, probe_baked_ao_at_world_scaled,
+                shadow_caster_z_up_probe,
+            };
+            use crate::hallway_glb::with_hallway_glb_cpu;
+            use crate::projected_light_shadow::punctual_light_world;
+            use crate::room_gi_bake::room_gi_room_index;
+            use crate::room_glb::room_env_world_scale;
+            let skip_live = false;
+            let ao_scale = if self.active_lab_baked_shadow {
+                crate::shadow_ao_lab::CONTACT_AO_WORLD_SCALE
+            } else if contact_ao_active {
+                crate::room_shadow_bake::contact_ao_world_scale_ratio(camera.h)
+            } else {
+                1.0
+            };
+            let mut ao_probe = serde_json::Value::Null;
+            let mut hallway_far_wall_probe = serde_json::Value::Null;
+            if let (Some(room), Some(gpu)) = (
+                self.active_room_baked_shadow,
+                self.active_room_baked_shadow.and_then(|room| {
+                    self.room_baked_shadow_gpu[room_gi_room_index(room)]
+                        .as_ref()
+                }),
+            ) {
+                if let Ok(bake) = crate::room_shadow_bake::require_room_shadow_bake(room) {
+                    if let Some(ao) = bake.ao_bytes.as_ref() {
+                        ao_probe = serde_json::json!({
+                            "room": format!("{room:?}"),
+                            "origin_ndc_uv_ao": probe_baked_ao_at_world(
+                                gpu.baked_light_view_proj,
+                                ao,
+                                bake.width,
+                                bake.height,
+                                glam::Vec3::ZERO,
+                            )
+                            .map(|(ndc, uv, a)| serde_json::json!({
+                                "ndc": ndc.to_array(),
+                                "uv": uv,
+                                "ao": a,
+                            })),
+                        });
+                        if active_room_env
+                            == Some(super::shadow_setup::ActiveRoomEnv::Hallway)
+                        {
+                            let height = self
+                                .env_tune_for(crate::scene_keys::HALLWAY)
+                                .height_scale;
+                            let far_wall_world = with_hallway_glb_cpu(|cpu| {
+                                let cpu = cpu?;
+                                let bounds = cpu.environment_bounds_doc?;
+                                let center = bounds.center();
+                                let s = room_env_world_scale(camera.h, height);
+                                let doc = glam::Vec3::new(
+                                    center.x,
+                                    bounds.max.y - 0.05,
+                                    bounds.min.z + (bounds.max.z - bounds.min.z) * 0.45,
+                                );
+                                Some((doc - center) * s)
+                            });
+                            if let Some(world) = far_wall_world {
+                                hallway_far_wall_probe = probe_baked_ao_at_world_scaled(
+                                    gpu.baked_light_view_proj,
+                                    Some(&bake.depth_bytes),
+                                    ao,
+                                    bake.width,
+                                    bake.height,
+                                    world,
+                                    ao_scale,
+                                )
+                                .map(|p| {
+                                    serde_json::json!({
+                                        "world": world.to_array(),
+                                        "ndc": p.ndc.to_array(),
+                                        "uv": p.uv,
+                                        "ao": p.ao,
+                                        "baked_depth": p.baked_depth,
+                                        "depth_delta": p.depth_delta,
+                                        "ao_would_apply_pre_fix": p.ao < 128,
+                                        "ao_would_apply_post_fix": p.ao_would_apply,
+                                    })
+                                })
+                                .unwrap_or(serde_json::Value::Null);
+                            }
+                        }
+                    }
+                }
+            }
+            let hallway_z_up = if active_room_env == Some(super::shadow_setup::ActiveRoomEnv::Hallway)
+                && let Some(caster) = projected_frame.casters().first()
+            {
+                let i = caster.source_light_index as usize;
+                let light_world = frame
+                    .scene_lighting
+                    .punctual
+                    .get(i)
+                    .map(|entry| {
+                        punctual_light_world(
+                            camera.w,
+                            camera.h,
+                            entry,
+                            frame.camera_override.as_ref(),
+                            frame
+                                .showcase_render_hints
+                                .layout_uses_ray_plane(self.active_scene_key),
+                        )
+                    })
+                    .unwrap_or(glam::Vec3::ZERO);
+                Some(shadow_caster_z_up_probe(light_world, glam::Vec3::ZERO))
+            } else {
+                None
+            };
+            agent_shadow_log(
+                "H1-H5",
+                "render.rs:shadow_frame",
+                "shadow frame state",
+                serde_json::json!({
+                    "shadow_quality": shadow_quality.label(),
+                    "shadow_active": shadow_quality.active(),
+                    "contact_ao_active": contact_ao_active,
+                    "offline_baked_loaded": offline_room_baked_loaded,
+                    "skip_room_env_live": skip_live,
+                    "room_glb_brdf": frame.uses_room_glb_shader(),
+                    "punctual_count": frame.scene_lighting.punctual.len(),
+                    "caster_count": projected_frame.casters().len(),
+                    "active_env": active_room_env.map(|e| format!("{e:?}")),
+                    "scene_key": self.active_scene_key,
+                    "camera_h": camera.h,
+                    "ao_world_scale": ao_scale,
+                    "ao_probe": ao_probe,
+                    "hallway_far_wall_probe": hallway_far_wall_probe,
+                    "hallway_z_up_probe": hallway_z_up,
+                }),
+            );
+            if let Some(layout) = frame.shadow_ao_lab_layout {
+                let hdr = self.tile_hdr_tonemap(frame);
+                let bake = crate::shadow_ao_lab::synthetic_bake(layout);
+                let mid = glam::Vec3::new(0.0, 5950.0, 1200.0);
+                let light_w = crate::shadow_ao_lab::light_world();
+                let ao_mid = crate::room_shadow_bake::probe_contact_ao_at_world(
+                    &bake,
+                    mid,
+                    crate::shadow_ao_lab::CONTACT_AO_WORLD_SCALE,
+                );
+                let punctual_kind = frame
+                    .scene_lighting
+                    .punctual
+                    .first()
+                    .map(|e| match e {
+                        crate::draw_cmd::ScenePunctualLight::Smooth(_) => "smooth",
+                        crate::draw_cmd::ScenePunctualLight::InverseSquare(_) => "inverse_square",
+                    });
+                let synth_lvp = crate::shadow_ao_lab::punctual_light_view_proj(layout);
+                let live_lvp = projected_frame
+                    .build
+                    .casters
+                    .first()
+                    .map(|c| c.light_view_proj);
+                let lvp_max_delta = live_lvp.map(|m| {
+                    let a = m.to_cols_array();
+                    let b = synth_lvp.to_cols_array();
+                    a.iter()
+                        .zip(b.iter())
+                        .map(|(x, y)| (x - y).abs())
+                        .fold(0.0f32, f32::max)
+                });
+                let back_mid_ndc = live_lvp.map(|m| {
+                    let clip = m * mid.extend(1.0);
+                    (clip.truncate() / clip.w).to_array()
+                });
+                agent_shadow_log(
+                    "LAB-S1-S3",
+                    "render.rs:shadow_ao_lab",
+                    "lab shadow diagnostics",
+                    serde_json::json!({
+                        "layout": format!("{layout:?}"),
+                        "hdr_tonemap": hdr,
+                        "punctual_kind": punctual_kind,
+                        "light_world": light_w.to_array(),
+                        "shadow_look_at": crate::shadow_ao_lab::punctual_shadow_look_at().to_array(),
+                        "lvp_max_delta_vs_synthetic": lvp_max_delta,
+                        "back_mid_ndc_live_lvp": back_mid_ndc,
+                        "shadow_caster_draws": object3d_shadow_draw_list.len(),
+                        "contact_ao_active": contact_ao_active,
+                        "active_lab_baked": self.active_lab_baked_shadow,
+                        "object3d_cmd_count": object3d_cmds.len(),
+                        "back_mid_ao_probe": ao_mid.map(|p| serde_json::json!({
+                            "ndc": p.ndc,
+                            "uv": p.uv,
+                            "ao": p.ao,
+                            "applies": p.applies,
+                        })),
+                    }),
+                );
+            }
+        }
+        // #endregion
         macro_rules! room_env_shadow_upload {
             ($env:expr) => {
-                super::shadow_setup::room_env_shadow_upload_active(
-                    room_shadow_active,
-                    frame,
-                    $env,
-                    offline_room_baked_loaded,
-                )
-                .then_some((light_view_proj_arr, &mut shadow_uniforms_changed))
+                super::shadow_setup::room_env_shadow_upload_active(room_shadow_active)
+                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed))
             };
         }
         if ops_flags.shop_env {

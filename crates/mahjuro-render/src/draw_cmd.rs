@@ -916,9 +916,6 @@ pub struct UiFrame {
     pub hallway_distortion: Option<crate::hallway_glb::HallwayDistortion>,
     /// When true, skip offline room GI probe bake and run dynamic `emissive-probe-update`.
     pub room_gi_dynamic: bool,
-    /// Shop item inspect: baked GI stays on; shadow pre-pass uses a tight frustum at this
-    /// pivot and only draws the mesh tagged with [`SHOP_INSPECT_SUBJECT_ANIM_ID`].
-    pub shop_inspect_shadow_target: Option<[f32; 3]>,
     /// World-space flame emitters without procedural candle meshes (e.g. shop
     /// `light_candle_*` punctual lights). Merged into the particle system each frame.
     pub procedural_flame_emitters: Vec<crate::flame_volume::FlameEmitter>,
@@ -934,6 +931,10 @@ pub struct UiFrame {
     pub shop_env_unlit_debug: bool,
     /// Gameplay score roller digits `(live_score, target_score)` when the HUD roller is active.
     pub gameplay_score_roller_values: Option<(u64, u64)>,
+    /// Debug [`shadow_ao_lab`] overlay — synthetic geometry + contact AO bake.
+    pub shadow_ao_lab_layout: Option<crate::shadow_ao_lab::ShadowAoLabLayout>,
+    /// Debug labs: override global shadow quality for one frame (`None` = use settings).
+    pub shadow_quality_override: Option<mahjuro_gfx_types::ShadowQuality>,
 }
 
 impl UiFrame {
@@ -963,7 +964,6 @@ impl UiFrame {
             archive_inspect_plaque_decal_text: None,
             hallway_distortion: None,
             room_gi_dynamic: false,
-            shop_inspect_shadow_target: None,
             procedural_flame_emitters: Vec::new(),
             gameplay_action_picks: None,
             gameplay_cash_in_button_visible: false,
@@ -971,6 +971,8 @@ impl UiFrame {
             shop_env_eyeball_only: false,
             shop_env_unlit_debug: false,
             gameplay_score_roller_values: None,
+            shadow_ao_lab_layout: None,
+            shadow_quality_override: None,
         }
     }
 

@@ -297,7 +297,7 @@ impl WgpuRenderer {
                     };
                     {
                         let stg_mut = &mut self.showcase_tiles[slot_cursor];
-                        stg_mut.casts_shadow = p.pick_id.is_some();
+                        stg_mut.casts_shadow = true;
                         if stg_mut.cached_shadow_caster != su {
                             stg_mut.cached_shadow_caster = su;
                             self.queue.write_buffer(
@@ -374,114 +374,6 @@ impl WgpuRenderer {
         // also flow through Object3d paths into `pack_rects`).
         for (rect, pick_id) in &self.proj.pack_rects {
             self.proj.aux_dish_rects.push((*pick_id, *rect));
-        }
-
-        // Tile occluder buffer — analytic AABBs for the per-fragment ray
-        // occlusion test that gives the candle pools their tile shadows.
-        // Each tile contributes a single conservative world-space AABB
-        // built from the 8 transformed local corners of its mesh extent.
-        // Limited to MAX_TILE_OCCLUDERS so the uniform stays bounded.
-        //
-        // After collecting per-tile boxes we inflate adjacent tiles toward
-        // each other so their AABBs touch along the row axis. Without this,
-        // the back candles sit high above the table and their light threads
-        // through the visible gaps between hand tiles, painting sharp
-        // specular streaks on the table in front of the row (the row is
-        // visually contiguous but physically gappy). The inflation per side
-        // is half the gap to the nearest neighbour, so distant tiles never
-        // smear into each other.
-        {
-            let hx = LOCAL_X_EXTENT * 0.5;
-            let hy = LOCAL_Y_EXTENT * 0.5;
-            let hz = LOCAL_Z_EXTENT * 0.5;
-            let local_corners = [
-                glam::Vec3::new(-hx, -hy, -hz),
-                glam::Vec3::new(hx, -hy, -hz),
-                glam::Vec3::new(-hx, hy, -hz),
-                glam::Vec3::new(hx, hy, -hz),
-                glam::Vec3::new(-hx, -hy, hz),
-                glam::Vec3::new(hx, -hy, hz),
-                glam::Vec3::new(-hx, hy, hz),
-                glam::Vec3::new(hx, hy, hz),
-            ];
-            let mut tiles: Vec<(glam::Vec3, glam::Vec3)> =
-                Vec::with_capacity(tile_pick_models.len().min(MAX_TILE_OCCLUDERS));
-            for (_, model) in tile_pick_models.iter() {
-                if tiles.len() >= MAX_TILE_OCCLUDERS {
-                    break;
-                }
-                let mut lo = glam::Vec3::splat(f32::INFINITY);
-                let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
-                for c in local_corners.iter() {
-                    let w = model.transform_point3(*c);
-                    lo = lo.min(w);
-                    hi = hi.max(w);
-                }
-                tiles.push(((lo + hi) * 0.5, (hi - lo) * 0.5));
-            }
-
-            // Pick the dominant horizontal axis (X or Y on the felt; Z is up) by
-            // comparing the spread of tile centers. The hand is laid out
-            // along screen X — that's world X after `pixel_to_world` — but
-            // detecting it from the data keeps this robust if the layout
-            // ever rotates.
-            if tiles.len() >= 2 {
-                let (mut min_x, mut max_x) = (f32::INFINITY, f32::NEG_INFINITY);
-                let (mut min_z, mut max_z) = (f32::INFINITY, f32::NEG_INFINITY);
-                for (c, _) in &tiles {
-                    min_x = min_x.min(c.x);
-                    max_x = max_x.max(c.x);
-                    min_z = min_z.min(c.z);
-                    max_z = max_z.max(c.z);
-                }
-                let row_axis_x = (max_x - min_x) >= (max_z - min_z);
-
-                let mut order: Vec<usize> = (0..tiles.len()).collect();
-                order.sort_by(|&a, &b| {
-                    let ka = if row_axis_x {
-                        tiles[a].0.x
-                    } else {
-                        tiles[a].0.z
-                    };
-                    let kb = if row_axis_x {
-                        tiles[b].0.x
-                    } else {
-                        tiles[b].0.z
-                    };
-                    ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
-                });
-                for win in order.windows(2) {
-                    let (a, b) = (win[0], win[1]);
-                    let (ca, cb) = (tiles[a].0, tiles[b].0);
-                    let (ha, hb) = (tiles[a].1, tiles[b].1);
-                    let gap = if row_axis_x {
-                        (cb.x - ca.x) - (ha.x + hb.x)
-                    } else {
-                        (cb.z - ca.z) - (ha.z + hb.z)
-                    };
-                    if gap > 0.0 {
-                        let pad = gap * 0.5;
-                        if row_axis_x {
-                            tiles[a].1.x += pad;
-                            tiles[b].1.x += pad;
-                        } else {
-                            tiles[a].1.z += pad;
-                            tiles[b].1.z += pad;
-                        }
-                    }
-                }
-            }
-
-            let mut occ = TileOccludersBuf::empty();
-            for (i, (center, half)) in tiles.iter().enumerate() {
-                occ.boxes[i] = TileOccluderGpu {
-                    center: [center.x, center.y, center.z, 0.0],
-                    half_extents: [half.x, half.y, half.z, 0.0],
-                };
-            }
-            occ.count[0] = tiles.len() as u32;
-            self.queue
-                .write_buffer(&self.tile_occluders_buffer, 0, bytemuck::bytes_of(&occ));
         }
     }
 }

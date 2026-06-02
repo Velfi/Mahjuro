@@ -940,48 +940,61 @@ pub(super) fn build_relic_tray(
     env_height_scale: f32,
     glb_relic_poses: &[crate::render::gameplay_glb::GameplayMarkerPose],
 ) -> Vec<Object3d> {
+    use crate::core::relic::{all_relic_defs, RelicId};
+    use crate::render::table_transform::{compose_rotation_euler, rot_euler_xyz_rad};
+    use crate::render::world_space::pixel_to_world;
+
     let mut relic_objects: Vec<Object3d> = Vec::new();
     let active_ids = GameEngine::active_relics(run);
-    if !active_ids.is_empty() {
-        use crate::core::relic::all_relic_defs;
-        use crate::render::table_transform::{compose_rotation_euler, rot_euler_xyz_rad};
-        use crate::render::world_space::pixel_to_world;
-        let defs = all_relic_defs();
-        let w = layout.window_w;
-        let h = layout.window_h;
-        let stride_world = if glb_relic_poses.len() >= 2 {
-            let a0 = pixel_to_world(
-                w,
-                h,
-                glb_relic_poses[0].anchor[0],
-                glb_relic_poses[0].anchor[1],
-                glb_relic_poses[0].anchor[2],
-            );
-            let a1 = pixel_to_world(
-                w,
-                h,
-                glb_relic_poses[1].anchor[0],
-                glb_relic_poses[1].anchor[1],
-                glb_relic_poses[1].anchor[2],
-            );
-            let d = a1 - a0;
-            d.truncate().length().max(layout.mm(8.0))
-        } else {
-            w.min(h) * 0.048 * 1.1
-        };
-        let face = stride_world / 1.1;
+    let lab_tray = scene.lab_mode();
+    if active_ids.is_empty() && !lab_tray {
+        return relic_objects;
+    }
+    if glb_relic_poses.is_empty() {
+        return relic_objects;
+    }
 
-        // Mesh geometry (see `build_relic_mesh`): the disc lies in local
-        // XZ with radius 0.5, and thickness runs along local ±Y with
-        // half-height 0.5. Extents are full-width scalars on each local
-        // axis, so `[face, thick, face]` scales the disc to face-width
-        // and the cylinder height to the (much smaller) badge thickness.
-        for (i, &rid) in active_ids.iter().enumerate() {
-            if i >= glb_relic_poses.len() {
-                break;
-            }
-            let pose = glb_relic_poses[i];
-            let slot_face = face * pose.uniform_author_scale(h, env_height_scale);
+    let w = layout.window_w;
+    let h = layout.window_h;
+    let stride_world = if glb_relic_poses.len() >= 2 {
+        let a0 = pixel_to_world(
+            w,
+            h,
+            glb_relic_poses[0].anchor[0],
+            glb_relic_poses[0].anchor[1],
+            glb_relic_poses[0].anchor[2],
+        );
+        let a1 = pixel_to_world(
+            w,
+            h,
+            glb_relic_poses[1].anchor[0],
+            glb_relic_poses[1].anchor[1],
+            glb_relic_poses[1].anchor[2],
+        );
+        let d = a1 - a0;
+        d.truncate().length().max(layout.mm(8.0))
+    } else {
+        w.min(h) * 0.048 * 1.1
+    };
+    let face = stride_world / 1.1;
+    let slot_count = if lab_tray {
+        glb_relic_poses.len()
+    } else {
+        active_ids.len().min(glb_relic_poses.len())
+    };
+    let defs = all_relic_defs();
+
+    // Mesh geometry (see `build_relic_mesh`): the disc lies in local
+    // XZ with radius 0.5, and thickness runs along local ±Y with
+    // half-height 0.5. Extents are full-width scalars on each local
+    // axis, so `[face, thick, face]` scales the disc to face-width
+    // and the cylinder height to the (much smaller) badge thickness.
+    for i in 0..slot_count {
+        let pose = glb_relic_poses[i];
+        let slot_face = face * pose.uniform_author_scale(h, env_height_scale);
+        let rotation = crate::render::gameplay_glb::rotate_marker_pose_x_180(pose.rotation_rad);
+
+        if let Some(&rid) = active_ids.get(i) {
             let visual = relic_visual(rid);
             let thick = slot_face * 0.06 * visual.thickness_scale;
 
@@ -994,32 +1007,31 @@ pub(super) fn build_relic_tray(
             let color = crate::render::theme::color::rarity(rarity.tier());
 
             // Activation glow: fast-attack / smooth-decay envelope.
-            let (glow, wiggle_deg, vertical_wave) = if let Some(start) = scene.relic_glow_starts.get(&rid) {
-                let now_for_glow = Instant::now();
-                let age = now_for_glow.saturating_duration_since(*start).as_secs_f32();
-                let life = RELIC_GLOW_LIFETIME.as_secs_f32();
-                if age >= life {
-                    (0.0, 0.0, 0.0)
-                } else {
-                    let t = (age / life).clamp(0.0, 1.0);
-                    let attack_end = 0.12_f32;
-                    let glow = if t < attack_end {
-                        (t / attack_end).clamp(0.0, 1.0)
+            let (glow, wiggle_deg, vertical_wave) =
+                if let Some(start) = scene.relic_glow_starts.get(&rid) {
+                    let now_for_glow = Instant::now();
+                    let age = now_for_glow.saturating_duration_since(*start).as_secs_f32();
+                    let life = RELIC_GLOW_LIFETIME.as_secs_f32();
+                    if age >= life {
+                        (0.0, 0.0, 0.0)
                     } else {
-                        let decay_t = (t - attack_end) / (1.0 - attack_end);
-                        (1.0 - decay_t).max(0.0).powi(2)
-                    };
-                    let wiggle = glow * 12.0 * (age * 22.0).sin();
-                    let vertical = glow * (age * 18.0).sin();
-                    (glow, wiggle, vertical)
-                }
-            } else {
-                (0.0, 0.0, 0.0)
-            };
+                        let t = (age / life).clamp(0.0, 1.0);
+                        let attack_end = 0.12_f32;
+                        let glow = if t < attack_end {
+                            (t / attack_end).clamp(0.0, 1.0)
+                        } else {
+                            let decay_t = (t - attack_end) / (1.0 - attack_end);
+                            (1.0 - decay_t).max(0.0).powi(2)
+                        };
+                        let wiggle = glow * 12.0 * (age * 22.0).sin();
+                        let vertical = glow * (age * 18.0).sin();
+                        (glow, wiggle, vertical)
+                    }
+                } else {
+                    (0.0, 0.0, 0.0)
+                };
 
-            let mut rotation = crate::render::gameplay_glb::rotate_marker_pose_x_180(
-                pose.rotation_rad,
-            );
+            let mut rotation = rotation;
             if wiggle_deg != 0.0 {
                 rotation = compose_rotation_euler(
                     rot_euler_xyz_rad(rotation[0], rotation[1], rotation[2]),
@@ -1042,6 +1054,26 @@ pub(super) fn build_relic_tray(
                     glow,
                     silhouette: false,
                     debuffed: run.relics.is_debuffed(rid),
+                },
+                hover_target: 0.0,
+                anim_id: 0,
+            });
+        } else if lab_tray {
+            // Cascade Lab: keep one Object3d per physical tray slot so
+            // projected `relic_rects` indices match slot indices and empty
+            // slots get click targets.
+            let visual = relic_visual(RelicId::PairPower);
+            let thick = slot_face * 0.06 * visual.thickness_scale;
+            relic_objects.push(Object3d {
+                pos: pose.anchor,
+                extents: [slot_face, thick, slot_face],
+                rotation,
+                color: [0.06, 0.10, 0.08, 0.42],
+                kind: Object3dKind::Relic {
+                    relic_id: RelicId::PairPower,
+                    glow: 0.0,
+                    silhouette: true,
+                    debuffed: false,
                 },
                 hover_target: 0.0,
                 anim_id: 0,

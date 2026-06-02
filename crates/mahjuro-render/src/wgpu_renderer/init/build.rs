@@ -519,6 +519,41 @@ pub(super) fn build_renderer_new(
             depth_or_array_layers: 1,
         },
     );
+    let shadow_baked_depth_dummy_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("shadow-baked-depth-dummy"),
+        size: wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let shadow_baked_depth_dummy_view =
+        shadow_baked_depth_dummy_texture.create_view(&Default::default());
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &shadow_baked_depth_dummy_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        bytemuck::bytes_of(&0.5f32),
+        wgpu::TexelCopyBufferLayout {
+            bytes_per_row: Some(4),
+            rows_per_image: Some(1),
+            ..Default::default()
+        },
+        wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+    );
     let shadow_sample_bind_group = crate::lit_mesh::create_shadow_sample_bind_group(
         &device,
         &shadow_sample_layout,
@@ -529,6 +564,7 @@ pub(super) fn build_renderer_new(
         &shadow_compare_sampler,
         &shadow_ao_white_view,
         &shadow_ao_sampler,
+        &shadow_baked_depth_dummy_view,
     );
     let room_baked_shadow_gpu: [Option<impl_room_shadow::RoomBakedShadowGpu>;
         crate::room_gi_bake::ROOM_GI_ROOM_COUNT] = std::array::from_fn(|_| None);
@@ -2681,7 +2717,6 @@ pub(super) fn build_renderer_new(
         archive_plaque_backing_prim_idx,
         archive_page_left_prim_indices,
         archive_page_right_prim_indices,
-        archive_punctual_shadow_skip_prims,
     ) = (
         Vec::new(),
         None,
@@ -2691,7 +2726,6 @@ pub(super) fn build_renderer_new(
         None,
         Vec::new(),
         Vec::new(),
-        rustc_hash::FxHashSet::default(),
     );
     let (main_menu_env_primitives, main_menu_environment) = (Vec::new(), None);
     let main_menu_env_collision_meshes = Vec::new();
@@ -3250,7 +3284,6 @@ pub(super) fn build_renderer_new(
         archive_plaque_backing_prim_idx,
         archive_page_left_prim_indices,
         archive_page_right_prim_indices,
-        archive_punctual_shadow_skip_prims,
         archive_sign_decal_upload_key: 0,
         archive_inspect_plaque_decal_upload_key: 0,
         frame_env_tunes: rustc_hash::FxHashMap::default(),
@@ -3371,10 +3404,6 @@ pub(super) fn build_renderer_new(
         cached_shadow_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
         projected_shadow_lights: Vec::new(),
         cached_projected_shadow_hash: 0,
-        shop_inspect_subject_shadow_slot: None,
-        shadow_placement_anim_id: 0,
-        placement_shadow_room: None,
-        placement_shadow_casts: true,
         showcase_decal_atlas: None,
         showcase_decal_atlas_tileset: None,
         showcase_decal_atlas_cache: std::collections::VecDeque::new(),
@@ -3409,6 +3438,8 @@ pub(super) fn build_renderer_new(
         room_gi_captured: None,
         room_baked_shadow_gpu,
         active_room_baked_shadow: None,
+        lab_baked_shadow: None,
+        active_lab_baked_shadow: false,
         room_shadow_capture_pending: None,
         room_shadow_captured: None,
         shadow_probe_last_log: Instant::now(),
@@ -3483,6 +3514,8 @@ pub(super) fn build_renderer_new(
         shadow_ao_sampler,
         _shadow_ao_white_texture: shadow_ao_white_texture,
         shadow_ao_white_view,
+        _shadow_baked_depth_dummy_texture: shadow_baked_depth_dummy_texture,
+        shadow_baked_depth_dummy_view,
         shadow_caster_layout,
         shadow_warp_disabled_bind_group,
         shadow_globals_buffer,

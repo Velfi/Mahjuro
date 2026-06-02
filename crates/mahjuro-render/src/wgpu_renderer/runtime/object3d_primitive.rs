@@ -46,7 +46,6 @@ impl WgpuRenderer {
         let cursor = obj3d_primitive_slot.entry(*shape).or_insert(0);
         let slot_i = *cursor;
         *cursor += 1;
-        self.shadow_placement_anim_id = obj.anim_id;
         // Lazily grow the per-shape instance pool.
         // When a per-shape texture override is
         // registered, bind it to the instance's
@@ -137,15 +136,12 @@ impl WgpuRenderer {
         } else {
             inst.write_uniform_with_decal(&self.queue, view_proj_arr, model, params, has_decal);
         }
-        self.register_placement_shadow_slot(DrawKind::Primitive(*shape), slot_i);
-        if self.placement_shadow_writes(frame) {
-            self.write_lit_mesh_shadow(
-                shadow,
-                &self.primitive_instances.get(shape).unwrap()[slot_i],
-                model,
-                params.kind,
-            );
-        }
+        self.write_lit_mesh_shadow(
+            shadow,
+            &self.primitive_instances.get(shape).unwrap()[slot_i],
+            model,
+            params.kind,
+        );
         // Screen-space rect for focus/hover hit
         // testing. BeveledSlab projects only the
         // +Z face (back is never seen); other
@@ -255,18 +251,12 @@ impl WgpuRenderer {
                 false,
             );
             let rails_kind = rails_mesh.default_material.kind;
-            self.register_placement_shadow_slot(
-                DrawKind::Primitive(MeshId::CabinetRails),
-                rails_slot,
+            self.write_lit_mesh_shadow(
+                shadow,
+                &self.primitive_instances[&MeshId::CabinetRails][rails_slot],
+                model,
+                rails_kind,
             );
-            if self.placement_shadow_writes(frame) {
-                self.write_lit_mesh_shadow(
-                    shadow,
-                    &self.primitive_instances[&MeshId::CabinetRails][rails_slot],
-                    model,
-                    rails_kind,
-                );
-            }
             self.push_object3d_draw(
                 object3d_draw_list,
                 object3d_shadow_draw_list,

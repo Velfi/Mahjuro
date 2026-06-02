@@ -79,17 +79,6 @@ impl WgpuRenderer {
         let Some(active_room_env) = super::shadow_setup::active_room_env(frame) else {
             return;
         };
-        let offline_baked = self
-            .active_room_baked_shadow
-            .is_some()
-            && super::shadow_setup::room_env_uses_offline_baked_shadow(active_room_env);
-        if super::shadow_setup::skip_room_env_live_shadow_pass(
-            frame,
-            active_room_env,
-            offline_baked,
-        ) {
-            return;
-        }
         let model = self.room_env_shadow_base_model(active_room_env, camera_h);
         let prim_deltas = match active_room_env {
             ActiveRoomEnv::Shop => self.shop_gltf_anim_prim_deltas(frame),
@@ -119,20 +108,9 @@ impl WgpuRenderer {
         showcase_tile_batches: &[&[ShowcaseTilePlacement]],
         _tile_3d_rects: &[(usize, [f32; 4])],
     ) -> u32 {
-        let shop_inspect_shadow_only = frame.shop_inspect_shadow_target.is_some();
         let mut room_draws = 0u32;
         if let Some(active_room_env) = super::shadow_setup::active_room_env(frame) {
-            let offline_baked = self
-                .active_room_baked_shadow
-                .is_some()
-                && super::shadow_setup::room_env_uses_offline_baked_shadow(active_room_env);
-            let skip_room_env = super::shadow_setup::skip_room_env_live_shadow_pass(
-                frame,
-                active_room_env,
-                offline_baked,
-            );
-            if !skip_room_env {
-                match active_room_env {
+            match active_room_env {
                     ActiveRoomEnv::Shop => {
                         room_draws += self.draw_shop_environment_shadow(shadow_pass, frame);
                     }
@@ -183,16 +161,10 @@ impl WgpuRenderer {
                         }
                     }
                 }
-            }
         }
 
         shadow_pass.set_pipeline(&self.shadow_pipeline);
         for &(kind, slot_i) in object3d_draw_list {
-            if shop_inspect_shadow_only
-                && self.shop_inspect_subject_shadow_slot != Some((kind, slot_i))
-            {
-                continue;
-            }
             self.draw_object3d_shadow_entry(shadow_pass, frame, kind, slot_i);
         }
 

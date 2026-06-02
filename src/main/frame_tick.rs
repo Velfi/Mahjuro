@@ -793,8 +793,8 @@ impl App {
             .map(|i| i.last_cursor)
             .unwrap_or((0.0, 0.0));
         let loading_done = match &self.scene {
-            // Splash stays up until showcase atlases exist and the main-menu offline
-            // shadow map is on the GPU (lazy room shadows — see prepare_splash_hub_boot).
+            // Splash stays up until showcase atlases exist and every runtime offline
+            // room shadow bake is on the GPU (see prepare_splash_hub_boot).
             Scene::Splash(_) => {
                 if let Some(r) = self.renderer.as_mut() {
                     r.prepare_splash_hub_boot();
@@ -1185,8 +1185,7 @@ impl App {
             self.gfx.tile_preset = opts.tile_preset;
             self.gfx.tileset_name = opts.tileset_name.clone();
             self.gfx.gamma = opts.gamma;
-            self.gfx.shadow_quality = opts.shadow_quality;
-            self.gfx.ssr_enabled = opts.ssr_enabled;
+            self.gfx.graphics_mode = opts.graphics_mode;
             self.gfx.hdr_enabled = opts.hdr_enabled;
             if opts.take_borderless_fullscreen_apply_armed()
                 && opts.borderless_fullscreen != shell.desktop_fullscreen_on()

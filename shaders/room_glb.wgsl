@@ -227,7 +227,7 @@ struct ShopShaded {
 
 fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let base_s = textureSample(base_color, base_sampler, in.uv);
-    let is_hallway_wall_tint = abs(in.v_color.a - 3.0) < 0.01;
+    let is_hallway_wall_tint = abs(in.v_color.a - 4.0) < 0.01;
     let vtx_alpha = select(in.v_color.a, 1.0, is_hallway_wall_tint);
     let tex_a = base_s.a * vtx_alpha;
     if (pbr.alpha_mode == 1u) {
@@ -256,7 +256,6 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     }
     // Archive decal boards tag `COLOR_0.a = 2` in `room_env_gltf` (see `decode_env_primitive`).
     let is_archive_decal = abs(in.v_color.a - 2.0) < 0.01;
-    let is_archive_no_dir_shadow = abs(in.v_color.a - 3.0) < 0.01;
     if (is_archive_decal) {
         let dec = textureSample(decal_tex, base_sampler, in.uv);
         albedo = mix(albedo, dec.rgb, dec.a);
@@ -372,7 +371,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let punc_vis = select(
             1.0,
             punctual_shadow_vis(i, in.world_pos),
-            projected_shadows_on && !is_archive_no_dir_shadow,
+            projected_shadows_on,
         );
         let diffuse = kD * albedo / PI * radiance * NdotL * punc_vis;
 

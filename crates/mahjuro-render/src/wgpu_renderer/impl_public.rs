@@ -63,17 +63,11 @@ impl WgpuRenderer {
     pub fn splash_hub_boot_ready(&self) -> bool {
         self.showcase_decal_atlases_baked_for_all_player_tilesets()
             && self.main_menu_environment.is_some()
-            && self.room_baked_shadow_gpu
-                [crate::room_gi_bake::room_gi_room_index(
-                    crate::room_gi_bake::RoomGiRoom::MainMenu,
-                )]
-                .is_some()
     }
 
-    /// Upload offline shadows and the hub room while the splash loading screen is still up.
+    /// Upload the hub room while the splash loading screen is still up.
     pub fn prepare_splash_hub_boot(&mut self) {
         self.ensure_main_menu_room_gpu();
-        self.ensure_room_baked_shadow_gpu(crate::room_gi_bake::RoomGiRoom::MainMenu);
     }
 
     /// Partial hub readiness for the unified loading progress bar (0–1).
@@ -85,15 +79,7 @@ impl WgpuRenderer {
         if self.main_menu_environment.is_some() {
             done += 1.0;
         }
-        if self.room_baked_shadow_gpu
-            [crate::room_gi_bake::room_gi_room_index(
-                crate::room_gi_bake::RoomGiRoom::MainMenu,
-            )]
-            .is_some()
-        {
-            done += 1.0;
-        }
-        done / 3.0
+        done / 2.0
     }
 
     /// Load the active tileset showcase atlas from its baked PNG.

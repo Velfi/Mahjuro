@@ -26,6 +26,7 @@ fn punctual_shadow_layer(light_index: u32) -> i32 {
 @group(2) @binding(3) var shadow_samp: sampler_comparison;
 @group(2) @binding(4) var contact_ao_map: texture_2d<f32>;
 @group(2) @binding(5) var contact_ao_samp: sampler;
+@group(2) @binding(6) var contact_baked_depth: texture_2d<f32>;
 
 fn sample_projected_depth(
     lvp: mat4x4<f32>,
@@ -78,7 +79,8 @@ fn sample_contact_ao(world_pos: vec3<f32>) -> f32 {
     if (shadow_globals.counts.z < 0.5) {
         return 1.0;
     }
-    let lp = shadow_globals.contact_ao_view_proj * vec4<f32>(world_pos, 1.0);
+    let wp = world_pos * shadow_globals.counts.w;
+    let lp = shadow_globals.contact_ao_view_proj * vec4<f32>(wp, 1.0);
     let proj = lp.xyz / lp.w;
     if (proj.z < 0.0 || proj.z > 1.0) {
         return 1.0;
@@ -86,6 +88,18 @@ fn sample_contact_ao(world_pos: vec3<f32>) -> f32 {
     let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
         return 1.0;
+    }
+    let depth_eps = shadow_globals.counts.y;
+    if (depth_eps > 0.0) {
+        let dims = textureDimensions(contact_baked_depth);
+        let coord = vec2<i32>(
+            i32(clamp(uv.x * f32(dims.x), 0.0, f32(dims.x) - 1.0)),
+            i32(clamp(uv.y * f32(dims.y), 0.0, f32(dims.y) - 1.0)),
+        );
+        let baked_d = textureLoad(contact_baked_depth, coord, 0).r;
+        if (abs(baked_d - proj.z) > depth_eps) {
+            return 1.0;
+        }
     }
     return textureSample(contact_ao_map, contact_ao_samp, uv).r;
 }

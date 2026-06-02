@@ -109,6 +109,7 @@ pub enum DebugAction {
     OpenRollerLab,
     OpenCascadeLab,
     OpenRumbleLab,
+    OpenShadowAoLab,
     OpenTileAnchorLab,
     OpenButtonAabbLab,
     OpenTixels,
@@ -385,6 +386,13 @@ impl DebugMenuBar {
         let rumble_lab_item = MenuItem::new("Rumble Lab...", true, None);
         mappings.push((rumble_lab_item.id().clone(), DebugAction::OpenRumbleLab));
         let _ = debug_menu.append(&rumble_lab_item);
+
+        let shadow_ao_lab_item = MenuItem::new("Shadow & AO Lab...", true, None);
+        mappings.push((
+            shadow_ao_lab_item.id().clone(),
+            DebugAction::OpenShadowAoLab,
+        ));
+        let _ = debug_menu.append(&shadow_ao_lab_item);
 
         let tile_anchor_lab_item = MenuItem::new("Tile Anchor Lab...", true, None);
         mappings.push((

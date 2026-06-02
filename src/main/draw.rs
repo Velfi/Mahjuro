@@ -412,6 +412,7 @@ impl App {
                     | Scene::ButtonAabbLab(_)
                     | Scene::RollerLab(_)
                     | Scene::CascadeLab(_)
+                    | Scene::ShadowAoLab(_)
                     | Scene::Tixels(_)
             )
         );
@@ -852,7 +853,7 @@ impl App {
         renderer.set_frame_scene_env_tunes(active_scene_key, &env_frame_tunes);
 
         let active_tileset_name = self.gfx.tileset_name.clone();
-        let render_settings = self.effect_layers.wgpu_render_settings(
+        let mut render_settings = self.effect_layers.wgpu_render_settings(
             &crate::effect_layers::WgpuRenderSettingsParams {
                 gfx: &self.gfx,
                 tile_preset: self.gfx.tile_preset,
@@ -862,6 +863,9 @@ impl App {
                 sort_settle_speed,
             },
         );
+        if let Some(q) = frame.shadow_quality_override {
+            render_settings.shadow_quality = q;
+        }
         renderer.set_hdr_enabled(self.effect_layers.hdr_enabled(&self.gfx));
         renderer.main_menu_pride_rainbow_debug = self.debug.main_menu_pride_rainbow_debug;
         renderer.main_menu_moon_phase_debug = self.debug.main_menu_moon_phase_debug;

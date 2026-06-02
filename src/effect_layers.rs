@@ -61,11 +61,11 @@ impl EffectLayers {
             sort_settle_speed: p.sort_settle_speed,
             gamma: p.gfx.gamma,
             shadow_quality: if self.shadows {
-                p.gfx.shadow_quality
+                p.gfx.shadow_quality()
             } else {
                 mahjuro_gfx_types::ShadowQuality::Off
             },
-            ssr_enabled: p.gfx.ssr_enabled && self.ssr,
+            ssr_enabled: p.gfx.ssr_enabled() && self.ssr,
             vhs_enabled: p.gfx.vhs_enabled,
         }
     }

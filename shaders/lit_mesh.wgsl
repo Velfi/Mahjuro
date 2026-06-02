@@ -751,21 +751,16 @@ fn fs_main(
     // base material rather than multiplied with it. For talismans, .w carries
     // the per-kind heightmap index used by the relief sampling (no per-kind
     // shader branching keys off it any more — each MaterialKind has its own
-    // dedicated branch). `w ≈ 3` is reserved for portrait silk that skips
-    // directional shadows (showcase zodiac ribbon).
-    let skip_directional_shadow = abs(mesh.material_params.w - 3.0) < 0.01;
+    // dedicated branch).
     // ── Shop shelf catalog balance ─────────────────────────────────────
     // Storeroom row (`shop_punctual.y == 1`, see `shop_catalog_balance` in lit_mesh.rs):
     //   spec_forward — pack wrap, foil, talisman: gloss/holo-led pull-back.
-    //   art_forward  — enamel relic, portrait silk: ambient fill + shadow floor.
+    //   art_forward  — enamel relic: ambient fill.
     let shop_cat_amb = ssr_globals.shop_punctual.z;
-    let shop_cat_shadow_floor = ssr_globals.shop_punctual.w;
     let shop_spec_forward = shop_display_case_tuning
         && (is_pack_wrap || is_foil || is_talisman);
-    let shop_art_forward = shop_display_case_tuning
-        && (is_enamel || skip_directional_shadow);
+    let shop_art_forward = shop_display_case_tuning && is_enamel;
     let has_decal = mesh.material_params.w > 0.5
-        && !skip_directional_shadow
         && !is_talisman
         && !is_foil
         && !is_pack_wrap
@@ -1708,14 +1703,10 @@ fn fs_main(
         let ndl_raw = dot(n, l_dir);
         let nl = max(ndl_raw, 0.0);
         let lambert = 0.35 + 0.65 * nl;
-        // Per-light shadow: projected depth map on gameplay, else tile AABB occlusion.
+        // Live punctual depth maps only (same path as the shadow & AO lab).
         let projected_shadows_on = shadow_globals.params.x > 0.5;
         let cand_vis = select(
-            mix(
-                mix(0.18, 1.0, candle_occlusion(lp, in.world_pos, in.clip_pos.xy)),
-                1.0,
-                phys_hdr,
-            ),
+            1.0,
             punctual_shadow_vis(i, in.world_pos),
             projected_shadows_on,
         );
@@ -2141,11 +2132,7 @@ fn fs_main(
         let ndl_raw = dot(n, l_dir);
         let nl = max(ndl_raw, 0.0);
         let lambert_sp = 0.35 + 0.65 * nl;
-        let cand_vis_sp = mix(
-            mix(0.18, 1.0, candle_occlusion(lp, in.world_pos, in.clip_pos.xy)),
-            1.0,
-            phys_hdr,
-        );
+        let cand_vis_sp = 1.0;
         let sc = s.color.rgb * s.color.a * atten_sp * spot_factor * cand_vis_sp * lm_punctual_scale;
         lit = lit + sc * lambert_sp;
 
@@ -2386,11 +2373,6 @@ fn fs_main(
         let glaze = pow(edge, 2.4) * 0.12;
         albedo = mix(albedo, albedo * 1.10 + vec3<f32>(0.04, 0.04, 0.05), glaze);
     }
-    // Portrait silk (zodiac ribbon): parchment lift under cubby punctual.
-    if (shop_art_forward && skip_directional_shadow && kind < 0.5) {
-        albedo = albedo * 1.08 + vec3<f32>(0.03, 0.025, 0.02);
-    }
-
     if (is_pack_wrap) {
         let edge = 1.0 - ndv_view;
         let rim = pow(edge, 2.1) * 0.26;
@@ -2458,27 +2440,20 @@ fn fs_main(
     // Legacy combined min-shadow across all punctual depth layers. Per-light
     // `punctual_shadow_vis` above already samples the correct layer per light;
     // applying combined again double-darkens and reads misaligned maps as black slabs.
-    // Shop catalog: spec-forward props get less direct diffuse; art-forward get shadow floor.
+    // Shop catalog: spec-forward props get less direct diffuse.
     var lit_display_case = lit;
     if (shop_spec_forward) {
         lit_display_case = lit_display_case * 0.42;
     }
     let projected_shadows_on = shadow_globals.params.x > 0.5;
-    // Portrait silk (zodiac ribbon): skip key-light shadow — same rule as archive decals.
     var shadow_vis = select(
         combined_mesh_shadow_vis(in.world_pos),
         1.0,
-        skip_directional_shadow || projected_shadows_on,
+        projected_shadows_on,
     );
-    if (shop_art_forward && shop_cat_shadow_floor > 0.001) {
-        shadow_vis = max(shadow_vis, shop_cat_shadow_floor);
-    }
     // Offline `.msh` contact AO grounds catalog props on room surfaces (shop
     // counter, gameplay table edge) the same way `room_glb.wgsl` does for shells.
-    var baked_contact = sample_contact_ao(in.world_pos);
-    if (shop_art_forward && shop_cat_shadow_floor > 0.001) {
-        baked_contact = max(baked_contact, shop_cat_shadow_floor);
-    }
+    let baked_contact = sample_contact_ao(in.world_pos);
     let lit_shadowed = lit_display_case * shadow_vis * baked_contact;
     // Reinhard-knee the coat accumulator on wood: with many candles
     // contributing additive white highlights, the lacquer lobe was

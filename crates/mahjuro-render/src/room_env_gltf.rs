@@ -65,6 +65,8 @@ fn capped_image_at(capped: &[Option<CappedGltfImage>], index: usize) -> Option<&
 pub const ROOM_ENV_COLOR_A_ARCHIVE_DECAL: f32 = 2.0;
 /// `COLOR_0.a` tag: skip directional shadow receive (`room_glb.wgsl`) — chrome / pedestal shell.
 pub const ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW: f32 = 3.0;
+/// `COLOR_0.a` tag: pick-blind hallway `walls` mesh — per-run wall tint in `room_glb.wgsl`.
+pub const ROOM_ENV_COLOR_A_HALLWAY_WALL_TINT: f32 = 4.0;
 
 /// Shop [`shop.glb`](../../../assets/3d/shop.glb) glazed ceramic on relic/talisman trays.
 pub const SHOP_PORCELAIN_MATERIAL_NAME: &str = "Porcelain";
