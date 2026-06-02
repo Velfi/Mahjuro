@@ -102,6 +102,7 @@ impl App {
             .tick(self.last_frame_dt * 1000.0, transitioning, now);
         self.anim.update(now);
         self.audio.tick(now);
+        self.try_play_production_logo_stinger();
 
         let drawn = self.overlay_stack.last().unwrap_or(&self.scene);
         let brownout_room = crate::main_room_gltf_brownout::RoomGltfBrownout::scene_eligible(drawn);

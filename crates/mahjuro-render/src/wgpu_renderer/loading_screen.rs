@@ -1,6 +1,7 @@
 //! Shared boot + splash loading plate: production logo sequence, progress bar,
 //! and SDF "loading..." label layout.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
@@ -8,7 +9,10 @@ use crate::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
 use crate::wgpu_renderer::TextLabel;
 use crate::wgpu_renderer::ui_instances::GpuInstance;
 
+/// Production logo on the boot/splash plate. Audio: `audio/loading/zelda_built_this.ogg`.
 pub const LOADING_LOGO_ASSET: &str = "textures/loading/zelda_built_this.png";
+
+const LOGO_STINGER_ALPHA_THRESHOLD: f32 = 0.004;
 
 const LOGO_FADE_IN_SECS: f32 = 1.0;
 const LOGO_HOLD_SECS: f32 = 3.0;
@@ -39,6 +43,7 @@ struct LoadingScreenClock {
 }
 
 static CLOCK: OnceLock<Mutex<LoadingScreenClock>> = OnceLock::new();
+static LOGO_STINGER_FIRED: AtomicBool = AtomicBool::new(false);
 
 fn clock() -> &'static Mutex<LoadingScreenClock> {
     CLOCK.get_or_init(|| Mutex::new(LoadingScreenClock::default()))
@@ -98,6 +103,23 @@ pub fn logo_sequence_complete() -> bool {
 
 pub fn splash_logo_sequence_complete() -> bool {
     current_splash_alphas().loading_ui >= 1.0 - 1e-3
+}
+
+/// Returns `true` once per process when the production logo becomes visible (fade-in).
+pub fn take_production_logo_stinger() -> bool {
+    if LOGO_STINGER_FIRED.load(Ordering::Acquire) {
+        return false;
+    }
+    let c = clock().lock().expect("loading clock");
+    let Some(start) = c.splash_start.or(c.boot_start) else {
+        return false;
+    };
+    let alphas = alphas_for_elapsed(start, c.skip_at);
+    if alphas.logo <= LOGO_STINGER_ALPHA_THRESHOLD {
+        return false;
+    }
+    LOGO_STINGER_FIRED.store(true, Ordering::Release);
+    true
 }
 
 fn alphas_for_elapsed(start: Instant, skip_at: Option<Instant>) -> LoadingAlphas {

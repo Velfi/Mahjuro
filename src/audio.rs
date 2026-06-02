@@ -336,6 +336,7 @@ impl crate::sfx_id::SfxId {
             SfxId::Victory2 => "victory2.ogg",
             SfxId::Defeat => "defeat.ogg",
             SfxId::NewGameStinger => "sfx/gong_swell1.ogg",
+            SfxId::ProductionLogo => "loading/zelda_built_this.ogg",
             SfxId::MainMenuEnter => "mahjuro.ogg",
             SfxId::StairwayEnter => "imgmidi-bell-transition-1-305458.mp3",
             SfxId::ShopEnter => "sfx/door_chimes1.ogg",

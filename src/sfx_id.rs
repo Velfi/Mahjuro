@@ -161,6 +161,8 @@ pub enum SfxId {
     Defeat,
     /// Main-menu "New Game" / "Play" — random gong swell stinger.
     NewGameStinger,
+    /// Boot/splash production logo (`zelda_built_this`) fade-in — once per launch.
+    ProductionLogo,
     /// Played whenever the main menu (start screen) is entered.
     MainMenuEnter,
     /// Played when entering the post-run stairway scene.
@@ -256,6 +258,7 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::Victory2,
         SfxId::Defeat,
         SfxId::NewGameStinger,
+        SfxId::ProductionLogo,
         SfxId::MainMenuEnter,
         SfxId::StairwayEnter,
         SfxId::ShopEnter,
