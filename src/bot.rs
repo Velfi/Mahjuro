@@ -1714,8 +1714,8 @@ mod tests {
             RelicId::SequenceSurge,
             RelicId::HonorFury,
             RelicId::DragonRage,
-            RelicId::GreenLuck,
         ];
+        run.recompute_capacities();
         assert!(run.relics.is_full());
         let base = ShopMarginalBase::new(&run);
         let mut sell_index = None;

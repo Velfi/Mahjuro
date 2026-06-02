@@ -832,6 +832,9 @@ fn load_relic_defs() -> Vec<RelicDef> {
         .collect()
 }
 
+/// Default relic inventory capacity (shop dish + gameplay anchors).
+pub const BASE_RELIC_SLOTS: usize = 5;
+
 /// Active relics during a run (by id).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RelicState {
@@ -845,7 +848,7 @@ impl Default for RelicState {
     fn default() -> Self {
         Self {
             active: Vec::new(),
-            max_slots: 6,
+            max_slots: BASE_RELIC_SLOTS,
             debuffed: BTreeSet::new(),
         }
     }

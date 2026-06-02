@@ -66,20 +66,30 @@ fn max_structure_score_serious(progress: &PlayerProgress) -> Option<u64> {
         .max()
 }
 
-/// Title line for one run-log row (descending display number, pin glyphs).
+fn max_final_wing_serious(progress: &PlayerProgress) -> Option<u32> {
+    serious_records(progress).map(|r| r.final_wing).max()
+}
+
+/// Title line for one run-log row (descending display number, PR medal emojis).
 pub fn chronicle_run_log_title(
     progress: &PlayerProgress,
     display_num: u32,
     rec: &RunRecord,
 ) -> String {
     let mut pins = String::new();
-    if Some(rec.total_score_earned) == max_total_score_serious(progress) {
-        pins.push_str("⌁ ");
-    }
-    if Some(rec.best_structure_score) == max_structure_score_serious(progress)
-        && rec.best_structure_score > 0
-    {
-        pins.push_str("◆ ");
+    // PR medals only matter once there is more than one run to compare against.
+    if serious_records(progress).count() > 1 {
+        if Some(rec.total_score_earned) == max_total_score_serious(progress) {
+            pins.push_str("🥇 ");
+        }
+        if Some(rec.best_structure_score) == max_structure_score_serious(progress)
+            && rec.best_structure_score > 0
+        {
+            pins.push_str("🥈 ");
+        }
+        if Some(rec.final_wing) == max_final_wing_serious(progress) {
+            pins.push_str("🥉 ");
+        }
     }
     let outcome = match rec.outcome {
         RunOutcome::Victory => "Victory",
@@ -773,7 +783,7 @@ pub fn format_run_log_score(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{career_ordeal_records, format_run_ended_timestamp};
+    use super::{career_ordeal_records, chronicle_run_log_title, format_run_ended_timestamp};
     use crate::core::ordeal::OrdealKind;
     use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};
     use crate::core::rules::ChamberKind;
@@ -840,6 +850,33 @@ mod tests {
         assert_eq!(rows[0].ordeal, OrdealKind::Whisper);
         assert_eq!(rows[1].ordeal, OrdealKind::Drought);
         assert_eq!(rows[2].ordeal, OrdealKind::Gate);
+    }
+
+    #[test]
+    fn chronicle_run_log_title_skips_medals_for_lone_run() {
+        let mut progress = PlayerProgress::new();
+        progress.run_history.push(defeat_against(OrdealKind::Whisper, 10_000));
+        let rec = &progress.run_history[0];
+        let title = chronicle_run_log_title(&progress, 1, rec);
+        assert!(!title.contains("🥇"));
+        assert!(!title.contains("🥈"));
+        assert!(!title.contains("🥉"));
+        assert_eq!(title, "Run 1 — Defeat — The Whisper");
+    }
+
+    #[test]
+    fn chronicle_run_log_title_shows_pr_medals_with_multiple_runs() {
+        let mut progress = PlayerProgress::new();
+        progress.run_history.push(defeat_against(OrdealKind::Whisper, 10_000));
+        progress.run_history.push(defeat_against(OrdealKind::Gate, 5_000));
+        let best = &progress.run_history[0];
+        let title = chronicle_run_log_title(&progress, 2, best);
+        assert!(title.contains("🥇"), "expected total-score medal: {title}");
+        assert!(title.contains("🥉"), "expected deepest-wing medal: {title}");
+        assert!(title.contains("Run 2 — Defeat"));
+        let other = &progress.run_history[1];
+        let other_title = chronicle_run_log_title(&progress, 1, other);
+        assert!(!other_title.contains("🥇"));
     }
 
     #[test]

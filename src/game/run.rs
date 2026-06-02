@@ -890,6 +890,7 @@ impl RunState {
         // No-op for a fresh run (empty enhancement map), but kept here so the
         // invariant "hand always reflects tile_enhancements" holds uniformly.
         state.restamp_hand_enhancements();
+        state.recompute_capacities();
         state
     }
 

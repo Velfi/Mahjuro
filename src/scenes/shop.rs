@@ -243,6 +243,46 @@ mod tests {
     }
 
     #[test]
+    fn patron_gift_free_relic_blocked_when_inventory_full() {
+        use crate::core::relic::RelicId;
+        use crate::game::event_bus::EventBus;
+
+        let mut run = crate::game::run::RunState::new(GameMode::standard());
+        run.relics.active = vec![
+            RelicId::PairPower,
+            RelicId::TripletBoost,
+            RelicId::SequenceSurge,
+            RelicId::HonorFury,
+            RelicId::DragonRage,
+        ];
+        run.recompute_capacities();
+        assert!(run.relics.is_full());
+        run.tag_patron_gift = 1;
+
+        let mut shop = ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
+        let free_idx = shop
+            .items
+            .iter()
+            .position(|item| item.price == 0)
+            .expect("patron gift should zero one relic");
+        let free_relic = shop.items[free_idx].relic;
+
+        let mut bus = EventBus::default();
+        apply_shop_action(
+            ShopAction::BuyCard(free_idx),
+            &mut shop.items,
+            &mut shop.zodiac_items,
+            &mut shop.talisman_items,
+            &mut shop.pack_items,
+            &mut run,
+            &mut bus,
+        );
+
+        assert_eq!(run.relics.active.len(), 5);
+        assert!(!run.relics.active.contains(&free_relic));
+    }
+
+    #[test]
     fn stacked_patron_gift_shop_zeros_multiple_relics() {
         let mut run = crate::game::run::RunState::new(GameMode::standard());
         run.tag_patron_gift = 2;
