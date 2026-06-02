@@ -1,2 +1,3 @@
-[target.x86_64-pc-windows-msvc]
-linker = "rust-lld.exe"
+# Default MSVC link.exe — rust-lld + Steam /DELAYLOAD often needs atls.lib (missing on some VS Build Tools installs).
+# [target.x86_64-pc-windows-msvc]
+# linker = "rust-lld.exe"

@@ -138,10 +138,9 @@ impl SteamClient {
 
 /// Whether `steam_api64.dll` can be loaded from the executable directory.
 ///
-/// On Windows we link the Steam API with `/DELAYLOAD` so the process starts even
-/// when the redistributable DLL is absent; this probes [`LoadLibrary`] before any
-/// Steamworks calls so we can fall back to [`SteamClient::Disabled`] instead of
-/// a loader error dialog.
+/// Probes [`LoadLibraryW`] for `steam_api64.dll` next to the executable before any
+/// Steamworks calls so we can use [`SteamClient::Disabled`] when the redistributable
+/// is absent (no delay-load / loader dialog).
 #[cfg(windows)]
 pub fn steamworks_dll_ready() -> bool {
     use std::ffi::OsString;
