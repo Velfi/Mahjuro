@@ -292,25 +292,34 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     var emissive = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb
         * pbr.emissive_factor.rgb
         * cam.decal_atlas_uv.z;
-    // Main-menu `MoonObject` (`emissive_factor.w` ≈ 2): mesh albedo × synodic phase.
-    // Skipped during June pride / debug rainbow (`hdr_tonemap.w` > 0).
-    if (pbr.emissive_factor.w > 1.5 && cam.hdr_tonemap.w <= 0.0) {
+    // Main-menu `MoonObject` (`emissive_factor.w` ≈ 2): phase terminator always;
+    // pride rainbow tints the lit hemisphere when `hdr_tonemap.w` > 0.
+    if (pbr.emissive_factor.w > 1.5) {
         let V = normalize(cam.cam_pos - in.world_pos);
-        emissive = moon_hub_phase_emissive(albedo, n_world, V, cam.decal_atlas_uv.w);
+        let phase_col =
+            moon_hub_phase_emissive(albedo, n_world, V, cam.decal_atlas_uv.w, cam.model);
+        if (cam.hdr_tonemap.w > 0.0) {
+            let lit_mask = moon_phase_lit_mask(n_world, cam.model, cam.decal_atlas_uv.w);
+            let mask = max(emissive.r, max(emissive.g, emissive.b));
+            let swirl_uv = in.uv_emr * 0.65
+                + vec2<f32>(in.world_pos.x, in.world_pos.y) * 0.004;
+            let rainbow = rainbow_swirl_rgb(swirl_uv, cam.hdr_tonemap.w);
+            let rb = rainbow * mask;
+            let phase_lum = dot(phase_col, vec3<f32>(0.299, 0.587, 0.114));
+            let rb_lum = max(dot(rb, vec3<f32>(0.299, 0.587, 0.114)), 1e-4);
+            let tint = rb * (phase_lum / rb_lum);
+            emissive = mix(phase_col, tint, clamp(lit_mask * 0.94, 0.0, 1.0));
+        } else {
+            emissive = phase_col;
+        }
         return ShopShaded(emissive, emissive, out_alpha);
     }
-    // Main-menu `MoonObject` (`w` ≈ 2): hard pride stripes; `star*` (`w` ≈ 1): smooth fade.
-    // `hdr_tonemap.w` carries scene time while June pride (or debug override) is on.
-    if (pbr.emissive_factor.w > 0.5 && cam.hdr_tonemap.w > 0.0) {
+    // `star*` (`emissive_factor.w` ≈ 1): smooth pride fade only (no phase shading).
+    if (pbr.emissive_factor.w > 0.5 && pbr.emissive_factor.w <= 1.5 && cam.hdr_tonemap.w > 0.0) {
         let mask = max(emissive.r, max(emissive.g, emissive.b));
         let swirl_uv = in.uv_emr * 0.65
             + vec2<f32>(in.world_pos.x, in.world_pos.y) * 0.004;
-        let rainbow = select(
-            rainbow_swirl_smooth_rgb(swirl_uv, cam.hdr_tonemap.w),
-            rainbow_swirl_rgb(swirl_uv, cam.hdr_tonemap.w),
-            pbr.emissive_factor.w > 1.5,
-        );
-        emissive = rainbow * mask;
+        emissive = rainbow_swirl_smooth_rgb(swirl_uv, cam.hdr_tonemap.w) * mask;
     }
 
     let V = normalize(cam.cam_pos - in.world_pos);

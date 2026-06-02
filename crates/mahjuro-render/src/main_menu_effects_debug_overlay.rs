@@ -7,8 +7,10 @@ use crate::debug_overlay_ui::{self, DebugPointerState, DebugRowVisual};
 use crate::draw_cmd::CameraParams;
 use crate::main_menu_effects_tuning::MainMenuEffectsTuning;
 use crate::main_menu_moon_tuning::{
-    MOON_DEBUG_ROW_META, MOON_DEBUG_SLIDER_COUNT, moon_row_is_hue, moon_row_is_saturation,
+    MainMenuMoonPhaseDebug, MOON_DEBUG_ROW_META, MOON_DEBUG_SLIDER_COUNT, moon_row_is_hue,
+    moon_row_is_phase, moon_row_is_saturation,
 };
+use crate::wgpu_renderer::moon_phase_short_name;
 use crate::main_menu_moth_tuning::{MOTH_DEBUG_ROW_META, MOTH_DEBUG_SLIDER_COUNT};
 use crate::particles::RainSpawnVolume;
 use crate::rain_field::main_menu_rain_spawn_volume;
@@ -32,6 +34,11 @@ const TAB_LABELS: [&str; TAB_COUNT] = ["Moon", "Rain", "Moths"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ActionRow {
+    MoonPhaseLive,
+    MoonPhaseNew,
+    MoonPhaseFirstQuarter,
+    MoonPhaseFull,
+    MoonPhaseLastQuarter,
     PrideRainbow,
     ShowRainHit,
     ShowRainDepth,
@@ -57,24 +64,38 @@ fn tab_slider_count(tab: MainMenuEffectsTab) -> usize {
     }
 }
 
-fn tab_action_rows(tab: MainMenuEffectsTab) -> &'static [ActionRow] {
+const FOOTER_ACTION_ROWS: [ActionRow; 3] = [ActionRow::Save, ActionRow::Reset, ActionRow::Close];
+
+/// Scrollable action buttons (Save / Reset / Close are pinned in the panel footer).
+fn tab_mid_action_rows(tab: MainMenuEffectsTab) -> &'static [ActionRow] {
     match tab {
         MainMenuEffectsTab::Moon => &[
+            ActionRow::MoonPhaseLive,
+            ActionRow::MoonPhaseNew,
+            ActionRow::MoonPhaseFirstQuarter,
+            ActionRow::MoonPhaseFull,
+            ActionRow::MoonPhaseLastQuarter,
             ActionRow::PrideRainbow,
-            ActionRow::Save,
-            ActionRow::Reset,
-            ActionRow::Close,
         ],
         MainMenuEffectsTab::Rain => &[
             ActionRow::ShowRainHit,
             ActionRow::ShowRainDepth,
             ActionRow::HideUi,
-            ActionRow::Save,
-            ActionRow::Reset,
-            ActionRow::Close,
         ],
-        MainMenuEffectsTab::Moths => &[ActionRow::Save, ActionRow::Reset, ActionRow::Close],
+        MainMenuEffectsTab::Moths => &[],
     }
+}
+
+fn tab_scroll_item_count(tab: MainMenuEffectsTab) -> usize {
+    tab_slider_count(tab) + tab_mid_action_rows(tab).len()
+}
+
+fn tab_row_count(tab: MainMenuEffectsTab) -> usize {
+    tab_scroll_item_count(tab) + FOOTER_ACTION_ROWS.len()
+}
+
+fn tab_footer_row_index(tab: MainMenuEffectsTab, footer_idx: usize) -> usize {
+    tab_scroll_item_count(tab) + footer_idx
 }
 
 fn row_is_hue(tab: MainMenuEffectsTab, row: usize) -> bool {
@@ -103,7 +124,8 @@ fn row_color_swatch(tuning: &MainMenuEffectsTuning, tab: MainMenuEffectsTab, row
 
 const SPAWN_FIELD_COLS: usize = 26;
 const SPAWN_FIELD_ROWS: usize = 18;
-const VISIBLE_ROWS: usize = 22;
+/// Upper bound when computing how many rows fit on screen.
+const MAX_VISIBLE_ROWS: usize = 40;
 
 fn rain_view_forward(cam: &CameraParams) -> Vec3 {
     let eye = Vec3::from_array(cam.eye);
@@ -766,6 +788,10 @@ struct EffectsDebugLayout {
     value_w: f32,
     scale: f32,
     scroll_row: usize,
+    /// Rows shown in the scroll viewport (sliders + mid-tab actions).
+    visible_rows: usize,
+    scroll_item_count: usize,
+    total_rows: usize,
 }
 
 impl EffectsDebugLayout {
@@ -782,7 +808,12 @@ impl EffectsDebugLayout {
         let tab_h = (20.0 * scale).max(14.0);
         let pad = (8.0 * scale).max(5.0);
         let margin = (10.0 * scale).max(6.0);
-        let panel_w = (340.0 * scale).min(window_w * 0.46);
+        let mut panel_w = (340.0 * scale).min(window_w * 0.46);
+        if tab == MainMenuEffectsTab::Rain {
+            let diagram_w = (320.0 * scale).min(window_w * 0.38);
+            let max_panel = window_w - diagram_w - margin * 3.0;
+            panel_w = panel_w.min(max_panel.max(200.0 * scale));
+        }
         let panel_x = if tab_panel_on_left(tab) {
             margin
         } else {
@@ -794,7 +825,18 @@ impl EffectsDebugLayout {
         let label_w = panel_w * 0.42;
         let slider_w = panel_w * 0.32;
         let value_w = (panel_w - label_w - slider_w - 10.0 * scale).max(32.0);
-        let _ = window_h;
+        let hint_h = (13.0 * scale).max(9.0);
+        let hints_block = pad + hint_h * 2.0 + pad;
+        let per_row = row_h + row_gap;
+        let scroll_item_count = tab_scroll_item_count(tab);
+        let total_rows = tab_row_count(tab);
+        let footer_block = FOOTER_ACTION_ROWS.len() as f32 * per_row + pad;
+        let list_bottom = window_h - margin - hints_block - footer_block;
+        let available = (list_bottom - rows_y0).max(row_h);
+        let visible_rows = (available / per_row)
+            .floor()
+            .max(1.0) as usize;
+        let visible_rows = visible_rows.clamp(1, MAX_VISIBLE_ROWS);
         Self {
             panel_x,
             panel_y,
@@ -809,7 +851,35 @@ impl EffectsDebugLayout {
             value_w,
             scale,
             scroll_row,
+            visible_rows,
+            scroll_item_count,
+            total_rows,
         }
+    }
+
+    /// Scroll-region height in rows (excludes pinned footer actions).
+    fn viewport_rows(&self) -> usize {
+        if self.scroll_item_count <= self.visible_rows {
+            self.scroll_item_count.max(1)
+        } else {
+            self.visible_rows
+        }
+    }
+
+    fn footer_y0(&self) -> f32 {
+        let pad = (8.0 * self.scale).max(5.0);
+        self.rows_y0 + self.viewport_rows() as f32 * (self.row_h + self.row_gap) + pad
+    }
+
+    fn is_footer_row(&self, row: usize) -> bool {
+        row >= self.scroll_item_count
+    }
+
+    fn row_in_viewport(&self, row: usize) -> bool {
+        if self.is_footer_row(row) {
+            return true;
+        }
+        row >= self.scroll_row && row < self.scroll_row + self.visible_rows
     }
 
     fn tab_rect(&self, tab: MainMenuEffectsTab) -> (f32, f32, f32, f32) {
@@ -819,52 +889,45 @@ impl EffectsDebugLayout {
         (x, self.tab_y, tw, self.tab_h)
     }
 
-    fn slider_track(&self, row: usize) -> (f32, f32, f32, f32) {
-        let vis = row.saturating_sub(self.scroll_row);
-        let row_y = self.rows_y0 + vis as f32 * (self.row_h + self.row_gap);
+    fn row_y(&self, row: usize) -> Option<f32> {
+        if row >= self.total_rows {
+            return None;
+        }
+        if self.is_footer_row(row) {
+            let footer_idx = row - self.scroll_item_count;
+            return Some(self.footer_y0() + footer_idx as f32 * (self.row_h + self.row_gap));
+        }
+        if !self.row_in_viewport(row) {
+            return None;
+        }
+        let vis = row - self.scroll_row;
+        Some(self.rows_y0 + vis as f32 * (self.row_h + self.row_gap))
+    }
+
+    fn slider_track(&self, row: usize) -> Option<(f32, f32, f32, f32)> {
+        let row_y = self.row_y(row)?;
         let track_x = self.panel_x + self.label_w;
         let track_h = (4.0 * self.scale).max(3.0);
         let track_y = row_y + (self.row_h - track_h) * 0.5;
-        (track_x, track_y, self.slider_w, track_h)
+        Some((track_x, track_y, self.slider_w, track_h))
     }
 
-    fn value_cell(&self, row: usize) -> (f32, f32, f32, f32) {
-        let vis = row.saturating_sub(self.scroll_row);
-        let row_y = self.rows_y0 + vis as f32 * (self.row_h + self.row_gap);
+    fn value_cell(&self, row: usize) -> Option<(f32, f32, f32, f32)> {
+        let row_y = self.row_y(row)?;
         let x = self.panel_x + self.label_w + self.slider_w + 4.0 * self.scale;
-        (x, row_y, self.value_w, self.row_h)
+        Some((x, row_y, self.value_w, self.row_h))
     }
 
-    fn row_rect(&self, row: usize) -> (f32, f32, f32, f32) {
-        let vis = row.saturating_sub(self.scroll_row);
-        let row_y = self.rows_y0 + vis as f32 * (self.row_h + self.row_gap);
-        (self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h)
-    }
-
-    fn action_row_rect(&self, tab: MainMenuEffectsTab, row: usize) -> Option<(f32, f32, f32, f32)> {
-        let slider_count = tab_slider_count(tab);
-        if row < slider_count {
-            return None;
-        }
-        let action_idx = row - slider_count;
-        if action_idx >= tab_action_rows(tab).len() {
-            return None;
-        }
-        let pad = (8.0 * self.scale).max(5.0);
-        let actions_y0 =
-            self.rows_y0 + VISIBLE_ROWS as f32 * (self.row_h + self.row_gap) + pad;
-        let row_y = actions_y0 + action_idx as f32 * (self.row_h + self.row_gap);
+    fn row_rect(&self, row: usize) -> Option<(f32, f32, f32, f32)> {
+        let row_y = self.row_y(row)?;
         Some((self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h))
     }
 
-    fn hit_row_rect(&self, tab: MainMenuEffectsTab, row: usize) -> Option<(f32, f32, f32, f32)> {
-        if let Some(r) = self.action_row_rect(tab, row) {
-            return Some(r);
+    fn hit_row_rect(&self, row: usize) -> Option<(f32, f32, f32, f32)> {
+        if row >= self.total_rows {
+            return None;
         }
-        if row < tab_slider_count(tab) {
-            return Some(self.row_rect(row));
-        }
-        None
+        self.row_rect(row)
     }
 }
 
@@ -877,6 +940,7 @@ pub struct MainMenuEffectsDebugOverlay {
     cursor: usize,
     pub tuning: MainMenuEffectsTuning,
     pub pride_rainbow_debug: bool,
+    pub moon_phase_debug: MainMenuMoonPhaseDebug,
     pub show_rain_hit_colliders: bool,
     pub show_rain_depth: bool,
     pub hide_all_ui: bool,
@@ -899,12 +963,17 @@ pub type RainDebugOverlay = MainMenuEffectsDebugOverlay;
 pub type RainDebugResult = MainMenuEffectsDebugResult;
 
 impl MainMenuEffectsDebugOverlay {
-    pub fn new(tuning: MainMenuEffectsTuning, pride_rainbow_debug: bool) -> Self {
+    pub fn new(
+        tuning: MainMenuEffectsTuning,
+        pride_rainbow_debug: bool,
+        moon_phase_debug: MainMenuMoonPhaseDebug,
+    ) -> Self {
         Self {
             tab: MainMenuEffectsTab::Rain,
             cursor: 0,
             tuning,
             pride_rainbow_debug,
+            moon_phase_debug,
             show_rain_hit_colliders: false,
             show_rain_depth: false,
             hide_all_ui: false,
@@ -917,21 +986,40 @@ impl MainMenuEffectsDebugOverlay {
     }
 
     fn row_count(&self) -> usize {
-        tab_slider_count(self.tab) + tab_action_rows(self.tab).len()
+        tab_row_count(self.tab)
     }
 
-    fn ensure_scroll(&mut self) {
-        if self.cursor >= self.scroll_row + VISIBLE_ROWS {
-            self.scroll_row = self.cursor + 1 - VISIBLE_ROWS;
+    fn ensure_scroll(&mut self, window_w: f32, window_h: f32) {
+        let layout = EffectsDebugLayout::compute(window_w, window_h, self.scroll_row, self.tab);
+        let vis = layout.visible_rows;
+        let scroll_items = layout.scroll_item_count;
+        if self.cursor >= self.row_count() {
+            self.cursor = self.row_count().saturating_sub(1);
+        }
+        if layout.is_footer_row(self.cursor) {
+            let max_scroll = scroll_items.saturating_sub(vis);
+            self.scroll_row = self.scroll_row.min(max_scroll);
+            return;
+        }
+        if self.cursor >= self.scroll_row + vis {
+            self.scroll_row = self.cursor.saturating_sub(vis.saturating_sub(1));
         }
         if self.cursor < self.scroll_row {
             self.scroll_row = self.cursor;
         }
+        let max_scroll = scroll_items.saturating_sub(vis);
+        self.scroll_row = self.scroll_row.min(max_scroll);
     }
 
     fn row_value(&self, row: usize) -> f32 {
         match self.tab {
-            MainMenuEffectsTab::Moon => self.tuning.moon.debug_row_value(row),
+            MainMenuEffectsTab::Moon => {
+                if moon_row_is_phase(row) {
+                    self.moon_phase_debug.resolved_phase()
+                } else {
+                    self.tuning.moon.debug_row_value(row)
+                }
+            }
             MainMenuEffectsTab::Rain => self.tuning.rain.debug_row_value(row),
             MainMenuEffectsTab::Moths => self.tuning.moths.debug_row_value(row),
         }
@@ -939,14 +1027,29 @@ impl MainMenuEffectsDebugOverlay {
 
     fn set_row_value(&mut self, row: usize, v: f32) {
         match self.tab {
-            MainMenuEffectsTab::Moon => self.tuning.moon.set_debug_row_value(row, v),
+            MainMenuEffectsTab::Moon => {
+                if moon_row_is_phase(row) {
+                    let (_, lo, hi, _) = MOON_DEBUG_ROW_META[row];
+                    self.moon_phase_debug.forced_phase = v.clamp(lo, hi);
+                    self.moon_phase_debug.use_live_calendar = false;
+                } else {
+                    self.tuning.moon.set_debug_row_value(row, v);
+                }
+            }
             MainMenuEffectsTab::Rain => self.tuning.rain.set_debug_row_value(row, v),
             MainMenuEffectsTab::Moths => self.tuning.moths.set_debug_row_value(row, v),
         }
     }
 
+    fn set_moon_phase_preset(&mut self, phase: f32) {
+        self.moon_phase_debug.forced_phase = phase.clamp(0.0, 1.0);
+        self.moon_phase_debug.use_live_calendar = false;
+    }
+
     fn apply_slider_mx(&mut self, row: usize, mx: f32, layout: &EffectsDebugLayout) {
-        let (tx, _, tw, _) = layout.slider_track(row);
+        let Some((tx, _, tw, _)) = layout.slider_track(row) else {
+            return;
+        };
         let (_, min, max, _) = tab_slider_meta(self.tab)[row];
         let t = ((mx - tx) / tw.max(1e-6)).clamp(0.0, 1.0);
         self.set_row_value(row, min + t * (max - min));
@@ -1007,13 +1110,25 @@ impl MainMenuEffectsDebugOverlay {
         self.clear_edit();
     }
 
-    fn format_row_display(tab: MainMenuEffectsTab, row: usize, v: f32) -> String {
+    fn format_row_display(
+        tab: MainMenuEffectsTab,
+        row: usize,
+        v: f32,
+        moon_phase_debug: MainMenuMoonPhaseDebug,
+    ) -> String {
         let (_, _, _, step) = tab_slider_meta(tab)[row];
         if row_is_hue(tab, row) {
             return format!("{}°", (v * 360.0).round() as i32);
         }
         if row_is_saturation(tab, row) {
             return format!("{:.0}%", v * 100.0);
+        }
+        if tab == MainMenuEffectsTab::Moon && moon_row_is_phase(row) {
+            let name = moon_phase_short_name(v);
+            if moon_phase_debug.use_live_calendar {
+                return format!("{v:.2} — {name} (live)");
+            }
+            return format!("{v:.2} — {name} (forced)");
         }
         if step >= 0.01 {
             format!("{v:.2}")
@@ -1148,13 +1263,14 @@ impl MainMenuEffectsDebugOverlay {
         }
     }
 
-    fn switch_tab(&mut self, tab: MainMenuEffectsTab) {
+    fn switch_tab(&mut self, tab: MainMenuEffectsTab, window_w: f32, window_h: f32) {
         if self.tab != tab {
             self.tab = tab;
             self.cursor = 0;
             self.scroll_row = 0;
             self.clear_edit();
             self.dragging_slider = None;
+            self.ensure_scroll(window_w, window_h);
         }
     }
 
@@ -1163,11 +1279,41 @@ impl MainMenuEffectsDebugOverlay {
         if row < slider_count {
             return None;
         }
-        tab_action_rows(self.tab).get(row - slider_count).copied()
+        let mid = tab_mid_action_rows(self.tab);
+        let mid_idx = row - slider_count;
+        if mid_idx < mid.len() {
+            return Some(mid[mid_idx]);
+        }
+        let footer_idx = mid_idx - mid.len();
+        FOOTER_ACTION_ROWS.get(footer_idx).copied()
     }
 
     fn dispatch_action(&mut self, action: ActionRow) -> MainMenuEffectsDebugResult {
         match action {
+            ActionRow::MoonPhaseLive => {
+                self.moon_phase_debug.use_live_calendar =
+                    !self.moon_phase_debug.use_live_calendar;
+                if !self.moon_phase_debug.use_live_calendar {
+                    self.moon_phase_debug.sync_forced_from_calendar();
+                }
+                MainMenuEffectsDebugResult::Stay
+            }
+            ActionRow::MoonPhaseNew => {
+                self.set_moon_phase_preset(0.0);
+                MainMenuEffectsDebugResult::Stay
+            }
+            ActionRow::MoonPhaseFirstQuarter => {
+                self.set_moon_phase_preset(0.25);
+                MainMenuEffectsDebugResult::Stay
+            }
+            ActionRow::MoonPhaseFull => {
+                self.set_moon_phase_preset(0.5);
+                MainMenuEffectsDebugResult::Stay
+            }
+            ActionRow::MoonPhaseLastQuarter => {
+                self.set_moon_phase_preset(0.75);
+                MainMenuEffectsDebugResult::Stay
+            }
             ActionRow::PrideRainbow => {
                 self.pride_rainbow_debug = !self.pride_rainbow_debug;
                 MainMenuEffectsDebugResult::Stay
@@ -1192,6 +1338,18 @@ impl MainMenuEffectsDebugOverlay {
 
     fn action_row_label(&self, action: ActionRow) -> (&'static str, ButtonVariant) {
         match action {
+            ActionRow::MoonPhaseLive => (
+                if self.moon_phase_debug.use_live_calendar {
+                    "Use live calendar phase [ON]"
+                } else {
+                    "Use live calendar phase [OFF]"
+                },
+                ButtonVariant::Default,
+            ),
+            ActionRow::MoonPhaseNew => ("New moon (0.00)", ButtonVariant::Default),
+            ActionRow::MoonPhaseFirstQuarter => ("First quarter (0.25)", ButtonVariant::Default),
+            ActionRow::MoonPhaseFull => ("Full moon (0.50)", ButtonVariant::Default),
+            ActionRow::MoonPhaseLastQuarter => ("Last quarter (0.75)", ButtonVariant::Default),
             ActionRow::PrideRainbow => (
                 if self.pride_rainbow_debug {
                     "Pride rainbow [ON]"
@@ -1242,7 +1400,7 @@ impl MainMenuEffectsDebugOverlay {
             self.pointer.clear_hover();
             return MainMenuEffectsDebugResult::Stay;
         }
-        self.ensure_scroll();
+        self.ensure_scroll(window_w, window_h);
         let layout =
             EffectsDebugLayout::compute(window_w, window_h, self.scroll_row, self.tab);
         self.pointer.sync_held(mouse);
@@ -1257,14 +1415,14 @@ impl MainMenuEffectsDebugOverlay {
                     MainMenuEffectsTab::Moths,
                 ] {
                     if point_in_rect(mx, my, layout.tab_rect(t)) {
-                        self.switch_tab(t);
+                        self.switch_tab(t, window_w, window_h);
                         break;
                     }
                 }
             }
 
             for i in 0..self.row_count() {
-                if let Some(rect) = layout.hit_row_rect(self.tab, i)
+                if let Some(rect) = layout.hit_row_rect(i)
                     && point_in_rect(mx, my, rect)
                 {
                     self.pointer.hover_row = Some(i);
@@ -1282,8 +1440,11 @@ impl MainMenuEffectsDebugOverlay {
                 self.apply_slider_mx(di, mx, &layout);
             }
             if (clicked || held) && self.dragging_slider.is_none() {
-                for i in self.scroll_row..(self.scroll_row + VISIBLE_ROWS).min(slider_count) {
-                    if point_in_rect(mx, my, layout.slider_track(i)) {
+                for i in self.scroll_row..(self.scroll_row + layout.visible_rows).min(slider_count) {
+                    let Some(track) = layout.slider_track(i) else {
+                        continue;
+                    };
+                    if point_in_rect(mx, my, track) {
                         self.cursor = i;
                         self.clear_edit();
                         self.apply_slider_mx(i, mx, &layout);
@@ -1295,15 +1456,18 @@ impl MainMenuEffectsDebugOverlay {
                 }
             }
             if clicked && self.dragging_slider.is_none() {
-                for i in self.scroll_row..(self.scroll_row + VISIBLE_ROWS).min(slider_count) {
-                    if point_in_rect(mx, my, layout.value_cell(i)) {
+                for i in self.scroll_row..(self.scroll_row + layout.visible_rows).min(slider_count) {
+                    let Some(cell) = layout.value_cell(i) else {
+                        continue;
+                    };
+                    if point_in_rect(mx, my, cell) {
                         self.cursor = i;
                         self.begin_editing();
                         break;
                     }
                 }
                 for row in slider_count..self.row_count() {
-                    let Some(rect) = layout.action_row_rect(self.tab, row) else {
+                    let Some(rect) = layout.hit_row_rect(row) else {
                         continue;
                     };
                     if point_in_rect(mx, my, rect) {
@@ -1330,12 +1494,12 @@ impl MainMenuEffectsDebugOverlay {
                 UiAction::FocusDown => {
                     self.cursor = (self.cursor + 1) % self.row_count();
                     self.clear_edit();
-                    self.ensure_scroll();
+                    self.ensure_scroll(window_w, window_h);
                 }
                 UiAction::FocusUp => {
                     self.cursor = (self.cursor + self.row_count() - 1) % self.row_count();
                     self.clear_edit();
-                    self.ensure_scroll();
+                    self.ensure_scroll(window_w, window_h);
                 }
                 UiAction::FocusNext | UiAction::FocusPrev => {
                     if !self.editing {
@@ -1401,15 +1565,18 @@ impl MainMenuEffectsDebugOverlay {
         let pad = (8.0 * layout.scale).max(5.0);
         let title_h = (22.0 * layout.scale).max(14.0);
         let hint_h = (13.0 * layout.scale).max(9.0);
-        let action_rows = tab_action_rows(self.tab).len();
-        let vis_h = VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap)
-            + layout.row_h * action_rows as f32;
+        let scroll_vis_h =
+            layout.viewport_rows() as f32 * (layout.row_h + layout.row_gap);
+        let footer_vis_h =
+            FOOTER_ACTION_ROWS.len() as f32 * (layout.row_h + layout.row_gap);
         let panel_h = pad
             + title_h
             + pad
             + layout.tab_h
             + pad
-            + vis_h
+            + scroll_vis_h
+            + pad
+            + footer_vis_h
             + pad
             + hint_h * 2.0
             + pad * 2.0;
@@ -1481,130 +1648,154 @@ impl MainMenuEffectsDebugOverlay {
             MainMenuEffectsTab::Rain => RAIN_DEBUG_ROW_META,
             MainMenuEffectsTab::Moths => MOTH_DEBUG_ROW_META,
         };
-        for (i, (name, min, max, _)) in rows
-            .iter()
-            .enumerate()
-            .skip(self.scroll_row)
-            .take(VISIBLE_ROWS.min(slider_count.saturating_sub(self.scroll_row)))
-        {
-            let visual = DebugRowVisual::for_row(i, self.cursor, &self.pointer);
-            let v = self.row_value(i);
+        let last_visible =
+            (self.scroll_row + layout.visible_rows).min(layout.scroll_item_count);
+        for row in self.scroll_row..last_visible {
+            if row < slider_count {
+                let i = row;
+                let Some(&(name, min, max, _)) = rows.get(i) else {
+                    continue;
+                };
+                let visual = DebugRowVisual::for_row(i, self.cursor, &self.pointer);
+                let v = self.row_value(i);
 
-            let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, ButtonVariant::Default);
-            let (rx, ry, rw, rh) = layout.row_rect(i);
-            instances.push(GpuInstance {
-                rect: [rx, ry, rw, rh],
-                color: bg,
-                user: 0,
-            });
-
-            let swatch = (14.0 * layout.scale).max(10.0);
-            let mut label_x = layout.panel_x + 6.0 * layout.scale;
-            let mut label_w = layout.label_w - 4.0 * layout.scale;
-            if let Some(rgb) = row_color_swatch(&self.tuning, self.tab, i) {
-                let sw_y = ry + (layout.row_h - swatch) * 0.5;
+                let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, ButtonVariant::Default);
+                let Some((rx, ry, rw, rh)) = layout.row_rect(i) else {
+                    continue;
+                };
                 instances.push(GpuInstance {
-                    rect: [label_x - 1.0, sw_y - 1.0, swatch + 2.0, swatch + 2.0],
-                    color: color::alpha(color::PARCHMENT, if visual.highlighted { 0.55 } else { 0.28 }),
+                    rect: [rx, ry, rw, rh],
+                    color: bg,
                     user: 0,
                 });
-                instances.push(GpuInstance {
-                    rect: [label_x, sw_y, swatch, swatch],
-                    color: [rgb[0], rgb[1], rgb[2], 1.0],
-                    user: 0,
-                });
-                label_x += swatch + 4.0 * layout.scale;
-                label_w -= swatch + 4.0 * layout.scale;
-            }
-            labels.push(TextLabel {
-                rect: [label_x, ry, label_w, layout.row_h],
-                text: name.to_string(),
-                font_px: Some(row_font),
-                color: tc,
-                align: TextAlign::Left,
-                ..Default::default()
-            });
 
-            let (track_x, track_y, tw, th) = layout.slider_track(i);
-            let t = ((v - min) / (max - min).max(1e-8)).clamp(0.0, 1.0);
-            let fill_w = tw * t;
-            if row_is_hue(self.tab, i) {
-                Self::draw_hue_slider_track(track_x, track_y, tw, th, &mut instances);
-            } else {
-                instances.push(GpuInstance {
-                    rect: [track_x, track_y, tw, th],
-                    color: color::WALNUT_INK,
-                    user: 0,
-                });
-                let fill_color = row_color_swatch(&self.tuning, self.tab, i)
-                    .map(|[r, g, b]| {
-                        if visual.highlighted {
-                            [r, g, b, 0.95]
-                        } else {
-                            [r * 0.85, g * 0.85, b * 0.85, 0.75]
-                        }
-                    })
-                    .unwrap_or_else(|| {
-                        if visual.highlighted {
-                            color::JADE
-                        } else {
-                            color::alpha(color::JADE, 0.7)
-                        }
+                let swatch = (14.0 * layout.scale).max(10.0);
+                let mut label_x = layout.panel_x + 6.0 * layout.scale;
+                let mut label_w = layout.label_w - 4.0 * layout.scale;
+                if let Some(rgb) = row_color_swatch(&self.tuning, self.tab, i) {
+                    let sw_y = ry + (layout.row_h - swatch) * 0.5;
+                    instances.push(GpuInstance {
+                        rect: [label_x - 1.0, sw_y - 1.0, swatch + 2.0, swatch + 2.0],
+                        color: color::alpha(color::PARCHMENT, if visual.highlighted { 0.55 } else { 0.28 }),
+                        user: 0,
                     });
+                    instances.push(GpuInstance {
+                        rect: [label_x, sw_y, swatch, swatch],
+                        color: [rgb[0], rgb[1], rgb[2], 1.0],
+                        user: 0,
+                    });
+                    label_x += swatch + 4.0 * layout.scale;
+                    label_w -= swatch + 4.0 * layout.scale;
+                }
+                labels.push(TextLabel {
+                    rect: [label_x, ry, label_w, layout.row_h],
+                    text: name.to_string(),
+                    font_px: Some(row_font),
+                    color: tc,
+                    align: TextAlign::Left,
+                    ..Default::default()
+                });
+
+                let Some((track_x, track_y, tw, th)) = layout.slider_track(i) else {
+                    continue;
+                };
+                let t = ((v - min) / (max - min).max(1e-8)).clamp(0.0, 1.0);
+                let fill_w = tw * t;
+                if row_is_hue(self.tab, i) {
+                    Self::draw_hue_slider_track(track_x, track_y, tw, th, &mut instances);
+                } else {
+                    instances.push(GpuInstance {
+                        rect: [track_x, track_y, tw, th],
+                        color: color::WALNUT_INK,
+                        user: 0,
+                    });
+                    let fill_color = row_color_swatch(&self.tuning, self.tab, i)
+                        .map(|[r, g, b]| {
+                            if visual.highlighted {
+                                [r, g, b, 0.95]
+                            } else {
+                                [r * 0.85, g * 0.85, b * 0.85, 0.75]
+                            }
+                        })
+                        .unwrap_or_else(|| {
+                            if visual.highlighted {
+                                color::JADE
+                            } else {
+                                color::alpha(color::JADE, 0.7)
+                            }
+                        });
+                    instances.push(GpuInstance {
+                        rect: [track_x, track_y, fill_w, th],
+                        color: fill_color,
+                        user: 0,
+                    });
+                }
+                let knob_size = th * 2.5;
+                let knob_x = track_x + fill_w - knob_size * 0.5;
+                let knob_y = track_y + (th - knob_size) * 0.5;
                 instances.push(GpuInstance {
-                    rect: [track_x, track_y, fill_w, th],
-                    color: fill_color,
+                    rect: [knob_x, knob_y, knob_size, knob_size],
+                    color: if visual.highlighted {
+                        color::PARCHMENT
+                    } else {
+                        color::alpha(color::STONE, 0.95)
+                    },
                     user: 0,
                 });
-            }
-            let knob_size = th * 2.5;
-            let knob_x = track_x + fill_w - knob_size * 0.5;
-            let knob_y = track_y + (th - knob_size) * 0.5;
-            instances.push(GpuInstance {
-                rect: [knob_x, knob_y, knob_size, knob_size],
-                color: if visual.highlighted {
-                    color::PARCHMENT
-                } else {
-                    color::alpha(color::STONE, 0.95)
-                },
-                user: 0,
-            });
 
-            let (vx, vy, vw, vh) = layout.value_cell(i);
-            let value_text = if self.editing && i == self.cursor {
-                format!(
-                    "{}{}",
-                    self.edit_buffer,
-                    if visual.highlighted { "\u{258c}" } else { "" }
-                )
-            } else {
-                Self::format_row_display(self.tab, i, v)
-            };
-            instances.push(GpuInstance {
-                rect: [vx, vy + vh * 0.15, vw, vh * 0.7],
-                color: if self.editing && i == self.cursor {
-                    color::alpha(color::WALNUT_INK, 0.95)
+                let Some((vx, vy, vw, vh)) = layout.value_cell(i) else {
+                    continue;
+                };
+                let value_text = if self.editing && i == self.cursor {
+                    format!(
+                        "{}{}",
+                        self.edit_buffer,
+                        if visual.highlighted { "\u{258c}" } else { "" }
+                    )
                 } else {
-                    color::alpha(color::WALNUT_INK, 0.75)
-                },
-                user: 0,
-            });
-            labels.push(TextLabel {
-                rect: [vx + 2.0 * layout.scale, vy, vw - 4.0 * layout.scale, vh],
-                text: value_text,
-                font_px: Some(row_font),
-                color: [tc[0] * 0.92, tc[1] * 0.92, tc[2] * 0.92, 1.0],
-                align: TextAlign::Right,
-                ..Default::default()
-            });
+                    Self::format_row_display(self.tab, i, v, self.moon_phase_debug)
+                };
+                instances.push(GpuInstance {
+                    rect: [vx, vy + vh * 0.15, vw, vh * 0.7],
+                    color: if self.editing && i == self.cursor {
+                        color::alpha(color::WALNUT_INK, 0.95)
+                    } else {
+                        color::alpha(color::WALNUT_INK, 0.75)
+                    },
+                    user: 0,
+                });
+                labels.push(TextLabel {
+                    rect: [vx + 2.0 * layout.scale, vy, vw - 4.0 * layout.scale, vh],
+                    text: value_text,
+                    font_px: Some(row_font),
+                    color: [tc[0] * 0.92, tc[1] * 0.92, tc[2] * 0.92, 1.0],
+                    align: TextAlign::Right,
+                    ..Default::default()
+                });
+            } else if let Some(action) = self.action_at_row(row) {
+                let Some(row_y) = layout.row_y(row) else {
+                    continue;
+                };
+                let (label, variant) = self.action_row_label(action);
+                self.draw_action_row(
+                    &layout,
+                    row_y,
+                    row,
+                    label,
+                    &mut instances,
+                    &mut labels,
+                    row_font,
+                    variant,
+                );
+            }
         }
 
-        let actions_y0 =
-            layout.rows_y0 + VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + pad;
-        for (idx, action) in tab_action_rows(self.tab).iter().enumerate() {
-            let row = slider_count + idx;
+        for (footer_idx, action) in FOOTER_ACTION_ROWS.iter().enumerate() {
+            let row = tab_footer_row_index(self.tab, footer_idx);
+            let Some(row_y) = layout.row_y(row) else {
+                continue;
+            };
             let (label, variant) = self.action_row_label(*action);
-            let row_y = actions_y0 + idx as f32 * (layout.row_h + layout.row_gap);
             self.draw_action_row(
                 &layout,
                 row_y,
@@ -1619,9 +1810,16 @@ impl MainMenuEffectsDebugOverlay {
 
         let hint_y = layout.panel_y + panel_h - pad - hint_h * 2.0;
         let hint_font = typography::tier_at_most(hint_h * 0.85, window_h);
+        let scroll_hint = if layout.scroll_item_count > layout.visible_rows {
+            " · more rows: ↑↓".to_string()
+        } else {
+            String::new()
+        };
         labels.push(TextLabel {
             rect: [layout.panel_x, hint_y, layout.panel_w, hint_h],
-            text: "Tabs: click · ↑↓ navigate · ←→ adjust · Enter edit/confirm".into(),
+            text: format!(
+                "Tabs: click · ↑↓ navigate · ←→ adjust · Enter edit/confirm{scroll_hint}"
+            ),
             font_px: Some(hint_font),
             color: color::alpha(color::PARCHMENT, 0.55),
             align: TextAlign::Center,

@@ -1,31 +1,45 @@
 // Synodic lunar phase shading for the main-menu `MoonObject` mesh.
 //
-// `phase` is 0..1 from CPU calendar data (0 = new, 0.25 = first quarter,
-// 0.5 = full, 0.75 = last quarter). Uses the mesh base-color albedo texture.
+// `phase` is 0..1 (0 = new, 0.25 = first quarter, 0.5 = full, 0.75 = last quarter).
+// Uses per-pixel `n_world` so the terminator stays smooth on the low-poly sphere.
+
+fn moon_phase_sun_dir_world(model: mat4x4<f32>, phase: f32) -> vec3<f32> {
+    let phase_angle = phase * 6.2831853;
+    // Synodic light sweeps the mesh equator (pole = +Z in `MoonObject` mesh space).
+    let sun_mesh = vec3(cos(phase_angle), sin(phase_angle), 0.0);
+    return normalize((model * vec4<f32>(sun_mesh, 0.0)).xyz);
+}
+
+fn moon_phase_ndotl(n_world: vec3<f32>, model: mat4x4<f32>, phase: f32) -> f32 {
+    return dot(n_world, moon_phase_sun_dir_world(model, phase));
+}
+
+/// Hard terminator with a hairline soften (avoids aliasing, not a foggy ramp).
+fn moon_phase_lit_mask(n_world: vec3<f32>, model: mat4x4<f32>, phase: f32) -> f32 {
+    let ndotl = moon_phase_ndotl(n_world, model, phase);
+    return smoothstep(-0.008, 0.012, ndotl);
+}
 
 fn moon_hub_phase_emissive(
     albedo: vec3<f32>,
-    normal: vec3<f32>,
+    n_world: vec3<f32>,
     view_dir: vec3<f32>,
     phase: f32,
+    model: mat4x4<f32>,
 ) -> vec3<f32> {
-    let phase_angle = phase * 6.2831853;
-    let sun_dir = normalize(vec3<f32>(sin(phase_angle), 0.06, -cos(phase_angle)));
-    let n = normalize(normal);
-    let ndotl = dot(n, sun_dir);
-    let lit_mask = smoothstep(-0.03, 0.02, ndotl);
-    let direct_light = pow(max(ndotl, 0.0), 0.82);
-    let terminator_rim = smoothstep(-0.10, 0.06, ndotl) - smoothstep(0.00, 0.16, ndotl);
+    let ndotl = moon_phase_ndotl(n_world, model, phase);
+    let lit_mask = moon_phase_lit_mask(n_world, model, phase);
 
-    // View-dependent limb darkening (UV sphere mesh; u ≈ 0.6 for the Moon).
-    let mu = max(dot(n, normalize(view_dir)), 0.0);
-    let ld = 1.0 - 0.6 + 0.6 * mu;
+    let mu = max(dot(n_world, normalize(view_dir)), 0.0);
+    let limb_att = mix(0.82, 1.0, smoothstep(0.15, 0.65, mu));
 
-    let moon_body = vec3<f32>(0.93, 0.94, 0.88);
-    let lit_albedo = moon_body * ld * albedo * 1.35;
-    let lit_face = lit_albedo * (0.16 + direct_light * 1.55);
-    let dark_face = 1.0 - lit_mask;
-    let earthshine = vec3<f32>(0.018, 0.026, 0.042) * dark_face * (0.40 + 0.60 * ld) * albedo;
-    let terminator_glow = vec3<f32>(0.18, 0.20, 0.24) * terminator_rim;
-    return lit_face * lit_mask + earthshine + terminator_glow;
+    let moon_body = vec3<f32>(0.94, 0.95, 0.90);
+    let lit = moon_body * albedo * 1.55 * lit_mask * limb_att;
+
+    // Dark hemisphere: nearly black; earthshine only deep in shadow (not at terminator).
+    let shadow_depth = (1.0 - lit_mask) * (1.0 - lit_mask);
+    let dark = albedo * vec3<f32>(0.006, 0.009, 0.016) * shadow_depth;
+    let earthshine = vec3<f32>(0.006, 0.009, 0.016) * albedo * shadow_depth * 0.35;
+
+    return lit + dark + earthshine;
 }

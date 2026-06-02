@@ -3495,6 +3495,7 @@ pub(super) fn build_renderer_new(
         shadow_quality: default_shadow_quality,
         flame_tuning: crate::flame_tuning::FlameTuning::load(),
         main_menu_pride_rainbow_debug: crate::main_menu_glb::main_menu_pride_rainbow_default_enabled(),
+        main_menu_moon_phase_debug: crate::main_menu_moon_tuning::MainMenuMoonPhaseDebug::default(),
         main_menu_rain_hit_debug_mesh,
         main_menu_rain_hit_debug_instance,
         probe_gi_stale_aabb_warned_room: None,

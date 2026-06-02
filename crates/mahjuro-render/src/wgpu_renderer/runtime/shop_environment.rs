@@ -558,7 +558,7 @@ impl WgpuRenderer {
                 inv_doc_scale,
                 env_tune.gltf_emissive_scale,
                 if main_menu_env {
-                    current_moon_phase()
+                    self.main_menu_moon_phase_debug.resolved_phase()
                 } else {
                     1.0
                 },
