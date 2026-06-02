@@ -55,14 +55,9 @@ use std::path::{Path, PathBuf};
 fn main() {
     emit_debug_menu_cfg();
 
-    // Defer resolving steam_api64.dll until first use so we can run `main` and
-    // skip Steamworks when the DLL is missing (see `steam::steamworks_dll_ready`).
+    // Windows: link steam_api64 normally; `steam::steamworks_dll_ready` loads the DLL
+    // with LoadLibraryW before Client::init so we can skip Steam when it is missing.
     let target = env::var("TARGET").unwrap_or_default();
-    if target.contains("windows-msvc") && target.contains("x86_64") {
-        println!("cargo:rustc-link-arg=/DELAYLOAD:steam_api64.dll");
-        // `__delayLoadHelper2` lives in delayimp.lib (required for /DELAYLOAD).
-        println!("cargo:rustc-link-lib=delayimp");
-    }
 
     if target.contains("linux") && !target.contains("android") {
         println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
