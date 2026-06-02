@@ -342,12 +342,18 @@ impl CelebrationShowcaseIntroGate {
         self.intro
             .tick_audio(ctx.bus, ctx.headless, &ctx.effect_layers);
         if ctx.headless {
-            self.intro.jump_to_done();
-            self.intro_grace_start = Some(Instant::now() - Duration::from_secs_f32(1.0));
+            self.skip_intro();
         }
         if self.intro.is_done_for(&ctx.effect_layers) && self.intro_grace_start.is_none() {
             self.intro_grace_start = Some(Instant::now());
         }
+    }
+
+    /// Fast-forward the shooting-star wipe so confirm / click can dismiss immediately.
+    pub fn skip_intro(&mut self) {
+        self.intro.jump_to_done();
+        self.intro_grace_start =
+            Some(Instant::now() - Duration::from_secs_f32(Self::GRACE_AFTER_DONE_SECS));
     }
 
     #[inline]

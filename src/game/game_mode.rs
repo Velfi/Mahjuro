@@ -32,8 +32,8 @@ pub struct GameMode {
     /// gameplay bonuses (e.g. Plastic grants +1 discard).
     #[serde(default)]
     pub tile_material: TileMaterial,
-    /// Difficulty tier selected at run start. Modulates target score, shop
-    /// prices, reroll base cost, and boss min_ante floor — see `core::season`.
+    /// Difficulty tier selected at run start. Modulates target score, reroll
+    /// base cost, and boss min_ante floor — see `core::season`.
     #[serde(default, alias = "stake")]
     pub season: Season,
     /// Shop price multiplier derived from `season` at run creation. Cached on
@@ -62,9 +62,9 @@ impl GameMode {
     }
 
     /// Build a game mode for the given tile material AND difficulty season.
-    /// The season's numeric deltas (target mult, shop price mult, reroll
-    /// base cost, boss floor) are folded in here so `RunState::new` and the
-    /// shop never reach back to the season enum directly.
+    /// The season's numeric deltas (target mult, reroll base cost, boss floor)
+    /// are folded in here so `RunState::new` and the shop never reach back to
+    /// the season enum directly.
     /// Apply the mode's shop price multiplier to a base price. Returns at
     /// least 1 gold so season-driven discounts (if any were added later) can't
     /// make items free. Used by every shop-side pricing call in
@@ -82,8 +82,6 @@ impl GameMode {
         // Apply the season's base-target multiplier once here; per-ante growth is
         // `core::chamber_target::TARGET_SCALING`.
         let base_target = ((DEFAULT_BASE_TARGET as f32) * season.base_target_mult()).round() as u32;
-        let mut starting_rules = vec![RuleModifier::PairDoubleScore];
-        starting_rules.extend(season.starting_rules());
         Self {
             starting_yen: STARTING_GOLD + bonus_gold,
             starting_plays: STARTING_PLAYS + bonus_plays,
@@ -91,12 +89,12 @@ impl GameMode {
             hand_size: HAND_SIZE,
             base_target,
             starting_relics: vec![],
-            starting_rules,
+            starting_rules: vec![RuleModifier::PairDoubleScore],
             starting_yaku: crate::core::yaku::YakuKind::all().to_vec(),
             consumable_capacity: CONSUMABLE_CAPACITY,
             tile_material: material,
             season,
-            price_multiplier: season.price_multiplier(),
+            price_multiplier: default_price_multiplier(),
         }
     }
 }
@@ -114,16 +112,14 @@ mod tests {
     }
 
     #[test]
-    fn winter_scales_target_and_price() {
+    fn winter_scales_target() {
         let m = GameMode::with_material_and_season(TileMaterial::Bamboo, Season::Winter);
         assert_eq!(m.season, Season::Winter);
         assert_eq!(
             m.base_target,
-            ((DEFAULT_BASE_TARGET as f32) * 1.5).round() as u32
+            ((DEFAULT_BASE_TARGET as f32) * 2.0).round() as u32
         );
-        assert!((m.price_multiplier - 1.5).abs() < 1e-6);
-        // scale_shop_price: 10 * 1.5 = 15
-        assert_eq!(m.scale_shop_price(10), 15);
+        assert!((m.price_multiplier - 1.0).abs() < 1e-6);
     }
 
     #[test]

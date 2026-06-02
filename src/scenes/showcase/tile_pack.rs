@@ -87,6 +87,23 @@ impl TilePackPresenter {
         self.intro_gate.intro.content_alpha_for(&ctx.effect_layers)
     }
 
+    fn emit_skip_to_settled(&mut self, ctx: &mut UpdateCtx<'_>) {
+        let needs_opened = matches!(
+            self.celebration.phase,
+            PackCelebPhase::Arrival | PackCelebPhase::Anticipation
+        );
+        let from = self.celebration.revealed_count;
+        self.celebration.skip_to_settled();
+        if needs_opened {
+            ctx.bus
+                .push(crate::game::event_bus::GameEvent::PackOpened);
+        }
+        for _ in from..self.celebration.tiles.len() {
+            ctx.bus
+                .push(crate::game::event_bus::GameEvent::PackTileRevealed);
+        }
+    }
+
     fn camera_with_dolly(&self, w: f32, h: f32, env_h: f32, pull: f32) -> CameraParams {
         let mut cam = shop_celebration_camera(w, h, env_h);
         if pull <= 0.0 {
@@ -414,10 +431,8 @@ impl TilePackPresenter {
         self.intro_gate.tick(&mut ctx);
 
         if ctx.headless {
-            self.intro_gate.intro.jump_to_done();
-            if self.celebration.phase == PackCelebPhase::Arrival
-                && self.intro_gate.intro.is_done_for(&ctx.effect_layers)
-            {
+            self.intro_gate.skip_intro();
+            if self.celebration.phase == PackCelebPhase::Arrival {
                 self.celebration.phase = PackCelebPhase::Anticipation;
                 self.celebration.started_at = Instant::now();
             }
@@ -428,9 +443,8 @@ impl TilePackPresenter {
         {
             if self.arrival_done_at.is_none() {
                 self.arrival_done_at = Some(Instant::now());
-            } else if self.arrival_done_at.is_some()
-                && Instant::now().saturating_duration_since(self.arrival_done_at.unwrap())
-                    >= Duration::from_secs_f32(CelebrationShowcaseIntroGate::GRACE_AFTER_DONE_SECS)
+            } else if Instant::now().saturating_duration_since(self.arrival_done_at.unwrap())
+                >= Duration::from_secs_f32(CelebrationShowcaseIntroGate::GRACE_AFTER_DONE_SECS)
             {
                 self.celebration.phase = PackCelebPhase::Anticipation;
                 self.celebration.started_at = Instant::now();
@@ -438,22 +452,44 @@ impl TilePackPresenter {
             }
         }
 
-        let has_input = ctx.actions.iter().any(|a| {
-            matches!(
-                a,
-                UiAction::Confirm | UiAction::Cancel | UiAction::CommitDiscard
-            )
+        let confirm_or_click = ctx.actions.iter().any(|a| {
+            matches!(a, UiAction::Confirm | UiAction::CommitDiscard)
         }) || !ctx.button_clicks.is_empty();
+        let cancel = ctx.actions.iter().any(|a| matches!(a, UiAction::Cancel));
 
-        match self.celebration.phase {
-            PackCelebPhase::Arrival => {}
-            PackCelebPhase::Anticipation => {
-                if has_input {
+        if confirm_or_click || cancel {
+            self.intro_gate.skip_intro();
+            match self.celebration.phase {
+                PackCelebPhase::Arrival => {
+                    self.celebration.phase = PackCelebPhase::Anticipation;
+                    self.celebration.started_at = Instant::now();
+                    self.arrival_done_at = None;
+                }
+                PackCelebPhase::Anticipation if confirm_or_click => {
                     self.celebration.phase = PackCelebPhase::Unseal;
                     self.celebration.started_at = Instant::now();
-                    ctx.bus.push(crate::game::event_bus::GameEvent::PackOpened);
+                    ctx.bus
+                        .push(crate::game::event_bus::GameEvent::PackOpened);
+                }
+                PackCelebPhase::Anticipation => {
+                    self.emit_skip_to_settled(&mut ctx);
+                }
+                PackCelebPhase::Unseal => {
+                    self.emit_skip_to_settled(&mut ctx);
+                }
+                PackCelebPhase::Deal if self.celebration.fully_settled() => {
+                    ctx.run.pending_shop_focus_snap_after_celebration = true;
+                    *ctx.overlay_request = Some(OverlayRequest::Pop);
+                }
+                PackCelebPhase::Deal => {
+                    self.emit_skip_to_settled(&mut ctx);
                 }
             }
+            return None;
+        }
+
+        match self.celebration.phase {
+            PackCelebPhase::Arrival | PackCelebPhase::Anticipation => {}
             PackCelebPhase::Unseal => {
                 if self.celebration.elapsed() >= PackCelebration::UNSEAL_SECS {
                     self.celebration.phase = PackCelebPhase::Deal;
@@ -471,11 +507,6 @@ impl TilePackPresenter {
                     ctx.bus
                         .push(crate::game::event_bus::GameEvent::PackTileRevealed);
                     self.celebration.revealed_count += 1;
-                }
-                let done = self.celebration.fully_settled() || self.celebration.dismissed;
-                if done && has_input {
-                    ctx.run.pending_shop_focus_snap_after_celebration = true;
-                    *ctx.overlay_request = Some(OverlayRequest::Pop);
                 }
             }
         }
@@ -537,15 +568,7 @@ impl TilePackPresenter {
         frame.window_title = "Mahjuro".to_string();
         frame.showcase_render_hints = Self::render_hints();
 
-        let allow_click = match self.celebration.phase {
-            PackCelebPhase::Arrival => false,
-            PackCelebPhase::Anticipation => self.intro_gate.intro.is_done_for(&ctx.effect_layers),
-            PackCelebPhase::Unseal => false,
-            PackCelebPhase::Deal => self.celebration.fully_settled() || self.celebration.dismissed,
-        };
-        if allow_click {
-            frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
-        }
+        frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
         frame
     }
 }

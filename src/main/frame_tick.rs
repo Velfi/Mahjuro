@@ -1114,7 +1114,7 @@ impl App {
                             Scene::Gameplay(g) if g.music_chamber_kind(self.run.chamber)
                                 == crate::core::rules::ChamberKind::Ordeal
                         );
-                    sync_music_for_scene(&mut self.audio, tag, gameplay_ordeal_chamber);
+                    sync_music_for_scene(&mut self.audio, tag, gameplay_ordeal_chamber, None);
                 }
             }
             None => {}
