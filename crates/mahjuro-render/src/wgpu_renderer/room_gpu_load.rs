@@ -1411,6 +1411,7 @@ impl WgpuRenderer {
         for cmd in cmds {
             match cmd {
                 DrawCmd::ShopEnvironment => need |= ROOM_SHOP,
+                DrawCmd::MainMenuEnvironment => need |= ROOM_MAIN_MENU,
                 DrawCmd::HallwayEnvironment => need |= ROOM_HALLWAY,
                 DrawCmd::StaircaseEnvironment => need |= ROOM_STAIRCASE,
                 DrawCmd::ArchiveEnvironment => need |= ROOM_ARCHIVE,
@@ -1420,6 +1421,9 @@ impl WgpuRenderer {
         }
         if need & ROOM_SHOP != 0 {
             self.ensure_shop_room_gpu();
+        }
+        if need & ROOM_MAIN_MENU != 0 {
+            self.ensure_main_menu_room_gpu();
         }
         if need & ROOM_HALLWAY != 0 {
             self.ensure_hallway_room_gpu();

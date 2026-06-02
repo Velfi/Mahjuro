@@ -372,7 +372,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let punc_vis = select(
             1.0,
             punctual_shadow_vis(i, in.world_pos),
-            projected_shadows_on,
+            projected_shadows_on && !is_archive_no_dir_shadow,
         );
         let diffuse = kD * albedo / PI * radiance * NdotL * punc_vis;
 
@@ -462,6 +462,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     // glTF light energy). Keep the runtime hemisphere fill in scene-linear units
     // so the Scene Look "Room ambient" slider remains visible.
     var lit_hdr = Lo * cam.tile_seed + ambient + metal_hemi;
+    lit_hdr = lit_hdr * sample_contact_ao(in.world_pos);
     // Per-light projected shadows are applied in the punctual / spot loops above.
     let hdr = lit_hdr + emissive;
     return ShopShaded(hdr, emissive, out_alpha);

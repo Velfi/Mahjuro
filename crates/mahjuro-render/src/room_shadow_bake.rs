@@ -190,6 +190,63 @@ pub fn bake_contact_ao_from_depth(width: u32, height: u32, depth_bytes: &[u8]) -
     ao
 }
 
+/// True when the committed `.msh` has real depth coverage and non-trivial contact AO.
+pub fn room_shadow_bake_is_effective(bake: &RoomShadowBake) -> bool {
+    let pixel_count = (bake.width as u64)
+        .saturating_mul(bake.height as u64)
+        .max(1) as f32;
+    let mut depth_covered = 0u32;
+    for chunk in bake.depth_bytes.chunks_exact(4) {
+        let d = f32::from_le_bytes(chunk.try_into().unwrap());
+        if d > 0.001 && d < 0.999 {
+            depth_covered += 1;
+        }
+    }
+    if depth_covered as f32 / pixel_count < 0.005 {
+        return false;
+    }
+    // Archive cubby-only bakes store all-white contact AO; runtime does not sample `.msh` yet.
+    if bake.room == RoomGiRoom::Archive {
+        return true;
+    }
+    let Some(ao) = bake.ao_bytes.as_ref() else {
+        return true;
+    };
+    let dark = ao.iter().filter(|&&b| b < 250).count();
+    dark as f32 / ao.len().max(1) as f32 >= 0.001
+}
+
+/// Game runtime must load valid committed `.msh` files. Offline bakers skip this so stale
+/// placeholders do not block capturing fresh bakes (live punctual shadows during bake).
+pub fn committed_room_shadows_required() -> bool {
+    if cfg!(feature = "bake") {
+        return false;
+    }
+    !mahjuro_bake_stamp::skip_committed_bake_checks()
+}
+
+/// Fail when a decoded bake is a placeholder (all-zero depth / all-white AO).
+pub fn validate_room_shadow_bake_effective(
+    bake: &RoomShadowBake,
+    room: RoomGiRoom,
+) -> anyhow::Result<()> {
+    if room_shadow_bake_is_effective(bake) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "room shadow bake {room:?} at {} has no usable depth/AO — \
+         run `scripts/rebake-offline.sh room`",
+        room.shadow_asset_path(),
+    )
+}
+
+/// Load and validate a room `.msh`; missing or placeholder bakes are hard errors.
+pub fn require_effective_room_shadow_bake(room: RoomGiRoom) -> anyhow::Result<Arc<RoomShadowBake>> {
+    let bake = require_room_shadow_bake(room)?;
+    validate_room_shadow_bake_effective(&bake, room)?;
+    Ok(bake)
+}
+
 fn load_room_shadow_bake(room: RoomGiRoom) -> Option<Arc<RoomShadowBake>> {
     let file = asset_path::get(room.shadow_asset_path())?;
     RoomShadowBake::decode_for_room(&file.data, room)
@@ -266,5 +323,62 @@ mod tests {
         assert_eq!(back.width, BAKE_SIZE);
         assert_eq!(back.depth_bytes.len(), depth_len);
         assert_eq!(back.ao_bytes.as_ref().map(|a| a.len()), Some(ao_len));
+    }
+
+    #[test]
+    fn ineffective_when_depth_and_ao_are_empty_placeholders() {
+        let depth_len = (512 * 512 * 4) as usize;
+        let bake = RoomShadowBake {
+            room: RoomGiRoom::Shop,
+            width: 512,
+            height: 512,
+            light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+            depth_bias: 0.005,
+            depth_bytes: Arc::from(vec![0u8; depth_len]),
+            ao_bytes: Some(Arc::from(vec![255u8; 512 * 512])),
+        };
+        assert!(!room_shadow_bake_is_effective(&bake));
+        assert!(validate_room_shadow_bake_effective(&bake, RoomGiRoom::Shop).is_err());
+    }
+
+    #[test]
+    fn effective_when_depth_has_coverage_and_ao_varies() {
+        let w = 8u32;
+        let h = 8u32;
+        let mut depth = vec![0u8; (w * h * 4) as usize];
+        depth[0..4].copy_from_slice(&0.4f32.to_le_bytes());
+        let mut ao = vec![255u8; (w * h) as usize];
+        ao[0] = 180;
+        let bake = RoomShadowBake {
+            room: RoomGiRoom::Shop,
+            width: w,
+            height: h,
+            light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+            depth_bias: 0.005,
+            depth_bytes: Arc::from(depth),
+            ao_bytes: Some(Arc::from(ao)),
+        };
+        assert!(room_shadow_bake_is_effective(&bake));
+    }
+
+    #[test]
+    fn archive_effective_with_depth_and_all_white_ao() {
+        let w = 512u32;
+        let h = 512u32;
+        let mut depth = vec![0u8; (w * h * 4) as usize];
+        for i in 0..2000 {
+            depth[i * 4..(i + 1) * 4].copy_from_slice(&0.4f32.to_le_bytes());
+        }
+        let bake = RoomShadowBake {
+            room: RoomGiRoom::Archive,
+            width: w,
+            height: h,
+            light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+            depth_bias: 0.005,
+            depth_bytes: Arc::from(depth),
+            ao_bytes: Some(Arc::from(vec![255u8; (w * h) as usize])),
+        };
+        assert!(room_shadow_bake_is_effective(&bake));
+        assert!(validate_room_shadow_bake_effective(&bake, RoomGiRoom::Archive).is_ok());
     }
 }

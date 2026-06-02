@@ -284,6 +284,9 @@ impl RoomBakeApp {
         self.tick();
         self.renderer.take_room_shadow_capture().ok_or_else(|| {
             anyhow::anyhow!("room shadow bake: GPU readback missing")
+        }).and_then(|bake| {
+            mahjuro::render::room_shadow_bake::validate_room_shadow_bake_effective(&bake, room)?;
+            Ok(bake)
         })
     }
 }

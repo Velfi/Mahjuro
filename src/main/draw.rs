@@ -862,7 +862,6 @@ impl App {
                 sort_settle_speed,
             },
         );
-
         renderer.set_hdr_enabled(self.effect_layers.hdr_enabled(&self.gfx));
         renderer.main_menu_pride_rainbow_debug = self.debug.main_menu_pride_rainbow_debug;
         renderer.main_menu_moon_phase_debug = self.debug.main_menu_moon_phase_debug;

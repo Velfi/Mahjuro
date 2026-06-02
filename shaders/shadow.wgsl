@@ -1,10 +1,10 @@
-// Depth-only vertex shader for the shadow map pre-pass.
+// Depth-only vertex shader for the punctual shadow map pre-pass.
 //
-// Renders caster meshes from the directional key light's POV into a single
-// 2048×2048 D32Float texture. Lit-mesh casters (table/dish/candles/relics —
-// the table felt does not cast), imported room GLB primitives (`shop.glb`,
-// hallway, archive, main menu), and hand-tile glb meshes share this shader
-// because all vertex layouts start with `position : vec3<f32>` at offset 0;
+// Renders caster meshes from each shadow-casting punctual light's POV into a
+// D32Float depth array (256² Low, 512² Medium/High). Lit-mesh casters
+// (table/dish/candles/relics — the table felt does not cast), imported room GLB
+// primitives when the live pass is active, and hand-tile glb meshes share this
+// shader because all vertex layouts start with `position : vec3<f32>` at offset 0;
 // everything after that is ignored.
 //
 // `hallway_vertex_warp.wgsl` is prepended in `embedded_wgsl::SHADOW` so room

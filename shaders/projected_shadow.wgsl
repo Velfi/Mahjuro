@@ -80,6 +80,9 @@ fn sample_contact_ao(world_pos: vec3<f32>) -> f32 {
     }
     let lp = shadow_globals.contact_ao_view_proj * vec4<f32>(world_pos, 1.0);
     let proj = lp.xyz / lp.w;
+    if (proj.z < 0.0 || proj.z > 1.0) {
+        return 1.0;
+    }
     let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
         return 1.0;

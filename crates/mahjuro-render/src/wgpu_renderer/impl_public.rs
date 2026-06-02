@@ -63,9 +63,10 @@ impl WgpuRenderer {
     pub fn splash_hub_boot_ready(&self) -> bool {
         self.showcase_decal_atlases_baked_for_all_player_tilesets()
             && self.main_menu_environment.is_some()
-            && self
-                .room_baked_shadow_gpu
-                [crate::room_gi_bake::room_gi_room_index(crate::room_gi_bake::RoomGiRoom::MainMenu)]
+            && self.room_baked_shadow_gpu
+                [crate::room_gi_bake::room_gi_room_index(
+                    crate::room_gi_bake::RoomGiRoom::MainMenu,
+                )]
                 .is_some()
     }
 
@@ -84,9 +85,12 @@ impl WgpuRenderer {
         if self.main_menu_environment.is_some() {
             done += 1.0;
         }
-        let idx =
-            crate::room_gi_bake::room_gi_room_index(crate::room_gi_bake::RoomGiRoom::MainMenu);
-        if self.room_baked_shadow_gpu[idx].is_some() {
+        if self.room_baked_shadow_gpu
+            [crate::room_gi_bake::room_gi_room_index(
+                crate::room_gi_bake::RoomGiRoom::MainMenu,
+            )]
+            .is_some()
+        {
             done += 1.0;
         }
         done / 3.0
