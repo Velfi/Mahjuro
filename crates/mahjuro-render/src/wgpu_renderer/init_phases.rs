@@ -558,14 +558,6 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     })
 }
 
-/// Whether the process is running under Steam's tenfoot / gamescope session.
-fn running_under_gamescope() -> bool {
-    std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_some()
-        || std::env::var_os("ENABLE_GAMESCOPE_WSI").is_some()
-        || std::env::var_os("SteamTenfoot").is_some()
-        || std::env::var_os("SteamGamepadUI").is_some()
-}
-
 /// Pick a swapchain present mode. Windows stays on FIFO (DXGI pacing).
 ///
 /// On Steam Deck game mode, FIFO + gamescope's nested compositor has been
@@ -605,7 +597,11 @@ fn select_present_mode(caps: &wgpu::SurfaceCapabilities) -> wgpu::PresentMode {
 
     #[cfg(not(target_os = "windows"))]
     {
-        if running_under_gamescope() {
+        let gamescope = std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_some()
+            || std::env::var_os("ENABLE_GAMESCOPE_WSI").is_some()
+            || std::env::var_os("SteamTenfoot").is_some()
+            || std::env::var_os("SteamGamepadUI").is_some();
+        if gamescope {
             const PREFERENCE: &[wgpu::PresentMode] = &[
                 wgpu::PresentMode::Mailbox,
                 wgpu::PresentMode::Immediate,
