@@ -5,7 +5,6 @@ use crate::projected_light_shadow::{
     ProjectedShadowLightSetup, PunctualShadowBuild, build_punctual_shadow_setups,
     punctual_shadow_setups_changed,
 };
-use crate::room_gi_bake::RoomGiRoom;
 use crate::scene_keys;
 use mahjuro_gfx_types::ShadowQuality;
 
@@ -37,19 +36,6 @@ pub fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
 }
 
 impl ActiveRoomEnv {
-    #[allow(dead_code)]
-    #[inline]
-    pub fn to_room_gi(self) -> Option<RoomGiRoom> {
-        match self {
-            Self::Shop => Some(RoomGiRoom::Shop),
-            Self::Hallway => Some(RoomGiRoom::Hallway),
-            Self::Stairway => Some(RoomGiRoom::Stairway),
-            Self::Archive => Some(RoomGiRoom::Archive),
-            Self::MainMenu => Some(RoomGiRoom::MainMenu),
-            Self::Gameplay => Some(RoomGiRoom::Gameplay),
-        }
-    }
-
     pub fn environment_bounds_doc(self) -> Option<crate::room_env_gltf::RoomEnvironmentBounds> {
         match self {
             Self::Gameplay => {
@@ -99,27 +85,6 @@ impl ActiveRoomEnv {
             "main_menu_exterior" => Some(Self::MainMenu),
             "game_over" => Some(Self::Gameplay),
             _ => None,
-        }
-    }
-
-    /// glTF node name for embedded punctual `light_index` when scene tags are missing.
-    pub fn embedded_point_light_node_name(self, light_index: usize) -> Option<String> {
-        let node = |cpu: &crate::room_glb::RoomGlbCpu| {
-            cpu.embedded_point_lights
-                .get(light_index)
-                .map(|l| l.node_name.clone())
-        };
-        match self {
-            Self::Gameplay => crate::gameplay_glb::with_gameplay_glb_cpu(|o| o.map(node)).flatten(),
-            Self::Shop => crate::room_glb::with_shop_glb_cpu(|o| o.map(node)).flatten(),
-            Self::Hallway => crate::hallway_glb::with_hallway_glb_cpu(|o| o.map(node)).flatten(),
-            Self::Stairway => {
-                crate::staircase_glb::with_staircase_glb_cpu(|o| o.map(node)).flatten()
-            }
-            Self::Archive => crate::archive_glb::with_archive_glb_cpu(|o| o.map(node)).flatten(),
-            Self::MainMenu => {
-                crate::main_menu_glb::with_main_menu_glb_cpu(|o| o.map(node)).flatten()
-            }
         }
     }
 }
@@ -427,12 +392,6 @@ impl WgpuRenderer {
         }
         *changed = true;
     }
-}
-
-/// Whether this room uses offline `.msh` contact AO (archive is punctual-only today).
-#[inline]
-pub fn room_env_uses_offline_baked_shadow(env: ActiveRoomEnv) -> bool {
-    env != ActiveRoomEnv::Archive
 }
 
 /// Static room shells always participate in the live depth pre-pass when shadows are on.
