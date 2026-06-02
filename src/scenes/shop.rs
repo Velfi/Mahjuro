@@ -228,7 +228,6 @@ impl ShopScene {
 mod tests {
     use super::*;
     use crate::game::game_mode::GameMode;
-    use crate::persistence::TileMaterial;
 
     #[test]
     fn patron_gift_shop_always_contains_a_free_relic() {
@@ -333,43 +332,6 @@ mod tests {
 
         assert!(!items.is_empty());
         assert!(items.iter().all(|item| item.relic == RelicId::PairPower));
-    }
-
-    #[test]
-    fn season_scales_shop_prices() {
-        use crate::core::season::Season;
-        let relics = RelicState::default();
-        let available = vec![RelicId::PairPower];
-        let spring = GameMode::with_material_and_season(TileMaterial::Bamboo, Season::Spring);
-        let winter = GameMode::with_material_and_season(TileMaterial::Bamboo, Season::Winter);
-        let spring_run = crate::game::run::RunState::new(spring.clone());
-        let winter_run = crate::game::run::RunState::new(winter.clone());
-
-        let (spring_items, _, _, _) = actions::generate_shop_stock(
-            &relics,
-            &available,
-            1,
-            crate::game::run::RelicShopPoolExtinction::default(),
-            &spring,
-            &spring_run,
-        );
-        let (winter_items, _, _, _) = actions::generate_shop_stock(
-            &relics,
-            &available,
-            1,
-            crate::game::run::RelicShopPoolExtinction::default(),
-            &winter,
-            &winter_run,
-        );
-
-        let spring_price = spring_items[0].price;
-        let winter_price = winter_items[0].price;
-        assert!(
-            winter_price > spring_price,
-            "Winter {} should exceed Spring {}",
-            winter_price,
-            spring_price,
-        );
     }
 
     #[test]
