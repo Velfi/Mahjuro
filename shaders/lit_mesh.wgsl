@@ -2473,7 +2473,13 @@ fn fs_main(
     if (shop_art_forward && shop_cat_shadow_floor > 0.001) {
         shadow_vis = max(shadow_vis, shop_cat_shadow_floor);
     }
-    let lit_shadowed = lit_display_case * shadow_vis;
+    // Offline `.msh` contact AO grounds catalog props on room surfaces (shop
+    // counter, gameplay table edge) the same way `room_glb.wgsl` does for shells.
+    var baked_contact = sample_contact_ao(in.world_pos);
+    if (shop_art_forward && shop_cat_shadow_floor > 0.001) {
+        baked_contact = max(baked_contact, shop_cat_shadow_floor);
+    }
+    let lit_shadowed = lit_display_case * shadow_vis * baked_contact;
     // Reinhard-knee the coat accumulator on wood: with many candles
     // contributing additive white highlights, the lacquer lobe was
     // piling up past 1.0 and milkifying the deep walnut. The knee
@@ -2620,7 +2626,7 @@ fn fs_main(
             out_rgb = albedo;
         } else {
             var hdr = rgb;
-            hdr = hdr + albedo * vec3<f32>(amb) * diffuse_scale;
+            hdr = hdr + albedo * vec3<f32>(amb) * diffuse_scale * baked_contact;
             hdr = hdr * ssr_globals.hdr_tonemap.y;
             out_rgb = hdr;
         }

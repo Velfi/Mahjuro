@@ -207,6 +207,7 @@ impl WgpuRenderer {
             bounds_doc,
             frame.camera_override.as_ref(),
             use_ray_plane,
+            frame.shop_inspect_shadow_target,
         );
         let (hash, changed) =
             punctual_shadow_setups_changed(&build, self.cached_projected_shadow_hash);
@@ -280,16 +281,6 @@ pub(super) struct Object3dShadowCtx<'a> {
 }
 
 impl WgpuRenderer {
-    pub(super) fn write_per_instance_shadow_casters(
-        &mut self,
-        _frame: &UiFrame,
-        _camera: &CameraFrame,
-        _light_view_proj_arr: [f32; 16],
-        _tile_pick_models: &[(usize, glam::Mat4)],
-        _shadow_uniforms_changed: &mut bool,
-    ) {
-    }
-
     pub(super) fn rewrite_shadow_casters_for_light(
         &self,
         light_view_proj_arr: [f32; 16],
@@ -358,7 +349,18 @@ impl WgpuRenderer {
                 rewrite!(self.tally_stick_instances)
             }
             super::DrawKind::ExtrudedGlyph => rewrite!(self.extruded_glyph_instances),
-            super::DrawKind::GltfCoin => {}
+            super::DrawKind::GltfCoin => {
+                if let Some(inst) = self.coin_glb_instances.get(slot_i) {
+                    self.queue.write_buffer(
+                        &inst.shadow_uniform_buffer,
+                        0,
+                        bytemuck::bytes_of(&ShadowCasterUniform {
+                            light_view_proj: light_view_proj_arr,
+                            model: inst.cached_shadow_caster.model,
+                        }),
+                    );
+                }
+            }
             super::DrawKind::Primitive(shape) => {
                 if let Some(pool) = self.primitive_instances.get(&shape) {
                     rewrite!(pool);
@@ -436,6 +438,37 @@ impl WgpuRenderer {
     }
 }
 
+/// Whether this room uses offline `.msh` contact AO (archive is punctual-only today).
+#[inline]
+pub fn room_env_uses_offline_baked_shadow(env: ActiveRoomEnv) -> bool {
+    env != ActiveRoomEnv::Archive
+}
+
+/// Static room shells skip the live depth pre-pass when offline contact AO is active,
+/// or during catalog inspect (props-only cast).
+#[inline]
+pub fn skip_room_env_live_shadow_pass(
+    frame: &UiFrame,
+    env: ActiveRoomEnv,
+    offline_baked_loaded: bool,
+) -> bool {
+    if frame.shop_inspect_shadow_target.is_some() {
+        return true;
+    }
+    offline_baked_loaded && room_env_uses_offline_baked_shadow(env)
+}
+
+/// Whether room-env shadow caster uniforms should upload this frame.
+#[inline]
+pub fn room_env_shadow_upload_active(
+    shadow_quality_active: bool,
+    frame: &UiFrame,
+    env: ActiveRoomEnv,
+    offline_baked_loaded: bool,
+) -> bool {
+    shadow_quality_active && !skip_room_env_live_shadow_pass(frame, env, offline_baked_loaded)
+}
+
 /// Whether this catalog prop should cast into the live shadow map.
 #[inline]
 pub(super) fn object3d_casts_dynamic_shadow(
@@ -471,6 +504,34 @@ mod object3d_shadow_tests {
         assert!(object3d_casts_dynamic_shadow(
             env,
             SHOP_INSPECT_SUBJECT_ANIM_ID
+        ));
+    }
+
+    #[test]
+    fn offline_bake_skips_live_room_env_pass_except_archive() {
+        use super::{room_env_shadow_upload_active, skip_room_env_live_shadow_pass};
+        let mut frame = crate::draw_cmd::UiFrame::default();
+        assert!(skip_room_env_live_shadow_pass(
+            &frame,
+            ActiveRoomEnv::Shop,
+            true,
+        ));
+        assert!(!skip_room_env_live_shadow_pass(
+            &frame,
+            ActiveRoomEnv::Archive,
+            true,
+        ));
+        assert!(!room_env_shadow_upload_active(
+            true,
+            &frame,
+            ActiveRoomEnv::Shop,
+            true,
+        ));
+        frame.shop_inspect_shadow_target = Some([0.0, 0.0, 12.0]);
+        assert!(skip_room_env_live_shadow_pass(
+            &frame,
+            ActiveRoomEnv::Archive,
+            false,
         ));
     }
 }

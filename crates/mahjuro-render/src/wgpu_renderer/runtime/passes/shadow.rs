@@ -58,14 +58,13 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             shadow_pass.set_pipeline(&self.shadow_pipeline);
-            let room_draws = self.draw_shadow_casters(
+            let _ = self.draw_shadow_casters(
                 &mut shadow_pass,
                 frame,
                 object3d_draw_list,
                 showcase_tile_batches,
                 tile_3d_rects,
             );
-            let _ = room_draws;
         }
     }
 
@@ -80,9 +79,15 @@ impl WgpuRenderer {
         let Some(active_room_env) = super::shadow_setup::active_room_env(frame) else {
             return;
         };
-        if frame.shop_inspect_shadow_target.is_some()
-            && matches!(active_room_env, ActiveRoomEnv::Shop)
-        {
+        let offline_baked = self
+            .active_room_baked_shadow
+            .is_some()
+            && super::shadow_setup::room_env_uses_offline_baked_shadow(active_room_env);
+        if super::shadow_setup::skip_room_env_live_shadow_pass(
+            frame,
+            active_room_env,
+            offline_baked,
+        ) {
             return;
         }
         let model = self.room_env_shadow_base_model(active_room_env, camera_h);
@@ -117,55 +122,65 @@ impl WgpuRenderer {
         let shop_inspect_shadow_only = frame.shop_inspect_shadow_target.is_some();
         let mut room_draws = 0u32;
         if let Some(active_room_env) = super::shadow_setup::active_room_env(frame) {
-            match active_room_env {
-                ActiveRoomEnv::Shop if !shop_inspect_shadow_only => {
-                    room_draws += self.draw_shop_environment_shadow(shadow_pass, frame);
-                }
-                ActiveRoomEnv::Shop => {}
-                ActiveRoomEnv::Hallway => {
-                    if let Some(ref gpu) = self.hallway_environment {
-                        room_draws += self.draw_gltf_room_env_shadow(
-                            shadow_pass,
-                            &self.hallway_env_primitives,
-                            gpu,
-                            |_| false,
-                        );
+            let offline_baked = self
+                .active_room_baked_shadow
+                .is_some()
+                && super::shadow_setup::room_env_uses_offline_baked_shadow(active_room_env);
+            let skip_room_env = super::shadow_setup::skip_room_env_live_shadow_pass(
+                frame,
+                active_room_env,
+                offline_baked,
+            );
+            if !skip_room_env {
+                match active_room_env {
+                    ActiveRoomEnv::Shop => {
+                        room_draws += self.draw_shop_environment_shadow(shadow_pass, frame);
                     }
-                }
-                ActiveRoomEnv::Stairway => {
-                    if let Some(ref gpu) = self.staircase_environment {
-                        room_draws += self.draw_gltf_room_env_shadow(
-                            shadow_pass,
-                            &self.staircase_env_primitives,
-                            gpu,
-                            |_| false,
-                        );
+                    ActiveRoomEnv::Hallway => {
+                        if let Some(ref gpu) = self.hallway_environment {
+                            room_draws += self.draw_gltf_room_env_shadow(
+                                shadow_pass,
+                                &self.hallway_env_primitives,
+                                gpu,
+                                |_| false,
+                            );
+                        }
                     }
-                }
-                ActiveRoomEnv::Archive => {
-                    room_draws += self.draw_archive_environment_shadow(shadow_pass, frame);
-                }
-                ActiveRoomEnv::MainMenu => {
-                    if let Some(ref gpu) = self.main_menu_environment {
-                        room_draws += self.draw_gltf_room_env_shadow(
-                            shadow_pass,
-                            &self.main_menu_env_primitives,
-                            gpu,
-                            |_| false,
-                        );
+                    ActiveRoomEnv::Stairway => {
+                        if let Some(ref gpu) = self.staircase_environment {
+                            room_draws += self.draw_gltf_room_env_shadow(
+                                shadow_pass,
+                                &self.staircase_env_primitives,
+                                gpu,
+                                |_| false,
+                            );
+                        }
                     }
-                }
-                ActiveRoomEnv::Gameplay => {
-                    if let Some(ref gpu) = self.gameplay_environment {
-                        room_draws += self.draw_gltf_room_env_shadow(
-                            shadow_pass,
-                            &self.gameplay_env_primitives,
-                            gpu,
-                            |pi| {
-                                !frame.gameplay_cash_in_button_visible
-                                    && self.gameplay_cash_in_prim_indices.contains(&pi)
-                            },
-                        );
+                    ActiveRoomEnv::Archive => {
+                        room_draws += self.draw_archive_environment_shadow(shadow_pass, frame);
+                    }
+                    ActiveRoomEnv::MainMenu => {
+                        if let Some(ref gpu) = self.main_menu_environment {
+                            room_draws += self.draw_gltf_room_env_shadow(
+                                shadow_pass,
+                                &self.main_menu_env_primitives,
+                                gpu,
+                                |_| false,
+                            );
+                        }
+                    }
+                    ActiveRoomEnv::Gameplay => {
+                        if let Some(ref gpu) = self.gameplay_environment {
+                            room_draws += self.draw_gltf_room_env_shadow(
+                                shadow_pass,
+                                &self.gameplay_env_primitives,
+                                gpu,
+                                |pi| {
+                                    !frame.gameplay_cash_in_button_visible
+                                        && self.gameplay_cash_in_prim_indices.contains(&pi)
+                                },
+                            );
+                        }
                     }
                 }
             }

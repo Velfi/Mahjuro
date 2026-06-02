@@ -10,7 +10,7 @@ Stamp hashes and skip env vars are centralized in [`crates/mahjuro-bake-stamp`](
 
 ## Offline room shadows (`.msh`)
 
-Static rooms ship offline `assets/data/room_shadow/<room>.msh` (MSH1: depth + contact AO). [`room_glb.wgsl`](../../shaders/room_glb.wgsl) samples the baked map when present; the live 1024² shadow map is for **moving catalog props only**.
+Static rooms ship offline `assets/data/room_shadow/<room>.msh` (MSH1: depth + contact AO). [`room_glb.wgsl`](../../shaders/room_glb.wgsl) samples baked contact AO via `sample_contact_ao` when a `.msh` is loaded; the live depth array is for **moving catalog props** (static room shells skip the live cast pass when offline bake is active — see `skip_room_env_live_shadow_pass` in [`shadow_setup.rs`](../../crates/mahjuro-render/src/wgpu_renderer/runtime/shadow_setup.rs)).
 
 **Rebake all rooms** (refreshes `.inputs_stamp` automatically):
 

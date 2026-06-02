@@ -1118,14 +1118,6 @@ impl WgpuRenderer {
 
         self.garbage_collect_prev_tile_world();
 
-        self.write_per_instance_shadow_casters(
-            frame,
-            &camera,
-            light_view_proj_arr,
-            &tile_pick_models,
-            &mut shadow_uniforms_changed,
-        );
-
         self.run_showcase_tiles_placement(
             frame,
             &camera,
@@ -1150,11 +1142,25 @@ impl WgpuRenderer {
             );
         }
         let room_shadow_active = shadow_quality.active();
+        let offline_room_baked_loaded = self.active_room_baked_shadow.is_some();
+        macro_rules! room_env_shadow_upload {
+            ($env:expr) => {
+                super::shadow_setup::room_env_shadow_upload_active(
+                    room_shadow_active,
+                    frame,
+                    $env,
+                    offline_room_baked_loaded,
+                )
+                .then_some((light_view_proj_arr, &mut shadow_uniforms_changed))
+            };
+        }
         if ops_flags.shop_env {
-            let shop_room_shadow = (room_shadow_active
-                && frame.shop_inspect_shadow_target.is_none())
-                .then_some((light_view_proj_arr, &mut shadow_uniforms_changed));
-            self.write_shop_environment_uniforms(frame, &camera, false, shop_room_shadow);
+            self.write_shop_environment_uniforms(
+                frame,
+                &camera,
+                false,
+                room_env_shadow_upload!(super::shadow_setup::ActiveRoomEnv::Shop),
+            );
             if frame.scene_lighting.embedded_gltf_punctual {
                 self.write_shop_room_punctual_occluders(&camera);
             }
@@ -1164,8 +1170,7 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                room_shadow_active
-                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
+                room_env_shadow_upload!(super::shadow_setup::ActiveRoomEnv::Hallway),
             );
         }
         if ops_flags.staircase_env {
@@ -1173,8 +1178,7 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                room_shadow_active
-                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
+                room_env_shadow_upload!(super::shadow_setup::ActiveRoomEnv::Stairway),
             );
         }
         if self.archive_environment.is_some() {
@@ -1185,8 +1189,7 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                room_shadow_active
-                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
+                room_env_shadow_upload!(super::shadow_setup::ActiveRoomEnv::Archive),
             );
         }
         if ops_flags.main_menu_env {
@@ -1194,8 +1197,7 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                room_shadow_active
-                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
+                room_env_shadow_upload!(super::shadow_setup::ActiveRoomEnv::MainMenu),
             );
             if frame.scene_lighting.embedded_gltf_punctual {
                 self.write_main_menu_room_punctual_occluders(&camera);
@@ -1206,8 +1208,7 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                room_shadow_active
-                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
+                room_env_shadow_upload!(super::shadow_setup::ActiveRoomEnv::Gameplay),
             );
         }
 

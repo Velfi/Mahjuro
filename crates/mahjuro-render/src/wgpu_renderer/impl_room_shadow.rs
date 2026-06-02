@@ -84,17 +84,16 @@ impl WgpuRenderer {
 
     /// GPU-upload one room's offline `.msh` contact AO on first draw (lazy init at startup).
     pub(super) fn ensure_room_baked_shadow_gpu(&mut self, room: RoomGiRoom) {
+        if !room_shadow_bake::committed_room_shadows_required() {
+            return;
+        }
         let idx = room_gi_room_index(room);
         if self.room_baked_shadow_gpu[idx].is_some() {
             return;
         }
-        let Some(bake) = room_shadow_bake::cached_room_shadow_bake(room) else {
-            log::error!(
-                "missing room shadow bake at {}; run `cargo build` (mahjuro-bake)",
-                room.shadow_asset_path()
-            );
-            return;
-        };
+        let bake = room_shadow_bake::require_effective_room_shadow_bake(room).unwrap_or_else(|e| {
+            panic!("{e:#}");
+        });
         match Self::upload_room_baked_shadow_gpu(
             &self.device,
             &self.queue,
@@ -110,7 +109,7 @@ impl WgpuRenderer {
                 self.room_baked_shadow_gpu[idx] = Some(gpu);
             }
             Err(e) => {
-                log::error!("room shadow GPU upload for {room:?}: {e:#}");
+                panic!("room shadow GPU upload for {room:?}: {e:#}");
             }
         }
     }
@@ -237,10 +236,18 @@ impl WgpuRenderer {
             self.active_room_baked_shadow = None;
             return;
         };
+        if !room_shadow_bake::committed_room_shadows_required() {
+            self.active_room_baked_shadow = None;
+            return;
+        }
         self.ensure_room_baked_shadow_gpu(room);
-        self.active_room_baked_shadow = self.room_baked_shadow_gpu[room_gi_room_index(room)]
-            .as_ref()
-            .map(|_| room);
+        let gpu_loaded = self.room_baked_shadow_gpu[room_gi_room_index(room)].is_some();
+        if !gpu_loaded {
+            panic!(
+                "room shadow GPU missing for {room:?} after ensure_room_baked_shadow_gpu"
+            );
+        }
+        self.active_room_baked_shadow = Some(room);
     }
 
     pub(super) fn room_shadow_sample_bind_group(&self) -> &wgpu::BindGroup {
