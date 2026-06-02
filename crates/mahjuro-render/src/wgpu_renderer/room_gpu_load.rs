@@ -874,7 +874,7 @@ fn create_cleared_archive_decal_texture(
     tex
 }
 
-fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>, Option<usize>, Option<usize>, Option<usize>, Option<usize>, Vec<usize>, Vec<usize>, rustc_hash::FxHashSet<usize>) {
+fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>, Option<usize>, Option<usize>, Option<usize>, Option<usize>, Vec<usize>, Vec<usize>) {
     crate::archive_glb::with_archive_glb_cpu(|cpu_opt| {
                 let mut prims = Vec::new();
                 let mut gpu_wrap = None;
@@ -884,7 +884,6 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                 let mut plaque_backing = None;
                 let mut page_left = Vec::new();
                 let mut page_right = Vec::new();
-                let mut punctual_shadow_skip = rustc_hash::FxHashSet::default();
                 let Some(cpu) = cpu_opt else {
                     return (
                         prims,
@@ -895,7 +894,6 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                         plaque_backing,
                         page_left,
                         page_right,
-                        punctual_shadow_skip,
                     );
                 };
                 if !cpu.environment_primitives.is_empty() {
@@ -915,10 +913,6 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                                 page_left.push(i);
                             } else if name == crate::archive_glb::BTN_PAGE_RIGHT {
                                 page_right.push(i);
-                            }
-                            if !crate::archive_glb::archive_env_prim_casts_punctual_shadow(Some(name))
-                            {
-                                punctual_shadow_skip.insert(i);
                             }
                         }
                         let prim = &env_prim.mesh;
@@ -1137,7 +1131,6 @@ fn load_archive_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, O
                     plaque_backing,
                     page_left,
                     page_right,
-                    punctual_shadow_skip,
                 )
             })
 }
@@ -1180,7 +1173,7 @@ fn load_gameplay_room_gpu(ctx: RoomGpuUploadCtx<'_>) -> (
                                 name.as_str(),
                                 crate::gameplay_glb::BTN_CASH_IN
                                     | crate::gameplay_glb::LABEL_CASH_IN
-                            ) {
+                            )                             {
                                 gameplay_cash_in_prim_indices.push(i);
                             }
                             if let Some(raw_idx) = score_roller_layout::gameplay_score_roller_raw_index(name)
@@ -1732,7 +1725,6 @@ impl WgpuRenderer {
                     plaque_backing,
                     page_left,
                     page_right,
-                    punctual_shadow_skip,
                 ) = load_archive_room_gpu(ctx);
                 require_room_environment_loaded("archive.glb", &prims, &gpu_wrap);
                 self.archive_env_primitives = prims;
@@ -1743,7 +1735,6 @@ impl WgpuRenderer {
                 self.archive_plaque_backing_prim_idx = plaque_backing;
                 self.archive_page_left_prim_indices = page_left;
                 self.archive_page_right_prim_indices = page_right;
-                self.archive_punctual_shadow_skip_prims = punctual_shadow_skip;
                 crate::archive_glb::release_archive_environment_cpu_sources_after_gpu_upload();
                 self.rooms_gpu_loaded |= ROOM_ARCHIVE;
             },

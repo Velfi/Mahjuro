@@ -64,33 +64,6 @@ pub const ARCHIVE_TAB_BUTTON_NODES: [&str; 5] = [
     BTN_CHRONICLE_TAB,
 ];
 
-/// Whether this archive room primitive casts into the directional shadow map (live or bake).
-///
-/// Archive never casts room GLB into the directional map — contact is punctual-only.
-#[inline]
-pub fn archive_prim_casts_room_shadow(_node_name: Option<&str>) -> bool {
-    false
-}
-
-/// Whether this archive room mesh should cast into the live punctual shadow depth pass.
-///
-/// Shell geometry (cubbies, fixture, shelves) casts; UI chrome (tabs, signs, text) does not.
-#[inline]
-pub fn archive_env_prim_casts_punctual_shadow(node_name: Option<&str>) -> bool {
-    let Some(name) = node_name else {
-        return true;
-    };
-    !is_archive_button_node(name)
-        && !matches!(
-            name,
-            SIGN_DESCRIPTION_LEFT
-                | SIGN_DESCRIPTION_RIGHT
-                | INSPECT_PLAQUE
-                | PLAQUE_BACKING
-        )
-        && !name.starts_with("text_")
-}
-
 /// Fallback host extents for [`crate::decal::decal_dimensions`] when the archive `.glb`
 /// is missing. Live archive decal sizing reads the actual sign-face aspect via
 /// [`archive_sign_description_decal_extents`].
@@ -559,12 +532,6 @@ pub fn archive_embedded_point_lights_runtime(
 mod tests {
     use super::*;
 
-    /// Whether this archive mesh skips directional shadows (matches decode in [`room_env_gltf`]:
-    /// every shell primitive except description boards).
-    fn archive_env_skips_directional_room_shadow(node_name: &str) -> bool {
-        !matches!(node_name, SIGN_DESCRIPTION_LEFT | SIGN_DESCRIPTION_RIGHT)
-    }
-
     #[test]
     fn archive_tab_button_nodes_have_marker_bounds() {
         with_archive_glb_cpu(|opt| {
@@ -598,29 +565,5 @@ mod tests {
                 .is_some(),
             "missing mesh bounds for inspect_plaque"
         );
-    }
-
-    #[test]
-    fn archive_shadow_caster_receiver_split() {
-        assert!(!archive_prim_casts_room_shadow(Some("main_fixture")));
-        assert!(!archive_prim_casts_room_shadow(Some(SIGN_DESCRIPTION_LEFT)));
-        assert!(!archive_prim_casts_room_shadow(Some("Cubby")));
-        assert!(archive_env_skips_directional_room_shadow(
-            "text_scene_title"
-        ));
-        assert!(archive_env_skips_directional_room_shadow(BTN_PAGE_RIGHT));
-        assert!(archive_env_skips_directional_room_shadow("main_fixture"));
-        assert!(!archive_env_skips_directional_room_shadow(
-            SIGN_DESCRIPTION_LEFT
-        ));
-    }
-
-    #[test]
-    fn archive_punctual_shadow_casters_are_shell_only() {
-        assert!(archive_env_prim_casts_punctual_shadow(Some("Cubby")));
-        assert!(archive_env_prim_casts_punctual_shadow(Some("main_fixture")));
-        assert!(!archive_env_prim_casts_punctual_shadow(Some(BTN_RELICS_TAB)));
-        assert!(!archive_env_prim_casts_punctual_shadow(Some(SIGN_DESCRIPTION_LEFT)));
-        assert!(!archive_env_prim_casts_punctual_shadow(Some("text_scene_title")));
     }
 }

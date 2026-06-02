@@ -139,35 +139,16 @@ pub fn material_casts_shadow(kind: MaterialKind) -> bool {
     !matches!(kind, MaterialKind::Emissive | MaterialKind::Unshaded)
 }
 
-/// `material_params.w` sentinel: portrait silk / readable decals must not catch
-/// the shared key-light shadow map (same class of bug as archive description
-/// signs in `room_glb.wgsl`). Showcase zodiac ribbons set this in
-/// `object3d_ribbon.rs`.
-pub const LIT_MESH_PARAMS_W_SKIP_DIRECTIONAL_SHADOW: f32 = 3.0;
-
 /// Balance for props on the shop shelf when embedded punctual lights and HDR
 /// tonemap are active (`SsrGlobals.shop_punctual.y == DISPLAY_CASE_STOREROOM`).
 ///
 /// Spec-forward materials (pack wrap, foil, talismans) pull back direct lit in
-/// `lit_mesh.wgsl`; art-forward materials (enamel relics, portrait silk) use
-/// [`AMBIENT_MUL`] and [`SHADOW_FLOOR`] instead.
+/// `lit_mesh.wgsl`; art-forward materials (enamel relics) use [`AMBIENT_MUL`].
 pub mod shop_catalog_balance {
     /// `SsrGlobals.shop_punctual.y` — storeroom shelf row balance active.
     pub const DISPLAY_CASE_STOREROOM: f32 = 1.0;
     /// Hemispheric ambient multiplier for art-forward catalog props.
     pub const AMBIENT_MUL: f32 = 0.22;
-    /// Minimum key-light visibility for art-forward catalog props.
-    pub const SHADOW_FLOOR: f32 = 0.62;
-}
-
-#[inline]
-pub fn lit_mesh_skips_directional_shadow_receive(params_w: f32) -> bool {
-    (params_w - LIT_MESH_PARAMS_W_SKIP_DIRECTIONAL_SHADOW).abs() < 0.01
-}
-
-#[inline]
-pub fn lit_mesh_casts_directional_shadow(kind: MaterialKind, params_w: f32) -> bool {
-    material_casts_shadow(kind) && !lit_mesh_skips_directional_shadow_receive(params_w)
 }
 
 /// Compact per-mesh material parameters.
@@ -904,11 +885,21 @@ pub fn create_shadow_sample_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 6,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                },
+                count: None,
+            },
         ],
     })
 }
 
-/// Shared shadow-sampling bind group (projected point/spot arrays + contact AO).
+/// Shared shadow-sampling bind group (projected point/spot arrays + contact AO + baked depth).
 pub fn create_shadow_sample_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -919,6 +910,7 @@ pub fn create_shadow_sample_bind_group(
     compare_sampler: &wgpu::Sampler,
     ao_view: &wgpu::TextureView,
     ao_sampler: &wgpu::Sampler,
+    baked_depth_view: &wgpu::TextureView,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(label),
@@ -947,6 +939,10 @@ pub fn create_shadow_sample_bind_group(
             wgpu::BindGroupEntry {
                 binding: 5,
                 resource: wgpu::BindingResource::Sampler(ao_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(baked_depth_view),
             },
         ],
     })

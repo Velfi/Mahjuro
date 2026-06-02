@@ -199,7 +199,9 @@ impl WgpuRenderer {
             | Some("tutorial")
             | Some(scene_keys::HALLWAY)
             | Some(scene_keys::ARCHIVE)
-        ) || (k == Some("showcase") && h.collection_tonemap_context);
+            | Some(scene_keys::SHADOW_AO_LAB)
+        ) || frame.shadow_ao_lab_layout.is_some()
+            || (k == Some("showcase") && h.collection_tonemap_context);
         let shop_scene =
             k == Some(scene_keys::SHOP) || (k == Some("showcase") && h.shop_tonemap_and_lit_mesh_context);
         let gameplay_glb_room = matches!(k, Some(scene_keys::GAMEPLAY) | Some("tutorial"))
@@ -212,6 +214,18 @@ impl WgpuRenderer {
         let shop_env_tonemap = shop_scene;
         let tile_pack_celebration = k == Some("tile_pack_celebration")
             || (k == Some("showcase") && h.tile_pack_celebration_tonemap);
+        // Synthetic lab geometry is kilo-unit world space; smooth punctual + readable ambient.
+        if k == Some(scene_keys::SHADOW_AO_LAB) || frame.shadow_ao_lab_layout.is_some() {
+            return [
+                1.0,
+                self.active_frame_env().linear_exposure * 1.35,
+                self.active_frame_env()
+                    .ambient_scale
+                    .max(crate::room_glb::GAMEPLAY_TABLE_AMBIENT_MIN)
+                    .max(0.62),
+                0.0,
+            ];
+        }
         if tile_pack_celebration {
             let ambient = (self.active_frame_env().ambient_scale * 0.45)
                 .max(crate::room_glb::TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN);
@@ -328,11 +342,8 @@ impl WgpuRenderer {
             } else {
                 0.0
             };
-        let (shop_cat_amb, shop_cat_shadow_floor) = if shop_punctual_display_case > 0.5 {
-            (
-                crate::lit_mesh::shop_catalog_balance::AMBIENT_MUL,
-                crate::lit_mesh::shop_catalog_balance::SHADOW_FLOOR,
-            )
+        let (shop_cat_amb, _shop_cat_shadow_floor) = if shop_punctual_display_case > 0.5 {
+            (crate::lit_mesh::shop_catalog_balance::AMBIENT_MUL, 0.0)
         } else {
             (0.0, 0.0)
         };
@@ -354,7 +365,7 @@ impl WgpuRenderer {
                 shop_punctual_inv_doc,
                 shop_punctual_display_case,
                 shop_cat_amb,
-                shop_cat_shadow_floor,
+                0.0,
             ],
         }
     }

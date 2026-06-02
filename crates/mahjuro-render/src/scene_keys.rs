@@ -9,6 +9,7 @@ pub const OPTIONS: &str = "options";
 pub const STAIRWAY: &str = "stairway";
 pub const VICTORY: &str = "victory";
 pub const DEFEAT: &str = "defeat";
+pub const SHADOW_AO_LAB: &str = "shadow_ao_lab";
 
 /// Primary navigable scenes — the names used in docs, CLI, and persistence keys.
 pub const PRIMARY: &[&str] = &[

@@ -141,9 +141,7 @@ impl WgpuRenderer {
         slot: usize,
     ) {
         object3d_draw_list.push((kind, slot));
-        if self.placement_shadow_casts {
-            object3d_shadow_draw_list.push((kind, slot));
-        }
+        object3d_shadow_draw_list.push((kind, slot));
     }
 
     /// Walk all `Object3d` batches and the wall-stack placements and write
@@ -165,7 +163,6 @@ impl WgpuRenderer {
         relic_debuff_markers: &mut Vec<GpuInstance>,
         mut shadow: Option<&mut super::shadow_setup::Object3dShadowCtx<'_>>,
     ) {
-        self.reset_shop_inspect_shadow_slot();
         self.talisman_slot_kind.fill(None);
         let cam_pos = camera.cam_pos;
         let look_target = camera.look_target;
@@ -183,8 +180,6 @@ impl WgpuRenderer {
         // Object3d instances don't collide with legacy placement instances.
         // Also fills in the start/end range in the corresponding RenderOp.
         {
-            self.placement_shadow_room =
-                crate::wgpu_renderer::runtime::shadow_setup::active_room_env(frame);
             let _camera_pitch_deg = {
                 let look = look_target - cam_pos;
                 look.z.atan2(look.y.abs()).to_degrees() + 180.0
@@ -217,12 +212,6 @@ impl WgpuRenderer {
                 let batch_start = object3d_draw_list.len();
 
                 for obj in batch.iter() {
-                    self.shadow_placement_anim_id = obj.anim_id;
-                    self.placement_shadow_casts =
-                        super::shadow_setup::object3d_casts_dynamic_shadow(
-                            self.placement_shadow_room,
-                            obj.anim_id,
-                        );
                     use crate::draw_cmd::Object3dKind;
                     let use_ray_plane = frame
                         .showcase_render_hints
@@ -339,15 +328,12 @@ impl WgpuRenderer {
                                 material,
                                 true,
                             );
-                            self.register_placement_shadow_slot(DrawKind::YakuTablet, slot_i);
-                            if self.placement_shadow_writes(frame) {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.yaku_tablet_instances[slot_i],
                                     model,
                                     material.kind,
                                 );
-                            }
                             self.push_object3d_draw(
                                 object3d_draw_list,
                                 object3d_shadow_draw_list,
@@ -494,15 +480,12 @@ impl WgpuRenderer {
                                 body_material,
                                 false,
                             );
-                            self.register_placement_shadow_slot(DrawKind::Book, slot_i);
-                            if self.placement_shadow_writes(frame) {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.book_instances[slot_i],
                                     model,
                                     body_material.kind,
                                 );
-                            }
                             if let Some(pid) = pick_id {
                                 self.proj
                                     .aux_dish_rects
@@ -582,15 +565,12 @@ impl WgpuRenderer {
                                 self.book_cover_mesh.default_material,
                                 true,
                             );
-                            self.register_placement_shadow_slot(DrawKind::BookCover, slot_i);
-                            if self.placement_shadow_writes(frame) {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.book_cover_instances[slot_i],
                                     cover_model,
                                     self.book_cover_mesh.default_material.kind,
                                 );
-                            }
                             self.push_object3d_draw(
                                 object3d_draw_list,
                                 object3d_shadow_draw_list,
@@ -658,34 +638,20 @@ impl WgpuRenderer {
                                     base_color,
                                 );
                             } else {
-                                let skip_shadow = frame.showcase_render_hints.modal_relic_staging;
-                                if skip_shadow {
-                                    self.relic_instances[slot_i].write_uniform_raw_w(
-                                        &self.queue,
-                                        view_proj_arr,
-                                        model,
-                                        material,
-                                        crate::lit_mesh::LIT_MESH_PARAMS_W_SKIP_DIRECTIONAL_SHADOW,
-                                    );
-                                } else {
-                                    self.relic_instances[slot_i].write_uniform_with_decal(
-                                        &self.queue,
-                                        view_proj_arr,
-                                        model,
-                                        material,
-                                        false,
-                                    );
-                                }
+                                self.relic_instances[slot_i].write_uniform_with_decal(
+                                    &self.queue,
+                                    view_proj_arr,
+                                    model,
+                                    material,
+                                    false,
+                                );
                             }
-                            self.register_placement_shadow_slot(DrawKind::Relic, slot_i);
-                            if self.placement_shadow_writes(frame) {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.relic_instances[slot_i],
                                     model,
                                     material.kind,
                                 );
-                            }
                             // Silhouette pass skips the relic albedo/relief
                             // texture — we want the shape only, not the
                             // engraved artwork.
@@ -806,15 +772,12 @@ impl WgpuRenderer {
                                 material,
                                 false,
                             );
-                            self.register_placement_shadow_slot(DrawKind::BossIcon, slot_i);
-                            if self.placement_shadow_writes(frame) {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.ordeal_icon_instances[slot_i],
                                     model,
                                     material.kind,
                                 );
-                            }
                             let want_tex = self
                                 .ordeal_icon_textures
                                 .contains_key(kind)
@@ -919,20 +882,12 @@ impl WgpuRenderer {
                                 material,
                                 false,
                             );
-                            self.register_placement_shadow_slot(DrawKind::Pack, slot_i);
-                            if self.placement_shadow_writes(frame)
-                                && crate::lit_mesh::lit_mesh_casts_directional_shadow(
-                                    material.kind,
-                                    0.0,
-                                )
-                            {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.pack_instances[slot_i],
                                     model,
                                     material.kind,
                                 );
-                            }
                             let want_tex = if self.pack_textures.contains_key(kind) {
                                 Some(*kind)
                             } else {
@@ -1098,15 +1053,12 @@ impl WgpuRenderer {
                                 material,
                                 kind_idx as f32,
                             );
-                            self.register_placement_shadow_slot(DrawKind::Talisman, slot_i);
-                            if self.placement_shadow_writes(frame) {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.talisman_instances[slot_i],
                                     talisman_model,
                                     material.kind,
                                 );
-                            }
                             self.last_talisman_models.push(talisman_model);
                             self.proj
                                 .talisman_rects
@@ -1153,15 +1105,12 @@ impl WgpuRenderer {
                                 self.bug_body_mesh.default_material,
                                 false,
                             );
-                            self.register_placement_shadow_slot(DrawKind::BugBody, slot);
-                            if self.placement_shadow_writes(frame) {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.bug_body_instances[slot],
                                     bug_model,
                                     self.bug_body_mesh.default_material.kind,
                                 );
-                            }
                             self.push_object3d_draw(
                                 object3d_draw_list,
                                 object3d_shadow_draw_list,
@@ -1253,15 +1202,12 @@ impl WgpuRenderer {
                                 model,
                                 *material,
                             );
-                            self.register_placement_shadow_slot(DrawKind::Orb, slot_i);
-                            if self.placement_shadow_writes(frame) {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.orb_instances[slot_i],
                                     model,
                                     material.kind,
                                 );
-                            }
                             self.push_object3d_draw(
                                 object3d_draw_list,
                                 object3d_shadow_draw_list,
@@ -1382,15 +1328,12 @@ impl WgpuRenderer {
                                 glyph_model,
                                 material,
                             );
-                            self.register_placement_shadow_slot(DrawKind::ExtrudedGlyph, slot_i);
-                            if self.placement_shadow_writes(frame) {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.extruded_glyph_instances[slot_i],
                                     glyph_model,
                                     material.kind,
                                 );
-                            }
                             self.push_object3d_draw(
                                 object3d_draw_list,
                                 object3d_shadow_draw_list,
@@ -1506,32 +1449,20 @@ impl WgpuRenderer {
                                     model,
                                     base_material,
                                 );
-                                self.register_placement_shadow_slot(
-                                    DrawKind::TallyStickBase,
-                                    obj3d_tally_stick_cursor,
-                                );
-                                if self.placement_shadow_writes(frame) {
                                     self.write_lit_mesh_shadow(
                                         &mut shadow,
                                         &self.tally_stick_instances[obj3d_tally_stick_cursor],
                                         model,
                                         base_material.kind,
                                     );
-                                }
                                 self.tally_stick_instances[obj3d_tally_stick_cursor + 1]
                                     .write_uniform(&self.queue, view_proj_arr, model, tip_material);
-                                self.register_placement_shadow_slot(
-                                    DrawKind::TallyStickTip,
-                                    obj3d_tally_stick_cursor + 1,
-                                );
-                                if self.placement_shadow_writes(frame) {
                                     self.write_lit_mesh_shadow(
                                         &mut shadow,
                                         &self.tally_stick_instances[obj3d_tally_stick_cursor + 1],
                                         model,
                                         tip_material.kind,
                                     );
-                                }
                                 self.push_object3d_draw(
                                     object3d_draw_list,
                                     object3d_shadow_draw_list,

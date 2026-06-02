@@ -13,7 +13,7 @@ impl WgpuRenderer {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn place_object3d_ribbon(
         &mut self,
-        frame: &crate::draw_cmd::UiFrame,
+        _frame: &crate::draw_cmd::UiFrame,
         camera: &CameraFrame,
         obj: &crate::draw_cmd::Object3d,
         center: glam::Vec3,
@@ -64,7 +64,6 @@ impl WgpuRenderer {
         });
         let slot_i = *ribbon_slot;
         *ribbon_slot += 1;
-        self.shadow_placement_anim_id = obj.anim_id;
         if self.ribbon_slot_zodiac[slot_i] != zodiac_id {
             let view: &wgpu::TextureView = match zodiac_id {
                 Some(idx) => &self.ribbon_zodiac_tex.views[idx as usize],
@@ -97,30 +96,18 @@ impl WgpuRenderer {
             });
             self.ribbon_slot_zodiac[slot_i] = zodiac_id;
         }
-        // Portrait silk: skip the key-light shadow map in every scene (shop
-        // cubbies, collection, showcase) so ribbon art stays readable — same
-        // class as archive description decals.
-        self.ribbon_instances[slot_i].write_uniform_raw_w(
+        self.ribbon_instances[slot_i].write_uniform(
             &self.queue,
             view_proj_arr,
             full_ribbon_model,
             silk_mat,
-            crate::lit_mesh::LIT_MESH_PARAMS_W_SKIP_DIRECTIONAL_SHADOW,
         );
-        self.register_placement_shadow_slot(DrawKind::Ribbon, slot_i);
-        if self.placement_shadow_writes(frame)
-            && crate::lit_mesh::lit_mesh_casts_directional_shadow(
-                silk_mat.kind,
-                crate::lit_mesh::LIT_MESH_PARAMS_W_SKIP_DIRECTIONAL_SHADOW,
-            )
-        {
-            self.write_lit_mesh_shadow(
-                shadow,
-                &self.ribbon_instances[slot_i],
-                full_ribbon_model,
-                silk_mat.kind,
-            );
-        }
+        self.write_lit_mesh_shadow(
+            shadow,
+            &self.ribbon_instances[slot_i],
+            full_ribbon_model,
+            silk_mat.kind,
+        );
         self.push_object3d_draw(
             object3d_draw_list,
             object3d_shadow_draw_list,

@@ -13,6 +13,82 @@ use crate::room_gi_bake::RoomGiRoom;
 
 const MAGIC: &[u8; 4] = b"MSH1";
 pub const VERSION: u32 = mahjuro_bake_stamp::room_shadow::MSH_FORMAT_VERSION;
+/// Window height used by `mahjuro-bake` room shadow captures (see `bake_cli.rs`).
+pub const ROOM_SHADOW_BAKE_REFERENCE_H: f32 = 1080.0;
+
+/// Scale runtime world positions into bake-space before sampling `.msh` contact AO.
+#[inline]
+pub fn contact_ao_world_scale_ratio(window_h: f32) -> f32 {
+    (ROOM_SHADOW_BAKE_REFERENCE_H / window_h.max(1.0)).clamp(0.25, 4.0)
+}
+
+/// Reject contact AO when receiver light-space depth differs from baked depth at the
+/// same UV — stops ceiling/floor bake edges from painting horizontal bands on walls.
+pub const CONTACT_AO_DEPTH_COHERENCE_EPS: f32 = 0.02;
+
+/// CPU-side contact-AO sample at a runtime world position (matches shader math).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ContactAoWorldProbe {
+    pub ndc: [f32; 3],
+    pub uv: [f32; 2],
+    pub ao: u8,
+    pub baked_depth: Option<f32>,
+    pub depth_delta: Option<f32>,
+    /// Whether contact AO would darken this texel after depth-coherence gating.
+    pub applies: bool,
+}
+
+/// Sample committed `.msh` contact AO at `world` using bake LVP + window-height scale.
+pub fn probe_contact_ao_world(
+    bake: &RoomShadowBake,
+    world: glam::Vec3,
+    window_h: f32,
+) -> Option<ContactAoWorldProbe> {
+    probe_contact_ao_at_world(bake, world, contact_ao_world_scale_ratio(window_h))
+}
+
+/// Sample contact AO with an explicit world-position scale (`1.0` for [`crate::shadow_ao_lab`]).
+pub fn probe_contact_ao_at_world(
+    bake: &RoomShadowBake,
+    world: glam::Vec3,
+    world_scale: f32,
+) -> Option<ContactAoWorldProbe> {
+    let ao = bake.ao_bytes.as_ref()?;
+    let scale = world_scale;
+    let lvp = glam::Mat4::from_cols_array(&bake.light_view_proj);
+    let scaled = world * scale;
+    let clip = lvp * scaled.extend(1.0);
+    if clip.w.abs() < 1e-8 {
+        return None;
+    }
+    let ndc_v = clip.truncate() / clip.w;
+    if ndc_v.z < 0.0 || ndc_v.z > 1.0 {
+        return None;
+    }
+    let uv = [ndc_v.x * 0.5 + 0.5, ndc_v.y * -0.5 + 0.5];
+    if uv[0] < 0.0 || uv[0] > 1.0 || uv[1] < 0.0 || uv[1] > 1.0 {
+        return None;
+    }
+    let w = bake.width as usize;
+    let h = bake.height as usize;
+    let x = ((uv[0] * (w as f32 - 1.0)).round() as usize).min(w - 1);
+    let y = ((uv[1] * (h as f32 - 1.0)).round() as usize).min(h - 1);
+    let ao_val = *ao.get(y * w + x)?;
+    let baked_depth = bake.depth_bytes.chunks_exact(4).nth(y * w + x).map(|chunk| {
+        f32::from_le_bytes(chunk.try_into().unwrap())
+    });
+    let depth_delta = baked_depth.map(|d| (d - ndc_v.z).abs());
+    let applies = depth_delta.is_none_or(|d| d <= CONTACT_AO_DEPTH_COHERENCE_EPS)
+        && (ao_val as f32) < 250.0;
+    Some(ContactAoWorldProbe {
+        ndc: ndc_v.to_array(),
+        uv,
+        ao: ao_val,
+        baked_depth,
+        depth_delta,
+        applies,
+    })
+}
 
 #[derive(Clone)]
 pub struct RoomShadowBake {
@@ -219,10 +295,7 @@ pub fn room_shadow_bake_is_effective(bake: &RoomShadowBake) -> bool {
 /// Game runtime must load valid committed `.msh` files. Offline bakers skip this so stale
 /// placeholders do not block capturing fresh bakes (live punctual shadows during bake).
 pub fn committed_room_shadows_required() -> bool {
-    if cfg!(feature = "bake") {
-        return false;
-    }
-    !mahjuro_bake_stamp::skip_committed_bake_checks()
+    crate::offline_bakes::committed_offline_bakes_required()
 }
 
 /// Fail when a decoded bake is a placeholder (all-zero depth / all-white AO).
@@ -247,7 +320,23 @@ pub fn require_effective_room_shadow_bake(room: RoomGiRoom) -> anyhow::Result<Ar
     Ok(bake)
 }
 
+/// Rooms that must have a committed `.msh` at game runtime (archive uses punctual-only today).
+pub fn runtime_required_room_shadow_bakes() -> [RoomGiRoom; 5] {
+    [
+        RoomGiRoom::Shop,
+        RoomGiRoom::Hallway,
+        RoomGiRoom::MainMenu,
+        RoomGiRoom::Stairway,
+        RoomGiRoom::Gameplay,
+    ]
+}
+
 fn load_room_shadow_bake(room: RoomGiRoom) -> Option<Arc<RoomShadowBake>> {
+    if committed_room_shadows_required() {
+        return Some(
+            require_effective_room_shadow_bake(room).unwrap_or_else(|e| panic!("{e:#}")),
+        );
+    }
     let file = asset_path::get(room.shadow_asset_path())?;
     RoomShadowBake::decode_for_room(&file.data, room)
         .map(Arc::new)
@@ -339,6 +428,74 @@ mod tests {
         };
         assert!(!room_shadow_bake_is_effective(&bake));
         assert!(validate_room_shadow_bake_effective(&bake, RoomGiRoom::Shop).is_err());
+    }
+
+    fn project_world_to_ao_uv(lvp: glam::Mat4, world: glam::Vec3) -> Option<(glam::Vec2, f32)> {
+        let clip = lvp * world.extend(1.0);
+        if clip.w.abs() < 1e-8 {
+            return None;
+        }
+        let ndc = clip.truncate() / clip.w;
+        if ndc.z < 0.0 || ndc.z > 1.0 {
+            return None;
+        }
+        let uv = glam::Vec2::new(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+        if uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 {
+            return None;
+        }
+        Some((uv, ndc.z))
+    }
+
+    fn sample_bake_ao(bake: &RoomShadowBake, uv: glam::Vec2) -> Option<u8> {
+        let ao = bake.ao_bytes.as_ref()?;
+        let w = bake.width as usize;
+        let h = bake.height as usize;
+        let x = ((uv.x * (w as f32 - 1.0)).round() as usize).min(w - 1);
+        let y = ((uv.y * (h as f32 - 1.0)).round() as usize).min(h - 1);
+        ao.get(y * w + x).copied()
+    }
+
+    /// Committed `.msh` contact AO is often white at room geometry UVs (see runtime logs).
+    #[test]
+    fn committed_shop_msh_corner_uv_ao_diagnostic() {
+        use crate::room_env_gltf::room_world_bounds_corners_centered;
+        use crate::room_gi_bake::RoomGiRoom;
+        use crate::room_glb::with_shop_glb_cpu;
+
+        let bake = require_room_shadow_bake(RoomGiRoom::Shop).expect("shop.msh");
+        let lvp = glam::Mat4::from_cols_array(&bake.light_view_proj);
+        let bounds = with_shop_glb_cpu(|o| o.and_then(|c| c.environment_bounds_doc))
+            .expect("shop bounds");
+        const BAKE_H: f32 = 1080.0;
+        const ENV_H: f32 = 1.0;
+        let corners = room_world_bounds_corners_centered(bounds, BAKE_H, ENV_H);
+        assert!(!corners.is_empty(), "shop corners");
+        let mut uv_min = glam::Vec2::splat(f32::INFINITY);
+        let mut uv_max = glam::Vec2::splat(f32::NEG_INFINITY);
+        let mut ao_samples = Vec::new();
+        for corner in &corners {
+            let Some((uv, ndc_z)) = project_world_to_ao_uv(lvp, *corner) else {
+                eprintln!("corner {:?} outside frustum", corner);
+                continue;
+            };
+            uv_min = uv_min.min(uv);
+            uv_max = uv_max.max(uv);
+            if let Some(a) = sample_bake_ao(&bake, uv) {
+                eprintln!("corner {:?} uv {:?} ndc_z {:.3} ao {}", corner, uv, ndc_z, a);
+                ao_samples.push(a);
+            }
+        }
+        let uv_span = uv_max - uv_min;
+        eprintln!(
+            "shop corner uv span=({:.4}, {:.4}) samples={:?} min={} max={}",
+            uv_span.x,
+            uv_span.y,
+            ao_samples,
+            ao_samples.iter().copied().min().unwrap_or(255),
+            ao_samples.iter().copied().max().unwrap_or(255),
+        );
+        // Documents current bake: corners map inside frustum but AO texels are white.
+        assert!(uv_span.x > 0.05 && uv_span.y > 0.05);
     }
 
     #[test]

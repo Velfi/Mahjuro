@@ -18,51 +18,17 @@ use crate::render::gameplay_glb::{
     self, STRUCTURE_TILES_LEFT, STRUCTURE_TILES_RIGHT, TILE_PLINTH_MARKERS, PLAYER_RELIC_MARKERS,
 };
 use crate::render::theme::{color, metrics, typography};
+use crate::render::draw_cmd::CameraParams;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::ordeal_icons::ordeal_icon_source;
 
+use super::cascade_lab_click::LabClick;
 use super::gameplay::{relic_tray_slot_screen_center, GameplayScene};
 use super::main_menu::MainMenuScene;
 use super::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const RELIC_SLOT_COUNT: usize = PLAYER_RELIC_MARKERS.len();
-
-const CLICK_BACK: u32 = 0xE220;
-const CLICK_PREV: u32 = 0xE221;
-const CLICK_NEXT: u32 = 0xE222;
-const CLICK_CASH_IN: u32 = 0xE223;
-const CLICK_RESET_SCORE: u32 = 0xE224;
-const CLICK_APPLY: u32 = 0xE225;
-const CLICK_STRUCTURE_FIELD: u32 = 0xE22E;
-const CLICK_SAVE: u32 = 0xE228;
-const CLICK_RESET_TUNING: u32 = 0xE229;
-const CLICK_TOGGLE_PANEL: u32 = 0xE22A;
-const CLICK_TAB_TIMING: u32 = 0xE22B;
-const CLICK_TAB_TABLE: u32 = 0xE22C;
-const CLICK_TAB_STATE: u32 = 0xE22D;
-const CLICK_RELIC_SLOT_BASE: u32 = 0xE240;
-const CLICK_PICKER_CLOSE: u32 = 0xE24A;
-const CLICK_PICKER_CLEAR: u32 = 0xE24B;
-const CLICK_PICK_RELIC_BASE: u32 = 0xE250;
-const CLICK_DISCARDS_DEC: u32 = 0xE290;
-const CLICK_DISCARDS_INC: u32 = 0xE291;
-const CLICK_PLAYS_DEC: u32 = 0xE292;
-const CLICK_PLAYS_INC: u32 = 0xE293;
-const CLICK_YEN_DEC: u32 = 0xE294;
-const CLICK_YEN_INC: u32 = 0xE295;
-const CLICK_TOGGLE_SCORED_LAST: u32 = 0xE296;
-const CLICK_COUNTER_DEC: u32 = 0xE298;
-const CLICK_COUNTER_INC: u32 = 0xE299;
-const CLICK_DORA_BASE: u32 = 0xE260;
-const CLICK_ROUND_WIND_BASE: u32 = 0xE264;
-const CLICK_STRUCTURE_MELD_BASE: u32 = 0xE270;
-const CLICK_STRUCTURE_ADD: u32 = 0xE27F;
-const CLICK_BOSS: u32 = 0xE27E;
-const CLICK_PICK_DORA_BASE: u32 = 0xE2A0;
-const CLICK_PICK_WIND_BASE: u32 = 0xE2B0;
-const CLICK_PICK_MELD_BASE: u32 = 0xE2C0;
-const CLICK_PICK_BOSS_BASE: u32 = 0xE2D0;
 
 const STRUCTURE_MELD_SLOTS_MAX: usize = 5;
 const DORA_SLOT_MAX: usize = 2;
@@ -700,6 +666,7 @@ impl CascadeLabScene {
         env_h: f32,
         slot: usize,
         proj: &crate::render::wgpu_renderer::ProjectionCache,
+        cam: Option<&CameraParams>,
     ) -> Option<[f32; 4]> {
         if let Some([rx, ry, rw, rh]) = proj.relic_rects.get(slot).copied()
             && rw > 1.0
@@ -712,20 +679,20 @@ impl CascadeLabScene {
             return Some([rx - pad, ry - pad, rw + pad * 2.0, rh + pad * 2.0]);
         }
         let hit = (44.0 * metrics::scene_scale(w, h)).max(32.0);
+        if let Some(cam) = cam {
+            let name = PLAYER_RELIC_MARKERS.get(slot)?;
+            return gameplay_glb::with_gameplay_glb_cpu(|cpu| {
+                let cpu = cpu?;
+                gameplay_glb::gameplay_marker_screen_rect(w, h, cam, env_h, cpu, name, hit, hit)
+            });
+        }
         relic_tray_slot_screen_center(w, h, env_h, slot).map(|(cx, cy)| {
             [cx - hit * 0.5, cy - hit * 0.5, hit, hit]
         })
     }
 
     fn is_picker_button(id: u32) -> bool {
-        id == CLICK_PICKER_CLOSE
-            || id == CLICK_PICKER_CLEAR
-            || (CLICK_PICK_RELIC_BASE..CLICK_PICK_RELIC_BASE + 512).contains(&id)
-            || (CLICK_PICK_DORA_BASE..CLICK_PICK_DORA_BASE + 64).contains(&id)
-            || (CLICK_PICK_WIND_BASE..CLICK_PICK_WIND_BASE + 8).contains(&id)
-            || (CLICK_PICK_MELD_BASE..CLICK_PICK_MELD_BASE + MELD_PRESETS.len() as u32).contains(&id)
-            || (CLICK_PICK_BOSS_BASE..CLICK_PICK_BOSS_BASE + OrdealKind::ALL.len() as u32)
-                .contains(&id)
+        LabClick::from_id(id).is_some_and(LabClick::is_picker)
     }
 
     fn picker_row_count(picker: LabPicker) -> usize {
@@ -756,7 +723,10 @@ impl CascadeLabScene {
         let mut ordered = Vec::with_capacity(picker_btns.len() + rest.len() + gameplay_buttons.len() + 1);
         ordered.extend(picker_btns);
         ordered.extend(rest);
-        ordered.push(ButtonDef::scene((0.0, 0.0, w, h), CLICK_PICKER_CLOSE));
+        ordered.push(ButtonDef::scene(
+            (0.0, 0.0, w, h),
+            LabClick::PickerClose.id(),
+        ));
         ordered.extend(gameplay_buttons);
         ordered
     }
@@ -904,7 +874,13 @@ impl CascadeLabScene {
         self.picker_scroll = (self.picker_scroll - scroll_lines * row_h * 0.85).clamp(0.0, max_scroll);
     }
 
-    fn push_btn(frame: &mut UiFrame, rect: (f32, f32, f32, f32), label: &str, id: u32, font_h: f32) {
+    fn push_btn(
+        frame: &mut UiFrame,
+        rect: (f32, f32, f32, f32),
+        label: &str,
+        click: LabClick,
+        font_h: f32,
+    ) {
         frame.quad(GpuInstance {
             rect: [rect.0, rect.1, rect.2, rect.3],
             color: color::alpha(color::WALNUT_RAISED, 0.92),
@@ -918,7 +894,7 @@ impl CascadeLabScene {
             align: TextAlign::Center,
             ..Default::default()
         });
-        frame.buttons.push(ButtonDef::scene(rect, id));
+        frame.buttons.push(ButtonDef::scene(rect, click.id()));
     }
 
     fn draw_collapsed_tab(&self, frame: &mut UiFrame, w: f32, h: f32) {
@@ -938,7 +914,10 @@ impl CascadeLabScene {
         });
         frame
             .buttons
-            .push(ButtonDef::scene((panel_x, panel_y, panel_w, panel_h), CLICK_TOGGLE_PANEL));
+            .push(ButtonDef::scene(
+                (panel_x, panel_y, panel_w, panel_h),
+                LabClick::TogglePanel.id(),
+            ));
     }
 
     fn draw_expanded_panel(&self, frame: &mut UiFrame, w: f32, h: f32) {
@@ -973,7 +952,7 @@ impl CascadeLabScene {
                 tab_h,
             ),
             "▼",
-            CLICK_TOGGLE_PANEL,
+            LabClick::TogglePanel,
             tab_h,
         );
 
@@ -1003,10 +982,12 @@ impl CascadeLabScene {
                 align: TextAlign::Center,
                 ..Default::default()
             });
-            frame.buttons.push(ButtonDef::scene(
-                (tx, tabs_y, tab_w, tab_h),
-                CLICK_TAB_TIMING + i as u32,
-            ));
+            let tab_click = match tab {
+                LabTab::Timing => LabClick::TabTiming,
+                LabTab::Table => LabClick::TabTable,
+                LabTab::RunState => LabClick::TabState,
+            };
+            frame.buttons.push(ButtonDef::scene((tx, tabs_y, tab_w, tab_h), tab_click.id()));
         }
 
         let body_y = Self::expanded_panel_body_y(panel_y, scale);
@@ -1140,7 +1121,7 @@ impl CascadeLabScene {
         });
         frame.buttons.push(ButtonDef::scene(
             (panel_x + 8.0, y, panel_w - 16.0, field_h),
-            CLICK_STRUCTURE_FIELD,
+            LabClick::StructureField.id(),
         ));
         y += field_h + gap * 0.5;
         if let Some(err) = &self.structure_error {
@@ -1159,24 +1140,24 @@ impl CascadeLabScene {
             frame,
             (panel_x + 8.0, y, half_w, row_h),
             "◀ Prev",
-            CLICK_PREV,
+            LabClick::Prev,
             row_h,
         );
         Self::push_btn(
             frame,
             (panel_x + 12.0 + half_w, y, half_w, row_h),
             "Next ▶",
-            CLICK_NEXT,
+            LabClick::Next,
             row_h,
         );
         y += row_h + gap;
         for (label, id) in [
-            ("Apply structure", CLICK_APPLY),
-            ("Cash in", CLICK_CASH_IN),
-            ("Reset score", CLICK_RESET_SCORE),
-            ("Save tuning", CLICK_SAVE),
-            ("Reset tuning", CLICK_RESET_TUNING),
-            ("Back", CLICK_BACK),
+            ("Apply structure", LabClick::Apply),
+            ("Cash in", LabClick::CashIn),
+            ("Reset score", LabClick::ResetScore),
+            ("Save tuning", LabClick::Save),
+            ("Reset tuning", LabClick::ResetTuning),
+            ("Back", LabClick::Back),
         ] {
             Self::push_btn(frame, (panel_x + 8.0, y, panel_w - 16.0, row_h), label, id, row_h);
             y += row_h + gap;
@@ -1190,9 +1171,10 @@ impl CascadeLabScene {
         h: f32,
         env_h: f32,
         proj: &crate::render::wgpu_renderer::ProjectionCache,
+        cam: Option<&CameraParams>,
     ) {
         for i in 0..RELIC_SLOT_COUNT {
-            let Some([rx, ry, rw, rh]) = Self::relic_slot_hit_rect(w, h, env_h, i, proj) else {
+            let Some([rx, ry, rw, rh]) = Self::relic_slot_hit_rect(w, h, env_h, i, proj, cam) else {
                 continue;
             };
             let picking = self.active_picker == Some(LabPicker::Relic(i));
@@ -1207,7 +1189,7 @@ impl CascadeLabScene {
             });
             frame.buttons.push(ButtonDef::scene(
                 (rx, ry, rw, rh),
-                CLICK_RELIC_SLOT_BASE + i as u32,
+                LabClick::RelicTraySlot(i).id(),
             ));
         }
     }
@@ -1265,7 +1247,7 @@ impl CascadeLabScene {
                     frame,
                     split_rect_slots(dora_rect, i, dora_count),
                     picking,
-                    CLICK_DORA_BASE + i as u32,
+                    LabClick::DoraSlot(i).id(),
                 );
             }
             let wind_count = Self::round_wind_slot_count(run);
@@ -1281,13 +1263,13 @@ impl CascadeLabScene {
                     frame,
                     split_rect_slots(wind_rect, i, wind_count),
                     picking,
-                    CLICK_ROUND_WIND_BASE + i as u32,
+                    LabClick::RoundWindSlot(i).id(),
                 );
             }
             if plinth.len() >= 3 {
                 let boss_rect = plinth_hit_rect(None, &plinth[2].anchor, layout, 1);
                 let picking = self.active_picker == Some(LabPicker::Boss);
-                highlight(frame, boss_rect, picking, CLICK_BOSS);
+                highlight(frame, boss_rect, picking, LabClick::Boss.id());
             }
         }
 
@@ -1305,7 +1287,7 @@ impl CascadeLabScene {
                     frame,
                     split_rect_by_weights(strip, &weights, i),
                     picking,
-                    CLICK_STRUCTURE_MELD_BASE + i as u32,
+                    LabClick::StructureMeldSlot(i).id(),
                 );
             }
             if show_add {
@@ -1314,7 +1296,7 @@ impl CascadeLabScene {
                     frame,
                     split_rect_by_weights(strip, &weights, sets.len()),
                     picking,
-                    CLICK_STRUCTURE_ADD,
+                    LabClick::StructureAdd.id(),
                 );
             }
         }
@@ -1357,7 +1339,7 @@ impl CascadeLabScene {
                 header_h,
             ),
             "✕",
-            CLICK_PICKER_CLOSE,
+            LabClick::PickerClose,
             header_h,
         );
 
@@ -1368,7 +1350,7 @@ impl CascadeLabScene {
                 frame,
                 (picker_x + pad, list_y0, picker_w - pad * 2.0, row_h * 0.55),
                 clear,
-                CLICK_PICKER_CLEAR,
+                LabClick::PickerClear,
                 row_h,
             );
             list_y0 += row_h * 0.65 + pad;
@@ -1423,7 +1405,7 @@ impl CascadeLabScene {
                     });
                     frame.buttons.push(ButtonDef::scene(
                         (picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0),
-                        CLICK_PICK_RELIC_BASE + (first_visible + vis) as u32,
+                        LabClick::PickRelicDef(def_idx).id(),
                     ));
                 }
             }
@@ -1454,7 +1436,7 @@ impl CascadeLabScene {
                     });
                     frame.buttons.push(ButtonDef::scene(
                         (picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0),
-                        CLICK_PICK_DORA_BASE + (first_visible + vis) as u32,
+                        LabClick::PickDoraRow(first_visible + vis).id(),
                     ));
                 }
             }
@@ -1481,7 +1463,7 @@ impl CascadeLabScene {
                     });
                     frame.buttons.push(ButtonDef::scene(
                         (picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0),
-                        CLICK_PICK_WIND_BASE + (first_visible + vis) as u32,
+                        LabClick::PickWind(rank).id(),
                     ));
                 }
             }
@@ -1522,7 +1504,7 @@ impl CascadeLabScene {
                     });
                     frame.buttons.push(ButtonDef::scene(
                         (picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0),
-                        CLICK_PICK_BOSS_BASE + (first_visible + vis) as u32,
+                        LabClick::PickBossRow(first_visible + vis).id(),
                     ));
                 }
             }
@@ -1552,7 +1534,7 @@ impl CascadeLabScene {
                     });
                     frame.buttons.push(ButtonDef::scene(
                         (picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0),
-                        CLICK_PICK_MELD_BASE + (first_visible + vis) as u32,
+                        LabClick::PickMeldRow(first_visible + vis).id(),
                     ));
                 }
             }
@@ -1586,7 +1568,7 @@ impl CascadeLabScene {
         });
         y += row_h + gap;
 
-        let draw_stepper = |frame: &mut UiFrame, y: f32, label: &str, value: &str, dec: u32, inc: u32| {
+        let draw_stepper = |frame: &mut UiFrame, y: f32, label: &str, value: &str, dec: LabClick, inc: LabClick| {
             frame.text(TextLabel {
                 rect: [panel_x + 8.0, y, panel_w * 0.42, row_h],
                 text: label.into(),
@@ -1619,8 +1601,8 @@ impl CascadeLabScene {
             y,
             "Discards left",
             &run.discards_remaining.to_string(),
-            CLICK_DISCARDS_DEC,
-            CLICK_DISCARDS_INC,
+            LabClick::DiscardsDec,
+            LabClick::DiscardsInc,
         );
         y += row_h + gap;
         draw_stepper(
@@ -1628,8 +1610,8 @@ impl CascadeLabScene {
             y,
             "Plays left",
             &run.plays_remaining.to_string(),
-            CLICK_PLAYS_DEC,
-            CLICK_PLAYS_INC,
+            LabClick::PlaysDec,
+            LabClick::PlaysInc,
         );
         y += row_h + gap;
         draw_stepper(
@@ -1637,8 +1619,8 @@ impl CascadeLabScene {
             y,
             "Yen",
             &run.yen.to_string(),
-            CLICK_YEN_DEC,
-            CLICK_YEN_INC,
+            LabClick::YenDec,
+            LabClick::YenInc,
         );
         y += row_h + gap;
 
@@ -1647,7 +1629,7 @@ impl CascadeLabScene {
             frame,
             (panel_x + 8.0, y, panel_w - 16.0, row_h),
             &format!("Scored last turn: {scored}"),
-            CLICK_TOGGLE_SCORED_LAST,
+            LabClick::ToggleScoredLast,
             row_h,
         );
         y += row_h + gap;
@@ -1665,8 +1647,8 @@ impl CascadeLabScene {
                 y,
                 &format!("{name} counter"),
                 &counter.to_string(),
-                CLICK_COUNTER_DEC,
-                CLICK_COUNTER_INC,
+                LabClick::CounterDec,
+                LabClick::CounterInc,
             );
         }
     }
@@ -1693,171 +1675,135 @@ impl SceneBehavior for CascadeLabScene {
         self.prev_mouse_down = ctx.mouse_left_down;
 
         for &cid in ctx.button_clicks {
-            if cid == CLICK_TOGGLE_PANEL {
-                self.panel_collapsed = !self.panel_collapsed;
+            let Some(click) = LabClick::from_id(cid) else {
                 continue;
-            }
-            if cid == CLICK_STRUCTURE_FIELD {
-                self.structure_field_focused = true;
-                self.structure_error = None;
-                continue;
-            }
+            };
             if self.structure_field_focused
-                && cid != CLICK_STRUCTURE_FIELD
-                && !Self::is_picker_button(cid)
+                && click != LabClick::StructureField
+                && !click.is_picker()
             {
                 self.structure_field_focused = false;
             }
-            if cid == CLICK_PICKER_CLOSE {
-                self.active_picker = None;
-                continue;
-            }
-            if cid == CLICK_PICKER_CLEAR {
-                match self.active_picker {
-                    Some(LabPicker::Relic(slot)) => Self::clear_relic_slot(ctx.run, slot),
-                    Some(LabPicker::StructureMeld(i)) => {
-                        Self::clear_structure_meld(ctx.run, i);
-                        self.sync_structure_text_from_run(ctx.run);
-                    }
-                    Some(LabPicker::Boss) => Self::clear_lab_boss(ctx.run),
-                    _ => {}
+            match click {
+                LabClick::TogglePanel => self.panel_collapsed = !self.panel_collapsed,
+                LabClick::StructureField => {
+                    self.structure_field_focused = true;
+                    self.structure_error = None;
                 }
-                self.active_picker = None;
-                continue;
-            }
-            if (CLICK_PICK_RELIC_BASE..CLICK_PICK_RELIC_BASE + 512).contains(&cid)
-                && let Some(LabPicker::Relic(slot)) = self.active_picker
-            {
-                let pick_i = (cid - CLICK_PICK_RELIC_BASE) as usize;
-                if let Some(&def_idx) = self.sorted_relic_indices.get(pick_i) {
-                    Self::assign_relic_slot(ctx.run, slot, all_relic_defs()[def_idx].id);
-                }
-                self.active_picker = None;
-                continue;
-            }
-            if (CLICK_PICK_DORA_BASE..CLICK_PICK_DORA_BASE + 64).contains(&cid)
-                && let Some(LabPicker::Dora(i)) = self.active_picker
-            {
-                let pick_i = (cid - CLICK_PICK_DORA_BASE) as usize;
-                if let Some((_, suit, rank)) = dora_picker_faces().get(pick_i) {
-                    Self::set_dora_slot(ctx.run, i, *suit, *rank);
-                }
-                self.active_picker = None;
-                continue;
-            }
-            if (CLICK_PICK_WIND_BASE..CLICK_PICK_WIND_BASE + 8).contains(&cid)
-                && let Some(LabPicker::RoundWind(i)) = self.active_picker
-            {
-                let rank = (cid - CLICK_PICK_WIND_BASE + 1) as u8;
-                Self::set_round_wind_slot(ctx.run, i, rank);
-                self.active_picker = None;
-                continue;
-            }
-            if (CLICK_PICK_BOSS_BASE..CLICK_PICK_BOSS_BASE + OrdealKind::ALL.len() as u32)
-                .contains(&cid)
-                && self.active_picker == Some(LabPicker::Boss)
-            {
-                let pick_i = (cid - CLICK_PICK_BOSS_BASE) as usize;
-                if let Some(&kind_idx) = self.sorted_ordeal_indices.get(pick_i) {
-                    Self::set_lab_boss(ctx.run, OrdealKind::ALL[kind_idx]);
-                }
-                self.active_picker = None;
-                continue;
-            }
-            if (CLICK_PICK_MELD_BASE..CLICK_PICK_MELD_BASE + MELD_PRESETS.len() as u32).contains(&cid)
-            {
-                let pick_i = (cid - CLICK_PICK_MELD_BASE) as usize;
-                if let Some(token) = MELD_PRESETS.get(pick_i) {
+                LabClick::PickerClose => self.active_picker = None,
+                LabClick::PickerClear => {
                     match self.active_picker {
+                        Some(LabPicker::Relic(slot)) => Self::clear_relic_slot(ctx.run, slot),
                         Some(LabPicker::StructureMeld(i)) => {
-                            if Self::apply_meld_preset(ctx.run, Some(i), token) {
-                                self.sync_structure_text_from_run(ctx.run);
-                            }
+                            Self::clear_structure_meld(ctx.run, i);
+                            self.sync_structure_text_from_run(ctx.run);
                         }
-                        Some(LabPicker::AddStructureMeld) => {
-                            if Self::apply_meld_preset(ctx.run, None, token) {
-                                self.sync_structure_text_from_run(ctx.run);
-                            }
-                        }
+                        Some(LabPicker::Boss) => Self::clear_lab_boss(ctx.run),
                         _ => {}
                     }
+                    self.active_picker = None;
                 }
-                self.active_picker = None;
-                continue;
-            }
-            if (CLICK_RELIC_SLOT_BASE..CLICK_RELIC_SLOT_BASE + RELIC_SLOT_COUNT as u32)
-                .contains(&cid)
-            {
-                let slot = (cid - CLICK_RELIC_SLOT_BASE) as usize;
-                self.counter_edit_slot = slot;
-                self.active_picker = Some(LabPicker::Relic(slot));
-                self.picker_scroll = 0.0;
-                continue;
-            }
-            if (CLICK_DORA_BASE..CLICK_DORA_BASE + DORA_SLOT_MAX as u32).contains(&cid) {
-                let i = (cid - CLICK_DORA_BASE) as usize;
-                self.active_picker = Some(LabPicker::Dora(i));
-                self.picker_scroll = 0.0;
-                continue;
-            }
-            if (CLICK_ROUND_WIND_BASE..CLICK_ROUND_WIND_BASE + ROUND_WIND_SLOT_MAX as u32)
-                .contains(&cid)
-            {
-                let i = (cid - CLICK_ROUND_WIND_BASE) as usize;
-                self.active_picker = Some(LabPicker::RoundWind(i));
-                self.picker_scroll = 0.0;
-                continue;
-            }
-            if (CLICK_STRUCTURE_MELD_BASE
-                ..CLICK_STRUCTURE_MELD_BASE + STRUCTURE_MELD_SLOTS_MAX as u32)
-                .contains(&cid)
-            {
-                let i = (cid - CLICK_STRUCTURE_MELD_BASE) as usize;
-                if i < ctx.run.structure_sets().len() {
-                    self.active_picker = Some(LabPicker::StructureMeld(i));
+                LabClick::PickRelicDef(def_idx) => {
+                    if let Some(LabPicker::Relic(slot)) = self.active_picker {
+                        if let Some(def) = all_relic_defs().get(def_idx) {
+                            Self::assign_relic_slot(ctx.run, slot, def.id);
+                            self.active_picker = None;
+                        }
+                    }
+                }
+                LabClick::PickDoraRow(pick_i) => {
+                    if let Some(LabPicker::Dora(i)) = self.active_picker {
+                        if let Some((_, suit, rank)) = dora_picker_faces().get(pick_i) {
+                            Self::set_dora_slot(ctx.run, i, *suit, *rank);
+                            self.active_picker = None;
+                        }
+                    }
+                }
+                LabClick::PickWind(rank) => {
+                    if let Some(LabPicker::RoundWind(i)) = self.active_picker {
+                        Self::set_round_wind_slot(ctx.run, i, rank);
+                        self.active_picker = None;
+                    }
+                }
+                LabClick::PickBossRow(pick_i) => {
+                    if self.active_picker == Some(LabPicker::Boss) {
+                        if let Some(&kind_idx) = self.sorted_ordeal_indices.get(pick_i) {
+                            Self::set_lab_boss(ctx.run, OrdealKind::ALL[kind_idx]);
+                            self.active_picker = None;
+                        }
+                    }
+                }
+                LabClick::PickMeldRow(pick_i) => {
+                    if let Some(token) = MELD_PRESETS.get(pick_i) {
+                        match self.active_picker {
+                            Some(LabPicker::StructureMeld(i)) => {
+                                if Self::apply_meld_preset(ctx.run, Some(i), token) {
+                                    self.sync_structure_text_from_run(ctx.run);
+                                }
+                            }
+                            Some(LabPicker::AddStructureMeld) => {
+                                if Self::apply_meld_preset(ctx.run, None, token) {
+                                    self.sync_structure_text_from_run(ctx.run);
+                                }
+                            }
+                            _ => {}
+                        }
+                        self.active_picker = None;
+                    }
+                }
+                LabClick::RelicTraySlot(slot) if slot < RELIC_SLOT_COUNT => {
+                    self.counter_edit_slot = slot;
+                    self.active_picker = Some(LabPicker::Relic(slot));
                     self.picker_scroll = 0.0;
                 }
-                continue;
-            }
-            if cid == CLICK_STRUCTURE_ADD
-                && ctx.run.structure_sets().len() < STRUCTURE_MELD_SLOTS_MAX
-            {
-                self.active_picker = Some(LabPicker::AddStructureMeld);
-                self.picker_scroll = 0.0;
-                continue;
-            }
-            if cid == CLICK_BOSS {
-                self.active_picker = Some(LabPicker::Boss);
-                self.picker_scroll = 0.0;
-                continue;
-            }
-
-            if self.active_picker.is_some() {
-                continue;
-            }
-
-            match cid {
-                CLICK_BACK => return self.go_back(ctx.run, ctx.overlay_request),
-                CLICK_TAB_TIMING => self.active_tab = LabTab::Timing,
-                CLICK_TAB_TABLE => self.active_tab = LabTab::Table,
-                CLICK_TAB_STATE => self.active_tab = LabTab::RunState,
-                CLICK_PREV => {
+                LabClick::DoraSlot(i) if i < DORA_SLOT_MAX => {
+                    self.active_picker = Some(LabPicker::Dora(i));
+                    self.picker_scroll = 0.0;
+                }
+                LabClick::RoundWindSlot(i) if i < ROUND_WIND_SLOT_MAX => {
+                    self.active_picker = Some(LabPicker::RoundWind(i));
+                    self.picker_scroll = 0.0;
+                }
+                LabClick::StructureMeldSlot(i) => {
+                    if i < STRUCTURE_MELD_SLOTS_MAX && i < ctx.run.structure_sets().len() {
+                        self.active_picker = Some(LabPicker::StructureMeld(i));
+                        self.picker_scroll = 0.0;
+                    }
+                }
+                LabClick::StructureAdd => {
+                    if ctx.run.structure_sets().len() < STRUCTURE_MELD_SLOTS_MAX {
+                        self.active_picker = Some(LabPicker::AddStructureMeld);
+                        self.picker_scroll = 0.0;
+                    }
+                }
+                LabClick::Boss => {
+                    self.active_picker = Some(LabPicker::Boss);
+                    self.picker_scroll = 0.0;
+                }
+                _ if self.active_picker.is_some() => {}
+                LabClick::Back => return self.go_back(ctx.run, ctx.overlay_request),
+                LabClick::TabTiming => self.active_tab = LabTab::Timing,
+                LabClick::TabTable => self.active_tab = LabTab::Table,
+                LabClick::TabState => self.active_tab = LabTab::RunState,
+                LabClick::Prev => {
                     self.preset_idx = (self.preset_idx + StructurePreset::ALL.len() - 1)
                         % StructurePreset::ALL.len();
                     self.apply_preset(ctx.run);
                     self.sync_structure_text_from_preset();
                 }
-                CLICK_NEXT => {
+                LabClick::Next => {
                     self.preset_idx = (self.preset_idx + 1) % StructurePreset::ALL.len();
                     self.apply_preset(ctx.run);
                     self.sync_structure_text_from_preset();
                 }
-                CLICK_APPLY => {
-                    self.apply_structure_from_text(ctx.run);
+                LabClick::Apply => {
+                    let _ = self.apply_structure_from_text(ctx.run);
                 }
-                CLICK_CASH_IN => self.cash_in(&mut ctx),
-                CLICK_RESET_SCORE => self.reset_score(ctx.run),
-                CLICK_SAVE => {
+                LabClick::CashIn => {
+                    self.cash_in(&mut ctx);
+                }
+                LabClick::ResetScore => self.reset_score(ctx.run),
+                LabClick::Save => {
                     if let Err(e) = std::fs::write(
                         "cascade_tuning.json",
                         serde_json::to_string_pretty(&self.tuning).unwrap_or_default(),
@@ -1865,35 +1811,42 @@ impl SceneBehavior for CascadeLabScene {
                         log::warn!("Failed to save cascade tuning: {e}");
                     }
                 }
-                CLICK_RESET_TUNING => self.tuning = CascadeTuning::default(),
-                CLICK_DISCARDS_DEC => {
+                LabClick::ResetTuning => self.tuning = CascadeTuning::default(),
+                LabClick::DiscardsDec => {
                     ctx.run.discards_remaining = ctx.run.discards_remaining.saturating_sub(1);
                 }
-                CLICK_DISCARDS_INC => {
+                LabClick::DiscardsInc => {
                     ctx.run.discards_remaining = (ctx.run.discards_remaining + 1)
                         .min(ctx.run.discards_max.max(12));
                 }
-                CLICK_PLAYS_DEC => {
+                LabClick::PlaysDec => {
                     ctx.run.plays_remaining = ctx.run.plays_remaining.saturating_sub(1);
                 }
-                CLICK_PLAYS_INC => {
+                LabClick::PlaysInc => {
                     ctx.run.plays_remaining =
                         (ctx.run.plays_remaining + 1).min(ctx.run.plays_max.max(12));
                 }
-                CLICK_YEN_DEC => ctx.run.set_run_yen_direct(ctx.run.yen.saturating_sub(50), None),
-                CLICK_YEN_INC => ctx.run.set_run_yen_direct(ctx.run.yen.saturating_add(50), None),
-                CLICK_TOGGLE_SCORED_LAST => {
+                LabClick::YenDec => {
+                    ctx.run.set_run_yen_direct(ctx.run.yen.saturating_sub(50), None);
+                }
+                LabClick::YenInc => {
+                    ctx.run.set_run_yen_direct(ctx.run.yen.saturating_add(50), None);
+                }
+                LabClick::ToggleScoredLast => {
                     ctx.run.scored_last_turn = !ctx.run.scored_last_turn;
                 }
-                CLICK_COUNTER_DEC | CLICK_COUNTER_INC => {
+                LabClick::CounterDec => {
                     let slot = self.counter_edit_slot;
                     if let Some(rid) = Self::counter_relic_for_slot(ctx.run, slot) {
                         let entry = ctx.run.relic_counters.entry(rid).or_insert(0);
-                        if cid == CLICK_COUNTER_DEC {
-                            *entry = entry.saturating_sub(1);
-                        } else {
-                            *entry = entry.saturating_add(1);
-                        }
+                        *entry = entry.saturating_sub(1);
+                    }
+                }
+                LabClick::CounterInc => {
+                    let slot = self.counter_edit_slot;
+                    if let Some(rid) = Self::counter_relic_for_slot(ctx.run, slot) {
+                        let entry = ctx.run.relic_counters.entry(rid).or_insert(0);
+                        *entry = entry.saturating_add(1);
                     }
                 }
                 _ => {}
@@ -1930,7 +1883,8 @@ impl SceneBehavior for CascadeLabScene {
         let gameplay_button_count = frame.buttons.len();
         frame.window_title = "Mahjuro — Cascade Lab".into();
 
-        self.draw_relic_slot_targets(&mut frame, w, h, env_h, proj);
+        let cam = frame.camera_override;
+        self.draw_relic_slot_targets(&mut frame, w, h, env_h, proj, cam.as_ref());
         self.draw_table_pick_targets(&mut frame, w, h, env_h, layout, proj, run);
 
         if self.panel_collapsed {

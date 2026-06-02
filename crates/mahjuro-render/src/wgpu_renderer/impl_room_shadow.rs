@@ -5,6 +5,7 @@ use crate::lit_mesh::create_shadow_sample_bind_group;
 use crate::room_gi_bake::{RoomGiRoom, room_gi_room_index};
 use crate::room_shadow_bake::{self, RoomShadowBake};
 use crate::wgpu_renderer::runtime::shadow_setup::{ActiveRoomEnv, build_shadow_globals};
+use crate::wgpu_renderer::runtime::{agent_shadow_log, probe_baked_ao_at_world};
 use mahjuro_gfx_types::ShadowQuality;
 
 pub(crate) struct RoomBakedShadowGpu {
@@ -12,6 +13,7 @@ pub(crate) struct RoomBakedShadowGpu {
     pub globals_buffer: wgpu::Buffer,
     pub baked_light_view_proj: [f32; 16],
     _ao_texture: wgpu::Texture,
+    _depth_texture: wgpu::Texture,
 }
 
 impl WgpuRenderer {
@@ -54,9 +56,11 @@ impl WgpuRenderer {
             &self.shadow_compare_sampler,
             &self.shadow_ao_white_view,
             &self.shadow_ao_sampler,
+            &self.shadow_baked_depth_dummy_view,
         );
         for gpu in self.room_baked_shadow_gpu.iter_mut().flatten() {
             let ao_view = gpu._ao_texture.create_view(&Default::default());
+            let depth_view = gpu._depth_texture.create_view(&Default::default());
             gpu.sample_bind_group = create_shadow_sample_bind_group(
                 &self.device,
                 &self.shadow_sample_layout,
@@ -67,6 +71,23 @@ impl WgpuRenderer {
                 &self.shadow_compare_sampler,
                 &ao_view,
                 &self.shadow_ao_sampler,
+                &depth_view,
+            );
+        }
+        if let Some((_, gpu)) = self.lab_baked_shadow.as_mut() {
+            let ao_view = gpu._ao_texture.create_view(&Default::default());
+            let depth_view = gpu._depth_texture.create_view(&Default::default());
+            gpu.sample_bind_group = create_shadow_sample_bind_group(
+                &self.device,
+                &self.shadow_sample_layout,
+                "lab-baked-shadow-sample-bg",
+                &gpu.globals_buffer,
+                &self.point_shadow_array.array_view,
+                &self.spot_shadow_array.array_view,
+                &self.shadow_compare_sampler,
+                &ao_view,
+                &self.shadow_ao_sampler,
+                &depth_view,
             );
         }
         self.cached_projected_shadow_hash = 0;
@@ -82,7 +103,8 @@ impl WgpuRenderer {
         self.room_shadow_captured.take()
     }
 
-    /// GPU-upload one room's offline `.msh` contact AO on first draw (lazy init at startup).
+    /// GPU-upload offline `.msh` contact AO for one room (panics when committed bakes are required).
+    #[allow(dead_code)] // offline `.msh` bake tooling only — runtime uses live punctual maps
     pub(super) fn ensure_room_baked_shadow_gpu(&mut self, room: RoomGiRoom) {
         if !room_shadow_bake::committed_room_shadows_required() {
             return;
@@ -106,6 +128,42 @@ impl WgpuRenderer {
             &bake,
         ) {
             Ok(gpu) => {
+                // #region agent log
+                if let Ok(bake) = room_shadow_bake::require_room_shadow_bake(room) {
+                    if let Some(ao) = bake.ao_bytes.as_ref() {
+                        let mut dark = 0u32;
+                        for &b in ao.iter() {
+                            if b < 128 {
+                                dark += 1;
+                            }
+                        }
+                        agent_shadow_log(
+                            "H1",
+                            "impl_room_shadow.rs:ensure_room_baked_shadow_gpu",
+                            "room baked shadow GPU loaded",
+                            serde_json::json!({
+                                "room": format!("{room:?}"),
+                                "gpu_loaded": true,
+                                "ao_dark_frac": dark as f32 / ao.len().max(1) as f32,
+                                "origin_probe": probe_baked_ao_at_world(
+                                    gpu.baked_light_view_proj,
+                                    ao,
+                                    bake.width,
+                                    bake.height,
+                                    glam::Vec3::ZERO,
+                                )
+                                .map(|(ndc, uv, a): (glam::Vec3, [f32; 2], u8)| {
+                                    serde_json::json!({
+                                        "ndc": ndc.to_array(),
+                                        "uv": uv,
+                                        "ao": a,
+                                    })
+                                }),
+                            }),
+                        );
+                    }
+                }
+                // #endregion
                 self.room_baked_shadow_gpu[idx] = Some(gpu);
             }
             Err(e) => {
@@ -128,10 +186,9 @@ impl WgpuRenderer {
         let w = bake.width;
         let h = bake.height;
 
-        let ao_bytes = bake
-            .ao_bytes
-            .clone()
-            .unwrap_or_else(|| Arc::from(vec![255u8; (w * h) as usize]));
+        let ao_bytes = bake.ao_bytes.clone().expect(
+            "room shadow bake missing AO bytes after require_effective_room_shadow_bake",
+        );
         let ao_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("room-baked-shadow-ao"),
             size: wgpu::Extent3d {
@@ -167,11 +224,49 @@ impl WgpuRenderer {
             },
         );
 
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("room-baked-shadow-depth"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let depth_view = depth_texture.create_view(&Default::default());
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &depth_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &bake.depth_bytes,
+            wgpu::TexelCopyBufferLayout {
+                bytes_per_row: Some(w * 4),
+                rows_per_image: Some(h),
+                ..Default::default()
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+
         let globals = build_shadow_globals(
             ShadowQuality::Medium,
             &crate::projected_light_shadow::PunctualShadowBuild::empty(),
             true,
             bake.light_view_proj,
+            crate::room_shadow_bake::contact_ao_world_scale_ratio(
+                crate::room_shadow_bake::ROOM_SHADOW_BAKE_REFERENCE_H,
+            ),
         );
         let globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("room-baked-shadow-globals"),
@@ -188,32 +283,36 @@ impl WgpuRenderer {
             compare_sampler,
             &ao_view,
             ao_sampler,
+            &depth_view,
         );
         Ok(RoomBakedShadowGpu {
             sample_bind_group,
             globals_buffer,
             baked_light_view_proj: bake.light_view_proj,
             _ao_texture: ao_texture,
+            _depth_texture: depth_texture,
         })
     }
 
-    /// Keep baked room contact AO in sync with the live projected shadow pass.
+    /// Shadow & AO lab only — sync synthetic contact AO with the live punctual pass.
     pub(super) fn write_active_room_baked_shadow_globals(
         &self,
         shadow_quality: ShadowQuality,
         build: &crate::projected_light_shadow::PunctualShadowBuild,
+        _window_h: f32,
     ) {
-        let Some(room) = self.active_room_baked_shadow else {
+        if !self.active_lab_baked_shadow {
             return;
-        };
-        let Some(gpu) = &self.room_baked_shadow_gpu[room_gi_room_index(room)] else {
+        }
+        let Some((_, gpu)) = &self.lab_baked_shadow else {
             return;
         };
         let globals = build_shadow_globals(
             shadow_quality,
             build,
-            true,
+            shadow_quality.contact_ao(),
             gpu.baked_light_view_proj,
+            crate::shadow_ao_lab::CONTACT_AO_WORLD_SCALE,
         );
         self.queue.write_buffer(
             &gpu.globals_buffer,
@@ -222,39 +321,50 @@ impl WgpuRenderer {
         );
     }
 
+    pub(super) fn ensure_lab_baked_shadow_gpu(&mut self, layout: crate::shadow_ao_lab::ShadowAoLabLayout) {
+        if self
+            .lab_baked_shadow
+            .as_ref()
+            .is_some_and(|(l, _)| *l == layout)
+        {
+            return;
+        }
+        let bake = crate::shadow_ao_lab::synthetic_bake(layout);
+        match Self::upload_room_baked_shadow_gpu(
+            &self.device,
+            &self.queue,
+            &self.shadow_sample_layout,
+            &self.point_shadow_array.array_view,
+            &self.spot_shadow_array.array_view,
+            &self.shadow_compare_sampler,
+            &self.shadow_ao_sampler,
+            RoomGiRoom::Hallway,
+            &bake,
+        ) {
+            Ok(gpu) => {
+                self.lab_baked_shadow = Some((layout, gpu));
+            }
+            Err(e) => panic!("lab shadow GPU upload: {e:#}"),
+        }
+    }
+
     pub(super) fn upload_active_room_baked_shadow_globals(&mut self, frame: &UiFrame) {
-        let active_env = ActiveRoomEnv::from_frame(frame);
-        let Some(env) = active_env else {
+        if let Some(layout) = frame.shadow_ao_lab_layout {
+            self.ensure_lab_baked_shadow_gpu(layout);
             self.active_room_baked_shadow = None;
-            return;
-        };
-        if env == ActiveRoomEnv::Archive {
-            self.active_room_baked_shadow = None;
+            self.active_lab_baked_shadow = true;
             return;
         }
-        let Some(room) = env.to_room_gi() else {
-            self.active_room_baked_shadow = None;
-            return;
-        };
-        if !room_shadow_bake::committed_room_shadows_required() {
-            self.active_room_baked_shadow = None;
-            return;
-        }
-        self.ensure_room_baked_shadow_gpu(room);
-        let gpu_loaded = self.room_baked_shadow_gpu[room_gi_room_index(room)].is_some();
-        if !gpu_loaded {
-            panic!(
-                "room shadow GPU missing for {room:?} after ensure_room_baked_shadow_gpu"
-            );
-        }
-        self.active_room_baked_shadow = Some(room);
+        self.active_lab_baked_shadow = false;
+        self.active_room_baked_shadow = None;
     }
 
     pub(super) fn room_shadow_sample_bind_group(&self) -> &wgpu::BindGroup {
-        if let Some(room) = self.active_room_baked_shadow
-            && let Some(gpu) = &self.room_baked_shadow_gpu[room_gi_room_index(room)] {
-                return &gpu.sample_bind_group;
-            }
+        if self.active_lab_baked_shadow
+            && let Some((_, gpu)) = &self.lab_baked_shadow
+        {
+            return &gpu.sample_bind_group;
+        }
         &self.shadow_sample_bind_group
     }
 

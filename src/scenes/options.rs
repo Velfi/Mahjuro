@@ -92,8 +92,7 @@ enum Row {
     Tile,
     Tileset,
     BorderlessFullscreen,
-    Shadows,
-    Ssr,
+    Graphics,
     Hdr,
     UndoDiscard,
     SwapAb,
@@ -132,8 +131,7 @@ const ROWS: &[Row] = &[
     Row::Tile,
     Row::Tileset,
     Row::BorderlessFullscreen,
-    Row::Shadows,
-    Row::Ssr,
+    Row::Graphics,
     Row::Hdr,
     Row::SwapAb,
     Row::SwapXy,
@@ -167,8 +165,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Tile),
     ContentSlot::Row(Row::Tileset),
     ContentSlot::Row(Row::BorderlessFullscreen),
-    ContentSlot::Row(Row::Shadows),
-    ContentSlot::Row(Row::Ssr),
+    ContentSlot::Row(Row::Graphics),
     ContentSlot::Row(Row::Hdr),
     ContentSlot::Header(Section::Controls),
     ContentSlot::Row(Row::SwapAb),
@@ -352,8 +349,7 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
                 "Windowed".into()
             },
         ),
-        Row::Shadows => ("Shadow quality", scene.shadow_quality.label().into()),
-        Row::Ssr => ("Reflections", on_off(scene.ssr_enabled)),
+        Row::Graphics => ("Graphics", scene.graphics_mode.label().into()),
         Row::Hdr => ("HDR", on_off(scene.hdr_enabled)),
         Row::SwapAb => ("Swap A/B", on_off(scene.swap_ab)),
         Row::SwapXy => ("Swap X/Y", on_off(scene.swap_xy)),
@@ -508,8 +504,7 @@ pub struct OptionsScene {
     pub tileset_name: String,
     pub available_tilesets: Vec<String>,
     pub gamma: f32,
-    pub shadow_quality: crate::persistence::ShadowQuality,
-    pub ssr_enabled: bool,
+    pub graphics_mode: crate::persistence::GraphicsMode,
     pub hdr_enabled: bool,
     pub borderless_fullscreen: bool,
     borderless_fullscreen_apply_armed: Cell<bool>,
@@ -571,8 +566,7 @@ impl OptionsScene {
             tileset_name,
             available_tilesets,
             gamma: settings.gamma,
-            shadow_quality: settings.shadow_quality,
-            ssr_enabled: settings.ssr_enabled,
+            graphics_mode: settings.graphics_mode,
             hdr_enabled: settings.hdr_enabled,
             borderless_fullscreen: settings.borderless_fullscreen,
             borderless_fullscreen_apply_armed: Cell::new(false),
@@ -618,8 +612,7 @@ impl OptionsScene {
         settings.tile_preset = self.tile_preset;
         settings.tileset_name = self.tileset_name.clone();
         settings.gamma = self.gamma;
-        settings.shadow_quality = self.shadow_quality;
-        settings.ssr_enabled = self.ssr_enabled;
+        settings.graphics_mode = self.graphics_mode;
         settings.hdr_enabled = self.hdr_enabled;
         settings.borderless_fullscreen = self.borderless_fullscreen;
         settings.swap_ab = self.swap_ab;
@@ -808,8 +801,7 @@ impl OptionsScene {
             Row::Tile => self.tile_preset = self.tile_preset.next(),
             Row::Tileset => self.cycle_tileset(1),
             Row::BorderlessFullscreen => self.toggle_borderless_fullscreen(),
-            Row::Shadows => self.shadow_quality = self.shadow_quality.next(),
-            Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
+            Row::Graphics => self.graphics_mode = self.graphics_mode.next(),
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => {
                 self.swap_ab = !self.swap_ab;
@@ -846,8 +838,7 @@ impl OptionsScene {
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
             Row::Tileset => self.cycle_tileset(-1),
             Row::BorderlessFullscreen => self.toggle_borderless_fullscreen(),
-            Row::Shadows => self.shadow_quality = self.shadow_quality.prev(),
-            Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
+            Row::Graphics => self.graphics_mode = self.graphics_mode.prev(),
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => {
                 self.swap_ab = !self.swap_ab;
@@ -908,12 +899,8 @@ impl OptionsScene {
                 self.toggle_borderless_fullscreen();
                 self.save_settings();
             }
-            Row::Shadows => {
-                self.shadow_quality = self.shadow_quality.next();
-                self.save_settings();
-            }
-            Row::Ssr => {
-                self.ssr_enabled = !self.ssr_enabled;
+            Row::Graphics => {
+                self.graphics_mode = self.graphics_mode.next();
                 self.save_settings();
             }
             Row::Hdr => {

@@ -292,20 +292,6 @@ fn is_gameplay_score_cascade_bounds_node(name: &str) -> bool {
     name == SCORE_FRAME
 }
 
-/// Static env meshes that should not cast into the punctual shadow atlas (or the
-/// shared key-light map). The table is a receiver; candles are light sources;
-/// flat dishes and engraved UI read as harsh rectangular pools.
-#[inline]
-pub fn gameplay_prim_casts_room_shadow(node_name: Option<&str>) -> bool {
-    match node_name {
-        None => true,
-        Some("table") | Some("candles") | Some("candle_wicks") => false,
-        Some("consumables_dish") | Some("gold_dish") => false,
-        Some(n) if n.starts_with("label_") || n.starts_with("btn_") => false,
-        Some(_) => true,
-    }
-}
-
 #[derive(Copy, Clone)]
 struct GameplayRoomWalkHooks;
 
@@ -1198,17 +1184,6 @@ pub fn gameplay_gltf_candle_flame_emitters(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn gameplay_room_shadow_caster_policy() {
-        assert!(!gameplay_prim_casts_room_shadow(Some("table")));
-        assert!(!gameplay_prim_casts_room_shadow(Some("candles")));
-        assert!(!gameplay_prim_casts_room_shadow(Some("candle_wicks")));
-        assert!(!gameplay_prim_casts_room_shadow(Some("gold_dish")));
-        assert!(!gameplay_prim_casts_room_shadow(Some("label_cash_in")));
-        assert!(gameplay_prim_casts_room_shadow(Some("plinth_dora")));
-        assert!(gameplay_prim_casts_room_shadow(Some("plinth_ordeal")));
-    }
 
     #[test]
     fn shipped_gameplay_glb_loads_with_required_markers() {

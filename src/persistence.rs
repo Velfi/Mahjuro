@@ -9,8 +9,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 pub use mahjuro_gfx_types::{
-    EffectsQuality, ShadowQuality, TileMaterial, TilePreset, clear_tuning_override, has_tuning_override,
-    load_tuning_override, save_tuning_override,
+    EffectsQuality, GraphicsMode, ShadowQuality, TileMaterial, TilePreset, clear_tuning_override,
+    has_tuning_override, load_tuning_override, save_tuning_override,
 };
 
 use crate::core::progression::{PlayerProgress, RunOutcome};
@@ -115,8 +115,8 @@ fn data_dir() -> PathBuf {
     PathBuf::from(".")
 }
 
-fn default_shadow_quality() -> ShadowQuality {
-    ShadowQuality::High
+fn default_graphics_mode() -> GraphicsMode {
+    GraphicsMode::Visuals
 }
 
 fn default_effects_quality() -> EffectsQuality {
@@ -160,10 +160,8 @@ pub struct AppSettings {
     pub tileset_name: String,
     #[serde(default = "default_gamma")]
     pub gamma: f32,
-    #[serde(default = "default_shadow_quality")]
-    pub shadow_quality: ShadowQuality,
-    #[serde(default = "default_true")]
-    pub ssr_enabled: bool,
+    #[serde(default = "default_graphics_mode")]
+    pub graphics_mode: GraphicsMode,
     #[serde(default)]
     pub hdr_enabled: bool,
     /// Master kill-switch for the per-scene VHS overlay. Defaults to `true`
@@ -257,8 +255,7 @@ impl Default for AppSettings {
             tile_material: TileMaterial::Bamboo,
             tileset_name: default_tileset_name(),
             gamma: 1.0,
-            shadow_quality: ShadowQuality::High,
-            ssr_enabled: true,
+            graphics_mode: GraphicsMode::Visuals,
             hdr_enabled: false,
             vhs_enabled: true,
             borderless_fullscreen: true,
@@ -318,17 +315,32 @@ fn load_settings_uncached() -> AppSettings {
     };
     let mut settings: AppSettings = serde_json::from_str(&data).unwrap_or_default();
     if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&data)
-        && raw.get("shadow_quality").is_none()
+        && raw.get("graphics_mode").is_none()
     {
-        settings.shadow_quality = if raw
-            .get("shadows_enabled")
+        let shadow: ShadowQuality = raw
+            .get("shadow_quality")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_else(|| {
+                if raw
+                    .get("shadows_enabled")
+                    .and_then(|v| v.as_bool())
+                    == Some(false)
+                {
+                    ShadowQuality::Off
+                } else {
+                    ShadowQuality::High
+                }
+            });
+        let ssr = raw
+            .get("ssr_enabled")
             .and_then(|v| v.as_bool())
-            == Some(false)
-        {
-            ShadowQuality::Off
-        } else {
-            ShadowQuality::High
-        };
+            .unwrap_or(true);
+        let hdr = raw
+            .get("hdr_enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        settings.graphics_mode = GraphicsMode::from_legacy(shadow, ssr);
+        settings.hdr_enabled = hdr;
     }
     settings.active_profile = settings.active_profile.min(MAX_PROFILES - 1);
     if crate::asset_path::is_internal_only_tileset(&settings.tileset_name) {

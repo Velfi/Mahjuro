@@ -5,8 +5,9 @@ use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay
 use crate::game::engine::GameEngine;
 use crate::scenes::shop::PackCelebration;
 use crate::scenes::{
-    ButtonAabbLabScene, CascadeLabScene, DefeatScene, RollerLabScene, ShowcasePresenter, ShowcaseScene,
-    TileAnchorLabScene, TilePackPresenter, TixelsScene, VictoryScene,
+    ButtonAabbLabScene, CascadeLabScene, DefeatScene, RollerLabScene, ShadowAoLabScene,
+    ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter, TixelsScene,
+    VictoryScene,
 };
 use rand::RngExt;
 
@@ -291,6 +292,7 @@ impl App {
                         Scene::RollerLab(_) => "RollerLab",
                         Scene::CascadeLab(_) => "CascadeLab",
                         Scene::RumbleLab(_) => "RumbleLab",
+                        Scene::ShadowAoLab(_) => "ShadowAoLab",
                         Scene::Tixels(_) => "Tixels",
                         Scene::YakuJournal(_) => "YakuJournal",
                         Scene::WallLedger(_) => "WallLedger",
@@ -353,6 +355,11 @@ impl App {
                 self.overlay_stack
                     .push(Scene::RumbleLab(RumbleLabScene::new(true)));
                 log::debug!("Opened rumble lab");
+            }
+            DebugAction::OpenShadowAoLab => {
+                self.overlay_stack
+                    .push(Scene::ShadowAoLab(ShadowAoLabScene::new(true)));
+                log::debug!("Opened shadow & AO lab");
             }
             DebugAction::OpenTileAnchorLab => {
                 self.overlay_stack

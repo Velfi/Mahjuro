@@ -1065,15 +1065,12 @@ impl WgpuRenderer {
             || self.archive_env_skip_page_button_prim(pi, frame)
     }
 
-    /// Depth pass: shell geometry only — skip UI chrome and frame-culled boards.
-    #[inline]
-    pub(super) fn archive_env_skip_punctual_shadow_prim(
+    pub(super) fn archive_env_skip_shadow_prim(
         &self,
         pi: usize,
         frame: &crate::draw_cmd::UiFrame,
     ) -> bool {
-        self.archive_punctual_shadow_skip_prims.contains(&pi)
-            || self.archive_env_skip_archive_prim(pi, frame)
+        self.archive_env_skip_archive_prim(pi, frame)
     }
 
     pub(super) fn draw_archive_environment_shadow(
@@ -1088,7 +1085,7 @@ impl WgpuRenderer {
             pass,
             &self.archive_env_primitives,
             gpu,
-            |pi| self.archive_env_skip_punctual_shadow_prim(pi, frame),
+            |pi| self.archive_env_skip_shadow_prim(pi, frame),
         )
     }
 

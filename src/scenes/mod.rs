@@ -23,6 +23,8 @@ pub mod pause_menu;
 pub mod hallway;
 pub mod profile_select;
 pub mod cascade_lab;
+mod cascade_lab_click;
+pub mod shadow_ao_lab;
 pub mod roller_lab;
 pub mod rumble_lab;
 pub(crate) mod scoring_intro_copy;
@@ -54,6 +56,7 @@ pub use options::OptionsScene;
 pub use hallway::HallwayScene;
 pub use profile_select::ProfileSelectScene;
 pub use cascade_lab::CascadeLabScene;
+pub use shadow_ao_lab::ShadowAoLabScene;
 pub use roller_lab::RollerLabScene;
 pub use rumble_lab::RumbleLabScene;
 pub use shop::ShopScene;
@@ -494,6 +497,7 @@ pub enum Scene {
     RumbleLab(RumbleLabScene),
     RollerLab(RollerLabScene),
     CascadeLab(Box<CascadeLabScene>),
+    ShadowAoLab(ShadowAoLabScene),
     YakuJournal(YakuJournalScene),
     WallLedger(WallLedgerScene),
 }
@@ -520,6 +524,7 @@ pub fn active_scene_key(scene: &Scene) -> Option<&'static str> {
         Scene::AnimationLab(_) => Some(scene_keys::SHOP),
         Scene::RollerLab(_) => Some(scene_keys::GAMEPLAY),
         Scene::CascadeLab(_) => Some(scene_keys::GAMEPLAY),
+        Scene::ShadowAoLab(_) => Some(scene_keys::SHADOW_AO_LAB),
         Scene::Tixels(_) => Some("tixels"),
         Scene::TileSelect(_) => Some("tile_select"),
         _ => None,

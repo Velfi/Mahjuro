@@ -132,7 +132,11 @@ fn decode_relic_albedo_masked(id: RelicId) -> Option<(image::RgbaImage, Option<i
 
 /// Mask-cut relic albedo for 2D [`ImageQuad`](crate::draw_cmd::ImageQuad) icons.
 pub(crate) fn decode_relic_icon_rgba(id: RelicId) -> Option<(Vec<u8>, u32, u32)> {
-    let msg = crate::relic_bake::load_baked_relic(id).ok()?;
+    let msg = if crate::offline_bakes::committed_offline_bakes_required() {
+        crate::relic_bake::load_baked_relic(id).unwrap_or_else(|e| panic!("{e:#}"))
+    } else {
+        crate::relic_bake::load_baked_relic(id).ok()?
+    };
     Some((msg.rgba, msg.width, msg.height))
 }
 
@@ -245,6 +249,9 @@ fn spawn_relic_bake_loader() -> mpsc::Receiver<DecodedRelicImage> {
                         }
                     }
                     Err(e) => {
+                        if crate::offline_bakes::committed_offline_bakes_required() {
+                            panic!("baked relic {path}: {e:#}");
+                        }
                         log::error!("baked relic {path}: {e:#}");
                     }
                 }
