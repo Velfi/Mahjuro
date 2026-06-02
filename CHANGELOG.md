@@ -7,6 +7,12 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.1 — 2026-06-02
+
+### Fixed
+- The production logo no longer plays twice at startup; it runs once across the early load screen and the main loading splash.
+- Main-menu rain streaks and splashes now scale down on smaller resolutions, so they no longer look oversized at 720p while staying the same on 1080p and 4K.
+
 ## 0.5.0 — 2026-06-01
 
 - maintenance, development, and bugfixes.
