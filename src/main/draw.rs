@@ -653,7 +653,7 @@ impl App {
         if let Some(ref overlay) = self.debug.rain_debug_overlay {
             frame.debug_rain_hit_colliders = overlay.show_rain_hit_colliders;
             frame.debug_rain_depth = overlay.show_rain_depth;
-            hide_all_ui = overlay.hide_all_ui;
+            hide_all_ui |= overlay.hide_all_ui;
             let cam = frame
                 .camera_override
                 .unwrap_or(self.debug.last_effective_camera);
@@ -691,6 +691,7 @@ impl App {
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
+        hide_all_ui |= self.debug.hide_2d_ui;
         if hide_all_ui {
             self.active_buttons.clear();
             frame.buttons.clear();
@@ -864,6 +865,7 @@ impl App {
 
         renderer.set_hdr_enabled(self.effect_layers.hdr_enabled(&self.gfx));
         renderer.main_menu_pride_rainbow_debug = self.debug.main_menu_pride_rainbow_debug;
+        renderer.main_menu_moon_phase_debug = self.debug.main_menu_moon_phase_debug;
 
         // Journal pre-pass: when the shop set `journal_prepass_frame`,
         // render that frame to the offscreen `journal_scene_texture`

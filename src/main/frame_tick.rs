@@ -642,8 +642,10 @@ impl App {
             if let Some(renderer) = self.renderer.as_mut() {
                 renderer.main_menu_effects = overlay.tuning;
                 renderer.main_menu_pride_rainbow_debug = overlay.pride_rainbow_debug;
+                renderer.main_menu_moon_phase_debug = overlay.moon_phase_debug;
             }
             self.debug.main_menu_pride_rainbow_debug = overlay.pride_rainbow_debug;
+            self.debug.main_menu_moon_phase_debug = overlay.moon_phase_debug;
             self.mouse_clicked = false;
             if !close {
                 self.debug.rain_debug_overlay = Some(overlay);

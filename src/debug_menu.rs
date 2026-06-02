@@ -52,6 +52,8 @@ pub enum DebugAction {
     /// face. Clobbers any extra dora revealed by Dora Crown.
     SetDora(Suit, u8),
     ToggleShowFps,
+    /// Hide all 2D UI draw commands so only the 3D scene renders.
+    ToggleHide2dUi,
     /// Open the in-game debug visibility modal — a checkbox panel for
     /// hiding individual gameplay HUD elements (tiles, candles, the two
     /// hanging plaques, the inventory dish) so the procedural 3D scene
@@ -172,6 +174,10 @@ impl DebugMenuBar {
         let fps_item = MenuItem::new("Show FPS", true, None);
         mappings.push((fps_item.id().clone(), DebugAction::ToggleShowFps));
         let _ = overlays_sub.append(&fps_item);
+
+        let hide_2d_ui_item = MenuItem::new("Hide 2D UI", true, None);
+        mappings.push((hide_2d_ui_item.id().clone(), DebugAction::ToggleHide2dUi));
+        let _ = overlays_sub.append(&hide_2d_ui_item);
 
         let visibility_item = MenuItem::new("Gameplay Visibility...", true, None);
         mappings.push((

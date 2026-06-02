@@ -318,7 +318,7 @@ impl WgpuRenderer {
                 cursor_pos: [cx, cy],
                 transition_progress: frame.transition_progress,
                 quality_level: effects_quality.quality_level_f32(),
-                moon_phase: current_moon_phase(),
+                moon_phase: self.main_menu_moon_phase_debug.resolved_phase(),
                 _globals_pad: [
                     cascade_quality_level,
                     if crate::main_menu_glb::main_menu_pride_rainbow_active(

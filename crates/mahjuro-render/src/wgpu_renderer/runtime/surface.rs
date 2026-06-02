@@ -550,7 +550,7 @@ impl WgpuRenderer {
                 cursor_pos: [new_size.width as f32 * 0.5, new_size.height as f32 * 0.5],
                 transition_progress: 0.0,
                 quality_level: 2.0,
-                moon_phase: current_moon_phase(),
+                moon_phase: self.main_menu_moon_phase_debug.resolved_phase(),
                 _globals_pad: [
                     0.0,
                     if crate::main_menu_glb::main_menu_pride_rainbow_active(

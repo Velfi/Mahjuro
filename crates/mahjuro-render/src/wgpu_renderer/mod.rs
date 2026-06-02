@@ -822,6 +822,8 @@ pub struct WgpuRenderer {
     pub flame_tuning: crate::flame_tuning::FlameTuning,
     /// Main-menu moon tab: pride rainbow on moon / stars (defaults on in June).
     pub main_menu_pride_rainbow_debug: bool,
+    /// Main-menu moon tab: live calendar vs forced synodic phase for hub shading.
+    pub main_menu_moon_phase_debug: crate::main_menu_moon_tuning::MainMenuMoonPhaseDebug,
     /// Emissive overlay mesh for main-menu `rain_hit_*` shells (rain debug menu).
     pub(super) main_menu_rain_hit_debug_mesh: Option<LitMeshGpu>,
     pub(super) main_menu_rain_hit_debug_instance: Option<LitMeshInstance>,
@@ -861,7 +863,8 @@ pub(crate) use lighting_buffers::{
     PointLightsBuf, PunctualLightBakeParams, PunctualLightBakeShopCameraParams, SpotLightsBuf,
     TileOccluderGpu, TileOccludersBuf,
 };
-pub(crate) use moon::current_moon_phase;
+pub(crate) use moon::{current_moon_phase, main_menu_moon_phase_for_render};
+pub use moon::moon_phase_short_name;
 pub(crate) use resources::{create_depth, create_depth_r32_snapshot};
 pub(crate) use screenshot::ScreenshotStaging;
 pub(crate) use targets::RenderTarget;

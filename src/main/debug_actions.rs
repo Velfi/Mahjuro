@@ -117,6 +117,10 @@ impl App {
                 self.debug.show_fps = !self.debug.show_fps;
                 log::debug!("Show FPS: {}", self.debug.show_fps);
             }
+            DebugAction::ToggleHide2dUi => {
+                self.debug.hide_2d_ui = !self.debug.hide_2d_ui;
+                log::debug!("Hide 2D UI: {}", self.debug.hide_2d_ui);
+            }
             DebugAction::OpenDebugVisibility => {
                 if self.debug.visibility_overlay.is_some() {
                     self.debug.visibility_overlay = None;
@@ -153,10 +157,16 @@ impl App {
                         .as_ref()
                         .map(|r| r.main_menu_effects)
                         .unwrap_or_else(crate::render::main_menu_effects_tuning::MainMenuEffectsTuning::load);
+                    let moon_phase_debug = self
+                        .renderer
+                        .as_ref()
+                        .map(|r| r.main_menu_moon_phase_debug)
+                        .unwrap_or(self.debug.main_menu_moon_phase_debug);
                     self.debug.rain_debug_overlay = Some(
                         crate::render::main_menu_effects_debug_overlay::MainMenuEffectsDebugOverlay::new(
                             tuning,
                             self.debug.main_menu_pride_rainbow_debug,
+                            moon_phase_debug,
                         ),
                     );
                     log::debug!("Opened main menu effects debug overlay");

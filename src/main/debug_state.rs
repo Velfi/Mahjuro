@@ -20,6 +20,9 @@ pub struct DebugState {
     #[cfg(debug_menu_enabled)]
     pub menu: Option<DebugMenuBar>,
     pub show_fps: bool,
+    /// Strip all 2D draw commands (HUD, modals, debug panels) so only the 3D
+    /// scene is visible. Toggled from Debug → Overlays → Hide 2D UI.
+    pub hide_2d_ui: bool,
     pub fps_smoothed: f32,
     pub visibility: crate::scenes::DebugVisibility,
     pub visibility_overlay: Option<DebugVisibilityOverlay>,
@@ -34,6 +37,8 @@ pub struct DebugState {
     pub flame_debug_overlay: Option<FlameDebugOverlay>,
     /// Main menu moon tab — pride rainbow on moon / stars (defaults on in June).
     pub main_menu_pride_rainbow_debug: bool,
+    /// Main menu moon tab — live calendar vs forced synodic phase.
+    pub main_menu_moon_phase_debug: crate::render::main_menu_moon_tuning::MainMenuMoonPhaseDebug,
     /// Effective 3D camera after the scene's `draw_frame` (override or table
     /// default), updated each paint — used to seed camera debug overlay.
     pub last_effective_camera: CameraParams,
@@ -45,6 +50,7 @@ impl DebugState {
             #[cfg(debug_menu_enabled)]
             menu: None,
             show_fps: false,
+            hide_2d_ui: false,
             fps_smoothed: 60.0,
             visibility: crate::scenes::DebugVisibility::default(),
             visibility_overlay: None,
@@ -56,6 +62,7 @@ impl DebugState {
             rain_debug_overlay: None,
             flame_debug_overlay: None,
             main_menu_pride_rainbow_debug: crate::render::main_menu_glb::main_menu_pride_rainbow_default_enabled(),
+            main_menu_moon_phase_debug: crate::render::main_menu_moon_tuning::MainMenuMoonPhaseDebug::default(),
             last_effective_camera: CameraParams::default_table_camera(800.0),
         }
     }
