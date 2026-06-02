@@ -98,7 +98,8 @@ This is the only sustained musical sequence in the moment-to-moment loop. It is 
 - **`RoundWin` / `Victory` / `Victory2`** — today: `roundwin.ogg`, `victory.ogg`, `victory2.ogg`. Keep; the two-victory randomization is the only randomization Mahjuro currently does and it is working.
 - **`GameOver` / `Defeat`** — today: `gameover.ogg`, `defeat.ogg`. Keep.
 - **`LevelUp`** — today: `levelup.ogg`. Keep.
-- **`MainMenuEnter`** — today: `mahjuro.ogg` logo sting. Keep, locked.
+- **`ProductionLogo`** — today: `loading/zelda_built_this.ogg`. Boot/splash production logo fade-in; once per launch. Keep, locked.
+- **`MainMenuEnter`** — today: `mahjuro.ogg`. Main menu (start screen) entry sting. Keep, locked.
 - **`BossEncountered`** *(no asset yet)*. Design as a **single low wooden temple-block thud** (a `mokugyo`-style hit) with a soft, brief shakuhachi-style breath layer. ~700 ms. One sample for all 23 bosses. Per-boss differentiation lives in BGM filter & visual, not in a unique cue per boss — that path is content-prohibitive.
 - **`BossDefeated`** *(no asset yet)*. Same temple-block instrument as `BossEncountered`, struck *twice* (call-and-resolve), with the second hit dampened. Reuses the instrument so player can hear the encounter→defeat arc as the same object book-ending the fight.
 
@@ -376,7 +377,7 @@ M1–M5 are pure content. M6 requires one new sink. M7 is the largest dev work a
 
 This is the design-side view of the cue inventory. The implementation-side source of truth is `enum SfxId` + `SfxId::filename()` in [src/audio.rs](../src/audio.rs); when the two disagree, source wins and this doc should be updated.
 
-**Locked:** `MainMenu` BGM, `Gameplay` BGM, `Shop` BGM, `ChamberWin`/`ChamberLoss`/`BossWin`/`BossLoss` music stingers, `TileDiscard`, `TileClick`, all `Yaku*` (except `YakuKokushiMusou`), all `audio/relics/<slug>.ogg` that ship today, `MainMenuEnter`, `RoundWin`, `Victory`/`Victory2`, `GameOver`, `Defeat`, `LevelUp`, `ZodiacLevelUp`, `CoinDrop`, `Purchase`, `CandleFlareWhoosh`, `CandleFlareImpact`, `UiConfirm`, `UiCancel`, all `Focus*`, `Pause`, `Unpause`, `InvalidAction`, `CashIn`.
+**Locked:** `MainMenu` BGM, `Gameplay` BGM, `Shop` BGM, `ChamberWin`/`ChamberLoss`/`BossWin`/`BossLoss` music stingers, `TileDiscard`, `TileClick`, all `Yaku*` (except `YakuKokushiMusou`), all `audio/relics/<slug>.ogg` that ship today, `ProductionLogo`, `MainMenuEnter`, `RoundWin`, `Victory`/`Victory2`, `GameOver`, `Defeat`, `LevelUp`, `ZodiacLevelUp`, `CoinDrop`, `Purchase`, `CandleFlareWhoosh`, `CandleFlareImpact`, `UiConfirm`, `UiCancel`, all `Focus*`, `Pause`, `Unpause`, `InvalidAction`, `CashIn`.
 
 **Shipped interim (polish pass still open):** `TileSelect`, `TileDeselect`, `StructureCommit`, `Sell`, `PackBuy`, `PackTileReveal`, `RoundStart`, `StarShimmer`, `DoraScored`, `ChamberSkipped`.
 

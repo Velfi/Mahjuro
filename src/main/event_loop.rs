@@ -23,8 +23,6 @@ fn mod_gui(m: Mod) -> bool {
 use sdl3::gamepad::Button as GpButton;
 
 fn poll_loading_logo_skip(shell: &mut SdlShell) {
-    use crate::render::wgpu_renderer::loading_screen;
-
     for event in shell.pump.poll_iter() {
         match event {
             Event::KeyDown {
@@ -36,20 +34,33 @@ fn poll_loading_logo_skip(shell: &mut SdlShell) {
                 Scancode::Space | Scancode::Return | Scancode::KpEnter | Scancode::Backspace
             ) =>
             {
-                loading_screen::request_skip();
+                crate::render::wgpu_renderer::loading_screen::request_skip();
             }
             Event::ControllerButtonDown {
                 button: GpButton::South | GpButton::East,
                 ..
             } => {
-                loading_screen::request_skip();
+                crate::render::wgpu_renderer::loading_screen::request_skip();
             }
             _ => {}
         }
     }
 }
 
+fn poll_loading_during_init(shell: &mut SdlShell, audio: &mut crate::audio::AudioManager) {
+    poll_loading_logo_skip(shell);
+    if crate::render::wgpu_renderer::loading_screen::take_production_logo_stinger() {
+        audio.play_sfx(crate::audio::SfxId::ProductionLogo);
+    }
+}
+
 impl App {
+    pub(crate) fn try_play_production_logo_stinger(&mut self) {
+        if crate::render::wgpu_renderer::loading_screen::take_production_logo_stinger() {
+            self.audio.play_sfx(crate::audio::SfxId::ProductionLogo);
+        }
+    }
+
     pub fn run_sdl_main(mut self, shell: &mut SdlShell) -> anyhow::Result<()> {
         // macOS: hide during renderer init to avoid Shown-without-focus races. Elsewhere
         // (Steam Deck / gamescope) keep the window visible and present a boot clear frame
@@ -68,14 +79,16 @@ impl App {
         // 1 — a redundant Metal surface transition linked to intermittent black
         // startup frames on macOS.
         let window = shell.window.clone();
+        let hdr_enabled = self.effect_layers.hdr_enabled(&self.gfx);
+        let show_window_during_init = !cfg!(target_os = "macos");
         let renderer = {
             let _wgpu = crate::startup_profile::scope("wgpu.renderer_new");
-            let mut poll_boot_skip = || poll_loading_logo_skip(shell);
+            let mut poll_boot = || poll_loading_during_init(shell, &mut self.audio);
             WgpuRenderer::new_windowed(
                 window,
-                self.effect_layers.hdr_enabled(&self.gfx),
-                !cfg!(target_os = "macos"),
-                Some(&mut poll_boot_skip),
+                hdr_enabled,
+                show_window_during_init,
+                Some(&mut poll_boot),
             )?
         };
         self.renderer = Some(renderer);

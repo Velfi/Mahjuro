@@ -132,7 +132,7 @@ No ambience for the main menu exterior (existing music carries it; a bed risks c
 
 These cues define the identity everything else sits alongside. Listed here so you know to skip them in recording sessions.
 
-**SFX**: `TileDiscard`, `TileClick`, `CashIn`, `CoinDrop`, `Purchase`, `RelicPickup`, `RoundWin`, `Victory`, `Victory2`, `Defeat`, `GameOver`, `LevelUp`, `MainMenuEnter`, `ZodiacLevelUp`, `CandleFlareWhoosh`, `CandleFlareImpact`, `StarShimmer` (revisit only if it clashes with the cascade hand-off), all `Yaku*` except `YakuKokushiMusou`, all 82 `audio/relics/<slug>.ogg` per-relic stingers.
+**SFX**: `TileDiscard`, `TileClick`, `CashIn`, `CoinDrop`, `Purchase`, `RelicPickup`, `RoundWin`, `Victory`, `Victory2`, `Defeat`, `GameOver`, `LevelUp`, `ProductionLogo`, `MainMenuEnter`, `ZodiacLevelUp`, `CandleFlareWhoosh`, `CandleFlareImpact`, `StarShimmer` (revisit only if it clashes with the cascade hand-off), all `Yaku*` except `YakuKokushiMusou`, all 82 `audio/relics/<slug>.ogg` per-relic stingers.
 
 **Music**: `MusicId::MainMenu`, `Gameplay`, `Shop`, `ChamberWin`, `ChamberLoss`, `BossWin`, `BossLoss`.
 
