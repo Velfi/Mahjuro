@@ -204,12 +204,15 @@ pub(crate) struct PostSceneTransitionCtx<'a> {
     pub audio: &'a mut crate::audio::AudioManager,
 }
 
+/// Shop BGM waits this long after a fresh shop entry (door chime plays immediately).
+const SHOP_BGM_START_DELAY: f32 = 2.0;
+
 /// Side effects after the scene pointer(s) have been updated (smoke, SFX, focus reset, entry tweens).
 pub(crate) fn sync_music_for_scene(
     audio: &mut crate::audio::AudioManager,
     tag: SceneTag,
     gameplay_ordeal_chamber: bool,
-    shop_enter_chime: Option<std::time::Duration>,
+    shop_bgm_delay: Option<std::time::Duration>,
 ) {
     use crate::audio::MusicId;
     use std::time::Instant;
@@ -219,8 +222,8 @@ pub(crate) fn sync_music_for_scene(
         }
         SceneTag::Gameplay => audio.set_gameplay_music(gameplay_ordeal_chamber),
         SceneTag::Shop => {
-            if let Some(dur) = shop_enter_chime {
-                audio.schedule_music_track(Instant::now() + dur, MusicId::Shop);
+            if let Some(delay) = shop_bgm_delay {
+                audio.schedule_music_track(Instant::now() + delay, MusicId::Shop);
             } else {
                 audio.set_music_track(MusicId::Shop);
             }
@@ -277,8 +280,11 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
     if ctx.to == SceneTag::Stairway {
         ctx.audio.play_sfx(crate::audio::SfxId::StairwayEnter);
     }
-    let shop_enter_chime = if ctx.to == SceneTag::Shop {
-        ctx.audio.play_sfx(crate::audio::SfxId::ShopEnter)
+    if ctx.to == SceneTag::Shop {
+        ctx.audio.play_sfx(crate::audio::SfxId::ShopEnter);
+    }
+    let shop_bgm_delay = if ctx.to == SceneTag::Shop {
+        Some(std::time::Duration::from_secs_f32(SHOP_BGM_START_DELAY))
     } else {
         None
     };
@@ -289,7 +295,7 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
         ctx.audio,
         ctx.to,
         ctx.gameplay_ordeal_chamber,
-        shop_enter_chime,
+        shop_bgm_delay,
     );
     sync_ambient_for_scene(ctx.audio, ctx.to);
     if let Some(input) = ctx.input {

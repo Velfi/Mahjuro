@@ -237,7 +237,7 @@ impl RunState {
     /// Recompute inventory capacities from currently-owned relics.
     /// Idempotent — call after any relic add/remove.
     pub fn recompute_capacities(&mut self) {
-        let mut relic_slots = 6usize;
+        let mut relic_slots = crate::core::relic::BASE_RELIC_SLOTS;
         if self.relics.owns(RelicId::BrocadePouch) {
             relic_slots += 1;
         }
