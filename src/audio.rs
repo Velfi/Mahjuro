@@ -81,6 +81,15 @@ impl Source for SharedPcmSource {
     }
 }
 
+fn clip_duration_at_speed(clip: &PcmClip, speed: f32) -> Duration {
+    let base = SharedPcmSource::duration(clip);
+    if speed > 0.0 && speed.is_finite() {
+        Duration::from_secs_f32(base.as_secs_f32() / speed)
+    } else {
+        base
+    }
+}
+
 fn decode_rodio(label: &str, bytes: &[u8]) -> Option<Arc<PcmClip>> {
     let cursor = Cursor::new(bytes.to_vec());
     let decoder = Decoder::new(cursor).ok()?;
@@ -448,6 +457,8 @@ pub struct AudioManager {
     /// as entries come due. Used to stagger stacked stingers (e.g. yaku
     /// on a multi-yaku commit) so they roll out one after another.
     pending_sfx: Vec<(Instant, SfxId)>,
+    /// Looping BGM queued to start at a future instant (e.g. after shop door chimes).
+    pending_music: Vec<(Instant, MusicId)>,
     master_volume: f32,
     sfx_volume: f32,
     music_volume: f32,
@@ -538,6 +549,7 @@ impl AudioManager {
             relic_trigger_data: FxHashMap::default(),
             active_sinks: Vec::with_capacity(MAX_CONCURRENT_SFX),
             pending_sfx: Vec::new(),
+            pending_music: Vec::new(),
             master_volume: crate::persistence::VOLUME_UNITY,
             sfx_volume: crate::persistence::VOLUME_UNITY,
             music_volume: crate::persistence::VOLUME_UNITY,
@@ -565,8 +577,9 @@ impl AudioManager {
     }
 
     /// Play a sound effect. No-op if audio is unavailable or the SFX file wasn't loaded.
-    pub fn play_sfx(&mut self, id: SfxId) {
-        self.play_sfx_with_speed(id, 1.0);
+    /// Returns the clip duration (adjusted for `speed`) when playback started.
+    pub fn play_sfx(&mut self, id: SfxId) -> Option<Duration> {
+        self.play_sfx_with_speed(id, 1.0)
     }
 
     /// Queue `id` for playback at `when`. Pair with [`AudioManager::tick`]
@@ -576,6 +589,23 @@ impl AudioManager {
         self.pending_sfx.push((when, id));
     }
 
+    /// Queue looping BGM to start at `when`. Clears any earlier scheduled track.
+    /// Stops whatever loop is on the music sink now (e.g. main-menu BGM during
+    /// shop door chimes) without cancelling this schedule. While a win/loss jingle
+    /// owns the sink, suppresses the jingle's post-hand-off so this schedule is
+    /// the sole source of the next loop.
+    pub fn schedule_music_track(&mut self, when: Instant, id: MusicId) {
+        debug_assert!(id.is_loop(), "use play_music_jingle for one-shot tracks");
+        self.pending_music.clear();
+        self.last_music = Some(id);
+        if self.jingle_active {
+            self.pending_post_jingle_music = None;
+        } else {
+            self.stop_active_looping_music();
+        }
+        self.pending_music.push((when, id));
+    }
+
     /// Drain any scheduled sfx whose time has arrived. Call once per frame.
     /// Also detects when an active one-shot jingle has finished and resumes
     /// the deferred background loop (or stops music) accordingly.
@@ -583,6 +613,11 @@ impl AudioManager {
         while self.pending_sfx.first().is_some_and(|(t, _)| *t <= now) {
             let (_, id) = self.pending_sfx.remove(0);
             self.play_sfx(id);
+        }
+
+        while self.pending_music.first().is_some_and(|(t, _)| *t <= now) {
+            let (_, id) = self.pending_music.remove(0);
+            self.set_music_track(id);
         }
 
         if self.jingle_active {
@@ -601,26 +636,25 @@ impl AudioManager {
         }
     }
 
-    fn play_sfx_with_speed(&mut self, id: SfxId, speed: f32) {
+    fn play_sfx_with_speed(&mut self, id: SfxId, speed: f32) -> Option<Duration> {
         if let Some(len) = self.sfx_variant_data.get(&id).map(|v| v.len()) {
             if len == 0 {
                 log::debug!("play_sfx({id:?}): no variant data");
-                return;
+                return None;
             }
             let idx = self.pick_variant_index(id, len);
             let Some(clip) = self.sfx_variant_data.get(&id).and_then(|v| v.get(idx)).cloned()
             else {
                 log::debug!("play_sfx({id:?}): variant index out of range");
-                return;
+                return None;
             };
-            self.play_clip(&format!("{id:?}[{idx}]"), clip, speed);
-            return;
+            return self.play_clip(&format!("{id:?}[{idx}]"), clip, speed);
         }
         let Some(clip) = self.sfx_data.get(&id).cloned() else {
             log::debug!("play_sfx({id:?}): no data");
-            return;
+            return None;
         };
-        self.play_clip(&format!("{id:?}"), clip, speed);
+        self.play_clip(&format!("{id:?}"), clip, speed)
     }
 
     fn pick_variant_index(&mut self, id: SfxId, len: usize) -> usize {
@@ -660,18 +694,19 @@ impl AudioManager {
         }
     }
 
-    fn play_clip(&mut self, tag: &str, clip: Arc<PcmClip>, speed: f32) {
+    fn play_clip(&mut self, tag: &str, clip: Arc<PcmClip>, speed: f32) -> Option<Duration> {
+        let duration = clip_duration_at_speed(&clip, speed);
         if !self.sfx_enabled {
             log::debug!("play_clip({tag}): sfx disabled");
-            return;
+            return None;
         }
         let Some(handle) = &self.handle else {
             log::debug!("play_clip({tag}): no handle");
-            return;
+            return None;
         };
         let Ok(sink) = Sink::try_new(handle) else {
             log::warn!("play_clip({tag}): sink creation failed");
-            return;
+            return None;
         };
 
         self.active_sinks.retain(|s| !s.empty());
@@ -693,6 +728,7 @@ impl AudioManager {
         let amplified = source.speed(speed).amplify(effective_vol);
         sink.append(amplified);
         self.active_sinks.push(sink);
+        Some(duration)
     }
 
     /// Set the master volume (0.0 to 1.0).
@@ -757,11 +793,21 @@ impl AudioManager {
         sink.set_volume(self.music_sink_effective_volume());
     }
 
+    /// Halt the current looping track on `music_sink` but keep [`Self::last_music`]
+    /// and [`Self::pending_music`] (used when shop BGM is deferred after door chimes).
+    fn stop_active_looping_music(&mut self) {
+        self.music_active_id = None;
+        if let Some(sink) = self.music_sink.take() {
+            sink.stop();
+        }
+    }
+
     /// Stop background music and clear the remembered track (e.g. splash / loading).
     /// While a one-shot jingle is playing, this defers the stop until the
     /// jingle finishes (so blind-loss → game-over transitions don't truncate
     /// the loss jingle).
     pub fn stop_background_music(&mut self) {
+        self.pending_music.clear();
         if self.jingle_active {
             self.last_music = None;
             self.pending_post_jingle_music = None;
@@ -780,6 +826,7 @@ impl AudioManager {
     /// audible across the post-blind scene transition.
     pub fn set_music_track(&mut self, id: MusicId) {
         debug_assert!(id.is_loop(), "use play_music_jingle for one-shot tracks");
+        self.pending_music.clear();
         if self.jingle_active {
             self.pending_post_jingle_music = Some(id);
             self.last_music = Some(id);

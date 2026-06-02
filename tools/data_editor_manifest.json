@@ -29,10 +29,8 @@
       { "key": "label", "type": "string" },
       { "key": "description", "type": "string" },
       { "key": "base_target_mult", "type": "number", "step": "any" },
-      { "key": "price_multiplier", "type": "number", "step": "any" },
       { "key": "reroll_base_cost", "type": "number", "step": 1 },
-      { "key": "boss_min_wing_floor", "type": "number", "step": 1 },
-      { "key": "starting_rules", "type": "json" }
+      { "key": "boss_min_wing_floor", "type": "number", "step": 1 }
     ]
   },
   "tags": {

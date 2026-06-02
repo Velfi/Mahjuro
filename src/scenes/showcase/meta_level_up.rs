@@ -67,27 +67,41 @@ impl MetaLevelUpPresenter {
         if ctx.headless {
             self.started_at = Instant::now() - Duration::from_secs_f32(2.0);
         }
-        let ready = self.intro_gate.ready_for_dismiss(&ctx.effect_layers);
+        let has_input = ctx.actions.iter().any(|a| {
+            matches!(
+                a,
+                UiAction::Confirm
+                    | UiAction::Cancel
+                    | UiAction::Pause
+                    | UiAction::NorthFacePress
+                    | UiAction::FocusPrev
+                    | UiAction::FocusNext
+                    | UiAction::CommitDiscard
+            )
+        }) || !ctx.button_clicks.is_empty();
+        if has_input {
+            self.intro_gate.skip_intro();
+        }
 
         for a in ctx.actions {
             match a {
-                UiAction::FocusPrev if ready => {
+                UiAction::FocusPrev => {
                     self.modal.navigate_unlock_page(-1);
                 }
-                UiAction::FocusNext if ready => {
+                UiAction::FocusNext => {
                     self.modal.navigate_unlock_page(1);
                 }
-                UiAction::Confirm if ready => {
+                UiAction::Confirm => {
                     let _ = self.try_advance_or_dismiss();
                 }
-                UiAction::Cancel | UiAction::Pause | UiAction::NorthFacePress if ready => {
+                UiAction::Cancel | UiAction::Pause | UiAction::NorthFacePress => {
                     self.dismissed = true;
                 }
                 _ => {}
             }
         }
 
-        if !ctx.button_clicks.is_empty() && ready {
+        if !ctx.button_clicks.is_empty() {
             let _ = self.try_advance_or_dismiss();
         }
 
@@ -123,9 +137,7 @@ impl MetaLevelUpPresenter {
         }
         apply_modal_relic_staging(&mut frame, w, h, relic_objects);
 
-        if self.intro_gate.intro.is_done_for(&ctx.effect_layers) {
-            frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
-        }
+        frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
 
         frame.window_title = "Mahjuro".to_string();
 

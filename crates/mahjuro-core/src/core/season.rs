@@ -1,19 +1,15 @@
 //! Difficulty tiers applied on top of the baseline `GameMode`.
 //!
 //! A season is a small bundle of numeric modifiers — no new rules system,
-//! no per-season relic or yaku pools. The four knobs are:
+//! no per-season relic or yaku pools. The three knobs are:
 //!
 //! * `base_target_mult` — scales `GameMode::base_target` once at `RunState::new`.
-//! * `price_multiplier` — shop price multiplier for relics / zodiacs /
-//!   talismans / packs. Applied at call sites in `scenes/shop.rs` (see
-//!   `price_multiplier` field on `GameMode`).
 //! * `reroll_base_cost` — replaces `REROLL_BASE_COST` for the active run.
 //! * `ordeal_min_wing_floor` — reduces `OrdealDef::min_ante` in the filter in
 //!   `core::ordeal::pick_for_wing`, letting harder bosses appear earlier.
 //!
-//! Labels, descriptions, numeric knobs, and optional `starting_rules` slugs
-//! live in `assets/data/seasons.json`. `next` / `previous` unlock order stays
-//! in this module.
+//! Labels, descriptions, and numeric knobs live in `assets/data/seasons.json`.
+//! `next` / `previous` unlock order stays in this module.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -21,7 +17,6 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 
 use crate::core::json_asset::load_json_asset;
-use crate::core::rules::RuleModifier;
 
 /// Ordered list of seasons from easiest to hardest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -45,27 +40,16 @@ struct SeasonPresentationRaw {
     label: String,
     description: String,
     base_target_mult: f32,
-    price_multiplier: f32,
     reroll_base_cost: u32,
     ordeal_min_wing_floor: u32,
-    starting_rules: Vec<String>,
 }
 
 struct SeasonPresentation {
     label: &'static str,
     description: &'static str,
     base_target_mult: f32,
-    price_multiplier: f32,
     reroll_base_cost: u32,
     ordeal_min_wing_floor: u32,
-    starting_rules: &'static [RuleModifier],
-}
-
-fn season_rule_from_data_slug(s: &str) -> RuleModifier {
-    match s {
-        "no_sequence_bonus" => RuleModifier::NoSequenceBonus,
-        _ => panic!("unknown season starting_rules slug: {s}"),
-    }
 }
 
 fn season_presentations() -> &'static HashMap<Season, SeasonPresentation> {
@@ -75,22 +59,14 @@ fn season_presentations() -> &'static HashMap<Season, SeasonPresentation> {
         let raw: Vec<SeasonPresentationRaw> = load_json_asset(PATH, "season data");
         raw.into_iter()
             .map(|r| {
-                let rules: Vec<RuleModifier> = r
-                    .starting_rules
-                    .iter()
-                    .map(|s| season_rule_from_data_slug(s))
-                    .collect();
-                let starting_rules: &'static [RuleModifier] = Box::leak(rules.into_boxed_slice());
                 (
                     r.id,
                     SeasonPresentation {
                         label: Box::leak(r.label.into_boxed_str()),
                         description: Box::leak(r.description.into_boxed_str()),
                         base_target_mult: r.base_target_mult,
-                        price_multiplier: r.price_multiplier,
                         reroll_base_cost: r.reroll_base_cost,
                         ordeal_min_wing_floor: r.ordeal_min_wing_floor,
-                        starting_rules,
                     },
                 )
             })
@@ -124,11 +100,6 @@ impl Season {
         season_presentation(self).base_target_mult
     }
 
-    /// Shop price multiplier for everything bought from the shop.
-    pub fn price_multiplier(self) -> f32 {
-        season_presentation(self).price_multiplier
-    }
-
     /// Base reroll cost in the shop. Increment-per-reroll still applies on top.
     pub fn reroll_base_cost(self) -> u32 {
         season_presentation(self).reroll_base_cost
@@ -140,11 +111,6 @@ impl Season {
     /// season does).
     pub fn ordeal_min_wing_floor(self) -> u32 {
         season_presentation(self).ordeal_min_wing_floor
-    }
-
-    /// Run-wide `RuleModifier`s pushed into `GameMode::starting_rules`.
-    pub fn starting_rules(self) -> Vec<RuleModifier> {
-        season_presentation(self).starting_rules.to_vec()
     }
 
     /// The next season in the unlock chain, if any. `Winter` is terminal.
@@ -246,8 +212,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn winter_has_no_starting_rules() {
-        assert!(Season::Winter.starting_rules().is_empty());
-    }
 }

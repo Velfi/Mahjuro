@@ -209,15 +209,27 @@ pub(crate) fn sync_music_for_scene(
     audio: &mut crate::audio::AudioManager,
     tag: SceneTag,
     gameplay_ordeal_chamber: bool,
+    shop_enter_chime: Option<std::time::Duration>,
 ) {
     use crate::audio::MusicId;
+    use std::time::Instant;
     match tag {
         SceneTag::MainMenu | SceneTag::Archive => {
             audio.set_music_track(MusicId::MainMenu)
         }
         SceneTag::Gameplay => audio.set_gameplay_music(gameplay_ordeal_chamber),
-        SceneTag::Shop | SceneTag::Hallway | SceneTag::Stairway => {
+        SceneTag::Shop => {
+            if let Some(dur) = shop_enter_chime {
+                audio.schedule_music_track(Instant::now() + dur, MusicId::Shop);
+            } else {
+                audio.set_music_track(MusicId::Shop);
+            }
+        }
+        SceneTag::Hallway => {
             audio.set_music_track(MusicId::Shop)
+        }
+        SceneTag::Stairway => {
+            audio.stop_background_music();
         }
         SceneTag::Credits => audio.set_music_track(MusicId::Credits),
         _ => audio.stop_background_music(),
@@ -231,7 +243,7 @@ pub(crate) fn sync_ambient_for_scene(audio: &mut crate::audio::AudioManager, tag
             AmbientId::MainMenuRain,
             AmbientId::HallwayBulbBuzz,
         ]),
-        SceneTag::Hallway => {
+        SceneTag::Hallway | SceneTag::Stairway => {
             audio.set_ambient_tracks(&[AmbientId::HallwayBulbBuzz]);
         }
         _ => audio.set_ambient_tracks(&[]),
@@ -265,13 +277,20 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
     if ctx.to == SceneTag::Stairway {
         ctx.audio.play_sfx(crate::audio::SfxId::StairwayEnter);
     }
-    if ctx.to == SceneTag::Shop {
-        ctx.audio.play_sfx(crate::audio::SfxId::ShopEnter);
-    }
+    let shop_enter_chime = if ctx.to == SceneTag::Shop {
+        ctx.audio.play_sfx(crate::audio::SfxId::ShopEnter)
+    } else {
+        None
+    };
     if ctx.to == SceneTag::MainMenu {
         crate::asset_path::prefetch_lazy_packs_after_menu_once();
     }
-    sync_music_for_scene(ctx.audio, ctx.to, ctx.gameplay_ordeal_chamber);
+    sync_music_for_scene(
+        ctx.audio,
+        ctx.to,
+        ctx.gameplay_ordeal_chamber,
+        shop_enter_chime,
+    );
     sync_ambient_for_scene(ctx.audio, ctx.to);
     if let Some(input) = ctx.input {
         input.focus_slot = 0;

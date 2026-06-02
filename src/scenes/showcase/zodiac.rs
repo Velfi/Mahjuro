@@ -63,7 +63,8 @@ impl ZodiacPresenter {
                 UiAction::Confirm | UiAction::Cancel | UiAction::CommitDiscard
             )
         }) || !ctx.button_clicks.is_empty();
-        if has_input && self.intro_gate.ready_for_dismiss(&ctx.effect_layers) {
+        if has_input {
+            self.intro_gate.skip_intro();
             self.dismissed = true;
         }
         if self.dismissed {
@@ -154,9 +155,7 @@ impl ZodiacPresenter {
             celebration_overlay::label_zodiac_level_title(h, w, format!("{} Lvl.{}", self.yaku_name, self.new_level), alpha);
         title.rect[1] += drift.xy[1];
         frame.text(title);
-        if self.intro_gate.intro.is_done_for(&ctx.effect_layers) {
-            frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
-        }
+        frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
         frame.window_title = "Mahjuro".to_string();
 
         self.intro_gate

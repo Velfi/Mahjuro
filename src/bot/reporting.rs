@@ -356,8 +356,8 @@ impl BotConfig {
     }
 
     pub fn into_mode(self) -> GameMode {
-        // Start from the season-aware preset so base_target / price_multiplier /
-        // starting_rules reflect the chosen difficulty; the CLI overrides
+        // Start from the season-aware preset so base_target reflects the chosen
+        // difficulty; the CLI overrides
         // below then apply *on top* of that (handy for A/B'ing individual
         // knobs at a given season).
         let season = self.season.unwrap_or_default();

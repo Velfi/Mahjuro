@@ -76,16 +76,21 @@ impl PackCelebration {
         (t / Self::DEAL_TILE_FLY_SECS).clamp(0.0, 1.0)
     }
 
+    /// Jump to the fully revealed row; the player still dismisses the overlay separately.
+    pub fn skip_to_settled(&mut self) {
+        self.phase = PackCelebPhase::Deal;
+        let dur = self.total_duration();
+        self.started_at = Instant::now() - std::time::Duration::from_secs_f32(dur + 0.5);
+        self.revealed_count = self.tiles.len();
+    }
+
     pub fn screenshot_reveal_settled(
         tiles: Vec<Tile>,
         pack_name: &'static str,
         pack_kind: TilePackKind,
     ) -> Self {
         let mut s = Self::new(tiles, pack_name, pack_kind);
-        s.phase = PackCelebPhase::Deal;
-        let dur = s.total_duration();
-        s.started_at = Instant::now() - std::time::Duration::from_secs_f32(dur + 0.5);
-        s.revealed_count = s.tiles.len();
+        s.skip_to_settled();
         s
     }
 }

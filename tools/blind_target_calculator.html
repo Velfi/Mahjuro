@@ -86,6 +86,21 @@
       border-radius: 4px;
     }
     input[type="range"] { accent-color: var(--accent); }
+    button.reset {
+      align-self: end;
+      padding: 0.45rem 0.75rem;
+      font: inherit;
+      font-size: 0.85rem;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button.reset:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
     .row-check {
       display: flex;
       align-items: center;
@@ -176,7 +191,7 @@
 <body>
   <h1>Blind target calculator</h1>
   <p class="sub">
-    Matches <code>core::blind_target</code> — ante base
+    Matches <code>core::chamber_target</code> — ante base
     <code>B × r^(ante−1)</code>, then ×1 / ×1.5 / ×2 for Small / Big / Boss.
   </p>
 
@@ -184,26 +199,26 @@
     <label>
       Season preset
       <select id="season">
-        <option value="500">Spring (×1.0) — 500</option>
-        <option value="575">Summer (×1.15) — 575</option>
-        <option value="650">Autumn (×1.3) — 650</option>
-        <option value="750">Winter (×1.5) — 750</option>
+        <option value="1000">Spring (×1.0) — 1000</option>
+        <option value="1250">Summer (×1.25) — 1250</option>
+        <option value="1500">Autumn (×1.5) — 1500</option>
+        <option value="2000">Winter (×2.0) — 2000</option>
         <option value="custom">Custom base…</option>
       </select>
     </label>
     <label>
       Base target (B)
-      <input type="number" id="base" min="1" max="999999" step="1" value="500" />
+      <input type="number" id="base" min="1" max="999999" step="1" value="1000" disabled />
     </label>
     <label>
       Per-ante scaling (r)
-      <span class="val" id="scaleVal">1.60</span>
-      <input type="range" id="scale" min="1" max="2.5" step="0.01" value="1.60" />
-      <input type="number" id="scaleNum" min="1" max="3" step="0.01" value="1.60" />
+      <span class="val" id="scaleVal">1.618034</span>
+      <input type="range" id="scale" min="1" max="3" step="0.001" value="1.618034" />
+      <input type="number" id="scaleNum" min="1" max="3" step="0.000001" value="1.618034" />
     </label>
     <label>
       Max ante
-      <input type="number" id="maxAnte" min="1" max="24" step="1" value="8" />
+      <input type="number" id="maxAnte" min="1" max="7" step="1" value="7" />
     </label>
     <label class="row-check">
       <span style="visibility:hidden">.</span>
@@ -212,6 +227,7 @@
         Show Famine boss (×2)
       </span>
     </label>
+    <button type="button" class="reset" id="reset">Reset</button>
   </div>
 
   <table>
@@ -236,14 +252,18 @@
     <summary>Desmos</summary>
     <pre>r = [your scaling]
 B = [your base]
-y = 2·B·r^(x−1)   {1 ≤ x ≤ 8}</pre>
+y = 2·B·r^(x−1)   {1 ≤ x ≤ 7}</pre>
   </details>
 
   <script>
     const SMALL = 1;
     const BIG = 1.5;
     const BOSS = 2;
-    const DEFAULT_SCALE = 1.6;
+    const DEFAULT_SCALE = 1.618034;
+    const DEFAULT_BASE = 1000;
+    const DEFAULT_SEASON = "1000";
+    const DEFAULT_MAX_ANTE = 7;
+    const SCALE_DECIMALS = 6;
 
     const seasonEl = document.getElementById("season");
     const baseEl = document.getElementById("base");
@@ -252,6 +272,7 @@ y = 2·B·r^(x−1)   {1 ≤ x ≤ 8}</pre>
     const scaleValEl = document.getElementById("scaleVal");
     const maxAnteEl = document.getElementById("maxAnte");
     const famineEl = document.getElementById("famine");
+    const resetEl = document.getElementById("reset");
     const tbody = document.getElementById("tbody");
     const bars = document.getElementById("bars");
 
@@ -270,6 +291,10 @@ y = 2·B·r^(x−1)   {1 ≤ x ≤ 8}</pre>
       return n.toLocaleString("en-US");
     }
 
+    function fmtScale(v) {
+      return v.toFixed(SCALE_DECIMALS).replace(/\.?0+$/, "");
+    }
+
     function readScale() {
       const v = parseFloat(scaleNumEl.value);
       return Number.isFinite(v) && v >= 1 ? v : DEFAULT_SCALE;
@@ -277,19 +302,16 @@ y = 2·B·r^(x−1)   {1 ≤ x ≤ 8}</pre>
 
     function syncScale(fromRange) {
       const v = readScale();
-      if (fromRange) scaleNumEl.value = v.toFixed(2);
-      else {
-        const clamped = Math.min(2.5, Math.max(1, v));
-        scaleEl.value = clamped;
-        scaleNumEl.value = clamped.toFixed(2);
-      }
-      scaleValEl.textContent = readScale().toFixed(2);
+      const clamped = Math.min(3, Math.max(1, v));
+      scaleEl.value = clamped;
+      if (fromRange) scaleNumEl.value = fmtScale(clamped);
+      scaleValEl.textContent = fmtScale(v);
     }
 
     function render() {
-      const base = Math.max(1, parseInt(baseEl.value, 10) || 500);
+      const base = Math.max(1, parseInt(baseEl.value, 10) || DEFAULT_BASE);
       const scaling = readScale();
-      const maxAnte = Math.min(24, Math.max(1, parseInt(maxAnteEl.value, 10) || 8));
+      const maxAnte = Math.min(7, Math.max(1, parseInt(maxAnteEl.value, 10) || DEFAULT_MAX_ANTE));
       const famine = famineEl.checked;
 
       const rows = [];
@@ -351,6 +373,17 @@ y = 2·B·r^(x−1)   {1 ≤ x ≤ 8}</pre>
     });
     maxAnteEl.addEventListener("input", render);
     famineEl.addEventListener("change", render);
+    resetEl.addEventListener("click", () => {
+      seasonEl.value = DEFAULT_SEASON;
+      baseEl.value = DEFAULT_BASE;
+      baseEl.disabled = true;
+      scaleEl.value = DEFAULT_SCALE;
+      scaleNumEl.value = fmtScale(DEFAULT_SCALE);
+      maxAnteEl.value = DEFAULT_MAX_ANTE;
+      famineEl.checked = false;
+      syncScale(true);
+      render();
+    });
 
     syncScale(true);
     render();
