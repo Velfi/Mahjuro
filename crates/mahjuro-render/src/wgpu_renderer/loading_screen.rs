@@ -56,11 +56,11 @@ pub fn touch_boot_frame() {
     }
 }
 
-/// Begin (or continue) the production-logo timeline on the full-renderer splash.
+/// Anchor the full-renderer splash to the boot logo timeline (no replay after init).
 pub fn touch_splash_logo_frame() {
     let mut c = clock().lock().expect("loading clock");
     if c.splash_start.is_none() {
-        c.splash_start = Some(Instant::now());
+        c.splash_start = Some(c.boot_start.unwrap_or_else(Instant::now));
     }
 }
 
@@ -87,7 +87,7 @@ pub fn current_alphas() -> LoadingAlphas {
     alphas_for_elapsed(start, c.skip_at)
 }
 
-/// Alphas for the unified splash plate (independent of boot-init duration).
+/// Alphas for the unified splash plate (same timeline as boot, once anchored).
 pub fn current_splash_alphas() -> LoadingAlphas {
     let c = clock().lock().expect("loading clock");
     let start = c

@@ -14,7 +14,7 @@ pub struct RainFieldTuning {
     pub fall_speed: f32,
     pub wind_x: f32,
     pub wind_y: f32,
-    /// Target on-screen streak length in **pixels** (full span along fall direction).
+    /// Target on-screen streak length in **pixels** at ~1080p (scaled down on smaller viewports).
     pub streak_len_px: f32,
     pub splash_count: f32,
     pub splash_lifetime: f32,

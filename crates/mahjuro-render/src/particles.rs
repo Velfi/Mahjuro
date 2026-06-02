@@ -378,6 +378,16 @@ mod splash_normal_tests {
     }
 
     #[test]
+    fn rain_px_scale_shrinks_720p_not_upscale_4k() {
+        let s720 = rain_screen_px_scale(1280.0, 720.0);
+        let s1080 = rain_screen_px_scale(1920.0, 1080.0);
+        let s4k = rain_screen_px_scale(3840.0, 2160.0);
+        assert!((s720 - 720.0 / 1080.0).abs() < 1e-4);
+        assert!((s1080 - 1.0).abs() < 1e-4);
+        assert!((s4k - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
     fn flat_splash_spreads_radially_not_with_wind() {
         let mut rng = rand::rng();
         let impact = Vec3::new(400.0, 800.0, -8000.0);
@@ -406,6 +416,8 @@ pub struct ParticleSystem {
 }
 
 const MAX_SPLASH_EVENTS_PER_FRAME: u32 = 48;
+/// Rain streak/splash pixel sizes are tuned at ~1080p; shrink on smaller viewports, never upscale.
+const RAIN_PX_REF_MIN_DIM: f32 = 1080.0;
 const SPLASH_SIZE_REF_DISTANCE: f32 = 350.0;
 const SPLASH_SIZE_MIN_MUL: f32 = 0.45;
 const SPLASH_SIZE_MAX_MUL: f32 = 1.9;
@@ -444,6 +456,11 @@ fn segment_hit_rain_mesh(
     raycast::ray_hit_trimesh_inv(&mesh.triangles, model, inv, origin, dir_unit)
         .filter(|hit| hit.t > 1e-5 && hit.t <= max_t)
         .map(|hit| (origin + dir_unit * hit.t, hit.normal))
+}
+
+#[inline]
+fn rain_screen_px_scale(window_w: f32, window_h: f32) -> f32 {
+    (window_w.min(window_h) / RAIN_PX_REF_MIN_DIM).clamp(0.45, 1.0)
 }
 
 #[inline]
@@ -819,6 +836,7 @@ impl ParticleSystem {
         out: &mut Vec<([f32; 4], [f32; 4], f32)>,
         proj: ScreenProjector,
     ) {
+        let px_scale = rain_screen_px_scale(proj.window_w(), proj.window_h());
         out.reserve(self.particles.len());
         for p in &self.particles {
             let alpha = p.color[3] * p.life.max(0.0);
@@ -827,8 +845,9 @@ impl ParticleSystem {
             } else {
                 (p.x, p.y, 0.5)
             };
+            let size = p.size * px_scale;
             out.push((
-                [x - p.size * 0.5, y - p.size * 0.5, p.size, p.size],
+                [x - size * 0.5, y - size * 0.5, size, size],
                 [p.color[0], p.color[1], p.color[2], alpha],
                 depth,
             ));
@@ -850,6 +869,9 @@ impl ParticleSystem {
         let margin = 80.0;
         let w = proj.window_w();
         let h = proj.window_h();
+        let px_scale = rain_screen_px_scale(w, h);
+        let streak_len = streak_len_px.max(1.0) * px_scale;
+        let half_w = 1.2 * px_scale;
         out.reserve(self.world_drops.len());
         for d in &self.world_drops {
             let (sx, sy, depth) = proj.project_with_depth(d.pos);
@@ -869,13 +891,12 @@ impl ParticleSystem {
             // Map desired pixel streak length → world offset along fall direction.
             let (bx, by) = proj.project(d.pos - v_dir * 1.0);
             let px_per_world = ((bx - sx).hypot(by - sy)).max(1e-3);
-            let world_back = (streak_len_px.max(1.0) / px_per_world).min(5000.0);
+            let world_back = (streak_len / px_per_world).min(5000.0);
             let tail = d.pos - v_dir * world_back;
             let (tx, ty) = proj.project(tail);
             let dx = tx - sx;
             let dy = ty - sy;
-            let len = (dx * dx + dy * dy).sqrt().max(4.0);
-            let half_w = 1.2;
+            let len = (dx * dx + dy * dy).sqrt().max(4.0 * px_scale);
             let cx = (sx + tx) * 0.5;
             let cy = (sy + ty) * 0.5;
             // Axis-aligned quads: thin along X, long along Y (streaks read vertical on screen).
