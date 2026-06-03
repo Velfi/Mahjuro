@@ -71,6 +71,8 @@ mod sdl_shell;
 pub use mahjuro_render::startup_profile;
 pub mod steam;
 pub mod ui;
+#[cfg(test)]
+mod shader_fxc_lints;
 
 #[cfg(feature = "game")]
 #[path = "main/app.rs"]
