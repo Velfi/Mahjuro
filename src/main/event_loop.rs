@@ -551,6 +551,13 @@ impl App {
         repeat: bool,
     ) -> anyhow::Result<()> {
         self.modifiers = keymod;
+        #[cfg(debug_menu_enabled)]
+        if let Some(action) =
+            crate::debug_menu::debug_action_for_keyboard_shortcut(scancode, keymod, repeat)
+        {
+            self.handle_debug_action(action);
+            return Ok(());
+        }
         if let Some(ref mut o) = self.debug.rain_debug_overlay
             && o.hide_all_ui
             && o.feed_key_event(scancode, false)
@@ -590,44 +597,6 @@ impl App {
             if lab.feed_structure_key(scancode, shift) {
                 return Ok(());
             }
-        }
-
-        // Cross-platform debug shortcut: Ctrl+Shift+M opens the
-        // material viewer pushdown scene. Mirrors the Debug menu
-        // entry so Linux (where muda has no non-GTK menu) and any
-        // other OS the menu doesn't reach still has access.
-        if let Some(code) = scancode
-            && code == Scancode::M
-            && mod_shift(self.modifiers)
-            && (mod_ctrl(self.modifiers) || mod_gui(self.modifiers))
-        {
-            if !self
-                .overlay_stack
-                .iter()
-                .any(|s| matches!(s, Scene::MaterialViewer(_)))
-            {
-                self.overlay_stack
-                    .push(Scene::MaterialViewer(MaterialViewerScene::new(true)));
-                log::debug!("Opened material viewer (keyboard shortcut)");
-            }
-            return Ok(());
-        }
-
-        if let Some(code) = scancode
-            && code == Scancode::H
-            && mod_shift(self.modifiers)
-            && (mod_ctrl(self.modifiers) || mod_gui(self.modifiers))
-        {
-            if !self
-                .overlay_stack
-                .iter()
-                .any(|s| matches!(s, Scene::RumbleLab(_)))
-            {
-                self.overlay_stack
-                    .push(Scene::RumbleLab(RumbleLabScene::new(true)));
-                log::debug!("Opened rumble lab (keyboard shortcut)");
-            }
-            return Ok(());
         }
 
         let tixels_active = self

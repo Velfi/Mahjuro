@@ -1,6 +1,6 @@
 //! Rumble lab — debug overlay for iterating dual-motor force feedback (SDL weak/strong rumble).
 //!
-//! Enter from **Debug → Labs → Rumble Lab…** or **Ctrl+Shift+H**.
+//! Enter from **Debug → Rumble Lab…**.
 
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{self, color, typography};
@@ -260,7 +260,7 @@ impl SceneBehavior for RumbleLabScene {
                 w * 0.88,
                 hint_font * 2.2,
             ],
-            text: "Ctrl+Shift+H opens this overlay.".into(),
+            text: "Debug → Rumble Lab…".into(),
             color: color::STONE,
             align: TextAlign::Center,
             font_px: Some(hint_font),

@@ -25,6 +25,8 @@ mod cascade_tuning_timeline;
 mod debug_menu;
 #[cfg(feature = "game")]
 mod debug_overlays;
+#[cfg(feature = "game")]
+mod trailer_mode;
 pub mod effect_layers;
 pub mod game;
 #[cfg(all(feature = "game", target_os = "macos"))]
@@ -125,7 +127,6 @@ use crate::debug_overlays::{
 use crate::render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
 #[cfg(feature = "game")]
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
-#[cfg(feature = "game")]
 #[cfg(feature = "game")]
 use crate::scenes::gameplay::GameplayScene;
 #[cfg(feature = "game")]

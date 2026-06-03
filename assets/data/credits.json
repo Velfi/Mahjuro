@@ -28,7 +28,8 @@
     {
       "title": "Special Thanks",
       "entries": [
-        { "name": "Nicole LeGare", "role": "Playtesting & Feedback" }
+        { "name": "Nicole LeGare", "role": "Playtesting & Feedback" },
+        { "name": "The Blender Foundation & the Community", "role": "Holy crap I can't believe how good Blender is" }
       ]
     }
   ],

@@ -359,6 +359,78 @@ pub fn main_menu_glb_has_embedded_lights() -> bool {
     })
 }
 
+/// Close-up on the hub moon, facing it from the hub camera side (trailer-mode start pose).
+pub fn main_menu_moon_trailer_start_camera(
+    _window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    end_cam: &CameraParams,
+) -> Option<CameraParams> {
+    with_main_menu_glb_cpu(|opt| {
+        let cpu = opt?;
+        let moon = room_glb::room_node_mesh_center_world(
+            cpu,
+            window_h,
+            env_height_scale,
+            MAIN_MENU_MOON_MESH_NODE,
+        )?;
+        let moon_radius = room_node_mesh_radius_world(
+            cpu,
+            window_h,
+            env_height_scale,
+            MAIN_MENU_MOON_MESH_NODE,
+        )
+        .unwrap_or(window_h * 0.015);
+
+        let end_eye = glam::Vec3::from_array(end_cam.eye);
+        let to_moon = moon - end_eye;
+        let dir = to_moon.normalize_or_zero();
+        if dir.length_squared() < 1e-8 {
+            return None;
+        }
+
+        let standoff = moon_radius * 1.4 + window_h * 0.006;
+        let eye = moon - dir * standoff;
+
+        Some(CameraParams {
+            eye: eye.to_array(),
+            target: moon.to_array(),
+            up: end_cam.up,
+            fovy_deg: end_cam.fovy_deg,
+            clip_near: end_cam.clip_near,
+            clip_far: end_cam.clip_far,
+        })
+    })
+}
+
+fn room_node_mesh_radius_world(
+    cpu: &RoomGlbCpu,
+    window_h: f32,
+    height_scale: f32,
+    node_name: &str,
+) -> Option<f32> {
+    let s = room_glb::room_env_world_scale(window_h, height_scale);
+    let mut mn = Vec3::splat(f32::INFINITY);
+    let mut mx = Vec3::splat(f32::NEG_INFINITY);
+    let mut any = false;
+    for ep in &cpu.environment_primitives {
+        if ep.gltf_node_name.as_deref() != Some(node_name) {
+            continue;
+        }
+        for v in &ep.mesh.vertices {
+            let p = Vec3::from_array(v.position);
+            mn = mn.min(p);
+            mx = mx.max(p);
+            any = true;
+        }
+    }
+    if !any {
+        return None;
+    }
+    let ext = (mx - mn) * s;
+    Some(ext.max_element() * 0.5)
+}
+
 /// Screen hit rect for the emissive moon mesh (`MoonObject`), for hub click targets.
 pub fn main_menu_moon_screen_hit_rect(w: f32, h: f32, env_h: f32) -> Option<[f32; 4]> {
     if !main_menu_room_draw_ready() {

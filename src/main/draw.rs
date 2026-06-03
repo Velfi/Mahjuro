@@ -529,7 +529,17 @@ impl App {
             self.debug
                 .hallway_distortion_debug_overlay
                 .as_ref()
-                .map(|o| o.to_snapshot()),
+                .map(|o| o.to_snapshot())
+                .or_else(|| {
+                    self.debug
+                        .trailer_mode
+                        .as_ref()
+                        .and_then(|tm| tm.hallway_snapshot_at(self.last_frame))
+                }),
+            self.debug
+                .trailer_mode
+                .as_ref()
+                .and_then(|tm| tm.main_menu_camera_at(self.last_frame, size.height as f32)),
             loading_hub_progress,
             renderer.main_menu_effects,
             renderer.flame_tuning,

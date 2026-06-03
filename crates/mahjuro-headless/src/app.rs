@@ -410,8 +410,10 @@ impl HeadlessApp {
             false,
             0,
             None,
+            None,
             1.0,
             self.renderer.main_menu_effects,
+            self.renderer.flame_tuning,
         );
         let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
             top.draw_frame(ctx)

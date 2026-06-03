@@ -14,12 +14,17 @@
 //! - **Linux**: muda requires GTK on Linux, which the rest of the app does not
 //!   pull in. The menu is built (so `poll()` continues to work for any
 //!   programmatically-injected events) but is *not* attached to the window —
-//!   Linux users reach the same actions via in-app keyboard shortcuts instead.
+//!   Linux users reach debug actions via the Debug menu (or Ctrl/Cmd+Shift+H /
+//!   Ctrl/Cmd+Shift+T when `debug_menu_enabled`).
 
+#[cfg(debug_menu_enabled)]
+use muda::accelerator::{Accelerator, Code, Modifiers, CMD_OR_CTRL};
 #[cfg(debug_menu_enabled)]
 use muda::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 #[cfg(all(debug_menu_enabled, target_os = "windows"))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+#[cfg(debug_menu_enabled)]
+use sdl3::keyboard::{Mod, Scancode};
 #[cfg(debug_menu_enabled)]
 use sdl3::video::Window;
 
@@ -126,8 +131,40 @@ pub enum DebugAction {
     SeedChronicleFromBotRuns(u32),
     /// Mark Kokushi Musō as discovered in the active profile (journal, guide, Qilin ribbon).
     RevealKokushiMusou,
+    /// Pick-blind hallway: cycle seed/tint at accelerating intervals (~5 s).
+    TriggerTrailerMode,
     /// Meta: unlock every tile material and every season on every material.
     UnlockAllTilesetsAndSeasons,
+}
+
+#[cfg(debug_menu_enabled)]
+fn accel_cmd_shift(key: Code) -> Accelerator {
+    Accelerator::new(Some(CMD_OR_CTRL | Modifiers::SHIFT), key)
+}
+
+/// SDL fallback when the native menubar does not receive the chord (Linux).
+/// macOS/Windows also register these on the matching [`MenuItem`] accelerators.
+#[cfg(debug_menu_enabled)]
+pub fn debug_action_for_keyboard_shortcut(
+    scancode: Option<Scancode>,
+    keymod: Mod,
+    repeat: bool,
+) -> Option<DebugAction> {
+    if repeat {
+        return None;
+    }
+    let shift = keymod.contains(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
+    let cmd_or_ctrl = keymod.contains(
+        Mod::LCTRLMOD | Mod::RCTRLMOD | Mod::LGUIMOD | Mod::RGUIMOD,
+    );
+    if !shift || !cmd_or_ctrl {
+        return None;
+    }
+    match scancode {
+        Some(Scancode::H) => Some(DebugAction::ToggleHide2dUi),
+        Some(Scancode::T) => Some(DebugAction::TriggerTrailerMode),
+        _ => None,
+    }
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -176,7 +213,11 @@ impl DebugMenuBar {
         mappings.push((fps_item.id().clone(), DebugAction::ToggleShowFps));
         let _ = overlays_sub.append(&fps_item);
 
-        let hide_2d_ui_item = MenuItem::new("Hide 2D UI", true, None);
+        let hide_2d_ui_item = MenuItem::new(
+            "Hide 2D UI",
+            true,
+            Some(accel_cmd_shift(Code::KeyH)),
+        );
         mappings.push((hide_2d_ui_item.id().clone(), DebugAction::ToggleHide2dUi));
         let _ = overlays_sub.append(&hide_2d_ui_item);
 
@@ -423,6 +464,14 @@ impl DebugMenuBar {
         let defeat_item = MenuItem::new("Defeat", true, None);
         mappings.push((defeat_item.id().clone(), DebugAction::ShowDefeatScreen));
         let _ = debug_menu.append(&defeat_item);
+
+        let trailer_item = MenuItem::new(
+            "Trigger Trailer Mode",
+            true,
+            Some(accel_cmd_shift(Code::KeyT)),
+        );
+        mappings.push((trailer_item.id().clone(), DebugAction::TriggerTrailerMode));
+        let _ = debug_menu.append(&trailer_item);
         let _ = debug_menu.append(&PredefinedMenuItem::separator());
 
         // ── Profile ──────────────────────────────────────────────────────────
@@ -515,6 +564,6 @@ fn install_menu(menu: &Menu, window: &Window) {
 fn install_menu(_menu: &Menu, _window: &Window) {
     // Linux/other: muda requires GTK on Linux. The menu object exists so
     // `poll()` stays valid, but it isn't attached to a window. Use the
-    // in-app keyboard shortcuts instead (e.g. Ctrl+Shift+M for the
-    // material viewer).
+    // in-app keyboard shortcuts instead (Ctrl/Cmd+Shift+H and +T when
+    // `debug_menu_enabled`).
 }
