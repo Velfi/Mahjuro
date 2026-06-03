@@ -18,8 +18,6 @@ Follow-up tasks that are scoped but not scheduled. Each entry links to a doc wit
 - [Archive offline baked directional shadows](archive-offline-baked-shadows.md) — re-enable `archive.msh` after a proper caster/receiver split in `archive.glb`; current workaround is punctual-only room lighting.
 - [Emissive materials — global illumination transport](emissive-materials-gi-transport.md) — glTF emissive should contribute incident light via SSGI / bake / area-light techniques, not only self-emission and bloom; shop/hallway first.
 - [Journal prepass vs SSR history isolation](journal-prepass-ssr-history-isolation.md) — offscreen journal render must not publish `scene_prev` / SSR depth; split main vs auxiliary `render_to` or gate snapshot so lacquer SSR stays stable while the shop book is focused.
-- [Porcelain crazing](porcelain-crazing.md) — Voronoi crack network + tea-stain tint + glaze-break in the porcelain shader branch, so antique ceramic relics can read as old rather than fresh-from-the-kiln.
-- [Global tonemapper pass](tonemapper.md) — render the 3D pass into an offscreen Rgba16Float target and tonemap to the surface, so SDR and HDR look consistent without per-scene light retuning.
 
 ## Catalog / content
 
