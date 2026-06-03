@@ -1205,7 +1205,16 @@ use crate::core::debuff::{TileDebuff, TileDebuffClass};
     }
 
     /// Regression: dead hand with discards spent but plays left (UI soft-lock) should
-    /// end the round when the player acts — not only after `refill_hand`.
+    /// end the round via [`RunState::resolve_round_end`] — not only after `refill_hand`.
+    #[test]
+    fn dead_hand_idle_resolve_queues_game_over() {
+        let (mut run, mut bus) = dead_hand_no_actions_fixture();
+        run.plays_remaining = 1;
+        assert!(!game_over_queued(&bus));
+        run.resolve_round_end(&mut bus);
+        assert!(game_over_queued(&bus));
+    }
+
     #[test]
     fn dead_hand_with_plays_left_queues_game_over_without_refill() {
         let (mut run, mut bus) = dead_hand_no_actions_fixture();
