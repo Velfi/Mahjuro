@@ -48,6 +48,7 @@ Section "Mahjuro" SecMain
   SetOutPath "$INSTDIR"
 
   File "${SOURCE_DIR}\mahjuro.exe"
+  File "${SOURCE_DIR}\steam_api64.dll"
   File "${SOURCE_DIR}\icon.ico"
   File "${SOURCE_DIR}\pack_manifest.json"
   File "${SOURCE_DIR}\mahjuro-pack-shared.zip"
@@ -76,6 +77,7 @@ SectionEnd
 
 Section "Uninstall"
   Delete "$INSTDIR\mahjuro.exe"
+  Delete "$INSTDIR\steam_api64.dll"
   Delete "$INSTDIR\icon.ico"
   Delete "$INSTDIR\pack_manifest.json"
   Delete "$INSTDIR\mahjuro-pack-shared.zip"
