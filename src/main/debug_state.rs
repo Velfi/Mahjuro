@@ -11,6 +11,7 @@ use crate::debug_overlays::{
     SceneLookDebugOverlay, SfxTestOverlay, TuningOverlay,
 };
 use crate::render::draw_cmd::CameraParams;
+use crate::trailer_mode::TrailerMode;
 use crate::render::flame_debug_overlay::FlameDebugOverlay;
 use crate::render::rain_debug_overlay::RainDebugOverlay;
 
@@ -33,6 +34,8 @@ pub struct DebugState {
     pub scene_look_debug_overlay: Option<SceneLookDebugOverlay>,
     /// Pick-blind hallway vertex warp tuning (left panel).
     pub hallway_distortion_debug_overlay: Option<HallwayDistortionDebugOverlay>,
+    /// Rapid seed/tint / camera cycling for capture reels (Debug → Trigger Trailer Mode).
+    pub trailer_mode: Option<TrailerMode>,
     pub rain_debug_overlay: Option<RainDebugOverlay>,
     pub flame_debug_overlay: Option<FlameDebugOverlay>,
     /// Main menu moon tab — pride rainbow on moon / stars (defaults on in June).
@@ -59,6 +62,7 @@ impl DebugState {
             camera_debug_overlay: None,
             scene_look_debug_overlay: None,
             hallway_distortion_debug_overlay: None,
+            trailer_mode: None,
             rain_debug_overlay: None,
             flame_debug_overlay: None,
             main_menu_pride_rainbow_debug: crate::render::main_menu_glb::main_menu_pride_rainbow_default_enabled(),

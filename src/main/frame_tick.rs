@@ -102,6 +102,15 @@ impl App {
             .tick(self.last_frame_dt * 1000.0, transitioning, now);
         self.anim.update(now);
         self.audio.tick(now);
+        if self
+            .debug
+            .trailer_mode
+            .as_ref()
+            .is_some_and(|tm| tm.finished_at(now))
+        {
+            self.debug.trailer_mode = None;
+            log::debug!("Trailer mode finished");
+        }
         self.try_play_production_logo_stinger();
 
         let drawn = self.overlay_stack.last().unwrap_or(&self.scene);

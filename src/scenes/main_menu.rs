@@ -251,13 +251,16 @@ fn push_main_menu_room_frame(
     h: f32,
     env_scale: f32,
     tune: &RoomEnvLightingTune,
+    camera: Option<CameraParams>,
 ) {
     if !main_menu_glb::main_menu_room_draw_ready() {
         return;
     }
     frame.background(BackgroundId::Black);
     frame.main_menu_environment();
-    frame.camera_override = Some(main_menu_glb::main_menu_camera_base(w, h, env_scale));
+    frame.camera_override = Some(
+        camera.unwrap_or_else(|| main_menu_glb::main_menu_camera_base(w, h, env_scale)),
+    );
     let room_glb = main_menu_glb::main_menu_glb_has_embedded_lights();
     frame.scene_lighting.embedded_gltf_punctual = room_glb;
     frame.scene_lighting.room_glb_brdf = room_glb;
@@ -616,7 +619,14 @@ impl SceneBehavior for MainMenuScene {
             frame.background(BackgroundId::Black);
             let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
             if main_menu_glb::main_menu_room_draw_ready() {
-                push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.room_env_for(scene_keys::MAIN_MENU).0);
+                push_main_menu_room_frame(
+                    &mut frame,
+                    w,
+                    h,
+                    env_scale,
+                    &ctx.room_env_for(scene_keys::MAIN_MENU).0,
+                    ctx.main_menu_trailer_camera,
+                );
                 if let Some(light_door) =
                     main_menu_glb::main_menu_light_door_object3d_anchor(w, h, env_scale)
                 {
@@ -649,48 +659,61 @@ impl SceneBehavior for MainMenuScene {
             return frame;
         }
 
-        let in_progress = ctx.game_in_progress;
-        let items = menu_items(in_progress);
-        let layout = Self::hub_layout(w, h, &items);
-        let focus_rects = layout.menu_rects.clone();
-        *self.last_focus_rects.borrow_mut() = focus_rects.clone();
+        let trailer_shot = ctx.main_menu_trailer_camera.is_some();
+        let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
 
         let mut quads: Vec<GpuInstance> = Vec::new();
-        if let Some(focus) = self.focus
-            && let Some(&(_, rect)) = focus_rects.iter().find(|(t, _)| *t == focus)
-        {
-            focus_nav::push_focus_ring(rect, scale, w, h, &mut quads);
-        }
-
-        let menu_font = typography::size(typography::H36, h);
-        let label_color = color::PARCHMENT;
-        let mut text_labels = Vec::with_capacity(focus_rects.len());
-
-        for &(item, rect) in &focus_rects {
-            text_labels.push(TextLabel {
-                rect,
-                text: label_for(item, in_progress, ctx.archive_has_new),
-                font_px: Some(menu_font),
-                color: label_color,
-                align: TextAlign::Left,
-                ..Default::default()
-            });
-        }
-
-        let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
+        let mut text_labels = Vec::new();
         let mut buttons = Vec::new();
-        if let Some(moon_rect) = main_menu_glb::main_menu_moon_screen_hit_rect(w, h, env_scale) {
-            buttons.push(ButtonDef::scene(
-                (moon_rect[0], moon_rect[1], moon_rect[2], moon_rect[3]),
-                MAIN_MENU_PICK_MOON,
-            ));
-        }
-        buttons.push(ButtonDef::scene((0.0, 0.0, w, h), 0));
+        let hub_layout = if trailer_shot {
+            None
+        } else {
+            let in_progress = ctx.game_in_progress;
+            let items = menu_items(in_progress);
+            let layout = Self::hub_layout(w, h, &items);
+            let focus_rects = layout.menu_rects.clone();
+            *self.last_focus_rects.borrow_mut() = focus_rects.clone();
+
+            if let Some(focus) = self.focus
+                && let Some(&(_, rect)) = focus_rects.iter().find(|(t, _)| *t == focus)
+            {
+                focus_nav::push_focus_ring(rect, scale, w, h, &mut quads);
+            }
+
+            let menu_font = typography::size(typography::H36, h);
+            let label_color = color::PARCHMENT;
+            for &(item, rect) in &focus_rects {
+                text_labels.push(TextLabel {
+                    rect,
+                    text: label_for(item, in_progress, ctx.archive_has_new),
+                    font_px: Some(menu_font),
+                    color: label_color,
+                    align: TextAlign::Left,
+                    ..Default::default()
+                });
+            }
+
+            if let Some(moon_rect) = main_menu_glb::main_menu_moon_screen_hit_rect(w, h, env_scale) {
+                buttons.push(ButtonDef::scene(
+                    (moon_rect[0], moon_rect[1], moon_rect[2], moon_rect[3]),
+                    MAIN_MENU_PICK_MOON,
+                ));
+            }
+            buttons.push(ButtonDef::scene((0.0, 0.0, w, h), 0));
+            Some(layout)
+        };
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
         if main_menu_glb::main_menu_room_draw_ready() {
-            push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.room_env_for(scene_keys::MAIN_MENU).0);
+            push_main_menu_room_frame(
+                &mut frame,
+                w,
+                h,
+                env_scale,
+                &ctx.room_env_for(scene_keys::MAIN_MENU).0,
+                ctx.main_menu_trailer_camera,
+            );
             if let Some(light_door) =
                 main_menu_glb::main_menu_light_door_object3d_anchor(w, h, env_scale)
             {
@@ -711,26 +734,31 @@ impl SceneBehavior for MainMenuScene {
         if ctx.effect_layers.starfield {
             frame.starfield();
         }
-        frame.quads(quads);
-        frame.image_quads([ImageQuad {
-            inst: GpuInstance {
-                rect: layout.logo_rect,
-                color: [1.0, 1.0, 1.0, 1.0],
-                user: 0,
-            },
-            source: ImageQuadSource::Asset {
-                path: MAIN_MENU_LOGO_ASSET,
-            },
-        }]);
-        frame.texts(text_labels);
-        if self.moon_quip_visible
-            && !self.moon_quip_message.is_empty()
-            && let Some(moon_rect) = main_menu_glb::main_menu_moon_screen_hit_rect(w, h, env_scale)
-        {
-            push_moon_quip_bubble(&mut frame, moon_rect, &self.moon_quip_message, w, h, scale);
+        if !trailer_shot {
+            if let Some(layout) = hub_layout {
+                frame.quads(quads);
+                frame.image_quads([ImageQuad {
+                    inst: GpuInstance {
+                        rect: layout.logo_rect,
+                        color: [1.0, 1.0, 1.0, 1.0],
+                        user: 0,
+                    },
+                    source: ImageQuadSource::Asset {
+                        path: MAIN_MENU_LOGO_ASSET,
+                    },
+                }]);
+            }
+            frame.texts(text_labels);
+            if self.moon_quip_visible
+                && !self.moon_quip_message.is_empty()
+                && let Some(moon_rect) =
+                    main_menu_glb::main_menu_moon_screen_hit_rect(w, h, env_scale)
+            {
+                push_moon_quip_bubble(&mut frame, moon_rect, &self.moon_quip_message, w, h, scale);
+            }
+            frame.buttons = buttons;
+            frame.cursor_pos = Some(self.cursor_pos);
         }
-        frame.buttons = buttons;
-        frame.cursor_pos = Some(self.cursor_pos);
         frame.window_title = format!(
             "Mahjuro — {}",
             if cfg!(debug_assertions) {

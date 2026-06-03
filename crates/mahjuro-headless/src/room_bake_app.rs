@@ -225,6 +225,7 @@ impl RoomBakeApp {
             false,
             0,
             None,
+            None,
             1.0,
             self.renderer.main_menu_effects,
             self.renderer.flame_tuning,

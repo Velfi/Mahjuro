@@ -2,6 +2,7 @@ use super::*;
 
 use crate::core::tile_pack::TilePackKind;
 use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay};
+use crate::trailer_mode::TrailerMode;
 use crate::game::engine::GameEngine;
 use crate::scenes::shop::PackCelebration;
 use crate::scenes::{
@@ -405,6 +406,26 @@ impl App {
                 self.pending_scene = Some(Scene::Defeat(DefeatScene::new(&self.run, reason)));
                 self.transition_alpha = 1.0;
                 log::debug!("Showing defeat screen");
+            }
+            DebugAction::TriggerTrailerMode => {
+                let w = self.last_drawable_px.width as f32;
+                let h = self.last_drawable_px.height as f32;
+                let scene_look = self
+                    .scene_look
+                    .resolve(self.active_scene_key_for_renderer());
+                match TrailerMode::try_start(
+                    &self.scene,
+                    &self.run,
+                    w,
+                    h,
+                    scene_look.room_gltf_height_scale,
+                ) {
+                    Some(tm) => {
+                        self.debug.trailer_mode = Some(tm);
+                        log::debug!("Started trailer mode for current scene");
+                    }
+                    None => log::warn!("Trailer mode not available for the current scene"),
+                }
             }
         }
     }
