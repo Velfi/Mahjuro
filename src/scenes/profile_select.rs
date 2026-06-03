@@ -475,7 +475,9 @@ impl SceneBehavior for ProfileSelectScene {
                     line_y += body_line_h + pad_y * 0.3;
                 }
             } else {
-                let empty_y = header_top + header_line_h + pad_y;
+                let empty_y = header_top
+                    + header_line_h * if is_active { 2.0 } else { 1.0 }
+                    + pad_y * 0.5;
                 frame.text(TextLabel {
                     rect: [
                         card_x + pad_x,

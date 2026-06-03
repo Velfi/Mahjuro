@@ -20,6 +20,9 @@ use crate::render::draw_cmd::{CameraParams, ShowcaseTilePlacement, UiFrame};
 use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
+use crate::ui::controller_hints::{
+    HintStyle, journal_plaque_footer_row, push_inline_hint_rows,
+};
 use crate::ui::focus_nav;
 use crate::ui::input::UiAction;
 use crate::ui::widget;
@@ -708,6 +711,7 @@ impl SceneBehavior for YakuJournalScene {
             h,
             jr,
             jc,
+            &ctx,
         );
 
         if !placements.is_empty() {
@@ -967,6 +971,7 @@ fn draw_plaque(
     h: f32,
     jr: f32,
     jc: f32,
+    ctx: &DrawCtx<'_>,
 ) {
     let plaque_x = w * (0.055 - 0.027 * jc);
     let plaque_w = w * (0.89 + 0.054 * jc);
@@ -1180,4 +1185,37 @@ fn draw_plaque(
             cursor_x += hand_gap;
         }
     }
+
+    // Brass footer — control hints along the plaque's bottom edge.
+    let footer_h = ((26.0 * shadow_scale).max(20.0)) * pad_scale;
+    let footer_y = plaque_y + plaque_h - footer_h - pad * 0.28;
+    frame.quad(GpuInstance {
+        rect: [face_x, footer_y, face_w, footer_h],
+        color: color::BRASS,
+        user: 0,
+    });
+    frame.quad(GpuInstance {
+        rect: [
+            face_x + bevel,
+            footer_y + bevel * 0.5,
+            face_w - bevel * 2.0,
+            footer_h - bevel,
+        ],
+        color: color::alpha(color::WALNUT_DEEP, 0.92),
+        user: 0,
+    });
+    let hint_style = HintStyle::journal_plaque_footer(h);
+    let hint_rect = [
+        face_x + header_pad * 0.35,
+        footer_y + footer_h * 0.14,
+        face_w - header_pad * 0.7,
+        footer_h * 0.72,
+    ];
+    push_inline_hint_rows(
+        frame,
+        ctx,
+        &[hint_rect],
+        &[journal_plaque_footer_row(ctx.input_mode)],
+        hint_style,
+    );
 }

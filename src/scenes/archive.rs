@@ -30,7 +30,7 @@ use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_ray_plane_z};
 use crate::ui::controller_hints::{
-    HintSegment, HintStyle, inspect_camera_hint_row,
+    HintSegment, HintStyle, archive_browse_footer_row, inspect_camera_hint_row,
     push_inline_hint_rows,
 };
 use crate::ui::focus_nav::{FocusDir, pick_neighbor, push_focus_ring};
@@ -1110,6 +1110,11 @@ impl ArchiveScene {
             legend_rows.push(vec![HintSegment::text(
                 "Finish a non-tutorial run to add folios here.",
             )]);
+        } else if !chronicle_ledger {
+            legend_rows.push(archive_browse_footer_row(
+                ctx.input_mode,
+                archive_multi_page,
+            ));
         }
 
         let hint_line_count = legend_rows.len();
@@ -1861,6 +1866,62 @@ fn push_relic_stinger_for(
         && let ArtifactKind::Relic(rid) = art.kind
     {
         bus.push(GameEvent::PlayRelicStinger(rid));
+    }
+}
+
+fn relic_stinger_asset_exists(rid: crate::core::relic::RelicId) -> bool {
+    let slug = rid.asset_filename().trim_end_matches(".png");
+    let path = format!("audio/relics/{slug}.ogg");
+    crate::asset_path::get(&path).is_some()
+}
+
+fn yaku_at_catalog_index(
+    progress: &crate::core::progression::PlayerProgress,
+    idx: usize,
+) -> Option<crate::core::yaku::YakuKind> {
+    crate::core::yaku::YakuKind::all()
+        .iter()
+        .copied()
+        .filter(|yk| progress.yaku_times_scored.contains_key(yk))
+        .nth(idx)
+}
+
+fn inspect_artifact_index(scene: &ArchiveScene) -> usize {
+    scene
+        .focused_row
+        .or(scene.selected_artifact)
+        .unwrap_or(0)
+}
+
+/// Play the focused catalog item's bespoke audio while orbit inspect is open (A / Confirm).
+pub(crate) fn push_inspect_artifact_sound_if_present(
+    scene: &ArchiveScene,
+    progress: &crate::core::progression::PlayerProgress,
+    bus: &mut crate::game::event_bus::EventBus,
+) {
+    let chronicle_last_seen = scene.chronicle_last_seen.unwrap_or(0);
+    let arts = tab_artifacts(scene.active_tab, progress, chronicle_last_seen);
+    let idx = inspect_artifact_index(scene).min(arts.len().saturating_sub(1));
+    let Some(art) = arts.get(idx) else {
+        return;
+    };
+    if !art.unlocked {
+        return;
+    }
+    match scene.active_tab {
+        Tab::Relics => {
+            if let ArtifactKind::Relic(rid) = art.kind
+                && relic_stinger_asset_exists(rid)
+            {
+                bus.push(GameEvent::PlayRelicStinger(rid));
+            }
+        }
+        Tab::Yaku => {
+            if let Some(yk) = yaku_at_catalog_index(progress, idx) {
+                bus.push(GameEvent::UiSound(crate::sfx_id::SfxId::for_yaku(yk)));
+            }
+        }
+        Tab::Ordeals | Tab::Talismans | Tab::Chronicle => {}
     }
 }
 

@@ -24,6 +24,9 @@ use crate::render::showcase_tile_layout::{
 use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::colored_keywords;
+use crate::ui::controller_hints::{
+    HintStyle, guide_footer_row, push_screen_footer_hint, screen_footer_reserve,
+};
 use crate::ui::focus_nav;
 use crate::ui::input::UiAction;
 use crate::ui::widget::{self, wrap_text};
@@ -303,6 +306,13 @@ impl SceneBehavior for GuideScene {
             );
         }
 
+        push_screen_footer_hint(
+            &mut frame,
+            &ctx,
+            guide_footer_row(ctx.input_mode),
+            HintStyle::archive_footer(h),
+        );
+
         frame.window_title = "Mahjuro \u{2014} Guide".into();
         frame
     }
@@ -401,7 +411,7 @@ fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, Vec<Ti
             vec![
                 tile_group_with_subtitle(
                     "Manzu",
-                    "Characters · ranks 1–9",
+                    "ranks 1–9",
                     vec![
                         t(Suit::Manzu, 1, 0),
                         t(Suit::Manzu, 5, 1),
@@ -411,7 +421,7 @@ fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, Vec<Ti
                 ),
                 tile_group_with_subtitle(
                     "Souzu",
-                    "Bamboo · ranks 1–9",
+                    "ranks 1–9",
                     vec![
                         t(Suit::Souzu, 1, 3),
                         t(Suit::Souzu, 5, 4),
@@ -421,7 +431,7 @@ fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, Vec<Ti
                 ),
                 tile_group_with_subtitle(
                     "Pinzu",
-                    "Dots · ranks 1–9",
+                    "ranks 1–9",
                     vec![
                         t(Suit::Pinzu, 1, 6),
                         t(Suit::Pinzu, 5, 7),
@@ -704,13 +714,14 @@ impl GuideLayout {
         let margin = 48.0 * ui;
         let header_btn_h = (h * 0.052).clamp(44.0, 72.0);
         let content_top = margin + header_btn_h + 12.0 * ui;
+        let content_bottom = h - screen_footer_reserve(h) - 12.0 * ui;
         Self {
             window_w: w,
             margin,
             content_x: margin,
             content_w: w - margin * 2.0,
             content_top,
-            content_bottom: h - margin,
+            content_bottom,
             header_btn_h,
         }
     }
@@ -2677,19 +2688,29 @@ fn push_flowers_margin_scrawl(
     let font = typography::size(typography::H42, h);
     let pad = 10.0;
     let inner_w = (w - pad * 2.0).max(1.0);
-    let wrapped = wrap_text(text, inner_w, font / 0.99);
-    let line_h = font * widget::PLAIN_TEXT_LINE_STEP_MUL;
-    let block_h = line_h * wrapped.len().max(1) as f32;
+    let default = color::alpha(color::STONE, 0.72);
+    let wrapped =
+        colored_keywords::wrap_colored_text_multiline(text, inner_w, font / 0.99, default);
+    let line_h = font;
+    let block_h = colored_keywords::colored_wrapped_rows_height(&wrapped, line_h);
     let y = bottom - block_h - h * 0.008;
-    frame.text(TextLabel {
-        rect: [x + pad, y, inner_w, block_h],
-        text: wrapped.join("\n"),
-        color: color::alpha(color::STONE, 0.72),
-        align: TextAlign::Left,
-        font_px: Some(font),
-        italic: true,
-        ..Default::default()
-    });
+    let mut labels = Vec::new();
+    colored_keywords::push_colored_rows_left(
+        &mut labels,
+        colored_keywords::ColoredRowsLayout {
+            text_left: x + pad,
+            top_y: y,
+            inner_w,
+            line_h,
+            fallback_plain: text,
+            fallback_color: default,
+        },
+        &wrapped,
+    );
+    for mut label in labels {
+        label.italic = true;
+        frame.text(label);
+    }
 }
 
 fn push_melds_left_cards(
@@ -3144,7 +3165,7 @@ fn push_tile_group_labels(
     wrap_long_labels: bool,
 ) {
     let label_font = typography::size(typography::H42, h);
-    let label_line_h = label_font * 1.22;
+    let default = color::PARCHMENT;
     for ml in labels {
         let underline_h = (3.0 * scale).max(2.0);
         frame.quad(GpuInstance {
@@ -3152,21 +3173,42 @@ fn push_tile_group_labels(
             color: ml.color,
             user: 0,
         });
-        let (label_text, label_h) = if wrap_long_labels {
-            let wrapped = wrap_text(&ml.text, ml.w, label_font / 0.99);
-            let lh = label_line_h * wrapped.len().max(1) as f32;
-            (wrapped.join("\n"), lh)
+        let mut text_labels = Vec::new();
+        if wrap_long_labels {
+            let wrapped = colored_keywords::wrap_colored_text_multiline(
+                &ml.text,
+                ml.w,
+                label_font / 0.99,
+                default,
+            );
+            colored_keywords::push_colored_rows_in_width(
+                &mut text_labels,
+                colored_keywords::ColoredRowsLayout {
+                    text_left: ml.x,
+                    top_y: ml.y,
+                    inner_w: ml.w,
+                    line_h: label_font,
+                    fallback_plain: &ml.text,
+                    fallback_color: default,
+                },
+                &wrapped,
+                TextAlign::Center,
+            );
         } else {
-            (ml.text.clone(), label_font * 1.4)
-        };
-        frame.text(TextLabel {
-            rect: [ml.x, ml.y, ml.w, label_h],
-            text: label_text,
-            color: color::PARCHMENT,
-            align: TextAlign::Center,
-            font_px: Some(label_font),
-            ..Default::default()
-        });
+            colored_keywords::push_colored_line_clipped(
+                &mut text_labels,
+                [ml.x, ml.y, ml.w, label_font * 1.4],
+                None,
+                &ml.text,
+                default,
+                label_font,
+                TextAlign::Center,
+                false,
+            );
+        }
+        for label in text_labels {
+            frame.text(label);
+        }
     }
 }
 

@@ -5,6 +5,7 @@
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{self, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer_hint};
 use crate::ui::input::{InputState, RumbleLabOp, UiAction};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -296,6 +297,12 @@ impl SceneBehavior for RumbleLabScene {
 
         self.tree.register_flat_buttons(&items, &mut frame.buttons);
 
+        push_screen_footer_hint(
+            &mut frame,
+            &ctx,
+            back_footer_row(ctx.input_mode),
+            HintStyle::archive_footer(h),
+        );
         frame.window_title = "Mahjuro — Rumble Lab".into();
         frame
     }

@@ -7,6 +7,7 @@ use std::time::Instant;
 use crate::render::draw_cmd::{CameraParams, UiFrame};
 use crate::render::theme::{self, ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer_hint};
 use crate::ui::input::UiAction;
 
 use super::main_menu::MainMenuScene;
@@ -211,6 +212,12 @@ impl SceneBehavior for RollerLabScene {
                 .push(ButtonDef::scene((rect[0], rect[1], rect[2], rect[3]), *id));
         }
 
+        push_screen_footer_hint(
+            &mut frame,
+            &ctx,
+            back_footer_row(ctx.input_mode),
+            HintStyle::archive_footer(h),
+        );
         frame
     }
 }

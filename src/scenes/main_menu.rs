@@ -24,6 +24,7 @@ use crate::render::wgpu_renderer::{
     GpuInstance, PointLight, SpotLight, TextAlign, TextLabel, MAIN_MENU_PICK_MOON,
 };
 use crate::ui::tooltip;
+use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
 use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::UiAction;
 
@@ -758,6 +759,12 @@ impl SceneBehavior for MainMenuScene {
             }
             frame.buttons = buttons;
             frame.cursor_pos = Some(self.cursor_pos);
+            push_screen_footer_hint(
+                &mut frame,
+                &ctx,
+                menu_footer_row(ctx.input_mode),
+                HintStyle::profile_footer(h),
+            );
         }
         frame.window_title = format!(
             "Mahjuro — {}",

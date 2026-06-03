@@ -6,6 +6,9 @@ use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
 use crate::render::theme::color;
 use crate::scenes::options;
 use crate::scenes::{BackgroundId, GuideScene, OverlayRequest};
+use crate::ui::controller_hints::{
+    HintStyle, gameplay_help_footer_row, push_screen_footer_hint,
+};
 use crate::ui::inspect_plaque::{
     FocusTooltipPanelParams, dora_focus_tooltip_strings, gameplay_consumable_description_full,
     hand_tile_focus_tooltip, push_focus_tooltip_panel_2d, round_wind_focus_tooltip_strings,
@@ -1319,19 +1322,21 @@ impl SceneBehavior for GameplayScene {
                 self.focus,
                 play_enabled,
             );
-            super::action_prompts::push_gameplay_action_prompts(
-                &mut frame,
-                &ctx,
-                super::action_prompts::GameplayActionPromptInput {
-                    discard_btn_rect,
-                    play_btn_rect,
-                    trigger_btn_rect,
-                    cash_in_enabled: gameplay.trigger_enabled,
-                    show_discard_legend,
-                    show_play_legend,
-                    hud_text: &mut hud_text,
-                },
-            );
+            if settings.hints_enabled {
+                super::action_prompts::push_gameplay_action_prompts(
+                    &mut frame,
+                    &ctx,
+                    super::action_prompts::GameplayActionPromptInput {
+                        discard_btn_rect,
+                        play_btn_rect,
+                        trigger_btn_rect,
+                        cash_in_enabled: gameplay.trigger_enabled,
+                        show_discard_legend,
+                        show_play_legend,
+                        hud_text: &mut hud_text,
+                    },
+                );
+            }
             if let Some(undo_rect) = discard_undo_rect {
                 let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
                 let fs =
@@ -1917,6 +1922,20 @@ impl SceneBehavior for GameplayScene {
         if !self.pause_menu.paused && self.cascade_queue.is_empty() {
             onboarding_hints::push_lessons_banner(&mut frame, &ctx, ctx.run);
             onboarding_hints::push_finale_intro_banner(&mut frame, &ctx, ctx.run);
+        }
+
+        let settings = crate::persistence::load_settings();
+        if settings.hints_enabled
+            && !self.pause_menu.paused
+            && !ctx.modal_active
+            && self.cascade_queue.is_empty()
+        {
+            push_screen_footer_hint(
+                &mut frame,
+                &ctx,
+                gameplay_help_footer_row(ctx.input_mode),
+                HintStyle::archive_footer(layout.window_h),
+            );
         }
 
         frame.buttons = buttons;

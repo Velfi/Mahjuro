@@ -7,6 +7,9 @@ use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::ui::controller_hints::{
+    HintStyle, back_scroll_footer_row, push_screen_footer_hint, screen_footer_reserve,
+};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::widget::{self, TextStyle};
@@ -55,7 +58,7 @@ fn compute_layout(w: f32, h: f32) -> Layout {
     let slot_gap = (10.0 * scale).max(5.0);
 
     let back_h = (42.0 * scale).max(28.0);
-    let back_y = h - back_h - (18.0 * scale);
+    let back_y = h - screen_footer_reserve(h) - back_h - (18.0 * scale);
     let back_w = content_w;
     let back_x = content_x;
 
@@ -494,6 +497,12 @@ impl SceneBehavior for CreditsScene {
         if ctx.effect_layers.starfield {
             frame.starfield();
         }
+        push_screen_footer_hint(
+            &mut frame,
+            &ctx,
+            back_scroll_footer_row(ctx.input_mode),
+            HintStyle::archive_footer(h),
+        );
         frame.window_title = "Mahjuro — Credits".into();
         frame
     }

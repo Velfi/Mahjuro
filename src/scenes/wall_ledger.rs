@@ -11,7 +11,9 @@ use crate::render::text_effect::TextEffectId;
 use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
-use crate::ui::controller_hints::{HintKey, HintRow, HintSegment, HintStyle, push_inline_hint_rows};
+use crate::ui::controller_hints::{
+    HintStyle, back_scroll_footer_row, push_inline_hint_rows,
+};
 use crate::ui::focus_nav;
 use crate::ui::input::UiAction;
 use crate::ui::widget;
@@ -603,18 +605,7 @@ impl SceneBehavior for WallLedgerScene {
         let hints_y = h - hints_bottom - layout.hints_h;
         let hint_style = HintStyle::archive_footer(h);
         let hint_rect = [0.0, hints_y, w, layout.hints_h];
-        let hint_row = HintRow::new()
-            .bind(
-                "back",
-                vec![HintKey::for_input(
-                    ctx.input_mode,
-                    UiAction::Cancel,
-                    "keyboard_escape",
-                )],
-            )
-            .sep()
-            .push(HintSegment::text("scroll wheel"))
-            .into_segments();
+        let hint_row = back_scroll_footer_row(ctx.input_mode);
         push_inline_hint_rows(&mut frame, &ctx, &[hint_rect], &[hint_row], hint_style);
 
         frame

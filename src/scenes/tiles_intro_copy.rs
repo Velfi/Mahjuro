@@ -21,9 +21,9 @@ pub const RANK_TERMS_HEADING: &str = SECTION_RANK_TERMS;
 pub const SEQUENCE_RULES_HEADING: &str = SECTION_SEQUENCE_RULES;
 
 pub const NUMBER_SUIT_LINES: &[&str] = &[
-    "Manzu — Characters, ranks 1–9.",
-    "Souzu — Bamboo, ranks 1–9.",
-    "Pinzu — Dots, ranks 1–9.",
+    "Manzu — ranks 1–9.",
+    "Souzu — ranks 1–9.",
+    "Pinzu — ranks 1–9.",
 ];
 
 pub const HONOR_LINES: &[&str] = &[

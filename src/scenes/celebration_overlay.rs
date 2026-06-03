@@ -22,6 +22,11 @@ use crate::game::event_bus::{EventBus, GameEvent};
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::typography;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::scenes::DrawCtx;
+use crate::ui::controller_hints::{
+    HintStyle, confirm_action_footer_row, confirm_continue_footer_row, hint_style_with_alpha,
+    push_inline_hint_rows,
+};
 
 /// Semi-transparent black dimmer (shop pack + zodiac overlay).
 pub const DIMMER_RGBA: [f32; 4] = [0.0, 0.0, 0.0, 0.72];
@@ -123,6 +128,54 @@ pub fn label_confirm_to_continue(h: f32, w: f32, t_secs: f32, overall_alpha: f32
         "Click or press confirm to continue",
         overall_alpha * prompt_pulse_alpha(t_secs),
     )
+}
+
+/// Kenney glyph row for confirm-to-continue celebrations.
+pub fn push_confirm_continue_footer(
+    frame: &mut UiFrame,
+    ctx: &DrawCtx<'_>,
+    overall_alpha: f32,
+    t_secs: f32,
+) {
+    let alpha = overall_alpha * prompt_pulse_alpha(t_secs);
+    if alpha <= 0.02 {
+        return;
+    }
+    let h = ctx.layout.window_h;
+    let w = ctx.layout.window_w;
+    let style = hint_style_with_alpha(HintStyle::archive_footer(h), alpha);
+    let line_h = style.line_h;
+    push_inline_hint_rows(
+        frame,
+        ctx,
+        &[[0.0, h * PROMPT_NY, w, line_h * 1.25]],
+        &[confirm_continue_footer_row(ctx.input_mode, "")],
+        style,
+    );
+}
+
+/// Kenney glyph row for pack anticipation (unseal).
+pub fn push_confirm_unseal_footer(
+    frame: &mut UiFrame,
+    ctx: &DrawCtx<'_>,
+    overall_alpha: f32,
+    t_secs: f32,
+) {
+    let alpha = overall_alpha * prompt_pulse_alpha(t_secs);
+    if alpha <= 0.02 {
+        return;
+    }
+    let h = ctx.layout.window_h;
+    let w = ctx.layout.window_w;
+    let style = hint_style_with_alpha(HintStyle::archive_footer(h), alpha);
+    let line_h = style.line_h;
+    push_inline_hint_rows(
+        frame,
+        ctx,
+        &[[0.0, h * PROMPT_NY, w, line_h * 1.25]],
+        &[confirm_action_footer_row(ctx.input_mode, "unseal")],
+        style,
+    );
 }
 
 /// TPOS2 anticipation prompt.

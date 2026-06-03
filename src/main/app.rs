@@ -18,6 +18,17 @@ impl crate::App {
 
     /// Face-button semantics for the scene currently receiving controller input.
     pub(crate) fn active_face_bindings(&self) -> crate::ui::input::FaceButtonBindings {
+        if self.overlay_stack.last().is_some_and(|top| {
+            matches!(
+                top,
+                Scene::Showcase(s) if s.wants_orbit_input()
+            )
+        }) {
+            return crate::ui::input::FaceButtonBindings {
+                north_press: Some(crate::ui::input::UiAction::NorthFacePress),
+                ..Default::default()
+            };
+        }
         if !self.overlay_stack.is_empty() || self.scene.has_blocking_overlay() {
             return crate::ui::input::FaceButtonBindings::default();
         }

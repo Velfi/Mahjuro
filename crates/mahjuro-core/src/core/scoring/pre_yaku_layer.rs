@@ -1,7 +1,7 @@
 //! Early relic chips/mults, talismans, flowers, and Dragon Echo —
 //! everything applied before [`super::dora_yaku_layer`] (Dora and yaku).
 
-use crate::core::hand::MeldKind;
+use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::relic::{RelicId, ScoreContext};
 use crate::core::scoring::push_steps::push_yen;
 use crate::core::tile::{Suit, Tile};
@@ -20,6 +20,23 @@ fn effective_point_value(t: &Tile, ctx: &ScoreContext<'_>) -> i32 {
     } else {
         t.point_value() as i32
     }
+}
+
+fn meld_base_chips(s: &DetectedMeld, tiles: &[Tile], ctx: &ScoreContext<'_>) -> i32 {
+    s.tile_ids
+        .iter()
+        .filter_map(|&tid| tile_by_id(tiles, tid))
+        .map(|t| effective_point_value(t, ctx))
+        .sum()
+}
+
+fn meld_all_number_ranks(s: &DetectedMeld, tiles: &[Tile], pred: impl Fn(u8) -> bool) -> bool {
+    !s.tile_ids.is_empty()
+        && s.tile_ids.iter().all(|&tid| {
+            tile_by_id(tiles, tid).is_some_and(|t| {
+                matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu) && pred(t.rank)
+            })
+        })
 }
 
 pub(crate) fn apply_pre_yaku_scoring(
@@ -162,67 +179,43 @@ pub(crate) fn apply_pre_yaku_scoring(
         && ctx.round.is_final_play
         && ctx.structure.is_some()
     {
-        let mut retrigger_chips = 0i32;
-        for s in sets {
-            for &tid in &s.tile_ids {
-                if let Some(t) = tile_by_id(tiles, tid) {
-                    retrigger_chips += effective_point_value(t, ctx);
-                }
-            }
-        }
+        let retrigger_chips: i32 = sets
+            .iter()
+            .map(|s| meld_base_chips(s, tiles, ctx))
+            .sum();
         if retrigger_chips > 0 {
             push_chips(steps, chips, *mult, "Last Breath", retrigger_chips);
         }
     }
 
     if eff.has(ctx.relic.roster, RelicId::Geese) {
-        let mut retrigger = 0i32;
-        let mut remaining = 5;
-        'outer: for s in sets {
-            for &tid in &s.tile_ids {
-                if remaining == 0 {
-                    break 'outer;
-                }
-                if let Some(t) = tile_by_id(tiles, tid) {
-                    retrigger += effective_point_value(t, ctx);
-                    remaining -= 1;
-                }
-            }
-        }
+        let retrigger: i32 = sets
+            .iter()
+            .take(5)
+            .map(|s| meld_base_chips(s, tiles, ctx))
+            .sum();
         if retrigger > 0 {
             push_chips(steps, chips, *mult, "Geese", retrigger);
         }
     }
 
     if eff.has(ctx.relic.roster, RelicId::VoiceOfThePeople) {
-        let mut retrigger = 0i32;
-        for s in sets {
-            for &tid in &s.tile_ids {
-                if let Some(t) = tile_by_id(tiles, tid)
-                    && matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu)
-                    && t.rank <= 4
-                {
-                    retrigger += effective_point_value(t, ctx);
-                }
-            }
-        }
+        let retrigger: i32 = sets
+            .iter()
+            .filter(|s| meld_all_number_ranks(s, tiles, |rank| rank <= 4))
+            .map(|s| meld_base_chips(s, tiles, ctx))
+            .sum();
         if retrigger > 0 {
             push_chips(steps, chips, *mult, "Voice of the People", retrigger);
         }
     }
 
     if eff.has(ctx.relic.roster, RelicId::VoiceOfTheElite) {
-        let mut retrigger = 0i32;
-        for s in sets {
-            for &tid in &s.tile_ids {
-                if let Some(t) = tile_by_id(tiles, tid)
-                    && matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu)
-                    && t.rank >= 6
-                {
-                    retrigger += effective_point_value(t, ctx);
-                }
-            }
-        }
+        let retrigger: i32 = sets
+            .iter()
+            .filter(|s| meld_all_number_ranks(s, tiles, |rank| rank >= 6))
+            .map(|s| meld_base_chips(s, tiles, ctx))
+            .sum();
         if retrigger > 0 {
             push_chips(steps, chips, *mult, "Voice of the Elite", retrigger);
         }
@@ -236,14 +229,10 @@ pub(crate) fn apply_pre_yaku_scoring(
             .copied()
             .unwrap_or(0);
         if charges > 0 {
-            let mut retrigger = 0i32;
-            for s in sets {
-                for &tid in &s.tile_ids {
-                    if let Some(t) = tile_by_id(tiles, tid) {
-                        retrigger += effective_point_value(t, ctx);
-                    }
-                }
-            }
+            let retrigger: i32 = sets
+                .iter()
+                .map(|s| meld_base_chips(s, tiles, ctx))
+                .sum();
             if retrigger > 0 {
                 push_chips(steps, chips, *mult, "XXXL Egg", retrigger);
             }
@@ -441,13 +430,7 @@ pub(crate) fn apply_pre_yaku_scoring(
     if eff.has(ctx.relic.roster, RelicId::AncestorEcho) && !sets.is_empty() {
         let best = sets
             .iter()
-            .map(|s| {
-                s.tile_ids
-                    .iter()
-                    .filter_map(|&tid| tile_by_id(tiles, tid))
-                    .map(|t| effective_point_value(t, ctx))
-                    .sum::<i32>()
-            })
+            .map(|s| meld_base_chips(s, tiles, ctx))
             .max()
             .unwrap_or(0);
         if best > 0 {
@@ -457,21 +440,15 @@ pub(crate) fn apply_pre_yaku_scoring(
 
     if eff.has(ctx.relic.roster, RelicId::DragonEcho) {
         for s in sets {
-            let mut base = 0i32;
-            let mut is_dragon_meld = !s.tile_ids.is_empty();
-            for &tid in &s.tile_ids {
-                let Some(t) = tile_by_id(tiles, tid) else {
-                    is_dragon_meld = false;
-                    break;
-                };
-                if t.suit != Suit::Dragon {
-                    is_dragon_meld = false;
-                    break;
+            let is_dragon_meld = !s.tile_ids.is_empty()
+                && s.tile_ids.iter().all(|&tid| {
+                    tile_by_id(tiles, tid).is_some_and(|t| t.suit == Suit::Dragon)
+                });
+            if is_dragon_meld {
+                let base = meld_base_chips(s, tiles, ctx);
+                if base > 0 {
+                    push_chips(steps, chips, *mult, "Dragon Echo", base);
                 }
-                base += effective_point_value(t, ctx);
-            }
-            if is_dragon_meld && base > 0 {
-                push_chips(steps, chips, *mult, "Dragon Echo", base);
             }
         }
     }

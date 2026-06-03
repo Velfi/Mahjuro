@@ -4,24 +4,9 @@
 //!
 //! Whitespace splits the paragraph into tokens; trailing punctuation
 //! `, . ; : ! ? ' "` and closing quotes/brackets are stripped before lookup.
-//! Match is ASCII case-insensitive. **Longest** `needle` in
-//! [`crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE`] wins.
-//!
-//! | Needle(s) | Theme | Meaning |
-//! | --- | --- | --- |
-//! | `Manzu`, `manzu`, `characters` | Manzu suit red | Numbered suit |
-//! | `Souzu`, `souzu`, `bamboos`, `bamboo` | Souzu green | Numbered suit |
-//! | `Pinzu`, `pinzu`, `dots` | Pinzu suit blue | Numbered suit |
-//! | `Winds`, `winds` | Wind gold | Honor suit family |
-//! | `Dragons`, `dragons` | Red dragon (Chun) | Honor suit family |
-//! | `Flowers`, `flowers` | Flower pink | Bonus tiles |
-//! | `Seasons`, `seasons` | Season teal | Bonus tiles (solitaire) |
-//! | `Honors`, `honors` | `color::keyword::HONORS` | Winds + dragons umbrella |
-//! | `Chips`, `chips` | `color::keyword::CHIPS` | Score rail (cool) |
-//! | `Mult`, `mult` | `color::keyword::MULT` | Score rail (warm) |
-//! | `Gold`, `gold` | `color::keyword::GOLD` | Currency |
-//! | `Play`, `play` | `color::keyword::PLAY` | Bank-meld HUD verb |
-//! | `Trigger`, `trigger` | `color::keyword::TRIGGER` | Cash-in HUD verb |
+//! Match is ASCII case-insensitive. **Longest** needle in
+//! [`COLORED_KEYWORD_TABLE`](crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE)
+//! wins; each entry maps to a [`color::keyword`](crate::render::theme::color::keyword) tint.
 //!
 //! 3D cascade labels and streaming score popups reuse `LAPIS` / `RUBY` /
 //! `RELIC_GOLD` / `PARCHMENT` for chips, mult, gold, and final totals — see
@@ -31,7 +16,7 @@
 //! together with the same per-word tinting, use [`crate::ui::widget::push_text_block`]
 //! (`glossary_tint: true`) instead of this module’s plain-text wrappers.
 
-use crate::render::decal::load_ui_font;
+use crate::render::decal::{load_mono_font, load_ui_font};
 #[allow(unused_imports)] // Re-exported for API parity; table lives in `vocabulary_colors`.
 pub use crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE;
 #[allow(unused_imports)]
@@ -39,6 +24,7 @@ pub use crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE;
 pub use crate::render::vocabulary_colors::color_for_token;
 pub use crate::render::vocabulary_colors::colored_token_segments;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
+use crate::ui::clip::intersect_rect;
 use crate::ui::text_wrap::{TextBreakUnit, break_units_kp};
 use crate::ui::widget;
 
@@ -316,19 +302,123 @@ pub fn push_colored_rows_left(
     for (row, chunks) in lines.iter().enumerate() {
         let line_y = top_y + row as f32 * line_step;
         let mut cx = text_left;
-        for (s, c) in chunks {
-            let piece_w = word_width(font, s, font_px).max(1.0);
-            out.push(TextLabel {
-                rect: [cx, line_y, piece_w, line_step],
-                text: s.clone(),
-                color: *c,
-                font_px: Some(font_px),
-                align: TextAlign::Left,
-                ..Default::default()
-            });
-            cx += piece_w;
-        }
+        push_tinted_segment_run(
+            out,
+            chunks,
+            font,
+            font_px,
+            line_y,
+            line_step,
+            &mut cx,
+            None,
+            false,
+        );
     }
+}
+
+fn line_start_x(origin_x: f32, span_w: f32, total_w: f32, align: TextAlign) -> f32 {
+    match align {
+        TextAlign::Right => origin_x + span_w - total_w,
+        TextAlign::Center => origin_x + (span_w - total_w) * 0.5,
+        TextAlign::Left => origin_x,
+    }
+}
+
+fn measure_tinted_run(font: &fontdue::Font, segments: &[(String, [f32; 4])], font_px: f32) -> f32 {
+    segments
+        .iter()
+        .map(|(s, _)| word_width(font, s, font_px))
+        .sum()
+}
+
+fn push_tinted_segment_run(
+    out: &mut Vec<TextLabel>,
+    segments: &[(String, [f32; 4])],
+    font: &fontdue::Font,
+    font_px: f32,
+    y: f32,
+    row_h: f32,
+    cursor_x: &mut f32,
+    clip_rect: Option<[f32; 4]>,
+    mono: bool,
+) {
+    for (s, c) in segments {
+        let piece_w = word_width(font, s, font_px).max(1.0);
+        out.push(TextLabel {
+            rect: [*cursor_x, y, piece_w, row_h],
+            text: s.clone(),
+            color: *c,
+            font_px: Some(font_px),
+            align: TextAlign::Left,
+            clip_rect,
+            mono,
+            ..Default::default()
+        });
+        *cursor_x += piece_w;
+    }
+}
+
+fn colored_line_segments(text: &str, default: [f32; 4]) -> Vec<(String, [f32; 4])> {
+    let mut segments = Vec::new();
+    for (wi, word) in text.split_whitespace().enumerate() {
+        if wi > 0 {
+            segments.push((" ".to_string(), default));
+        }
+        segments.extend(colored_token_segments(word, default));
+    }
+    if segments.is_empty() && !text.is_empty() {
+        segments.push((text.to_string(), default));
+    }
+    segments
+}
+
+/// Single-line glossary tinting inside a clipped rect (Chronicle ledger cells).
+pub fn push_colored_line_clipped(
+    out: &mut Vec<TextLabel>,
+    rect: [f32; 4],
+    clip_rect: Option<[f32; 4]>,
+    text: &str,
+    default: [f32; 4],
+    font_px: f32,
+    align: TextAlign,
+    mono: bool,
+) {
+    let clip = clip_rect.unwrap_or(rect);
+    let Some(clipped) = intersect_rect(rect, clip) else {
+        return;
+    };
+    let segments = colored_line_segments(text, default);
+    let font = if mono {
+        load_mono_font().or_else(load_ui_font)
+    } else {
+        load_ui_font()
+    };
+    let Some(font) = font else {
+        out.push(TextLabel {
+            rect: clipped,
+            text: text.into(),
+            color: default,
+            font_px: Some(font_px),
+            align,
+            clip_rect: Some(clipped),
+            mono,
+            ..Default::default()
+        });
+        return;
+    };
+    let total_w = measure_tinted_run(font, &segments, font_px);
+    let mut x = line_start_x(clipped[0], clipped[2], total_w, align);
+    push_tinted_segment_run(
+        out,
+        &segments,
+        font,
+        font_px,
+        clipped[1],
+        clipped[3],
+        &mut x,
+        Some(clipped),
+        mono,
+    );
 }
 
 /// Horizontally aligned colored rows inside `[block_left, top_y, inner_w, …]`.
@@ -365,28 +455,19 @@ pub fn push_colored_rows_in_width(
 
     for (row, chunks) in lines.iter().enumerate() {
         let line_y = top_y + row as f32 * line_step;
-        let measured: f32 = chunks
-            .iter()
-            .map(|(s, _)| word_width(font, s, font_px))
-            .sum();
-        let line_start = match align {
-            TextAlign::Left => block_left,
-            TextAlign::Center => block_left + (inner_w - measured) * 0.5,
-            TextAlign::Right => block_left + inner_w - measured,
-        };
-        let mut cx = line_start;
-        for (s, c) in chunks {
-            let piece_w = word_width(font, s, font_px).max(1.0);
-            out.push(TextLabel {
-                rect: [cx, line_y, piece_w, line_step],
-                text: s.clone(),
-                color: *c,
-                font_px: Some(font_px),
-                align: TextAlign::Left,
-                ..Default::default()
-            });
-            cx += piece_w;
-        }
+        let total_w = measure_tinted_run(font, chunks, font_px);
+        let mut cx = line_start_x(block_left, inner_w, total_w, align);
+        push_tinted_segment_run(
+            out,
+            chunks,
+            font,
+            font_px,
+            line_y,
+            line_step,
+            &mut cx,
+            None,
+            false,
+        );
     }
 }
 
@@ -397,7 +478,7 @@ mod tests {
 
     #[test]
     fn push_colored_line_left_matches_colored_line_block_height() {
-        let text = "Manzu — Characters, ranks 1–9.";
+        let text = "Manzu — ranks 1–9.";
         let inner_w = 420.0;
         let line_h = 22.0;
         let default = color::PARCHMENT;

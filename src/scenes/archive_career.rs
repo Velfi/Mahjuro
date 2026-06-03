@@ -60,36 +60,101 @@ pub fn max_total_score_serious(progress: &PlayerProgress) -> Option<u64> {
         .max()
 }
 
+/// Best signature-hand score across non-tutorial runs.
 fn max_structure_score_serious(progress: &PlayerProgress) -> Option<u64> {
     serious_records(progress)
         .map(|r| r.best_structure_score)
         .max()
 }
 
-fn max_final_wing_serious(progress: &PlayerProgress) -> Option<u32> {
-    serious_records(progress).map(|r| r.final_wing).max()
+/// Mahjong red-dragon tile (Noto Emoji block U+1F004) — career-best signature hand.
+const BEST_HAND_PIN: &str = "\u{1F004} ";
+
+/// 0 = 1st … 2 = 3rd by total score among serious runs.
+pub fn chronicle_run_score_rank(progress: &PlayerProgress, rec: &RunRecord) -> Option<u8> {
+    let mut ranked: Vec<&RunRecord> = serious_records(progress).collect();
+    if ranked.len() <= 1 {
+        return None;
+    }
+    ranked.sort_by(|a, b| {
+        b.total_score_earned
+            .cmp(&a.total_score_earned)
+            .then(b.timestamp_unix.cmp(&a.timestamp_unix))
+    });
+    ranked
+        .iter()
+        .position(|r| std::ptr::eq(*r, rec))
+        .and_then(|i| u8::try_from(i).ok())
+        .filter(|&i| i < 3)
 }
 
-/// Title line for one run-log row (descending display number, PR medal emojis).
-pub fn chronicle_run_log_title(
+/// Highlight for a top-three run score (`0` = gold … `2` = bronze).
+pub fn chronicle_score_rank_color(rank: u8) -> [f32; 4] {
+    use crate::render::theme::color;
+    match rank {
+        0 => color::GOLD,
+        1 => color::alpha(color::CHAMPAGNE, 0.88),
+        _ => color::alpha(color::BRASS, 0.96),
+    }
+}
+
+/// Default chips magnitude tint for non-podium scores.
+pub fn chronicle_chips_color() -> [f32; 4] {
+    use crate::render::theme::color;
+    color::alpha(color::score_cascade::CHIPS, 0.94)
+}
+
+/// Wing column tint in the run log.
+pub fn chronicle_wing_color() -> [f32; 4] {
+    use crate::render::theme::color;
+    color::alpha(color::keyword::WIND, 0.92)
+}
+
+/// Run-detail footer value tint by stat label.
+pub fn chronicle_footer_value_color(label: &str) -> [f32; 4] {
+    use crate::render::theme::color;
+    match label {
+        "Yen earned" => color::alpha(color::keyword::GOLD, 0.96),
+        "Best combo" => color::alpha(color::keyword::TRIGGER, 0.96),
+        _ => color::CHAMPAGNE,
+    }
+}
+
+/// Medal emoji when `rec` ranks 1st–3rd among serious runs by total score.
+fn chronicle_run_score_rank_medal(progress: &PlayerProgress, rec: &RunRecord) -> Option<&'static str> {
+    match chronicle_run_score_rank(progress, rec)? {
+        0 => Some("🥇 "),
+        1 => Some("🥈 "),
+        2 => Some("🥉 "),
+        _ => None,
+    }
+}
+
+fn chronicle_run_best_hand_pin(progress: &PlayerProgress, rec: &RunRecord) -> Option<&'static str> {
+    if serious_records(progress).count() <= 1 {
+        return None;
+    }
+    if rec.best_structure_score > 0
+        && Some(rec.best_structure_score) == max_structure_score_serious(progress)
+    {
+        Some(BEST_HAND_PIN)
+    } else {
+        None
+    }
+}
+
+/// Title pins + body for one run-log row (medals / best-hand pin, then run line).
+pub fn chronicle_run_log_title_parts(
     progress: &PlayerProgress,
     display_num: u32,
     rec: &RunRecord,
-) -> String {
+) -> (String, String) {
     let mut pins = String::new();
-    // PR medals only matter once there is more than one run to compare against.
-    if serious_records(progress).count() > 1 {
-        if Some(rec.total_score_earned) == max_total_score_serious(progress) {
-            pins.push_str("🥇 ");
-        }
-        if Some(rec.best_structure_score) == max_structure_score_serious(progress)
-            && rec.best_structure_score > 0
-        {
-            pins.push_str("🥈 ");
-        }
-        if Some(rec.final_wing) == max_final_wing_serious(progress) {
-            pins.push_str("🥉 ");
-        }
+    if let Some(medal) = chronicle_run_score_rank_medal(progress, rec) {
+        pins.push_str(medal);
+    }
+    if let Some(hand_pin) = chronicle_run_best_hand_pin(progress, rec) {
+        pins.push_str(hand_pin);
     }
     let outcome = match rec.outcome {
         RunOutcome::Victory => "Victory",
@@ -99,7 +164,17 @@ pub fn chronicle_run_log_title(
         .final_ordeal
         .map(|b| format!(" — {}", b.name()))
         .unwrap_or_default();
-    format!("{pins}Run {display_num} — {outcome}{boss}")
+    (pins, format!("Run {display_num} — {outcome}{boss}"))
+}
+
+/// Title line for one run-log row (descending display number, score-rank medals, best-hand pin).
+pub fn chronicle_run_log_title(
+    progress: &PlayerProgress,
+    display_num: u32,
+    rec: &RunRecord,
+) -> String {
+    let (pins, body) = chronicle_run_log_title_parts(progress, display_num, rec);
+    format!("{pins}{body}")
 }
 
 /// Full boss name for run-log row line 2.
@@ -398,7 +473,7 @@ pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
     vec![
         CareerKpi {
             label: "Best run",
-            value: format!("{} · #{best_run_num}", format_score(best_run)),
+            value: format!("{} · #{best_run_num}", format_chips(best_run)),
         },
         CareerKpi {
             label: "Win rate",
@@ -406,11 +481,11 @@ pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
         },
         CareerKpi {
             label: "Peak wing",
-            value: format!("{max_ante}"),
+            value: format_wing(max_ante),
         },
         CareerKpi {
             label: "Total score",
-            value: format_score(total_score),
+            value: format_chips(total_score),
         },
     ]
 }
@@ -423,11 +498,11 @@ pub struct ScoreBucket {
 
 pub fn score_distribution_buckets(progress: &PlayerProgress) -> Vec<ScoreBucket> {
     const BUCKETS: &[(&str, u64, u64)] = &[
-        ("< 10k", 0, 10_000),
-        ("10k–50k", 10_000, 50_000),
-        ("50k–100k", 50_000, 100_000),
-        ("100k–250k", 100_000, 250_000),
-        ("250k+", 250_000, u64::MAX),
+        ("< 10k cp", 0, 10_000),
+        ("10k–50k cp", 10_000, 50_000),
+        ("50k–100k cp", 50_000, 100_000),
+        ("100k–250k cp", 100_000, 250_000),
+        ("250k+ cp", 250_000, u64::MAX),
     ];
     let mut counts = vec![0u32; BUCKETS.len()];
     for r in serious_records(progress) {
@@ -531,13 +606,16 @@ pub fn format_run_ended_timestamp(unix: u64) -> String {
 
 #[derive(Clone, Debug)]
 pub struct RunDetailModel {
-    pub heading: String,
+    pub title_pins: String,
+    pub title_rest: String,
     pub timestamp_line: String,
     pub signature_name: String,
     pub signature_score: u64,
     pub tiles: Vec<Tile>,
     pub tiles_representative: bool,
     pub yaku_rows: Vec<(YakuKind, u32)>,
+    /// Bar value suffix for [`Self::yaku_rows`] (`" han"` or `"×"`).
+    pub yaku_value_suffix: &'static str,
     pub score_lines: Vec<String>,
     pub wing_scores: Vec<(u32, u64)>,
     pub timeline: Vec<(u32, String, String)>,
@@ -549,7 +627,7 @@ pub fn run_detail_model(
     display_num: u32,
     rec: &RunRecord,
 ) -> RunDetailModel {
-    let heading = chronicle_run_log_title(progress, display_num, rec);
+    let (title_pins, title_rest) = chronicle_run_log_title_parts(progress, display_num, rec);
     let timestamp_line = format_run_ended_timestamp(rec.timestamp_unix);
 
     let mut tiles = rec
@@ -567,39 +645,47 @@ pub fn run_detail_model(
         tiles_representative = !tiles.is_empty();
     }
 
-    let mut yaku_rows: Vec<(YakuKind, u32)> = if !rec.chronicle.yaku_contributions.is_empty() {
-        rec.chronicle
-            .yaku_contributions
-            .iter()
-            .map(|(k, v)| (*k, v.han))
-            .collect()
+    let (mut yaku_rows, yaku_value_suffix): (Vec<(YakuKind, u32)>, &str) =
+        if !rec.chronicle.yaku_contributions.is_empty() {
+        (
+            rec.chronicle
+                .yaku_contributions
+                .iter()
+                .map(|(k, v)| (*k, v.han))
+                .collect(),
+            " han",
+        )
     } else {
-        rec.yaku_times_played
-            .iter()
-            .map(|(k, v)| (*k, *v))
-            .collect()
+        (
+            rec.yaku_times_played
+                .iter()
+                .map(|(k, v)| (*k, *v))
+                .collect(),
+            "×",
+        )
     };
     yaku_rows.sort_by(|a, b| b.1.cmp(&a.1));
 
     let mut score_lines = Vec::new();
     if let Some(snap) = rec.chronicle.terminal_score.as_ref() {
-        score_lines.push(format!("Base {}", snap.base_chips));
-        score_lines.push(format!("Yaku +{}", snap.yaku_chips));
-        score_lines.push(format!("Dora +{}", snap.dora_chips));
+        score_lines.push(format!("Base {} chips", snap.base_chips));
+        score_lines.push(format!("Yaku +{} chips", snap.yaku_chips));
+        score_lines.push(format!("Dora +{} chips", snap.dora_chips));
         if snap.relic_chips > 0 {
-            score_lines.push(format!("Relics +{}", snap.relic_chips));
+            score_lines.push(format!("Relics +{} chips", snap.relic_chips));
         }
         score_lines.push(format!(
-            "Boss ×{:.2} · Season ×{:.2}",
+            "Boss mult ×{:.2} · Season mult ×{:.2}",
             snap.boss_mult_factor, snap.season_mult_factor
         ));
-        score_lines.push(format!("Total {}", snap.total));
+        score_lines.push(format!("Total {} chips", snap.total));
     } else {
         score_lines.push(format!(
-            "Round {} / target {}",
-            rec.round_score, rec.target_score
+            "Round {} / {} chips target",
+            format_score(rec.round_score),
+            format_score(rec.target_score as u64),
         ));
-        score_lines.push(format!("Run total {}", rec.total_score_earned));
+        score_lines.push(format_chips(rec.total_score_earned));
     }
     score_lines.push(format!(
         "{} · {}",
@@ -625,26 +711,27 @@ pub fn run_detail_model(
         ("Shops".into(), format!("{}", c.shops_visited)),
         ("Rerolls".into(), format!("{}", c.rerolls_used)),
         ("Relic triggers".into(), format!("{}", c.relic_triggers)),
-        ("Yen earned".into(), format!("{}", c.yen_earned)),
+        ("Yen earned".into(), format!("¥{}", c.yen_earned)),
         (
             "Best combo".into(),
-            format!(
-                "{}",
+            format_han(
                 rec.chronicle
                     .best_combo_han
-                    .max((rec.best_structure_score / 100).min(u32::MAX as u64) as u32)
+                    .max((rec.best_structure_score / 100).min(u32::MAX as u64) as u32),
             ),
         ),
     ];
 
     RunDetailModel {
-        heading,
+        title_pins,
+        title_rest,
         timestamp_line,
         signature_name: rec.best_structure_name.clone(),
         signature_score: rec.best_structure_score,
         tiles,
         tiles_representative,
         yaku_rows,
+        yaku_value_suffix,
         score_lines,
         wing_scores,
         timeline,
@@ -768,8 +855,13 @@ pub fn format_score(n: u64) -> String {
     out.chars().rev().collect()
 }
 
-/// Compact score for the narrow run-log column (full commas below 100k).
-pub fn format_run_log_score(n: u64) -> String {
+/// Score with unit for Chronicle copy (career ledger, run detail).
+pub fn format_chips(n: u64) -> String {
+    format!("{} chips", format_score(n))
+}
+
+/// Compact score magnitude for narrow Chronicle columns and chart callouts.
+fn format_score_magnitude(n: u64) -> String {
     if n >= 10_000_000 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
     } else if n >= 1_000_000 {
@@ -779,6 +871,26 @@ pub fn format_run_log_score(n: u64) -> String {
     } else {
         format_score(n)
     }
+}
+
+/// Compact score for the narrow run-log column (magnitude + `cp` chips abbrev).
+pub fn format_run_log_score(n: u64) -> String {
+    format!("{} cp", format_score_magnitude(n))
+}
+
+/// Compact score callout for chart stat panels and ordeal rows.
+pub fn format_chips_compact(n: u64) -> String {
+    format!("{} cp", format_score_magnitude(n))
+}
+
+/// Wing index with a clear prefix (`W4`).
+pub fn format_wing(wing: u32) -> String {
+    format!("W{wing}")
+}
+
+/// Han count with unit (`206 han`).
+pub fn format_han(han: u32) -> String {
+    format!("{han} han")
 }
 
 #[cfg(test)]
@@ -792,6 +904,10 @@ mod tests {
     use crate::persistence::TileMaterial;
 
     fn defeat_against(boss: OrdealKind, score: u64) -> RunRecord {
+        defeat_against_hand(boss, score, 0)
+    }
+
+    fn defeat_against_hand(boss: OrdealKind, score: u64, best_hand: u64) -> RunRecord {
         RunRecord {
             timestamp_unix: 0,
             run_number: 1,
@@ -812,7 +928,7 @@ mod tests {
             tiles_played: 0,
             tiles_discarded: 0,
             times_restocked: 0,
-            best_structure_score: 0,
+            best_structure_score: best_hand,
             best_structure_name: String::new(),
             yaku_times_played: Default::default(),
             relics_owned: vec![],
@@ -853,6 +969,15 @@ mod tests {
     }
 
     #[test]
+    fn chronicle_score_formatters_include_units() {
+        assert_eq!(super::format_chips(40_368), "40,368 chips");
+        assert_eq!(super::format_run_log_score(347_000), "347k cp");
+        assert_eq!(super::format_chips_compact(1_500_000), "1.50M cp");
+        assert_eq!(super::format_wing(4), "W4");
+        assert_eq!(super::format_han(206), "206 han");
+    }
+
+    #[test]
     fn chronicle_run_log_title_skips_medals_for_lone_run() {
         let mut progress = PlayerProgress::new();
         progress.run_history.push(defeat_against(OrdealKind::Whisper, 10_000));
@@ -865,18 +990,46 @@ mod tests {
     }
 
     #[test]
-    fn chronicle_run_log_title_shows_pr_medals_with_multiple_runs() {
+    fn chronicle_best_hand_pin_uses_mahjong_red_dragon_glyph() {
+        let font = crate::render::decal::load_noto_emoji_font().expect("Noto Emoji");
+        assert!(
+            font.has_glyph('\u{1F004}'),
+            "expected Noto Emoji to cover mahjong red-dragon tile for best-hand pin"
+        );
+    }
+
+    #[test]
+    fn chronicle_run_log_title_shows_best_hand_pin_on_signature_pr() {
+        let mut progress = PlayerProgress::new();
+        progress.run_history.push(defeat_against_hand(OrdealKind::Whisper, 10_000, 50_000));
+        progress.run_history.push(defeat_against_hand(OrdealKind::Gate, 20_000, 30_000));
+        let pr_hand = &progress.run_history[0];
+        let title = chronicle_run_log_title(&progress, 2, pr_hand);
+        assert!(title.contains('\u{1F004}'), "expected best-hand pin: {title}");
+        let other = &progress.run_history[1];
+        let other_title = chronicle_run_log_title(&progress, 1, other);
+        assert!(
+            !other_title.contains('\u{1F004}'),
+            "only the PR hand run should get the pin: {other_title}"
+        );
+    }
+
+    #[test]
+    fn chronicle_run_log_title_shows_score_rank_medals_for_top_three() {
         let mut progress = PlayerProgress::new();
         progress.run_history.push(defeat_against(OrdealKind::Whisper, 10_000));
         progress.run_history.push(defeat_against(OrdealKind::Gate, 5_000));
+        progress.run_history.push(defeat_against(OrdealKind::Drought, 1_000));
         let best = &progress.run_history[0];
-        let title = chronicle_run_log_title(&progress, 2, best);
-        assert!(title.contains("🥇"), "expected total-score medal: {title}");
-        assert!(title.contains("🥉"), "expected deepest-wing medal: {title}");
-        assert!(title.contains("Run 2 — Defeat"));
-        let other = &progress.run_history[1];
-        let other_title = chronicle_run_log_title(&progress, 1, other);
-        assert!(!other_title.contains("🥇"));
+        let title = chronicle_run_log_title(&progress, 3, best);
+        assert!(title.starts_with("🥇 "), "expected 1st-place medal: {title}");
+        assert!(title.contains("Run 3 — Defeat"));
+        let second = &progress.run_history[1];
+        let second_title = chronicle_run_log_title(&progress, 2, second);
+        assert!(second_title.starts_with("🥈 "), "expected 2nd-place medal: {second_title}");
+        let third = &progress.run_history[2];
+        let third_title = chronicle_run_log_title(&progress, 1, third);
+        assert!(third_title.starts_with("🥉 "), "expected 3rd-place medal: {third_title}");
     }
 
     #[test]

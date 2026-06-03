@@ -19,6 +19,9 @@ use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typograph
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::render::world_space::LayoutAnchorPx;
 use crate::ui::colored_keywords;
+use crate::ui::controller_hints::{
+    HintStyle, menu_footer_row, push_screen_footer_hint, screen_footer_reserve,
+};
 use crate::ui::focus_nav;
 use crate::ui::placement::PlacementAnchor;
 use crate::ui::styled_text;
@@ -929,7 +932,7 @@ impl TutorialCampaignScene {
         let btn_w = (170.0 * scale).max(120.0);
         let btn_h = (46.0 * scale).max(30.0);
         let gap = 14.0 * scale;
-        let y = h - btn_h - 22.0 * scale;
+        let y = h - screen_footer_reserve(h) - btn_h - 22.0 * scale;
         let next_x = w * 0.5 + gap * 0.5;
         let back_x = next_x - btn_w - gap;
 
@@ -1463,19 +1466,22 @@ impl TutorialCampaignScene {
                 color: label.accent,
                 user: 0,
             });
-            texts.push(TextLabel {
-                rect: [
-                    label.x,
-                    label.y,
-                    label.w,
-                    colored_keywords::colored_row_line_step(label_font),
-                ],
-                text: label.text.to_string(),
-                color: color::PARCHMENT,
-                align: TextAlign::Center,
-                font_px: Some(label_font),
-                ..Default::default()
-            });
+            let label_rect = [
+                label.x,
+                label.y,
+                label.w,
+                colored_keywords::colored_row_line_step(label_font),
+            ];
+            colored_keywords::push_colored_line_clipped(
+                texts,
+                label_rect,
+                None,
+                label.text,
+                color::PARCHMENT,
+                label_font,
+                TextAlign::Center,
+                false,
+            );
         }
     }
 }
@@ -1639,7 +1645,7 @@ impl SceneBehavior for TutorialCampaignScene {
             ..Default::default()
         });
 
-        let nav_top = h - (46.0 * scale).max(30.0) - 22.0 * scale;
+        let nav_top = h - screen_footer_reserve(h) - (46.0 * scale).max(30.0) - 22.0 * scale;
         let content_top = panel_y + panel_h * 0.11;
         let pad_x = panel_w * 0.04;
         // Wider copy column — fewer wraps so body text can scale up to fill height.
@@ -2158,6 +2164,12 @@ impl SceneBehavior for TutorialCampaignScene {
         frame.quads(fg_quads);
         frame.texts(texts);
         frame.buttons = buttons;
+        push_screen_footer_hint(
+            &mut frame,
+            &ctx,
+            menu_footer_row(ctx.input_mode),
+            HintStyle::archive_footer(h),
+        );
         frame.window_title = format!("Mahjuro — {}", page.title);
         frame
     }
@@ -2172,7 +2184,7 @@ mod tests {
         let panel_y = h * 0.07;
         let panel_w = w * 0.88;
         let panel_h = h * 0.84;
-        let nav_top = h - (46.0 * scale).max(30.0) - 22.0 * scale;
+        let nav_top = h - screen_footer_reserve(h) - (46.0 * scale).max(30.0) - 22.0 * scale;
         let content_top = panel_y + panel_h * 0.11;
         let copy_frac = if h < 820.0 { 0.46 } else { 0.40 };
         let copy_w = panel_w * copy_frac;

@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use crate::render::draw_cmd::{ShowcaseRenderHints, UiFrame, apply_modal_relic_staging};
-use crate::scenes::celebration_overlay;
+use crate::scenes::celebration_overlay::{self, push_confirm_continue_footer};
 use crate::ui::input::UiAction;
 use crate::ui::modal::{Modal, modal_paginated_unlock_layer_vecs};
 
@@ -136,6 +136,8 @@ impl MetaLevelUpPresenter {
             frame.gradient_quads(gradient_quads);
         }
         apply_modal_relic_staging(&mut frame, w, h, relic_objects);
+
+        push_confirm_continue_footer(&mut frame, &ctx, card_alpha, 0.0);
 
         frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
 

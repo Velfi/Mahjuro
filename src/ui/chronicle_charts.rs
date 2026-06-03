@@ -10,31 +10,10 @@ use crate::scenes::archive_career::{
     self, CareerKpi, OrdealRecordRow, ScoreHistoryPoint, WingOutcomeCell,
 };
 use crate::ui::chart_primitives::{
-    self, ChartClip, chart_y_axis_width_for_max, pill_label_width, push_chart_plot_baseline,
-    push_chart_time_axis_labels, push_chart_y_axis, push_label_clipped, push_quad_clipped,
+    self, ChartClip, LedgerPanelStyle, chart_y_axis_width_for_max, pill_label_width,
+    push_chart_plot_baseline, push_chart_time_axis_labels, push_chart_y_axis,
+    push_colored_label_clipped, push_label_clipped, push_ledger_panel_clipped, push_quad_clipped,
 };
-
-/// Worn gold corner brackets — lighter than a full card border.
-pub fn push_corner_brackets(
-    quads: &mut Vec<GpuInstance>,
-    clip: ChartClip,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-) {
-    let tick = 7.0_f32;
-    let tc = color::alpha(color::BRASS, 0.48);
-    for &(dx, dy) in &[
-        (0.0, 0.0),
-        (w - tick, 0.0),
-        (0.0, h - tick),
-        (w - tick, h - tick),
-    ] {
-        push_quad_clipped(quads, [x + dx, y + dy, tick, 1.0], clip, tc);
-        push_quad_clipped(quads, [x + dx, y + dy, 1.0, tick], clip, tc);
-    }
-}
 
 pub fn push_outcome_strip(
     quads: &mut Vec<GpuInstance>,
@@ -139,13 +118,7 @@ pub fn push_kpi_card(
     body_px: f32,
     kpi: &CareerKpi,
 ) {
-    push_quad_clipped(
-        quads,
-        [x, y, w, h],
-        clip,
-        color::alpha(color::WALNUT_INK, 0.38),
-    );
-    push_corner_brackets(quads, clip, x, y, w, h);
+    push_ledger_panel_clipped(quads, clip, [x, y, w, h], LedgerPanelStyle::KPI);
     let text_w = (w - inset * 2.0).max(1.0);
     let row_h = val_h.max(cap_h);
     let ly = y + inset;
@@ -165,19 +138,21 @@ pub fn push_kpi_card(
             ..Default::default()
         },
     );
-    push_label_clipped(
+    let value_default = match kpi.label {
+        "Peak wing" => archive_career::chronicle_wing_color(),
+        "Win rate" => color::CHAMPAGNE,
+        _ => archive_career::chronicle_chips_color(),
+    };
+    let value_rect = [value_x, ly, value_w, row_h];
+    push_colored_label_clipped(
         labels,
-        [value_x, ly, value_w, row_h],
+        value_rect,
         clip,
-        TextLabel {
-            rect: [value_x, ly, value_w, row_h],
-            text: kpi.value.clone(),
-            color: color::CHAMPAGNE,
-            font_px: Some(body_px),
-            align: TextAlign::Right,
-            mono: true,
-            ..Default::default()
-        },
+        &kpi.value,
+        value_default,
+        body_px,
+        TextAlign::Right,
+        true,
     );
 }
 
@@ -198,13 +173,7 @@ fn push_score_stat_panel(
     value: &str,
 ) -> f32 {
     let panel_h = inset * 2.0 + row_h;
-    push_quad_clipped(
-        quads,
-        [x, y, w, panel_h],
-        clip,
-        color::alpha(color::WALNUT_INK, 0.38),
-    );
-    push_corner_brackets(quads, clip, x, y, w, panel_h);
+    push_ledger_panel_clipped(quads, clip, [x, y, w, panel_h], LedgerPanelStyle::KPI);
     let text_w = (w - inset * 2.0).max(1.0);
     let label_w =
         (pill_label_width(label, caption_px) + inline_gap * 0.5).clamp(1.0, text_w * 0.42);
@@ -224,19 +193,16 @@ fn push_score_stat_panel(
             ..Default::default()
         },
     );
-    push_label_clipped(
+    let value_rect = [value_x, line_y, value_w, row_h];
+    push_colored_label_clipped(
         labels,
-        [value_x, line_y, value_w, row_h],
+        value_rect,
         clip,
-        TextLabel {
-            rect: [value_x, line_y, value_w, row_h],
-            text: value.into(),
-            color: color::CHAMPAGNE,
-            font_px: Some(body_px),
-            align: TextAlign::Right,
-            mono: true,
-            ..Default::default()
-        },
+        value,
+        archive_career::chronicle_chips_color(),
+        body_px,
+        TextAlign::Right,
+        true,
     );
     panel_h
 }
@@ -299,8 +265,8 @@ pub fn push_score_history_ledger(
         }
     }
     let peak_score = points[peak_i].score;
-    let peak_text = archive_career::format_score(peak_score);
-    let avg_text = (avg_score > 0).then(|| archive_career::format_score(avg_score));
+    let peak_text = archive_career::format_chips_compact(peak_score);
+    let avg_text = (avg_score > 0).then(|| archive_career::format_chips_compact(avg_score));
     let stat_row_h = score_history_stat_row_height(cap_h.max(val_h), inset);
     let chart_x = x;
     let chart_w = w;
@@ -525,7 +491,7 @@ pub fn push_ante_outcome_matrix(
             TextLabel {
                 rect: [cx, y, cell_w, label_h],
                 text: format!("W{}", cell.wing),
-                color: color::alpha(color::STONE, 0.85),
+                color: archive_career::chronicle_wing_color(),
                 font_px: Some(caption_px * 0.82),
                 align: TextAlign::Center,
                 mono: true,
@@ -589,19 +555,17 @@ pub fn push_ordeal_record_rows(
                 ..Default::default()
             },
         );
-        push_label_clipped(
+        let score_text = archive_career::format_chips_compact(row.best_score);
+        let score_rect = [score_x, ry, score_w, row_h];
+        push_colored_label_clipped(
             labels,
-            [score_x, ry, score_w, row_h],
+            score_rect,
             clip,
-            TextLabel {
-                rect: [score_x, ry, score_w, row_h],
-                text: archive_career::format_score(row.best_score),
-                color: color::alpha(color::CHAMPAGNE, 0.94),
-                font_px: Some(body_px * 0.92),
-                align: TextAlign::Right,
-                mono: true,
-                ..Default::default()
-            },
+            &score_text,
+            archive_career::chronicle_chips_color(),
+            body_px * 0.92,
+            TextAlign::Right,
+            true,
         );
     }
 }
@@ -643,7 +607,7 @@ pub fn push_yaku_fingerprint_rows(
             color::alpha(color::PARCHMENT, 0.94),
             caption_px,
             body_px,
-            None,
+            Some("×"),
         );
     }
 }

@@ -146,6 +146,16 @@ impl ArchiveInspectPresenter {
                 }
                 continue;
             }
+            if crate::scenes::object3d_inspect::item_inspect_overlay_play_sound(*a) {
+                if let Some(collection) = ctx.suspended_collection.as_deref() {
+                    archive::push_inspect_artifact_sound_if_present(
+                        collection,
+                        ctx.progress,
+                        ctx.bus,
+                    );
+                }
+                continue;
+            }
             if crate::scenes::object3d_inspect::item_inspect_overlay_exit(*a) {
                 *ctx.overlay_request = Some(OverlayRequest::Pop);
                 return None;
