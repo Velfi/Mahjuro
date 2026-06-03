@@ -34,6 +34,9 @@ pub enum Command {
     /// Internal: Win32 Vulkan WSI smoke test (parent uses this to fall back to DX12 on fault).
     #[command(hide = true, name = "vulkan-wsi-probe")]
     VulkanWsiProbe,
+    /// Internal: force renderer init in a tiny window to smoke DX12/FXC shader compilation.
+    #[command(hide = true, name = "dx12-fxc-probe")]
+    Dx12FxcProbe,
 }
 
 #[derive(Debug, Args)]

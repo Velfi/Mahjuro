@@ -50,6 +50,16 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
             crate::render::wgpu_renderer::run_vulkan_wsi_probe_with_window(shell.window)?;
             Ok(true)
         }
+        Some(Command::Dx12FxcProbe) => {
+            let shell = crate::sdl_shell::SdlShell::new("DX12 FXC probe", 256, 256, false)?;
+            let _renderer = crate::render::wgpu_renderer::WgpuRenderer::new(
+                crate::render::wgpu_renderer::TargetInit::Windowed {
+                    window: shell.window,
+                    hdr_enabled: false,
+                },
+            )?;
+            Ok(true)
+        }
         None => Ok(false),
     }
 }
