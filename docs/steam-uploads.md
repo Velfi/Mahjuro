@@ -153,6 +153,11 @@ also copies the dylib into `Mahjuro.app/Contents/MacOS/` next to the
 binary — required because Steam's dylib has install_name
 `@loader_path/libsteam_api.dylib`.
 
+The Windows release zip and NSIS installer must include `steam_api64.dll`
+next to `mahjuro.exe` (see [.github/workflows/release-windows.yml](../.github/workflows/release-windows.yml)).
+Without it the process fails in the Windows loader **before** `main()` runs —
+no `MAHJURO_LOG_FILE` output and no Rust panic crash log.
+
 ## Achievements
 
 Achievement IDs live in [src/steam/achievement.rs](../src/steam/achievement.rs).

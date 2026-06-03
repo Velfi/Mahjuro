@@ -15,7 +15,7 @@ $env:STEAM_SDK_LOCATION = "C:\Users\zelda\steamworks_sdk_164\sdk"
 cargo build --release
 ```
 
-`build.rs` copies `redistributable_bin\win64\steam_api64.dll` beside `target\release\mahjuro.exe`. Steam is loaded at runtime via `LoadLibraryW` (no `/DELAYLOAD`).
+`build.rs` copies `redistributable_bin\win64\steam_api64.dll` beside `target\release\mahjuro.exe`. The binary links `steam_api64.dll` at load time (no `/DELAYLOAD`), so **packaging must ship that DLL next to `mahjuro.exe`** — same as macOS `libsteam_api.dylib` (see [macOS dylibs](macos-dylibs.md)). The release zip, NSIS installer, and Steam depot all include it.
 
 ## Linker notes
 
