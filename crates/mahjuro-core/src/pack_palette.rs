@@ -240,7 +240,12 @@ mod tests {
         let border = parsed
             .get("border_gold")
             .expect("pack_palette.json missing top-level `border_gold`");
-        assert_rgba_eq("border_gold", "_shared", mahjuro_types::theme_tokens::GOLD, border);
+        assert_rgba_eq(
+            "border_gold",
+            "_shared",
+            mahjuro_types::theme_tokens::GOLD,
+            border,
+        );
 
         assert_eq!(
             packs.len(),

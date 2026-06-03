@@ -3,8 +3,7 @@
 //! Entered from Debug → Labs → Button AABB Lab…
 
 use crate::render::archive_glb::{
-    self, ARCHIVE_TAB_BUTTON_NODES, BTN_MAIN_MENU, BTN_PAGE_LEFT, BTN_PAGE_RIGHT,
-    BTN_SWITCH_SAVE,
+    self, ARCHIVE_TAB_BUTTON_NODES, BTN_MAIN_MENU, BTN_PAGE_LEFT, BTN_PAGE_RIGHT, BTN_SWITCH_SAVE,
 };
 use crate::render::draw_cmd::{CameraParams, Object3d, UiFrame};
 use crate::render::gameplay_glb::{
@@ -207,8 +206,8 @@ impl SceneBehavior for ButtonAabbLabScene {
 
         let cam = match self.room {
             RoomPreset::Archive => archive_glb::archive_camera_base(w, h, env_h),
-            RoomPreset::Gameplay => gameplay_glb::require_gameplay_camera(h, env_h)
-                .unwrap_or_else(|e| {
+            RoomPreset::Gameplay => {
+                gameplay_glb::require_gameplay_camera(h, env_h).unwrap_or_else(|e| {
                     log::error!("{e:#}");
                     CameraParams {
                         eye: [0.0, -h * 1.15, h * 0.48],
@@ -218,7 +217,8 @@ impl SceneBehavior for ButtonAabbLabScene {
                         clip_near: None,
                         clip_far: None,
                     }
-                }),
+                })
+            }
         };
         frame.camera_override = Some(cam);
 
@@ -458,7 +458,12 @@ fn model_aabb_and_ref_for_marker(
     (Some(rect), Some(obj))
 }
 
-fn draw_probe_overlays(frame: &mut UiFrame, probe: &ResolvedProbe, label_font: f32, label_line_h: f32) {
+fn draw_probe_overlays(
+    frame: &mut UiFrame,
+    probe: &ResolvedProbe,
+    label_font: f32,
+    label_line_h: f32,
+) {
     if let Some(rect) = probe.model {
         frame.quad(GpuInstance {
             rect,

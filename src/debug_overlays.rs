@@ -4,7 +4,7 @@
 
 use crate::audio;
 use crate::cascade_tuning_timeline::{
-    apply_timeline_drag, draw_timelines, CascadeTuningTimelineGeom, TimelineDragTarget,
+    CascadeTuningTimelineGeom, TimelineDragTarget, apply_timeline_drag, draw_timelines,
 };
 use crate::core::rules::ChamberKind;
 use crate::game::cascade::CascadeTuning;
@@ -13,12 +13,12 @@ use crate::game::scene_look_tuning::{
     hue_wheel_preview_linear,
 };
 use crate::game::tonemap_tuning::FALLBACK_SCENE_KEY;
+use crate::render::debug_overlay_ui::{self, DebugPointerState, DebugRowVisual};
 use crate::render::draw_cmd::CameraParams;
 use crate::render::hallway_glb::{
     HallwayDistortion, HallwayDistortionDebugSnapshot, hallway_distortion_apply_glb_depth_extent,
 };
-use crate::render::debug_overlay_ui::{self, DebugPointerState, DebugRowVisual};
-use crate::render::theme::{color, metrics, typography, ButtonVariant};
+use crate::render::theme::{ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 use sdl3::keyboard::Scancode;
@@ -142,10 +142,9 @@ impl DebugVisibilityOverlay {
                     self.pointer.hover_row = Some(i);
                     self.cursor = i;
                     hit = true;
-                    if clicked
-                        && let Some(f) = self.vis.flag_mut(i) {
-                            *f = !*f;
-                        }
+                    if clicked && let Some(f) = self.vis.flag_mut(i) {
+                        *f = !*f;
+                    }
                     break;
                 }
             }
@@ -335,8 +334,7 @@ impl DebugVisibilityOverlay {
         }
 
         // Hide All / Reveal All button.
-        let btn_visual =
-            DebugRowVisual::for_row(VIS_CURSOR_TOGGLE_ALL, self.cursor, &self.pointer);
+        let btn_visual = DebugRowVisual::for_row(VIS_CURSOR_TOGGLE_ALL, self.cursor, &self.pointer);
         let all_hidden = self.vis.any_hide();
         let btn_label = if all_hidden { "Reveal All" } else { "Hide All" };
         let (btn_bg, btn_tc) =
@@ -537,16 +535,20 @@ impl TuningOverlay {
                 layout.scale,
             );
 
-            if clicked && self.dragging_timeline.is_none() && self.dragging_slider.is_none()
-                && let Some(target) = timeline.hit_handle(mx, my, &self.tuning) {
-                    self.dragging_timeline = Some(target);
-                    self.cursor = CascadeTuningTimelineGeom::cursor_for_drag(target);
-                }
+            if clicked
+                && self.dragging_timeline.is_none()
+                && self.dragging_slider.is_none()
+                && let Some(target) = timeline.hit_handle(mx, my, &self.tuning)
+            {
+                self.dragging_timeline = Some(target);
+                self.cursor = CascadeTuningTimelineGeom::cursor_for_drag(target);
+            }
             if let Some(target) = self.dragging_timeline
-                && held {
-                    apply_timeline_drag(&mut self.tuning, target, mx, &timeline);
-                    self.cursor = CascadeTuningTimelineGeom::cursor_for_drag(target);
-                }
+                && held
+            {
+                apply_timeline_drag(&mut self.tuning, target, mx, &timeline);
+                self.cursor = CascadeTuningTimelineGeom::cursor_for_drag(target);
+            }
 
             for i in 0..TUNING_ROW_COUNT {
                 if debug_overlay_ui::point_in_rect_tuple(mx, my, layout.row_rect(i)) {
@@ -581,11 +583,14 @@ impl TuningOverlay {
                 }
             }
 
-            if clicked && self.dragging_slider.is_none() && self.dragging_timeline.is_none()
-                && tuning_point_in_rect(mx, my, layout.export_button_rect()) {
-                    self.cursor = TUNING_ROW_COUNT - 1;
-                    return TuningResult::Export;
-                }
+            if clicked
+                && self.dragging_slider.is_none()
+                && self.dragging_timeline.is_none()
+                && tuning_point_in_rect(mx, my, layout.export_button_rect())
+            {
+                self.cursor = TUNING_ROW_COUNT - 1;
+                return TuningResult::Export;
+            }
         }
 
         if let Some((_, _, _, held)) = mouse {
@@ -1711,13 +1716,14 @@ impl SceneLookDebugOverlay {
         if let Some((mx, my, clicked, held)) = mouse {
             for i in 0..self.row_count() {
                 if let Some(rect) = layout.row_rect(i)
-                    && scene_look_point_in_rect(mx, my, rect) {
-                        self.pointer.hover_row = Some(i);
-                        if self.dragging_slider.is_none() {
-                            self.cursor = i;
-                        }
-                        break;
+                    && scene_look_point_in_rect(mx, my, rect)
+                {
+                    self.pointer.hover_row = Some(i);
+                    if self.dragging_slider.is_none() {
+                        self.cursor = i;
                     }
+                    break;
+                }
             }
 
             if let Some(di) = self.dragging_slider
@@ -2004,7 +2010,10 @@ impl SceneLookDebugOverlay {
                 });
                 instances.push(GpuInstance {
                     rect: [label_x - 1.0, sw_y - 1.0, swatch + 2.0, swatch + 2.0],
-                    color: color::alpha(color::PARCHMENT, if visual.highlighted { 0.55 } else { 0.28 }),
+                    color: color::alpha(
+                        color::PARCHMENT,
+                        if visual.highlighted { 0.55 } else { 0.28 },
+                    ),
                     user: 0,
                 });
                 label_x += swatch + 4.0 * layout.scale;

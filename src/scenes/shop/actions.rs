@@ -556,12 +556,8 @@ impl ShopScene {
             &run.mode,
             run,
         );
-        let focus = default_shop_focus_for_stock(
-            &items,
-            &zodiac_items,
-            &talisman_items,
-            &pack_items,
-        );
+        let focus =
+            default_shop_focus_for_stock(&items, &zodiac_items, &talisman_items, &pack_items);
         super::restock_exit::PendingShopStock {
             items,
             zodiac_items,

@@ -303,15 +303,7 @@ pub fn push_colored_rows_left(
         let line_y = top_y + row as f32 * line_step;
         let mut cx = text_left;
         push_tinted_segment_run(
-            out,
-            chunks,
-            font,
-            font_px,
-            line_y,
-            line_step,
-            &mut cx,
-            None,
-            false,
+            out, chunks, font, font_px, line_y, line_step, &mut cx, None, false,
         );
     }
 }
@@ -458,15 +450,7 @@ pub fn push_colored_rows_in_width(
         let total_w = measure_tinted_run(font, chunks, font_px);
         let mut cx = line_start_x(block_left, inner_w, total_w, align);
         push_tinted_segment_run(
-            out,
-            chunks,
-            font,
-            font_px,
-            line_y,
-            line_step,
-            &mut cx,
-            None,
-            false,
+            out, chunks, font, font_px, line_y, line_step, &mut cx, None, false,
         );
     }
 }

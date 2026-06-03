@@ -186,9 +186,10 @@ impl WgpuRenderer {
         let w = bake.width;
         let h = bake.height;
 
-        let ao_bytes = bake.ao_bytes.clone().expect(
-            "room shadow bake missing AO bytes after require_effective_room_shadow_bake",
-        );
+        let ao_bytes = bake
+            .ao_bytes
+            .clone()
+            .expect("room shadow bake missing AO bytes after require_effective_room_shadow_bake");
         let ao_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("room-baked-shadow-ao"),
             size: wgpu::Extent3d {
@@ -314,14 +315,14 @@ impl WgpuRenderer {
             gpu.baked_light_view_proj,
             crate::shadow_ao_lab::CONTACT_AO_WORLD_SCALE,
         );
-        self.queue.write_buffer(
-            &gpu.globals_buffer,
-            0,
-            bytemuck::bytes_of(&globals),
-        );
+        self.queue
+            .write_buffer(&gpu.globals_buffer, 0, bytemuck::bytes_of(&globals));
     }
 
-    pub(super) fn ensure_lab_baked_shadow_gpu(&mut self, layout: crate::shadow_ao_lab::ShadowAoLabLayout) {
+    pub(super) fn ensure_lab_baked_shadow_gpu(
+        &mut self,
+        layout: crate::shadow_ao_lab::ShadowAoLabLayout,
+    ) {
         if self
             .lab_baked_shadow
             .as_ref()
@@ -388,11 +389,7 @@ impl WgpuRenderer {
             wgpu::TexelCopyTextureInfo {
                 texture: &self.point_shadow_array.texture,
                 mip_level: 0,
-                origin: wgpu::Origin3d {
-                    x: 0,
-                    y: 0,
-                    z: 0,
-                },
+                origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::TexelCopyBufferInfo {

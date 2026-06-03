@@ -16,13 +16,13 @@ use std::time::{Duration, Instant};
 
 use super::UpdateCtx;
 
-use crate::sfx_id::SfxId;
 use crate::effect_layers::EffectLayers;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::typography;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::DrawCtx;
+use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{
     HintStyle, confirm_action_footer_row, confirm_continue_footer_row, hint_style_with_alpha,
     push_inline_hint_rows,
@@ -220,11 +220,7 @@ impl CelebrationContentDrift {
 
     #[inline]
     pub fn apply_to_pos(&self, pos: [f32; 3]) -> [f32; 3] {
-        [
-            pos[0] + self.xy[0],
-            pos[1] + self.xy[1],
-            pos[2],
-        ]
+        [pos[0] + self.xy[0], pos[1] + self.xy[1], pos[2]]
     }
 }
 
@@ -335,7 +331,12 @@ impl ShootingStarCelebrationIntro {
 
     /// Subtle scale + vertical drift while celebration content eases in after the wipe.
     #[inline]
-    pub fn content_drift_for(&self, _w: f32, h: f32, layers: &EffectLayers) -> CelebrationContentDrift {
+    pub fn content_drift_for(
+        &self,
+        _w: f32,
+        h: f32,
+        layers: &EffectLayers,
+    ) -> CelebrationContentDrift {
         if !self.wipe_active(layers) {
             return CelebrationContentDrift::identity();
         }

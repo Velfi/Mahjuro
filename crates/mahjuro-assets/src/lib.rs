@@ -2,5 +2,5 @@
 
 #![deny(unused_imports)]
 
-pub mod asset_sources;
 pub mod asset_path;
+pub mod asset_sources;

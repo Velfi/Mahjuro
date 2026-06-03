@@ -68,13 +68,10 @@ mod tests {
         use crate::table_transform::rot_euler_xyz_rad;
         use glam::Vec4;
 
-        let mesh = build_talisman_mesh_from_mask_asset("textures/talismans/talisman_wildflower_mask.png")
-            .expect("wildflower mesh");
-        let cap: Vec<_> = mesh
-            .vertices
-            .iter()
-            .filter(|v| v.normal[2] > 0.9)
-            .collect();
+        let mesh =
+            build_talisman_mesh_from_mask_asset("textures/talismans/talisman_wildflower_mask.png")
+                .expect("wildflower mesh");
+        let cap: Vec<_> = mesh.vertices.iter().filter(|v| v.normal[2] > 0.9).collect();
         assert!(!cap.is_empty(), "expected +Z front cap");
 
         let top = cap
@@ -93,15 +90,17 @@ mod tests {
             bottom.uv[1],
         );
 
-        let rot = rot_euler_xyz_rad(
-            TALISMAN_FACE_CAMERA_RX_DEG.to_radians(),
-            0.0,
-            0.0,
-        );
-        let world_top = (rot * Vec4::new(top.position[0], top.position[1], top.position[2], 1.0)).truncate();
-        let world_bottom =
-            (rot * Vec4::new(bottom.position[0], bottom.position[1], bottom.position[2], 1.0))
-                .truncate();
+        let rot = rot_euler_xyz_rad(TALISMAN_FACE_CAMERA_RX_DEG.to_radians(), 0.0, 0.0);
+        let world_top =
+            (rot * Vec4::new(top.position[0], top.position[1], top.position[2], 1.0)).truncate();
+        let world_bottom = (rot
+            * Vec4::new(
+                bottom.position[0],
+                bottom.position[1],
+                bottom.position[2],
+                1.0,
+            ))
+        .truncate();
 
         assert!(
             world_top.z > world_bottom.z + 1e-4,
@@ -132,8 +131,9 @@ mod tests {
 
     #[test]
     fn mask_asset_extrudes_pendant_mesh() {
-        let cpu = build_talisman_mesh_from_mask_asset("textures/talismans/talisman_wildflower_mask.png")
-            .expect("wildflower mask should extrude");
+        let cpu =
+            build_talisman_mesh_from_mask_asset("textures/talismans/talisman_wildflower_mask.png")
+                .expect("wildflower mask should extrude");
         assert!(!cpu.vertices.is_empty());
         assert!(!cpu.indices.is_empty());
     }
@@ -150,12 +150,7 @@ fn octagon_rim() -> [(f32, f32); SIDES] {
 pub fn build_talisman_mesh_from_mask_asset(path: &str) -> Option<MeshCpu> {
     let file = mahjuro_assets::asset_path::get(path)?;
     let img = image::load_from_memory(&file.data).ok()?.into_rgba8();
-    build_talisman_mesh_from_rgba(
-        img.as_raw(),
-        img.width(),
-        img.height(),
-        path,
-    )
+    build_talisman_mesh_from_rgba(img.as_raw(), img.width(), img.height(), path)
 }
 
 /// Build the legacy octagonal fallback mesh (flat edge down).

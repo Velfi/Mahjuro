@@ -2,11 +2,11 @@
 use super::*;
 
 #[cfg(feature = "game")]
-use crate::scenes::{DefeatScene, VictoryScene};
-#[cfg(feature = "game")]
 use crate::game::engine::GameEngine;
 #[cfg(feature = "game")]
 use crate::scene_transition::overlay_kind_for_transition;
+#[cfg(feature = "game")]
+use crate::scenes::{DefeatScene, VictoryScene};
 
 use crate::core;
 use crate::render;
@@ -133,8 +133,7 @@ impl App {
                             return;
                         }
                         Some(crate::game::onboarding::OnboardingPhase::Finale) => {
-                            self.audio
-                                .play_music_jingle(audio::MusicId::OrdealWin);
+                            self.audio.play_music_jingle(audio::MusicId::OrdealWin);
                             self.progress.tutorial_completed = true;
                             let _ = persistence::save_profile(self.active_profile, &self.progress);
                             persistence::delete_saved_run(self.active_profile);
@@ -242,12 +241,12 @@ impl App {
                         self.steam
                             .unlock_achievement(crate::steam::Achievement::Season2Unlocked);
                     }
-                    self.progress
-                        .run_history
-                        .push(crate::game::progression_run::run_record_from_run(
+                    self.progress.run_history.push(
+                        crate::game::progression_run::run_record_from_run(
                             &self.run,
                             crate::core::progression::RunOutcome::Victory,
-                        ));
+                        ),
+                    );
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     persistence::delete_saved_run(self.active_profile);
                     self.steam.sync_profile_stats(&self.progress);
@@ -461,20 +460,17 @@ impl App {
         let mut env_per_scene = rustc_hash::FxHashMap::default();
         let mut env_frame_tunes = Vec::new();
         for &key in crate::game::scene_look_tuning::GLTF_ENV_SCENE_KEYS {
-            let look =
-                crate::game::scene_look_tuning::resolve_scene_look_with_overlay(
-                    &self.scene_look,
-                    overlay_key,
-                    overlay_look,
-                    Some(key),
-                );
+            let look = crate::game::scene_look_tuning::resolve_scene_look_with_overlay(
+                &self.scene_look,
+                overlay_key,
+                overlay_look,
+                Some(key),
+            );
             let room = self.room_gltf_brownout.apply(look.room);
             env_per_scene.insert(key, (room, look.room_gltf_height_scale));
             env_frame_tunes.push((
                 key,
-                mahjuro_render::tuning::scene_look::room_env_frame_from_scene_look(
-                    &look, room,
-                ),
+                mahjuro_render::tuning::scene_look::room_env_frame_from_scene_look(&look, room),
             ));
         }
         let loading_hub_progress = if matches!(self.scene, Scene::Splash(_)) {
@@ -661,12 +657,7 @@ impl App {
             let env_scale = crate::render::main_menu_glb::main_menu_env_height_scale(
                 scene_look.room_gltf_height_scale,
             );
-            let (insts, lbls) = overlay.draw(
-                size.width as f32,
-                size.height as f32,
-                cam,
-                env_scale,
-            );
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32, cam, env_scale);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
@@ -722,12 +713,13 @@ impl App {
                 let max_tooltip_w =
                     crate::render::theme::metrics::tooltip_max_panel_px(w, h) * 0.72;
                 let max_inner_w = (max_tooltip_w - 2.0 * pad).max(40.0);
-                let preferred_inner_w = crate::ui::colored_keywords::colored_paragraph_preferred_width(
-                    label.as_ref(),
-                    line_h,
-                    max_inner_w,
-                )
-                .max(40.0);
+                let preferred_inner_w =
+                    crate::ui::colored_keywords::colored_paragraph_preferred_width(
+                        label.as_ref(),
+                        line_h,
+                        max_inner_w,
+                    )
+                    .max(40.0);
                 let tooltip_w = (preferred_inner_w + 2.0 * pad).clamp(72.0, max_tooltip_w);
                 let (bx, by, bw, bh) = btn.rect;
                 let cx = bx + bw * 0.5;

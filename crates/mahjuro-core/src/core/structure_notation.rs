@@ -84,7 +84,9 @@ fn trailing_number_suit(token: &str) -> Option<Suit> {
 fn parse_numbered_token(token: &str, suit: Suit) -> Result<Vec<Face>, StructureNotationError> {
     let digits = &token[..token.len() - 1];
     if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
-        return Err(StructureNotationError(format!("invalid numbered token '{token}'")));
+        return Err(StructureNotationError(format!(
+            "invalid numbered token '{token}'"
+        )));
     }
     let ranks: Vec<u8> = digits
         .chars()
@@ -92,7 +94,9 @@ fn parse_numbered_token(token: &str, suit: Suit) -> Result<Vec<Face>, StructureN
         .collect();
     for &r in &ranks {
         if !(1..=9).contains(&r) {
-            return Err(StructureNotationError(format!("rank {r} out of range in '{token}'")));
+            return Err(StructureNotationError(format!(
+                "rank {r} out of range in '{token}'"
+            )));
         }
     }
     Ok(ranks.into_iter().map(|rank| Face { suit, rank }).collect())
@@ -107,7 +111,9 @@ fn parse_mixed_token(token: &str) -> Result<Vec<Face>, StructureNotationError> {
         if bytes[i] == b'f' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
             let rank = bytes[i + 1] - b'0';
             if !(1..=4).contains(&rank) {
-                return Err(StructureNotationError(format!("invalid flower rank in '{token}'")));
+                return Err(StructureNotationError(format!(
+                    "invalid flower rank in '{token}'"
+                )));
             }
             faces.push(Face {
                 suit: Suit::Flower,
@@ -226,7 +232,9 @@ fn format_meld_token(tiles: &[Tile], set: &DetectedMeld) -> String {
             s
         }
         MeldKind::Pair | MeldKind::Triplet | MeldKind::Kong
-            if ordered.iter().all(|t| t.suit == ordered[0].suit && t.rank == ordered[0].rank) =>
+            if ordered
+                .iter()
+                .all(|t| t.suit == ordered[0].suit && t.rank == ordered[0].rank) =>
         {
             if ordered[0].is_number_tile() {
                 let ch = ordered[0].rank.to_string();
@@ -237,16 +245,10 @@ fn format_meld_token(tiles: &[Tile], set: &DetectedMeld) -> String {
                 s.push(suit_letter(ordered[0].suit));
                 s
             } else {
-                ordered
-                    .iter()
-                    .map(|t| honor_chunk(t))
-                    .collect::<String>()
+                ordered.iter().map(|t| honor_chunk(t)).collect::<String>()
             }
         }
-        _ => ordered
-            .iter()
-            .map(|t| honor_chunk(t))
-            .collect::<String>(),
+        _ => ordered.iter().map(|t| honor_chunk(t)).collect::<String>(),
     }
 }
 

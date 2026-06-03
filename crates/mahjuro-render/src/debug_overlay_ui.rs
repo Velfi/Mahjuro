@@ -22,13 +22,7 @@ impl DebugPointerState {
         self.hover_row = None;
     }
 
-    pub fn set_hover_if_hit(
-        &mut self,
-        mx: f32,
-        my: f32,
-        row: usize,
-        rect: [f32; 4],
-    ) -> bool {
+    pub fn set_hover_if_hit(&mut self, mx: f32, my: f32, row: usize, rect: [f32; 4]) -> bool {
         if point_in_rect(mx, my, rect) {
             self.hover_row = Some(row);
             true

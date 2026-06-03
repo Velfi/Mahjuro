@@ -9,6 +9,7 @@
 
 use glam::{Mat4, Vec3};
 
+use crate::gameplay_glb::BTN_CASH_IN;
 use crate::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF};
 use crate::river_mesh::{
     RIVER_LOCAL_CENTER_Y as BOWL_LOCAL_CENTER_Y, RIVER_LOCAL_HALF as BOWL_LOCAL_HALF,
@@ -18,10 +19,7 @@ use crate::wgpu_renderer::{
     GameplayPick, LOCAL_X_EXTENT, LOCAL_Y_EXTENT, LOCAL_Z_EXTENT, MAIN_MENU_PICK_OPTIONS,
     MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MainMenuPick, ShopHit, WgpuRenderer,
 };
-use crate::gameplay_glb::BTN_CASH_IN;
-use mahjuro_types::shop_pick::{
-    PICK_LEAVE_PROP, PICK_REROLL_PROP, YAKU_JOURNAL_BOOK_PICK_ID,
-};
+use mahjuro_types::shop_pick::{PICK_LEAVE_PROP, PICK_REROLL_PROP, YAKU_JOURNAL_BOOK_PICK_ID};
 
 fn gameplay_env_collision_node_to_hit(node_name: &str) -> Option<GameplayPick> {
     match node_name {
@@ -579,7 +577,10 @@ impl WgpuRenderer {
     /// Resolve the cached triangle list for a relic. Falls back to the
     /// fallback box mesh when the per-relic silhouette mesh hasn't finished
     /// loading yet (the first few frames after the relic texture shows up).
-    pub(super) fn relic_tris(&self, relic_id: mahjuro_core::core::relic::RelicId) -> &[[glam::Vec3; 3]] {
+    pub(super) fn relic_tris(
+        &self,
+        relic_id: mahjuro_core::core::relic::RelicId,
+    ) -> &[[glam::Vec3; 3]] {
         self.relic_tri_lists
             .get(&relic_id)
             .map(|v| v.as_slice())

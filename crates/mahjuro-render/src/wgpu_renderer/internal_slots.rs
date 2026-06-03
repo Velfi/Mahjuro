@@ -145,7 +145,12 @@ pub(crate) struct ShowcaseTileGpu {
     /// Last-uploaded shadow caster uniform — skips writes + shadow depth pass when static.
     pub cached_shadow_caster: crate::lit_mesh::ShadowCasterUniform,
     /// Cache key to skip re-rasterisation when the tile hasn't changed.
-    pub tile_id: (Suit, u8, Option<mahjuro_core::core::tile::TileEnhancement>, bool),
+    pub tile_id: (
+        Suit,
+        u8,
+        Option<mahjuro_core::core::tile::TileEnhancement>,
+        bool,
+    ),
     /// Hand tiles cast into the punctual shadow pre-pass; structure / celebration
     /// overlays receive shadows but should not cross-shadow the table row.
     pub casts_shadow: bool,

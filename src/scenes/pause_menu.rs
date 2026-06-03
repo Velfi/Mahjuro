@@ -1,11 +1,11 @@
 //! Shared pause menu overlay used by gameplay, shop, and blind-selection scenes.
 
-use crate::sfx_id::SfxId;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::run::RunState;
 use crate::render::theme::{ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
+use crate::sfx_id::SfxId;
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState};
 
@@ -335,9 +335,7 @@ impl PauseMenu {
             }
             Some(PauseAction::MainMenu) => {
                 bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                PauseUpdate::Transition(Box::new(Some(Scene::MainMenu(
-                    MainMenuScene::new(),
-                ))))
+                PauseUpdate::Transition(Box::new(Some(Scene::MainMenu(MainMenuScene::new()))))
             }
             Some(PauseAction::Exit) => {
                 bus.push(GameEvent::UiSound(SfxId::UiConfirm));

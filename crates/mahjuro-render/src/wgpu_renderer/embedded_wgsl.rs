@@ -4,7 +4,11 @@
 
 macro_rules! wgsl_file {
     ($file:literal) => {
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../shaders/", $file))
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../shaders/",
+            $file
+        ))
     };
 }
 
@@ -42,7 +46,10 @@ pub const FLAME: &str = concat!(
         "/../../shaders/blackbody.wgsl"
     )),
     "\n",
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../shaders/flame.wgsl")),
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../shaders/flame.wgsl"
+    )),
 );
 pub const STARFIELD: &str = concat!(
     wgsl_file!("rainbow_swirl.wgsl"),

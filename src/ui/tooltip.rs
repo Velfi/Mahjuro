@@ -178,10 +178,7 @@ pub fn push_speech_bubble_overlay(
     let rim = [color::BRASS[0], color::BRASS[1], color::BRASS[2], RIM_ALPHA];
 
     // Lower-left of the panel, inset so the squircle corner covers the join.
-    let tail_base = [
-        panel_x + panel_w * 0.14,
-        panel_y + panel_h * 0.90,
-    ];
+    let tail_base = [panel_x + panel_w * 0.14, panel_y + panel_h * 0.90];
     // Bulge the curve downward/outward toward the tip (moon).
     let control = [
         tail_base[0] - (tail_base[0] - tail_tip[0]).abs() * 0.22,

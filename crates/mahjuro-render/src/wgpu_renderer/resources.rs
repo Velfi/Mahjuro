@@ -4,9 +4,9 @@ use std::time::Instant;
 
 use super::*;
 
-use mahjuro_core::core::tile_pack::TilePackKind;
 use crate::gpu_types::RelicTextureGpu;
 use crate::theme::color;
+use mahjuro_core::core::tile_pack::TilePackKind;
 
 /// Linear HDR color format for the main 3D scene, bloom chain, and journal
 /// GPU scene target — independent of swapchain (SDR vs HDR).
@@ -581,7 +581,10 @@ pub(super) fn load_zodiac_ribbon_textures(
         textures.push(tex);
         views.push(view);
     }
-    ZodiacRibbonTextures { _textures: textures, views }
+    ZodiacRibbonTextures {
+        _textures: textures,
+        views,
+    }
 }
 
 /// Load tile-pack box art textures synchronously at init. There are at most 7
@@ -1002,7 +1005,8 @@ pub(crate) fn write_rgba8_texture(
     for y in 0..height {
         let src = (y * unpadded) as usize;
         let dst = (y * bytes_per_row) as usize;
-        padded[dst..dst + unpadded as usize].copy_from_slice(&tight_rgba[src..src + unpadded as usize]);
+        padded[dst..dst + unpadded as usize]
+            .copy_from_slice(&tight_rgba[src..src + unpadded as usize]);
     }
     queue.write_texture(tex_info, &padded, layout, extent);
 }

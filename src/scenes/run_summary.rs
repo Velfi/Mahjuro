@@ -2,20 +2,20 @@
 
 use std::time::Instant;
 
-use crate::sfx_id::SfxId;
 use crate::core::memorial_talisman::{MemorialTalismanKind, select_memorial};
-use crate::game::memorial_run::snapshot_from_run;
 use crate::core::progression::{
     LEVEL_UP_POINTS_FOR_LOSS, LEVEL_UP_POINTS_FOR_WIN, MAX_PROGRESS_LEVEL, POINTS_PER_LEVEL,
     PlayerProgress, meta_depth_roman,
 };
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::{GameEvent, GameOverReason};
+use crate::game::memorial_run::snapshot_from_run;
 use crate::game::run::RunState;
 use crate::persistence;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::GpuInstance;
+use crate::sfx_id::SfxId;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::archive_career::format_score;
@@ -267,12 +267,8 @@ impl SceneBehavior for RunSummaryScene {
         };
         let layout = RunSummaryPanelLayout::compute(w, h, &content, &theme);
         self.panel_scroll.sync(&layout);
-        self.panel_scroll.handle_wheel(
-            ctx.scroll_lines,
-            ctx.cursor_pos,
-            &layout,
-            ctx.input_mode,
-        );
+        self.panel_scroll
+            .handle_wheel(ctx.scroll_lines, ctx.cursor_pos, &layout, ctx.input_mode);
 
         let items = self.flat_items(w, h);
         let action = self.tree.update_flat(

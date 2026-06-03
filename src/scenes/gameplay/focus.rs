@@ -169,8 +169,8 @@ pub(super) fn play_select_sfx(
     added: u32,
     removed: u32,
 ) {
-    use crate::sfx_id::SfxId;
     use crate::game::event_bus::GameEvent;
+    use crate::sfx_id::SfxId;
     if added > 0 {
         bus.push(GameEvent::UiSound(SfxId::TileSelect));
     }
@@ -207,9 +207,10 @@ pub(super) fn focus_kind(f: Option<FocusTarget>) -> Option<FocusKind> {
         FocusTarget::Dora => Some(FocusKind::Dora),
         FocusTarget::Ordeal => Some(FocusKind::Ordeal),
         FocusTarget::RoundWind => Some(FocusKind::RoundWind),
-        FocusTarget::DiscardUndo | FocusTarget::Journal | FocusTarget::Guidebook | FocusTarget::WallHud => {
-            Some(FocusKind::Button)
-        }
+        FocusTarget::DiscardUndo
+        | FocusTarget::Journal
+        | FocusTarget::Guidebook
+        | FocusTarget::WallHud => Some(FocusKind::Button),
     }
 }
 

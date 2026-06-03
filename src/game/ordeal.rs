@@ -29,10 +29,10 @@ use rand::RngExt;
 use serde::Deserialize;
 
 use crate::core::debuff::{TileDebuff, TileDebuffClass};
-use mahjuro_core::core::json_asset::load_json_asset;
 use crate::core::relic::{RelicId, RelicState};
 use crate::core::rules::RuleModifier;
 use crate::game::run::RunState;
+use mahjuro_core::core::json_asset::load_json_asset;
 
 pub use mahjuro_core::core::ordeal_kind::{OrdealKind, OrdealTier};
 

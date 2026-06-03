@@ -1127,7 +1127,14 @@ impl AggregateStats {
             );
             out!(
                 "  {:<14} {:<18} {:>6} {:>6} {:>7} {:>8} {:>18} {:>8}",
-                "zodiac", "yaku", "acq", "used", "use/acq", "Δwin", "95% CI", "avgLvl"
+                "zodiac",
+                "yaku",
+                "acq",
+                "used",
+                "use/acq",
+                "Δwin",
+                "95% CI",
+                "avgLvl"
             );
             for row in d.zodiac_balance.iter().filter(|r| r.acquired > 0) {
                 out!(

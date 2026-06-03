@@ -109,17 +109,21 @@ fn seed_relic_order_heuristics(relics: &mut RelicState) {
         .active
         .iter()
         .position(|&id| id == RelicId::MirrorTile)
-        && mirror_idx + 1 >= n && mirror_idx > 0 {
-            relics.swap_relics(mirror_idx, mirror_idx - 1);
-        }
+        && mirror_idx + 1 >= n
+        && mirror_idx > 0
+    {
+        relics.swap_relics(mirror_idx, mirror_idx - 1);
+    }
 
     if let Some(hg_idx) = relics
         .active
         .iter()
         .position(|&id| id == RelicId::HungryGhost)
-        && hg_idx + 1 >= n && hg_idx > 0 {
-            relics.swap_relics(hg_idx, hg_idx - 1);
-        }
+        && hg_idx + 1 >= n
+        && hg_idx > 0
+    {
+        relics.swap_relics(hg_idx, hg_idx - 1);
+    }
 }
 
 /// Score a pre-round roster: simulate Hungry Ghost feed, then average best-play lift.
@@ -230,19 +234,9 @@ mod tests {
             RelicId::HungryGhost,
         ]);
         let base = ShopMarginalBase::new(&run);
-        let append_score = roster_eval_score(
-            &run,
-            &run.relics,
-            &run.relic_counters,
-            &base,
-        );
+        let append_score = roster_eval_score(&run, &run.relics, &run.relic_counters, &base);
         bot_optimize_relic_order_with_base(&mut run, &base);
-        let optimized_score = roster_eval_score(
-            &run,
-            &run.relics,
-            &run.relic_counters,
-            &base,
-        );
+        let optimized_score = roster_eval_score(&run, &run.relics, &run.relic_counters, &base);
         assert!(optimized_score >= append_score);
         let hg_idx = run
             .relics

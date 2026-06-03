@@ -18,8 +18,7 @@ impl BakeKind for Relic {
     const STAMP_PATH: &'static str = "assets/data/relic_baked/.inputs_stamp";
     const OUT_DIR: &'static str = "assets/data/relic_baked";
     const SKIP_ENV: &'static str = "MAHJURO_SKIP_RELIC_BAKE";
-    const BUILD_TOOL_CMD: &'static str =
-        "cargo build -p mahjuro-render --bin mahjuro-bake-relics";
+    const BUILD_TOOL_CMD: &'static str = "cargo build -p mahjuro-render --bin mahjuro-bake-relics";
     const REBAKE_CMD: &'static str = "cargo run -p mahjuro-render --bin mahjuro-bake-relics";
     const COMMIT_PATHS: &'static str =
         "assets/data/relic_baked/*.rlc assets/data/relic_baked/.inputs_stamp";

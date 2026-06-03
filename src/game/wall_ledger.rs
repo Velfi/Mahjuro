@@ -53,11 +53,7 @@ fn group_tiles(tiles: &[(Tile, bool)]) -> (Vec<WallLedgerFaceGroup>, Vec<WallLed
         .into_iter()
         .map(|((suit, rank), mut copies)| {
             copies.sort_by(|a, b| cmp_sort_order(&a.tile, &b.tile));
-            WallLedgerFaceGroup {
-                suit,
-                rank,
-                copies,
-            }
+            WallLedgerFaceGroup { suit, rank, copies }
         })
         .collect();
 

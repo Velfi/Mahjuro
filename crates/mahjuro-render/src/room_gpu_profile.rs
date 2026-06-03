@@ -47,8 +47,7 @@ pub fn count_cpu_payload(primitives: &[RoomEnvPrimitiveCpu]) -> RoomCpuUploadPay
 }
 
 fn count_loaded_primitive(prim: &LoadedPrimitive, out: &mut RoomCpuUploadPayload) {
-    out.vertex_bytes +=
-        (prim.vertices.len() * std::mem::size_of::<Vertex3dTex>()) as u64;
+    out.vertex_bytes += (prim.vertices.len() * std::mem::size_of::<Vertex3dTex>()) as u64;
     out.index_bytes += (prim.indices.len() * std::mem::size_of::<u32>()) as u64;
     count_texture_slot(
         prim.albedo_rgba.as_ref(),
@@ -62,7 +61,9 @@ fn count_loaded_primitive(prim: &LoadedPrimitive, out: &mut RoomCpuUploadPayload
     );
     count_texture_slot(
         prim.metallic_roughness_rgba.as_ref(),
-        prim.metallic_roughness_mip_chain.as_deref().map(|c| c.as_slice()),
+        prim.metallic_roughness_mip_chain
+            .as_deref()
+            .map(|c| c.as_slice()),
         out,
     );
     count_texture_slot(

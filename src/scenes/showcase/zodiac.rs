@@ -151,8 +151,12 @@ impl ZodiacPresenter {
             placement_rot_deg: [0.0, 0.0, 0.0],
         })]);
 
-        let mut title =
-            celebration_overlay::label_zodiac_level_title(h, w, format!("{} Lvl.{}", self.yaku_name, self.new_level), alpha);
+        let mut title = celebration_overlay::label_zodiac_level_title(
+            h,
+            w,
+            format!("{} Lvl.{}", self.yaku_name, self.new_level),
+            alpha,
+        );
         title.rect[1] += drift.xy[1];
         frame.text(title);
         push_confirm_continue_footer(&mut frame, &ctx, alpha, t);

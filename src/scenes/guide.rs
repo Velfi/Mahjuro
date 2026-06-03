@@ -9,7 +9,6 @@
 //! shop help. The previous scene is suspended by `App` and restored when
 //! the player presses Back.
 
-use crate::sfx_id::SfxId;
 use crate::core::hand::MeldKind;
 use crate::core::progression::PlayerProgress;
 use crate::core::tile::{Suit, Tile};
@@ -23,6 +22,7 @@ use crate::render::showcase_tile_layout::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::sfx_id::SfxId;
 use crate::ui::colored_keywords;
 use crate::ui::controller_hints::{
     HintStyle, guide_footer_row, push_screen_footer_hint, screen_footer_reserve,

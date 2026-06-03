@@ -12,21 +12,18 @@ pub use mahjuro_render as render;
 
 /// Ordeal presentation helpers (`def` / `name` / `tier`) live in the game crate.
 pub use game::ordeal::OrdealKindExt;
-pub mod sfx_id;
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 mod audio;
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 pub mod bot;
 #[cfg(feature = "game")]
-mod crash_guard;
-#[cfg(feature = "game")]
 mod cascade_tuning_timeline;
+#[cfg(feature = "game")]
+mod crash_guard;
 #[cfg(feature = "game")]
 mod debug_menu;
 #[cfg(feature = "game")]
 mod debug_overlays;
-#[cfg(feature = "game")]
-mod trailer_mode;
 pub mod effect_layers;
 pub mod game;
 #[cfg(all(feature = "game", target_os = "macos"))]
@@ -61,6 +58,9 @@ pub mod main_render_settings;
 #[path = "main/room_gltf_brownout.rs"]
 mod main_room_gltf_brownout;
 pub mod persistence;
+pub mod sfx_id;
+#[cfg(feature = "game")]
+mod trailer_mode;
 pub use mahjuro_render::physical_size;
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 #[path = "main/scene_transition.rs"]
@@ -105,14 +105,12 @@ use crate::ui::input::{InputMode, InputState, UiAction};
 #[cfg(feature = "game")]
 use crate::ui::layout::UiLayout;
 #[cfg(feature = "game")]
-use crate::ui::modal::{Modal, ModalQueue};
-#[cfg(feature = "game")]
 use crate::ui::modal::ModalTheme;
+#[cfg(feature = "game")]
+use crate::ui::modal::{Modal, ModalQueue};
 #[cfg(feature = "game")]
 use sdl3::keyboard::Mod;
 
-#[cfg(feature = "game")]
-use clap::{ArgAction, Args, Parser, Subcommand};
 #[cfg(feature = "game")]
 use crate::debug_menu::DebugAction;
 #[cfg(feature = "game")]
@@ -128,9 +126,9 @@ use crate::render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
 #[cfg(feature = "game")]
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 #[cfg(feature = "game")]
-use crate::scenes::gameplay::GameplayScene;
-#[cfg(feature = "game")]
 use crate::scenes::animation_lab::AnimationLabScene;
+#[cfg(feature = "game")]
+use crate::scenes::gameplay::GameplayScene;
 #[cfg(feature = "game")]
 use crate::scenes::material_viewer::MaterialViewerScene;
 #[cfg(feature = "game")]
@@ -141,6 +139,8 @@ use crate::scenes::transition_playground::TransitionPlaygroundScene;
 use crate::scenes::tutorial_summary::TutorialSummaryScene;
 #[cfg(feature = "game")]
 use crate::scenes::{ButtonAction, DrawCtx, UpdateCtx};
+#[cfg(feature = "game")]
+use clap::{ArgAction, Args, Parser, Subcommand};
 
 #[cfg(feature = "game")]
 pub(crate) struct App {

@@ -3,9 +3,7 @@
 use super::focus::FocusTarget;
 use crate::render::draw_cmd::UiFrame;
 use crate::scenes::DrawCtx;
-use crate::ui::controller_hints::{
-    HintStyle, gameplay_action_footer_row, push_screen_footer_hint,
-};
+use crate::ui::controller_hints::{HintStyle, gameplay_action_footer_row, push_screen_footer_hint};
 use crate::ui::input::InputMode;
 
 /// Whether to show the West / North (keyboard **Q** / **E**) gameplay legend for discard or play.

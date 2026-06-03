@@ -212,9 +212,7 @@ impl WgpuRenderer {
                             .cmds
                             .iter()
                             .flat_map(
-                                |cmd| -> Box<
-                                    dyn Iterator<Item = &crate::draw_cmd::Object3d>,
-                                > {
+                                |cmd| -> Box<dyn Iterator<Item = &crate::draw_cmd::Object3d>> {
                                     match cmd {
                                         DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),
                                         DrawCmd::Object3dBatch(v) => Box::new(v.iter()),
@@ -223,10 +221,9 @@ impl WgpuRenderer {
                                 },
                             )
                             .filter_map(|o| match &o.kind {
-                                crate::draw_cmd::Object3dKind::ExtrudedGlyph {
-                                    label,
-                                    ..
-                                } => Some(label.as_ref()),
+                                crate::draw_cmd::Object3dKind::ExtrudedGlyph { label, .. } => {
+                                    Some(label.as_ref())
+                                }
                                 _ => None,
                             })
                             .nth(slot_i);
@@ -246,11 +243,7 @@ impl WgpuRenderer {
                                         self.index_buffer.slice(..),
                                         wgpu::IndexFormat::Uint16,
                                     );
-                                    pass.draw_indexed(
-                                        0..6,
-                                        0,
-                                        slot_i as u32..slot_i as u32 + 1,
-                                    );
+                                    pass.draw_indexed(0..6, 0, slot_i as u32..slot_i as u32 + 1);
                                 }
                             }
                             pass.set_pipeline(&self.lit_mesh_pipeline);
@@ -362,7 +355,10 @@ impl WgpuRenderer {
                             (mesh, inst)
                         }
                         // Handled by the early-out blocks above.
-                        DrawKind::Relic | DrawKind::ExtrudedGlyph | DrawKind::BossIcon | DrawKind::GltfCoin => {
+                        DrawKind::Relic
+                        | DrawKind::ExtrudedGlyph
+                        | DrawKind::BossIcon
+                        | DrawKind::GltfCoin => {
                             unreachable!()
                         }
                     };
@@ -493,7 +489,9 @@ impl WgpuRenderer {
                                 let Some(stg) = self.showcase_tiles.get(slot_i) else {
                                     break;
                                 };
-                                for (pi, prim) in self.active_tile_mesh().primitives.iter().enumerate() {
+                                for (pi, prim) in
+                                    self.active_tile_mesh().primitives.iter().enumerate()
+                                {
                                     if prim.pipeline_key.is_blend() != blend_phase {
                                         continue;
                                     }

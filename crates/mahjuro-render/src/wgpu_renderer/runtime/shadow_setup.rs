@@ -1,6 +1,8 @@
 use super::*;
 use crate::draw_cmd::{DrawCmd, UiFrame};
-use crate::lit_mesh::{LitMeshInstance, MaterialKind, ShadowCasterUniform, ShadowGlobals, material_casts_shadow};
+use crate::lit_mesh::{
+    LitMeshInstance, MaterialKind, ShadowCasterUniform, ShadowGlobals, material_casts_shadow,
+};
 use crate::projected_light_shadow::{
     ProjectedShadowLightSetup, PunctualShadowBuild, build_punctual_shadow_setups,
     punctual_shadow_setups_changed,
@@ -38,28 +40,24 @@ pub fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
 impl ActiveRoomEnv {
     pub fn environment_bounds_doc(self) -> Option<crate::room_env_gltf::RoomEnvironmentBounds> {
         match self {
-            Self::Gameplay => {
-                crate::gameplay_glb::with_gameplay_glb_cpu(|o| o.and_then(|c| c.environment_bounds_doc))
-            }
+            Self::Gameplay => crate::gameplay_glb::with_gameplay_glb_cpu(|o| {
+                o.and_then(|c| c.environment_bounds_doc)
+            }),
             Self::Shop => {
                 crate::room_glb::with_shop_glb_cpu(|o| o.and_then(|c| c.environment_bounds_doc))
             }
-            Self::Hallway => {
-                crate::hallway_glb::with_hallway_glb_cpu(|o| o.and_then(|c| c.environment_bounds_doc))
-            }
-            Self::Stairway => {
-                crate::staircase_glb::with_staircase_glb_cpu(|o| {
-                    o.and_then(|c| c.environment_bounds_doc)
-                })
-            }
-            Self::Archive => {
-                crate::archive_glb::with_archive_glb_cpu(|o| o.and_then(|c| c.environment_bounds_doc))
-            }
-            Self::MainMenu => {
-                crate::main_menu_glb::with_main_menu_glb_cpu(|o| {
-                    o.and_then(|c| c.environment_bounds_doc)
-                })
-            }
+            Self::Hallway => crate::hallway_glb::with_hallway_glb_cpu(|o| {
+                o.and_then(|c| c.environment_bounds_doc)
+            }),
+            Self::Stairway => crate::staircase_glb::with_staircase_glb_cpu(|o| {
+                o.and_then(|c| c.environment_bounds_doc)
+            }),
+            Self::Archive => crate::archive_glb::with_archive_glb_cpu(|o| {
+                o.and_then(|c| c.environment_bounds_doc)
+            }),
+            Self::MainMenu => crate::main_menu_glb::with_main_menu_glb_cpu(|o| {
+                o.and_then(|c| c.environment_bounds_doc)
+            }),
         }
     }
 
@@ -161,8 +159,10 @@ impl WgpuRenderer {
                 first_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
             };
         }
-        let active_room_env = ActiveRoomEnv::from_frame(frame)
-            .or_else(|| self.active_scene_key.and_then(ActiveRoomEnv::from_scene_key));
+        let active_room_env = ActiveRoomEnv::from_frame(frame).or_else(|| {
+            self.active_scene_key
+                .and_then(ActiveRoomEnv::from_scene_key)
+        });
         let bounds_doc = active_room_env.and_then(|e| e.environment_bounds_doc());
         let env_height_scale = active_room_env
             .map(|e| self.room_env_shadow_height_scale(e))
@@ -235,16 +235,14 @@ impl WgpuRenderer {
             contact_ao_view_proj,
             ao_scale,
         );
-        self.queue.write_buffer(
-            &self.shadow_globals_buffer,
-            0,
-            bytemuck::bytes_of(&globals),
-        );
+        self.queue
+            .write_buffer(&self.shadow_globals_buffer, 0, bytemuck::bytes_of(&globals));
     }
 
     /// Realtime shadows are punctual-only; glTF spot lights are a content error.
     pub(super) fn warn_if_spot_lights_present(&self, frame: &UiFrame) {
-        if frame.scene_lighting.spot_lights.is_empty() || !frame.scene_lighting.spot_lights_from_gltf
+        if frame.scene_lighting.spot_lights.is_empty()
+            || !frame.scene_lighting.spot_lights_from_gltf
         {
             return;
         }
@@ -361,7 +359,9 @@ impl WgpuRenderer {
         model: glam::Mat4,
         material: MaterialKind,
     ) {
-        if let Some(shadow) = shadow.as_deref_mut() && material_casts_shadow(material) {
+        if let Some(shadow) = shadow.as_deref_mut()
+            && material_casts_shadow(material)
+        {
             *shadow.changed |=
                 inst.write_shadow_uniform(&self.queue, shadow.light_view_proj, model);
         }

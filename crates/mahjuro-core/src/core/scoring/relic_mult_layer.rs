@@ -258,10 +258,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         );
     }
 
-    if has(RelicId::Minimalist)
-        && sets.len() == 1
-        && sets[0].kind != MeldKind::Single
-    {
+    if has(RelicId::Minimalist) && sets.len() == 1 && sets[0].kind != MeldKind::Single {
         push_chips(steps, chips, *mult, "Minimalist", 120);
         push_mult(steps, *chips, mult, "Minimalist", 2.0);
     }
@@ -402,7 +399,13 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .map(|id| crate::core::relic::relic_sell_price_live(id, &ctx.relic.counters))
             .sum();
         if bonus > 0 {
-            push_mult(steps, *chips, mult, "Curio Cabinet", (bonus as f64).min(15.0));
+            push_mult(
+                steps,
+                *chips,
+                mult,
+                "Curio Cabinet",
+                (bonus as f64).min(15.0),
+            );
         }
     }
 

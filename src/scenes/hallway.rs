@@ -8,20 +8,20 @@
 //! camera from [`hallway_glb::hallway_camera_pick_chamber`], [`DrawCmd::HallwayEnvironment`],
 //! and a 2D HUD (side panels, skip context) on top.
 
-use crate::sfx_id::SfxId;
 use crate::core::rules::ChamberKind;
-use crate::game::engine::{GameCommand, GameEngine};
+use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{ImageQuad, ScenePunctualLight, UiFrame};
-use crate::render::scene_keys;
 use crate::render::hallway_glb::{self, BTN_SKIP_ROUND};
 use crate::render::room_glb;
+use crate::render::scene_keys;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::sfx_id::SfxId;
 use crate::ui::colored_keywords;
-use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
+use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
 use crate::ui::ordeal_icons::ordeal_icon_source;
 use crate::ui::skip_tag_icons::skip_tag_icon_source;
@@ -146,7 +146,8 @@ fn hallway_button_screen_rect(
 
 fn wrapped_text_height(text: &str, col_w: f32, font_px: f32, _line_h: f32) -> f32 {
     let default = [0.0; 4];
-    let wrapped = colored_keywords::wrap_colored_text_multiline(text, col_w, font_px / 0.99, default);
+    let wrapped =
+        colored_keywords::wrap_colored_text_multiline(text, col_w, font_px / 0.99, default);
     colored_keywords::colored_wrapped_rows_height(&wrapped, font_px)
 }
 
@@ -319,8 +320,7 @@ impl SceneBehavior for HallwayScene {
 
         match action {
             Some(ChamberAction::SkipChamber) if can_skip => {
-                let mut engine = GameEngine::new(ctx.run, ctx.bus);
-                let _ = engine.dispatch(GameCommand::SkipUpcomingChamberWithTag);
+                GameEngine::skip_upcoming_chamber(ctx.run, ctx.bus);
                 Some(Scene::Hallway(HallwayScene::new()))
             }
             Some(ChamberAction::PlayChamber) => {
@@ -393,29 +393,33 @@ impl SceneBehavior for HallwayScene {
             let room_glb = hallway_glb::hallway_glb_has_embedded_lights();
             frame.scene_lighting.embedded_gltf_punctual = room_glb;
             frame.scene_lighting.room_glb_brdf = room_glb;
-            frame.scene_lighting.set_gltf_embedded_spot_lights(if room_glb {
-                hallway_glb::hallway_embedded_spot_lights_runtime(
-                    w,
-                    h,
-                    ctx.room_gltf_height_scale,
-                    &ctx.room_env_for(scene_keys::HALLWAY).0,
-                )
-            } else {
-                Vec::new()
-            });
-            let (mut inverse_punctual, mut punctual_gltf_nodes): (Vec<ScenePunctualLight>, Vec<Option<String>>) =
-                if room_glb {
-                    crate::render::room_gltf_punctual::tagged_to_scene_punctual(
-                        hallway_glb::hallway_embedded_point_lights_runtime_tagged(
-                            w,
-                            h,
-                            ctx.room_gltf_height_scale,
-                            &ctx.room_env_for(scene_keys::HALLWAY).0,
-                        ),
+            frame
+                .scene_lighting
+                .set_gltf_embedded_spot_lights(if room_glb {
+                    hallway_glb::hallway_embedded_spot_lights_runtime(
+                        w,
+                        h,
+                        ctx.room_gltf_height_scale,
+                        &ctx.room_env_for(scene_keys::HALLWAY).0,
                     )
                 } else {
-                    (Vec::new(), Vec::new())
-                };
+                    Vec::new()
+                });
+            let (mut inverse_punctual, mut punctual_gltf_nodes): (
+                Vec<ScenePunctualLight>,
+                Vec<Option<String>>,
+            ) = if room_glb {
+                crate::render::room_gltf_punctual::tagged_to_scene_punctual(
+                    hallway_glb::hallway_embedded_point_lights_runtime_tagged(
+                        w,
+                        h,
+                        ctx.room_gltf_height_scale,
+                        &ctx.room_env_for(scene_keys::HALLWAY).0,
+                    ),
+                )
+            } else {
+                (Vec::new(), Vec::new())
+            };
             let mut point_lights: Vec<PointLight> = if room_glb {
                 Vec::new()
             } else {

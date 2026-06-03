@@ -468,8 +468,15 @@ pub(crate) fn evaluate_play_masks(
     yaku_levels_override: Option<&YakuLevels>,
     masks: &[u32],
 ) -> Option<(u64, Vec<usize>)> {
-    evaluate_play_masks_payoff(run, hand, relics_override, yaku_levels_override, None, masks)
-        .map(|(score, _, indices)| (score, indices))
+    evaluate_play_masks_payoff(
+        run,
+        hand,
+        relics_override,
+        yaku_levels_override,
+        None,
+        masks,
+    )
+    .map(|(score, _, indices)| (score, indices))
 }
 
 /// Top-scoring play commits in one mask-evaluation pass (shared score context).
@@ -769,7 +776,6 @@ fn best_play_in_hand(
     )
     .map(|(score, _, indices)| (score, indices))
 }
-
 
 /// Search for the highest-scoring playable selection in the current hand.
 /// Returns `(score, indices)`, or `None` if no positive-scoring play exists.
@@ -1093,8 +1099,8 @@ fn play_chamber(
         let mut did_discard = false;
         if can_discard && !strategy.oracle_discards_enabled() {
             let need = (run.target_score as u64).saturating_sub(run.round_score);
-            let cant_clear_pace = best_score == 0
-                || best_score.saturating_mul(run.plays_remaining as u64) < need;
+            let cant_clear_pace =
+                best_score == 0 || best_score.saturating_mul(run.plays_remaining as u64) < need;
             if cant_clear_pace {
                 if let Some(indices) = discard_candidates(run.hand(), 1).into_iter().next() {
                     bot_log!(
@@ -1872,9 +1878,16 @@ fn best_play_shop_value_for_hand(
 ) -> i64 {
     let commit_rules = run.validation_rules_for_structure_commits();
     let masks = enumerate_candidate_play_masks(hand, &commit_rules);
-    evaluate_play_masks_payoff(run, hand, relics_override, yaku_levels_override, None, &masks)
-        .map(|(score, yen, _)| shop_payoff_units(run, score, yen))
-        .unwrap_or(0)
+    evaluate_play_masks_payoff(
+        run,
+        hand,
+        relics_override,
+        yaku_levels_override,
+        None,
+        &masks,
+    )
+    .map(|(score, yen, _)| shop_payoff_units(run, score, yen))
+    .unwrap_or(0)
 }
 
 /// Synthetic random hands per shop valuation (plus the real current hand).
@@ -3026,14 +3039,7 @@ fn play_run_with_options(
                 run.yen,
                 run.upcoming_chamber
             );
-            match visit_shop(
-                &mut run,
-                &mut stats,
-                log,
-                &strategy,
-                deadline,
-                &mut bus,
-            ) {
+            match visit_shop(&mut run, &mut stats, log, &strategy, deadline, &mut bus) {
                 ShopVisitOutcome::Completed => {}
                 ShopVisitOutcome::TimedOut => {
                     record_timeout_snapshot(
@@ -3086,14 +3092,7 @@ fn play_run_with_options(
 
         // Shop visit happens after advance_round (matching Shop → Hallway scene
         // flow), so we evaluate purchases against the freshly-drawn next hand.
-        match visit_shop(
-            &mut run,
-            &mut stats,
-            log,
-            &strategy,
-            deadline,
-            &mut bus,
-        ) {
+        match visit_shop(&mut run, &mut stats, log, &strategy, deadline, &mut bus) {
             ShopVisitOutcome::Completed => {}
             ShopVisitOutcome::TimedOut => {
                 record_timeout_snapshot(

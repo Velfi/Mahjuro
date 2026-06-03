@@ -5,8 +5,8 @@ use crate::render::gameplay_glb::{
     self, BTN_CASH_IN, DISCARD_RIVER, GameplayMarkerPose, HAND_TILES_LEFT, HAND_TILES_RIGHT,
     PLAY_MIRROR, PLAYER_CONSUMABLE_MARKERS, PLAYER_DISCARD_TALLY, PLAYER_GOLD, PLAYER_PLAY_TALLY,
     PLAYER_RELIC_MARKERS, STRUCTURE_TILES_LEFT, STRUCTURE_TILES_RIGHT, TILE_PLINTH_MARKERS,
-    YAKU_TABLETS_LEFT, YAKU_TABLETS_RIGHT,
-    gameplay_discard_river_model_screen_rect, gameplay_play_mirror_model_screen_rect,
+    YAKU_TABLETS_LEFT, YAKU_TABLETS_RIGHT, gameplay_discard_river_model_screen_rect,
+    gameplay_play_mirror_model_screen_rect,
 };
 use crate::render::room_glb::RoomGlbCpu;
 
@@ -25,8 +25,13 @@ pub fn reproject_action_button_rects(
     env_h: f32,
     layout_scale: f32,
     anchors: &GameplayGlbAnchors,
-) -> ((f32, f32, f32, f32), (f32, f32, f32, f32), (f32, f32, f32, f32)) {
-    let discard = gameplay_discard_river_model_screen_rect(win_w, win_h, cam, &anchors.discard_river_pick);
+) -> (
+    (f32, f32, f32, f32),
+    (f32, f32, f32, f32),
+    (f32, f32, f32, f32),
+) {
+    let discard =
+        gameplay_discard_river_model_screen_rect(win_w, win_h, cam, &anchors.discard_river_pick);
     let play = gameplay_play_mirror_model_screen_rect(win_w, win_h, cam, &anchors.play_mirror_pick);
     let cash_in_w = (96.0 * layout_scale).max(72.0);
     let cash_in_h = (36.0 * layout_scale).max(24.0);
@@ -476,10 +481,9 @@ mod tests {
         );
         assert!(anchors.hand_world_slots[0].1 > 0.0, "slot width");
 
-        let short = super::resolve_gameplay_glb_anchors_from_cpu(
-            &cpu, &layout, 10, w, h, &cam, env_h,
-        )
-        .expect("anchors");
+        let short =
+            super::resolve_gameplay_glb_anchors_from_cpu(&cpu, &layout, 10, w, h, &cam, env_h)
+                .expect("anchors");
         let (short_first, short_w, _) = short.hand_world_slots.first().unwrap();
         let (short_last, _, _) = short.hand_world_slots.last().unwrap();
         let full_w = anchors.hand_world_slots[0].1;

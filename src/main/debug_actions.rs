@@ -2,7 +2,6 @@ use super::*;
 
 use crate::core::tile_pack::TilePackKind;
 use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay};
-use crate::trailer_mode::TrailerMode;
 use crate::game::engine::GameEngine;
 use crate::scenes::shop::PackCelebration;
 use crate::scenes::{
@@ -10,6 +9,7 @@ use crate::scenes::{
     ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter, TixelsScene,
     VictoryScene,
 };
+use crate::trailer_mode::TrailerMode;
 use rand::RngExt;
 
 impl App {
@@ -158,7 +158,9 @@ impl App {
                         .renderer
                         .as_ref()
                         .map(|r| r.main_menu_effects)
-                        .unwrap_or_else(crate::render::main_menu_effects_tuning::MainMenuEffectsTuning::load);
+                        .unwrap_or_else(
+                            crate::render::main_menu_effects_tuning::MainMenuEffectsTuning::load,
+                        );
                     let moon_phase_debug = self
                         .renderer
                         .as_ref()
@@ -215,8 +217,9 @@ impl App {
                         .as_ref()
                         .map(|r| r.flame_tuning)
                         .unwrap_or_else(crate::render::flame_tuning::FlameTuning::load);
-                    self.debug.flame_debug_overlay =
-                        Some(crate::render::flame_debug_overlay::FlameDebugOverlay::new(tuning));
+                    self.debug.flame_debug_overlay = Some(
+                        crate::render::flame_debug_overlay::FlameDebugOverlay::new(tuning),
+                    );
                     log::debug!("Opened flame debug overlay");
                 }
             }
@@ -347,9 +350,11 @@ impl App {
                 log::debug!("Opened roller lab");
             }
             DebugAction::OpenCascadeLab => {
-                self.overlay_stack.push(Scene::CascadeLab(Box::new(
-                    CascadeLabScene::new(true, self.cascade_tuning.clone()),
-                )));
+                self.overlay_stack
+                    .push(Scene::CascadeLab(Box::new(CascadeLabScene::new(
+                        true,
+                        self.cascade_tuning.clone(),
+                    ))));
                 log::debug!("Opened cascade lab");
             }
             DebugAction::OpenRumbleLab => {

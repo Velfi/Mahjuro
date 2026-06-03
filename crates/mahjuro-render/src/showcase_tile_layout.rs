@@ -3,13 +3,11 @@
 
 use glam::Vec3;
 
-use mahjuro_gfx_types::TilePreset;
 use crate::draw_cmd::CameraParams;
-use crate::table_transform::{
-    rot_euler_xyz_rad, tile_mesh_local_to_world, translate_rot_scale,
-};
+use crate::table_transform::{rot_euler_xyz_rad, tile_mesh_local_to_world, translate_rot_scale};
 use crate::wgpu_renderer::{LOCAL_X_EXTENT, LOCAL_Y_EXTENT, LOCAL_Z_EXTENT};
 use crate::world_space::layout_anchor_to_world;
+use mahjuro_gfx_types::TilePreset;
 
 /// Max fraction of window width occupied by the pack-reveal row (projected silhouettes + gaps).
 const PACK_REVEAL_ROW_MAX_W_FRAC: f32 = 0.72;
@@ -282,8 +280,8 @@ pub fn compute_pack_reveal_row_layout(p: &PackRevealRowLayoutParams<'_>) -> Pack
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mahjuro_gfx_types::TilePreset;
     use crate::scene_glue::shop_celebration_camera;
+    use mahjuro_gfx_types::TilePreset;
 
     #[test]
     fn pack_reveal_row_tiles_are_readable_on_celebration_camera() {

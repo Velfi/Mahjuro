@@ -34,11 +34,7 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
             Ok(true)
         }
         Some(Command::ForcedRelicSweep(args)) => {
-            bot::run_forced_relic_sweep(
-                args.runs,
-                args.meta_depth,
-                args.export_json.as_deref(),
-            );
+            bot::run_forced_relic_sweep(args.runs, args.meta_depth, args.export_json.as_deref());
             Ok(true)
         }
         Some(Command::Bot(bot_cli)) => {

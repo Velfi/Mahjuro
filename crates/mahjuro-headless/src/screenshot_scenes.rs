@@ -12,7 +12,9 @@ use super::fixtures::{
 };
 use super::slug::{parse_tile_pack_slug, parse_zodiac_slug};
 
-pub(crate) fn validate_screenshot_cli(s: &crate::screenshot_cli::ScreenshotCli) -> anyhow::Result<()> {
+pub(crate) fn validate_screenshot_cli(
+    s: &crate::screenshot_cli::ScreenshotCli,
+) -> anyhow::Result<()> {
     let shop_like = matches!(s.scene.as_str(), "shop");
     let collection_like = collection_screenshot_tab(&s.scene).is_some();
     if s.item_inspect && !shop_like && !collection_like {
@@ -128,7 +130,9 @@ fn collection_scene(tab: CollectionScreenshotTab) -> Scene {
     Scene::Archive(coll)
 }
 
-fn zodiac_from_cli(s: &crate::screenshot_cli::ScreenshotCli) -> anyhow::Result<mahjuro::core::zodiac::ZodiacKind> {
+fn zodiac_from_cli(
+    s: &crate::screenshot_cli::ScreenshotCli,
+) -> anyhow::Result<mahjuro::core::zodiac::ZodiacKind> {
     match s.zodiac.as_deref() {
         Some(slug) => parse_zodiac_slug(slug),
         None => Ok(mahjuro::core::zodiac::ZodiacKind::Snake),
@@ -139,7 +143,9 @@ fn zodiac_celebration_level(s: &crate::screenshot_cli::ScreenshotCli) -> u32 {
     s.celebration_level.unwrap_or(2).max(1)
 }
 
-pub(crate) fn zodiac_showcase_scene(s: &crate::screenshot_cli::ScreenshotCli) -> anyhow::Result<Scene> {
+pub(crate) fn zodiac_showcase_scene(
+    s: &crate::screenshot_cli::ScreenshotCli,
+) -> anyhow::Result<Scene> {
     let z = zodiac_from_cli(s)?;
     let level = zodiac_celebration_level(s);
     let yaku = z.yaku();
@@ -169,9 +175,9 @@ fn game_over_defeat_scene(
     progress: &mut mahjuro::core::progression::PlayerProgress,
 ) -> anyhow::Result<Scene> {
     use mahjuro::core::memorial_talisman::select_memorial;
+    use mahjuro::game::event_bus::GameOverReason;
     use mahjuro::game::memorial_run::snapshot_from_run;
     use mahjuro::game::progression_run::{hydrate_game_over_run, run_record_defeat_reason};
-    use mahjuro::game::event_bus::GameOverReason;
 
     if s.bot_play && s.from_run_history.is_some() {
         anyhow::bail!("use only one of --bot-play or --from-run-history");
@@ -279,10 +285,9 @@ pub(crate) fn resolve_screenshot_scene(
             force_round_win_modal = true;
             (Scene::Gameplay(Box::new(GameplayScene::new())), true)
         }
-        "hallway" | "pick_chamber" | "pick_blind" => (
-            Scene::Hallway(mahjuro::scenes::HallwayScene::new()),
-            true,
-        ),
+        "hallway" | "pick_chamber" | "pick_blind" => {
+            (Scene::Hallway(mahjuro::scenes::HallwayScene::new()), true)
+        }
         "stairway" | "staircase" => (Scene::Stairway(mahjuro::scenes::StairwayScene::new()), true),
         "shop" => {
             setup_shop_state(run);
@@ -307,9 +312,9 @@ pub(crate) fn resolve_screenshot_scene(
             false,
         ),
         "guide" | "tile_guide" | "tiles_guide" => (
-            Scene::Guide(mahjuro::scenes::GuideScene::with_page(screenshot_page_index(
-                s,
-            ))),
+            Scene::Guide(mahjuro::scenes::GuideScene::with_page(
+                screenshot_page_index(s),
+            )),
             false,
         ),
         "tutorial" | "tutorial_campaign" => (
@@ -336,7 +341,10 @@ pub(crate) fn resolve_screenshot_scene(
             Scene::ButtonAabbLab(mahjuro::scenes::ButtonAabbLabScene::new(false)),
             false,
         ),
-        "tixels" => (Scene::Tixels(mahjuro::scenes::TixelsScene::new(false)), false),
+        "tixels" => (
+            Scene::Tixels(mahjuro::scenes::TixelsScene::new(false)),
+            false,
+        ),
         "relic_unlock" => {
             force_relic_modal = true;
             (

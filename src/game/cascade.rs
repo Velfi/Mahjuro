@@ -225,11 +225,7 @@ pub fn last_yaku_step(breakdown: &ScoreBreakdown, step_index: usize) -> Option<Y
         .steps
         .get(step_index + 1)
         .is_some_and(|next| next.source == step.source);
-    if next_same {
-        None
-    } else {
-        Some(yk)
-    }
+    if next_same { None } else { Some(yk) }
 }
 
 /// What the UI should display for the current cascade frame.
@@ -387,10 +383,7 @@ impl ScoringCascade {
             Phase::Done => 1.0,
         };
 
-        let wave_t = if matches!(
-            self.phase,
-            Phase::ShowBaseStep(_) | Phase::ShowStep(_)
-        ) {
+        let wave_t = if matches!(self.phase, Phase::ShowBaseStep(_) | Phase::ShowStep(_)) {
             (phase_t * std::f32::consts::TAU * 1.35).sin()
         } else {
             0.0
@@ -416,10 +409,18 @@ impl ScoringCascade {
                 let from = if i > 0 {
                     self.score_before + self.breakdown.steps[i - 1].running_total
                 } else {
-                    self.score_before + self.breakdown.base_steps.last().map_or(0, |s| s.running_total)
+                    self.score_before
+                        + self
+                            .breakdown
+                            .base_steps
+                            .last()
+                            .map_or(0, |s| s.running_total)
                 };
                 let to = self.score_before + step.running_total;
-                (lerp_u64(from, to, tick_t), Some(self.breakdown.base_steps.len() + i))
+                (
+                    lerp_u64(from, to, tick_t),
+                    Some(self.breakdown.base_steps.len() + i),
+                )
             }
             Phase::PostStepHold | Phase::Done => (self.score_before + self.earned, None),
         };
@@ -498,8 +499,8 @@ impl ScoringCascade {
         let (active_yaku, active_relic) = latest_step
             .as_ref()
             .map(|(source, _)| {
-                let yaku = crate::core::yaku::yaku_kind_by_display_name(source)
-                    .map(|_| source.clone());
+                let yaku =
+                    crate::core::yaku::yaku_kind_by_display_name(source).map(|_| source.clone());
                 let relic = crate::core::relic::relic_by_name(source);
                 (yaku, relic)
             })

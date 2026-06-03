@@ -627,15 +627,14 @@ fn decode_tile_primitive(
         }
     }
 
-    if is_face
-        && let Some(mut face) = face_uvs {
-            anyhow::ensure!(
-                face.len() == positions_local.len(),
-                "TEXCOORD_1 count does not match POSITION count on face primitive"
-            );
-            face = normalize_uv01(&face);
-            uv_emr = face;
-        }
+    if is_face && let Some(mut face) = face_uvs {
+        anyhow::ensure!(
+            face.len() == positions_local.len(),
+            "TEXCOORD_1 count does not match POSITION count on face primitive"
+        );
+        face = normalize_uv01(&face);
+        uv_emr = face;
+    }
 
     let indices: Vec<u32> = if let Some(ids) = reader.read_indices() {
         ids.into_u32().collect()
@@ -666,7 +665,10 @@ fn decode_tile_primitive(
             let t_loc = Vec3::new(tl[0], tl[1], tl[2]);
             let w = tl[3];
             let t_w = node_world.transform_vector3(t_loc).normalize_or_zero();
-            let mut color = colors.get(i).copied().unwrap_or([1.0, 1.0, 1.0, face_marker_a]);
+            let mut color = colors
+                .get(i)
+                .copied()
+                .unwrap_or([1.0, 1.0, 1.0, face_marker_a]);
             if colors.is_empty() {
                 color[3] = face_marker_a;
             } else if is_face {
@@ -722,12 +724,15 @@ fn decode_tile_primitive(
 
     let normal_rgba = material.normal_texture().and_then(|nt| {
         let img_index = nt.texture().source().index();
-        images.get(img_index).and_then(gltf_image_to_rgba8).map(|mut tex| {
-            if (nt.scale() - 1.0).abs() > 1e-6 {
-                apply_normal_scale_rgba8(&mut tex.0, nt.scale());
-            }
-            tex
-        })
+        images
+            .get(img_index)
+            .and_then(gltf_image_to_rgba8)
+            .map(|mut tex| {
+                if (nt.scale() - 1.0).abs() > 1e-6 {
+                    apply_normal_scale_rgba8(&mut tex.0, nt.scale());
+                }
+                tex
+            })
     });
 
     if normal_rgba.is_none() && material.normal_texture().is_some() {
@@ -772,12 +777,11 @@ fn walk_tile_scene_nodes_filtered(
     let local = Mat4::from_cols_array_2d(&node.transform().matrix());
     let world = parent * local;
     let include_mesh = node_name.is_none_or(|name| node.name() == Some(name));
-    if include_mesh
-        && let Some(mesh) = node.mesh() {
-            for prim in mesh.primitives() {
-                out.push(decode_tile_primitive(prim, world, buffers, images)?);
-            }
+    if include_mesh && let Some(mesh) = node.mesh() {
+        for prim in mesh.primitives() {
+            out.push(decode_tile_primitive(prim, world, buffers, images)?);
         }
+    }
     for child in node.children() {
         walk_tile_scene_nodes_filtered(child, world, node_name, out, buffers, images)?;
     }
@@ -836,8 +840,12 @@ fn apply_normal_scale_rgba8(pixels: &mut [u8], scale: f32) {
         let snx = nx * scale;
         let sny = ny * scale;
         let len = (snx * snx + sny * sny + nz * nz).sqrt().max(1e-6);
-        px[0] = (((snx / len) * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8;
-        px[1] = (((sny / len) * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8;
+        px[0] = (((snx / len) * 0.5 + 0.5) * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        px[1] = (((sny / len) * 0.5 + 0.5) * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8;
         px[2] = (((nz / len) * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8;
     }
 }
@@ -877,7 +885,9 @@ mod tests {
                 "3d/tile_bamboo_and_ivory.glb" => {
                     include_bytes!("../../../assets/3d/tile_bamboo_and_ivory.glb").as_slice()
                 }
-                "3d/tile_plastic.glb" => include_bytes!("../../../assets/3d/tile_plastic.glb").as_slice(),
+                "3d/tile_plastic.glb" => {
+                    include_bytes!("../../../assets/3d/tile_plastic.glb").as_slice()
+                }
                 "3d/tile_tortoise_shell.glb" => {
                     include_bytes!("../../../assets/3d/tile_tortoise_shell.glb").as_slice()
                 }

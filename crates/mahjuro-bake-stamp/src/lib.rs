@@ -210,8 +210,7 @@ pub fn skip_committed_bake_checks() -> bool {
     skip_env_set(SKIP_COMMITTED_BAKE_CHECKS_ENV)
 }
 
-pub const BUILD_BAKER_CMD: &str =
-    "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo build -p mahjuro-headless --bin mahjuro-bake --features bake";
+pub const BUILD_BAKER_CMD: &str = "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo build -p mahjuro-headless --bin mahjuro-bake --features bake";
 
 #[derive(Debug, Clone)]
 pub struct BakeStatus {
@@ -256,8 +255,7 @@ pub trait BakeKind {
 
     fn bake_status(repo: &Path) -> BakeStatus {
         let hash = Self::compute_inputs_hash(repo);
-        let stamp_ok =
-            read_stamp_line(&Self::stamp_file(repo)).is_some_and(|s| s == hash);
+        let stamp_ok = read_stamp_line(&Self::stamp_file(repo)).is_some_and(|s| s == hash);
         let outputs_ok = Self::outputs_ok(repo);
         BakeStatus {
             hash,
@@ -285,7 +283,10 @@ pub fn out_of_date_message<K: BakeKind>(status: &BakeStatus) -> String {
             status.hash
         )
     } else {
-        format!("  baked outputs missing or incomplete under {}/", K::OUT_DIR)
+        format!(
+            "  baked outputs missing or incomplete under {}/",
+            K::OUT_DIR
+        )
     };
     format!(
         concat!(
@@ -332,26 +333,18 @@ pub fn skip_auto_offline_rebake() -> bool {
 
 /// True when `build.rs` may spawn offline rebake tools (local dev host builds).
 pub fn auto_offline_rebake_enabled() -> bool {
-    !skip_auto_offline_rebake()
-        && !skip_env_set("CI")
-        && !cross_compiling()
+    !skip_auto_offline_rebake() && !skip_env_set("CI") && !cross_compiling()
 }
 
 fn cross_compiling() -> bool {
-    match (
-        std::env::var("HOST"),
-        std::env::var("TARGET"),
-    ) {
+    match (std::env::var("HOST"), std::env::var("TARGET")) {
         (Ok(host), Ok(target)) => host != target,
         _ => false,
     }
 }
 
 /// Freshness check used by `build.rs`: auto-rebake locally when stale, panic in CI or on failure.
-pub fn ensure_bake_current<K: BakeKind>(
-    repo: &Path,
-    rebake: impl FnOnce() -> Result<(), String>,
-) {
+pub fn ensure_bake_current<K: BakeKind>(repo: &Path, rebake: impl FnOnce() -> Result<(), String>) {
     if skip_committed_bake_checks() || K::skip_bake_env() {
         let via = if skip_committed_bake_checks() {
             SKIP_COMMITTED_BAKE_CHECKS_ENV
@@ -360,10 +353,7 @@ pub fn ensure_bake_current<K: BakeKind>(
         } else {
             K::SKIP_ENV
         };
-        println!(
-            "cargo:info={via}: skipping {} freshness check",
-            K::LABEL
-        );
+        println!("cargo:info={via}: skipping {} freshness check", K::LABEL);
         return;
     }
 
@@ -411,10 +401,7 @@ pub fn assert_bake_current<K: BakeKind>(repo: &Path) {
         } else {
             K::SKIP_ENV
         };
-        println!(
-            "cargo:info={via}: skipping {} freshness check",
-            K::LABEL
-        );
+        println!("cargo:info={via}: skipping {} freshness check", K::LABEL);
         return;
     }
 
@@ -430,9 +417,9 @@ pub fn assert_bake_current<K: BakeKind>(repo: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::showcase_decal::ShowcaseDecal;
     use crate::room_gi::RoomGi;
     use crate::room_shadow::RoomShadow;
+    use crate::showcase_decal::ShowcaseDecal;
     use std::path::PathBuf;
 
     fn assert_stamp_matches<K: BakeKind>() {

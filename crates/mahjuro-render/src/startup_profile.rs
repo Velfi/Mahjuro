@@ -93,12 +93,10 @@ pub fn log_sample(name: &'static str, context: &str) {
     if !enabled() {
         return;
     }
-    let ms = samples().lock().ok().and_then(|v| {
-        v.iter()
-            .rev()
-            .find(|s| s.name == name)
-            .map(|s| s.ms)
-    });
+    let ms = samples()
+        .lock()
+        .ok()
+        .and_then(|v| v.iter().rev().find(|s| s.name == name).map(|s| s.ms));
     if let Some(ms) = ms {
         log::info!(
             "startup profile: {name} — {context} ({ms:.1} ms, wall {:.0} ms)",

@@ -17,11 +17,14 @@ mod tests {
     #[test]
     fn coin_glb_loads_punched_mesh_only() {
         let bytes = include_bytes!("../../../assets/3d/coin.glb");
-        let mut tile =
-            load_glb_tile_from_node_name(bytes, Some(COIN_GLB_NODE)).expect("coin.glb");
+        let mut tile = load_glb_tile_from_node_name(bytes, Some(COIN_GLB_NODE)).expect("coin.glb");
         normalize_mesh(&mut tile);
         assert!(
-            tile.primitives.iter().map(|p| p.vertices.len()).sum::<usize>() > 100,
+            tile.primitives
+                .iter()
+                .map(|p| p.vertices.len())
+                .sum::<usize>()
+                > 100,
             "coin_punched should have substantial geometry"
         );
         assert!(

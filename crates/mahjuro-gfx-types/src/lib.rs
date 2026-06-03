@@ -12,4 +12,6 @@ pub use effects::EffectsQuality;
 pub use graphics_mode::GraphicsMode;
 pub use shadow::ShadowQuality;
 pub use tile::{TileMaterial, TilePreset};
-pub use tuning::{clear_tuning_override, has_tuning_override, load_tuning_override, save_tuning_override};
+pub use tuning::{
+    clear_tuning_override, has_tuning_override, load_tuning_override, save_tuning_override,
+};

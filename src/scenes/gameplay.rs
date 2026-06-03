@@ -332,15 +332,12 @@ impl GameplayScene {
         run: &crate::game::run::RunState,
     ) {
         let interaction = GameEngine::read_interaction(run);
-        if score_counter::try_resolve_score_cascade_layout(layout, &self.positions, 1.0).is_none()
-        {
-            log::warn!("[Debug] demo cascade: gameplay.glb score frame unavailable; using fallbacks");
+        if score_counter::try_resolve_score_cascade_layout(layout, &self.positions, 1.0).is_none() {
+            log::warn!(
+                "[Debug] demo cascade: gameplay.glb score frame unavailable; using fallbacks"
+            );
         }
-        let fly_dest = score_counter::resolve_score_popup_fly_dest(
-            layout,
-            &self.positions,
-            1.0,
-        );
+        let fly_dest = score_counter::resolve_score_popup_fly_dest(layout, &self.positions, 1.0);
         let dest = (fly_dest.px, fly_dest.py);
         let dest_lift = Some(fly_dest.lift_z);
 
@@ -581,14 +578,20 @@ impl GameplayScene {
 
     /// [`with_pending_chamber`] plus [`RunState::preset_round_hud_for_chamber_entry`]
     /// so score/target rollers are correct on the first gameplay frame.
-    pub fn enter_pending_chamber(run: &mut crate::game::run::RunState, blind: crate::core::rules::ChamberKind) -> Self {
+    pub fn enter_pending_chamber(
+        run: &mut crate::game::run::RunState,
+        blind: crate::core::rules::ChamberKind,
+    ) -> Self {
         run.preset_round_hud_for_chamber_entry(blind);
         Self::with_pending_chamber(blind)
     }
 
     /// Chamber whose BGM should play: the round being entered (`pending_chamber`)
     /// or the active round on resume (`active_chamber`).
-    pub fn music_chamber_kind(&self, active_chamber: crate::core::rules::ChamberKind) -> crate::core::rules::ChamberKind {
+    pub fn music_chamber_kind(
+        &self,
+        active_chamber: crate::core::rules::ChamberKind,
+    ) -> crate::core::rules::ChamberKind {
         self.pending_chamber.unwrap_or(active_chamber)
     }
 
@@ -680,11 +683,8 @@ impl GameplayScene {
         use crate::render::score_popups::TABLE_POPUP_LIFT_Z;
 
         if step.kind == StepKind::Final
-            && let Some(cascade) = score_counter::try_resolve_score_cascade_layout(
-                layout,
-                positions,
-                env_height_scale,
-            )
+            && let Some(cascade) =
+                score_counter::try_resolve_score_cascade_layout(layout, positions, env_height_scale)
         {
             return cascade.counter.reel;
         }
@@ -737,13 +737,7 @@ impl GameplayScene {
     ) -> Option<crate::render::world_space::LayoutAnchorPx> {
         let active_ids = GameEngine::active_relics(run);
         let idx = active_ids.iter().position(|&id| id == rid)?;
-        glb_anchors::relic_tray_anchor(
-            layout.window_w,
-            layout.window_h,
-            env_height_scale,
-            idx,
-        )
-        .ok()
+        glb_anchors::relic_tray_anchor(layout.window_w, layout.window_h, env_height_scale, idx).ok()
     }
 
     fn yaku_popup_source(
@@ -756,11 +750,9 @@ impl GameplayScene {
 
         let interaction = GameEngine::read_interaction(run);
         let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
-        if let Some(a) = glb_anchors::try_resolve_gameplay_glb_anchors(
-            layout,
-            interaction.hand_len,
-            env_h,
-        ) {
+        if let Some(a) =
+            glb_anchors::try_resolve_gameplay_glb_anchors(layout, interaction.hand_len, env_h)
+        {
             let mut active: Vec<_> = run.available_yaku.to_vec();
             active.sort();
             let idx = active
@@ -832,11 +824,8 @@ impl GameplayScene {
         let interaction = GameEngine::read_interaction(run);
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
         let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
-        let anchors = glb_anchors::try_resolve_gameplay_glb_anchors(
-            layout,
-            interaction.hand_len,
-            env_h,
-        )?;
+        let anchors =
+            glb_anchors::try_resolve_gameplay_glb_anchors(layout, interaction.hand_len, env_h)?;
         input_handler::structure_showcase_tile_popup_center(
             &anchors.structure_marker_poses,
             layout,
@@ -897,10 +886,7 @@ impl GameplayScene {
         let score_before = GameEngine::read(ctx.run).round_score;
         let gameplay = GameEngine::read(ctx.run);
         let cascade_showcase = Some(CascadeShowcase {
-            tiles: Self::display_tiles(
-                gameplay.structure_tiles.iter().copied(),
-                ctx.run,
-            ),
+            tiles: Self::display_tiles(gameplay.structure_tiles.iter().copied(), ctx.run),
             sets: gameplay.structure_sets.clone(),
         });
         let earned = ctx.run.trigger_structure_manual(ctx.bus);

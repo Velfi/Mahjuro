@@ -132,12 +132,7 @@ impl RainSpawnVolume {
 
     /// Frustum spawn biased toward the camera in the view plane (depth + lateral).
     /// `near_bias` ≤ 0 skips bias (uniform in frustum).
-    pub fn random_pos_near_camera(
-        self,
-        cam: &CameraParams,
-        aspect: f32,
-        near_bias: f32,
-    ) -> Vec3 {
+    pub fn random_pos_near_camera(self, cam: &CameraParams, aspect: f32, near_bias: f32) -> Vec3 {
         if near_bias <= 0.0 {
             return self.random_pos_in_frustum(cam, aspect);
         }
@@ -308,9 +303,18 @@ mod rain_spawn_bias_tests {
         let w_lat = vol.spawn_weight_at(&cam, off_axis, aspect, bias);
         let w_behind = vol.spawn_weight_at(&cam, eye - forward * 80.0, aspect, bias);
 
-        assert!(w_near > w_far, "near axis should beat far: {w_near} vs {w_far}");
-        assert!(w_near > w_lat, "center should beat lateral: {w_near} vs {w_lat}");
-        assert!(w_behind < 1e-5, "behind camera should be rejected, got {w_behind}");
+        assert!(
+            w_near > w_far,
+            "near axis should beat far: {w_near} vs {w_far}"
+        );
+        assert!(
+            w_near > w_lat,
+            "center should beat lateral: {w_near} vs {w_lat}"
+        );
+        assert!(
+            w_behind < 1e-5,
+            "behind camera should be rejected, got {w_behind}"
+        );
     }
 }
 
@@ -324,15 +328,16 @@ mod splash_normal_tests {
         let wall = splash_strength_from_normal(Vec3::new(1.0, 0.0, 0.0));
         let underside = splash_strength_from_normal(Vec3::new(0.0, 0.0, -1.0));
         assert!(floor > wall, "floor {floor} should beat wall {wall}");
-        assert!(wall > underside, "wall {wall} should beat underside {underside}");
+        assert!(
+            wall > underside,
+            "wall {wall} should beat underside {underside}"
+        );
     }
 
     #[test]
     fn splash_params_scale_with_surface() {
-        let (floor_count, floor_life, floor_size) =
-            splash_params_for_normal(Vec3::Z, 16, 0.4, 1.0);
-        let (wall_count, wall_life, wall_size) =
-            splash_params_for_normal(Vec3::X, 16, 0.4, 1.0);
+        let (floor_count, floor_life, floor_size) = splash_params_for_normal(Vec3::Z, 16, 0.4, 1.0);
+        let (wall_count, wall_life, wall_size) = splash_params_for_normal(Vec3::X, 16, 0.4, 1.0);
         assert!(floor_count > wall_count);
         assert!(floor_life > wall_life);
         assert!(floor_size > wall_size);
@@ -498,22 +503,14 @@ fn splash_params_for_normal(
 
 fn splash_tangent_frame(normal: Vec3) -> (Vec3, Vec3) {
     let n = normal.normalize_or_zero();
-    let ref_axis = if n.z.abs() < 0.95 {
-        Vec3::Z
-    } else {
-        Vec3::Y
-    };
+    let ref_axis = if n.z.abs() < 0.95 { Vec3::Z } else { Vec3::Y };
     let tangent = ref_axis.cross(n).normalize_or_zero();
     let bitangent = n.cross(tangent).normalize_or_zero();
     (tangent, bitangent)
 }
 
 /// Tangential spray from impact velocity + weak normal rebound (Z-up world).
-fn sample_splash_velocity_world(
-    impact_vel: Vec3,
-    normal: Vec3,
-    rng: &mut impl rand::Rng,
-) -> Vec3 {
+fn sample_splash_velocity_world(impact_vel: Vec3, normal: Vec3, rng: &mut impl rand::Rng) -> Vec3 {
     let n = normal.normalize_or_zero();
     let impact_speed = impact_vel.length().max(1.0);
     let vn = n * impact_vel.dot(n);
@@ -724,18 +721,13 @@ impl ParticleSystem {
             } else {
                 Vec3::new(0.0, 0.0, -1.0)
             };
-            let needs_collision = rain_on_screen(proj, prev, 80.0) || rain_on_screen(proj, drop.pos, 80.0);
+            let needs_collision =
+                rain_on_screen(proj, prev, 80.0) || rain_on_screen(proj, drop.pos, 80.0);
             if let Some(ref c) = collider
                 && needs_collision
                 && step_len > 1e-6
-                && let Some((hit_world, hit_normal)) = segment_hit_rain_mesh(
-                    prev,
-                    dir,
-                    step_len,
-                    c.model,
-                    c.inv_model,
-                    c.mesh,
-                )
+                && let Some((hit_world, hit_normal)) =
+                    segment_hit_rain_mesh(prev, dir, step_len, c.model, c.inv_model, c.mesh)
             {
                 self.rain_hits_scratch
                     .push((i, hit_world, hit_normal, drop.vel));
@@ -750,40 +742,23 @@ impl ParticleSystem {
                 shade_dielectric_rgb_at_world(
                     hit_world,
                     hit_normal,
-                    [
-                        splash_color[0],
-                        splash_color[1],
-                        splash_color[2],
-                    ],
+                    [splash_color[0], splash_color[1], splash_color[2]],
                     ctx,
                 )
             } else {
-                [
-                    splash_color[0],
-                    splash_color[1],
-                    splash_color[2],
-                ]
+                [splash_color[0], splash_color[1], splash_color[2]]
             };
-            let lit_splash = [
-                splash_rgb[0],
-                splash_rgb[1],
-                splash_rgb[2],
-                splash_color[3],
-            ];
+            let lit_splash = [splash_rgb[0], splash_rgb[1], splash_rgb[2], splash_color[3]];
             let distance_size_mul = splash_size_mul_for_distance(cam, hit_world);
-            let (count, lifetime, size_mul) =
-                splash_params_for_normal(hit_normal, splash_count, splash_lifetime, distance_size_mul);
-            self.emit_splash_at(
-                cam,
-                window_w,
-                window_h,
-                hit_world,
-                impact_vel,
+            let (count, lifetime, size_mul) = splash_params_for_normal(
                 hit_normal,
-                count,
-                lit_splash,
-                lifetime,
-                size_mul,
+                splash_count,
+                splash_lifetime,
+                distance_size_mul,
+            );
+            self.emit_splash_at(
+                cam, window_w, window_h, hit_world, impact_vel, hit_normal, count, lit_splash,
+                lifetime, size_mul,
             );
             self.world_drops[i].pos = volume.random_pos_near_camera(cam, aspect, spawn_near_bias);
             self.world_drops[i].fall_speed_mul = 0.88 + rng.random::<f32>() * 0.24;
@@ -878,9 +853,7 @@ impl ParticleSystem {
             if sx < -margin || sy < -margin || sx > w + margin || sy > h + margin {
                 continue;
             }
-            let rgb = lit
-                .map(|l| l.sample_at(d.pos, cam))
-                .unwrap_or(base_rgb);
+            let rgb = lit.map(|l| l.sample_at(d.pos, cam)).unwrap_or(base_rgb);
             let v = d.vel;
             let v_len = v.length();
             let v_dir = if v_len > 1e-6 {

@@ -179,10 +179,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         && ctx.round.is_final_play
         && ctx.structure.is_some()
     {
-        let retrigger_chips: i32 = sets
-            .iter()
-            .map(|s| meld_base_chips(s, tiles, ctx))
-            .sum();
+        let retrigger_chips: i32 = sets.iter().map(|s| meld_base_chips(s, tiles, ctx)).sum();
         if retrigger_chips > 0 {
             push_chips(steps, chips, *mult, "Last Breath", retrigger_chips);
         }
@@ -229,10 +226,7 @@ pub(crate) fn apply_pre_yaku_scoring(
             .copied()
             .unwrap_or(0);
         if charges > 0 {
-            let retrigger: i32 = sets
-                .iter()
-                .map(|s| meld_base_chips(s, tiles, ctx))
-                .sum();
+            let retrigger: i32 = sets.iter().map(|s| meld_base_chips(s, tiles, ctx)).sum();
             if retrigger > 0 {
                 push_chips(steps, chips, *mult, "XXXL Egg", retrigger);
             }
@@ -441,9 +435,9 @@ pub(crate) fn apply_pre_yaku_scoring(
     if eff.has(ctx.relic.roster, RelicId::DragonEcho) {
         for s in sets {
             let is_dragon_meld = !s.tile_ids.is_empty()
-                && s.tile_ids.iter().all(|&tid| {
-                    tile_by_id(tiles, tid).is_some_and(|t| t.suit == Suit::Dragon)
-                });
+                && s.tile_ids
+                    .iter()
+                    .all(|&tid| tile_by_id(tiles, tid).is_some_and(|t| t.suit == Suit::Dragon));
             if is_dragon_meld {
                 let base = meld_base_chips(s, tiles, ctx);
                 if base > 0 {

@@ -104,7 +104,10 @@ pub fn wrap_words_kp(
 
 #[cfg(test)]
 mod tests {
-    use crate::{decal::load_ui_font, text_wrap::{TextBreakUnit, break_units_kp, wrap_words_kp}};
+    use crate::{
+        decal::load_ui_font,
+        text_wrap::{TextBreakUnit, break_units_kp, wrap_words_kp},
+    };
 
     fn word_w(word: &str, font_px: f32) -> f32 {
         let font = load_ui_font().expect("ui font");

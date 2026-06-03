@@ -1,12 +1,12 @@
 //! End-of-tutorial summary shown after the onboarding finale.
 
-use crate::sfx_id::SfxId;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::persistence;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{
     HintStyle, menu_footer_row, push_screen_footer_hint, screen_footer_reserve,
 };

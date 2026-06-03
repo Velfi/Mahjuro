@@ -170,11 +170,7 @@ impl CameraFrame {
 }
 
 impl WgpuRenderer {
-    pub(super) fn room_punctual_inv_doc_scale(
-        &self,
-        cam: &CameraFrame,
-        enabled: bool,
-    ) -> f32 {
+    pub(super) fn room_punctual_inv_doc_scale(&self, cam: &CameraFrame, enabled: bool) -> f32 {
         if !enabled {
             return 0.0;
         }
@@ -196,14 +192,14 @@ impl WgpuRenderer {
         let table_like = matches!(
             k,
             Some(scene_keys::GAMEPLAY)
-            | Some("tutorial")
-            | Some(scene_keys::HALLWAY)
-            | Some(scene_keys::ARCHIVE)
-            | Some(scene_keys::SHADOW_AO_LAB)
+                | Some("tutorial")
+                | Some(scene_keys::HALLWAY)
+                | Some(scene_keys::ARCHIVE)
+                | Some(scene_keys::SHADOW_AO_LAB)
         ) || frame.shadow_ao_lab_layout.is_some()
             || (k == Some("showcase") && h.collection_tonemap_context);
-        let shop_scene =
-            k == Some(scene_keys::SHOP) || (k == Some("showcase") && h.shop_tonemap_and_lit_mesh_context);
+        let shop_scene = k == Some(scene_keys::SHOP)
+            || (k == Some("showcase") && h.shop_tonemap_and_lit_mesh_context);
         let gameplay_glb_room = matches!(k, Some(scene_keys::GAMEPLAY) | Some("tutorial"))
             && frame.scene_lighting.embedded_gltf_punctual
             && frame
@@ -268,7 +264,8 @@ impl WgpuRenderer {
             (
                 self.active_frame_env().linear_exposure
                     * crate::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE,
-                self.active_frame_env().ambient_scale
+                self.active_frame_env()
+                    .ambient_scale
                     .max(crate::room_glb::SHOP_ENV_DIELECTRIC_AMBIENT_MIN),
             )
         } else {
@@ -276,7 +273,8 @@ impl WgpuRenderer {
             (
                 self.active_frame_env().linear_exposure
                     * crate::room_glb::GAMEPLAY_TABLE_HDR_LINEAR_MUL,
-                self.active_frame_env().ambient_scale
+                self.active_frame_env()
+                    .ambient_scale
                     .max(crate::room_glb::GAMEPLAY_TABLE_AMBIENT_MIN),
             )
         };
@@ -336,12 +334,12 @@ impl WgpuRenderer {
         // shadow floor (see [`shop_catalog_balance`]).
         let shop_punctual_inv_doc =
             self.room_punctual_inv_doc_scale(cam, frame.scene_lighting.embedded_gltf_punctual);
-        let shop_punctual_display_case =
-            if shop_like && frame.scene_lighting.embedded_gltf_punctual {
-                crate::lit_mesh::shop_catalog_balance::DISPLAY_CASE_STOREROOM
-            } else {
-                0.0
-            };
+        let shop_punctual_display_case = if shop_like && frame.scene_lighting.embedded_gltf_punctual
+        {
+            crate::lit_mesh::shop_catalog_balance::DISPLAY_CASE_STOREROOM
+        } else {
+            0.0
+        };
         let (shop_cat_amb, _shop_cat_shadow_floor) = if shop_punctual_display_case > 0.5 {
             (crate::lit_mesh::shop_catalog_balance::AMBIENT_MUL, 0.0)
         } else {

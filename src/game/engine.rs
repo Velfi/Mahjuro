@@ -10,10 +10,10 @@
 //! [`GameplayCoreState::with_run_mut`](crate::game::engine_state::GameplayCoreState::with_run_mut)
 //! so parallel vectors stay aligned.
 
+use crate::core::OrdealKindExt;
 use crate::core::consumable::Consumable;
 use crate::core::hand::DetectedMeld;
 use crate::core::ordeal::OrdealKind;
-use crate::core::OrdealKindExt;
 use crate::core::progression::PlayerProgress;
 use crate::core::relic::{RelicId, RelicState, apply_merchants_eye_discount};
 use crate::core::rules::ChamberKind;
@@ -31,6 +31,8 @@ use crate::game::run::{ConsumableUseResult, RunState};
 use crate::persistence::{AppSettings, TileMaterial};
 use crate::ui::input::MarqueeSelect;
 
+/// In-round gameplay mutations only. Hallway pick-blind skip uses
+/// [`GameEngine::skip_upcoming_chamber`]; shop uses [`GameEngine::dispatch_shop`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GameCommand {
     CommitSelection,
@@ -39,7 +41,6 @@ pub enum GameCommand {
     RefillHand,
     UseConsumable { index: usize },
     ApplyChamber { blind: ChamberKind },
-    SkipUpcomingChamberWithTag,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,7 +77,6 @@ pub enum EngineEvent {
     StructureTriggered { earned: u64 },
     ConsumableUsed { result: ConsumableUseResult },
     ChamberApplied { blind: ChamberKind },
-    ChamberSkipped { next_chamber: ChamberKind },
     TagApplied { tag: TagKind },
     RoundComplete { reached_target: bool },
     GameOver { reason: GameOverReason },
@@ -124,7 +124,6 @@ pub enum CommandData {
     RefillHand,
     UseConsumable { result: ConsumableUseResult },
     ApplyChamber { blind: ChamberKind },
-    SkipChamber { tag: Option<TagKind> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -693,7 +692,9 @@ impl<'a> GameEngine<'a> {
         GameplayReadModel {
             chamber: run.chamber,
             chamber_label,
-            ordeal_kind: (run.chamber == ChamberKind::Ordeal).then_some(run.ordeal.upcoming).flatten(),
+            ordeal_kind: (run.chamber == ChamberKind::Ordeal)
+                .then_some(run.ordeal.upcoming)
+                .flatten(),
             ordeal_ofuda_title,
             ordeal_ofuda_rule_text,
             run_number: run.run_number,
@@ -764,6 +765,19 @@ impl<'a> GameEngine<'a> {
 
     pub fn current_upcoming_chamber(run: &RunState) -> ChamberKind {
         run.upcoming_chamber
+    }
+
+    /// Pick-blind skip on the hallway: apply the skip tag, advance the chamber
+    /// cycle, and trigger the room brownout. Does not run round-end resolution
+    /// (the hallway is between rounds, not inside one).
+    pub fn skip_upcoming_chamber(run: &mut RunState, bus: &mut EventBus) -> Option<TagKind> {
+        let tag = run.tag_for_chamber(run.upcoming_chamber);
+        if let Some(tag) = tag {
+            run.apply_tag(tag, Some(bus));
+        }
+        run.skip_to_next_chamber();
+        bus.push(GameEvent::RoomGltfBrownout);
+        tag
     }
 
     pub fn dispatch(&mut self, command: GameCommand) -> CommandOutcome {
@@ -902,15 +916,6 @@ impl<'a> GameEngine<'a> {
                 self.run.apply_chamber(blind, Some(&mut self.bus));
                 CommandData::ApplyChamber { blind }
             }
-            GameCommand::SkipUpcomingChamberWithTag => {
-                let tag = self.run.tag_for_chamber(self.run.upcoming_chamber);
-                if let Some(tag) = tag {
-                    self.run.apply_tag(tag, Some(&mut self.bus));
-                }
-                self.run.skip_to_next_chamber();
-                self.bus.push(GameEvent::RoomGltfBrownout);
-                CommandData::SkipChamber { tag }
-            }
         };
 
         self.finish_dispatch(command, before, queue_start, data, None)
@@ -984,7 +989,8 @@ impl<'a> GameEngine<'a> {
                 }
                 self.run
                     .apply_yen_reward(refund as i32, Some(&mut self.bus));
-                self.bus.push(GameEvent::UiSound(crate::sfx_id::SfxId::Sell));
+                self.bus
+                    .push(GameEvent::UiSound(crate::sfx_id::SfxId::Sell));
                 *self.run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
                 if self.run.relics.has(RelicId::Bonfire) {
                     self.run.relic_activations.push(RelicId::Bonfire);
@@ -1072,7 +1078,8 @@ impl<'a> GameEngine<'a> {
                 self.run.consumables.items.remove(index);
                 self.run
                     .apply_yen_reward(refund as i32, Some(&mut self.bus));
-                self.bus.push(GameEvent::UiSound(crate::sfx_id::SfxId::Sell));
+                self.bus
+                    .push(GameEvent::UiSound(crate::sfx_id::SfxId::Sell));
                 ShopCommandData::None
             }
             ShopCommand::UseConsumable { index } => {
@@ -1206,20 +1213,10 @@ impl<'a> GameEngine<'a> {
         if let CommandData::ApplyChamber { blind } = data {
             events.push(EngineEvent::ChamberApplied { blind });
         }
-        if let CommandData::SkipChamber { tag: Some(tag) } = data {
-            events.push(EngineEvent::TagApplied { tag });
-            events.push(EngineEvent::ChamberSkipped {
-                next_chamber: self.run.upcoming_chamber,
-            });
-        }
 
         let mut ui_hints = Self::ui_hints(before, after);
         if matches!(data, CommandData::ApplyChamber { .. }) {
             ui_hints.push(UiHint::Blind);
-        }
-        if matches!(data, CommandData::SkipChamber { .. }) {
-            ui_hints.push(UiHint::Blind);
-            ui_hints.push(UiHint::Round);
         }
 
         CommandOutcome {
@@ -1589,32 +1586,78 @@ mod tests {
     }
 
     #[test]
-    fn skip_upcoming_chamber_applies_tag_and_emits_events() {
+    fn skip_upcoming_chamber_applies_tag_and_advances_cycle() {
         let mut run = deterministic_run();
         run.small_chamber_tag = Some(TagKind::GoldIngot);
         run.upcoming_chamber = ChamberKind::Small;
         let yen_before = run.yen;
         let mut bus = EventBus::default();
-        let mut engine = GameEngine::new(&mut run, &mut bus);
 
-        let outcome = engine.dispatch(GameCommand::SkipUpcomingChamberWithTag);
+        let tag = GameEngine::skip_upcoming_chamber(&mut run, &mut bus);
 
-        assert_eq!(
-            outcome.data,
-            CommandData::SkipChamber {
-                tag: Some(TagKind::GoldIngot)
-            }
-        );
-        assert!(outcome.events.contains(&EngineEvent::TagApplied {
-            tag: TagKind::GoldIngot
-        }));
-        assert!(outcome.events.iter().any(|event| matches!(
-            event,
-            EngineEvent::ChamberSkipped {
-                next_chamber: ChamberKind::Big
-            }
-        )));
+        assert_eq!(tag, Some(TagKind::GoldIngot));
+        assert_eq!(run.upcoming_chamber, ChamberKind::Big);
         assert_eq!(run.yen, yen_before + 8);
+        assert!(
+            bus.queue
+                .iter()
+                .any(|ev| matches!(ev, GameEvent::RoomGltfBrownout))
+        );
+    }
+
+    #[test]
+    fn skip_upcoming_chamber_does_not_resolve_stale_cleared_round() {
+        let mut run = deterministic_run();
+        run.upcoming_chamber = ChamberKind::Big;
+        run.round_score = run.target_score as u64 + 500;
+        run.round_end_queued = false;
+        let mut bus = EventBus::default();
+
+        GameEngine::skip_upcoming_chamber(&mut run, &mut bus);
+
+        assert_eq!(run.round_score, 0);
+        assert!(!run.round_end_queued);
+        assert!(
+            !bus.queue
+                .iter()
+                .any(|ev| matches!(ev, GameEvent::RoundComplete { .. }))
+        );
+    }
+
+    #[test]
+    fn skip_upcoming_chamber_does_not_resolve_stale_dead_hand() {
+        let mut run = deterministic_run();
+        run.upcoming_chamber = ChamberKind::Small;
+        run.round_score = 0;
+        run.round_end_queued = false;
+        run.discards_remaining = 0;
+        run.plays_remaining = 2;
+        *run.hand_mut() = vec![
+            tile(Suit::Manzu, 1, 0),
+            tile(Suit::Manzu, 3, 1),
+            tile(Suit::Manzu, 5, 2),
+            tile(Suit::Manzu, 7, 3),
+            tile(Suit::Manzu, 9, 4),
+            tile(Suit::Souzu, 2, 5),
+            tile(Suit::Souzu, 4, 6),
+            tile(Suit::Souzu, 6, 7),
+            tile(Suit::Souzu, 8, 8),
+            tile(Suit::Pinzu, 1, 9),
+            tile(Suit::Pinzu, 3, 10),
+            tile(Suit::Pinzu, 5, 11),
+            tile(Suit::Wind, 1, 12),
+            tile(Suit::Dragon, 1, 13),
+        ];
+        *run.selected_mut() = vec![false; run.hand().len()];
+        let mut bus = EventBus::default();
+
+        GameEngine::skip_upcoming_chamber(&mut run, &mut bus);
+
+        assert!(
+            !bus.queue
+                .iter()
+                .any(|ev| matches!(ev, GameEvent::GameOver { .. }))
+        );
     }
 
     #[test]

@@ -75,7 +75,10 @@ pub fn maybe_bake_asset_packs(repo: &Path, profile_dir: &Path) {
     }
 
     write_stamp_line(&stamp_file, &hash).unwrap_or_else(|e| {
-        panic!("asset pack bake: could not write stamp {}: {e}", stamp_file.display());
+        panic!(
+            "asset pack bake: could not write stamp {}: {e}",
+            stamp_file.display()
+        );
     });
     log_bake_timing("asset packs", start);
 }

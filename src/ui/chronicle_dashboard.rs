@@ -7,13 +7,13 @@ use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
 use crate::scenes::archive_career;
 use crate::ui::chart_primitives::{
-    self, ChartClip, LedgerPanelStyle, push_colored_label_clipped,
-    push_ledger_panel_clipped, push_quad_clipped as chart_quad, push_rect_border, push_sparkline,
-    push_yaku_hbar_row, push_yaku_pill, yaku_pill_width,
+    self, ChartClip, LedgerPanelStyle, push_colored_label_clipped, push_ledger_panel_clipped,
+    push_quad_clipped as chart_quad, push_rect_border, push_sparkline, push_yaku_hbar_row,
+    push_yaku_pill, yaku_pill_width,
 };
 use crate::ui::chronicle_charts;
-use crate::ui::tooltip::push_tooltip_frame_quads;
 use crate::ui::clip::intersect_rect;
+use crate::ui::tooltip::push_tooltip_frame_quads;
 const LEFT_PANE_FRAC: f32 = 0.35;
 const KPI_COUNT: usize = 4;
 /// Focus-ring stroke; content and [`ChroniclePaneLayout`] insets sit inside this border.
@@ -1866,10 +1866,20 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
         let pins_w = chart_primitives::pill_label_width(&model.title_pins, section_px);
         push_label_clipped(
             emit.labels,
-            [rx + pins_w, ry(doc_y), (rw - pins_w).max(1.0), metrics.title_h],
+            [
+                rx + pins_w,
+                ry(doc_y),
+                (rw - pins_w).max(1.0),
+                metrics.title_h,
+            ],
             clip,
             TextLabel {
-                rect: [rx + pins_w, ry(doc_y), (rw - pins_w).max(1.0), metrics.title_h],
+                rect: [
+                    rx + pins_w,
+                    ry(doc_y),
+                    (rw - pins_w).max(1.0),
+                    metrics.title_h,
+                ],
                 text: model.title_rest.clone(),
                 color: outcome_color,
                 font_px: Some(section_px),

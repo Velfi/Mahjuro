@@ -406,7 +406,11 @@ mod tests {
         assert_eq!(wall.dora_faces(), vec![(Suit::Flower, 2)]);
         assert_eq!(
             wall.dora_indicator_tiles(),
-            &[Tile::new(Suit::Flower, 2, wall.dora_indicator_tiles()[0].id)]
+            &[Tile::new(
+                Suit::Flower,
+                2,
+                wall.dora_indicator_tiles()[0].id
+            )]
         );
     }
 

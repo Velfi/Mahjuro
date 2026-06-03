@@ -554,10 +554,7 @@ pub fn relic_description_live(
             format!("{base} [¥{paid} produced]")
         }
         RelicId::XxxlEgg => {
-            let charges = counters
-                .get(&RelicId::XxxlEgg)
-                .copied()
-                .unwrap_or(3);
+            let charges = counters.get(&RelicId::XxxlEgg).copied().unwrap_or(3);
             format!(
                 "{base} [{charges} charge{} left]",
                 if charges == 1 { "" } else { "s" }
@@ -651,7 +648,11 @@ pub fn relic_description_live(
             )
         }
         RelicId::Kindling => {
-            let total = counters.get(&RelicId::Kindling).copied().unwrap_or(0).max(0);
+            let total = counters
+                .get(&RelicId::Kindling)
+                .copied()
+                .unwrap_or(0)
+                .max(0);
             format!(
                 "{base} [{total} cash-in{}, +{:.1} mult (cap +{:.1})]",
                 if total == 1 { "" } else { "s" },
@@ -680,8 +681,8 @@ pub fn relic_description_live(
                 .max(0);
             format!(
                 "{base} [{blinds} blind{}, +{:.1} mult (cap +12.0)]",
-                if blinds == 1 { "" } else { "s" }
-                ,(blinds as f64).min(12.0)
+                if blinds == 1 { "" } else { "s" },
+                (blinds as f64).min(12.0)
             )
         }
         RelicId::GoldenEngine => {
@@ -708,7 +709,10 @@ pub fn relic_description_live(
             };
             let excess = overflow + added;
             if excess > 0 {
-                format!("{base} [+{:.1} mult (cap +8.0)]", (0.35 * excess as f64).min(8.0))
+                format!(
+                    "{base} [+{:.1} mult (cap +8.0)]",
+                    (0.35 * excess as f64).min(8.0)
+                )
             } else {
                 base.to_string()
             }
@@ -1207,7 +1211,7 @@ pub struct ScoreContext<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        RelicId, RelicState, KINDLING_MULT_CAP, KINDLING_STACK_CAP, SNOWBALL_CHIPS_PER_CLEAR,
+        KINDLING_MULT_CAP, KINDLING_STACK_CAP, RelicId, RelicState, SNOWBALL_CHIPS_PER_CLEAR,
         SNOWBALL_STACK_CAP, apply_merchants_eye_discount, golden_engine_mult_bonus,
         kindling_mult_bonus, relic_buy_price, relic_shop_price, snowball_score_chips,
     };
@@ -1236,7 +1240,10 @@ mod tests {
         assert_eq!(kindling_mult_bonus(0), 0.0);
         assert_eq!(kindling_mult_bonus(2), 0.8);
         assert_eq!(kindling_mult_bonus(KINDLING_STACK_CAP), KINDLING_MULT_CAP);
-        assert_eq!(kindling_mult_bonus(KINDLING_STACK_CAP + 10), KINDLING_MULT_CAP);
+        assert_eq!(
+            kindling_mult_bonus(KINDLING_STACK_CAP + 10),
+            KINDLING_MULT_CAP
+        );
     }
 
     #[test]

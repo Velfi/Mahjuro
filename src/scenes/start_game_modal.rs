@@ -2,7 +2,6 @@
 //! shop. Prev/next arrows cycle tile materials; each material displays its
 //! name and gameplay bonus. Play starts the run.
 
-use crate::sfx_id::SfxId;
 use crate::core::season::Season;
 use crate::core::tile::{Suit, Tile};
 use crate::game::engine::GameEngine;
@@ -11,6 +10,7 @@ use crate::game::run::RunState;
 use crate::persistence::TileMaterial;
 use crate::render::theme::{ButtonState, ButtonVariant, button_colors, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
 use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::{InputMode, UiAction};
@@ -129,18 +129,31 @@ impl LeftPanelLayout {
         }
     }
 
-    fn material_row_y(&self, h: f32, positions: &crate::ui::scene_layout::TileSelectPositions) -> f32 {
+    fn material_row_y(
+        &self,
+        h: f32,
+        positions: &crate::ui::scene_layout::TileSelectPositions,
+    ) -> f32 {
         positions.left_panel.ny * h + self.title_h + self.gap_lg
     }
 
-    fn material_row(&self, h: f32, positions: &crate::ui::scene_layout::TileSelectPositions) -> MaterialRowLayout {
+    fn material_row(
+        &self,
+        h: f32,
+        positions: &crate::ui::scene_layout::TileSelectPositions,
+    ) -> MaterialRowLayout {
         let row_y = self.material_row_y(h, positions);
         let row_h = self.material_row_h;
         let gap = (4.0 * self.scale).max(2.0);
         MaterialRowLayout {
             prev: [self.x, row_y, row_h, row_h],
             next: [self.x + self.w - row_h, row_y, row_h, row_h],
-            name: [self.x + row_h + gap, row_y, (self.w - 2.0 * (row_h + gap)).max(0.0), row_h],
+            name: [
+                self.x + row_h + gap,
+                row_y,
+                (self.w - 2.0 * (row_h + gap)).max(0.0),
+                row_h,
+            ],
         }
     }
 
@@ -377,10 +390,7 @@ impl TileSelectScene {
         targets
     }
 
-    fn default_focus(
-        &self,
-        targets: &[(ModalAction, [f32; 4])],
-    ) -> Option<ModalAction> {
+    fn default_focus(&self, targets: &[(ModalAction, [f32; 4])]) -> Option<ModalAction> {
         targets
             .iter()
             .find(|(action, _)| matches!(action, ModalAction::Play))
@@ -406,11 +416,7 @@ impl TileSelectScene {
             .map(|(_, rect)| *rect)
     }
 
-    fn activate_focus(
-        &mut self,
-        action: ModalAction,
-        ctx: &mut UpdateCtx<'_>,
-    ) -> SceneTransition {
+    fn activate_focus(&mut self, action: ModalAction, ctx: &mut UpdateCtx<'_>) -> SceneTransition {
         match action {
             ModalAction::MaterialPrev => {
                 self.material = ctx.progress.prev_unlocked_material(self.material);
@@ -488,7 +494,11 @@ impl TileSelectScene {
             let mut y = panel.menu_y;
             for (action, label, variant) in [
                 (ModalAction::Play, "Play Tutorial", ButtonVariant::Primary),
-                (ModalAction::SkipTutorial, "Skip Tutorial", ButtonVariant::Default),
+                (
+                    ModalAction::SkipTutorial,
+                    "Skip Tutorial",
+                    ButtonVariant::Default,
+                ),
                 (ModalAction::Back, "Back", ButtonVariant::Default),
             ] {
                 let rect = [panel.x, y, panel.w, row_h];

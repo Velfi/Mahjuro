@@ -660,7 +660,11 @@ impl AudioManager {
                 return None;
             }
             let idx = self.pick_variant_index(id, len);
-            let Some(clip) = self.sfx_variant_data.get(&id).and_then(|v| v.get(idx)).cloned()
+            let Some(clip) = self
+                .sfx_variant_data
+                .get(&id)
+                .and_then(|v| v.get(idx))
+                .cloned()
             else {
                 log::debug!("play_sfx({id:?}): variant index out of range");
                 return None;

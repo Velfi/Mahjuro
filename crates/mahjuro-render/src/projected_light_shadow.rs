@@ -43,11 +43,7 @@ impl PunctualShadowBuild {
 #[inline]
 pub fn z_up_shadow_view_up(forward: Vec3) -> Vec3 {
     let f = forward.normalize_or_zero();
-    if f.z.abs() > 0.999 {
-        Vec3::Y
-    } else {
-        Vec3::Z
-    }
+    if f.z.abs() > 0.999 { Vec3::Y } else { Vec3::Z }
 }
 
 /// Fallback ortho half-extent when room bounds are unavailable.
@@ -66,12 +62,7 @@ pub fn room_projected_shadow_half_xy(
     window_half.max(half_xy).max(32.0)
 }
 
-fn shadow_fit_points(
-    eye: Vec3,
-    forward: Vec3,
-    target: Vec3,
-    corners_world: &[Vec3],
-) -> Vec<Vec3> {
+fn shadow_fit_points(eye: Vec3, forward: Vec3, target: Vec3, corners_world: &[Vec3]) -> Vec<Vec3> {
     let fwd = forward.normalize_or_zero();
     let mut fit_points: Vec<Vec3> = corners_world
         .iter()
@@ -283,7 +274,10 @@ fn projected_shadow_hash(build: &PunctualShadowBuild) -> u64 {
     h.finish()
 }
 
-pub fn punctual_shadow_setups_changed(build: &PunctualShadowBuild, cached_hash: u64) -> (u64, bool) {
+pub fn punctual_shadow_setups_changed(
+    build: &PunctualShadowBuild,
+    cached_hash: u64,
+) -> (u64, bool) {
     let hash = projected_shadow_hash(build);
     (hash, hash != cached_hash)
 }
@@ -381,10 +375,14 @@ mod tests {
         let h = 800.0;
         let env_h = 1.0;
         let corners = room_world_bounds_corners_centered(bounds, h, env_h);
-        let max_corner_z = corners.iter().map(|c| c.z).fold(f32::NEG_INFINITY, f32::max);
+        let max_corner_z = corners
+            .iter()
+            .map(|c| c.z)
+            .fold(f32::NEG_INFINITY, f32::max);
         let light = Vec3::new(50.0, -30.0, max_corner_z + 5000.0);
         let fallback = room_projected_shadow_half_xy(h, env_h, Some(bounds));
-        let (vp, fit) = point_light_shadow_view_proj_with_fit(light, &corners, fallback, 500.0, Vec3::ZERO);
+        let (vp, fit) =
+            point_light_shadow_view_proj_with_fit(light, &corners, fallback, 500.0, Vec3::ZERO);
         let (_, _, near, far) = fit.expect("fit stats");
         let view = {
             let target = Vec3::ZERO;
@@ -427,18 +425,17 @@ mod tests {
             })],
             ..Default::default()
         };
-        let build = build_punctual_shadow_setups(
-            &frame, None, w, h, h, 1.0, None, None, false,
+        let build = build_punctual_shadow_setups(&frame, None, w, h, h, 1.0, None, None, false);
+        assert_eq!(
+            build.casters.len(),
+            1,
+            "lab should produce one shadow caster"
         );
-        assert_eq!(build.casters.len(), 1, "lab should produce one shadow caster");
         let expected = punctual_light_view_proj(ShadowAoLabLayout::HorizontalBand);
         let got = build.casters[0].light_view_proj.to_cols_array();
         let exp = expected.to_cols_array();
         for (i, (&g, &e)) in got.iter().zip(exp.iter()).enumerate() {
-            assert!(
-                (g - e).abs() < 1e-4,
-                "LVP[{i}] live={g} synthetic={e}"
-            );
+            assert!((g - e).abs() < 1e-4, "LVP[{i}] live={g} synthetic={e}");
         }
     }
 
@@ -451,10 +448,14 @@ mod tests {
         let h = 800.0;
         let env_h = 1.0;
         let corners = room_world_bounds_corners_centered(bounds, h, env_h);
-        let max_corner_z = corners.iter().map(|c| c.z).fold(f32::NEG_INFINITY, f32::max);
+        let max_corner_z = corners
+            .iter()
+            .map(|c| c.z)
+            .fold(f32::NEG_INFINITY, f32::max);
         let light = Vec3::new(50.0, -30.0, max_corner_z + 5000.0);
         let fallback = room_projected_shadow_half_xy(h, env_h, Some(bounds));
-        let (vp, _) = point_light_shadow_view_proj_with_fit(light, &corners, fallback, 500.0, Vec3::ZERO);
+        let (vp, _) =
+            point_light_shadow_view_proj_with_fit(light, &corners, fallback, 500.0, Vec3::ZERO);
         for (i, &corner) in corners.iter().enumerate() {
             let clip = vp * corner.extend(1.0);
             let ndc = clip.truncate() / clip.w;

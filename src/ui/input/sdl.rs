@@ -9,9 +9,7 @@ use sdl3::keyboard::Scancode;
 
 use crate::sdl_shell::SdlShell;
 
-use super::{
-    GamepadPollCtx, GamepadStyle, InputMode, InputState, RumbleLabOp, UiAction,
-};
+use super::{GamepadPollCtx, GamepadStyle, InputMode, InputState, RumbleLabOp, UiAction};
 
 struct RumbleEnvelopeParams {
     gain: f32,

@@ -14,11 +14,11 @@ use parking_lot::RwLock;
 
 use glam::Vec3;
 
-use mahjuro_core::core::rules::ChamberKind;
 use crate::draw_cmd::CameraParams;
 use crate::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
 use crate::wgpu_renderer::{PointLight, SpotLight};
+use mahjuro_core::core::rules::ChamberKind;
 
 /// glTF node names for pick-blind actions (must match Blender objects).
 pub const BTN_PLAY_ROUND: &str = "btn_play_round";
@@ -833,11 +833,11 @@ mod tests {
     use glam::Vec3;
 
     use super::load_hallway_glb_from_bytes;
-    use mahjuro_core::core::rules::ChamberKind;
     use crate::hallway_glb::{
         HALLWAY_RIPPLE_AMOUNT, HALLWAY_RIPPLE_SPEED, HALLWAY_RIPPLE_WAVES, HallwayDistortion,
     };
     use crate::room_glb;
+    use mahjuro_core::core::rules::ChamberKind;
 
     #[test]
     fn hallway_env_and_light_node_inventory() {
@@ -846,16 +846,19 @@ mod tests {
             return;
         };
         let cpu = load_hallway_glb_from_bytes(&file.data).expect("decode");
-        eprintln!("=== hallway environment_primitives ({}):", cpu.environment_primitives.len());
+        eprintln!(
+            "=== hallway environment_primitives ({}):",
+            cpu.environment_primitives.len()
+        );
         for ep in &cpu.environment_primitives {
             eprintln!("  mesh {:?}", ep.gltf_node_name);
         }
-        eprintln!("=== embedded_point_lights ({}):", cpu.embedded_point_lights.len());
+        eprintln!(
+            "=== embedded_point_lights ({}):",
+            cpu.embedded_point_lights.len()
+        );
         for l in &cpu.embedded_point_lights {
-            eprintln!(
-                "  {:?} pos_doc={:?}",
-                l.node_name, l.pos_doc
-            );
+            eprintln!("  {:?} pos_doc={:?}", l.node_name, l.pos_doc);
         }
         if let Some(b) = cpu.environment_bounds_doc {
             eprintln!("=== bounds min={:?} max={:?}", b.min, b.max);
@@ -868,12 +871,10 @@ mod tests {
             ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW, ROOM_ENV_COLOR_A_HALLWAY_WALL_TINT,
         };
         assert!(
-            (super::HALLWAY_WALL_TINT_COLOR_TAG - ROOM_ENV_COLOR_A_HALLWAY_WALL_TINT).abs()
-                < 1e-6
+            (super::HALLWAY_WALL_TINT_COLOR_TAG - ROOM_ENV_COLOR_A_HALLWAY_WALL_TINT).abs() < 1e-6
         );
         assert!(
-            (super::HALLWAY_WALL_TINT_COLOR_TAG
-                - ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW)
+            (super::HALLWAY_WALL_TINT_COLOR_TAG - ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW)
                 .abs()
                 > 0.5,
             "hallway wall tint must not reuse archive no-shadow tag"
@@ -948,7 +949,9 @@ mod tests {
             let wall_dist = (p.dot(lateral_n) - lat_ref).abs();
             let wall_gain = wall_dist;
             let u = ((p.dot(axis_n) - d0) / span).clamp(0.0, 1.0);
-            let depth_barrel = (u * std::f32::consts::PI).sin().max(super::HALLWAY_BALLOON_DEPTH_FLOOR);
+            let depth_barrel = (u * std::f32::consts::PI)
+                .sin()
+                .max(super::HALLWAY_BALLOON_DEPTH_FLOOR);
             let z_mid = (super::HALLWAY_BALLOON_FLOOR_Z + dist.ceiling[1]) * 0.5;
             let z_half = ((dist.ceiling[1] - super::HALLWAY_BALLOON_FLOOR_Z) * 0.5).max(0.18);
             let z_n = ((p.z - z_mid) / z_half).clamp(-1.0, 1.0);
@@ -976,19 +979,25 @@ mod tests {
         assert!(
             (super::hallway_wing_intensity_scale(super::HALLWAY_WING_FINAL + 2)
                 - super::hallway_wing_intensity_scale(super::HALLWAY_WING_FINAL))
-                .abs()
+            .abs()
                 < 1e-5
         );
     }
 
     #[test]
     fn pick_chamber_distortion_populates_lateral_ripple() {
-        let d = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 0xA5A5_5A5A_A5A5_5A5Au64, 3, 2);
+        let d =
+            HallwayDistortion::from_pick_chamber(ChamberKind::Big, 0xA5A5_5A5A_A5A5_5A5Au64, 3, 2);
         assert!(d.ripple[0] > 1e-5, "ripple amplitude");
         assert!(d.ripple[1] >= HALLWAY_RIPPLE_WAVES * 0.89);
         assert!((d.ripple[2] - HALLWAY_RIPPLE_SPEED).abs() < 1e-5);
         assert!(d.ripple[3] >= 0.55 && d.ripple[3] <= 0.85);
-        let boss = HallwayDistortion::from_pick_chamber(ChamberKind::Ordeal, 0xA5A5_5A5A_A5A5_5A5Au64, 3, 2);
+        let boss = HallwayDistortion::from_pick_chamber(
+            ChamberKind::Ordeal,
+            0xA5A5_5A5A_A5A5_5A5Au64,
+            3,
+            2,
+        );
         assert!(
             boss.ripple[0] >= HALLWAY_RIPPLE_AMOUNT * 0.39,
             "boss ripple keeps a visibility floor"

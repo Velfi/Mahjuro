@@ -3,7 +3,6 @@
 
 use std::time::Instant;
 
-use glam::Vec3;
 use crate::render::draw_cmd::{CameraParams, UiFrame};
 use crate::render::room_glb::{
     room_camera_with_room_clip_planes, room_node_mesh_center_world, with_shop_glb_cpu,
@@ -13,6 +12,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer_hint};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
+use glam::Vec3;
 
 use super::main_menu::MainMenuScene;
 use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
@@ -364,7 +364,13 @@ fn draw_hud(
         };
         let label = match item.action {
             LabAction::Play => "Play",
-            LabAction::Pause => if anim.playing { "Pause" } else { "Paused" },
+            LabAction::Pause => {
+                if anim.playing {
+                    "Pause"
+                } else {
+                    "Paused"
+                }
+            }
             LabAction::Restart => "Restart",
             LabAction::Back => "Back",
             LabAction::ScrubBar => continue,

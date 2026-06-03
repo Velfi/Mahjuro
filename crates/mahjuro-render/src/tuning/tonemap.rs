@@ -143,16 +143,15 @@ impl TonemapTuningSet {
         let mut per_scene = FxHashMap::default();
         for &key in KNOWN_SCENE_KEYS {
             if mahjuro_gfx_types::has_tuning_override(&storage_key(key)) {
-                let t =
-                    mahjuro_gfx_types::load_tuning_override::<TonemapTuning>(&storage_key(key));
+                let t = mahjuro_gfx_types::load_tuning_override::<TonemapTuning>(&storage_key(key));
                 per_scene.insert(key.to_string(), t);
                 continue;
             }
             for &legacy in scene_keys::legacy_aliases(key) {
                 if mahjuro_gfx_types::has_tuning_override(&storage_key(legacy)) {
-                    let t = mahjuro_gfx_types::load_tuning_override::<TonemapTuning>(
-                        &storage_key(legacy),
-                    );
+                    let t = mahjuro_gfx_types::load_tuning_override::<TonemapTuning>(&storage_key(
+                        legacy,
+                    ));
                     per_scene.insert(key.to_string(), t);
                     break;
                 }

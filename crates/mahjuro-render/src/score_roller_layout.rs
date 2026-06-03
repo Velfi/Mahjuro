@@ -7,7 +7,7 @@ use glam::Vec3;
 use crate::draw_cmd::CameraParams;
 use crate::gameplay_glb;
 use crate::room_glb::RoomGlbCpu;
-use crate::world_space::{object3d_pos_triple_for_world_center, LayoutAnchorPx};
+use crate::world_space::{LayoutAnchorPx, object3d_pos_triple_for_world_center};
 
 pub const GAMEPLAY_SCORE_ROLLER_SLOT_COUNT: usize = 20;
 pub const GAMEPLAY_SCORE_ROLLER_BANK_DIGITS: usize = 10;
@@ -47,11 +47,7 @@ pub fn score_roller_local_slot_for_significance(significance: i32) -> usize {
 
 /// Local slot for the most significant non-zero digit of `value` (ones when zero).
 pub fn score_roller_msd_local_slot(value: u64) -> usize {
-    let significance = if value == 0 {
-        0
-    } else {
-        value.ilog10() as i32
-    };
+    let significance = if value == 0 { 0 } else { value.ilog10() as i32 };
     score_roller_local_slot_for_significance(significance)
 }
 
@@ -65,7 +61,9 @@ pub fn score_roller_msd_slot_for_value(value: u64, bank: usize) -> usize {
 }
 
 /// Roller wheel pivot positions in authored doc space (from node bind poses).
-pub fn collect_score_roller_pivots_doc(cpu: &RoomGlbCpu) -> [[f32; 3]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT] {
+pub fn collect_score_roller_pivots_doc(
+    cpu: &RoomGlbCpu,
+) -> [[f32; 3]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT] {
     let mut pivots = [[0.0; 3]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
     for env_prim in &cpu.environment_primitives {
         let Some(name) = env_prim.gltf_node_name.as_deref() else {

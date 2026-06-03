@@ -1,17 +1,20 @@
 //! Scene system: each screen in the game is a `Scene` variant.
 //! Scenes transition by returning `Some(Scene)` from `update()`.
 
-pub mod archive_career;
-pub mod celebration_overlay;
+pub mod animation_lab;
 pub mod archive;
+pub mod archive_career;
+pub mod button_aabb_lab;
+pub mod cascade_lab;
+mod cascade_lab_click;
+pub mod celebration_overlay;
 pub mod credits;
 pub mod debug_visibility;
-pub(crate) mod flowers_intro_copy;
-pub mod run_summary;
 mod defeat_tableau;
-mod run_summary_panel;
+pub(crate) mod flowers_intro_copy;
 pub mod gameplay;
 pub mod guide;
+pub mod hallway;
 pub mod journal_transition;
 pub mod lamp_moths;
 pub mod main_menu;
@@ -20,73 +23,70 @@ pub(crate) mod melds_intro_copy;
 pub mod object3d_inspect;
 pub mod options;
 pub mod pause_menu;
-pub mod hallway;
 pub mod profile_select;
-pub mod cascade_lab;
-mod cascade_lab_click;
-pub mod shadow_ao_lab;
 pub mod roller_lab;
 pub mod rumble_lab;
+pub mod run_summary;
+mod run_summary_panel;
 pub(crate) mod scoring_intro_copy;
+pub mod shadow_ao_lab;
 pub mod shop;
 pub mod showcase;
 pub mod showcase_stage;
 pub mod splash;
 pub mod stairway;
 pub mod start_game_modal;
-pub mod animation_lab;
-pub mod button_aabb_lab;
 pub mod tile_anchor_lab;
 pub(crate) mod tiles_intro_copy;
 pub mod tixels;
 pub mod transition_playground;
 pub mod tutorial_campaign;
 pub mod tutorial_summary;
-pub mod yaku_journal;
 pub mod wall_ledger;
+pub mod yaku_journal;
+pub use animation_lab::AnimationLabScene;
 pub use archive::ArchiveScene;
+pub use button_aabb_lab::ButtonAabbLabScene;
+pub use cascade_lab::CascadeLabScene;
 pub use credits::CreditsScene;
 use enum_dispatch::enum_dispatch;
-pub use run_summary::{DefeatScene, RunSummaryScene, VictoryScene};
 pub use gameplay::GameplayScene;
 pub use guide::GuideScene;
+pub use hallway::HallwayScene;
 pub use main_menu::MainMenuScene;
 pub use material_viewer::MaterialViewerScene;
 pub use options::OptionsScene;
-pub use hallway::HallwayScene;
 pub use profile_select::ProfileSelectScene;
-pub use cascade_lab::CascadeLabScene;
-pub use shadow_ao_lab::ShadowAoLabScene;
 pub use roller_lab::RollerLabScene;
 pub use rumble_lab::RumbleLabScene;
+pub use run_summary::{DefeatScene, RunSummaryScene, VictoryScene};
+pub use shadow_ao_lab::ShadowAoLabScene;
 pub use shop::ShopScene;
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
+pub use showcase::MetaLevelUpPresenter;
 pub use showcase::{
     ArchiveInspectPresenter, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
     TilePackPresenter, ZodiacPresenter,
 };
-#[cfg(any(feature = "game", feature = "headless-screenshot"))]
-pub use showcase::MetaLevelUpPresenter;
 pub use splash::SplashScene;
 pub use stairway::StairwayScene;
 pub use start_game_modal::TileSelectScene;
-pub use animation_lab::AnimationLabScene;
-pub use button_aabb_lab::ButtonAabbLabScene;
 pub use tile_anchor_lab::TileAnchorLabScene;
 pub use tixels::TixelsScene;
 pub use transition_playground::TransitionPlaygroundScene;
 pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_summary::TutorialSummaryScene;
-pub use yaku_journal::YakuJournalScene;
 pub use wall_ledger::WallLedgerScene;
+pub use yaku_journal::YakuJournalScene;
 
 use crate::effect_layers::EffectLayers;
 use crate::game::cascade::CascadeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 use crate::persistence::ResumeScene;
-use crate::render::scene_keys;
 use crate::render::animation::AnimationController;
 use crate::render::draw_cmd::UiFrame;
+use crate::render::scene_keys;
 use crate::ui::input::{InputMode, RumbleLabOp, UiAction};
 use crate::ui::layout::LayoutResult;
 
@@ -539,7 +539,10 @@ pub fn active_scene_key(scene: &Scene) -> Option<&'static str> {
 }
 
 /// Scene directly under `top` on the overlay stack (the suspended host when `top` is an overlay).
-pub fn overlay_renderer_parent<'a>(base: &'a Scene, overlay_stack: &'a [Scene]) -> Option<&'a Scene> {
+pub fn overlay_renderer_parent<'a>(
+    base: &'a Scene,
+    overlay_stack: &'a [Scene],
+) -> Option<&'a Scene> {
     if overlay_stack.is_empty() {
         None
     } else if overlay_stack.len() >= 2 {
@@ -557,10 +560,11 @@ pub fn active_scene_key_for_renderer(top: &Scene, parent: Option<&Scene>) -> Opt
         && matches!(
             s.presenter,
             ShowcasePresenter::ShopInspect(_) | ShowcasePresenter::ArchiveInspect(_)
-        ) && let Some(key) = parent.and_then(active_scene_key)
-        {
-            return Some(key);
-        }
+        )
+        && let Some(key) = parent.and_then(active_scene_key)
+    {
+        return Some(key);
+    }
     active_scene_key(top)
 }
 

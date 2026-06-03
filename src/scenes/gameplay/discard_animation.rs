@@ -12,10 +12,10 @@ use crate::render::river_mesh::{
 };
 use crate::render::table_transform::mat4_to_euler_xyz_rad;
 use crate::render::world_space::surface_anchor_from_world_xyz;
-pub(crate) use mahjuro_render::scene_glue::bowl_model_matrix;
 use crate::scenes::gameplay::GameplayScene;
 use crate::scenes::gameplay::glb_anchors;
 use glam::Vec3;
+pub(crate) use mahjuro_render::scene_glue::bowl_model_matrix;
 use rand::RngExt;
 
 /// Discard tiles in the river — smaller than hand slots, lying face-up on the water.
@@ -942,8 +942,8 @@ pub fn settled_placements(
 mod tests {
     use super::*;
     use crate::core::tile::{Suit, Tile};
-    use crate::render::world_space::pixel_to_world;
     use crate::render::draw_cmd::Object3dKind;
+    use crate::render::world_space::pixel_to_world;
     use std::time::Instant;
 
     fn test_tile(id: u32) -> Tile {

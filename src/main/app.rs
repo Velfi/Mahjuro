@@ -247,7 +247,10 @@ impl crate::App {
         self.profile_dirty = false;
     }
 
-    pub(crate) fn toggle_fullscreen(&mut self, shell: &mut crate::sdl_shell::SdlShell) -> anyhow::Result<()> {
+    pub(crate) fn toggle_fullscreen(
+        &mut self,
+        shell: &mut crate::sdl_shell::SdlShell,
+    ) -> anyhow::Result<()> {
         let on = shell.desktop_fullscreen_on();
         shell.set_desktop_fullscreen(!on)?;
         let mut settings = crate::persistence::load_settings();

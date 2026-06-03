@@ -18,7 +18,7 @@
 //!   Ctrl/Cmd+Shift+T when `debug_menu_enabled`).
 
 #[cfg(debug_menu_enabled)]
-use muda::accelerator::{Accelerator, Code, Modifiers, CMD_OR_CTRL};
+use muda::accelerator::{Accelerator, CMD_OR_CTRL, Code, Modifiers};
 #[cfg(debug_menu_enabled)]
 use muda::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 #[cfg(all(debug_menu_enabled, target_os = "windows"))]
@@ -154,9 +154,7 @@ pub fn debug_action_for_keyboard_shortcut(
         return None;
     }
     let shift = keymod.contains(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
-    let cmd_or_ctrl = keymod.contains(
-        Mod::LCTRLMOD | Mod::RCTRLMOD | Mod::LGUIMOD | Mod::RGUIMOD,
-    );
+    let cmd_or_ctrl = keymod.contains(Mod::LCTRLMOD | Mod::RCTRLMOD | Mod::LGUIMOD | Mod::RGUIMOD);
     if !shift || !cmd_or_ctrl {
         return None;
     }
@@ -213,11 +211,7 @@ impl DebugMenuBar {
         mappings.push((fps_item.id().clone(), DebugAction::ToggleShowFps));
         let _ = overlays_sub.append(&fps_item);
 
-        let hide_2d_ui_item = MenuItem::new(
-            "Hide 2D UI",
-            true,
-            Some(accel_cmd_shift(Code::KeyH)),
-        );
+        let hide_2d_ui_item = MenuItem::new("Hide 2D UI", true, Some(accel_cmd_shift(Code::KeyH)));
         mappings.push((hide_2d_ui_item.id().clone(), DebugAction::ToggleHide2dUi));
         let _ = overlays_sub.append(&hide_2d_ui_item);
 
@@ -560,7 +554,10 @@ fn install_menu(menu: &Menu, window: &Window) {
     }
 }
 
-#[cfg(all(debug_menu_enabled, not(any(target_os = "macos", target_os = "windows"))))]
+#[cfg(all(
+    debug_menu_enabled,
+    not(any(target_os = "macos", target_os = "windows"))
+))]
 fn install_menu(_menu: &Menu, _window: &Window) {
     // Linux/other: muda requires GTK on Linux. The menu object exists so
     // `poll()` stays valid, but it isn't attached to a window. Use the

@@ -12,8 +12,8 @@ use std::num::NonZeroU64;
 use wgpu::util::DeviceExt;
 
 use crate::theme::color;
-use crate::wgpu_renderer::{MAX_POINT_LIGHTS};
 use crate::tile_glb::Vertex3dTex;
+use crate::wgpu_renderer::MAX_POINT_LIGHTS;
 
 /// Axis-aligned box extents for the `push_box` family of mesh builders.
 #[derive(Clone, Copy, Debug)]
@@ -526,11 +526,7 @@ impl LitMeshInstance {
             return;
         }
         last.light_view_proj = light_view_proj;
-        queue.write_buffer(
-            &self.shadow_uniform_buffer,
-            0,
-            bytemuck::bytes_of(&*last),
-        );
+        queue.write_buffer(&self.shadow_uniform_buffer, 0, bytemuck::bytes_of(&*last));
     }
 
     pub fn write_uniform(

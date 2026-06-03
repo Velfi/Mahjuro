@@ -5,30 +5,30 @@
 
 use std::time::Instant;
 
-use crate::sfx_id::SfxId;
-use crate::core::archive_seen::{self, ArchiveSeenMark, ArchiveTab};
-use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
 use crate::core::OrdealKindExt;
+use crate::core::archive_seen::{self, ArchiveSeenMark, ArchiveTab};
+use crate::core::memorial_talisman::MemorialTalismanKind;
+use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
 use crate::core::progression::is_transformation_successor_relic;
 use crate::core::relic::{RelicId, all_relic_defs};
-use crate::core::memorial_talisman::MemorialTalismanKind;
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
-use crate::render::scene_keys;
 use crate::render::archive_glb;
 use crate::render::draw_cmd::{
     CameraParams, Object3d, Object3dKind, UiFrame, camera_facing_euler_xyz_rad,
 };
 use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
 use crate::render::room_glb;
+use crate::render::scene_keys;
 use crate::render::table_transform::{
     euler_xyz_rad_from_deg, mat4_to_euler_xyz_rad, rot_fixed_axes_deg,
 };
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_ray_plane_z};
+use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{
     HintSegment, HintStyle, archive_browse_footer_row, inspect_camera_hint_row,
     push_inline_hint_rows,
@@ -1332,12 +1332,11 @@ impl SceneBehavior for ArchiveScene {
             }
         }
 
-        let apply_artifact_focus = |scene: &mut ArchiveScene,
-                                    bus: &mut crate::game::event_bus::EventBus,
-                                    idx: usize| {
-            bus.push(GameEvent::UiSound(SfxId::TilePlace));
-            collection_focus_artifact(scene, idx, ctx.progress, chronicle_last_seen, bus);
-        };
+        let apply_artifact_focus =
+            |scene: &mut ArchiveScene, bus: &mut crate::game::event_bus::EventBus, idx: usize| {
+                bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                collection_focus_artifact(scene, idx, ctx.progress, chronicle_last_seen, bus);
+            };
 
         for a in ctx.actions {
             match a {
@@ -1867,10 +1866,7 @@ fn yaku_at_catalog_index(
 }
 
 fn inspect_artifact_index(scene: &ArchiveScene) -> usize {
-    scene
-        .focused_row
-        .or(scene.selected_artifact)
-        .unwrap_or(0)
+    scene.focused_row.or(scene.selected_artifact).unwrap_or(0)
 }
 
 /// Play the focused catalog item's bespoke audio (Confirm / A), when a stinger exists.
@@ -3306,8 +3302,8 @@ mod tests {
             .iter()
             .find(|(ti, _)| *ti == chronicle_idx)
             .expect("chronicle tab rect");
-        let badge = crate::ui::corner_badge::corner_badge_rect(*host, w, h, "NEW")
-            .expect("badge layout");
+        let badge =
+            crate::ui::corner_badge::corner_badge_rect(*host, w, h, "NEW").expect("badge layout");
         assert!(
             badge[0] >= 0.0
                 && badge[1] >= 0.0

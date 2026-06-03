@@ -20,9 +20,7 @@ use crate::render::draw_cmd::{CameraParams, ShowcaseTilePlacement, UiFrame};
 use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
-use crate::ui::controller_hints::{
-    HintStyle, journal_plaque_footer_row, push_inline_hint_rows,
-};
+use crate::ui::controller_hints::{HintStyle, journal_plaque_footer_row, push_inline_hint_rows};
 use crate::ui::focus_nav;
 use crate::ui::input::UiAction;
 use crate::ui::widget;
@@ -64,7 +62,8 @@ fn journal_scrollbar(
     let track_x = table.table_x + table.table_w - track_w - 4.0 * jr;
     let track_y = body_top + 3.0 * jr;
     let track_h = table.table_h - table.header_h - 6.0 * jr;
-    let thumb_h = (track_h * (table.visible_rows as f32 / total_rows as f32)).clamp(24.0 * jr, track_h);
+    let thumb_h =
+        (track_h * (table.visible_rows as f32 / total_rows as f32)).clamp(24.0 * jr, track_h);
     let thumb_travel = (track_h - thumb_h).max(0.0);
     let thumb_t = scroll / max_scroll;
     let thumb_y = track_y + thumb_travel * thumb_t;
@@ -108,9 +107,7 @@ impl JournalNav {
 
 /// Upper-left Back control — same sizing as [`super::guide::GuideLayout::header_chrome`].
 fn journal_header_chrome(window_w: f32, window_h: f32) -> ([f32; 4], f32) {
-    let ui = (window_w / 1920.0)
-        .min(window_h / 1080.0)
-        .clamp(0.55, 1.35);
+    let ui = (window_w / 1920.0).min(window_h / 1080.0).clamp(0.55, 1.35);
     let margin = 48.0 * ui;
     let header_btn_h = (window_h * 0.052).clamp(44.0, 72.0);
     let back_w = (108.0 * (margin / 48.0)).clamp(88.0, 132.0);
@@ -289,8 +286,7 @@ impl SceneBehavior for YakuJournalScene {
 
         if let Some(sb) = scrollbar {
             if self.dragging_scrollbar && mouse_down {
-                let rows =
-                    scroll_rows_from_cursor(my, self.scroll_drag_grab_y, &sb, max_scroll);
+                let rows = scroll_rows_from_cursor(my, self.scroll_drag_grab_y, &sb, max_scroll);
                 self.target_scroll_rows = rows;
                 self.scroll_rows = rows;
             } else if mouse_click {

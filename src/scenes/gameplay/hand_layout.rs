@@ -92,8 +92,8 @@ pub(crate) fn hand_tile_size_from_slot_width(
 #[cfg(test)]
 mod tests {
     use super::{
-        hand_slots_for_count, hand_tile_layout_size_px, HAND_TILE_COUNT_MAX,
-        HAND_TILE_REFERENCE_COUNT,
+        HAND_TILE_COUNT_MAX, HAND_TILE_REFERENCE_COUNT, hand_slots_for_count,
+        hand_tile_layout_size_px,
     };
 
     #[test]

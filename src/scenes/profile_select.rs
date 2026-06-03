@@ -1,10 +1,10 @@
 //! Profile selection screen — pick one of three profile slots.
 
-use crate::sfx_id::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::persistence;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{HintKey, HintRow, HintStyle, push_inline_hint_rows};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -12,8 +12,7 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use crate::render::draw_cmd::UiFrame;
 
 use super::{
-    DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx, archive_career,
-    scene_archive,
+    DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx, archive_career, scene_archive,
 };
 
 const PROFILE_COUNT: usize = 3;
@@ -475,9 +474,8 @@ impl SceneBehavior for ProfileSelectScene {
                     line_y += body_line_h + pad_y * 0.3;
                 }
             } else {
-                let empty_y = header_top
-                    + header_line_h * if is_active { 2.0 } else { 1.0 }
-                    + pad_y * 0.5;
+                let empty_y =
+                    header_top + header_line_h * if is_active { 2.0 } else { 1.0 } + pad_y * 0.5;
                 frame.text(TextLabel {
                     rect: [
                         card_x + pad_x,
@@ -516,11 +514,7 @@ impl SceneBehavior for ProfileSelectScene {
             let title_line_h = dialog_title_font * 1.35;
             let body_line_h = dialog_body_font * 1.35;
 
-            let content_h = dialog_pad_y
-                + title_line_h
-                + section_gap
-                + body_line_h
-                + dialog_pad_y;
+            let content_h = dialog_pad_y + title_line_h + section_gap + body_line_h + dialog_pad_y;
             let dialog_w = ((360.0 * scale).max(280.0)).min(w * 0.85);
             let dialog_h = content_h;
             let dialog_x = (w - dialog_w) * 0.5;
@@ -566,7 +560,6 @@ impl SceneBehavior for ProfileSelectScene {
                 align: TextAlign::Center,
                 ..Default::default()
             });
-
         }
 
         // Scene-specific action hints (delete is not a universal face-button mapping).

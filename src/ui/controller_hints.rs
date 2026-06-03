@@ -38,8 +38,8 @@ impl HintMetrics {
     pub fn primary(h: f32) -> Self {
         let s = HINT_METRICS_SCALE;
         let bar_h_ref = h * HINT_BAR_H_FRAC;
-        let icon_px = (bar_h_ref * HINT_ICON_BAR_FRAC * 3.0).clamp(HINT_ICON_PX_MIN, HINT_ICON_PX_MAX)
-            * s;
+        let icon_px =
+            (bar_h_ref * HINT_ICON_BAR_FRAC * 3.0).clamp(HINT_ICON_PX_MIN, HINT_ICON_PX_MAX) * s;
         let legend_font_px = typography::size(typography::H24, h);
         let ui_font = load_ui_font();
         let legend_line_h = ui_font
@@ -49,9 +49,7 @@ impl HintMetrics {
             .unwrap_or(legend_font_px * 1.2)
             .max(legend_font_px * 0.85);
         let caption_px = typography::size(typography::H45, h);
-        let row_height = (icon_px * 1.06)
-            .max(legend_line_h)
-            .max(caption_px * 1.35);
+        let row_height = (icon_px * 1.06).max(legend_line_h).max(caption_px * 1.35);
         let gap_after_icon = icon_px * 0.18;
         Self {
             icon_px,
@@ -184,7 +182,11 @@ impl HintSegment {
         HintBind::alternatives(label, keys).into()
     }
 
-    pub fn bind_join(label: impl Into<String>, keys: Vec<HintKey>, within_join: HintKeyJoin) -> Self {
+    pub fn bind_join(
+        label: impl Into<String>,
+        keys: Vec<HintKey>,
+        within_join: HintKeyJoin,
+    ) -> Self {
         HintBind::grouped(label, vec![keys], within_join).into()
     }
 
@@ -372,10 +374,9 @@ fn confirm_bind(input_mode: InputMode, label: impl Into<String>) -> HintBind {
 fn navigate_bind(input_mode: InputMode) -> HintBind {
     match input_mode {
         InputMode::Controller => HintBind::alternatives("navigate", vec![HintKey::Dpad]),
-        InputMode::Keyboard | InputMode::Cursor => HintBind::alternatives(
-            "navigate",
-            vec![HintKey::Keyboard("keyboard_arrows")],
-        ),
+        InputMode::Keyboard | InputMode::Cursor => {
+            HintBind::alternatives("navigate", vec![HintKey::Keyboard("keyboard_arrows")])
+        }
     }
 }
 
@@ -589,9 +590,7 @@ pub fn archive_browse_footer_row(
         InputMode::Keyboard | InputMode::Cursor => {}
     }
     if show_preview {
-        row = row
-            .sep()
-            .push(confirm_bind(input_mode, "preview").into());
+        row = row.sep().push(confirm_bind(input_mode, "preview").into());
     }
     row.sep()
         .push(inspect_bind(input_mode).into())
@@ -706,10 +705,7 @@ enum InlineBindPart {
     Key(HintKey, bool),
 }
 
-fn for_each_inline_bind_part(
-    bind: &HintBind,
-    mut f: impl FnMut(InlineBindPart),
-) {
+fn for_each_inline_bind_part(bind: &HintBind, mut f: impl FnMut(InlineBindPart)) {
     let within_text = key_join_text(bind.within_join);
     for (gi, group) in bind.key_groups.iter().enumerate() {
         if gi > 0 {
@@ -719,8 +715,7 @@ fn for_each_inline_bind_part(
             if ki > 0 && !within_text.is_empty() {
                 f(InlineBindPart::WithinSep);
             }
-            let last_icon =
-                gi + 1 == bind.key_groups.len() && ki + 1 == group.len();
+            let last_icon = gi + 1 == bind.key_groups.len() && ki + 1 == group.len();
             f(InlineBindPart::Key(key, last_icon));
         }
     }
@@ -931,14 +926,7 @@ pub fn push_inline_hint_rows(
     rows: &[Vec<HintSegment>],
     style: HintStyle,
 ) -> Vec<InlineHintIconSlot> {
-    push_inline_hint_rows_for(
-        frame,
-        ctx.input_mode,
-        ctx.glyphs,
-        row_rects,
-        rows,
-        style,
-    )
+    push_inline_hint_rows_for(frame, ctx.input_mode, ctx.glyphs, row_rects, rows, style)
 }
 
 /// Like [`push_inline_hint_rows`] when [`DrawCtx`] was already consumed.

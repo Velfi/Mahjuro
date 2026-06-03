@@ -335,9 +335,7 @@ pub mod metrics {
     /// Max walnut fill width for focus / shop tooltips (~360 px @ 720p, ~870 px @ 4K).
     pub fn tooltip_max_panel_px(w: f32, h: f32) -> f32 {
         let scale = scene_scale(w, h);
-        (300.0 * scale)
-            .min(w * 0.42)
-            .min(400.0 + 130.0 * scale)
+        (300.0 * scale).min(w * 0.42).min(400.0 + 130.0 * scale)
     }
 }
 

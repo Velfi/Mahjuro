@@ -1,8 +1,6 @@
 use super::super::*;
 
-use crate::moths_to_a_light::{
-    build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh,
-};
+use crate::moths_to_a_light::{build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh};
 
 pub(super) fn build_renderer_new(
     target_init: TargetInit,
@@ -33,18 +31,17 @@ pub(super) fn build_renderer_new(
         super::super::init_phases::early_gpu_and_depth(target_init)?
     };
     #[cfg(feature = "windowed")]
-    let mut boot_splash: Option<super::super::boot_splash::BootSplash<'_>> =
-        if present_boot_frame {
-            Some(super::super::boot_splash::BootSplash::new(
-                &device,
-                &queue,
-                format,
-                size.width,
-                size.height,
-            )?)
-        } else {
-            None
-        };
+    let mut boot_splash: Option<super::super::boot_splash::BootSplash<'_>> = if present_boot_frame {
+        Some(super::super::boot_splash::BootSplash::new(
+            &device,
+            &queue,
+            format,
+            size.width,
+            size.height,
+        )?)
+    } else {
+        None
+    };
     #[cfg(feature = "windowed")]
     let mut boot_poll_slot = boot_input_poll;
     #[cfg(feature = "windowed")]
@@ -759,62 +756,64 @@ pub(super) fn build_renderer_new(
         multiview_mask: None,
         cache: None,
     });
-    let depth_quad_pipeline_display = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("depth-quad-pipeline-display"),
-        layout: Some(&quad_layout),
-        vertex: wgpu::VertexState {
-            module: &depth_quad_shader,
-            entry_point: Some("vs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[vertex_layout.clone(), instance_layout.clone()],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &depth_quad_shader,
-            entry_point: Some("fs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            ..Default::default()
-        },
-        depth_stencil: Some(depth_ui_test.clone()),
-        multisample: wgpu::MultisampleState::default(),
-        multiview_mask: None,
-        cache: None,
-    });
-    let depth_quad_debug_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("depth-quad-debug-pipeline"),
-        layout: Some(&quad_layout),
-        vertex: wgpu::VertexState {
-            module: &depth_quad_debug_shader,
-            entry_point: Some("vs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[vertex_layout.clone(), instance_layout.clone()],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &depth_quad_debug_shader,
-            entry_point: Some("fs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: scene_hdr_format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            ..Default::default()
-        },
-        depth_stencil: Some(depth_ui_test.clone()),
-        multisample: wgpu::MultisampleState::default(),
-        multiview_mask: None,
-        cache: None,
-    });
+    let depth_quad_pipeline_display =
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("depth-quad-pipeline-display"),
+            layout: Some(&quad_layout),
+            vertex: wgpu::VertexState {
+                module: &depth_quad_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[vertex_layout.clone(), instance_layout.clone()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &depth_quad_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_ui_test.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+    let depth_quad_debug_pipeline =
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("depth-quad-debug-pipeline"),
+            layout: Some(&quad_layout),
+            vertex: wgpu::VertexState {
+                module: &depth_quad_debug_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[vertex_layout.clone(), instance_layout.clone()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &depth_quad_debug_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: scene_hdr_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_ui_test.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
     let depth_quad_debug_pipeline_display =
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("depth-quad-debug-pipeline-display"),
@@ -1083,8 +1082,7 @@ pub(super) fn build_renderer_new(
         immediate_size: 0,
     });
     let flame_mesh_vertex_layout = wgpu::VertexBufferLayout {
-        array_stride: std::mem::size_of::<crate::tile_glb::Vertex3dTex>()
-            as wgpu::BufferAddress,
+        array_stride: std::mem::size_of::<crate::tile_glb::Vertex3dTex>() as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &[
             wgpu::VertexAttribute {
@@ -2391,8 +2389,8 @@ pub(super) fn build_renderer_new(
         mapped_at_creation: false,
     });
     let probe_sh_stride = 9 * std::mem::size_of::<glam::Vec4>();
-    let probe_sh_bytes = (crate::room_glb::ROOM_EMISSIVE_PROBE_MAX as usize
-        * probe_sh_stride) as wgpu::BufferAddress;
+    let probe_sh_bytes = (crate::room_glb::ROOM_EMISSIVE_PROBE_MAX as usize * probe_sh_stride)
+        as wgpu::BufferAddress;
     let probe_sh_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("emissive-probe-sh"),
         size: probe_sh_bytes,
@@ -2718,10 +2716,10 @@ pub(super) fn build_renderer_new(
 
     let tile_meshes = {
         let _tile = crate::startup_profile::scope("wgpu.tile_mesh");
-        use mahjuro_gfx_types::TileMaterial;
         use crate::tile_glb::{
             load_glb_tile_from_bytes, normalize_mesh, tile_glb_asset_path, tile_material_index,
         };
+        use mahjuro_gfx_types::TileMaterial;
         let tile_glb_defaults = crate::gltf_prop::GltfTileGpuDefaults {
             device: &device,
             queue: &queue,
@@ -2767,7 +2765,11 @@ pub(super) fn build_renderer_new(
                     }
                     Err(e) => {
                         log::warn!("Could not load tile mesh GLB {path}: {e:#}");
-                        crate::gltf_prop::upload_tile_mesh_gpu_set(&tile_glb_defaults, &label, &empty)
+                        crate::gltf_prop::upload_tile_mesh_gpu_set(
+                            &tile_glb_defaults,
+                            &label,
+                            &empty,
+                        )
                     }
                 },
                 None => {
@@ -3186,7 +3188,7 @@ pub(super) fn build_renderer_new(
             &tile_sampler,
         ));
     }
-  // Shop journal books are cheap; gameplay HUD instance pools are deferred
+    // Shop journal books are cheap; gameplay HUD instance pools are deferred
     // until first gameplay draw (`ensure_gameplay_hud_pools`).
     let make_pool = |n: usize| -> Vec<LitMeshInstance> {
         (0..n)
@@ -3615,7 +3617,8 @@ pub(super) fn build_renderer_new(
         acquire_telemetry: super::super::runtime::AcquireTelemetry::new(),
         shadow_quality: default_shadow_quality,
         flame_tuning: crate::flame_tuning::FlameTuning::load(),
-        main_menu_pride_rainbow_debug: crate::main_menu_glb::main_menu_pride_rainbow_default_enabled(),
+        main_menu_pride_rainbow_debug:
+            crate::main_menu_glb::main_menu_pride_rainbow_default_enabled(),
         main_menu_moon_phase_debug: crate::main_menu_moon_tuning::MainMenuMoonPhaseDebug::default(),
         main_menu_rain_hit_debug_mesh,
         main_menu_rain_hit_debug_instance,

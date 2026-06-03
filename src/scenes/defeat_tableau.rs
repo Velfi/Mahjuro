@@ -59,11 +59,7 @@ pub fn push_defeat_memorial_tableau(
 
     // Camera is world-space; frame the talisman at screen center.
     let cs = (h / 2104.0_f32).max(1e-4);
-    let eye = Vec3::new(
-        target_w.x,
-        target_w.y - 980.0 * cs,
-        target_w.z + 440.0 * cs,
-    );
+    let eye = Vec3::new(target_w.x, target_w.y - 980.0 * cs, target_w.z + 440.0 * cs);
     let look_target = Vec3::new(target_w.x, target_w.y, target_w.z + 12.0 * cs);
     let cam_eye = eye.to_array();
     let cam_target = look_target.to_array();
@@ -122,7 +118,9 @@ pub fn push_defeat_memorial_tableau(
         hover_target: 0.0,
         anim_id: 0,
     };
-    frame.cmds.push(DrawCmd::Object3dBatch(vec![wood_board, memorial]));
+    frame
+        .cmds
+        .push(DrawCmd::Object3dBatch(vec![wood_board, memorial]));
 
     let parchment = color::rgb(color::PARCHMENT);
     let accent_rgb = [accent[0], accent[1], accent[2]];

@@ -8,14 +8,14 @@ use std::sync::{Arc, OnceLock};
 
 use glam::{Mat4, Vec3, Vec4};
 
+use crate::draw_cmd::ScenePunctualLight;
 use crate::draw_cmd::{CameraParams, Object3d, Object3dKind};
 use crate::primitive::{MaterialSpec, MeshId};
 use crate::projected_light_shadow::punctual_light_world;
+use crate::room_gi_bake::RoomGiRoom;
 use crate::room_shadow_bake::{
     self, ContactAoWorldProbe, RoomShadowBake, bake_contact_ao_from_depth,
 };
-use crate::room_gi_bake::RoomGiRoom;
-use crate::draw_cmd::ScenePunctualLight;
 use crate::wgpu_renderer::PointLight;
 use crate::world_space::surface_anchor_from_world_xyz;
 
@@ -205,11 +205,7 @@ fn ray_aabb(origin: Vec3, dir: Vec3, box_center: Vec3, half: Vec3) -> Option<f32
 }
 
 /// World-space ray from light → probe blocked by any shadow-casting mesh?
-pub fn analytic_punctual_shadow(
-    light: Vec3,
-    probe: Vec3,
-    layout: ShadowAoLabLayout,
-) -> f32 {
+pub fn analytic_punctual_shadow(light: Vec3, probe: Vec3, layout: ShadowAoLabLayout) -> f32 {
     let dir = probe - light;
     let dist = dir.length();
     if dist < 1e-4 {
@@ -284,23 +280,13 @@ fn software_depth_bake(lvp: Mat4, meshes: &[LabMesh]) -> Vec<u8> {
             depth[y * w + x] = best;
         }
     }
-    depth
-        .into_iter()
-        .flat_map(f32::to_le_bytes)
-        .collect()
+    depth.into_iter().flat_map(f32::to_le_bytes).collect()
 }
 
 fn build_synthetic_bake(layout: ShadowAoLabLayout) -> RoomShadowBake {
     let lvp = light_view_proj(layout);
-    let depth_bytes: Arc<[u8]> = Arc::from(software_depth_bake(
-        lvp,
-        &shell_meshes(layout),
-    ));
-    let ao_bytes = Arc::from(bake_contact_ao_from_depth(
-        BAKE_W,
-        BAKE_H,
-        &depth_bytes,
-    ));
+    let depth_bytes: Arc<[u8]> = Arc::from(software_depth_bake(lvp, &shell_meshes(layout)));
+    let ao_bytes = Arc::from(bake_contact_ao_from_depth(BAKE_W, BAKE_H, &depth_bytes));
     RoomShadowBake {
         room: RoomGiRoom::Hallway,
         width: BAKE_W,
@@ -328,10 +314,7 @@ pub fn synthetic_bake(layout: ShadowAoLabLayout) -> Arc<RoomShadowBake> {
     }
 }
 
-pub fn probe_layout(
-    layout: ShadowAoLabLayout,
-    _window_h: f32,
-) -> Vec<ShadowAoLabProbe> {
+pub fn probe_layout(layout: ShadowAoLabLayout, _window_h: f32) -> Vec<ShadowAoLabProbe> {
     let bake = synthetic_bake(layout);
     let light = light_world();
     probe_world_points()
@@ -349,10 +332,7 @@ pub fn probe_layout(
         .collect()
 }
 
-pub fn camera(
-    preset: ShadowAoLabCamera,
-    orbit_yaw: f32,
-) -> CameraParams {
+pub fn camera(preset: ShadowAoLabCamera, orbit_yaw: f32) -> CameraParams {
     match preset {
         ShadowAoLabCamera::Corridor => CameraParams {
             eye: [0.0, -800.0, 1100.0],
@@ -375,7 +355,11 @@ pub fn camera(
             let offset = Vec3::new(0.0, -2200.0, 600.0);
             let c = orbit_yaw.cos();
             let s = orbit_yaw.sin();
-            let rotated = Vec3::new(offset.x * c - offset.y * s, offset.x * s + offset.y * c, offset.z);
+            let rotated = Vec3::new(
+                offset.x * c - offset.y * s,
+                offset.x * s + offset.y * c,
+                offset.z,
+            );
             let eye = target + rotated;
             CameraParams {
                 eye: eye.to_array(),
@@ -393,11 +377,7 @@ fn world_anchor(window_w: f32, window_h: f32, world: Vec3) -> [f32; 3] {
     surface_anchor_from_world_xyz(window_w, window_h, world)
 }
 
-pub fn build_object3ds(
-    layout: ShadowAoLabLayout,
-    window_w: f32,
-    window_h: f32,
-) -> Vec<Object3d> {
+pub fn build_object3ds(layout: ShadowAoLabLayout, window_w: f32, window_h: f32) -> Vec<Object3d> {
     let material = MaterialSpec::plain();
     shell_meshes(layout)
         .into_iter()
@@ -503,7 +483,10 @@ mod tests {
     fn horizontal_band_back_wall_probe_summary() {
         let probes = probe_layout(ShadowAoLabLayout::HorizontalBand, 1080.0);
         for p in probes {
-            let ao = p.contact_ao.map(|c| (c.ao, c.applies)).unwrap_or((255, false));
+            let ao = p
+                .contact_ao
+                .map(|c| (c.ao, c.applies))
+                .unwrap_or((255, false));
             eprintln!(
                 "{} shadow={} ao={} applies={}",
                 p.label, p.analytic_shadow, ao.0, ao.1
@@ -525,7 +508,9 @@ mod tests {
 
     #[test]
     fn z_up_shadow_view_up_uses_world_z() {
-        let up = crate::projected_light_shadow::z_up_shadow_view_up(Vec3::new(0.0, 1.0, -0.2).normalize());
+        let up = crate::projected_light_shadow::z_up_shadow_view_up(
+            Vec3::new(0.0, 1.0, -0.2).normalize(),
+        );
         assert!(up.z.abs() > 0.99);
     }
 }

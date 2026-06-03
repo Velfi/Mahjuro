@@ -181,7 +181,12 @@ impl SceneBehavior for ShadowAoLabScene {
         });
 
         frame.text(TextLabel {
-            rect: [margin, margin + title_font * 1.5, w - margin * 2.0, body_font * 1.2],
+            rect: [
+                margin,
+                margin + title_font * 1.5,
+                w - margin * 2.0,
+                body_font * 1.2,
+            ],
             text: format!(
                 "layout={}  camera={}  shadows={}  orbit={:.2}",
                 self.layout.label(),
@@ -196,10 +201,7 @@ impl SceneBehavior for ShadowAoLabScene {
         });
 
         let line_h = body_font * 1.12;
-        for (i, line) in probe_lines(&probes)
-            .iter()
-            .enumerate()
-        {
+        for (i, line) in probe_lines(&probes).iter().enumerate() {
             frame.text(TextLabel {
                 rect: [
                     margin,
@@ -277,8 +279,7 @@ fn probe_lines(probes: &[ShadowAoLabProbe]) -> Vec<String> {
             .unwrap_or_else(|| "ao=—".into());
         lines.push(format!(
             "{:<10} shadow={:.0}  {ao}",
-            p.label,
-            p.analytic_shadow
+            p.label, p.analytic_shadow
         ));
     }
     lines

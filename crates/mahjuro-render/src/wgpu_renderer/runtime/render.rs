@@ -552,8 +552,7 @@ impl WgpuRenderer {
         // persistent buffer. See `frame_pool.rs`.
         let mut quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
         let mut depth_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
-        let mut overlay_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
-            Vec::new();
+        let mut overlay_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
         let mut overlay_squircle_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
             Vec::new();
         let mut gradient_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
@@ -580,8 +579,7 @@ impl WgpuRenderer {
         let mut object3d_draw_list: Vec<(DrawKind, usize)> = Vec::new();
         let mut object3d_shadow_draw_list: Vec<(DrawKind, usize)> = Vec::new();
         let mut ops: Vec<RenderOp> = Vec::new();
-        let mut bg_inst_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
-            Vec::new();
+        let mut bg_inst_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
 
         let mut i = 0;
         while i < frame.cmds.len() {
@@ -933,8 +931,7 @@ impl WgpuRenderer {
             && let Some(ref font) = self.ui_font
         {
             let length = h * 0.35;
-            let label_size =
-                crate::theme::typography::size(crate::theme::typography::H24, h);
+            let label_size = crate::theme::typography::size(crate::theme::typography::H24, h);
             let label_w = label_size * 3.5;
             let label_h = label_size * 1.5;
             let labels: [(glam::Vec3, &str, [f32; 4]); 3] = [
@@ -1028,16 +1025,14 @@ impl WgpuRenderer {
         if self.recreate_shadow_depth_arrays_if_needed(shadow_quality) {
             self.cached_shadow_light_view_proj = [0.0; 16];
         }
-        let projected_frame =
-            self.prepare_projected_shadow_frame(frame, &camera, shadow_quality);
+        let projected_frame = self.prepare_projected_shadow_frame(frame, &camera, shadow_quality);
         let active_room_env = super::shadow_setup::ActiveRoomEnv::from_frame(frame).or_else(|| {
             self.active_scene_key
                 .and_then(super::shadow_setup::ActiveRoomEnv::from_scene_key)
         });
         self.warn_if_spot_lights_present(frame);
         let light_view_proj_arr = projected_frame.first_light_view_proj;
-        let contact_ao_active =
-            shadow_quality.contact_ao() && self.active_lab_baked_shadow;
+        let contact_ao_active = shadow_quality.contact_ao() && self.active_lab_baked_shadow;
         let contact_ao_view_proj = if self.active_lab_baked_shadow {
             self.lab_baked_shadow
                 .as_ref()
@@ -1046,8 +1041,7 @@ impl WgpuRenderer {
         } else {
             [0.0; 16]
         };
-        let shadow_just_enabled =
-            shadow_quality.active() && !self.prev_shadow_quality.active();
+        let shadow_just_enabled = shadow_quality.active() && !self.prev_shadow_quality.active();
         let shadow_quality_changed = shadow_quality != self.prev_shadow_quality;
         self.prev_shadow_quality = shadow_quality;
         let shadow_light_changed = self.cached_shadow_light_view_proj != light_view_proj_arr;
@@ -1056,12 +1050,13 @@ impl WgpuRenderer {
             || shadow_quality_changed
             || shadow_light_changed
             || projected_frame.changed;
-        let mut object3d_shadow = shadow_quality.active().then_some(
-            super::shadow_setup::Object3dShadowCtx {
-                light_view_proj: light_view_proj_arr,
-                changed: &mut shadow_uniforms_changed,
-            },
-        );
+        let mut object3d_shadow =
+            shadow_quality
+                .active()
+                .then_some(super::shadow_setup::Object3dShadowCtx {
+                    light_view_proj: light_view_proj_arr,
+                    changed: &mut shadow_uniforms_changed,
+                });
 
         self.last_gameplay_cash_in_button_visible = frame.gameplay_cash_in_button_visible;
 
@@ -1188,10 +1183,8 @@ impl WgpuRenderer {
             let mut hallway_far_wall_probe = serde_json::Value::Null;
             if let (Some(room), Some(gpu)) = (
                 self.active_room_baked_shadow,
-                self.active_room_baked_shadow.and_then(|room| {
-                    self.room_baked_shadow_gpu[room_gi_room_index(room)]
-                        .as_ref()
-                }),
+                self.active_room_baked_shadow
+                    .and_then(|room| self.room_baked_shadow_gpu[room_gi_room_index(room)].as_ref()),
             ) {
                 if let Ok(bake) = crate::room_shadow_bake::require_room_shadow_bake(room) {
                     if let Some(ao) = bake.ao_bytes.as_ref() {
@@ -1210,12 +1203,8 @@ impl WgpuRenderer {
                                 "ao": a,
                             })),
                         });
-                        if active_room_env
-                            == Some(super::shadow_setup::ActiveRoomEnv::Hallway)
-                        {
-                            let height = self
-                                .env_tune_for(crate::scene_keys::HALLWAY)
-                                .height_scale;
+                        if active_room_env == Some(super::shadow_setup::ActiveRoomEnv::Hallway) {
+                            let height = self.env_tune_for(crate::scene_keys::HALLWAY).height_scale;
                             let far_wall_world = with_hallway_glb_cpu(|cpu| {
                                 let cpu = cpu?;
                                 let bounds = cpu.environment_bounds_doc?;
@@ -1256,7 +1245,8 @@ impl WgpuRenderer {
                     }
                 }
             }
-            let hallway_z_up = if active_room_env == Some(super::shadow_setup::ActiveRoomEnv::Hallway)
+            let hallway_z_up = if active_room_env
+                == Some(super::shadow_setup::ActiveRoomEnv::Hallway)
                 && let Some(caster) = projected_frame.casters().first()
             {
                 let i = caster.source_light_index as usize;
@@ -1312,14 +1302,10 @@ impl WgpuRenderer {
                     mid,
                     crate::shadow_ao_lab::CONTACT_AO_WORLD_SCALE,
                 );
-                let punctual_kind = frame
-                    .scene_lighting
-                    .punctual
-                    .first()
-                    .map(|e| match e {
-                        crate::draw_cmd::ScenePunctualLight::Smooth(_) => "smooth",
-                        crate::draw_cmd::ScenePunctualLight::InverseSquare(_) => "inverse_square",
-                    });
+                let punctual_kind = frame.scene_lighting.punctual.first().map(|e| match e {
+                    crate::draw_cmd::ScenePunctualLight::Smooth(_) => "smooth",
+                    crate::draw_cmd::ScenePunctualLight::InverseSquare(_) => "inverse_square",
+                });
                 let synth_lvp = crate::shadow_ao_lab::punctual_light_view_proj(layout);
                 let live_lvp = projected_frame
                     .build
@@ -2015,83 +2001,81 @@ impl WgpuRenderer {
         // clear-only pass + redundant composite when there's no room
         // (loading frames, scenes that pull in `glb_room_emissive_prefetch`
         // before the GLB has parsed, etc.).
-        let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> = if glb_room_emissive_prefetch
-            && !is_prepass
-            && room_gi_effects_ok
-        {
-            if ops_flags.shop_env {
-                crate::room_glb::with_shop_glb_cpu(|cpu| {
-                    cpu.and_then(|c| {
-                        let corners = crate::room_glb::room_world_bounds_corners_centered(
-                            camera.h,
-                            self.active_frame_env().height_scale,
-                            c,
-                        );
-                        crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+        let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> =
+            if glb_room_emissive_prefetch && !is_prepass && room_gi_effects_ok {
+                if ops_flags.shop_env {
+                    crate::room_glb::with_shop_glb_cpu(|cpu| {
+                        cpu.and_then(|c| {
+                            let corners = crate::room_glb::room_world_bounds_corners_centered(
+                                camera.h,
+                                self.active_frame_env().height_scale,
+                                c,
+                            );
+                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+                        })
                     })
-                })
-            } else if ops_flags.hallway_env {
-                crate::hallway_glb::with_hallway_glb_cpu(|cpu| {
-                    cpu.and_then(|c| {
-                        let corners = crate::room_glb::room_world_bounds_corners_centered(
-                            camera.h,
-                            self.active_frame_env().height_scale,
-                            c,
-                        );
-                        crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+                } else if ops_flags.hallway_env {
+                    crate::hallway_glb::with_hallway_glb_cpu(|cpu| {
+                        cpu.and_then(|c| {
+                            let corners = crate::room_glb::room_world_bounds_corners_centered(
+                                camera.h,
+                                self.active_frame_env().height_scale,
+                                c,
+                            );
+                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+                        })
                     })
-                })
-            } else if ops_flags.staircase_env {
-                crate::staircase_glb::with_staircase_glb_cpu(|cpu| {
-                    cpu.and_then(|c| {
-                        let corners = crate::room_glb::room_world_bounds_corners_centered(
-                            camera.h,
-                            self.active_frame_env().height_scale,
-                            c,
-                        );
-                        crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+                } else if ops_flags.staircase_env {
+                    crate::staircase_glb::with_staircase_glb_cpu(|cpu| {
+                        cpu.and_then(|c| {
+                            let corners = crate::room_glb::room_world_bounds_corners_centered(
+                                camera.h,
+                                self.active_frame_env().height_scale,
+                                c,
+                            );
+                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+                        })
                     })
-                })
-            } else if ops_flags.archive_env {
-                crate::archive_glb::with_archive_glb_cpu(|cpu| {
-                    cpu.and_then(|c| {
-                        let corners = crate::room_glb::room_world_bounds_corners_centered(
-                            camera.h,
-                            self.active_frame_env().height_scale,
-                            c,
-                        );
-                        crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+                } else if ops_flags.archive_env {
+                    crate::archive_glb::with_archive_glb_cpu(|cpu| {
+                        cpu.and_then(|c| {
+                            let corners = crate::room_glb::room_world_bounds_corners_centered(
+                                camera.h,
+                                self.active_frame_env().height_scale,
+                                c,
+                            );
+                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+                        })
                     })
-                })
-            } else if ops_flags.main_menu_env {
-                let env_h = crate::main_menu_glb::main_menu_env_height_scale(
-                    self.active_frame_env().height_scale,
-                );
-                crate::main_menu_glb::with_main_menu_glb_cpu(|cpu| {
-                    cpu.and_then(|c| {
-                        let corners = crate::room_glb::room_world_bounds_corners_centered(
-                            camera.h, env_h, c,
-                        );
-                        crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+                } else if ops_flags.main_menu_env {
+                    let env_h = crate::main_menu_glb::main_menu_env_height_scale(
+                        self.active_frame_env().height_scale,
+                    );
+                    crate::main_menu_glb::with_main_menu_glb_cpu(|cpu| {
+                        cpu.and_then(|c| {
+                            let corners = crate::room_glb::room_world_bounds_corners_centered(
+                                camera.h, env_h, c,
+                            );
+                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+                        })
                     })
-                })
-            } else if ops_flags.gameplay_env {
-                crate::gameplay_glb::with_gameplay_glb_cpu(|cpu| {
-                    cpu.and_then(|c| {
-                        let corners = crate::room_glb::room_world_bounds_corners_centered(
-                            camera.h,
-                            self.active_frame_env().height_scale,
-                            c,
-                        );
-                        crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+                } else if ops_flags.gameplay_env {
+                    crate::gameplay_glb::with_gameplay_glb_cpu(|cpu| {
+                        cpu.and_then(|c| {
+                            let corners = crate::room_glb::room_world_bounds_corners_centered(
+                                camera.h,
+                                self.active_frame_env().height_scale,
+                                c,
+                            );
+                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
+                        })
                     })
-                })
+                } else {
+                    None
+                }
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
         let gi_runs_this_frame = room_gi_aabb.is_some();
 
         let gi_room = if gi_runs_this_frame {
@@ -2107,10 +2091,8 @@ impl WgpuRenderer {
             None
         };
         let mut gi_clear_gpu_probes = !gi_runs_this_frame && self.probe_gi_had_room;
-        let mut gi_baked_upload: Option<(
-            crate::room_gi_bake::RoomGiRoom,
-            std::sync::Arc<[u8]>,
-        )> = None;
+        let mut gi_baked_upload: Option<(crate::room_gi_bake::RoomGiRoom, std::sync::Arc<[u8]>)> =
+            None;
 
         // Quality-dependent GI tuning: Medium cuts dir samples and march steps to ~1/3 of
         // High and doubles the amortization interval, for roughly 6× cheaper compute.
@@ -2163,8 +2145,7 @@ impl WgpuRenderer {
                         self.probe_gi_stale_aabb_warned_room = None;
                     }
                     if self.probe_gi_gpu_room != Some(room) {
-                        gi_baked_upload =
-                            Some((room, std::sync::Arc::clone(&bake.probe_sh_bytes)));
+                        gi_baked_upload = Some((room, std::sync::Arc::clone(&bake.probe_sh_bytes)));
                     }
                     true
                 }
@@ -2270,15 +2251,14 @@ impl WgpuRenderer {
                         && gi_room == Some(room)
                     {
                         let (mn, mx) = room_gi_aabb.expect("gi frame");
-                        self.room_gi_capture_meta =
-                            Some(crate::room_gi_bake::probe_sh_meta(
-                                room,
-                                mn,
-                                mx,
-                                camera.view_proj_arr,
-                                gw as u32,
-                                gh as u32,
-                            ));
+                        self.room_gi_capture_meta = Some(crate::room_gi_bake::probe_sh_meta(
+                            room,
+                            mn,
+                            mx,
+                            camera.view_proj_arr,
+                            gw as u32,
+                            gh as u32,
+                        ));
                     }
                 }
                 {
@@ -2646,7 +2626,9 @@ impl WgpuRenderer {
         if ops.iter().any(|o| {
             matches!(
                 o,
-                RenderOp::TextDraw(_) | RenderOp::ImageQuad(_) | RenderOp::ArcRingQuadBatch { .. }
+                RenderOp::TextDraw(_)
+                    | RenderOp::ImageQuad(_)
+                    | RenderOp::ArcRingQuadBatch { .. }
                     | RenderOp::OverlayQuadBatch { .. }
                     | RenderOp::OverlaySquircleQuadBatch { .. }
             )

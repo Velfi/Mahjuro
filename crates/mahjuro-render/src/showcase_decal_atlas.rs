@@ -7,8 +7,8 @@
 
 use rustc_hash::FxHashMap;
 
-use mahjuro_core::core::tile::{Suit, Tile, TileEnhancement};
 use crate::decal::rasterize_tile_face_decal;
+use mahjuro_core::core::tile::{Suit, Tile, TileEnhancement};
 
 pub type ShowcaseDecalKey = (Suit, u8, Option<TileEnhancement>, bool);
 

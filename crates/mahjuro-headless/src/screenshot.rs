@@ -8,10 +8,10 @@ use crate::screenshot_scenes::{
 };
 use crate::slug::parse_ordeal_slug;
 use mahjuro::game::run::RunState;
+use mahjuro::scenes::Scene;
 use mahjuro::scenes::{
     ArchiveInspectPresenter, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
 };
-use mahjuro::scenes::Scene;
 use mahjuro::ui::input::{InputMode, UiAction};
 
 pub fn run(cli: ScreenshotCli) -> anyhow::Result<()> {
