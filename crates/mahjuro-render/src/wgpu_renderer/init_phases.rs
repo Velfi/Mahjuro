@@ -233,9 +233,16 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
 
     let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
     if cfg!(target_os = "windows") && std::env::var_os("WGPU_BACKEND").is_none() {
-        // Vulkan + Win32 swapchain still faults on some AMD stacks; DX12 is the safe default.
-        // Set `WGPU_BACKEND=vulkan` (or `vk`) to test Vulkan.
-        instance_desc.backends = wgpu::Backends::DX12;
+        if std::env::var_os("SteamDeck").is_some() {
+            // Steam Deck runs the Windows build through Proton/gamescope where DX12
+            // currently routes through FXC for some users; several startup shaders can
+            // hit FXC's SM5.1 resource-array limitation. Prefer Vulkan there.
+            instance_desc.backends = wgpu::Backends::VULKAN;
+        } else {
+            // Vulkan + Win32 swapchain still faults on some AMD stacks; DX12 is the safe default.
+            // Set `WGPU_BACKEND=vulkan` (or `vk`) to test Vulkan.
+            instance_desc.backends = wgpu::Backends::DX12;
+        }
     }
     let instance = wgpu::Instance::new(instance_desc);
     log::debug!("wgpu: instance created");
