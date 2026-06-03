@@ -9,8 +9,7 @@ use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::DrawCtx;
-use crate::scenes::object3d_inspect::ITEM_INSPECT_OVERLAY_EXIT;
-use crate::ui::glyph_source::{GlyphResolver, StickSide, TriggerSide};
+use crate::ui::glyph_source::{GlyphResolver, ShoulderSide, StickSide, TriggerSide};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::kenney_prompt_paths::keyboard_key;
 
@@ -22,6 +21,8 @@ const HINT_ICON_PX_MIN: f32 = 48.0;
 const HINT_ICON_PX_MAX: f32 = 132.0;
 const HINT_BAR_H_FRAC: f32 = 0.056;
 const HINT_ICON_BAR_FRAC: f32 = 0.72;
+/// Slightly smaller than the raw shop-legend reference (icons, labels, row height).
+const HINT_METRICS_SCALE: f32 = 0.85;
 
 // ── Shared sizing (shop legend is the reference) ─────────────────────────────
 
@@ -37,10 +38,11 @@ pub struct HintMetrics {
 
 impl HintMetrics {
     pub fn primary(h: f32) -> Self {
+        let s = HINT_METRICS_SCALE;
         let bar_h_ref = h * HINT_BAR_H_FRAC;
-        let icon_px =
-            (bar_h_ref * HINT_ICON_BAR_FRAC * 3.0).clamp(HINT_ICON_PX_MIN, HINT_ICON_PX_MAX);
-        let legend_font_px = typography::size(typography::H20, h);
+        let icon_px = (bar_h_ref * HINT_ICON_BAR_FRAC * 3.0).clamp(HINT_ICON_PX_MIN, HINT_ICON_PX_MAX)
+            * s;
+        let legend_font_px = typography::size(typography::H24, h);
         let ui_font = load_ui_font();
         let legend_line_h = ui_font
             .as_ref()
@@ -48,8 +50,10 @@ impl HintMetrics {
             .map(|lm| lm.new_line_size)
             .unwrap_or(legend_font_px * 1.2)
             .max(legend_font_px * 0.85);
-        let caption_px = typography::size(typography::H42, h);
-        let row_height = (icon_px * 1.06).max(legend_line_h).max(caption_px * 1.35);
+        let caption_px = typography::size(typography::H45, h);
+        let row_height = (icon_px * 1.06)
+            .max(legend_line_h)
+            .max(caption_px * 1.35);
         let gap_after_icon = icon_px * 0.18;
         Self {
             icon_px,
@@ -84,6 +88,9 @@ pub enum HintKey {
     Action(UiAction),
     Stick(StickSide),
     Trigger(TriggerSide),
+    Dpad,
+    Shoulder(ShoulderSide),
+    SystemHelp,
     Keyboard(&'static str),
 }
 
@@ -112,6 +119,9 @@ fn resolve_hint_key(
         (PromptInputSurface::Controller, HintKey::Action(action)) => glyphs.glyph_for(action),
         (PromptInputSurface::Controller, HintKey::Stick(side)) => glyphs.stick_glyph(side),
         (PromptInputSurface::Controller, HintKey::Trigger(side)) => glyphs.trigger_glyph(side),
+        (PromptInputSurface::Controller, HintKey::Dpad) => glyphs.dpad_glyph(),
+        (PromptInputSurface::Controller, HintKey::Shoulder(side)) => glyphs.shoulder_glyph(side),
+        (PromptInputSurface::Controller, HintKey::SystemHelp) => glyphs.system_help_glyph(),
         (PromptInputSurface::MouseOrKeyboard, HintKey::Keyboard(name)) => Some(keyboard_key(name)),
         _ => None,
     }
@@ -284,29 +294,26 @@ impl HintStyle {
             color::alpha(color::PORCELAIN_AGED, 0.94),
         )
     }
+
+    /// Brass-tinted footer on the yaku journal plaque.
+    pub fn journal_plaque_footer(h: f32) -> Self {
+        Self::from_metrics(
+            HintMetrics::primary(h),
+            color::alpha(color::CHAMPAGNE, 0.88),
+            color::alpha(color::PORCELAIN_AGED, 0.94),
+        )
+    }
 }
 
-/// Kenney keyboard sprite for `action` when building inline inspect hints.
-fn inspect_overlay_exit_hint_key(input_mode: InputMode, action: UiAction) -> Option<HintKey> {
-    match (input_mode, action) {
-        (InputMode::Controller, UiAction::Confirm | UiAction::Cancel | UiAction::NorthFacePress) => {
-            Some(HintKey::Action(action))
-        }
-        (InputMode::Controller, UiAction::Pause) => None,
-        (InputMode::Keyboard | InputMode::Cursor, UiAction::Confirm) => {
-            Some(HintKey::Keyboard("keyboard_return"))
-        }
-        (InputMode::Keyboard | InputMode::Cursor, UiAction::Cancel) => {
-            Some(HintKey::Keyboard("keyboard_backspace"))
-        }
-        (InputMode::Keyboard | InputMode::Cursor, UiAction::Pause) => {
-            Some(HintKey::Keyboard("keyboard_escape"))
-        }
-        (InputMode::Keyboard | InputMode::Cursor, UiAction::NorthFacePress) => {
-            Some(HintKey::Keyboard("keyboard_e"))
-        }
-        _ => None,
-    }
+fn inspect_exit_bind(input_mode: InputMode) -> HintBind {
+    HintBind::alternatives(
+        "exit",
+        vec![HintKey::for_input(
+            input_mode,
+            UiAction::NorthFacePress,
+            "keyboard_e",
+        )],
+    )
 }
 
 fn inspect_orbit_bind(input_mode: InputMode) -> HintBind {
@@ -351,14 +358,6 @@ fn inspect_zoom_bind(input_mode: InputMode) -> HintBind {
     }
 }
 
-fn inspect_exit_bind(input_mode: InputMode) -> HintBind {
-    let keys: Vec<HintKey> = ITEM_INSPECT_OVERLAY_EXIT
-        .iter()
-        .filter_map(|&action| inspect_overlay_exit_hint_key(input_mode, action))
-        .collect();
-    HintBind::alternatives("exit", keys)
-}
-
 /// Camera + exit controls while item inspect is active (item cycling uses normal focus nav).
 pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
     HintRow::new()
@@ -368,6 +367,258 @@ pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
         .sep()
         .push(inspect_exit_bind(input_mode).into())
         .into_segments()
+}
+
+// ── Shared scene footer rows ─────────────────────────────────────────────────
+
+fn back_bind(input_mode: InputMode) -> HintBind {
+    HintBind::alternatives(
+        "back",
+        vec![HintKey::for_input(
+            input_mode,
+            UiAction::Cancel,
+            "keyboard_escape",
+        )],
+    )
+}
+
+fn confirm_bind(input_mode: InputMode, label: impl Into<String>) -> HintBind {
+    HintBind::alternatives(
+        label,
+        vec![HintKey::for_input(
+            input_mode,
+            UiAction::Confirm,
+            "keyboard_return",
+        )],
+    )
+}
+
+fn navigate_bind(input_mode: InputMode) -> HintBind {
+    match input_mode {
+        InputMode::Controller => HintBind::alternatives("navigate", vec![HintKey::Dpad]),
+        InputMode::Keyboard | InputMode::Cursor => HintBind::alternatives(
+            "navigate",
+            vec![HintKey::Keyboard("keyboard_arrows")],
+        ),
+    }
+}
+
+fn scroll_bind(input_mode: InputMode) -> HintBind {
+    match input_mode {
+        InputMode::Controller => HintBind::alternatives("scroll", vec![HintKey::Dpad]),
+        InputMode::Keyboard | InputMode::Cursor => HintBind::grouped(
+            "scroll",
+            vec![
+                vec![HintKey::Keyboard("mouse_scroll")],
+                vec![HintKey::Keyboard("keyboard_arrows_vertical")],
+            ],
+            HintKeyJoin::Slash,
+        ),
+    }
+}
+
+fn page_bind(input_mode: InputMode) -> HintBind {
+    match input_mode {
+        InputMode::Controller => HintBind::alternatives(
+            "page",
+            vec![
+                HintKey::Shoulder(ShoulderSide::Left),
+                HintKey::Shoulder(ShoulderSide::Right),
+            ],
+        ),
+        InputMode::Keyboard | InputMode::Cursor => HintBind::alternatives(
+            "page",
+            vec![
+                HintKey::Keyboard("keyboard_page_up"),
+                HintKey::Keyboard("keyboard_page_down"),
+            ],
+        ),
+    }
+}
+
+fn section_bind() -> HintBind {
+    HintBind::alternatives(
+        "section",
+        vec![
+            HintKey::Shoulder(ShoulderSide::Left),
+            HintKey::Shoulder(ShoulderSide::Right),
+        ],
+    )
+}
+
+fn help_bind(input_mode: InputMode) -> HintBind {
+    match input_mode {
+        InputMode::Controller => HintBind::alternatives("guide", vec![HintKey::SystemHelp]),
+        InputMode::Keyboard | InputMode::Cursor => HintBind::alternatives(
+            "guide",
+            vec![
+                HintKey::Keyboard("keyboard_h"),
+                HintKey::Keyboard("keyboard_slash_forward"),
+            ],
+        ),
+    }
+}
+
+fn inspect_bind(input_mode: InputMode) -> HintBind {
+    HintBind::alternatives(
+        "inspect",
+        vec![HintKey::for_input(
+            input_mode,
+            UiAction::NorthFacePress,
+            "keyboard_e",
+        )],
+    )
+}
+
+/// Hub / modal menus: move focus, then confirm the highlighted row.
+pub fn menu_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    HintRow::new()
+        .push(navigate_bind(input_mode).into())
+        .sep()
+        .push(confirm_bind(input_mode, "select").into())
+        .into_segments()
+}
+
+/// Back + scroll affordances for read-only scroll panes.
+pub fn back_scroll_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    HintRow::new()
+        .push(back_bind(input_mode).into())
+        .sep()
+        .push(scroll_bind(input_mode).into())
+        .into_segments()
+}
+
+/// Back-only footer for dev tools and simple overlays.
+pub fn back_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    HintRow::new()
+        .push(back_bind(input_mode).into())
+        .into_segments()
+}
+
+/// Guide / book chrome: back out, turn pages with shoulders or PgUp/PgDn.
+pub fn guide_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    HintRow::new()
+        .push(back_bind(input_mode).into())
+        .sep()
+        .push(page_bind(input_mode).into())
+        .into_segments()
+}
+
+/// Yaku journal plaque brass footer: pick a row, page the catalog.
+pub fn journal_plaque_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    HintRow::new()
+        .push(navigate_bind(input_mode).into())
+        .sep()
+        .push(page_bind(input_mode).into())
+        .into_segments()
+}
+
+/// Archive grid (not in item inspect): browse, cycle sections / pages, inspect.
+pub fn archive_browse_footer_row(input_mode: InputMode, multi_page: bool) -> Vec<HintSegment> {
+    let mut row = HintRow::new().push(navigate_bind(input_mode).into());
+    match input_mode {
+        InputMode::Controller => {
+            row = row.sep().push(section_bind().into());
+        }
+        InputMode::Keyboard | InputMode::Cursor if multi_page => {
+            row = row.sep().push(page_bind(input_mode).into());
+        }
+        InputMode::Keyboard | InputMode::Cursor => {}
+    }
+    row.sep()
+        .push(inspect_bind(input_mode).into())
+        .into_segments()
+}
+
+/// Run-end and celebration overlays: optional flavor copy + confirm to continue.
+pub fn confirm_continue_footer_row(input_mode: InputMode, flavor: &str) -> Vec<HintSegment> {
+    let mut row = HintRow::new();
+    if !flavor.is_empty() {
+        row = row.push(HintSegment::text(flavor.to_string()));
+        row = row.sep();
+    }
+    row.push(confirm_bind(input_mode, "continue").into())
+        .into_segments()
+}
+
+/// Single confirm affordance (e.g. unseal pack).
+pub fn confirm_action_footer_row(input_mode: InputMode, action_label: &str) -> Vec<HintSegment> {
+    HintRow::new()
+        .push(confirm_bind(input_mode, action_label).into())
+        .into_segments()
+}
+
+/// Gameplay HUD: open the full guide reference.
+pub fn gameplay_help_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    HintRow::new()
+        .push(help_bind(input_mode).into())
+        .into_segments()
+}
+
+/// Options screen: move rows, scroll the panel, go back.
+pub fn options_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    HintRow::new()
+        .push(navigate_bind(input_mode).into())
+        .sep()
+        .push(scroll_bind(input_mode).into())
+        .sep()
+        .push(back_bind(input_mode).into())
+        .into_segments()
+}
+
+const SCREEN_FOOTER_BOTTOM_FRAC: f32 = 0.018;
+
+/// Vertical space to leave clear at the bottom when using [`push_screen_footer_hint`].
+pub fn screen_footer_reserve(h: f32) -> f32 {
+    HintStyle::archive_footer(h).line_h + h * SCREEN_FOOTER_BOTTOM_FRAC
+}
+
+/// Push a single centred footer row above the bottom edge.
+pub fn push_screen_footer_hint(
+    frame: &mut UiFrame,
+    ctx: &DrawCtx<'_>,
+    row: Vec<HintSegment>,
+    style: HintStyle,
+) {
+    push_screen_footer_hint_for(
+        frame,
+        ctx.layout.window_w,
+        ctx.layout.window_h,
+        ctx.input_mode,
+        ctx.glyphs,
+        row,
+        style,
+    );
+}
+
+/// Like [`push_screen_footer_hint`] when [`DrawCtx`] was already consumed.
+pub fn push_screen_footer_hint_for(
+    frame: &mut UiFrame,
+    window_w: f32,
+    window_h: f32,
+    input_mode: InputMode,
+    glyphs: GlyphResolver,
+    row: Vec<HintSegment>,
+    style: HintStyle,
+) {
+    let line_h = style.line_h;
+    let y = window_h - line_h - window_h * SCREEN_FOOTER_BOTTOM_FRAC;
+    push_inline_hint_rows_for(
+        frame,
+        input_mode,
+        glyphs,
+        &[[0.0, y, window_w, line_h]],
+        &[row],
+        style,
+    );
+}
+
+/// Apply alpha scaling to hint colours (celebration overlays).
+pub fn hint_style_with_alpha(mut style: HintStyle, alpha: f32) -> HintStyle {
+    let a = alpha.clamp(0.0, 1.0);
+    style.text_color[3] *= a;
+    style.icon_tint[3] *= a;
+    style
 }
 
 enum InlineSegmentRef<'a> {
@@ -588,12 +839,30 @@ pub fn push_inline_hint_rows(
     rows: &[Vec<HintSegment>],
     style: HintStyle,
 ) {
+    push_inline_hint_rows_for(
+        frame,
+        ctx.input_mode,
+        ctx.glyphs,
+        row_rects,
+        rows,
+        style,
+    );
+}
+
+/// Like [`push_inline_hint_rows`] when [`DrawCtx`] was already consumed.
+pub fn push_inline_hint_rows_for(
+    frame: &mut UiFrame,
+    input_mode: InputMode,
+    glyphs: GlyphResolver,
+    row_rects: &[[f32; 4]],
+    rows: &[Vec<HintSegment>],
+    style: HintStyle,
+) {
     if row_rects.is_empty() || rows.is_empty() || row_rects.len() != rows.len() {
         return;
     }
 
-    let surface = prompt_surface(ctx.input_mode);
-    let glyphs = ctx.glyphs;
+    let surface = prompt_surface(input_mode);
     let mut icon_px = style.icon_px;
     let mut gap_after_icon = style.gap_after_icon;
 

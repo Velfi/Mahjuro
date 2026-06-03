@@ -45,6 +45,24 @@ impl GlyphResolver {
         static_trigger_sprite(self.style, side)
             .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
     }
+
+    /// D-pad (all directions) artwork.
+    pub fn dpad_glyph(&self) -> Option<ImageQuadSource> {
+        static_dpad_sprite(self.style)
+            .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
+    }
+
+    /// Shoulder / bumper artwork.
+    pub fn shoulder_glyph(&self, side: ShoulderSide) -> Option<ImageQuadSource> {
+        static_shoulder_sprite(self.style, side)
+            .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
+    }
+
+    /// Select / View / − — opens the guide ([`UiAction::Help`]).
+    pub fn system_help_glyph(&self) -> Option<ImageQuadSource> {
+        static_system_help_sprite(self.style)
+            .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
+    }
 }
 
 /// Left / right analog stick artwork.
@@ -57,6 +75,13 @@ pub enum StickSide {
 /// Left / right analog trigger artwork.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TriggerSide {
+    Left,
+    Right,
+}
+
+/// Shoulder / bumper artwork (L1/R1, LB/RB, SL/SR).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShoulderSide {
     Left,
     Right,
 }
@@ -241,6 +266,49 @@ fn static_trigger_sprite(
         (GamepadStyle::SteamController, Right) => (STEAM_CONTROLLER_SHEET, "steam_rt"),
         (GamepadStyle::Xbox | GamepadStyle::Generic, Left) => (XBOX_SHEET, "xbox_lt"),
         (GamepadStyle::Xbox | GamepadStyle::Generic, Right) => (XBOX_SHEET, "xbox_rt"),
+    })
+}
+
+fn static_dpad_sprite(style: GamepadStyle) -> Option<(&'static str, &'static str)> {
+    Some(match style {
+        GamepadStyle::PlayStation => (PLAYSTATION_SHEET, "playstation_dpad_all"),
+        GamepadStyle::Nintendo => (SWITCH_SHEET, "switch_dpad_all"),
+        GamepadStyle::NintendoSwitch2 => (SWITCH2_SHEET, "switch_dpad_all"),
+        GamepadStyle::SteamDeck => (STEAM_DECK_SHEET, "steamdeck_dpad_all"),
+        GamepadStyle::SteamController => (STEAM_CONTROLLER_SHEET, "steam_dpad_all"),
+        GamepadStyle::Xbox | GamepadStyle::Generic => (XBOX_SHEET, "xbox_dpad_all"),
+    })
+}
+
+fn static_shoulder_sprite(
+    style: GamepadStyle,
+    side: ShoulderSide,
+) -> Option<(&'static str, &'static str)> {
+    use ShoulderSide::{Left, Right};
+    Some(match (style, side) {
+        (GamepadStyle::PlayStation, Left) => (PLAYSTATION_SHEET, "playstation_trigger_l1"),
+        (GamepadStyle::PlayStation, Right) => (PLAYSTATION_SHEET, "playstation_trigger_r1"),
+        (GamepadStyle::Nintendo, Left) => (SWITCH_SHEET, "switch_button_sl"),
+        (GamepadStyle::Nintendo, Right) => (SWITCH_SHEET, "switch_button_sr"),
+        (GamepadStyle::NintendoSwitch2, Left) => (SWITCH2_SHEET, "switch_button_sl"),
+        (GamepadStyle::NintendoSwitch2, Right) => (SWITCH2_SHEET, "switch_button_sr"),
+        (GamepadStyle::SteamDeck, Left) => (STEAM_DECK_SHEET, "steamdeck_button_l1"),
+        (GamepadStyle::SteamDeck, Right) => (STEAM_DECK_SHEET, "steamdeck_button_r1"),
+        (GamepadStyle::SteamController, Left) => (STEAM_CONTROLLER_SHEET, "controller_button_l1"),
+        (GamepadStyle::SteamController, Right) => (STEAM_CONTROLLER_SHEET, "controller_button_r1"),
+        (GamepadStyle::Xbox | GamepadStyle::Generic, Left) => (XBOX_SHEET, "xbox_lb"),
+        (GamepadStyle::Xbox | GamepadStyle::Generic, Right) => (XBOX_SHEET, "xbox_rb"),
+    })
+}
+
+fn static_system_help_sprite(style: GamepadStyle) -> Option<(&'static str, &'static str)> {
+    Some(match style {
+        GamepadStyle::PlayStation => (PLAYSTATION_SHEET, "playstation4_touchpad"),
+        GamepadStyle::Nintendo => (SWITCH_SHEET, "switch_button_minus"),
+        GamepadStyle::NintendoSwitch2 => (SWITCH2_SHEET, "switch_button_minus"),
+        GamepadStyle::SteamDeck => (STEAM_DECK_SHEET, "steamdeck_button_view"),
+        GamepadStyle::SteamController => (STEAM_CONTROLLER_SHEET, "controller_button_view"),
+        GamepadStyle::Xbox | GamepadStyle::Generic => (XBOX_SHEET, "xbox_button_view"),
     })
 }
 

@@ -9,6 +9,9 @@ use crate::game::event_bus::GameEvent;
 use crate::render::theme::{ButtonState, ButtonVariant, button_colors, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::clip::intersect_rect;
+use crate::ui::controller_hints::{
+    HintStyle, options_footer_row, push_screen_footer_hint, screen_footer_reserve,
+};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
 use std::cell::Cell;
@@ -422,10 +425,11 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
     let slot_h = (40.0 * scale).max(26.0);
     let slot_gap = (10.0 * scale).max(5.0);
 
-    // Back button and version footer pinned to the bottom.
+    // Back button and version sit above the screen footer hint row.
+    let footer_reserve = screen_footer_reserve(h);
     let back_h = (42.0 * scale).max(28.0);
     let version_h = (14.0 * scale).max(10.0);
-    let version_y = h - version_h - (4.0 * scale);
+    let version_y = h - footer_reserve - version_h - (4.0 * scale);
     let back_y = version_y - back_h - (12.0 * scale);
     let back_w = total_w;
     let back_x = margin;
@@ -1641,6 +1645,12 @@ impl SceneBehavior for OptionsScene {
         frame.quads(instances);
         frame.texts(text_labels);
         frame.buttons = buttons;
+        push_screen_footer_hint(
+            &mut frame,
+            &ctx,
+            options_footer_row(ctx.input_mode),
+            HintStyle::archive_footer(h),
+        );
         frame.window_title = "Mahjuro — Options".into();
         frame
     }

@@ -7,10 +7,12 @@ use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
 use crate::scenes::archive_career;
 use crate::ui::chart_primitives::{
-    self, ChartClip, push_quad_clipped as chart_quad, push_sparkline, push_yaku_hbar_row,
-    push_yaku_pill, yaku_pill_width,
+    self, ChartClip, LedgerPanelStyle, push_colored_label_clipped,
+    push_ledger_panel_clipped, push_quad_clipped as chart_quad, push_rect_border, push_sparkline,
+    push_yaku_hbar_row, push_yaku_pill, yaku_pill_width,
 };
 use crate::ui::chronicle_charts;
+use crate::ui::tooltip::push_tooltip_frame_quads;
 use crate::ui::clip::intersect_rect;
 const LEFT_PANE_FRAC: f32 = 0.35;
 const KPI_COUNT: usize = 4;
@@ -863,39 +865,6 @@ fn push_quad_clipped(out: &mut Vec<GpuInstance>, rect: [f32; 4], clip: ChartClip
     chart_quad(out, rect, clip, c);
 }
 
-fn push_section_card(
-    quads: &mut Vec<GpuInstance>,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    clip: ChartClip,
-) {
-    push_quad_clipped(
-        quads,
-        [x, y, w, h],
-        clip,
-        color::alpha(color::WALNUT_INK, 0.52),
-    );
-    push_quad_clipped(
-        quads,
-        [x, y, w, 1.0],
-        clip,
-        color::alpha(color::BRASS, 0.38),
-    );
-    let tick = 6.0_f32;
-    let tc = color::alpha(color::BRASS, 0.55);
-    for &(dx, dy) in &[
-        (0.0, 0.0),
-        (w - tick, 0.0),
-        (0.0, h - tick),
-        (w - tick, h - tick),
-    ] {
-        push_quad_clipped(quads, [x + dx, y + dy, tick, 1.0], clip, tc);
-        push_quad_clipped(quads, [x + dx, y + dy, 1.0, tick], clip, tc);
-    }
-}
-
 fn push_tile_strip(
     emit: &mut ChronicleEmit<'_>,
     clip: ChartClip,
@@ -1202,7 +1171,6 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
         let run_is_new =
             crate::core::archive_seen::chronicle_run_is_new(hist_idx, chronicle_last_seen_run_len);
         let score = archive_career::format_run_log_score(rec.total_score_earned);
-
         push_label_clipped(
             emit.labels,
             [receipt.num_x, text_y, receipt.num_w, row_text_h],
@@ -1270,8 +1238,12 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
             clip,
             tabular(TextLabel {
                 rect: [receipt.ante_x, text_y, receipt.ante_w, row_text_h],
-                text: format!("{}", rec.final_wing),
-                color: color::alpha(color::STONE, 0.88),
+                text: archive_career::format_wing(rec.final_wing),
+                color: if selected {
+                    color::CHAMPAGNE
+                } else {
+                    archive_career::chronicle_wing_color()
+                },
                 font_px: Some(row_font_px),
                 align: TextAlign::Center,
                 ..Default::default()
@@ -1303,22 +1275,23 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
                 },
             );
         }
-        push_label_clipped(
+        let score_rect = [receipt.score_x, text_y, receipt.score_w, row_text_h];
+        let score_color = if selected {
+            color::CHAMPAGNE
+        } else if let Some(rank) = archive_career::chronicle_run_score_rank(progress, rec) {
+            archive_career::chronicle_score_rank_color(rank)
+        } else {
+            archive_career::chronicle_chips_color()
+        };
+        push_colored_label_clipped(
             emit.labels,
-            [receipt.score_x, text_y, receipt.score_w, row_text_h],
+            score_rect,
             clip,
-            tabular(TextLabel {
-                rect: [receipt.score_x, text_y, receipt.score_w, row_text_h],
-                text: score,
-                color: if selected {
-                    color::CHAMPAGNE
-                } else {
-                    color::alpha(color::PARCHMENT, 0.94)
-                },
-                font_px: Some(row_font_px),
-                align: TextAlign::Right,
-                ..Default::default()
-            }),
+            &score,
+            score_color,
+            row_font_px,
+            TextAlign::Right,
+            true,
         );
     }
 }
@@ -1397,18 +1370,15 @@ fn push_insight_column(
     } else {
         tile.value.clone()
     };
-    push_label_clipped(
+    push_colored_label_clipped(
         emit.labels,
         [x + inset, ly, text_w, val_h],
         clip,
-        tabular(TextLabel {
-            rect: [x + inset, ly, text_w, val_h],
-            text: line,
-            color: color::CHAMPAGNE,
-            font_px: Some(body_px),
-            align: TextAlign::Left,
-            ..Default::default()
-        }),
+        &line,
+        color::CHAMPAGNE,
+        body_px,
+        TextAlign::Left,
+        false,
     );
 }
 
@@ -1441,26 +1411,13 @@ fn push_career_insights_band(
     let (fav_x, fav_w) = kpi_column_rect(rx, cols, 2);
     let (nem_x, nem_w) = kpi_column_rect(rx, cols, 3);
 
-    push_quad_clipped(
-        emit.quads,
-        [sig_x, by, sig_w, band_h],
-        clip,
-        color::alpha(color::WALNUT_INK, 0.32),
-    );
-    push_quad_clipped(
-        emit.quads,
-        [fav_x, by, fav_w, band_h],
-        clip,
-        color::alpha(color::WALNUT_INK, 0.32),
-    );
-    push_quad_clipped(
-        emit.quads,
-        [nem_x, by, nem_w, band_h],
-        clip,
-        color::alpha(color::WALNUT_INK, 0.32),
-    );
     for &(bx, bw) in &[(sig_x, sig_w), (fav_x, fav_w), (nem_x, nem_w)] {
-        chronicle_charts::push_corner_brackets(emit.quads, clip, bx, by, bw, band_h);
+        push_ledger_panel_clipped(
+            emit.quads,
+            clip,
+            [bx, by, bw, band_h],
+            LedgerPanelStyle::INSIGHT,
+        );
     }
 
     let col_gap = stack;
@@ -1513,22 +1470,19 @@ fn push_career_insights_band(
         let meta_y = summary_y + val_h + stack * 0.35;
         let meta = format!(
             "{} · avg {} · {}× used",
-            archive_career::format_score(rec.best_structure_score),
-            archive_career::format_score(stats.avg_score),
+            archive_career::format_chips(rec.best_structure_score),
+            archive_career::format_chips(stats.avg_score),
             stats.times_used
         );
-        push_label_clipped(
+        push_colored_label_clipped(
             emit.labels,
             [tx, meta_y, inner_w, val_h * 0.92],
             clip,
-            tabular(TextLabel {
-                rect: [tx, meta_y, inner_w, val_h * 0.92],
-                text: meta,
-                color: color::CHAMPAGNE,
-                font_px: Some(body_px * 0.92),
-                align: TextAlign::Left,
-                ..Default::default()
-            }),
+            &meta,
+            color::CHAMPAGNE,
+            body_px * 0.92,
+            TextAlign::Left,
+            false,
         );
     } else if let Some(tile) = highlights.first() {
         push_insight_column(
@@ -1893,19 +1847,37 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
     let mut doc_y = 0.0_f32;
     let ry = |dy: f32| panes.content_y() + dy - scroll;
 
+    let outcome_color = archive_career::chronicle_run_outcome_color(rec);
+
     push_label_clipped(
         emit.labels,
         [rx, ry(doc_y), rw, metrics.title_h],
         clip,
         TextLabel {
             rect: [rx, ry(doc_y), rw, metrics.title_h],
-            text: model.heading.clone(),
+            text: model.title_pins.clone(),
             color: color::GOLD,
             font_px: Some(section_px),
             align: TextAlign::Left,
             ..Default::default()
         },
     );
+    if !model.title_rest.is_empty() {
+        let pins_w = chart_primitives::pill_label_width(&model.title_pins, section_px);
+        push_label_clipped(
+            emit.labels,
+            [rx + pins_w, ry(doc_y), (rw - pins_w).max(1.0), metrics.title_h],
+            clip,
+            TextLabel {
+                rect: [rx + pins_w, ry(doc_y), (rw - pins_w).max(1.0), metrics.title_h],
+                text: model.title_rest.clone(),
+                color: outcome_color,
+                font_px: Some(section_px),
+                align: TextAlign::Left,
+                ..Default::default()
+            },
+        );
+    }
     doc_y += metrics.title_h + 4.0;
     push_label_clipped(
         emit.labels,
@@ -1925,7 +1897,12 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
     let strip_w = rw - 20.0;
     let hero_h = run_detail_hero_height(cap_h, val_h, strip_w, &model.tiles);
     let hy = ry(doc_y);
-    push_section_card(emit.quads, rx, hy, rw, hero_h, clip);
+    push_ledger_panel_clipped(
+        emit.quads,
+        clip,
+        [rx, hy, rw, hero_h],
+        LedgerPanelStyle::SECTION,
+    );
     let sig_label = if model.tiles_representative {
         "Signature hand (representative)"
     } else {
@@ -1944,22 +1921,19 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
             ..Default::default()
         },
     );
-    push_label_clipped(
+    push_colored_label_clipped(
         emit.labels,
         [rx + 10.0, hy + cap_h + 8.0, rw - 16.0, val_h],
         clip,
-        tabular(TextLabel {
-            rect: [rx + 10.0, hy + cap_h + 8.0, rw - 16.0, val_h],
-            text: format!(
-                "{} · {}",
-                model.signature_name,
-                archive_career::format_score(model.signature_score)
-            ),
-            color: color::PARCHMENT,
-            font_px: Some(body),
-            align: TextAlign::Left,
-            ..Default::default()
-        }),
+        &format!(
+            "{} · {}",
+            model.signature_name,
+            archive_career::format_chips(model.signature_score)
+        ),
+        color::PARCHMENT,
+        body,
+        TextAlign::Left,
+        true,
     );
     push_tile_strip(
         &mut emit,
@@ -2007,7 +1981,7 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
                 color::alpha(color::PARCHMENT, 0.94),
                 caption_px,
                 body,
-                None,
+                Some(model.yaku_value_suffix),
             );
             doc_y += metrics.bar_row_h + 3.0;
         }
@@ -2026,18 +2000,15 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
     );
     doc_y += metrics.title_h + metrics.gap * 0.35;
     for line in &model.score_lines {
-        push_label_clipped(
+        push_colored_label_clipped(
             emit.labels,
             [rx, ry(doc_y), rw, metrics.line_h],
             clip,
-            tabular(TextLabel {
-                rect: [rx, ry(doc_y), rw, metrics.line_h],
-                text: line.clone(),
-                color: color::alpha(color::PARCHMENT, 0.94),
-                font_px: Some(body),
-                align: TextAlign::Left,
-                ..Default::default()
-            }),
+            line,
+            color::alpha(color::PARCHMENT, 0.94),
+            body,
+            TextAlign::Left,
+            true,
         );
         doc_y += metrics.line_h;
     }
@@ -2169,23 +2140,26 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
     }
 
     let fy = ry(doc_y);
-    push_section_card(emit.quads, rx, fy, rw, metrics.footer_h, clip);
+    push_ledger_panel_clipped(
+        emit.quads,
+        clip,
+        [rx, fy, rw, metrics.footer_h],
+        LedgerPanelStyle::SECTION,
+    );
     let n = model.footer.len().max(1) as f32;
     let slot = rw / n;
     for (i, (label, value)) in model.footer.iter().enumerate() {
         let sx = rx + i as f32 * slot;
-        push_label_clipped(
+        let value_rect = [sx, fy + 4.0, slot, cap_h + 2.0];
+        push_colored_label_clipped(
             emit.labels,
-            [sx, fy + 4.0, slot, cap_h + 2.0],
+            value_rect,
             clip,
-            tabular(TextLabel {
-                rect: [sx, fy + 4.0, slot, cap_h + 2.0],
-                text: value.clone(),
-                color: color::CHAMPAGNE,
-                font_px: Some(caption_px),
-                align: TextAlign::Center,
-                ..Default::default()
-            }),
+            value,
+            archive_career::chronicle_footer_value_color(label),
+            caption_px,
+            TextAlign::Center,
+            true,
         );
         push_label_clipped(
             emit.labels,
@@ -2312,13 +2286,12 @@ fn push_pane_focus_ring(out: &mut Vec<GpuInstance>, rect: [f32; 4], active: bool
     if !active {
         return;
     }
-    let [x, y, w, h] = rect;
-    let b = PANE_RING_BORDER;
-    let c = color::alpha(color::CHAMPAGNE, 0.72);
-    chart_primitives::push_quad(out, [x, y, w, b], c);
-    chart_primitives::push_quad(out, [x, y + h - b, w, b], c);
-    chart_primitives::push_quad(out, [x, y, b, h], c);
-    chart_primitives::push_quad(out, [x + w - b, y, b, h], c);
+    push_rect_border(
+        out,
+        rect,
+        PANE_RING_BORDER,
+        color::alpha(color::CHAMPAGNE, 0.72),
+    );
 }
 
 fn push_ledger_sheet(
@@ -2331,21 +2304,7 @@ fn push_ledger_sheet(
     inner_h: f32,
 ) {
     let b = metrics::tooltip_border_px(window_w, window_h);
-    chart_primitives::push_quad(
-        out,
-        [
-            inner_x - b,
-            inner_y - b,
-            inner_w + b * 2.0,
-            inner_h + b * 2.0,
-        ],
-        color::alpha(color::BRASS, 0.5),
-    );
-    chart_primitives::push_quad(
-        out,
-        [inner_x, inner_y, inner_w, inner_h],
-        color::alpha(color::WALNUT_DEEP, 0.95),
-    );
+    push_tooltip_frame_quads(out, inner_x, inner_y, inner_w, inner_h, b);
     chart_primitives::push_quad(
         out,
         [inner_x, inner_y, inner_w, inner_h * 0.18],

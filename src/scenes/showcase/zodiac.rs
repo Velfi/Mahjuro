@@ -10,7 +10,7 @@ use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
 use crate::render::table_transform::rot_fixed_axes_deg_matrix;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::PointLight;
-use crate::scenes::celebration_overlay;
+use crate::scenes::celebration_overlay::{self, push_confirm_continue_footer};
 use crate::ui::input::UiAction;
 use crate::ui::placement::PlacementAnchor;
 use crate::ui::scene_layout::ShopPositions;
@@ -155,6 +155,7 @@ impl ZodiacPresenter {
             celebration_overlay::label_zodiac_level_title(h, w, format!("{} Lvl.{}", self.yaku_name, self.new_level), alpha);
         title.rect[1] += drift.xy[1];
         frame.text(title);
+        push_confirm_continue_footer(&mut frame, &ctx, alpha, t);
         frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
         frame.window_title = "Mahjuro".to_string();
 

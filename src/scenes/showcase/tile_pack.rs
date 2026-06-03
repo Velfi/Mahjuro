@@ -21,7 +21,7 @@ use crate::render::wgpu_renderer::{
 };
 use crate::scenes::celebration_overlay::{
     CelebrationContentDrift, CelebrationOverlayScratch, CelebrationShowcaseIntroGate,
-    ShootingStarCelebrationIntro,
+    ShootingStarCelebrationIntro, push_confirm_continue_footer, push_confirm_unseal_footer,
 };
 use crate::scenes::shop::pack_celebration::{PackCelebPhase, PackCelebration};
 use crate::scenes::shop::shop_celebration_camera;
@@ -280,7 +280,7 @@ impl TilePackPresenter {
                     foil,
                 );
                 push_pack_title(frame);
-
+                push_confirm_unseal_footer(frame, ctx, content_alpha, t);
             }
             PackCelebPhase::Unseal => {
                 let u = celeb.unseal_t();
@@ -423,6 +423,9 @@ impl TilePackPresenter {
 
                 frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements));
 
+                if celeb.fully_settled() {
+                    push_confirm_continue_footer(frame, ctx, content_alpha, deal_elapsed);
+                }
             }
         }
     }

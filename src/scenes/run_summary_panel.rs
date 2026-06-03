@@ -6,7 +6,9 @@ use crate::core::progression::{POINTS_PER_LEVEL, meta_depth_roman};
 use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::scenes::DrawCtx;
 use crate::ui::clip::intersect_rect;
+use crate::ui::controller_hints::{HintStyle, confirm_continue_footer_row, push_inline_hint_rows};
 use crate::ui::input::InputMode;
 use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::widget::wrap_text;
@@ -511,6 +513,7 @@ impl RunSummaryPanelLayout {
 
 pub fn push_run_summary_panel(
     frame: &mut UiFrame,
+    ctx: &DrawCtx<'_>,
     layout: &RunSummaryPanelLayout,
     content: &RunSummaryPanelContent,
     theme: &RunSummaryPanelTheme,
@@ -559,7 +562,6 @@ pub fn push_run_summary_panel(
 
     let sub_font = typography::size(typography::H32, h);
     let headline_font = typography::size(typography::H5, h);
-    let hint_font = typography::size(typography::H42, h);
     let sub_lines = wrap_text(&content.subtitle, layout.subtitle_rect[2], sub_font / 0.99);
 
     frame.text(TextLabel {
@@ -741,14 +743,14 @@ pub fn push_run_summary_panel(
         });
     }
 
-    frame.text(TextLabel {
-        rect: layout.hint_rect,
-        text: content.hint.clone(),
-        color: color::alpha(color::CHAMPAGNE, 0.70),
-        font_px: Some(hint_font),
-        align: layout.text_align,
-        ..Default::default()
-    });
+    let hint_row = confirm_continue_footer_row(ctx.input_mode, &content.hint);
+    push_inline_hint_rows(
+        frame,
+        ctx,
+        &[layout.hint_rect],
+        &[hint_row],
+        HintStyle::archive_footer(h),
+    );
 
     let elapsed = opened_at.elapsed().as_secs_f32();
     let displayed_fill = (elapsed * 4.0).min(content.level.into_level as f32);

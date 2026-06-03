@@ -9,7 +9,7 @@ use super::GameplayScene;
 use super::cascade_hud::CascadeShowcase;
 use super::focus::{
     FocusTarget, GameplayButton, default_hand_tile_focus, focus_after_consumable_use, focus_kind,
-    focus_kind_sfx, play_select_sfx, wrap_hand_tile_focus,
+    focus_kind_sfx, play_select_sfx, relic_to_dora_focus, wrap_hand_tile_focus,
 };
 use crate::core::relic::relic_visual;
 use crate::core::scoring::StepKind;
@@ -307,7 +307,8 @@ pub(super) fn process_focus_and_actions(
                     _ => None,
                 };
                 let hand_wrap = wrap_hand_tile_focus(scene.focus, dir, &focus_rects);
-                if let Some(next) = overridden.or(hand_wrap).or(spatial) {
+                let relic_dora = relic_to_dora_focus(scene.focus, dir, &focus_rects);
+                if let Some(next) = overridden.or(hand_wrap).or(relic_dora).or(spatial) {
                     scene.focus = Some(next);
                 }
             } else if let Some((first, _)) = focus_rects.first() {

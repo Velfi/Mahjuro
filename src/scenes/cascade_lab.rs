@@ -20,6 +20,9 @@ use crate::render::gameplay_glb::{
 use crate::render::theme::{color, metrics, typography};
 use crate::render::draw_cmd::CameraParams;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::ui::controller_hints::{
+    HintStyle, back_footer_row, push_screen_footer_hint_for,
+};
 use crate::ui::input::UiAction;
 use crate::ui::ordeal_icons::ordeal_icon_source;
 
@@ -1879,6 +1882,8 @@ impl SceneBehavior for CascadeLabScene {
         let run = ctx.run;
         let proj = ctx.proj;
         let layout = ctx.layout;
+        let input_mode = ctx.input_mode;
+        let glyphs = ctx.glyphs;
         let mut frame = self.gameplay.draw_frame(ctx);
         let gameplay_button_count = frame.buttons.len();
         frame.window_title = "Mahjuro — Cascade Lab".into();
@@ -1919,6 +1924,16 @@ impl SceneBehavior for CascadeLabScene {
             h,
             lab_buttons,
             frame.buttons,
+        );
+
+        push_screen_footer_hint_for(
+            &mut frame,
+            w,
+            h,
+            input_mode,
+            glyphs,
+            back_footer_row(input_mode),
+            HintStyle::archive_footer(h),
         );
 
         frame

@@ -19,7 +19,9 @@ use crate::render::hallway_glb::{self, BTN_SKIP_ROUND};
 use crate::render::room_glb;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::ui::colored_keywords;
 use crate::ui::focus_nav::push_focus_ring;
+use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
 use crate::ui::input::UiAction;
 use crate::ui::ordeal_icons::ordeal_icon_source;
 use crate::ui::skip_tag_icons::skip_tag_icon_source;
@@ -142,9 +144,10 @@ fn hallway_button_screen_rect(
     })
 }
 
-fn wrapped_text_height(text: &str, col_w: f32, font_px: f32, line_h: f32) -> f32 {
-    let lines = wrap_text(text, col_w, font_px / 0.99);
-    line_h * lines.len().max(1) as f32
+fn wrapped_text_height(text: &str, col_w: f32, font_px: f32, _line_h: f32) -> f32 {
+    let default = [0.0; 4];
+    let wrapped = colored_keywords::wrap_colored_text_multiline(text, col_w, font_px / 0.99, default);
+    colored_keywords::colored_wrapped_rows_height(&wrapped, font_px)
 }
 
 struct WrappedColumnLine<'a> {
@@ -166,21 +169,26 @@ fn push_wrapped_column_line(line: WrappedColumnLine<'_>) {
         y,
         col_w,
         font_px,
-        line_h,
+        line_h: _line_h,
         text,
         color,
         align,
     } = line;
-    let lines = wrap_text(text, col_w, font_px / 0.99);
-    let block_h = line_h * lines.len().max(1) as f32;
-    texts.push(TextLabel {
-        rect: [x, *y, col_w, block_h],
-        text: lines.join("\n"),
-        color,
-        font_px: Some(font_px),
+    let wrapped = colored_keywords::wrap_colored_text_multiline(text, col_w, font_px / 0.99, color);
+    let block_h = colored_keywords::colored_wrapped_rows_height(&wrapped, font_px);
+    colored_keywords::push_colored_rows_in_width(
+        texts,
+        colored_keywords::ColoredRowsLayout {
+            text_left: x,
+            top_y: *y,
+            inner_w: col_w,
+            line_h: font_px,
+            fallback_plain: text,
+            fallback_color: color,
+        },
+        &wrapped,
         align,
-        ..Default::default()
-    });
+    );
     *y += block_h;
 }
 
@@ -849,6 +857,14 @@ impl SceneBehavior for HallwayScene {
         }
 
         frame.buttons = buttons;
+        if !hide_scene_hud {
+            push_screen_footer_hint(
+                &mut frame,
+                &ctx,
+                menu_footer_row(ctx.input_mode),
+                HintStyle::archive_footer(h),
+            );
+        }
         frame.window_title = "Mahjuro".to_string();
 
         frame

@@ -10,6 +10,7 @@ use crate::render::showcase_tile_layout::{
 };
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer_hint};
 use crate::ui::input::UiAction;
 
 use super::main_menu::MainMenuScene;
@@ -334,6 +335,12 @@ impl SceneBehavior for TileAnchorLabScene {
             .push(ButtonDef::scene((btn_x, btn_y, btn_w, btn_h), CLICK_BACK));
 
         frame.window_title = "Mahjuro — Tile Anchor Lab".into();
+        push_screen_footer_hint(
+            &mut frame,
+            &ctx,
+            back_footer_row(ctx.input_mode),
+            HintStyle::archive_footer(h),
+        );
         frame
     }
 }

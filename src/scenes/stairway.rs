@@ -11,6 +11,9 @@ use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 use crate::scenes::shop::ShopScene;
 use crate::ui::colored_keywords;
 use crate::ui::inspect_plaque::estimated_flavor_line_count;
+use crate::ui::controller_hints::{
+    HintStyle, confirm_continue_footer_row, hint_style_with_alpha, push_inline_hint_rows,
+};
 use crate::ui::input::UiAction;
 
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
@@ -141,6 +144,17 @@ impl SceneBehavior for StairwayScene {
             align: TextAlign::Center,
             ..Default::default()
         });
+
+        let hint_style = hint_style_with_alpha(HintStyle::archive_footer(h), 0.92);
+        let hint_line_h = hint_style.line_h;
+        let hint_y = prompt_y + prompt_font * 2.0 + prompt_font * 0.55;
+        push_inline_hint_rows(
+            &mut frame,
+            &ctx,
+            &[[0.0, hint_y, w, hint_line_h]],
+            &[confirm_continue_footer_row(ctx.input_mode, "")],
+            hint_style,
+        );
 
         frame.buttons = vec![ButtonDef::ui((0.0, 0.0, w, h), UiAction::Confirm)];
 

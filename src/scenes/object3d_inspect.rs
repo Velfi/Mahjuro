@@ -34,8 +34,7 @@ use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
 use crate::ui::input::UiAction;
 
 /// Inputs that dismiss a [`crate::scenes::ShowcasePresenter`] item-inspect overlay.
-pub const ITEM_INSPECT_OVERLAY_EXIT: [UiAction; 4] = [
-    UiAction::Confirm,
+pub const ITEM_INSPECT_OVERLAY_EXIT: [UiAction; 3] = [
     UiAction::NorthFacePress,
     UiAction::Cancel,
     UiAction::Pause,
@@ -45,6 +44,12 @@ pub const ITEM_INSPECT_OVERLAY_EXIT: [UiAction; 4] = [
 #[inline]
 pub fn item_inspect_overlay_exit(action: UiAction) -> bool {
     ITEM_INSPECT_OVERLAY_EXIT.contains(&action)
+}
+
+/// Host scenes handle [`UiAction::Confirm`] to audition the focused item (e.g. relic stinger).
+#[inline]
+pub fn item_inspect_overlay_play_sound(action: UiAction) -> bool {
+    matches!(action, UiAction::Confirm)
 }
 
 /// Orbit + zoom state for close-up inspection (right stick, triggers, scroll).

@@ -10,8 +10,6 @@ use crate::theme::color;
 
 /// Longest-token-first table consumed by [`color_for_token`].
 pub const COLORED_KEYWORD_TABLE: &[(&str, [f32; 4])] = &[
-    ("characters", color::keyword::MANZU),
-    ("bamboos", color::keyword::SOUZU),
     ("manzu", color::keyword::MANZU),
     ("souzu", color::keyword::SOUZU),
     ("pinzu", color::keyword::PINZU),
@@ -19,12 +17,12 @@ pub const COLORED_KEYWORD_TABLE: &[(&str, [f32; 4])] = &[
     ("flowers", color::keyword::FLOWER),
     ("seasons", color::keyword::SEASON),
     ("trigger", color::keyword::TRIGGER),
-    ("bamboo", color::keyword::SOUZU),
     ("honors", color::keyword::HONORS),
     ("chips", color::keyword::CHIPS),
+    ("cp", color::keyword::CHIPS),
     ("winds", color::keyword::WIND),
     ("mult", color::keyword::MULT),
-    ("dots", color::keyword::PINZU),
+    ("han", color::keyword::TRIGGER),
     ("yen", color::keyword::GOLD),
     ("play", color::keyword::PLAY),
 ];
@@ -35,10 +33,6 @@ pub const COLORED_KEYWORD_TABLE: &[(&str, [f32; 4])] = &[
 /// title-cased word (leading upper + at least one later lower). Pure
 /// lowercase, ALL CAPS, and numeric/punct-heavy tokens are unaffected.
 const SKIP_WHEN_TITLE_CASED: &[&str] = &[
-    "characters",
-    "bamboos",
-    "bamboo",
-    "dots",
     "winds",
     "dragons",
     "flowers",

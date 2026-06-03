@@ -630,7 +630,7 @@
   {
     "id": "last_breath",
     "name": "Last Breath",
-    "description": "Cashing in a structure with 0 plays left: retrigger all tiles in the structure",
+    "description": "Cashing in a structure with 0 plays left: retrigger all melds in the structure",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -718,7 +718,7 @@
   {
     "id": "geese",
     "name": "Geese",
-    "description": "Cashing in a structure: retrigger the first 5 tiles",
+    "description": "Cashing in a structure: retrigger the first 5 melds",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -736,7 +736,7 @@
   {
     "id": "voice_of_the_people",
     "name": "Voice of the People",
-    "description": "Cashing in a structure: retrigger tiles ranked 1-4",
+    "description": "Cashing in a structure: retrigger melds of tiles ranked 1-4",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -749,7 +749,7 @@
   {
     "id": "voice_of_the_elite",
     "name": "Voice of the Elite",
-    "description": "Cashing in a structure: retrigger tiles ranked 6-9",
+    "description": "Cashing in a structure: retrigger melds of tiles ranked 6-9",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -762,7 +762,7 @@
   {
     "id": "xxxl_egg",
     "name": "XXXL Egg",
-    "description": "Cashing in a structure: retrigger all tiles. Destroyed after 3 uses",
+    "description": "Cashing in a structure: retrigger all melds. Destroyed after 3 uses",
     "rarity": "rare",
     "flavor_spans": [
       {

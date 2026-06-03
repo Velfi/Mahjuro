@@ -8,6 +8,7 @@
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::clip::intersect_rect;
+use crate::ui::colored_keywords::push_colored_line_clipped;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ChartClip {
@@ -24,13 +25,7 @@ pub fn push_quad(out: &mut Vec<GpuInstance>, rect: [f32; 4], c: [f32; 4]) {
 }
 
 pub fn push_quad_clipped(out: &mut Vec<GpuInstance>, rect: [f32; 4], clip: ChartClip, c: [f32; 4]) {
-    let clip_rect = [
-        rect[0],
-        clip.top,
-        rect[2],
-        (clip.bottom - clip.top).max(0.0),
-    ];
-    if let Some(clipped) = intersect_rect(rect, clip_rect) {
+    if let Some(clipped) = chart_clip_rect(rect, clip) {
         push_quad(out, clipped, c);
     }
 }
@@ -41,13 +36,7 @@ pub fn push_squircle_quad_clipped(
     clip: ChartClip,
     c: [f32; 4],
 ) {
-    let clip_rect = [
-        rect[0],
-        clip.top,
-        rect[2],
-        (clip.bottom - clip.top).max(0.0),
-    ];
-    if let Some(clipped) = intersect_rect(rect, clip_rect) {
+    if let Some(clipped) = chart_clip_rect(rect, clip) {
         push_quad(out, clipped, c);
     }
 }
@@ -58,16 +47,137 @@ pub fn push_label_clipped(
     clip: ChartClip,
     mut label: TextLabel,
 ) {
-    let clip_rect = [
-        rect[0],
-        clip.top,
-        rect[2],
-        (clip.bottom - clip.top).max(0.0),
-    ];
-    if let Some(clipped) = intersect_rect(rect, clip_rect) {
+    if let Some(clipped) = chart_clip_rect(rect, clip) {
         label.clip_rect = Some(clipped);
         out.push(label);
     }
+}
+
+/// Intersect `rect` with a [`ChartClip`] band (shared by quads and labels).
+pub fn chart_clip_rect(rect: [f32; 4], clip: ChartClip) -> Option<[f32; 4]> {
+    intersect_rect(
+        rect,
+        [
+            rect[0],
+            clip.top,
+            rect[2],
+            (clip.bottom - clip.top).max(0.0),
+        ],
+    )
+}
+
+/// Walnut ledger card chrome shared by Chronicle KPI tiles, section cards, and insight columns.
+#[derive(Clone, Copy, Debug)]
+pub struct LedgerPanelStyle {
+    pub fill: [f32; 4],
+    pub top_rule: Option<[f32; 4]>,
+    pub bracket: [f32; 4],
+    pub bracket_tick: f32,
+}
+
+impl LedgerPanelStyle {
+    pub const KPI: Self = Self {
+        fill: color::alpha(color::WALNUT_INK, 0.38),
+        top_rule: None,
+        bracket: color::alpha(color::BRASS, 0.48),
+        bracket_tick: 7.0,
+    };
+    pub const INSIGHT: Self = Self {
+        fill: color::alpha(color::WALNUT_INK, 0.32),
+        top_rule: None,
+        bracket: color::alpha(color::BRASS, 0.48),
+        bracket_tick: 7.0,
+    };
+    pub const SECTION: Self = Self {
+        fill: color::alpha(color::WALNUT_INK, 0.52),
+        top_rule: Some(color::alpha(color::BRASS, 0.38)),
+        bracket: color::alpha(color::BRASS, 0.55),
+        bracket_tick: 6.0,
+    };
+}
+
+/// Worn gold corner brackets — lighter than a full card border.
+pub fn push_corner_brackets_clipped(
+    quads: &mut Vec<GpuInstance>,
+    clip: ChartClip,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    tick: f32,
+    c: [f32; 4],
+) {
+    for &(dx, dy) in &[
+        (0.0, 0.0),
+        (w - tick, 0.0),
+        (0.0, h - tick),
+        (w - tick, h - tick),
+    ] {
+        push_quad_clipped(quads, [x + dx, y + dy, tick, 1.0], clip, c);
+        push_quad_clipped(quads, [x + dx, y + dy, 1.0, tick], clip, c);
+    }
+}
+
+/// Walnut fill, optional brass top rule, and corner brackets — Chronicle ledger card chrome.
+pub fn push_ledger_panel_clipped(
+    quads: &mut Vec<GpuInstance>,
+    clip: ChartClip,
+    rect: [f32; 4],
+    style: LedgerPanelStyle,
+) {
+    let [x, y, w, h] = rect;
+    push_quad_clipped(quads, rect, clip, style.fill);
+    if let Some(rule) = style.top_rule {
+        push_quad_clipped(quads, [x, y, w, 1.0], clip, rule);
+    }
+    push_corner_brackets_clipped(
+        quads,
+        clip,
+        x,
+        y,
+        w,
+        h,
+        style.bracket_tick,
+        style.bracket,
+    );
+}
+
+/// Four-edge border stroke (focus rings, pane highlights).
+pub fn push_rect_border(
+    out: &mut Vec<GpuInstance>,
+    rect: [f32; 4],
+    thickness: f32,
+    c: [f32; 4],
+) {
+    let [x, y, w, h] = rect;
+    let b = thickness;
+    push_quad(out, [x, y, w, b], c);
+    push_quad(out, [x, y + h - b, w, b], c);
+    push_quad(out, [x, y, b, h], c);
+    push_quad(out, [x + w - b, y, b, h], c);
+}
+
+/// Glossary-tinted single-line label inside a chart pane clip.
+pub fn push_colored_label_clipped(
+    out: &mut Vec<TextLabel>,
+    rect: [f32; 4],
+    clip: ChartClip,
+    text: &str,
+    default: [f32; 4],
+    font_px: f32,
+    align: TextAlign,
+    mono: bool,
+) {
+    push_colored_line_clipped(
+        out,
+        rect,
+        chart_clip_rect(rect, clip),
+        text,
+        default,
+        font_px,
+        align,
+        mono,
+    );
 }
 
 /// Tight gutter width from the widest rendered tick label.
@@ -346,20 +456,34 @@ pub fn push_yaku_hbar_row(
         None => format!("{count}"),
     };
     let value_x = x + w - value_w;
-    push_label_clipped(
-        labels,
-        [value_x, y, value_w, row_h],
-        clip,
-        TextLabel {
-            rect: [value_x, y, value_w, row_h],
-            text: value_text,
-            color: value_color,
-            font_px: Some(body_px),
-            align: TextAlign::Right,
-            mono: true,
-            ..Default::default()
-        },
-    );
+    let value_rect = [value_x, y, value_w, row_h];
+    if suffix.is_some() {
+        push_colored_label_clipped(
+            labels,
+            value_rect,
+            clip,
+            &value_text,
+            value_color,
+            body_px,
+            TextAlign::Right,
+            true,
+        );
+    } else {
+        push_label_clipped(
+            labels,
+            value_rect,
+            clip,
+            TextLabel {
+                rect: value_rect,
+                text: value_text,
+                color: value_color,
+                font_px: Some(body_px),
+                align: TextAlign::Right,
+                mono: true,
+                ..Default::default()
+            },
+        );
+    }
 }
 
 /// One labeled horizontal bar row.

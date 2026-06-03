@@ -338,6 +338,7 @@ impl SceneBehavior for RunSummaryScene {
 
         push_run_summary_panel(
             &mut frame,
+            &ctx,
             &layout,
             &content,
             &theme,

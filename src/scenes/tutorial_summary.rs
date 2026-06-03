@@ -7,7 +7,11 @@ use crate::persistence;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::ui::controller_hints::{
+    HintStyle, menu_footer_row, push_screen_footer_hint, screen_footer_reserve,
+};
 use crate::ui::focus_nav;
+use crate::ui::styled_text::styled_line_block_height_at_font_px;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -44,7 +48,7 @@ impl TutorialSummaryScene {
         let btn_w = (200.0 * scale).min(w * 0.38).max(140.0);
         let btn_h = (44.0 * scale).max(32.0);
         let gap = 16.0 * scale;
-        let y = h - btn_h - 28.0 * scale;
+        let y = h - screen_footer_reserve(h) - btn_h - 28.0 * scale;
         let pair_w = btn_w * 2.0 + gap;
         let start_x = (w - pair_w) * 0.5;
         vec![
@@ -184,8 +188,13 @@ impl SceneBehavior for TutorialSummaryScene {
         let subtitle_y = card_y + 78.0 * scale;
         let subtitle_w = card_w - 68.0 * scale;
         let subtitle_font = typography::size(typography::H36, h);
-        let subtitle_lines = widget::wrap_text(subtitle, subtitle_w, subtitle_font);
-        let subtitle_h = subtitle_lines.len().max(1) as f32 * subtitle_font * 1.3;
+        let subtitle_h = styled_line_block_height_at_font_px(
+            subtitle,
+            subtitle_w,
+            subtitle_font,
+            true,
+            color::PARCHMENT,
+        );
         widget::push_text_block(
             &mut texts,
             [subtitle_x, subtitle_y, subtitle_w, subtitle_h],
@@ -195,7 +204,7 @@ impl SceneBehavior for TutorialSummaryScene {
                 color: color::PARCHMENT,
                 padding: 0.0,
                 align: TextAlign::Center,
-                ..Default::default()
+                glossary_tint: true,
             },
             h,
         );
@@ -205,8 +214,13 @@ impl SceneBehavior for TutorialSummaryScene {
             let bullet_text = format!("• {bullet}");
             let bullet_w = card_w - 72.0 * scale;
             let bullet_font = typography::size(typography::H36, h);
-            let bullet_lines = widget::wrap_text(&bullet_text, bullet_w, bullet_font);
-            let bullet_h = bullet_lines.len().max(1) as f32 * bullet_font * 1.25;
+            let bullet_h = styled_line_block_height_at_font_px(
+                &bullet_text,
+                bullet_w,
+                bullet_font,
+                true,
+                color::STONE,
+            );
             widget::push_text_block(
                 &mut texts,
                 [card_x + 36.0 * scale, bullet_y, bullet_w, bullet_h],
@@ -216,7 +230,7 @@ impl SceneBehavior for TutorialSummaryScene {
                     color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
-                    ..Default::default()
+                    glossary_tint: true,
                 },
                 h,
             );
@@ -284,6 +298,12 @@ impl SceneBehavior for TutorialSummaryScene {
         frame.quads(btn_quads);
         frame.texts(texts);
         self.tree.register_flat_buttons(&items, &mut frame.buttons);
+        push_screen_footer_hint(
+            &mut frame,
+            &ctx,
+            menu_footer_row(ctx.input_mode),
+            HintStyle::archive_footer(h),
+        );
         frame.window_title = "Mahjuro — Tutorial Summary".to_string();
         frame
     }

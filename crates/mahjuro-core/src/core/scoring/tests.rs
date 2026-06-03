@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::hand::find_pairs_and_triplets;
+use crate::core::hand::{find_pairs_and_triplets, DetectedMeld, MeldKind};
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
     ScoreRoundBundle, ScoreTileBundle,
@@ -1051,4 +1051,166 @@ fn crown_of_patterns_adds_mult_per_distinct_yaku() {
         with_crown.final_mult,
         base.final_mult + 4.0 * yaku_count as f64
     );
+}
+
+#[test]
+fn geese_retriggers_first_five_melds() {
+    let hand: Vec<Tile> = (0..12)
+        .map(|i| Tile::new(Suit::Pinzu, (i / 2 + 1) as u8, i as u32))
+        .collect();
+    let sets = find_pairs_and_triplets(&hand);
+    assert_eq!(sets.len(), 6);
+    let base = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_geese = score_sets(
+        &hand,
+        &sets,
+        &ctx_with(&relics(vec![RelicId::Geese]), false),
+        &[],
+    );
+    assert_eq!(with_geese.final_chips, base.final_chips + 30);
+    assert!(with_geese.steps.iter().any(|s| s.source == "Geese"));
+}
+
+#[test]
+fn geese_full_meld_beats_partial_tiles() {
+    let hand = vec![
+        Tile::new(Suit::Pinzu, 9, 0),
+        Tile::new(Suit::Pinzu, 9, 1),
+        Tile::new(Suit::Pinzu, 9, 2),
+        Tile::new(Suit::Pinzu, 9, 3),
+        Tile::new(Suit::Manzu, 1, 4),
+        Tile::new(Suit::Manzu, 2, 5),
+        Tile::new(Suit::Manzu, 3, 6),
+    ];
+    let sets = vec![
+        DetectedMeld {
+            kind: MeldKind::Kong,
+            tile_ids: vec![0, 1, 2, 3],
+        },
+        DetectedMeld {
+            kind: MeldKind::Sequence,
+            tile_ids: vec![4, 5, 6],
+        },
+    ];
+    let base = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_geese = score_sets(
+        &hand,
+        &sets,
+        &ctx_with(&relics(vec![RelicId::Geese]), false),
+        &[],
+    );
+    assert_eq!(with_geese.final_chips, base.final_chips + 42);
+}
+
+#[test]
+fn xxxl_egg_retriggers_all_melds() {
+    let hand = vec![
+        Tile::new(Suit::Souzu, 3, 0),
+        Tile::new(Suit::Souzu, 3, 1),
+        Tile::new(Suit::Souzu, 3, 2),
+        Tile::new(Suit::Dragon, 1, 3),
+        Tile::new(Suit::Dragon, 1, 4),
+        Tile::new(Suit::Dragon, 1, 5),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let r = relics(vec![RelicId::XxxlEgg]);
+    let mut counters = std::collections::BTreeMap::new();
+    counters.insert(RelicId::XxxlEgg, 2);
+    let ctx = ScoreContext {
+        relic: ScoreRelicBundle {
+            roster: &r,
+            counters,
+        },
+        tiles: ScoreTileBundle {
+            debuffs: &[],
+            hand_for_ghost: &[],
+        },
+        round: ScoreRoundBundle {
+            scored_last_turn: false,
+            plays_used: 0,
+            round_wind: None,
+            bonus_round_wind: None,
+            played_yaku_this_round: vec![],
+            is_final_play: false,
+        },
+        pattern: ScorePatternBundle {
+            dora_faces: vec![],
+            available_yaku: vec![],
+            yaku_levels: None,
+        },
+        economy: ScoreEconomyBundle {
+            yen: 0,
+            total_score: 0,
+        },
+        structure: None,
+    };
+    let base = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_egg = score_sets(&hand, &sets, &ctx, &[]);
+    assert_eq!(with_egg.final_chips, base.final_chips + base.base_chips);
+    assert!(with_egg.steps.iter().any(|s| s.source == "XXXL Egg"));
+}
+
+#[test]
+fn voice_of_the_people_retriggers_whole_low_meld() {
+    let hand = vec![
+        Tile::new(Suit::Manzu, 2, 0),
+        Tile::new(Suit::Manzu, 2, 1),
+        Tile::new(Suit::Manzu, 2, 2),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let base = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_voice = score_sets(
+        &hand,
+        &sets,
+        &ctx_with(&relics(vec![RelicId::VoiceOfThePeople]), false),
+        &[],
+    );
+    assert_eq!(with_voice.final_chips, base.final_chips + base.base_chips);
+    assert!(with_voice.steps.iter().any(|s| s.source == "Voice of the People"));
+}
+
+#[test]
+fn voice_of_the_people_skips_mixed_rank_meld() {
+    let hand = vec![
+        Tile::new(Suit::Manzu, 3, 0),
+        Tile::new(Suit::Manzu, 4, 1),
+        Tile::new(Suit::Manzu, 5, 2),
+    ];
+    let sets = vec![DetectedMeld {
+        kind: MeldKind::Sequence,
+        tile_ids: vec![0, 1, 2],
+    }];
+    let base = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_voice = score_sets(
+        &hand,
+        &sets,
+        &ctx_with(&relics(vec![RelicId::VoiceOfThePeople]), false),
+        &[],
+    );
+    assert_eq!(with_voice.final_chips, base.final_chips);
+    assert!(
+        !with_voice
+            .steps
+            .iter()
+            .any(|s| s.source == "Voice of the People")
+    );
+}
+
+#[test]
+fn voice_of_the_elite_retriggers_whole_high_meld() {
+    let hand = vec![
+        Tile::new(Suit::Souzu, 8, 0),
+        Tile::new(Suit::Souzu, 8, 1),
+        Tile::new(Suit::Souzu, 8, 2),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let base = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_voice = score_sets(
+        &hand,
+        &sets,
+        &ctx_with(&relics(vec![RelicId::VoiceOfTheElite]), false),
+        &[],
+    );
+    assert_eq!(with_voice.final_chips, base.final_chips + base.base_chips);
+    assert!(with_voice.steps.iter().any(|s| s.source == "Voice of the Elite"));
 }

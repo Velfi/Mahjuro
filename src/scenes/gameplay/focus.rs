@@ -69,6 +69,36 @@ pub(super) const ALL_BUTTONS: [GameplayButton; 3] = [
     GameplayButton::Trigger,
 ];
 
+/// When focus is on the rightmost relic, RIGHT jumps to the dora plinth
+/// instead of falling through to spatial pick (which often lands on pegs
+/// or gold below the relic row).
+pub(super) fn relic_to_dora_focus(
+    current: Option<FocusTarget>,
+    dir: crate::ui::focus_nav::FocusDir,
+    focus_rects: &[(FocusTarget, [f32; 4])],
+) -> Option<FocusTarget> {
+    let FocusTarget::Relic(current_idx) = current? else {
+        return None;
+    };
+    if !matches!(dir, crate::ui::focus_nav::FocusDir::Right) {
+        return None;
+    }
+
+    let mut relic_indices = focus_rects.iter().filter_map(|(target, _)| match *target {
+        FocusTarget::Relic(i) => Some(i),
+        _ => None,
+    });
+    let last_idx = relic_indices.next_back()?;
+
+    if current_idx != last_idx {
+        return None;
+    }
+
+    focus_rects
+        .iter()
+        .find_map(|(target, _)| matches!(target, FocusTarget::Dora).then_some(*target))
+}
+
 pub(super) fn wrap_hand_tile_focus(
     current: Option<FocusTarget>,
     dir: crate::ui::focus_nav::FocusDir,
@@ -197,4 +227,31 @@ pub(super) fn focus_kind_sfx(k: FocusKind) -> Option<crate::sfx_id::SfxId> {
         FocusKind::Ordeal => SfxId::FocusDora,
         FocusKind::RoundWind => SfxId::FocusDora,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::focus_nav::FocusDir;
+
+    #[test]
+    fn relic_to_dora_only_from_last_relic_right() {
+        let rects = [
+            (FocusTarget::Relic(0), [0.0, 0.0, 10.0, 10.0]),
+            (FocusTarget::Relic(1), [20.0, 0.0, 10.0, 10.0]),
+            (FocusTarget::Dora, [200.0, 0.0, 10.0, 10.0]),
+        ];
+        assert_eq!(
+            relic_to_dora_focus(Some(FocusTarget::Relic(0)), FocusDir::Right, &rects),
+            None
+        );
+        assert_eq!(
+            relic_to_dora_focus(Some(FocusTarget::Relic(1)), FocusDir::Right, &rects),
+            Some(FocusTarget::Dora)
+        );
+        assert_eq!(
+            relic_to_dora_focus(Some(FocusTarget::Relic(1)), FocusDir::Left, &rects),
+            None
+        );
+    }
 }

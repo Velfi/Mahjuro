@@ -70,7 +70,7 @@ pub fn push_lessons_banner(frame: &mut UiFrame, ctx: &DrawCtx<'_>, run: &RunStat
             color: color::CHAMPAGNE,
             padding: 0.0,
             align: TextAlign::Center,
-            ..Default::default()
+            glossary_tint: true,
         },
         h,
     );
@@ -141,7 +141,7 @@ pub fn push_finale_intro_banner(frame: &mut UiFrame, ctx: &DrawCtx<'_>, run: &Ru
             color: color::PARCHMENT,
             padding: 0.0,
             align: TextAlign::Left,
-            ..Default::default()
+            glossary_tint: true,
         },
         h,
     );

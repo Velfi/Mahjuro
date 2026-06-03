@@ -15,10 +15,10 @@ use crate::core::relic::RelicId;
 use crate::core::relic::relic_visual;
 use crate::render::draw_cmd::{Object3d, Object3dKind};
 use crate::render::table_transform::euler_xyz_rad_from_deg;
-use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
-use crate::ui::widget::wrap_text;
+use crate::ui::styled_text::{StyledBlockStyle, StyledTextBlock};
 
 /// Assembled render data emitted by `ModalQueue::draw`: instanced quads,
 /// text labels, clickable button rects, 3D relic meshes, and radial-
@@ -607,15 +607,22 @@ impl ModalQueue {
         let padding = (20.0 * scale).max(10.0);
         let body_font = typography::size(typography::H36, window_h);
         let body_inner_w = card_w - padding * 2.0;
-        let wrapped = wrap_text(&modal.body, body_inner_w, body_font);
+        let [dr, dg, db, da] = modal.theme.body_color();
+        let body_color = [dr, dg, db, da * alpha];
+        let body_block = StyledTextBlock::measure_at_font_px(
+            &modal.body,
+            body_inner_w,
+            body_font,
+            true,
+            body_color,
+        );
         let body_line_step = crate::ui::colored_keywords::colored_row_line_step(body_font);
-        let body_lines = wrapped.len().max(1) as f32;
+        let body_lines = body_block.line_count().max(1) as f32;
         let chrome_h = padding + title_h + padding * 0.5 + padding;
         let max_body_h = window_h * 0.85 - chrome_h;
         let body_h = (body_lines * body_line_step)
             .max(20.0)
             .min(max_body_h.max(20.0));
-        let body_text = wrapped.join("\n");
         let card_h = chrome_h + body_h;
 
         let card_x = (window_w - card_w) * 0.5;
@@ -656,14 +663,17 @@ impl ModalQueue {
 
         // Body.
         let body_y = title_y + title_h + padding * 0.5;
-        let [dr, dg, db, da] = modal.theme.body_color();
-        labels.push(TextLabel {
-            rect: [card_x + padding, body_y, body_inner_w, body_h],
-            text: body_text,
-            color: [dr, dg, db, da * alpha],
-            font_px: Some(body_font),
-            ..Default::default()
-        });
+        body_block.push_at_font_px(
+            labels,
+            [card_x + padding, body_y, body_inner_w, body_h],
+            StyledBlockStyle {
+                tier: typography::H36,
+                color: body_color,
+                padding: 0.0,
+                align: TextAlign::Left,
+                glossary_tint: true,
+            },
+        );
 
     }
 }
@@ -835,18 +845,27 @@ fn draw_modal_paginated_unlock(
     let desc_y = name_y + name_font * 1.5;
     let desc_w = window_w * 0.7;
     let desc_x = (window_w - desc_w) * 0.5;
-    let desc_line_step = desc_font * 1.5;
-    let wrapped_desc = wrap_text(&page.description, desc_w, desc_font);
-    let desc_lines = wrapped_desc.len().max(1) as f32;
-    let desc_h = desc_lines * desc_line_step;
     let [dr, dg, db, _da] = crate::render::theme::color::PARCHMENT;
-    labels.push(TextLabel {
-        rect: [desc_x, desc_y, desc_w, desc_h],
-        text: wrapped_desc.join("\n"),
-        color: [dr, dg, db, 0.92 * alpha],
-        font_px: Some(desc_font),
-        ..Default::default()
-    });
+    let desc_color = [dr, dg, db, 0.92 * alpha];
+    let desc_block = StyledTextBlock::measure_at_font_px(
+        &page.description,
+        desc_w,
+        desc_font,
+        true,
+        desc_color,
+    );
+    let desc_h = desc_block.block_height();
+    desc_block.push_at_font_px(
+        labels,
+        [desc_x, desc_y, desc_w, desc_h],
+        StyledBlockStyle {
+            tier: typography::H36,
+            color: desc_color,
+            padding: 0.0,
+            align: TextAlign::Center,
+            glossary_tint: true,
+        },
+    );
 
     // ── Footer (page indicator when multi-page) ───────────────────
     let total = modal.pages.len();
