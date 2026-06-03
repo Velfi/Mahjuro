@@ -199,24 +199,13 @@ impl App {
                 self.run.advance_round(&mut self.bus);
 
                 {
-                    let mut lines = vec![format!(
-                        "Score: {} / {}",
-                        cleared_round_score, cleared_target_score
-                    )];
-                    lines.push(format!("Base reward  +¥{}", payout.base_reward));
-                    if payout.unused_play_bonus > 0 {
-                        lines.push(format!("Unused plays  +¥{}", payout.unused_play_bonus));
-                    }
-                    if payout.interest > 0 {
-                        lines.push(format!("Interest  +¥{}", payout.interest));
-                    }
-                    if payout.green_luck_bonus > 0 {
-                        lines.push(format!("Green Luck  +¥{}", payout.green_luck_bonus));
-                    }
-                    lines.push(format!("Total  +¥{}", payout.total));
-                    let modal =
-                        Modal::new("Winner!", lines.join("\n"), ModalTheme::Success)
-                            .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
+                    let modal = Modal::new("Winner!", "", ModalTheme::Success)
+                        .with_payout_breakdown(
+                            cleared_round_score,
+                            u64::from(cleared_target_score),
+                            payout,
+                        )
+                        .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
                     self.modals.push(modal);
                 }
 

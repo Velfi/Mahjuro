@@ -178,13 +178,12 @@ pub struct ArchiveScene {
     active_tab: Tab,
     /// Index into the active tab's visible row of the artifact featured for
     /// orbit inspect. `None` falls back to the first unlocked artifact for the
-    /// tab. Set by mouse click or by pressing Confirm while a row item is
-    /// focused; reset on tab change so stale indices don't bleed across tabs.
+    /// tab. Set by mouse click or when cycling focus in inspect; reset on tab
+    /// change so stale indices don't bleed across tabs.
     selected_artifact: Option<usize>,
     /// Row item that currently has keyboard / controller focus (the
     /// arrow-key / DPad cursor). `None` until the player first uses
-    /// directional input. Confirm sets the focused row as the orbit-inspect
-    /// target (`selected_artifact`).
+    /// directional input.
     focused_row: Option<usize>,
     /// Settings chronicle cursor captured at Archive entry (stable for this visit).
     chronicle_last_seen: Option<u32>,
@@ -1111,9 +1110,11 @@ impl ArchiveScene {
                 "Finish a non-tutorial run to add folios here.",
             )]);
         } else if !chronicle_ledger {
+            let show_preview = matches!(self.active_tab, Tab::Relics | Tab::Yaku);
             legend_rows.push(archive_browse_footer_row(
                 ctx.input_mode,
                 archive_multi_page,
+                show_preview,
             ));
         }
 
@@ -1278,7 +1279,7 @@ impl SceneBehavior for ArchiveScene {
         // Keyboard / controller / wheel navigation:
         //   - Triggers / Tab / Shift+Tab → cycle tabs
         //   - Cabinet: ←/↓ forward along the catalogue; →/↑ backward (wrap); wheel / PgUp/Dn flip pages
-        //   - Confirm / North → orbit inspect on the focused artifact
+        //   - North → orbit inspect on the focused artifact; Confirm → preview sound
         let all_count = tab_artifacts(self.active_tab, ctx.progress, chronicle_last_seen).len();
         if matches!(ctx.input_mode, InputMode::Cursor) && self.focused_chrome.is_none() {
             collection_apply_cursor_catalog_hover(
@@ -1674,28 +1675,7 @@ impl SceneBehavior for ArchiveScene {
                         continue;
                     }
                     if !matches!(self.active_tab, Tab::Chronicle) {
-                        let w = ctx.layout.window_w;
-                        let h = ctx.layout.window_h;
-                        let bosses =
-                            tab_artifacts(self.active_tab, ctx.progress, chronicle_last_seen);
-                        if !bosses.is_empty()
-                            && let Some(orbit) = self.archive_inspect_orbit_for_focus(
-                                w,
-                                h,
-                                &bosses,
-                                ctx.layout,
-                                ctx.room_gltf_height_scale,
-                            )
-                        {
-                            ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                            *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
-                                Scene::Showcase(crate::scenes::ShowcaseScene::new(
-                                    crate::scenes::ShowcasePresenter::ArchiveInspect(
-                                        crate::scenes::ArchiveInspectPresenter::new(orbit),
-                                    ),
-                                )),
-                            )));
-                        }
+                        push_inspect_artifact_sound_if_present(self, ctx.progress, ctx.bus);
                     }
                 }
                 UiAction::NorthFacePress => {
@@ -1893,7 +1873,7 @@ fn inspect_artifact_index(scene: &ArchiveScene) -> usize {
         .unwrap_or(0)
 }
 
-/// Play the focused catalog item's bespoke audio while orbit inspect is open (A / Confirm).
+/// Play the focused catalog item's bespoke audio (Confirm / A), when a stinger exists.
 pub(crate) fn push_inspect_artifact_sound_if_present(
     scene: &ArchiveScene,
     progress: &crate::core::progression::PlayerProgress,

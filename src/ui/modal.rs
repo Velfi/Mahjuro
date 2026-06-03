@@ -13,6 +13,8 @@ const SKIM_REPEAT_INTERVAL: Duration = Duration::from_millis(120);
 
 use crate::core::relic::RelicId;
 use crate::core::relic::relic_visual;
+use crate::game::event_bus::RoundPayout;
+use crate::render::decal::{load_mono_font, load_ui_font};
 use crate::render::draw_cmd::{Object3d, Object3dKind};
 use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
@@ -294,10 +296,21 @@ impl Fireworks {
     }
 }
 
+/// Round-win yen breakdown for [`Modal::draw_simple`] ledger layout.
+#[derive(Clone, Copy, Debug)]
+pub struct ModalPayoutBreakdown {
+    pub round_score: u64,
+    pub target_score: u64,
+    pub payout: RoundPayout,
+}
+
 /// A single modal to display.
 pub struct Modal {
     pub title: String,
     pub body: String,
+    /// When set, the body is drawn as a centered score line plus a right-aligned
+    /// addition-style yen ledger (rule above total) instead of plain wrapped text.
+    pub payout_breakdown: Option<ModalPayoutBreakdown>,
     pub theme: ModalTheme,
     /// When the modal was shown (for fade-in animation).
     shown_at: Instant,
@@ -316,6 +329,7 @@ impl Modal {
         Self {
             title: title.into(),
             body: body.into(),
+            payout_breakdown: None,
             theme,
             shown_at: Instant::now(),
             fade_in_secs: 0.25,
@@ -323,6 +337,21 @@ impl Modal {
             pages: Vec::new(),
             current_page: 0,
         }
+    }
+
+    /// Centered score + addition-style yen lines (see [`ModalPayoutBreakdown`]).
+    pub fn with_payout_breakdown(
+        mut self,
+        round_score: u64,
+        target_score: u64,
+        payout: RoundPayout,
+    ) -> Self {
+        self.payout_breakdown = Some(ModalPayoutBreakdown {
+            round_score,
+            target_score,
+            payout,
+        });
+        self
     }
 
     /// Create a modal with firework particles.
@@ -609,20 +638,35 @@ impl ModalQueue {
         let body_inner_w = card_w - padding * 2.0;
         let [dr, dg, db, da] = modal.theme.body_color();
         let body_color = [dr, dg, db, da * alpha];
-        let body_block = StyledTextBlock::measure_at_font_px(
-            &modal.body,
-            body_inner_w,
-            body_font,
-            true,
-            body_color,
-        );
         let body_line_step = crate::ui::colored_keywords::colored_row_line_step(body_font);
-        let body_lines = body_block.line_count().max(1) as f32;
         let chrome_h = padding + title_h + padding * 0.5 + padding;
         let max_body_h = window_h * 0.85 - chrome_h;
-        let body_h = (body_lines * body_line_step)
-            .max(20.0)
-            .min(max_body_h.max(20.0));
+
+        let payout_layout = modal
+            .payout_breakdown
+            .map(|b| measure_payout_ledger_layout(b, body_font, scale));
+        let body_block = if payout_layout.is_none() {
+            Some(StyledTextBlock::measure_at_font_px(
+                &modal.body,
+                body_inner_w,
+                body_font,
+                true,
+                body_color,
+            ))
+        } else {
+            None
+        };
+        let body_h = if let Some(ref layout) = payout_layout {
+            layout
+                .block_height(body_line_step, scale)
+                .max(20.0)
+                .min(max_body_h.max(20.0))
+        } else {
+            let body_lines = body_block.as_ref().unwrap().line_count().max(1) as f32;
+            (body_lines * body_line_step)
+                .max(20.0)
+                .min(max_body_h.max(20.0))
+        };
         let card_h = chrome_h + body_h;
 
         let card_x = (window_w - card_w) * 0.5;
@@ -663,19 +707,212 @@ impl ModalQueue {
 
         // Body.
         let body_y = title_y + title_h + padding * 0.5;
-        body_block.push_at_font_px(
-            labels,
-            [card_x + padding, body_y, body_inner_w, body_h],
-            StyledBlockStyle {
-                tier: typography::H36,
-                color: body_color,
-                padding: 0.0,
-                align: TextAlign::Left,
-                glossary_tint: true,
-            },
-        );
+        if let (Some(breakdown), Some(layout)) = (modal.payout_breakdown, payout_layout.as_ref())
+        {
+            push_payout_ledger_labels(
+                labels,
+                instances,
+                breakdown,
+                layout,
+                card_x,
+                card_w,
+                body_y,
+                body_font,
+                body_line_step,
+                scale,
+                body_color,
+                alpha,
+            );
+        } else if let Some(body_block) = body_block {
+            body_block.push_at_font_px(
+                labels,
+                [card_x + padding, body_y, body_inner_w, body_h],
+                StyledBlockStyle {
+                    tier: typography::H36,
+                    color: body_color,
+                    padding: 0.0,
+                    align: TextAlign::Left,
+                    glossary_tint: true,
+                },
+            );
+        }
 
     }
+}
+
+struct PayoutLedgerRow {
+    label: &'static str,
+    amount: u32,
+}
+
+struct PayoutLedgerLayout {
+    rows: Vec<PayoutLedgerRow>,
+    total: u32,
+    label_col_w: f32,
+    amount_col_w: f32,
+    table_w: f32,
+    score_line: String,
+}
+
+impl PayoutLedgerLayout {
+    fn block_height(&self, line_step: f32, scale: f32) -> f32 {
+        let score_gap = 10.0 * scale;
+        let rule_gap = 6.0 * scale;
+        let rule_h = (2.0 * scale).max(1.0);
+        let row_count = self.rows.len() as f32 + 1.0;
+        line_step + score_gap + row_count * line_step + rule_gap + rule_h + line_step
+    }
+}
+
+fn payout_ledger_rows(payout: RoundPayout) -> Vec<PayoutLedgerRow> {
+    let mut rows = vec![PayoutLedgerRow {
+        label: "Base reward",
+        amount: payout.base_reward,
+    }];
+    if payout.unused_play_bonus > 0 {
+        rows.push(PayoutLedgerRow {
+            label: "Unused plays",
+            amount: payout.unused_play_bonus,
+        });
+    }
+    if payout.interest > 0 {
+        rows.push(PayoutLedgerRow {
+            label: "Interest",
+            amount: payout.interest,
+        });
+    }
+    if payout.green_luck_bonus > 0 {
+        rows.push(PayoutLedgerRow {
+            label: "Green Luck",
+            amount: payout.green_luck_bonus,
+        });
+    }
+    rows
+}
+
+fn measure_text_width(font: &fontdue::Font, text: &str, font_px: f32) -> f32 {
+    text.chars()
+        .map(|ch| font.metrics(ch, font_px).advance_width)
+        .sum()
+}
+
+fn measure_payout_ledger_layout(
+    breakdown: ModalPayoutBreakdown,
+    font_px: f32,
+    scale: f32,
+) -> PayoutLedgerLayout {
+    let rows = payout_ledger_rows(breakdown.payout);
+    let score_line = format!(
+        "Score: {} / {}",
+        breakdown.round_score, breakdown.target_score
+    );
+    let font = load_mono_font()
+        .or_else(load_ui_font)
+        .expect("ui font");
+    let mut label_col_w = measure_text_width(&font, "Unused plays", font_px);
+    let mut amount_col_w = 0.0f32;
+    for row in &rows {
+        label_col_w = label_col_w.max(measure_text_width(&font, row.label, font_px));
+        let amount = format!("+¥{}", row.amount);
+        amount_col_w = amount_col_w.max(measure_text_width(&font, &amount, font_px));
+    }
+    let total_amount = format!("+¥{}", breakdown.payout.total);
+    amount_col_w = amount_col_w.max(measure_text_width(&font, &total_amount, font_px));
+    label_col_w = label_col_w.max(measure_text_width(&font, "Total", font_px));
+    let col_gap = 16.0 * scale;
+    let table_w = label_col_w + col_gap + amount_col_w;
+    PayoutLedgerLayout {
+        rows,
+        total: breakdown.payout.total,
+        label_col_w,
+        amount_col_w,
+        table_w,
+        score_line,
+    }
+}
+
+fn push_payout_ledger_labels(
+    labels: &mut Vec<TextLabel>,
+    instances: &mut Vec<GpuInstance>,
+    breakdown: ModalPayoutBreakdown,
+    layout: &PayoutLedgerLayout,
+    card_x: f32,
+    card_w: f32,
+    body_y: f32,
+    font_px: f32,
+    line_step: f32,
+    scale: f32,
+    color: [f32; 4],
+    alpha: f32,
+) {
+    let _ = breakdown;
+    use crate::render::theme::color;
+    let table_x = card_x + (card_w - layout.table_w) * 0.5;
+    let col_gap = 16.0 * scale;
+    let amount_x = table_x + layout.label_col_w + col_gap;
+    let mut y = body_y;
+
+    labels.push(TextLabel {
+        rect: [card_x, y, card_w, line_step],
+        text: layout.score_line.clone(),
+        color,
+        font_px: Some(font_px),
+        align: TextAlign::Center,
+        ..Default::default()
+    });
+    y += line_step + 10.0 * scale;
+
+    for row in &layout.rows {
+        labels.push(TextLabel {
+            rect: [table_x, y, layout.label_col_w, line_step],
+            text: row.label.into(),
+            color,
+            font_px: Some(font_px),
+            align: TextAlign::Left,
+            mono: true,
+            ..Default::default()
+        });
+        labels.push(TextLabel {
+            rect: [amount_x, y, layout.amount_col_w, line_step],
+            text: format!("+¥{}", row.amount),
+            color,
+            font_px: Some(font_px),
+            align: TextAlign::Right,
+            mono: true,
+            ..Default::default()
+        });
+        y += line_step;
+    }
+
+    y += 6.0 * scale;
+    let rule_h = (2.0 * scale).max(1.0);
+    instances.push(GpuInstance {
+        rect: [amount_x, y, layout.amount_col_w, rule_h],
+        color: color::alpha(color::BRASS, 0.55 * alpha),
+        user: 0,
+    });
+    y += rule_h;
+
+    labels.push(TextLabel {
+        rect: [table_x, y, layout.label_col_w, line_step],
+        text: "Total".into(),
+        color,
+        font_px: Some(font_px),
+        align: TextAlign::Left,
+        mono: true,
+        bold: true,
+        ..Default::default()
+    });
+    labels.push(TextLabel {
+        rect: [amount_x, y, layout.amount_col_w, line_step],
+        text: format!("+¥{}", layout.total),
+        color,
+        font_px: Some(font_px),
+        align: TextAlign::Right,
+        mono: true,
+        bold: true,
+        ..Default::default()
+    });
 }
 
 /// Paginated unlock layout (museum placard + optional hero relic mesh).

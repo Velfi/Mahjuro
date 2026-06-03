@@ -1,8 +1,6 @@
 //! Reusable Kenney controller / keyboard hint rows.
 //!
-//! Two layouts:
-//! - **Inline** — compact centred `[icon]: verb · …` copy (archive inspect, profile delete).
-//! - **Column** — equal-width `[icon][label]` slots with optional pill backers (shop, gameplay).
+//! All scenes use the same centred inline footer: `[icon]: verb · …` via [`HintStyle::standard`].
 
 use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
@@ -271,35 +269,11 @@ impl HintStyle {
         }
     }
 
-    pub fn archive_footer(h: f32) -> Self {
+    /// Shared footer look for every scene.
+    pub fn standard(h: f32) -> Self {
         Self::from_metrics(
             HintMetrics::primary(h),
             [0.78, 0.80, 0.88, 0.92],
-            color::alpha(color::PORCELAIN_AGED, 0.94),
-        )
-    }
-
-    pub fn profile_footer(h: f32) -> Self {
-        Self::from_metrics(
-            HintMetrics::primary(h),
-            color::UMBER,
-            color::alpha(color::UMBER, 0.96),
-        )
-    }
-
-    pub fn shop_inspect_camera(h: f32) -> Self {
-        Self::from_metrics(
-            HintMetrics::primary(h),
-            [0.82, 0.78, 0.72, 0.94],
-            color::alpha(color::PORCELAIN_AGED, 0.94),
-        )
-    }
-
-    /// Brass-tinted footer on the yaku journal plaque.
-    pub fn journal_plaque_footer(h: f32) -> Self {
-        Self::from_metrics(
-            HintMetrics::primary(h),
-            color::alpha(color::CHAMPAGNE, 0.88),
             color::alpha(color::PORCELAIN_AGED, 0.94),
         )
     }
@@ -364,6 +338,8 @@ pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
         .push(inspect_orbit_bind(input_mode).into())
         .sep()
         .push(inspect_zoom_bind(input_mode).into())
+        .sep()
+        .push(confirm_bind(input_mode, "preview").into())
         .sep()
         .push(inspect_exit_bind(input_mode).into())
         .into_segments()
@@ -470,6 +446,89 @@ fn inspect_bind(input_mode: InputMode) -> HintBind {
     )
 }
 
+fn hold_sell_bind(input_mode: InputMode) -> HintBind {
+    HintBind::alternatives(
+        "hold sell",
+        vec![HintKey::for_input(
+            input_mode,
+            UiAction::WestFacePress,
+            "keyboard_q",
+        )],
+    )
+}
+
+fn gameplay_discard_bind(input_mode: InputMode) -> HintBind {
+    HintBind::alternatives(
+        "discard",
+        vec![HintKey::for_input(
+            input_mode,
+            UiAction::WestFacePress,
+            "keyboard_q",
+        )],
+    )
+}
+
+fn gameplay_play_bind(input_mode: InputMode) -> HintBind {
+    HintBind::alternatives(
+        "play",
+        vec![HintKey::for_input(
+            input_mode,
+            UiAction::NorthFacePress,
+            "keyboard_e",
+        )],
+    )
+}
+
+fn gameplay_cash_in_bind(input_mode: InputMode) -> HintBind {
+    HintBind::alternatives(
+        "cash in",
+        vec![HintKey::for_input(
+            input_mode,
+            UiAction::TriggerStructure,
+            "keyboard_t",
+        )],
+    )
+}
+
+/// Storeroom browse: optional hold-to-sell, then inspect.
+pub fn shop_storeroom_footer_row(input_mode: InputMode, show_hold_sell: bool) -> Vec<HintSegment> {
+    let mut row = HintRow::new();
+    if show_hold_sell {
+        row = row.push(hold_sell_bind(input_mode).into());
+        row = row.sep();
+    }
+    row.push(inspect_bind(input_mode).into()).into_segments()
+}
+
+/// Gameplay HUD action prompts along the bottom edge.
+pub fn gameplay_action_footer_row(
+    input_mode: InputMode,
+    show_discard: bool,
+    show_play: bool,
+    show_cash_in: bool,
+) -> Vec<HintSegment> {
+    let mut row = HintRow::new();
+    let mut any = false;
+    if show_discard {
+        row = row.push(gameplay_discard_bind(input_mode).into());
+        any = true;
+    }
+    if show_play {
+        if any {
+            row = row.sep();
+        }
+        row = row.push(gameplay_play_bind(input_mode).into());
+        any = true;
+    }
+    if show_cash_in {
+        if any {
+            row = row.sep();
+        }
+        row = row.push(gameplay_cash_in_bind(input_mode).into());
+    }
+    row.into_segments()
+}
+
 /// Hub / modal menus: move focus, then confirm the highlighted row.
 pub fn menu_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
     HintRow::new()
@@ -513,8 +572,12 @@ pub fn journal_plaque_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
         .into_segments()
 }
 
-/// Archive grid (not in item inspect): browse, cycle sections / pages, inspect.
-pub fn archive_browse_footer_row(input_mode: InputMode, multi_page: bool) -> Vec<HintSegment> {
+/// Archive grid (not in item inspect): browse, cycle sections / pages, preview, inspect.
+pub fn archive_browse_footer_row(
+    input_mode: InputMode,
+    multi_page: bool,
+    show_preview: bool,
+) -> Vec<HintSegment> {
     let mut row = HintRow::new().push(navigate_bind(input_mode).into());
     match input_mode {
         InputMode::Controller => {
@@ -524,6 +587,11 @@ pub fn archive_browse_footer_row(input_mode: InputMode, multi_page: bool) -> Vec
             row = row.sep().push(page_bind(input_mode).into());
         }
         InputMode::Keyboard | InputMode::Cursor => {}
+    }
+    if show_preview {
+        row = row
+            .sep()
+            .push(confirm_bind(input_mode, "preview").into());
     }
     row.sep()
         .push(inspect_bind(input_mode).into())
@@ -570,7 +638,7 @@ const SCREEN_FOOTER_BOTTOM_FRAC: f32 = 0.018;
 
 /// Vertical space to leave clear at the bottom when using [`push_screen_footer_hint`].
 pub fn screen_footer_reserve(h: f32) -> f32 {
-    HintStyle::archive_footer(h).line_h + h * SCREEN_FOOTER_BOTTOM_FRAC
+    HintStyle::standard(h).line_h + h * SCREEN_FOOTER_BOTTOM_FRAC
 }
 
 /// Push a single centred footer row above the bottom edge.
@@ -984,7 +1052,7 @@ pub struct ColumnHintLayout {
 
 impl ColumnHintLayout {
     /// Shop-style bottom band: 90% window width, inset 2%.
-    pub fn shop_floating_band(w: f32, h: f32, inspect_active: bool, column_count: usize) -> Self {
+    pub fn shop_floating_band(w: f32, h: f32, column_count: usize) -> Self {
         let pad_bottom = h * 0.014;
         let x = w * 0.05;
         let bw = w * 0.90;
@@ -993,14 +1061,7 @@ impl ColumnHintLayout {
         let inner_width = (inner_right - inner_left).max(8.0);
 
         let metrics = HintMetrics::primary(h);
-        let inspect_line_h = if inspect_active {
-            metrics.row_height
-        } else {
-            0.0
-        };
-        let gap_before_inspect_line = if inspect_active { h * 0.01 } else { 0.0 };
-        let block_h = metrics.row_height + gap_before_inspect_line + inspect_line_h;
-        let row_top = h - pad_bottom - block_h;
+        let row_top = h - pad_bottom - metrics.row_height;
 
         Self {
             inner_left,
@@ -1014,7 +1075,7 @@ impl ColumnHintLayout {
 
     /// Gameplay-style bottom band (non-inspect icon scale).
     pub fn gameplay_floating_band(w: f32, h: f32, column_count: usize) -> Self {
-        Self::shop_floating_band(w, h, false, column_count)
+        Self::shop_floating_band(w, h, column_count)
     }
 }
 
