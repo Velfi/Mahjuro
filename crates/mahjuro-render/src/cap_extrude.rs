@@ -50,7 +50,14 @@ pub struct SilhouetteUnionBounds {
 }
 
 impl SilhouetteUnionBounds {
-    pub fn from_bbox(ux_min: f32, uy_min: f32, ux_max: f32, uy_max: f32, width: u32, height: u32) -> Self {
+    pub fn from_bbox(
+        ux_min: f32,
+        uy_min: f32,
+        ux_max: f32,
+        uy_max: f32,
+        width: u32,
+        height: u32,
+    ) -> Self {
         Self {
             union_cx: 0.5 * (ux_min + ux_max),
             union_cy: 0.5 * (uy_min + uy_max),
@@ -122,10 +129,7 @@ pub fn planar_y_cap_uv_xz(cap_x: f32, cap_z: f32) -> [f32; 2] {
 /// +Y cap with independent half-extents (non-square tray footprint).
 #[inline]
 pub fn planar_y_cap_uv_xz_extents(cap_x: f32, cap_z: f32, half_w: f32, half_d: f32) -> [f32; 2] {
-    [
-        cap_x / (2.0 * half_w) + 0.5,
-        cap_z / (2.0 * half_d) + 0.5,
-    ]
+    [cap_x / (2.0 * half_w) + 0.5, cap_z / (2.0 * half_d) + 0.5]
 }
 
 /// Sample grayscale height from RGBA at normalized albedo UV (v=0 = image top).
@@ -249,14 +253,8 @@ pub fn side_wall_quad_indices_oriented(base: u32, vertices: &[Vertex3dTex]) -> [
     let v = |i: u32| &vertices[i as usize];
     let want = glam::Vec3::from(v(base).normal);
 
-    let a: [[u32; 3]; 2] = [
-        [base, base + 1, base + 2],
-        [base + 3, base + 2, base],
-    ];
-    let b: [[u32; 3]; 2] = [
-        [base + 1, base + 3, base],
-        [base + 2, base + 3, base],
-    ];
+    let a: [[u32; 3]; 2] = [[base, base + 1, base + 2], [base + 3, base + 2, base]];
+    let b: [[u32; 3]; 2] = [[base + 1, base + 3, base], [base + 2, base + 3, base]];
     let score = |tris: &[[u32; 3]; 2]| -> f32 {
         tris.iter()
             .map(|tri| tri_face_normal_dot([v(tri[0]), v(tri[1]), v(tri[2])], want))

@@ -119,11 +119,9 @@ impl App {
             || self.debug.rain_debug_overlay.is_some()
             || self.scene.has_blocking_overlay()
             || self.overlay_stack.iter().any(|s| s.has_blocking_overlay());
-        let room_ambience = self.room_gltf_brownout.tick(
-            self.last_frame_dt,
-            brownout_room,
-            brownout_freeze,
-        );
+        let room_ambience =
+            self.room_gltf_brownout
+                .tick(self.last_frame_dt, brownout_room, brownout_freeze);
         if room_ambience.brownout_started {
             self.audio.play_sfx(audio::SfxId::BrownoutFlicker);
         }
@@ -967,7 +965,9 @@ impl App {
                     .renderer
                     .as_ref()
                     .map(|r| r.main_menu_effects)
-                    .unwrap_or_else(crate::render::main_menu_effects_tuning::MainMenuEffectsTuning::load),
+                    .unwrap_or_else(
+                        crate::render::main_menu_effects_tuning::MainMenuEffectsTuning::load,
+                    ),
                 flame_tuning: self
                     .renderer
                     .as_ref()
@@ -995,9 +995,7 @@ impl App {
                     shop.tick_suspended_animation_clock();
                     (Some(shop), None)
                 }
-                Scene::Archive(collection) if showcase_archive_inspect => {
-                    (None, Some(collection))
-                }
+                Scene::Archive(collection) if showcase_archive_inspect => (None, Some(collection)),
                 _ => (None, None),
             };
             self.overlay_stack
@@ -1060,7 +1058,9 @@ impl App {
                         .renderer
                         .as_ref()
                         .map(|r| r.main_menu_effects)
-                        .unwrap_or_else(crate::render::main_menu_effects_tuning::MainMenuEffectsTuning::load),
+                        .unwrap_or_else(
+                            crate::render::main_menu_effects_tuning::MainMenuEffectsTuning::load,
+                        ),
                     flame_tuning: self
                         .renderer
                         .as_ref()

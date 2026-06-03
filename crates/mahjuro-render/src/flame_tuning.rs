@@ -74,8 +74,7 @@ impl FlameTuning {
 
     #[inline]
     pub fn wick_from_light(&self, light_world: glam::Vec3, emitter_scale: f32) -> glam::Vec3 {
-        light_world
-            - glam::Vec3::new(0.0, 0.0, emitter_scale * self.wick_below_light_frac)
+        light_world - glam::Vec3::new(0.0, 0.0, emitter_scale * self.wick_below_light_frac)
     }
 
     #[inline]

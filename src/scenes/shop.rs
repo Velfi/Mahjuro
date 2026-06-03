@@ -6,8 +6,8 @@ mod actions;
 mod draw;
 mod layout;
 pub(crate) mod pack_celebration;
-mod restock_exit;
 pub(crate) mod pick_ids;
+mod restock_exit;
 mod shared;
 mod update;
 mod view;
@@ -56,8 +56,8 @@ use crate::render::wgpu_renderer::{GpuInstance, ShopHit, TextAlign, TextLabel};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
 use crate::ui::input::{InputMode, UiAction};
 
-use super::pause_menu::PauseMenu;
 use super::hallway::HallwayScene;
+use super::pause_menu::PauseMenu;
 pub(crate) use super::{Scene, SceneTransition, UpdateCtx};
 
 pub struct ShopScene {
@@ -356,9 +356,10 @@ mod tests {
         for _ in 0..64 {
             let (_, zodiacs, _, _) =
                 actions::generate_shop_stock(&relics, &available, 0, ex, &mode, &unlocked_run);
-            if zodiacs.iter().any(|item| {
-                matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin))
-            }) {
+            if zodiacs
+                .iter()
+                .any(|item| matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin)))
+            {
                 saw_qilin = true;
                 break;
             }

@@ -79,7 +79,12 @@ impl RoomGltfBrownout {
     }
 
     /// `freeze`: pause menu, shop lighting debug overlay, or scene blocking overlay.
-    pub fn tick(&mut self, dt: f32, room_scene_eligible: bool, freeze: bool) -> RoomGltfAmbienceTick {
+    pub fn tick(
+        &mut self,
+        dt: f32,
+        room_scene_eligible: bool,
+        freeze: bool,
+    ) -> RoomGltfAmbienceTick {
         let mut out = RoomGltfAmbienceTick::default();
         if !room_scene_eligible {
             self.active = None;

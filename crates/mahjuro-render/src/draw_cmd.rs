@@ -11,15 +11,15 @@
 //! There are no stages, no z-indexes, no overlay-split indices. Modals,
 //! tooltips, and pause menus are just "more cmds pushed at the end."
 
-use mahjuro_core::core::relic::RelicId;
-use mahjuro_core::core::tile::Tile;
-use mahjuro_core::core::tile_pack::TilePackKind;
 use crate::lit_mesh::MaterialParams;
 use crate::scene_keys;
 use crate::theme::color;
 use crate::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextLabel};
-use mahjuro_types::scene_draw::{BackgroundId, ButtonDef};
 use glam;
+use mahjuro_core::core::relic::RelicId;
+use mahjuro_core::core::tile::Tile;
+use mahjuro_core::core::tile_pack::TilePackKind;
+use mahjuro_types::scene_draw::{BackgroundId, ButtonDef};
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -1054,23 +1054,18 @@ impl UiFrame {
             .extend(iter.into_iter().map(DrawCmd::SquircleQuad));
     }
 
-    pub fn gradient_quads<
-        I: IntoIterator<Item = crate::wgpu_renderer::GradientQuadInstance>,
-    >(
+    pub fn gradient_quads<I: IntoIterator<Item = crate::wgpu_renderer::GradientQuadInstance>>(
         &mut self,
         iter: I,
     ) {
         self.cmds
             .extend(iter.into_iter().map(DrawCmd::GradientQuad));
     }
-    pub fn arc_ring_quads<
-        I: IntoIterator<Item = crate::wgpu_renderer::ArcRingQuadInstance>,
-    >(
+    pub fn arc_ring_quads<I: IntoIterator<Item = crate::wgpu_renderer::ArcRingQuadInstance>>(
         &mut self,
         iter: I,
     ) {
-        self.cmds
-            .extend(iter.into_iter().map(DrawCmd::ArcRingQuad));
+        self.cmds.extend(iter.into_iter().map(DrawCmd::ArcRingQuad));
     }
     pub fn flame_batch(&mut self) {
         self.cmds.push(DrawCmd::Flame);

@@ -33,9 +33,7 @@ pub(crate) fn gameplay_score_roller_bank_moving(
     drive_values: &[f64; 2],
     goal: &[f64; 2],
 ) -> bool {
-    (0..2).any(|bank| {
-        initialized[bank] && (goal[bank] - drive_values[bank]).abs() > 1e-5
-    })
+    (0..2).any(|bank| initialized[bank] && (goal[bank] - drive_values[bank]).abs() > 1e-5)
 }
 
 /// Remap a roller wheel's continuous phase so digits stay visually locked near
@@ -187,9 +185,7 @@ impl WgpuRenderer {
             .shop_gltf_anim
             .resolve_prim_deltas(&frame.shop_gltf_anim_samples);
         if deltas.is_empty() && !self.shop_gltf_anim_missing_clip_warned.replace(true) {
-            log::warn!(
-                "shop glTF anim: playback requested but no clip/primitive bindings matched"
-            );
+            log::warn!("shop glTF anim: playback requested but no clip/primitive bindings matched");
         } else if !deltas.is_empty() {
             self.shop_gltf_anim_missing_clip_warned.set(false);
         }
@@ -206,8 +202,7 @@ impl WgpuRenderer {
         let mut drive_values = self.gameplay_score_roller_drive_values.borrow_mut();
         let mut initialized = self.gameplay_score_roller_drive_initialized.borrow_mut();
         let mut roll_elapsed = self.gameplay_score_roller_roll_elapsed.borrow_mut();
-        let was_rolling =
-            gameplay_score_roller_bank_moving(&initialized, &drive_values, &goal);
+        let was_rolling = gameplay_score_roller_bank_moving(&initialized, &drive_values, &goal);
         if was_rolling {
             *roll_elapsed += dt;
         }
@@ -224,10 +219,10 @@ impl WgpuRenderer {
                 drive_values[bank] = target_value;
                 continue;
             }
-            let speed_units_per_sec = (diff
-                .abs()
-                .clamp(GAMEPLAY_SCORE_ROLLER_MIN_SPEED, GAMEPLAY_SCORE_ROLLER_MAX_SPEED)
-                * speed_multiplier)
+            let speed_units_per_sec = (diff.abs().clamp(
+                GAMEPLAY_SCORE_ROLLER_MIN_SPEED,
+                GAMEPLAY_SCORE_ROLLER_MAX_SPEED,
+            ) * speed_multiplier)
                 .min(GAMEPLAY_SCORE_ROLLER_MAX_SPEED);
             let step = speed_units_per_sec * dt;
             if diff > 0.0 {
@@ -495,8 +490,7 @@ impl WgpuRenderer {
         hdr_tonemap[3] = if main_menu_env
             && crate::main_menu_glb::main_menu_pride_rainbow_active(
                 self.main_menu_pride_rainbow_debug,
-            )
-        {
+            ) {
             self.creation_time.elapsed().as_secs_f32()
         } else {
             0.0
@@ -504,8 +498,7 @@ impl WgpuRenderer {
         let (exposure, ambient_x) = if embedded_gltf_punctual {
             let gameplay_table = matches!(env_scene_key, scene_keys::GAMEPLAY | "tutorial");
             // `gameplay.glb` room + tiles share `ROOM_GLB_LINEAR_EXPOSURE_BASE` × this mul via `tile_hdr_tonemap`.
-            let mut e = env_tune.linear_exposure
-                * crate::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
+            let mut e = env_tune.linear_exposure * crate::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
             if gameplay_table {
                 e *= crate::gameplay_glb::GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL;
             }
@@ -623,12 +616,9 @@ impl WgpuRenderer {
         };
         let eyeball_only = frame.shop_env_eyeball_only;
         let eyeball_indices = self.shop_eyeball_prim_indices_for_draw();
-        self.draw_gltf_room_env_shadow(
-            pass,
-            &self.shop_env_primitives,
-            gpu,
-            |pi| eyeball_only && !eyeball_indices.is_empty() && !eyeball_indices.contains(&pi),
-        )
+        self.draw_gltf_room_env_shadow(pass, &self.shop_env_primitives, gpu, |pi| {
+            eyeball_only && !eyeball_indices.is_empty() && !eyeball_indices.contains(&pi)
+        })
     }
 
     pub(super) fn write_shop_environment_uniforms(
@@ -644,9 +634,7 @@ impl WgpuRenderer {
         let height = self.env_tune_for(scene_keys::SHOP).height_scale;
         let s = crate::room_glb::room_env_world_scale(camera.h, height);
         let model = crate::room_glb::with_shop_glb_cpu(|opt| {
-            opt.map(|cpu| {
-                crate::room_glb::room_env_model_matrix_from_cpu(camera.h, height, cpu)
-            })
+            opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, height, cpu))
         })
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
         let prim_deltas = self.shop_gltf_anim_prim_deltas(frame);
@@ -685,9 +673,7 @@ impl WgpuRenderer {
         let height = self.env_tune_for(env_key).height_scale;
         let s = crate::room_glb::room_env_world_scale(camera.h, height);
         let model = crate::gameplay_glb::with_gameplay_glb_cpu(|opt| {
-            opt.map(|cpu| {
-                crate::room_glb::room_env_model_matrix_from_cpu(camera.h, height, cpu)
-            })
+            opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, height, cpu))
         })
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
         let prim_deltas = self.gameplay_score_roller_frame_state(frame);
@@ -721,13 +707,7 @@ impl WgpuRenderer {
         let height = self.env_tune_for(scene_keys::HALLWAY).height_scale;
         let s = crate::room_glb::room_env_world_scale(camera.h, height);
         let model = crate::hallway_glb::with_hallway_glb_cpu(|opt| {
-            opt.map(|cpu| {
-                crate::room_glb::room_env_model_matrix_from_cpu(
-                    camera.h,
-                    height,
-                    cpu,
-                )
-            })
+            opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, height, cpu))
         })
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
         let prim_deltas = rustc_hash::FxHashMap::default();
@@ -765,13 +745,7 @@ impl WgpuRenderer {
         let height = self.env_tune_for(scene_keys::STAIRWAY).height_scale;
         let s = crate::room_glb::room_env_world_scale(camera.h, height);
         let model = crate::staircase_glb::with_staircase_glb_cpu(|opt| {
-            opt.map(|cpu| {
-                crate::room_glb::room_env_model_matrix_from_cpu(
-                    camera.h,
-                    height,
-                    cpu,
-                )
-            })
+            opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, height, cpu))
         })
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
         let prim_deltas = rustc_hash::FxHashMap::default();
@@ -819,7 +793,12 @@ impl WgpuRenderer {
             return;
         }
         self.archive_sign_decal_upload_key = key;
-        self.upload_archive_decal_texture(tex, dw, dh, frame.archive_sign_description_decal_text.as_deref());
+        self.upload_archive_decal_texture(
+            tex,
+            dw,
+            dh,
+            frame.archive_sign_description_decal_text.as_deref(),
+        );
     }
 
     fn sync_archive_inspect_plaque_decal_texture(&mut self, frame: &crate::draw_cmd::UiFrame) {
@@ -840,7 +819,12 @@ impl WgpuRenderer {
             return;
         }
         self.archive_inspect_plaque_decal_upload_key = key;
-        self.upload_archive_decal_texture(tex, dw, dh, frame.archive_inspect_plaque_decal_text.as_deref());
+        self.upload_archive_decal_texture(
+            tex,
+            dw,
+            dh,
+            frame.archive_inspect_plaque_decal_text.as_deref(),
+        );
     }
 
     fn upload_archive_decal_texture(
@@ -879,13 +863,7 @@ impl WgpuRenderer {
         let height = self.env_tune_for(scene_keys::ARCHIVE).height_scale;
         let s = crate::room_glb::room_env_world_scale(camera.h, height);
         let model = crate::archive_glb::with_archive_glb_cpu(|opt| {
-            opt.map(|cpu| {
-                crate::room_glb::room_env_model_matrix_from_cpu(
-                    camera.h,
-                    height,
-                    cpu,
-                )
-            })
+            opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, height, cpu))
         })
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
         let prim_deltas = rustc_hash::FxHashMap::default();
@@ -937,13 +915,10 @@ impl WgpuRenderer {
             return;
         };
         let height = self.env_tune_for(scene_keys::MAIN_MENU).height_scale;
-        let env_h =
-            crate::main_menu_glb::main_menu_env_height_scale(height);
+        let env_h = crate::main_menu_glb::main_menu_env_height_scale(height);
         let s = crate::room_glb::room_env_world_scale(camera.h, env_h);
         let model = crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
-            opt.map(|cpu| {
-                crate::room_glb::room_env_model_matrix_from_cpu(camera.h, env_h, cpu)
-            })
+            opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, env_h, cpu))
         })
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
         let prim_deltas = rustc_hash::FxHashMap::default();
@@ -971,13 +946,7 @@ impl WgpuRenderer {
         }
         let height = self.env_tune_for(scene_keys::SHOP).height_scale;
         let model = crate::room_glb::with_shop_glb_cpu(|opt| {
-            opt.map(|cpu| {
-                crate::room_glb::room_env_model_matrix_from_cpu(
-                    camera.h,
-                    height,
-                    cpu,
-                )
-            })
+            opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, height, cpu))
         })
         .unwrap_or_else(|| {
             let s = crate::room_glb::room_env_world_scale(
@@ -998,12 +967,9 @@ impl WgpuRenderer {
             return;
         }
         let height = self.env_tune_for(scene_keys::MAIN_MENU).height_scale;
-        let env_h =
-            crate::main_menu_glb::main_menu_env_height_scale(height);
+        let env_h = crate::main_menu_glb::main_menu_env_height_scale(height);
         let model = crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
-            opt.map(|cpu| {
-                crate::room_glb::room_env_model_matrix_from_cpu(camera.h, env_h, cpu)
-            })
+            opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, env_h, cpu))
         })
         .unwrap_or_else(|| {
             let s = crate::room_glb::room_env_world_scale(camera.h, env_h);
@@ -1019,11 +985,7 @@ impl WgpuRenderer {
 
     /// Lit pass: hide authored cash-in control when structure cannot be scored.
     #[inline]
-    fn gameplay_env_skip_cash_in_prim(
-        &self,
-        pi: usize,
-        frame: &crate::draw_cmd::UiFrame,
-    ) -> bool {
+    fn gameplay_env_skip_cash_in_prim(&self, pi: usize, frame: &crate::draw_cmd::UiFrame) -> bool {
         !frame.gameplay_cash_in_button_visible && self.gameplay_cash_in_prim_indices.contains(&pi)
     }
 
@@ -1081,12 +1043,9 @@ impl WgpuRenderer {
         let Some(ref gpu) = self.archive_environment else {
             return 0;
         };
-        self.draw_gltf_room_env_shadow(
-            pass,
-            &self.archive_env_primitives,
-            gpu,
-            |pi| self.archive_env_skip_shadow_prim(pi, frame),
-        )
+        self.draw_gltf_room_env_shadow(pass, &self.archive_env_primitives, gpu, |pi| {
+            self.archive_env_skip_shadow_prim(pi, frame)
+        })
     }
 
     #[inline]
@@ -1124,16 +1083,14 @@ impl WgpuRenderer {
             _ => false,
         }
     }
-
 }
-
 
 #[cfg(test)]
 mod gameplay_score_roller_tests {
     use super::{
+        GAMEPLAY_SCORE_ROLLER_LOOP_SPIN_IN_SEMITONES, GAMEPLAY_SCORE_ROLLER_RAMP_INTERVAL_SECS,
         gameplay_score_roller_loop_speed_multiplier, gameplay_score_roller_speed_multiplier,
-        gameplay_score_roller_visual_phase, GAMEPLAY_SCORE_ROLLER_LOOP_SPIN_IN_SEMITONES,
-        GAMEPLAY_SCORE_ROLLER_RAMP_INTERVAL_SECS,
+        gameplay_score_roller_visual_phase,
     };
 
     #[test]
@@ -1155,24 +1112,24 @@ mod gameplay_score_roller_tests {
 
     #[test]
     fn loop_speed_multiplier_climbs_gently() {
-        let spin_in =
-            2.0_f64.powf(GAMEPLAY_SCORE_ROLLER_LOOP_SPIN_IN_SEMITONES / 12.0);
+        let spin_in = 2.0_f64.powf(GAMEPLAY_SCORE_ROLLER_LOOP_SPIN_IN_SEMITONES / 12.0);
         assert!((gameplay_score_roller_loop_speed_multiplier(0.0) - spin_in).abs() < 1e-6);
         assert!((gameplay_score_roller_loop_speed_multiplier(0.49) - spin_in).abs() < 1e-6);
         assert!((gameplay_score_roller_loop_speed_multiplier(0.5) - 1.0).abs() < 1e-6);
-        let at_2s = gameplay_score_roller_loop_speed_multiplier(GAMEPLAY_SCORE_ROLLER_RAMP_INTERVAL_SECS);
+        let at_2s =
+            gameplay_score_roller_loop_speed_multiplier(GAMEPLAY_SCORE_ROLLER_RAMP_INTERVAL_SECS);
         assert!((at_2s - 2.0_f64.powf(2.0 / 12.0)).abs() < 1e-6);
-        assert!(at_2s < gameplay_score_roller_speed_multiplier(GAMEPLAY_SCORE_ROLLER_RAMP_INTERVAL_SECS));
+        assert!(
+            at_2s
+                < gameplay_score_roller_speed_multiplier(GAMEPLAY_SCORE_ROLLER_RAMP_INTERVAL_SECS)
+        );
     }
 
     #[test]
     fn visual_phase_snaps_fractional_carry_residue() {
         // Score 42 leaves the tens wheel at 4.2 from continuous division.
         let snapped = gameplay_score_roller_visual_phase(4.2);
-        assert!(
-            (snapped - 4.0).abs() < 0.05,
-            "expected ~4.0, got {snapped}"
-        );
+        assert!((snapped - 4.0).abs() < 0.05, "expected ~4.0, got {snapped}");
     }
 
     #[test]
@@ -1180,7 +1137,6 @@ mod gameplay_score_roller_tests {
         assert!((gameplay_score_roller_visual_phase(2.0) - 2.0).abs() < 1e-6);
         assert!((gameplay_score_roller_visual_phase(7.0) - 7.0).abs() < 1e-6);
     }
-
 
     #[test]
     fn slot_wheel_phase_ones_tracks_drive() {

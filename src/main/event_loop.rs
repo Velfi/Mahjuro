@@ -164,10 +164,7 @@ impl App {
             // stop ticking, leaving the menu covered by a frozen black fade until refocus.
             let transition_in_flight = self.pending_scene.is_some() || self.transition_alpha < 1.0;
             let window_foreground = shell.window_is_foreground();
-            if window_foreground
-                || matches!(self.scene, Scene::Splash(_))
-                || transition_in_flight
-            {
+            if window_foreground || matches!(self.scene, Scene::Splash(_)) || transition_in_flight {
                 self.frame_tick(shell);
             } else {
                 // Idle cheaply while backgrounded: no catch-up simulation tick, no draw.
@@ -192,17 +189,12 @@ impl App {
                     }
                     if matches!(
                         self.scene,
-                        Scene::MainMenu(_)
-                            | Scene::Shop(_)
-                            | Scene::Hallway(_)
+                        Scene::MainMenu(_) | Scene::Shop(_) | Scene::Hallway(_)
                     ) {
                         renderer.poll_room_prefetch_gpu_uploads(
                             crate::scenes::active_scene_key(&self.scene),
                             self.last_frame_dt * 1000.0,
-                            matches!(
-                                self.resume_scene,
-                                crate::persistence::ResumeScene::Gameplay
-                            ),
+                            matches!(self.resume_scene, crate::persistence::ResumeScene::Gameplay),
                         );
                         did_loader_work = true;
                     }

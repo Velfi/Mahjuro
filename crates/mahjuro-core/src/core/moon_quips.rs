@@ -208,9 +208,10 @@ fn pick_weighted_entry_index(cat: &MoonQuipsCatalog, remaining: &[usize]) -> Opt
 
     let mut category_choices: Vec<(&'static str, f32)> = Vec::new();
     for (&category, &cat_w) in &cat.category_weights {
-        let has_line = cat.by_category.get(category).is_some_and(|indices| {
-            indices.iter().any(|&idx| remaining_set.contains_key(&idx))
-        });
+        let has_line = cat
+            .by_category
+            .get(category)
+            .is_some_and(|indices| indices.iter().any(|&idx| remaining_set.contains_key(&idx)));
         if has_line && cat_w > 0.0 {
             category_choices.push((category, cat_w));
         }

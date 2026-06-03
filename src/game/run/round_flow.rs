@@ -11,11 +11,18 @@ use crate::{
 };
 
 impl RunState {
+    /// Clear win/loss terminal flags. Call when leaving an active round or
+    /// between rounds so hallway / shop actions cannot re-fire resolution.
+    pub(super) fn clear_round_resolution_state(&mut self) {
+        self.round_score = 0;
+        self.round_end_queued = false;
+    }
+
     /// Zero round score and set the upcoming chamber target before the gameplay
     /// scene loads. `apply_chamber` still runs later for the deal and boss hooks;
     /// this only primes HUD values so score rollers do not spin off the last round.
     pub fn preset_round_hud_for_chamber_entry(&mut self, blind: ChamberKind) {
-        self.round_score = 0;
+        self.clear_round_resolution_state();
         self.target_score = self.chamber_score_target(blind);
     }
 
@@ -25,9 +32,8 @@ impl RunState {
         if blind == ChamberKind::Ordeal {
             self.ensure_ordeal_revealed();
         }
-        self.round_end_queued = false;
+        self.clear_round_resolution_state();
         self.chamber = blind;
-        self.round_score = 0;
         self.memorial_round.clear();
         self.reset_round_resources();
         self.tile_debuffs.clear();
@@ -299,6 +305,7 @@ impl RunState {
         );
         self.upcoming_chamber = self.upcoming_chamber.next();
         self.run_number += 1;
+        self.clear_round_resolution_state();
         // `target_score` is recomputed by `apply_chamber` when the next blind is picked.
         self.round_rules.clear();
         self.reset_round_resources();

@@ -37,8 +37,8 @@ use crate::table_transform::{
 };
 use crate::wgpu_renderer::{PointLight, SpotLight};
 use crate::world_space::{
-    object3d_pos_triple_for_world_center, pixel_to_world, surface_anchor_from_world_xyz,
-    LayoutAnchorPx,
+    LayoutAnchorPx, object3d_pos_triple_for_world_center, pixel_to_world,
+    surface_anchor_from_world_xyz,
 };
 
 pub const HAND_TILES_LEFT: &str = "hand_tiles_left";
@@ -918,11 +918,7 @@ pub fn require_gameplay_marker_screen_rect(
 /// then +90° CCW about mesh **+Y** (face normal) so atlas art reads upright on the pin.
 pub fn gameplay_boss_icon_rotation(plinth: &GameplayMarkerPose) -> [f32; 3] {
     let rz = plinth.rotation_rad[2] + std::f32::consts::PI;
-    let base = rot_euler_xyz_rad(
-        plinth.rotation_rad[0],
-        plinth.rotation_rad[1],
-        rz,
-    );
+    let base = rot_euler_xyz_rad(plinth.rotation_rad[0], plinth.rotation_rad[1], rz);
     let oriented = base * tile_mesh_local_to_world();
     mat4_to_euler_xyz_rad(oriented * Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2))
 }
@@ -1152,9 +1148,8 @@ pub fn gameplay_gltf_candle_flame_emitters(
             .environment_bounds_doc
             .map(|b| b.center())
             .unwrap_or(Vec3::ZERO);
-        let flame_scale = tuning.emitter_scale(
-            crate::flame_volume::SHOP_GLTF_CANDLE_HEIGHT_DOC_M * s.max(1e-6),
-        );
+        let flame_scale =
+            tuning.emitter_scale(crate::flame_volume::SHOP_GLTF_CANDLE_HEIGHT_DOC_M * s.max(1e-6));
         cpu.embedded_point_lights
             .iter()
             .filter(|l| l.is_candle)

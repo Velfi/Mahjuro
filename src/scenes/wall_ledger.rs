@@ -11,17 +11,13 @@ use crate::render::text_effect::TextEffectId;
 use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
-use crate::ui::controller_hints::{
-    HintStyle, back_scroll_footer_row, push_inline_hint_rows,
-};
+use crate::ui::controller_hints::{HintStyle, back_scroll_footer_row, push_inline_hint_rows};
 use crate::ui::focus_nav;
 use crate::ui::input::UiAction;
 use crate::ui::widget;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::{
-    BackgroundId, DrawCtx, OverlayRequest, SceneBehavior, SceneTransition, UpdateCtx,
-};
+use super::{BackgroundId, DrawCtx, OverlayRequest, SceneBehavior, SceneTransition, UpdateCtx};
 
 const DRAWN_BRIGHTNESS: f32 = 0.32;
 const DRAWN_SCALE: f32 = 0.92;
@@ -42,13 +38,7 @@ impl LedgerNav {
 }
 
 /// Row definitions for the standard 38-face grid (matches tile-select preview).
-const GRID_ROWS: [(usize, usize); 5] = [
-    (0, 9),
-    (9, 9),
-    (18, 9),
-    (27, 7),
-    (34, 4),
-];
+const GRID_ROWS: [(usize, usize); 5] = [(0, 9), (9, 9), (18, 9), (27, 7), (34, 4)];
 
 const ROW_LABELS: [&str; 5] = ["Manzu", "Souzu", "Pinzu", "Honors", "Flowers"];
 
@@ -101,9 +91,7 @@ impl WallLedgerScene {
 }
 
 fn header_chrome(window_w: f32, window_h: f32) -> ([f32; 4], f32) {
-    let ui = (window_w / 1920.0)
-        .min(window_h / 1080.0)
-        .clamp(0.55, 1.35);
+    let ui = (window_w / 1920.0).min(window_h / 1080.0).clamp(0.55, 1.35);
     let margin = 48.0 * ui;
     let header_btn_h = (window_h * 0.052).clamp(44.0, 72.0);
     let back_w = (108.0 * (margin / 48.0)).clamp(88.0, 132.0);
@@ -152,12 +140,7 @@ struct LedgerLayout {
     hints_h: f32,
 }
 
-fn grid_row_metrics(
-    w: f32,
-    h: f32,
-    jr: f32,
-    content_h: f32,
-) -> (f32, f32, f32, f32, f32, f32) {
+fn grid_row_metrics(w: f32, h: f32, jr: f32, content_h: f32) -> (f32, f32, f32, f32, f32, f32) {
     let grid_bottom_pad = (h * GRID_BOTTOM_PAD_FRAC).max(18.0 * jr);
     let label_col_w = w * 0.09;
     let grid_x = w * 0.055 + label_col_w;
@@ -165,16 +148,16 @@ fn grid_row_metrics(
     let available_h = (content_h - grid_bottom_pad).max(80.0 * jr);
     let min_gap = (4.0 * jr).max(3.0);
     let natural_slot_h = (grid_w / 9.0) * 1.36;
-    let natural_grid_h = GRID_ROWS.len() as f32 * natural_slot_h
-        + (GRID_ROWS.len() as f32 - 1.0) * min_gap;
+    let natural_grid_h =
+        GRID_ROWS.len() as f32 * natural_slot_h + (GRID_ROWS.len() as f32 - 1.0) * min_gap;
 
     let (slot_h, row_gap) = if natural_grid_h <= available_h {
         let extra = (available_h - natural_grid_h).max(0.0);
         let gap = min_gap + extra / (GRID_ROWS.len() as f32 - 1.0).max(1.0);
         (natural_slot_h, gap)
     } else {
-        let row_h = (available_h - min_gap * (GRID_ROWS.len() as f32 - 1.0))
-            / GRID_ROWS.len() as f32;
+        let row_h =
+            (available_h - min_gap * (GRID_ROWS.len() as f32 - 1.0)) / GRID_ROWS.len() as f32;
         (row_h, min_gap)
     };
     let standard_grid_h =
@@ -208,7 +191,10 @@ fn ledger_layout(w: f32, h: f32, jr: f32, pack_row_count: usize) -> LedgerLayout
         grid_row_metrics(w, h, jr, content_h);
     let pack_row_count = pack_row_count;
     let pack_gap = if pack_row_count > 0 { 12.0 * jr } else { 0.0 };
-    let pack_section_top = content_top + standard_grid_h + grid_bottom_pad + pack_gap
+    let pack_section_top = content_top
+        + standard_grid_h
+        + grid_bottom_pad
+        + pack_gap
         + if pack_row_count > 0 { 22.0 * jr } else { 0.0 };
     let pack_section_h = if pack_row_count > 0 {
         pack_row_count as f32 * (slot_h + row_gap * 0.5) + 8.0 * jr
@@ -233,10 +219,7 @@ fn ledger_layout(w: f32, h: f32, jr: f32, pack_row_count: usize) -> LedgerLayout
 }
 
 fn groups_by_face(groups: &[WallLedgerFaceGroup]) -> HashMap<(Suit, u8), &WallLedgerFaceGroup> {
-    groups
-        .iter()
-        .map(|g| ((g.suit, g.rank), g))
-        .collect()
+    groups.iter().map(|g| ((g.suit, g.rank), g)).collect()
 }
 
 fn push_cell_tiles(
@@ -270,7 +253,11 @@ fn push_cell_tiles(
         let offset_y = i as f32 * stack_dy;
         placements.push(ShowcaseTilePlacement {
             tile,
-            center_pos: [base_x + offset_x + tile_size * 0.5, row_center_y + offset_y, 0.0],
+            center_pos: [
+                base_x + offset_x + tile_size * 0.5,
+                row_center_y + offset_y,
+                0.0,
+            ],
             rotation: [0.0, 0.0, std::f32::consts::PI],
             scale,
             size_px: tile_size,
@@ -334,9 +321,9 @@ impl SceneBehavior for WallLedgerScene {
         let max_scroll = (layout.total_content_h - layout.content_h).max(0.0);
 
         if ctx.scroll_lines.abs() > 0.001 {
-            self.target_scroll_px =
-                (self.target_scroll_px + ctx.scroll_lines * layout.slot_h * 0.85)
-                    .clamp(0.0, max_scroll);
+            self.target_scroll_px = (self.target_scroll_px
+                + ctx.scroll_lines * layout.slot_h * 0.85)
+                .clamp(0.0, max_scroll);
         }
         self.target_scroll_px = self.target_scroll_px.clamp(0.0, max_scroll);
         self.scroll_px = self.scroll_px.clamp(0.0, max_scroll);
@@ -448,12 +435,7 @@ impl SceneBehavior for WallLedgerScene {
                 mono: false,
             },
             TextLabel {
-                rect: [
-                    w * 0.055,
-                    title_y + title_px * 1.35,
-                    w * 0.7,
-                    sub_px * 1.3,
-                ],
+                rect: [w * 0.055, title_y + title_px * 1.35, w * 0.7, sub_px * 1.3],
                 text: ledger.subtitle.clone(),
                 color: color::alpha(color::CHAMPAGNE, 0.72),
                 font_px: Some(sub_px),

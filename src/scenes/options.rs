@@ -4,10 +4,10 @@
 //! sections (Audio, Graphics, Controls, Accessibility, Data) in a
 //! scrollable content pane on the right.
 
-use crate::sfx_id::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::render::theme::{ButtonState, ButtonVariant, button_colors, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::sfx_id::SfxId;
 use crate::ui::clip::intersect_rect;
 use crate::ui::controller_hints::{
     HintStyle, options_footer_row, push_screen_footer_hint, screen_footer_reserve,
@@ -27,11 +27,7 @@ use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx
 use crate::persistence::{self, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, VOLUME_UNITY};
 
 fn volume_restore_default(current: f32) -> f32 {
-    if current > 0.0 {
-        current
-    } else {
-        VOLUME_UNITY
-    }
+    if current > 0.0 { current } else { VOLUME_UNITY }
 }
 /// Gamma adjustment step per input press.
 const GAMMA_STEP: f32 = 0.05;
@@ -329,11 +325,17 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
     match row {
         Row::Master => (
             "Master",
-            format!("{}%", persistence::volume_display_percent(scene.master_volume)),
+            format!(
+                "{}%",
+                persistence::volume_display_percent(scene.master_volume)
+            ),
         ),
         Row::Music => (
             "Music",
-            format!("{}%", persistence::volume_display_percent(scene.music_volume)),
+            format!(
+                "{}%",
+                persistence::volume_display_percent(scene.music_volume)
+            ),
         ),
         Row::Sfx => (
             "SFX",

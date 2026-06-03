@@ -1,7 +1,7 @@
 //! Splash screen — unified loading plate until the main-menu hub is ready.
 
 use crate::render::wgpu_renderer::loading_screen::{
-    self, append_splash_frame, current_splash_alphas, splash_logo_sequence_complete, request_skip,
+    self, append_splash_frame, current_splash_alphas, request_skip, splash_logo_sequence_complete,
 };
 
 use crate::render::draw_cmd::UiFrame;

@@ -20,8 +20,8 @@ impl WgpuRenderer {
         use crate::wgpu_renderer::constants::MEMORIAL_TALISMAN_TEXTURE_BASE;
         if kind_idx >= MEMORIAL_TALISMAN_TEXTURE_BASE {
             let idx = (kind_idx - MEMORIAL_TALISMAN_TEXTURE_BASE) as usize;
-            if let Some(&kind) = mahjuro_core::core::memorial_talisman::MemorialTalismanKind::all()
-                .get(idx)
+            if let Some(&kind) =
+                mahjuro_core::core::memorial_talisman::MemorialTalismanKind::all().get(idx)
             {
                 return self
                     .memorial_talisman_meshes
@@ -41,9 +41,12 @@ impl WgpuRenderer {
 
     /// Lazy-upload one boss atlas cell into [`Self::ordeal_icon_meshes`] /
     /// [`Self::ordeal_icon_textures`] (silhouette mesh via [`build_ordeal_icon_mesh_from_rgba`]).
-    pub(crate) fn ensure_ordeal_icon_gpu(&mut self, kind: mahjuro_core::core::ordeal_kind::OrdealKind) {
-        use crate::relic_dish::build_ordeal_icon_mesh_from_rgba;
+    pub(crate) fn ensure_ordeal_icon_gpu(
+        &mut self,
+        kind: mahjuro_core::core::ordeal_kind::OrdealKind,
+    ) {
         use crate::ordeal_icons::ordeal_icon_rgba;
+        use crate::relic_dish::build_ordeal_icon_mesh_from_rgba;
 
         if self.ordeal_icon_meshes.contains_key(&kind)
             && self.ordeal_icon_textures.contains_key(&kind)

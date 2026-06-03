@@ -576,10 +576,7 @@ pub(crate) fn flower_meld_partitions_for_rules(
 
 /// Hand-index bitmasks for every way to commit zero or more flower-only pairs /
 /// triplets from `flowers` (each entry is `(hand_index, tile_id)`).
-pub fn flower_meld_partition_masks(
-    flowers: &[(usize, u32)],
-    rules: &[RuleModifier],
-) -> Vec<u32> {
+pub fn flower_meld_partition_masks(flowers: &[(usize, u32)], rules: &[RuleModifier]) -> Vec<u32> {
     let ids: Vec<u32> = flowers.iter().map(|(_, id)| *id).collect();
     let mut masks = vec![0u32];
     for (melds, _) in flower_meld_partitions_for_rules(&ids, rules) {

@@ -8,8 +8,8 @@
 
 use std::sync::{Arc, OnceLock};
 
-use mahjuro_assets::asset_path;
 use crate::room_gi_bake::RoomGiRoom;
+use mahjuro_assets::asset_path;
 
 const MAGIC: &[u8; 4] = b"MSH1";
 pub const VERSION: u32 = mahjuro_bake_stamp::room_shadow::MSH_FORMAT_VERSION;
@@ -74,12 +74,14 @@ pub fn probe_contact_ao_at_world(
     let x = ((uv[0] * (w as f32 - 1.0)).round() as usize).min(w - 1);
     let y = ((uv[1] * (h as f32 - 1.0)).round() as usize).min(h - 1);
     let ao_val = *ao.get(y * w + x)?;
-    let baked_depth = bake.depth_bytes.chunks_exact(4).nth(y * w + x).map(|chunk| {
-        f32::from_le_bytes(chunk.try_into().unwrap())
-    });
+    let baked_depth = bake
+        .depth_bytes
+        .chunks_exact(4)
+        .nth(y * w + x)
+        .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()));
     let depth_delta = baked_depth.map(|d| (d - ndc_v.z).abs());
-    let applies = depth_delta.is_none_or(|d| d <= CONTACT_AO_DEPTH_COHERENCE_EPS)
-        && (ao_val as f32) < 250.0;
+    let applies =
+        depth_delta.is_none_or(|d| d <= CONTACT_AO_DEPTH_COHERENCE_EPS) && (ao_val as f32) < 250.0;
     Some(ContactAoWorldProbe {
         ndc: ndc_v.to_array(),
         uv,
@@ -333,9 +335,7 @@ pub fn runtime_required_room_shadow_bakes() -> [RoomGiRoom; 5] {
 
 fn load_room_shadow_bake(room: RoomGiRoom) -> Option<Arc<RoomShadowBake>> {
     if committed_room_shadows_required() {
-        return Some(
-            require_effective_room_shadow_bake(room).unwrap_or_else(|e| panic!("{e:#}")),
-        );
+        return Some(require_effective_room_shadow_bake(room).unwrap_or_else(|e| panic!("{e:#}")));
     }
     let file = asset_path::get(room.shadow_asset_path())?;
     RoomShadowBake::decode_for_room(&file.data, room)
@@ -464,8 +464,8 @@ mod tests {
 
         let bake = require_room_shadow_bake(RoomGiRoom::Shop).expect("shop.msh");
         let lvp = glam::Mat4::from_cols_array(&bake.light_view_proj);
-        let bounds = with_shop_glb_cpu(|o| o.and_then(|c| c.environment_bounds_doc))
-            .expect("shop bounds");
+        let bounds =
+            with_shop_glb_cpu(|o| o.and_then(|c| c.environment_bounds_doc)).expect("shop bounds");
         const BAKE_H: f32 = 1080.0;
         const ENV_H: f32 = 1.0;
         let corners = room_world_bounds_corners_centered(bounds, BAKE_H, ENV_H);
@@ -481,7 +481,10 @@ mod tests {
             uv_min = uv_min.min(uv);
             uv_max = uv_max.max(uv);
             if let Some(a) = sample_bake_ao(&bake, uv) {
-                eprintln!("corner {:?} uv {:?} ndc_z {:.3} ao {}", corner, uv, ndc_z, a);
+                eprintln!(
+                    "corner {:?} uv {:?} ndc_z {:.3} ao {}",
+                    corner, uv, ndc_z, a
+                );
                 ao_samples.push(a);
             }
         }

@@ -301,13 +301,12 @@ impl WgpuRenderer {
         let w_f = self.size.width as f32;
         let h_f = self.size.height as f32;
         let (cx, cy) = frame.cursor_pos.unwrap_or((w_f * 0.5, h_f * 0.5));
-        let cascade_quality_level = if frame.transition_progress > 0.0
-            && frame.transition_progress < 1.0
-        {
-            cascade_effects_quality.quality_level_f32()
-        } else {
-            0.0
-        };
+        let cascade_quality_level =
+            if frame.transition_progress > 0.0 && frame.transition_progress < 1.0 {
+                cascade_effects_quality.quality_level_f32()
+            } else {
+                0.0
+            };
         self.queue.write_buffer(
             &self.globals_buffer,
             0,

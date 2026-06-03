@@ -12,8 +12,8 @@ use std::sync::{Arc, OnceLock};
 
 use glam::Vec3;
 
-use mahjuro_assets::asset_path;
 use crate::room_glb;
+use mahjuro_assets::asset_path;
 
 const MAGIC: &[u8; 4] = b"MGI1";
 pub const VERSION: u32 = mahjuro_bake_stamp::room_gi::MGI_FORMAT_VERSION;
@@ -266,9 +266,7 @@ impl RoomGiBake {
 
 fn load_room_gi_bake(room: RoomGiRoom) -> Option<Arc<RoomGiBake>> {
     if crate::offline_bakes::committed_offline_bakes_required() {
-        return Some(
-            require_room_gi_bake(room).unwrap_or_else(|e| panic!("{e:#}")),
-        );
+        return Some(require_room_gi_bake(room).unwrap_or_else(|e| panic!("{e:#}")));
     }
     let file = asset_path::get(room.asset_path())?;
     RoomGiBake::decode_for_room(&file.data, room)

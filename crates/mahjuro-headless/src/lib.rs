@@ -21,9 +21,9 @@ mod bake;
 #[cfg(feature = "bake")]
 mod room_bake_app;
 #[cfg(feature = "screenshot")]
-mod screenshot_scenes;
-#[cfg(feature = "screenshot")]
 mod screenshot;
+#[cfg(feature = "screenshot")]
+mod screenshot_scenes;
 
 #[cfg(feature = "bake")]
 pub use bake::run as run_bake;

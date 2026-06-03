@@ -128,7 +128,6 @@ impl WgpuRenderer {
         active_key: Option<&str>,
         tunes: &[(&'static str, crate::room_glb::RoomEnvFrameTune)],
     ) {
-        
         self.frame_env_tunes.clear();
         for (key, tune) in tunes {
             self.frame_env_tunes.insert(*key, *tune);
@@ -158,9 +157,7 @@ impl WgpuRenderer {
     /// Snap gameplay score/target odometer rollers to the next frame's HUD values
     /// instead of animating from the previous round's drive state.
     pub fn snap_gameplay_score_rollers(&self) {
-        *self
-            .gameplay_score_roller_drive_initialized
-            .borrow_mut() = [false; 2];
+        *self.gameplay_score_roller_drive_initialized.borrow_mut() = [false; 2];
         *self.gameplay_score_roller_roll_elapsed.borrow_mut() = 0.0;
     }
 

@@ -63,45 +63,51 @@ pub(crate) fn upload_gltf_tile_primitives(
             None => white_albedo(device, queue),
         };
         let normal_view = match &prim.normal_rgba {
-            Some((rgba, w, h)) => upload_rgba_texture_with_mips(&TextureUploadParams {
-                device,
-                queue,
-                label: format!("{label_prefix}-normal-{i}"),
-                rgba,
-                width: *w,
-                height: *h,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                mips,
-            })
-            .1,
+            Some((rgba, w, h)) => {
+                upload_rgba_texture_with_mips(&TextureUploadParams {
+                    device,
+                    queue,
+                    label: format!("{label_prefix}-normal-{i}"),
+                    rgba,
+                    width: *w,
+                    height: *h,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    mips,
+                })
+                .1
+            }
             None => default_normal_view.clone(),
         };
         let metallic_roughness_view = match &prim.metallic_roughness_rgba {
-            Some((rgba, w, h)) => upload_rgba_texture_with_mips(&TextureUploadParams {
-                device,
-                queue,
-                label: format!("{label_prefix}-mr-{i}"),
-                rgba,
-                width: *w,
-                height: *h,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                mips,
-            })
-            .1,
+            Some((rgba, w, h)) => {
+                upload_rgba_texture_with_mips(&TextureUploadParams {
+                    device,
+                    queue,
+                    label: format!("{label_prefix}-mr-{i}"),
+                    rgba,
+                    width: *w,
+                    height: *h,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    mips,
+                })
+                .1
+            }
             None => default_mr_view.clone(),
         };
         let emissive_view = match &prim.emissive_rgba {
-            Some((rgba, w, h)) => upload_rgba_texture_with_mips(&TextureUploadParams {
-                device,
-                queue,
-                label: format!("{label_prefix}-emissive-{i}"),
-                rgba,
-                width: *w,
-                height: *h,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                mips,
-            })
-            .1,
+            Some((rgba, w, h)) => {
+                upload_rgba_texture_with_mips(&TextureUploadParams {
+                    device,
+                    queue,
+                    label: format!("{label_prefix}-emissive-{i}"),
+                    rgba,
+                    width: *w,
+                    height: *h,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    mips,
+                })
+                .1
+            }
             None => default_emissive_view.clone(),
         };
         let pbr_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

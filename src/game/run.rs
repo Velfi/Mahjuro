@@ -47,11 +47,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::OrdealKindExt;
 use crate::core::debuff::TileDebuff;
 use crate::core::deck::Wall;
 use crate::core::hand::{DetectedMeld, validate_selection_with_rules};
 use crate::core::ordeal::{self, OrdealKind};
-use crate::core::OrdealKindExt;
 use crate::core::relic::{RelicId, RelicState};
 use crate::core::rules::{ChamberKind, RuleModifier};
 use crate::core::scoring::ScoreBreakdown;
@@ -471,9 +471,7 @@ impl RunState {
     }
 
     pub(crate) fn can_afford_shop_reroll(&self, reroll_cost: u32) -> bool {
-        reroll_cost == 0
-            || self.yen >= reroll_cost as i32
-            || self.i_got_a_guy_restock_charges() > 0
+        reroll_cost == 0 || self.yen >= reroll_cost as i32 || self.i_got_a_guy_restock_charges() > 0
     }
 
     pub fn hand(&self) -> &[Tile] {
@@ -1066,8 +1064,7 @@ impl RunState {
         let (suit, rank) = (self.hand[idx].suit, self.hand[idx].rank);
         let id = crate::core::deck::joker_extra_tile_id(self.joker_extra_faces.len());
         self.joker_extra_faces.push((suit, rank));
-        self.wall
-            .inject_into_remaining(Tile::new(suit, rank, id));
+        self.wall.inject_into_remaining(Tile::new(suit, rank, id));
         self.push_relic_activation(RelicId::JokerTile);
     }
 }

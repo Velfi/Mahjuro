@@ -62,5 +62,5 @@ impl super::RunState {
         if yen_delta != 0 {
             self.notify_run_yen_changed(yen_delta, bus);
         }
-    }       
+    }
 }

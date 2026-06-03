@@ -15,8 +15,7 @@ impl BakeKind for ShowcaseDecal {
     const BUILD_TOOL_CMD: &'static str =
         "cargo build -p mahjuro-render --bin mahjuro-bake-decal-atlases";
     const REBAKE_CMD: &'static str = "cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases";
-    const COMMIT_PATHS: &'static str =
-        "assets/textures/tile_sets/*/showcase_decal_atlas.png assets/textures/tile_sets/.decal_bake_stamp";
+    const COMMIT_PATHS: &'static str = "assets/textures/tile_sets/*/showcase_decal_atlas.png assets/textures/tile_sets/.decal_bake_stamp";
 
     fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
         rerun_if_changed_paths()

@@ -12,11 +12,8 @@ fn main() -> anyhow::Result<()> {
     let assets = std::env::var_os("MAHJURO_ASSETS")
         .map(std::path::PathBuf::from)
         .or_else(|| {
-            std::env::var_os("CARGO_MANIFEST_DIR").map(|p| {
-                std::path::PathBuf::from(p)
-                    .join("../..")
-                    .join("assets")
-            })
+            std::env::var_os("CARGO_MANIFEST_DIR")
+                .map(|p| std::path::PathBuf::from(p).join("../..").join("assets"))
         })
         .ok_or_else(|| anyhow::anyhow!("set MAHJURO_ASSETS or run from the repo"))?;
 

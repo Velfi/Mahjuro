@@ -362,7 +362,11 @@ impl PlayerProgress {
     /// the next season for that material. Idempotent; returns `Some(next)` if
     /// a new tier was just freed up, `None` otherwise (already unlocked, or
     /// Winter has no successor).
-    pub fn record_season_victory(&mut self, material: TileMaterial, season: Season) -> Option<Season> {
+    pub fn record_season_victory(
+        &mut self,
+        material: TileMaterial,
+        season: Season,
+    ) -> Option<Season> {
         let entry = self.unlocked_seasons.entry(material).or_default();
         let newly_inserted = entry.insert(season);
         // The unlocked ladder advances by one on a successful win of `season`,

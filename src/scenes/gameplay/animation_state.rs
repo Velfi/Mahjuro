@@ -94,9 +94,11 @@ pub(super) fn tick_deal_detection(
         scene.prev_hand_len = cur_hand_len;
     } else {
         if cur_hand_len > scene.prev_hand_len
-            && scene.light_ramp < 1.0 && scene.light_ramp_anchor.is_none() {
-                scene.light_ramp_anchor = Some(now);
-            }
+            && scene.light_ramp < 1.0
+            && scene.light_ramp_anchor.is_none()
+        {
+            scene.light_ramp_anchor = Some(now);
+        }
         scene.prev_hand_len = cur_hand_len;
     }
 }

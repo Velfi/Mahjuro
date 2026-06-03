@@ -56,10 +56,7 @@ impl PunctualOccluderAabb {
 }
 
 #[inline]
-fn room_collision_mesh_world_aabb(
-    mesh: &RoomCollisionMesh,
-    model: glam::Mat4,
-) -> (Vec3, Vec3) {
+fn room_collision_mesh_world_aabb(mesh: &RoomCollisionMesh, model: glam::Mat4) -> (Vec3, Vec3) {
     let mut lo = Vec3::splat(f32::INFINITY);
     let mut hi = Vec3::splat(f32::NEG_INFINITY);
     for tri in &mesh.triangles {
@@ -154,11 +151,7 @@ fn scene_segment_hits_aabb(
     far_t > near_t && near_t > near_bias && near_t < far_bias
 }
 
-fn punctual_occlusion(
-    light_pos: Vec3,
-    frag_pos: Vec3,
-    occluders: &[PunctualOccluderAabb],
-) -> f32 {
+fn punctual_occlusion(light_pos: Vec3, frag_pos: Vec3, occluders: &[PunctualOccluderAabb]) -> f32 {
     if occluders.is_empty() {
         return 1.0;
     }
@@ -174,14 +167,7 @@ fn punctual_occlusion(
     let near_bias = 0.015;
     let far_bias = 0.985;
     for occ in occluders {
-        if scene_segment_hits_aabb(
-            lp,
-            inv,
-            occ.center,
-            occ.half_extents,
-            near_bias,
-            far_bias,
-        ) {
+        if scene_segment_hits_aabb(lp, inv, occ.center, occ.half_extents, near_bias, far_bias) {
             return 0.0;
         }
     }
@@ -249,11 +235,7 @@ fn spot_light_world(ctx: &SceneLightSampleCtx<'_>, light: &SpotLight) -> (Vec3, 
     (pos, dir)
 }
 
-fn punctual_visibility(
-    ctx: &SceneLightSampleCtx<'_>,
-    light_pos: Vec3,
-    frag_pos: Vec3,
-) -> f32 {
+fn punctual_visibility(ctx: &SceneLightSampleCtx<'_>, light_pos: Vec3, frag_pos: Vec3) -> f32 {
     if ctx.occluders.is_empty() {
         return 1.0;
     }
@@ -329,8 +311,7 @@ fn accumulate_punctual_lo(
         if dist < 1e-4 {
             continue;
         }
-        let atten =
-            punctual_attenuation_with_inv_doc_scale(dist, spot.radius, ctx.inv_doc_scale);
+        let atten = punctual_attenuation_with_inv_doc_scale(dist, spot.radius, ctx.inv_doc_scale);
         if atten <= 0.0 {
             continue;
         }
@@ -341,10 +322,7 @@ fn accumulate_punctual_lo(
         if spot_factor <= 0.0 {
             continue;
         }
-        let radiance = Vec3::from(spot.color)
-            * spot.intensity.max(0.0)
-            * atten
-            * spot_factor;
+        let radiance = Vec3::from(spot.color) * spot.intensity.max(0.0) * atten * spot_factor;
         let ndl = ndl_at(l_dir);
         if ndl <= 0.0 {
             continue;

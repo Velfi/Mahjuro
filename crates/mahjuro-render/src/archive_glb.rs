@@ -70,12 +70,9 @@ pub const ARCHIVE_TAB_BUTTON_NODES: [&str; 5] = [
 pub const ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS: [f32; 3] = [1.0, 1.0, 1.0];
 
 fn archive_decal_host_extents_for_marker(cpu: &RoomGlbCpu, node: &str) -> Option<[f32; 3]> {
-    let bounds = cpu
-        .marker_mesh_bounds_doc_for(node)
-        .copied()
-        .or_else(|| {
-            crate::room_env_gltf::room_env_primitive_bounds_doc(&cpu.environment_primitives, node)
-        })?;
+    let bounds = cpu.marker_mesh_bounds_doc_for(node).copied().or_else(|| {
+        crate::room_env_gltf::room_env_primitive_bounds_doc(&cpu.environment_primitives, node)
+    })?;
     let diag = bounds.max - bounds.min;
     let mut e = [diag.x.abs(), diag.y.abs(), diag.z.abs()];
     // Sort ascending so e[2] = longest face edge, e[1] = shorter face edge, e[0] = thickness.
@@ -307,8 +304,7 @@ impl RoomEnvWalkHooks for ArchiveRoomWalkHooks {
         if matches!(
             name,
             SIGN_DESCRIPTION_LEFT | SIGN_DESCRIPTION_RIGHT | INSPECT_PLAQUE
-        )
-            || is_archive_button_node(name)
+        ) || is_archive_button_node(name)
         {
             RoomMeshPolicy::EnvironmentDraw
         } else if matches!(
@@ -548,7 +544,8 @@ mod tests {
 
     #[test]
     fn archive_inspect_plaque_has_decal_host_bounds() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/3d/archive.glb");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/3d/archive.glb");
         let data = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let cpu = load_archive_glb_from_bytes(&data).expect("decode archive.glb");
         let extents = archive_inspect_plaque_decal_extents_for(&cpu);

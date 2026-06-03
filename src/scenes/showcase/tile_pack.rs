@@ -95,8 +95,7 @@ impl TilePackPresenter {
         let from = self.celebration.revealed_count;
         self.celebration.skip_to_settled();
         if needs_opened {
-            ctx.bus
-                .push(crate::game::event_bus::GameEvent::PackOpened);
+            ctx.bus.push(crate::game::event_bus::GameEvent::PackOpened);
         }
         for _ in from..self.celebration.tiles.len() {
             ctx.bus
@@ -198,7 +197,12 @@ impl TilePackPresenter {
 
         match celeb.phase {
             PackCelebPhase::Arrival => {
-                let anchor = pack_closeup_anchor(screen, &self.positions, box_h * drift.scale, Mat4::IDENTITY);
+                let anchor = pack_closeup_anchor(
+                    screen,
+                    &self.positions,
+                    box_h * drift.scale,
+                    Mat4::IDENTITY,
+                );
                 let hero = drift.apply_to_pos(anchor.pos);
                 let cx = hero[0];
                 let cy = hero[1];
@@ -455,9 +459,11 @@ impl TilePackPresenter {
             }
         }
 
-        let confirm_or_click = ctx.actions.iter().any(|a| {
-            matches!(a, UiAction::Confirm | UiAction::CommitDiscard)
-        }) || !ctx.button_clicks.is_empty();
+        let confirm_or_click = ctx
+            .actions
+            .iter()
+            .any(|a| matches!(a, UiAction::Confirm | UiAction::CommitDiscard))
+            || !ctx.button_clicks.is_empty();
         let cancel = ctx.actions.iter().any(|a| matches!(a, UiAction::Cancel));
 
         if confirm_or_click || cancel {
@@ -471,8 +477,7 @@ impl TilePackPresenter {
                 PackCelebPhase::Anticipation if confirm_or_click => {
                     self.celebration.phase = PackCelebPhase::Unseal;
                     self.celebration.started_at = Instant::now();
-                    ctx.bus
-                        .push(crate::game::event_bus::GameEvent::PackOpened);
+                    ctx.bus.push(crate::game::event_bus::GameEvent::PackOpened);
                 }
                 PackCelebPhase::Anticipation => {
                     self.emit_skip_to_settled(&mut ctx);
@@ -956,7 +961,17 @@ pub(crate) fn push_pack_object3d(
 ) {
     let (bx, by) = bob_xy.unwrap_or((0.0, 0.0));
     let pos = [anchor.pos[0] + bx, anchor.pos[1] + by, anchor.pos[2]];
-    push_pack_object3d_at(frame, win_w, win_h, cam, anchor, pos, screen_h_px, pack_kind, color);
+    push_pack_object3d_at(
+        frame,
+        win_w,
+        win_h,
+        cam,
+        anchor,
+        pos,
+        screen_h_px,
+        pack_kind,
+        color,
+    );
 }
 
 fn push_pack_object3d_at(

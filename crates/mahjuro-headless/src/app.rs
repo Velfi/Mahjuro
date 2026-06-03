@@ -362,7 +362,7 @@ impl HeadlessApp {
                     effect_layers: self.effect_layers,
                     item_inspect_orbit_stick: (0.0, 0.0),
                     item_inspect_zoom_triggers: 0.0,
-                shop_storeroom_orbit_drag_px: (0.0, 0.0),
+                    shop_storeroom_orbit_drag_px: (0.0, 0.0),
                     rumble_lab_ops: &mut scratch.rumble_lab_ops,
                     suspended_shop,
                     suspended_collection,
@@ -409,9 +409,7 @@ impl HeadlessApp {
             env_per_scene.insert(key, (room, look.room_gltf_height_scale));
             env_frame_tunes.push((
                 key,
-                mahjuro_render::tuning::scene_look::room_env_frame_from_scene_look(
-                    &look, room,
-                ),
+                mahjuro_render::tuning::scene_look::room_env_frame_from_scene_look(&look, room),
             ));
         }
         let ctx = DrawCtx::new(
@@ -481,7 +479,8 @@ impl HeadlessApp {
         self.renderer.set_active_scene(active_scene_key);
         let look = self.scene_look.resolve(active_scene_key);
         self.renderer.set_tonemap_tuning(&look.tonemap);
-        self.renderer.set_frame_scene_env_tunes(active_scene_key, &env_frame_tunes);
+        self.renderer
+            .set_frame_scene_env_tunes(active_scene_key, &env_frame_tunes);
 
         let active_material = frame
             .tile_material_override

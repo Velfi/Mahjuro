@@ -258,7 +258,13 @@ pub fn layout_with_msdf_label(screen_w: f32, screen_h: f32) -> LoadingLayout {
 }
 
 /// Append the unified loading plate to a full-renderer [`UiFrame`].
-pub fn append_splash_frame(frame: &mut UiFrame, screen_w: f32, screen_h: f32, progress: f32, alphas: LoadingAlphas) {
+pub fn append_splash_frame(
+    frame: &mut UiFrame,
+    screen_w: f32,
+    screen_h: f32,
+    progress: f32,
+    alphas: LoadingAlphas,
+) {
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, screen_w, screen_h],
         color: [0.0, 0.0, 0.0, 1.0],
@@ -297,7 +303,12 @@ pub fn append_splash_frame(frame: &mut UiFrame, screen_w: f32, screen_h: f32, pr
         let fill_w = (layout.bar_rect[2] * progress).max(0.0);
         if fill_w > 0.5 {
             frame.quad(GpuInstance {
-                rect: [layout.bar_rect[0], layout.bar_rect[1], fill_w, layout.bar_rect[3]],
+                rect: [
+                    layout.bar_rect[0],
+                    layout.bar_rect[1],
+                    fill_w,
+                    layout.bar_rect[3],
+                ],
                 color: [
                     layout.fill_color[0],
                     layout.fill_color[1],
@@ -351,7 +362,10 @@ mod tests {
     fn splash_logo_stays_up_during_hold() {
         let start = Instant::now() - std::time::Duration::from_secs_f32(2.5);
         let alphas = alphas_for_elapsed(start, None);
-        assert!((alphas.logo - 1.0).abs() < 0.01, "logo should hold at full opacity");
+        assert!(
+            (alphas.logo - 1.0).abs() < 0.01,
+            "logo should hold at full opacity"
+        );
         assert!(alphas.loading_ui < 0.1);
     }
 }

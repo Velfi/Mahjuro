@@ -2,32 +2,28 @@
 //!
 //! Entered from Debug → Labs → Cascade Lab…
 
+use crate::core::OrdealKindExt;
 use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::ordeal_kind::OrdealKind;
 use crate::core::relic::{RelicId, all_relic_defs};
 use crate::core::rules::ChamberKind;
-use crate::core::OrdealKindExt;
 use crate::core::rules::RuleModifier;
-use crate::core::structure_notation::{
-    self, StructureNotationError, STRUCTURE_NOTATION_HINT,
-};
+use crate::core::structure_notation::{self, STRUCTURE_NOTATION_HINT, StructureNotationError};
 use crate::core::tile::{Suit, Tile};
 use crate::game::cascade::CascadeTuning;
+use crate::render::draw_cmd::CameraParams;
 use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
 use crate::render::gameplay_glb::{
-    self, STRUCTURE_TILES_LEFT, STRUCTURE_TILES_RIGHT, TILE_PLINTH_MARKERS, PLAYER_RELIC_MARKERS,
+    self, PLAYER_RELIC_MARKERS, STRUCTURE_TILES_LEFT, STRUCTURE_TILES_RIGHT, TILE_PLINTH_MARKERS,
 };
 use crate::render::theme::{color, metrics, typography};
-use crate::render::draw_cmd::CameraParams;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
-use crate::ui::controller_hints::{
-    HintStyle, back_footer_row, push_screen_footer_hint_for,
-};
+use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer_hint_for};
 use crate::ui::input::UiAction;
 use crate::ui::ordeal_icons::ordeal_icon_source;
 
 use super::cascade_lab_click::LabClick;
-use super::gameplay::{relic_tray_slot_screen_center, GameplayScene};
+use super::gameplay::{GameplayScene, relic_tray_slot_screen_center};
 use super::main_menu::MainMenuScene;
 use super::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
@@ -255,9 +251,9 @@ fn yakuhai_structure() -> (Vec<Tile>, Vec<DetectedMeld>) {
 const STRUCTURE_TEXT_MAX: usize = 128;
 
 const MELD_PRESETS: &[&str] = &[
-    "11m", "22p", "33s", "44m", "55p", "66s", "77m", "88p", "99s", "123m", "234p", "345s",
-    "456m", "567p", "678s", "789m", "111m", "222p", "333s", "eee", "sss", "www", "nnn", "rrr",
-    "ggg", "whwh", "f1f2f3",
+    "11m", "22p", "33s", "44m", "55p", "66s", "77m", "88p", "99s", "123m", "234p", "345s", "456m",
+    "567p", "678s", "789m", "111m", "222p", "333s", "eee", "sss", "www", "nnn", "rrr", "ggg",
+    "whwh", "f1f2f3",
 ];
 
 fn plinth_hit_rect(
@@ -455,8 +451,10 @@ impl CascadeLabScene {
     }
 
     fn sync_structure_text_from_run(&mut self, run: &crate::game::run::RunState) {
-        self.structure_text =
-            structure_notation::format_structure_notation(run.structure_tiles(), run.structure_sets());
+        self.structure_text = structure_notation::format_structure_notation(
+            run.structure_tiles(),
+            run.structure_sets(),
+        );
         self.structure_error = None;
     }
 
@@ -689,9 +687,8 @@ impl CascadeLabScene {
                 gameplay_glb::gameplay_marker_screen_rect(w, h, cam, env_h, cpu, name, hit, hit)
             });
         }
-        relic_tray_slot_screen_center(w, h, env_h, slot).map(|(cx, cy)| {
-            [cx - hit * 0.5, cy - hit * 0.5, hit, hit]
-        })
+        relic_tray_slot_screen_center(w, h, env_h, slot)
+            .map(|(cx, cy)| [cx - hit * 0.5, cy - hit * 0.5, hit, hit])
     }
 
     fn is_picker_button(id: u32) -> bool {
@@ -720,10 +717,11 @@ impl CascadeLabScene {
         if !picker_open {
             return lab_buttons.into_iter().chain(gameplay_buttons).collect();
         }
-        let (picker_btns, rest): (Vec<_>, Vec<_>) = lab_buttons.into_iter().partition(|btn| {
-            matches!(btn.action, ButtonAction::Scene(id) if Self::is_picker_button(id))
-        });
-        let mut ordered = Vec::with_capacity(picker_btns.len() + rest.len() + gameplay_buttons.len() + 1);
+        let (picker_btns, rest): (Vec<_>, Vec<_>) = lab_buttons.into_iter().partition(
+            |btn| matches!(btn.action, ButtonAction::Scene(id) if Self::is_picker_button(id)),
+        );
+        let mut ordered =
+            Vec::with_capacity(picker_btns.len() + rest.len() + gameplay_buttons.len() + 1);
         ordered.extend(picker_btns);
         ordered.extend(rest);
         ordered.push(ButtonDef::scene(
@@ -778,7 +776,12 @@ impl CascadeLabScene {
         tabs_y + tab_h + pad
     }
 
-    fn timing_tab_layout(_panel_x: f32, body_y: f32, panel_w: f32, scale: f32) -> (f32, f32, f32, f32, f32) {
+    fn timing_tab_layout(
+        _panel_x: f32,
+        body_y: f32,
+        panel_w: f32,
+        scale: f32,
+    ) -> (f32, f32, f32, f32, f32) {
         let row_h = (18.0 * scale).max(14.0);
         let row_gap = (2.0 * scale).max(1.0);
         let label_w = panel_w * 0.48;
@@ -841,11 +844,7 @@ impl CascadeLabScene {
             for (i, _) in TUNING_ROW_META.iter().enumerate().take(TUNING_SLIDER_ROWS) {
                 let row_y = rows_y0 + i as f32 * (row_h + row_gap);
                 let track_x = panel_x + label_w;
-                if mx >= track_x
-                    && mx <= track_x + slider_w
-                    && my >= row_y
-                    && my <= row_y + row_h
-                {
+                if mx >= track_x && mx <= track_x + slider_w && my >= row_y && my <= row_y + row_h {
                     self.tuning_cursor = i;
                     let (_, min, max, _) = TUNING_ROW_META[i];
                     let t = ((mx - track_x) / slider_w.max(1e-6)).clamp(0.0, 1.0);
@@ -874,7 +873,8 @@ impl CascadeLabScene {
         let row_h = (52.0 * scale).max(40.0);
         let rows = Self::picker_row_count(picker) as f32;
         let max_scroll = (rows * row_h - h * 0.7).max(0.0);
-        self.picker_scroll = (self.picker_scroll - scroll_lines * row_h * 0.85).clamp(0.0, max_scroll);
+        self.picker_scroll =
+            (self.picker_scroll - scroll_lines * row_h * 0.85).clamp(0.0, max_scroll);
     }
 
     fn push_btn(
@@ -915,12 +915,10 @@ impl CascadeLabScene {
             align: TextAlign::Center,
             ..Default::default()
         });
-        frame
-            .buttons
-            .push(ButtonDef::scene(
-                (panel_x, panel_y, panel_w, panel_h),
-                LabClick::TogglePanel.id(),
-            ));
+        frame.buttons.push(ButtonDef::scene(
+            (panel_x, panel_y, panel_w, panel_h),
+            LabClick::TogglePanel.id(),
+        ));
     }
 
     fn draw_expanded_panel(&self, frame: &mut UiFrame, w: f32, h: f32) {
@@ -990,14 +988,20 @@ impl CascadeLabScene {
                 LabTab::Table => LabClick::TabTable,
                 LabTab::RunState => LabClick::TabState,
             };
-            frame.buttons.push(ButtonDef::scene((tx, tabs_y, tab_w, tab_h), tab_click.id()));
+            frame
+                .buttons
+                .push(ButtonDef::scene((tx, tabs_y, tab_w, tab_h), tab_click.id()));
         }
 
         let body_y = Self::expanded_panel_body_y(panel_y, scale);
         let body_h = panel_y + panel_h - body_y - pad;
         match self.active_tab {
-            LabTab::Timing => self.draw_timing_tab(frame, panel_x, body_y, panel_w, body_h, h, scale),
-            LabTab::Table => self.draw_table_tab(frame, panel_x, body_y, panel_w, body_h, h, scale, row_h),
+            LabTab::Timing => {
+                self.draw_timing_tab(frame, panel_x, body_y, panel_w, body_h, h, scale)
+            }
+            LabTab::Table => {
+                self.draw_table_tab(frame, panel_x, body_y, panel_w, body_h, h, scale, row_h)
+            }
             LabTab::RunState => {}
         }
     }
@@ -1162,7 +1166,13 @@ impl CascadeLabScene {
             ("Reset tuning", LabClick::ResetTuning),
             ("Back", LabClick::Back),
         ] {
-            Self::push_btn(frame, (panel_x + 8.0, y, panel_w - 16.0, row_h), label, id, row_h);
+            Self::push_btn(
+                frame,
+                (panel_x + 8.0, y, panel_w - 16.0, row_h),
+                label,
+                id,
+                row_h,
+            );
             y += row_h + gap;
         }
     }
@@ -1177,7 +1187,8 @@ impl CascadeLabScene {
         cam: Option<&CameraParams>,
     ) {
         for i in 0..RELIC_SLOT_COUNT {
-            let Some([rx, ry, rw, rh]) = Self::relic_slot_hit_rect(w, h, env_h, i, proj, cam) else {
+            let Some([rx, ry, rw, rh]) = Self::relic_slot_hit_rect(w, h, env_h, i, proj, cam)
+            else {
                 continue;
             };
             let picking = self.active_picker == Some(LabPicker::Relic(i));
@@ -1230,7 +1241,8 @@ impl CascadeLabScene {
             let cpu = cpu?;
             let mut poses = Vec::new();
             for name in TILE_PLINTH_MARKERS {
-                if let Ok(pose) = gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, name) {
+                if let Ok(pose) = gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, name)
+                {
                     poses.push(pose);
                 }
             }
@@ -1238,12 +1250,8 @@ impl CascadeLabScene {
         });
         if let Some(plinth) = plinth {
             let dora_count = Self::dora_slot_count(run);
-            let dora_rect = plinth_hit_rect(
-                proj.dora_tile_rect,
-                &plinth[0].anchor,
-                layout,
-                dora_count,
-            );
+            let dora_rect =
+                plinth_hit_rect(proj.dora_tile_rect, &plinth[0].anchor, layout, dora_count);
             for i in 0..dora_count {
                 let picking = self.active_picker == Some(LabPicker::Dora(i));
                 highlight(
@@ -1305,7 +1313,14 @@ impl CascadeLabScene {
         }
     }
 
-    fn draw_picker(&self, frame: &mut UiFrame, w: f32, h: f32, picker: LabPicker, run: &crate::game::run::RunState) {
+    fn draw_picker(
+        &self,
+        frame: &mut UiFrame,
+        w: f32,
+        h: f32,
+        picker: LabPicker,
+        run: &crate::game::run::RunState,
+    ) {
         let scale = metrics::scene_scale(w, h);
         let picker_w = (300.0 * scale).min(w * 0.34);
         let picker_x = w - picker_w - (8.0 * scale);
@@ -1326,7 +1341,12 @@ impl CascadeLabScene {
         let pad = (8.0 * scale).max(5.0);
         let header_h = (28.0 * scale).max(22.0);
         frame.text(TextLabel {
-            rect: [picker_x + pad, picker_y + pad, picker_w - pad * 2.0, header_h],
+            rect: [
+                picker_x + pad,
+                picker_y + pad,
+                picker_w - pad * 2.0,
+                header_h,
+            ],
             text: picker.title(run),
             color: color::JADE,
             font_px: Some(typography::tier_at_most(header_h * 0.52, h)),
@@ -1386,20 +1406,35 @@ impl CascadeLabScene {
                         continue;
                     }
                     frame.quad(GpuInstance {
-                        rect: [picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0],
+                        rect: [
+                            picker_x + pad + 2.0,
+                            row_y,
+                            picker_w - pad * 2.0 - 4.0,
+                            row_h - 2.0,
+                        ],
                         color: color::alpha(color::WALNUT_RAISED, 0.82),
                         user: 0,
                     });
                     frame.image_quads([ImageQuad {
                         inst: GpuInstance {
-                            rect: [picker_x + pad + 6.0, row_y + (row_h - icon) * 0.5, icon, icon],
+                            rect: [
+                                picker_x + pad + 6.0,
+                                row_y + (row_h - icon) * 0.5,
+                                icon,
+                                icon,
+                            ],
                             color: [1.0, 1.0, 1.0, 1.0],
                             user: 0,
                         },
                         source: ImageQuadSource::Relic(def.id),
                     }]);
                     frame.text(TextLabel {
-                        rect: [picker_x + pad + icon + 12.0, row_y, picker_w - icon - pad * 3.0, row_h],
+                        rect: [
+                            picker_x + pad + icon + 12.0,
+                            row_y,
+                            picker_w - icon - pad * 3.0,
+                            row_h,
+                        ],
                         text: def.name.into(),
                         color: color::PARCHMENT,
                         font_px: Some(row_font),
@@ -1407,7 +1442,12 @@ impl CascadeLabScene {
                         ..Default::default()
                     });
                     frame.buttons.push(ButtonDef::scene(
-                        (picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0),
+                        (
+                            picker_x + pad + 2.0,
+                            row_y,
+                            picker_w - pad * 2.0 - 4.0,
+                            row_h - 2.0,
+                        ),
                         LabClick::PickRelicDef(def_idx).id(),
                     ));
                 }
@@ -1425,7 +1465,12 @@ impl CascadeLabScene {
                         continue;
                     }
                     frame.quad(GpuInstance {
-                        rect: [picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0],
+                        rect: [
+                            picker_x + pad + 2.0,
+                            row_y,
+                            picker_w - pad * 2.0 - 4.0,
+                            row_h - 2.0,
+                        ],
                         color: color::alpha(color::WALNUT_RAISED, 0.82),
                         user: 0,
                     });
@@ -1438,7 +1483,12 @@ impl CascadeLabScene {
                         ..Default::default()
                     });
                     frame.buttons.push(ButtonDef::scene(
-                        (picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0),
+                        (
+                            picker_x + pad + 2.0,
+                            row_y,
+                            picker_w - pad * 2.0 - 4.0,
+                            row_h - 2.0,
+                        ),
                         LabClick::PickDoraRow(first_visible + vis).id(),
                     ));
                 }
@@ -1452,7 +1502,12 @@ impl CascadeLabScene {
                     let row_y = list_y0 + vis as f32 * row_h - (self.picker_scroll % row_h);
                     let label = ChamberKind::wind_name(rank);
                     frame.quad(GpuInstance {
-                        rect: [picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0],
+                        rect: [
+                            picker_x + pad + 2.0,
+                            row_y,
+                            picker_w - pad * 2.0 - 4.0,
+                            row_h - 2.0,
+                        ],
                         color: color::alpha(color::WALNUT_RAISED, 0.82),
                         user: 0,
                     });
@@ -1465,7 +1520,12 @@ impl CascadeLabScene {
                         ..Default::default()
                     });
                     frame.buttons.push(ButtonDef::scene(
-                        (picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0),
+                        (
+                            picker_x + pad + 2.0,
+                            row_y,
+                            picker_w - pad * 2.0 - 4.0,
+                            row_h - 2.0,
+                        ),
                         LabClick::PickWind(rank).id(),
                     ));
                 }
@@ -1485,20 +1545,35 @@ impl CascadeLabScene {
                         continue;
                     }
                     frame.quad(GpuInstance {
-                        rect: [picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0],
+                        rect: [
+                            picker_x + pad + 2.0,
+                            row_y,
+                            picker_w - pad * 2.0 - 4.0,
+                            row_h - 2.0,
+                        ],
                         color: color::alpha(color::WALNUT_RAISED, 0.82),
                         user: 0,
                     });
                     frame.image_quads([ImageQuad {
                         inst: GpuInstance {
-                            rect: [picker_x + pad + 6.0, row_y + (row_h - icon) * 0.5, icon, icon],
+                            rect: [
+                                picker_x + pad + 6.0,
+                                row_y + (row_h - icon) * 0.5,
+                                icon,
+                                icon,
+                            ],
                             color: [1.0, 1.0, 1.0, 1.0],
                             user: 0,
                         },
                         source: ordeal_icon_source(kind),
                     }]);
                     frame.text(TextLabel {
-                        rect: [picker_x + pad + icon + 12.0, row_y, picker_w - icon - pad * 3.0, row_h],
+                        rect: [
+                            picker_x + pad + icon + 12.0,
+                            row_y,
+                            picker_w - icon - pad * 3.0,
+                            row_h,
+                        ],
                         text: kind.name().into(),
                         color: color::PARCHMENT,
                         font_px: Some(row_font),
@@ -1506,7 +1581,12 @@ impl CascadeLabScene {
                         ..Default::default()
                     });
                     frame.buttons.push(ButtonDef::scene(
-                        (picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0),
+                        (
+                            picker_x + pad + 2.0,
+                            row_y,
+                            picker_w - pad * 2.0 - 4.0,
+                            row_h - 2.0,
+                        ),
                         LabClick::PickBossRow(first_visible + vis).id(),
                     ));
                 }
@@ -1523,7 +1603,12 @@ impl CascadeLabScene {
                         continue;
                     }
                     frame.quad(GpuInstance {
-                        rect: [picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0],
+                        rect: [
+                            picker_x + pad + 2.0,
+                            row_y,
+                            picker_w - pad * 2.0 - 4.0,
+                            row_h - 2.0,
+                        ],
                         color: color::alpha(color::WALNUT_RAISED, 0.82),
                         user: 0,
                     });
@@ -1536,7 +1621,12 @@ impl CascadeLabScene {
                         ..Default::default()
                     });
                     frame.buttons.push(ButtonDef::scene(
-                        (picker_x + pad + 2.0, row_y, picker_w - pad * 2.0 - 4.0, row_h - 2.0),
+                        (
+                            picker_x + pad + 2.0,
+                            row_y,
+                            picker_w - pad * 2.0 - 4.0,
+                            row_h - 2.0,
+                        ),
                         LabClick::PickMeldRow(first_visible + vis).id(),
                     ));
                 }
@@ -1571,7 +1661,12 @@ impl CascadeLabScene {
         });
         y += row_h + gap;
 
-        let draw_stepper = |frame: &mut UiFrame, y: f32, label: &str, value: &str, dec: LabClick, inc: LabClick| {
+        let draw_stepper = |frame: &mut UiFrame,
+                            y: f32,
+                            label: &str,
+                            value: &str,
+                            dec: LabClick,
+                            inc: LabClick| {
             frame.text(TextLabel {
                 rect: [panel_x + 8.0, y, panel_w * 0.42, row_h],
                 text: label.into(),
@@ -1590,13 +1685,7 @@ impl CascadeLabScene {
                 align: TextAlign::Center,
                 ..Default::default()
             });
-            Self::push_btn(
-                frame,
-                (bx + row_h * 2.5, y, row_h, row_h),
-                "+",
-                inc,
-                row_h,
-            );
+            Self::push_btn(frame, (bx + row_h * 2.5, y, row_h, row_h), "+", inc, row_h);
         };
 
         draw_stepper(
@@ -1819,8 +1908,8 @@ impl SceneBehavior for CascadeLabScene {
                     ctx.run.discards_remaining = ctx.run.discards_remaining.saturating_sub(1);
                 }
                 LabClick::DiscardsInc => {
-                    ctx.run.discards_remaining = (ctx.run.discards_remaining + 1)
-                        .min(ctx.run.discards_max.max(12));
+                    ctx.run.discards_remaining =
+                        (ctx.run.discards_remaining + 1).min(ctx.run.discards_max.max(12));
                 }
                 LabClick::PlaysDec => {
                     ctx.run.plays_remaining = ctx.run.plays_remaining.saturating_sub(1);
@@ -1830,10 +1919,12 @@ impl SceneBehavior for CascadeLabScene {
                         (ctx.run.plays_remaining + 1).min(ctx.run.plays_max.max(12));
                 }
                 LabClick::YenDec => {
-                    ctx.run.set_run_yen_direct(ctx.run.yen.saturating_sub(50), None);
+                    ctx.run
+                        .set_run_yen_direct(ctx.run.yen.saturating_sub(50), None);
                 }
                 LabClick::YenInc => {
-                    ctx.run.set_run_yen_direct(ctx.run.yen.saturating_add(50), None);
+                    ctx.run
+                        .set_run_yen_direct(ctx.run.yen.saturating_add(50), None);
                 }
                 LabClick::ToggleScoredLast => {
                     ctx.run.scored_last_turn = !ctx.run.scored_last_turn;
@@ -1899,16 +1990,7 @@ impl SceneBehavior for CascadeLabScene {
             let (panel_x, panel_y, panel_w, _panel_h) = Self::panel_layout(w, h, false);
             let row_h = (24.0 * scale).max(18.0);
             let body_y = Self::expanded_panel_body_y(panel_y, scale);
-            self.draw_run_state_values(
-                &mut frame,
-                panel_x,
-                body_y,
-                panel_w,
-                h,
-                scale,
-                row_h,
-                run,
-            );
+            self.draw_run_state_values(&mut frame, panel_x, body_y, panel_w, h, scale, row_h, run);
         }
 
         if let Some(picker) = self.active_picker {
@@ -1944,11 +2026,13 @@ fn structure_strip_rect(w: f32, h: f32, env_h: f32, meld_h: f32) -> Option<[f32;
     gameplay_glb::with_gameplay_glb_cpu(|cpu| {
         let cpu = cpu?;
         let left =
-            gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, STRUCTURE_TILES_LEFT).ok()?;
+            gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, STRUCTURE_TILES_LEFT)
+                .ok()?;
         let right =
             gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, STRUCTURE_TILES_RIGHT)
                 .ok()?;
-        let (x, y, rw, rh) = gameplay_glb::marker_pair_screen_rect_from_poses(&left, &right, meld_h);
+        let (x, y, rw, rh) =
+            gameplay_glb::marker_pair_screen_rect_from_poses(&left, &right, meld_h);
         Some([x, y, rw, rh])
     })
 }
@@ -1972,10 +2056,7 @@ fn dora_picker_faces() -> Vec<(String, Suit, u8)> {
     out
 }
 
-fn scancode_to_structure_char(
-    code: sdl3::keyboard::Scancode,
-    shift: bool,
-) -> Option<char> {
+fn scancode_to_structure_char(code: sdl3::keyboard::Scancode, shift: bool) -> Option<char> {
     use sdl3::keyboard::Scancode;
     let upper = shift;
     match code {

@@ -2,15 +2,14 @@
 
 use std::time::Instant;
 
-use crate::lit_mesh::LitMeshInstance;
 use crate::lit_mesh::LitMeshGpu;
+use crate::lit_mesh::LitMeshInstance;
 use crate::relic_pipeline::spawn_relic_loader;
 use crate::wgpu_renderer::resources::load_metal_heightmap;
 use crate::wgpu_renderer::{
-    MAX_BOWL_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORDEAL_ICON_SLOTS,
-    MAX_ORB_SLOTS, MAX_RELIC_SLOTS,
-    MAX_TALLY_STICK_SLOTS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS, MAX_YAKU_TABLET_SLOTS,
-    WgpuRenderer,
+    MAX_BOWL_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS,
+    MAX_ORDEAL_ICON_SLOTS, MAX_RELIC_SLOTS, MAX_TALLY_STICK_SLOTS, MAX_WALL_TILE_SLOTS,
+    MAX_WOOD_TABLET_SLOTS, MAX_YAKU_TABLET_SLOTS, WgpuRenderer,
 };
 
 impl WgpuRenderer {

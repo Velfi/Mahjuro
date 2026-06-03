@@ -42,12 +42,7 @@ fn ndc_uv(ndc: glam::Vec3) -> glam::Vec2 {
 }
 
 fn center_in_frustum(ndc: glam::Vec3, uv: glam::Vec2) -> bool {
-    ndc.z >= 0.0
-        && ndc.z <= 1.0
-        && uv.x >= 0.0
-        && uv.x <= 1.0
-        && uv.y >= 0.0
-        && uv.y <= 1.0
+    ndc.z >= 0.0 && ndc.z <= 1.0 && uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0
 }
 
 fn cpu_summary(
@@ -100,12 +95,9 @@ impl crate::wgpu_renderer::WgpuRenderer {
         }
         self.shadow_probe_last_caster_count = caster_count;
 
-        let summary = if let Some(summary) = cpu_summary(
-            build,
-            punctual_count,
-            active_env,
-            self.active_scene_key,
-        ) {
+        let summary = if let Some(summary) =
+            cpu_summary(build, punctual_count, active_env, self.active_scene_key)
+        {
             summary
         } else if punctual_count > 0 {
             ShadowProbeCpuSummary {

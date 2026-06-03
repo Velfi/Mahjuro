@@ -345,7 +345,6 @@ fn push_sequence_candidate(
     });
 }
 
-
 /// Advance `pos` (length k, strictly increasing) to the next k-combination of indices `0..n`.
 fn next_combination_in_range(pos: &mut [usize], n: usize) -> bool {
     let k = pos.len();

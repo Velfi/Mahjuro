@@ -194,9 +194,7 @@ impl RoomBakeApp {
             env_per_scene.insert(key, (room, look.room_gltf_height_scale));
             env_frame_tunes.push((
                 key,
-                mahjuro_render::tuning::scene_look::room_env_frame_from_scene_look(
-                    &look, room,
-                ),
+                mahjuro_render::tuning::scene_look::room_env_frame_from_scene_look(&look, room),
             ));
         }
 
@@ -236,7 +234,8 @@ impl RoomBakeApp {
         self.renderer.set_active_scene(active_scene_key);
         let look = self.scene_look.resolve(active_scene_key);
         self.renderer.set_tonemap_tuning(&look.tonemap);
-        self.renderer.set_frame_scene_env_tunes(active_scene_key, &env_frame_tunes);
+        self.renderer
+            .set_frame_scene_env_tunes(active_scene_key, &env_frame_tunes);
 
         let active_material = frame
             .tile_material_override
@@ -282,11 +281,14 @@ impl RoomBakeApp {
         self.renderer.request_room_shadow_capture(room);
         self.run_warmup(warmup_frames);
         self.tick();
-        self.renderer.take_room_shadow_capture().ok_or_else(|| {
-            anyhow::anyhow!("room shadow bake: GPU readback missing")
-        }).and_then(|bake| {
-            mahjuro::render::room_shadow_bake::validate_room_shadow_bake_effective(&bake, room)?;
-            Ok(bake)
-        })
+        self.renderer
+            .take_room_shadow_capture()
+            .ok_or_else(|| anyhow::anyhow!("room shadow bake: GPU readback missing"))
+            .and_then(|bake| {
+                mahjuro::render::room_shadow_bake::validate_room_shadow_bake_effective(
+                    &bake, room,
+                )?;
+                Ok(bake)
+            })
     }
 }

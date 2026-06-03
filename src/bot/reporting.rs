@@ -111,9 +111,7 @@ impl BotStrategy {
         let d = Self::default();
         Self {
             relic_weight: cfg.relic_weight.unwrap_or(d.relic_weight),
-            no_relic_acquisition: cfg
-                .no_relic_acquisition
-                .unwrap_or(d.no_relic_acquisition),
+            no_relic_acquisition: cfg.no_relic_acquisition.unwrap_or(d.no_relic_acquisition),
             zodiac_weight: cfg.zodiac_weight.unwrap_or(d.zodiac_weight),
             talisman_weight: cfg.talisman_weight.unwrap_or(d.talisman_weight),
             pack_weight: cfg.pack_weight.unwrap_or(d.pack_weight),
@@ -331,9 +329,7 @@ impl BotConfig {
             starting_discards: overlay.starting_discards.or(base.starting_discards),
             starting_yen: overlay.starting_yen.or(base.starting_yen),
             relic_weight: overlay.relic_weight.or(base.relic_weight),
-            no_relic_acquisition: overlay
-                .no_relic_acquisition
-                .or(base.no_relic_acquisition),
+            no_relic_acquisition: overlay.no_relic_acquisition.or(base.no_relic_acquisition),
             zodiac_weight: overlay.zodiac_weight.or(base.zodiac_weight),
             talisman_weight: overlay.talisman_weight.or(base.talisman_weight),
             pack_weight: overlay.pack_weight.or(base.pack_weight),
@@ -341,15 +337,11 @@ impl BotConfig {
                 .skip_threshold_multiplier
                 .or(base.skip_threshold_multiplier),
             sell_enabled: overlay.sell_enabled.or(base.sell_enabled),
-            sell_hold_threshold: overlay
-                .sell_hold_threshold
-                .or(base.sell_hold_threshold),
+            sell_hold_threshold: overlay.sell_hold_threshold.or(base.sell_hold_threshold),
             sell_max_per_visit: overlay.sell_max_per_visit.or(base.sell_max_per_visit),
             forced_relic: overlay.forced_relic.or(base.forced_relic),
             season: overlay.season.or(base.season),
-            chamber_planner_depth: overlay
-                .chamber_planner_depth
-                .or(base.chamber_planner_depth),
+            chamber_planner_depth: overlay.chamber_planner_depth.or(base.chamber_planner_depth),
             meta_depth: overlay.meta_depth.or(base.meta_depth),
             player_fair: overlay.player_fair.or(base.player_fair),
         }

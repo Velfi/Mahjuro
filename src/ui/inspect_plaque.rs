@@ -67,10 +67,8 @@ pub fn push_focus_tooltip_panel_2d(
     let pad = 14.0_f32.max(10.0);
     // Inset from the walnut fill edge to copy; independent of the brass rim draw width.
     const FILL_INSET_PX: f32 = 2.0;
-    let rim =
-        crate::render::theme::metrics::tooltip_border_px(window_w, window_h);
-    let max_panel_w =
-        crate::render::theme::metrics::tooltip_max_panel_px(window_w, window_h);
+    let rim = crate::render::theme::metrics::tooltip_border_px(window_w, window_h);
+    let max_panel_w = crate::render::theme::metrics::tooltip_max_panel_px(window_w, window_h);
     let min_inner_w = 80.0_f32;
     let max_inner_w = (max_panel_w - pad * 2.0 - FILL_INSET_PX * 2.0).max(min_inner_w);
 

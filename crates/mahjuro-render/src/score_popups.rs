@@ -10,11 +10,11 @@ use std::time::Instant;
 
 use rand::RngExt;
 
-use mahjuro_core::core::scoring::StepKind;
 use crate::draw_cmd::{GlyphMaterial, Object3d, Object3dKind};
 use crate::theme::typography;
 use crate::wgpu_renderer::{TextAlign, TextLabel};
 use crate::world_space::LayoutAnchorPx;
+use mahjuro_core::core::scoring::StepKind;
 
 /// Per-popup motion timing (seconds + overshoot fraction).
 #[derive(Clone, Copy, Debug)]
@@ -279,7 +279,14 @@ fn fly_to_reel_sample(p: &ScorePopup, age: f32) -> (f32, f32, f32, f32, f32, f32
     }
 
     if age < loiter_end {
-        return (p.source_pos[0], p.source_pos[1], p.source_pos[2], 1.0, 1.0, 0.92);
+        return (
+            p.source_pos[0],
+            p.source_pos[1],
+            p.source_pos[2],
+            1.0,
+            1.0,
+            0.92,
+        );
     }
 
     if age < fly_end {

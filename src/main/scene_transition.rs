@@ -122,9 +122,7 @@ pub(crate) fn transition_spec_for_edge(from: SceneTag, to: SceneTag) -> Transiti
             speed: 0.032,
         };
     }
-    if undirected_edge(from, to, MainMenu, Options)
-        || undirected_edge(from, to, Options, Credits)
-    {
+    if undirected_edge(from, to, MainMenu, Options) || undirected_edge(from, to, Options, Credits) {
         return TransitionSpec {
             kind: TransitionKind::Maelstrom,
             speed: 0.032,
@@ -219,9 +217,7 @@ pub(crate) fn sync_music_for_scene(
     use crate::audio::MusicId;
     use std::time::Instant;
     match tag {
-        SceneTag::MainMenu | SceneTag::Archive => {
-            audio.set_music_track(MusicId::MainMenu)
-        }
+        SceneTag::MainMenu | SceneTag::Archive => audio.set_music_track(MusicId::MainMenu),
         SceneTag::Gameplay => audio.set_gameplay_music(gameplay_ordeal_chamber),
         SceneTag::Shop => {
             if let Some(delay) = shop_bgm_delay {
@@ -230,9 +226,7 @@ pub(crate) fn sync_music_for_scene(
                 audio.set_music_track(MusicId::Shop);
             }
         }
-        SceneTag::Hallway => {
-            audio.set_music_track(MusicId::Shop)
-        }
+        SceneTag::Hallway => audio.set_music_track(MusicId::Shop),
         SceneTag::Stairway => {
             audio.stop_background_music();
         }
@@ -244,10 +238,9 @@ pub(crate) fn sync_music_for_scene(
 pub(crate) fn sync_ambient_for_scene(audio: &mut crate::audio::AudioManager, tag: SceneTag) {
     use crate::audio::AmbientId;
     match tag {
-        SceneTag::MainMenu => audio.set_ambient_tracks(&[
-            AmbientId::MainMenuRain,
-            AmbientId::HallwayBulbBuzz,
-        ]),
+        SceneTag::MainMenu => {
+            audio.set_ambient_tracks(&[AmbientId::MainMenuRain, AmbientId::HallwayBulbBuzz])
+        }
         SceneTag::Hallway | SceneTag::Stairway => {
             audio.set_ambient_tracks(&[AmbientId::HallwayBulbBuzz]);
         }

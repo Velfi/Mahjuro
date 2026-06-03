@@ -130,25 +130,11 @@ pub fn push_ledger_panel_clipped(
     if let Some(rule) = style.top_rule {
         push_quad_clipped(quads, [x, y, w, 1.0], clip, rule);
     }
-    push_corner_brackets_clipped(
-        quads,
-        clip,
-        x,
-        y,
-        w,
-        h,
-        style.bracket_tick,
-        style.bracket,
-    );
+    push_corner_brackets_clipped(quads, clip, x, y, w, h, style.bracket_tick, style.bracket);
 }
 
 /// Four-edge border stroke (focus rings, pane highlights).
-pub fn push_rect_border(
-    out: &mut Vec<GpuInstance>,
-    rect: [f32; 4],
-    thickness: f32,
-    c: [f32; 4],
-) {
+pub fn push_rect_border(out: &mut Vec<GpuInstance>, rect: [f32; 4], thickness: f32, c: [f32; 4]) {
     let [x, y, w, h] = rect;
     let b = thickness;
     push_quad(out, [x, y, w, b], c);

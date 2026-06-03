@@ -95,12 +95,12 @@ fn main_menu_point_color(l: &RoomGltfEmbeddedPointLight, tune: &RoomEnvLightingT
 
 /// Warn when [`main_menu.glb`](../../../assets/3d/main_menu.glb) punctual nodes are misnamed.
 pub fn log_main_menu_punctual_light_nodes(cpu: &RoomGlbCpu) {
-    const EXPECTED_PREFIXES: [&str; 2] =
-        [MAIN_MENU_MOONLIGHT_NODE_PREFIX, MAIN_MENU_DOORWAY_NODE_PREFIX];
+    const EXPECTED_PREFIXES: [&str; 2] = [
+        MAIN_MENU_MOONLIGHT_NODE_PREFIX,
+        MAIN_MENU_DOORWAY_NODE_PREFIX,
+    ];
     for l in &cpu.embedded_point_lights {
-        if !is_main_menu_moonlight_node(&l.node_name)
-            && !is_main_menu_doorway_node(&l.node_name)
-        {
+        if !is_main_menu_moonlight_node(&l.node_name) && !is_main_menu_doorway_node(&l.node_name) {
             log::warn!(
                 "main_menu.glb: point light {:?} has no MainMenu tint (rename to start with one of {EXPECTED_PREFIXES:?})",
                 l.node_name,
@@ -227,7 +227,10 @@ pub fn embedded_point_lights_runtime_tagged(
 
 pub fn tagged_to_scene_punctual(
     tagged: Vec<EmbeddedPointLightRuntime>,
-) -> (Vec<crate::draw_cmd::ScenePunctualLight>, Vec<Option<String>>) {
+) -> (
+    Vec<crate::draw_cmd::ScenePunctualLight>,
+    Vec<Option<String>>,
+) {
     tagged
         .into_iter()
         .map(|t| {
@@ -325,8 +328,7 @@ mod tests {
         assert_eq!(door, [0.95, 0.72, 0.38]);
         let moon_white = main_menu_point_color(&point("light_moonlight", [1.0, 1.0, 1.0]), &tune);
         assert_eq!(moon_white, MAIN_MENU_LIGHT_MOONLIGHT_COLOR_LINEAR);
-        let moon_dup =
-            main_menu_point_color(&point("light_moonlight.001", [1.0, 1.0, 1.0]), &tune);
+        let moon_dup = main_menu_point_color(&point("light_moonlight.001", [1.0, 1.0, 1.0]), &tune);
         assert_eq!(moon_dup, MAIN_MENU_LIGHT_MOONLIGHT_COLOR_LINEAR);
         let door_white = main_menu_point_color(&point("light_doorway", [1.0, 1.0, 1.0]), &tune);
         assert_eq!(

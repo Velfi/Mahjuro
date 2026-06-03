@@ -6,9 +6,9 @@
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::tuning::tonemap::{FALLBACK_SCENE_KEY, KNOWN_SCENE_KEYS, TonemapTuning};
 use crate::room_glb::{RoomEnvFrameTune, RoomEnvLightingTune, SHOP_ENV_HEIGHT_SCALE};
 use crate::scene_keys;
+use crate::tuning::tonemap::{FALLBACK_SCENE_KEY, KNOWN_SCENE_KEYS, TonemapTuning};
 
 /// Full-screen look for one scene: composite tonemap + `room_glb` / `lit_mesh` lighting.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -174,7 +174,10 @@ pub const GLTF_ENV_SCENE_KEYS: &[&str] = &[
 ];
 
 /// Build per-frame room env tuning from a resolved scene look bundle.
-pub fn room_env_frame_from_scene_look(look: &SceneLookTuning, room: RoomEnvLightingTune) -> RoomEnvFrameTune {
+pub fn room_env_frame_from_scene_look(
+    look: &SceneLookTuning,
+    room: RoomEnvLightingTune,
+) -> RoomEnvFrameTune {
     RoomEnvFrameTune::from_room_and_height(room, look.room_gltf_height_scale)
 }
 

@@ -23,10 +23,10 @@ pub(super) use acquire_telemetry::{AcquireOutcome, AcquireTelemetry};
 mod frame;
 use frame::RenderFrame;
 mod render;
-pub(crate) mod shadow_setup;
-pub(crate) mod shop_environment;
 mod shadow_debug_probe;
 mod shadow_debug_session;
+pub(crate) mod shadow_setup;
+pub(crate) mod shop_environment;
 pub(crate) use shadow_debug_session::{
     agent_shadow_log, probe_baked_ao_at_world, probe_baked_ao_at_world_scaled,
     shadow_caster_z_up_probe,

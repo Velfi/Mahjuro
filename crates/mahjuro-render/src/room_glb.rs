@@ -518,9 +518,9 @@ pub fn room_node_mesh_center_world(
         let center_doc = (mn + mx) * 0.5;
         return Some((center_doc - room_center_doc) * s);
     }
-    cpu.node_bind_poses.get(node_name).map(|bind| {
-        (bind.bind_world_doc.transform_point3(Vec3::ZERO) - room_center_doc) * s
-    })
+    cpu.node_bind_poses
+        .get(node_name)
+        .map(|bind| (bind.bind_world_doc.transform_point3(Vec3::ZERO) - room_center_doc) * s)
 }
 
 pub fn room_camera_fit_fovy_for_corners(

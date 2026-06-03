@@ -139,12 +139,7 @@ mod collision_mesh_tests {
             [-0.103, 0.285, 0.0],
             [0.103, 0.285, 0.0],
         ];
-        let uvs = [
-            [1.0, 0.999],
-            [1.0, 0.703],
-            [0.0, 0.999],
-            [0.0, 0.703],
-        ];
+        let uvs = [[1.0, 0.999], [1.0, 0.703], [0.0, 0.999], [0.0, 0.703]];
         assert!(decal_texel_u_runs_along_local_y(&positions, &uvs));
         let span_u = 1.0_f32;
         let span_v = 0.999 - 0.703;
@@ -163,12 +158,7 @@ mod collision_mesh_tests {
             [-0.103, 0.285, 0.0],
             [0.103, 0.285, 0.0],
         ];
-        let uvs = [
-            [1.0, 0.999],
-            [1.0, 0.703],
-            [0.0, 0.999],
-            [0.0, 0.703],
-        ];
+        let uvs = [[1.0, 0.999], [1.0, 0.703], [0.0, 0.999], [0.0, 0.703]];
         let mut min = glam::Vec2::splat(f32::INFINITY);
         let mut max = glam::Vec2::splat(f32::NEG_INFINITY);
         for uv in &uvs {
@@ -224,10 +214,8 @@ mod collision_mesh_tests {
                 [Vec3::ONE, Vec3::ZERO, Vec3::Y],
             ],
         );
-        let b = RoomCollisionMesh::from_triangles(
-            "rain_hit_b",
-            vec![[Vec3::ZERO, Vec3::Z, Vec3::Y]],
-        );
+        let b =
+            RoomCollisionMesh::from_triangles("rain_hit_b", vec![[Vec3::ZERO, Vec3::Z, Vec3::Y]]);
         let merged = RoomCollisionMesh::merge_rain_surfaces(&[a, b]).unwrap();
         assert_eq!(merged.triangles.len(), 3);
         assert_eq!(merged.node_name, "rain_hit_merged");
@@ -280,7 +268,10 @@ impl RoomEnvironmentBounds {
         if !found {
             return None;
         }
-        Some(Self { min: min_v, max: max_v })
+        Some(Self {
+            min: min_v,
+            max: max_v,
+        })
     }
 
     pub fn corners(self) -> [Vec3; 8] {
@@ -585,8 +576,16 @@ pub fn decal_texel_u_runs_along_local_y(positions: &[[f32; 3]], uvs: &[[f32; 2]]
         yy += dy * dy;
         xx += dx * dx;
     }
-    let corr_y = if yy > 1e-12 { uuy.abs() / yy.sqrt() } else { 0.0 };
-    let corr_x = if xx > 1e-12 { uux.abs() / xx.sqrt() } else { 0.0 };
+    let corr_y = if yy > 1e-12 {
+        uuy.abs() / yy.sqrt()
+    } else {
+        0.0
+    };
+    let corr_x = if xx > 1e-12 {
+        uux.abs() / xx.sqrt()
+    } else {
+        0.0
+    };
     corr_y > corr_x
 }
 
@@ -623,7 +622,10 @@ pub fn room_env_primitive_bounds_doc(
     if !found {
         return None;
     }
-    Some(RoomEnvironmentBounds { min: min_v, max: max_v })
+    Some(RoomEnvironmentBounds {
+        min: min_v,
+        max: max_v,
+    })
 }
 
 /// Document-space AABB for one named collision / rain-hit mesh node.
@@ -966,9 +968,8 @@ pub fn decode_env_primitive(
         gltf_node_name,
         "sign_description_left" | "sign_description_right" | "inspect_plaque"
     );
-    let swap_archive_decal_uv_axes =
-        gltf_node_name == "inspect_plaque"
-            && decal_texel_u_runs_along_local_y(&positions_local, &uvs);
+    let swap_archive_decal_uv_axes = gltf_node_name == "inspect_plaque"
+        && decal_texel_u_runs_along_local_y(&positions_local, &uvs);
     let (uv_remap, archive_decal_face_aspect) = if is_archive_sign {
         let mut min = Vec2::splat(f32::INFINITY);
         let mut max = Vec2::splat(f32::NEG_INFINITY);

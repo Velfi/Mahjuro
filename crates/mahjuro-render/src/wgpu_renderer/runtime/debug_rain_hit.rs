@@ -16,9 +16,7 @@ impl WgpuRenderer {
         let height = self.env_tune_for(scene_keys::MAIN_MENU).height_scale;
         let env_h = crate::main_menu_glb::main_menu_env_height_scale(height);
         let model = crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
-            opt.map(|cpu| {
-                crate::room_glb::room_env_model_matrix_from_cpu(camera.h, env_h, cpu)
-            })
+            opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, env_h, cpu))
         })
         .unwrap_or_else(|| {
             let s = crate::room_glb::room_env_world_scale(camera.h, env_h);
@@ -48,10 +46,7 @@ impl WgpuRenderer {
         pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
         pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
         pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-        pass.set_index_buffer(
-            mesh.index_buffer.slice(..),
-            wgpu::IndexFormat::Uint32,
-        );
+        pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.set_bind_group(0, &inst.bind_group, &[]);
         pass.draw_indexed(0..mesh.index_count, 0, 0..1);
     }

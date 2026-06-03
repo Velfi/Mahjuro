@@ -186,10 +186,9 @@ impl ShopScene {
             let sy = (-my * SENS).clamp(-1.0, 1.0);
             self.storeroom_orbit_yaw =
                 (self.storeroom_orbit_yaw + sx * ORBIT * dt).clamp(-YAW_LIM, YAW_LIM);
-            self.storeroom_orbit_pitch = (self.storeroom_orbit_pitch + sy * ORBIT * dt)
-                .clamp(-PITCH_LIM, PITCH_LIM);
-        } else if self.storeroom_orbit_yaw.abs() > 1e-5 || self.storeroom_orbit_pitch.abs() > 1e-5
-        {
+            self.storeroom_orbit_pitch =
+                (self.storeroom_orbit_pitch + sy * ORBIT * dt).clamp(-PITCH_LIM, PITCH_LIM);
+        } else if self.storeroom_orbit_yaw.abs() > 1e-5 || self.storeroom_orbit_pitch.abs() > 1e-5 {
             let k = 1.0 - (-7.0_f32 * dt).exp();
             self.storeroom_orbit_yaw += (0.0 - self.storeroom_orbit_yaw) * k;
             self.storeroom_orbit_pitch += (0.0 - self.storeroom_orbit_pitch) * k;

@@ -58,17 +58,14 @@ pub(super) fn tick_active_cascade(
                         ctx.audio
                             .as_mut()
                             .and_then(|audio| {
-                                audio
-                                    .play_sfx(sfx)
-                                    .or_else(|| audio.sfx_duration(sfx))
+                                audio.play_sfx(sfx).or_else(|| audio.sfx_duration(sfx))
                             })
                             .unwrap_or_else(|| std::time::Duration::from_millis(700))
                     };
                     #[cfg(not(any(feature = "game", feature = "headless-screenshot")))]
                     let voice_dur = std::time::Duration::from_millis(700);
                     cascade.extend_yaku_hold(
-                        now + voice_dur
-                            + std::time::Duration::from_millis(YAKU_NAME_POST_PAUSE_MS),
+                        now + voice_dur + std::time::Duration::from_millis(YAKU_NAME_POST_PAUSE_MS),
                     );
                 }
             }
@@ -81,8 +78,7 @@ pub(super) fn tick_active_cascade(
                     .get(ordinal - cascade.breakdown.base_steps.len())
             };
             if let Some(step) = step {
-                let step_count =
-                    cascade.breakdown.base_steps.len() + cascade.breakdown.steps.len();
+                let step_count = cascade.breakdown.base_steps.len() + cascade.breakdown.steps.len();
                 log::debug!(
                     "[score] cascade reveal {}/{}: kind={:?} source={} running_total={} chips={} mult={:.2}",
                     ordinal + 1,

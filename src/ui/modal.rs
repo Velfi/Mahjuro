@@ -707,8 +707,7 @@ impl ModalQueue {
 
         // Body.
         let body_y = title_y + title_h + padding * 0.5;
-        if let (Some(breakdown), Some(layout)) = (modal.payout_breakdown, payout_layout.as_ref())
-        {
+        if let (Some(breakdown), Some(layout)) = (modal.payout_breakdown, payout_layout.as_ref()) {
             push_payout_ledger_labels(
                 labels,
                 instances,
@@ -736,7 +735,6 @@ impl ModalQueue {
                 },
             );
         }
-
     }
 }
 
@@ -806,9 +804,7 @@ fn measure_payout_ledger_layout(
         "Score: {} / {}",
         breakdown.round_score, breakdown.target_score
     );
-    let font = load_mono_font()
-        .or_else(load_ui_font)
-        .expect("ui font");
+    let font = load_mono_font().or_else(load_ui_font).expect("ui font");
     let mut label_col_w = measure_text_width(&font, "Unused plays", font_px);
     let mut amount_col_w = 0.0f32;
     for row in &rows {
@@ -1084,13 +1080,8 @@ fn draw_modal_paginated_unlock(
     let desc_x = (window_w - desc_w) * 0.5;
     let [dr, dg, db, _da] = crate::render::theme::color::PARCHMENT;
     let desc_color = [dr, dg, db, 0.92 * alpha];
-    let desc_block = StyledTextBlock::measure_at_font_px(
-        &page.description,
-        desc_w,
-        desc_font,
-        true,
-        desc_color,
-    );
+    let desc_block =
+        StyledTextBlock::measure_at_font_px(&page.description, desc_w, desc_font, true, desc_color);
     let desc_h = desc_block.block_height();
     desc_block.push_at_font_px(
         labels,

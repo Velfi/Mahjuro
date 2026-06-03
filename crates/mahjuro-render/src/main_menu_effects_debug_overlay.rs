@@ -7,18 +7,18 @@ use crate::debug_overlay_ui::{self, DebugPointerState, DebugRowVisual};
 use crate::draw_cmd::CameraParams;
 use crate::main_menu_effects_tuning::MainMenuEffectsTuning;
 use crate::main_menu_moon_tuning::{
-    MainMenuMoonPhaseDebug, MOON_DEBUG_ROW_META, MOON_DEBUG_SLIDER_COUNT, moon_row_is_hue,
+    MOON_DEBUG_ROW_META, MOON_DEBUG_SLIDER_COUNT, MainMenuMoonPhaseDebug, moon_row_is_hue,
     moon_row_is_phase, moon_row_is_saturation,
 };
-use crate::wgpu_renderer::moon_phase_short_name;
 use crate::main_menu_moth_tuning::{MOTH_DEBUG_ROW_META, MOTH_DEBUG_SLIDER_COUNT};
 use crate::particles::RainSpawnVolume;
 use crate::rain_field::main_menu_rain_spawn_volume;
 use crate::rain_tuning::{
-    RainTuning, RAIN_DEBUG_ROW_META, RAIN_DEBUG_SLIDER_COUNT, rain_color_swatch_rgb,
+    RAIN_DEBUG_ROW_META, RAIN_DEBUG_SLIDER_COUNT, RainTuning, rain_color_swatch_rgb,
     rain_hue_wheel_preview_linear, rain_row_is_hue, rain_row_is_saturation,
 };
-use crate::theme::{color, metrics, typography, ButtonVariant};
+use crate::theme::{ButtonVariant, color, metrics, typography};
+use crate::wgpu_renderer::moon_phase_short_name;
 use crate::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use mahjuro_types::UiAction;
 
@@ -114,7 +114,11 @@ fn row_is_saturation(tab: MainMenuEffectsTab, row: usize) -> bool {
     }
 }
 
-fn row_color_swatch(tuning: &MainMenuEffectsTuning, tab: MainMenuEffectsTab, row: usize) -> Option<[f32; 3]> {
+fn row_color_swatch(
+    tuning: &MainMenuEffectsTuning,
+    tab: MainMenuEffectsTab,
+    row: usize,
+) -> Option<[f32; 3]> {
     match tab {
         MainMenuEffectsTab::Moon => tuning.moon.color_swatch_rgb(row),
         MainMenuEffectsTab::Rain => rain_color_swatch_rgb(&tuning.rain, row),
@@ -139,14 +143,7 @@ fn rain_view_right(cam: &CameraParams) -> Vec3 {
     forward.cross(up).normalize_or_zero()
 }
 
-fn push_quad(
-    instances: &mut Vec<GpuInstance>,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    rgba: [f32; 4],
-) {
+fn push_quad(instances: &mut Vec<GpuInstance>, x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4]) {
     instances.push(GpuInstance {
         rect: [x, y, w, h],
         color: rgba,
@@ -349,7 +346,12 @@ fn push_legend_swatch_row(
     let cy = y + row_h * 0.5;
     draw_swatch(instances, x + swatch_w * 0.5, cy, scale);
     labels.push(TextLabel {
-        rect: [x + swatch_w + 4.0 * scale, y, label_w - swatch_w - 4.0 * scale, row_h],
+        rect: [
+            x + swatch_w + 4.0 * scale,
+            y,
+            label_w - swatch_w - 4.0 * scale,
+            row_h,
+        ],
         text: caption.into(),
         font_px: Some(font),
         color: color::alpha(color::PARCHMENT, 0.82),
@@ -385,7 +387,12 @@ fn draw_spawn_field_diagram(
     let plot_h = plot_area_h - pad - title_h;
 
     instances.push(GpuInstance {
-        rect: [x0 - border, y0 - border, diagram_w + border * 2.0, diagram_h + border * 2.0],
+        rect: [
+            x0 - border,
+            y0 - border,
+            diagram_w + border * 2.0,
+            diagram_h + border * 2.0,
+        ],
         color: color::alpha(color::WALNUT_SOFT, 0.85),
         user: 0,
     });
@@ -471,8 +478,7 @@ fn draw_spawn_field_diagram(
                 row as f32 / (SPAWN_FIELD_ROWS - 1) as f32
             };
             let depth = d_min + depth_t * (d_max - d_min).max(1e-3);
-            let lateral_half =
-                RainSpawnVolume::frustum_lateral_half_at(cam, depth, aspect);
+            let lateral_half = RainSpawnVolume::frustum_lateral_half_at(cam, depth, aspect);
             let mut pos = eye + forward * depth + right * (lateral_t * lateral_half);
             pos.z = spawn_z;
 
@@ -524,13 +530,19 @@ fn draw_spawn_field_diagram(
 
     // Wind arrow on the plot (projected drift direction).
     let speed = tuning.speed_mul.max(0.0);
-    let wind = Vec3::new(tuning.field.wind_x * speed, tuning.field.wind_y * speed, 0.0);
+    let wind = Vec3::new(
+        tuning.field.wind_x * speed,
+        tuning.field.wind_y * speed,
+        0.0,
+    );
     let wind_len = wind.length();
     if wind_len > 1e-3 {
         let w_lat = wind.dot(right);
         let w_fwd = wind.dot(forward);
         let dir_len = (w_lat * w_lat + w_fwd * w_fwd).sqrt().max(1e-4);
-        let arrow_len = (plot_w.min(plot_h) * 0.22).min(56.0 * scale).max(16.0 * scale);
+        let arrow_len = (plot_w.min(plot_h) * 0.22)
+            .min(56.0 * scale)
+            .max(16.0 * scale);
         push_wind_arrow_icon(
             instances,
             plot_x + plot_w * 0.10,
@@ -795,12 +807,7 @@ struct EffectsDebugLayout {
 }
 
 impl EffectsDebugLayout {
-    fn compute(
-        window_w: f32,
-        window_h: f32,
-        scroll_row: usize,
-        tab: MainMenuEffectsTab,
-    ) -> Self {
+    fn compute(window_w: f32, window_h: f32, scroll_row: usize, tab: MainMenuEffectsTab) -> Self {
         let scale = metrics::scene_scale(window_w, window_h);
         let row_h = (18.0 * scale).max(14.0);
         let row_gap = (2.0 * scale).max(1.0);
@@ -833,9 +840,7 @@ impl EffectsDebugLayout {
         let footer_block = FOOTER_ACTION_ROWS.len() as f32 * per_row + pad;
         let list_bottom = window_h - margin - hints_block - footer_block;
         let available = (list_bottom - rows_y0).max(row_h);
-        let visible_rows = (available / per_row)
-            .floor()
-            .max(1.0) as usize;
+        let visible_rows = (available / per_row).floor().max(1.0) as usize;
         let visible_rows = visible_rows.clamp(1, MAX_VISIBLE_ROWS);
         Self {
             panel_x,
@@ -1291,8 +1296,7 @@ impl MainMenuEffectsDebugOverlay {
     fn dispatch_action(&mut self, action: ActionRow) -> MainMenuEffectsDebugResult {
         match action {
             ActionRow::MoonPhaseLive => {
-                self.moon_phase_debug.use_live_calendar =
-                    !self.moon_phase_debug.use_live_calendar;
+                self.moon_phase_debug.use_live_calendar = !self.moon_phase_debug.use_live_calendar;
                 if !self.moon_phase_debug.use_live_calendar {
                     self.moon_phase_debug.sync_forced_from_calendar();
                 }
@@ -1401,8 +1405,7 @@ impl MainMenuEffectsDebugOverlay {
             return MainMenuEffectsDebugResult::Stay;
         }
         self.ensure_scroll(window_w, window_h);
-        let layout =
-            EffectsDebugLayout::compute(window_w, window_h, self.scroll_row, self.tab);
+        let layout = EffectsDebugLayout::compute(window_w, window_h, self.scroll_row, self.tab);
         self.pointer.sync_held(mouse);
         self.pointer.clear_hover();
         let slider_count = tab_slider_count(self.tab);
@@ -1440,7 +1443,8 @@ impl MainMenuEffectsDebugOverlay {
                 self.apply_slider_mx(di, mx, &layout);
             }
             if (clicked || held) && self.dragging_slider.is_none() {
-                for i in self.scroll_row..(self.scroll_row + layout.visible_rows).min(slider_count) {
+                for i in self.scroll_row..(self.scroll_row + layout.visible_rows).min(slider_count)
+                {
                     let Some(track) = layout.slider_track(i) else {
                         continue;
                     };
@@ -1456,7 +1460,8 @@ impl MainMenuEffectsDebugOverlay {
                 }
             }
             if clicked && self.dragging_slider.is_none() {
-                for i in self.scroll_row..(self.scroll_row + layout.visible_rows).min(slider_count) {
+                for i in self.scroll_row..(self.scroll_row + layout.visible_rows).min(slider_count)
+                {
                     let Some(cell) = layout.value_cell(i) else {
                         continue;
                     };
@@ -1539,8 +1544,7 @@ impl MainMenuEffectsDebugOverlay {
         cam: CameraParams,
         env_scale: f32,
     ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let layout =
-            EffectsDebugLayout::compute(window_w, window_h, self.scroll_row, self.tab);
+        let layout = EffectsDebugLayout::compute(window_w, window_h, self.scroll_row, self.tab);
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
@@ -1565,10 +1569,8 @@ impl MainMenuEffectsDebugOverlay {
         let pad = (8.0 * layout.scale).max(5.0);
         let title_h = (22.0 * layout.scale).max(14.0);
         let hint_h = (13.0 * layout.scale).max(9.0);
-        let scroll_vis_h =
-            layout.viewport_rows() as f32 * (layout.row_h + layout.row_gap);
-        let footer_vis_h =
-            FOOTER_ACTION_ROWS.len() as f32 * (layout.row_h + layout.row_gap);
+        let scroll_vis_h = layout.viewport_rows() as f32 * (layout.row_h + layout.row_gap);
+        let footer_vis_h = FOOTER_ACTION_ROWS.len() as f32 * (layout.row_h + layout.row_gap);
         let panel_h = pad
             + title_h
             + pad
@@ -1648,8 +1650,7 @@ impl MainMenuEffectsDebugOverlay {
             MainMenuEffectsTab::Rain => RAIN_DEBUG_ROW_META,
             MainMenuEffectsTab::Moths => MOTH_DEBUG_ROW_META,
         };
-        let last_visible =
-            (self.scroll_row + layout.visible_rows).min(layout.scroll_item_count);
+        let last_visible = (self.scroll_row + layout.visible_rows).min(layout.scroll_item_count);
         for row in self.scroll_row..last_visible {
             if row < slider_count {
                 let i = row;
@@ -1676,7 +1677,10 @@ impl MainMenuEffectsDebugOverlay {
                     let sw_y = ry + (layout.row_h - swatch) * 0.5;
                     instances.push(GpuInstance {
                         rect: [label_x - 1.0, sw_y - 1.0, swatch + 2.0, swatch + 2.0],
-                        color: color::alpha(color::PARCHMENT, if visual.highlighted { 0.55 } else { 0.28 }),
+                        color: color::alpha(
+                            color::PARCHMENT,
+                            if visual.highlighted { 0.55 } else { 0.28 },
+                        ),
                         user: 0,
                     });
                     instances.push(GpuInstance {

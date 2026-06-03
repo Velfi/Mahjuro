@@ -8,9 +8,12 @@ impl RunState {
     /// Index of the best memorial talisman in inventory that can avert `reason`.
     pub fn find_salvage_talisman_index(&self, reason: GameOverReason) -> Option<usize> {
         for &kind in MemorialTalismanKind::salvage_candidates(reason) {
-            if let Some(index) = self.consumables.items.iter().position(|c| {
-                matches!(c, Consumable::Memorial(k) if *k == kind)
-            }) {
+            if let Some(index) = self
+                .consumables
+                .items
+                .iter()
+                .position(|c| matches!(c, Consumable::Memorial(k) if *k == kind))
+            {
                 return Some(index);
             }
         }
@@ -91,10 +94,7 @@ impl RunState {
                 self.memorial_round.clear_yen_bonus = bonus.min(12);
             }
             MemorialTalismanKind::Hoarder => {
-                self.apply_yen_reward(
-                    MemorialTalismanKind::HOARDER_YEN as i32,
-                    Some(bus),
-                );
+                self.apply_yen_reward(MemorialTalismanKind::HOARDER_YEN as i32, Some(bus));
             }
             MemorialTalismanKind::FullDish => {
                 self.discards_remaining = self.discards_remaining.saturating_add(1);

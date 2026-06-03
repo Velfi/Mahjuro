@@ -4,7 +4,7 @@ use sdl3::keyboard::Scancode;
 
 use crate::debug_overlay_ui::{self, DebugPointerState, DebugRowVisual};
 use crate::flame_tuning::{FLAME_DEBUG_ROW_META, FLAME_DEBUG_SLIDER_COUNT, FlameTuning};
-use crate::theme::{color, metrics, typography, ButtonVariant};
+use crate::theme::{ButtonVariant, color, metrics, typography};
 use crate::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use mahjuro_types::UiAction;
 
@@ -87,8 +87,7 @@ impl FlameDebugLayout {
         }
         let action_idx = row - FLAME_SAVE_ROW;
         let pad = (8.0 * self.scale).max(5.0);
-        let actions_y0 =
-            self.rows_y0 + VISIBLE_ROWS as f32 * (self.row_h + self.row_gap) + pad;
+        let actions_y0 = self.rows_y0 + VISIBLE_ROWS as f32 * (self.row_h + self.row_gap) + pad;
         let row_y = actions_y0 + action_idx as f32 * (self.row_h + self.row_gap);
         Some((self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h))
     }
@@ -151,8 +150,7 @@ impl FlameDebugOverlay {
         let (tx, _, tw, _) = layout.slider_track(row);
         let (_, min, max, _) = FLAME_DEBUG_ROW_META[row];
         let t = ((mx - tx) / tw.max(1e-6)).clamp(0.0, 1.0);
-        self.tuning
-            .set_debug_row_value(row, min + t * (max - min));
+        self.tuning.set_debug_row_value(row, min + t * (max - min));
     }
 
     fn adjust_row(&mut self, dir: f32) {
@@ -278,13 +276,14 @@ impl FlameDebugOverlay {
         if let Some((mx, my, clicked, held)) = mouse {
             for i in 0..FLAME_ROW_COUNT {
                 if let Some(rect) = layout.hit_row_rect(i)
-                    && point_in_rect(mx, my, rect) {
-                        self.pointer.hover_row = Some(i);
-                        if self.dragging_slider.is_none() {
-                            self.cursor = i;
-                        }
-                        break;
+                    && point_in_rect(mx, my, rect)
+                {
+                    self.pointer.hover_row = Some(i);
+                    if self.dragging_slider.is_none() {
+                        self.cursor = i;
                     }
+                    break;
+                }
             }
 
             if let Some(di) = self.dragging_slider
@@ -420,7 +419,12 @@ impl FlameDebugOverlay {
         });
 
         labels.push(TextLabel {
-            rect: [layout.panel_x, layout.panel_y + pad, layout.panel_w, title_h],
+            rect: [
+                layout.panel_x,
+                layout.panel_y + pad,
+                layout.panel_w,
+                title_h,
+            ],
             text: "Candle flames (shop / gameplay)".into(),
             color: color::JADE,
             ..Default::default()
@@ -442,7 +446,12 @@ impl FlameDebugOverlay {
                 user: 0,
             });
             labels.push(TextLabel {
-                rect: [layout.panel_x + 6.0 * layout.scale, ry, layout.label_w, layout.row_h],
+                rect: [
+                    layout.panel_x + 6.0 * layout.scale,
+                    ry,
+                    layout.label_w,
+                    layout.row_h,
+                ],
                 text: name.to_string(),
                 font_px: Some(row_font),
                 color: tc,
@@ -506,7 +515,11 @@ impl FlameDebugOverlay {
         let actions_y0 =
             layout.rows_y0 + VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + pad;
         for (idx, (row, label, variant)) in [
-            (FLAME_SAVE_ROW, "Save for shop / gameplay", ButtonVariant::Primary),
+            (
+                FLAME_SAVE_ROW,
+                "Save for shop / gameplay",
+                ButtonVariant::Primary,
+            ),
             (FLAME_RESET_ROW, "Reset to defaults", ButtonVariant::Danger),
             (FLAME_CLOSE_ROW, "Close", ButtonVariant::Subtle),
         ]
@@ -517,7 +530,12 @@ impl FlameDebugOverlay {
             let visual = DebugRowVisual::for_row(row, self.cursor, &self.pointer);
             let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, variant);
             instances.push(GpuInstance {
-                rect: [layout.panel_x + 4.0, row_y, layout.panel_w - 8.0, layout.row_h],
+                rect: [
+                    layout.panel_x + 4.0,
+                    row_y,
+                    layout.panel_w - 8.0,
+                    layout.row_h,
+                ],
                 color: bg,
                 user: 0,
             });

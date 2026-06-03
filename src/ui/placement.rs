@@ -97,11 +97,8 @@ mod tests {
             rz_deg: 0.0,
             ..Placement::default()
         };
-        let r = crate::render::table_transform::euler_xyz_rad_from_deg(
-            p.rx_deg,
-            p.ry_deg,
-            p.rz_deg,
-        );
+        let r =
+            crate::render::table_transform::euler_xyz_rad_from_deg(p.rx_deg, p.ry_deg, p.rz_deg);
         assert!(approx(r[0], std::f32::consts::FRAC_PI_2));
         assert!(approx(r[1], -std::f32::consts::FRAC_PI_4));
         assert!(approx(r[2], 0.0));

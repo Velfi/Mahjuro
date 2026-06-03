@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::hand::{find_pairs_and_triplets, DetectedMeld, MeldKind};
+use crate::core::hand::{DetectedMeld, MeldKind, find_pairs_and_triplets};
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
     ScoreRoundBundle, ScoreTileBundle,
@@ -1166,7 +1166,12 @@ fn voice_of_the_people_retriggers_whole_low_meld() {
         &[],
     );
     assert_eq!(with_voice.final_chips, base.final_chips + base.base_chips);
-    assert!(with_voice.steps.iter().any(|s| s.source == "Voice of the People"));
+    assert!(
+        with_voice
+            .steps
+            .iter()
+            .any(|s| s.source == "Voice of the People")
+    );
 }
 
 #[test]
@@ -1212,5 +1217,10 @@ fn voice_of_the_elite_retriggers_whole_high_meld() {
         &[],
     );
     assert_eq!(with_voice.final_chips, base.final_chips + base.base_chips);
-    assert!(with_voice.steps.iter().any(|s| s.source == "Voice of the Elite"));
+    assert!(
+        with_voice
+            .steps
+            .iter()
+            .any(|s| s.source == "Voice of the Elite")
+    );
 }

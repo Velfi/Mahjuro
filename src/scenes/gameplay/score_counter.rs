@@ -91,7 +91,9 @@ pub fn resolve_score_cascade_layout(
             min_rw,
             min_rh,
         )?;
-        Ok(score_cascade_layout_from_frame_rect(layout, positions, frame))
+        Ok(score_cascade_layout_from_frame_rect(
+            layout, positions, frame,
+        ))
     })
 }
 

@@ -1,13 +1,13 @@
 //! WGPU: depth-tested 3D tile meshes for the hand + 2D UI quads on top.
 
-mod embedded_wgsl;
-mod frame_pool;
 #[cfg(feature = "windowed")]
 mod boot_splash;
-pub mod loading_screen;
+mod embedded_wgsl;
+mod frame_pool;
 mod init;
 mod init_deferred;
 mod init_phases;
+pub mod loading_screen;
 pub(crate) mod resources;
 
 #[cfg(feature = "windowed")]
@@ -18,8 +18,8 @@ pub fn run_vulkan_wsi_probe_with_window(window: sdl3::video::Window) -> anyhow::
     })?;
     Ok(())
 }
-mod runtime;
 mod room_gpu_load;
+mod runtime;
 mod showcase;
 
 mod constants;
@@ -45,9 +45,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use glam::Mat4;
 use wgpu::util::DeviceExt;
 
-use mahjuro_core::core::relic::{RelicId, RelicRenderMaterial, relic_visual};
-use mahjuro_core::core::tile::{Suit, Tile};
-use mahjuro_core::core::tile_pack::TilePackKind;
 use crate::abacus_mesh::{
     build_abacus_earth_beads_mesh, build_abacus_heaven_beads_mesh, build_abacus_mesh,
 };
@@ -68,21 +65,18 @@ use crate::lit_mesh::Aabb;
 use crate::lit_mesh::MeshCpu;
 use crate::lit_mesh::push_box;
 use crate::lit_mesh::{
-    LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
-    SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_spot_ssr_layout,
-    create_room_env_camera_uniform_buffers, create_room_env_shadow_gpu_batch,
-    create_shadow_caster_layout, create_shadow_sample_layout,
+    LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform,
+    ShadowDepthArrayGpu, ShadowGlobals, SsrGlobals, create_lit_mesh_material_layout,
+    create_lit_mesh_spot_ssr_layout, create_room_env_camera_uniform_buffers,
+    create_room_env_shadow_gpu_batch, create_shadow_caster_layout, create_shadow_sample_layout,
     create_shadow_warp_bind_group, create_shadow_warp_layout,
-    ShadowDepthArrayGpu,
 };
 use crate::mirror_mesh::build_mirror_mesh;
 use crate::ofuda_mesh::build_ofuda_mesh;
 use crate::orb_mesh::build_orb_mesh;
 use crate::plaque_mesh::build_plaque_mesh;
 use crate::primitive::MeshId;
-use crate::progress_meter_mesh::{
-    build_progress_meter_pip_mesh, build_progress_meter_rail_mesh,
-};
+use crate::progress_meter_mesh::{build_progress_meter_pip_mesh, build_progress_meter_rail_mesh};
 use crate::relic_dish::{
     build_dish_mesh, build_pack_mesh, build_porcelain_dish_mesh, build_relic_mesh,
     build_round_dish_mesh, build_shop_action_prop_mesh,
@@ -98,6 +92,9 @@ use crate::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip
 use crate::tile_glb::Vertex3dTex;
 use crate::wood_tablet_mesh::build_wood_tablet_mesh;
 use crate::world_space::pixel_to_world;
+use mahjuro_core::core::relic::{RelicId, RelicRenderMaterial, relic_visual};
+use mahjuro_core::core::tile::{Suit, Tile};
+use mahjuro_core::core::tile_pack::TilePackKind;
 use mahjuro_types::scene_draw::BackgroundId;
 
 use self::frame_pool::FrameBufferPool;
@@ -300,8 +297,15 @@ pub struct WgpuRenderer {
     /// when the tile identity changes.
     showcase_tiles: Vec<ShowcaseTileGpu>,
     /// Cached 2D tile-face overlays keyed by tile identity.
-    tile_face_overlays:
-        FxHashMap<(Suit, u8, Option<mahjuro_core::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
+    tile_face_overlays: FxHashMap<
+        (
+            Suit,
+            u8,
+            Option<mahjuro_core::core::tile::TileEnhancement>,
+            bool,
+        ),
+        TileFaceOverlayGpu,
+    >,
     /// Cached [`ImageQuadSource`] textures keyed by [`ImageQuadSource::cache_key`].
     image_quad_overlays: FxHashMap<String, TileFaceOverlayGpu>,
     /// Negative cache for [`Self::image_quad_overlays`]: keys whose upload
@@ -417,10 +421,8 @@ pub struct WgpuRenderer {
     showcase_decal_atlas_tileset: Option<String>,
     /// In-memory cache of inactive showcase atlases keyed by tileset name.
     /// Splash preloading fills this so tileset cycling avoids rebuild hitches.
-    showcase_decal_atlas_cache: VecDeque<(
-        String,
-        crate::showcase_decal_atlas::ShowcaseDecalAtlasGpu,
-    )>,
+    showcase_decal_atlas_cache:
+        VecDeque<(String, crate::showcase_decal_atlas::ShowcaseDecalAtlasGpu)>,
 
     // ── Procedural lit meshes (candles + wood table) ────────────────────
     /// Bind-group layout shared by every lit-mesh instance.
@@ -470,11 +472,14 @@ pub struct WgpuRenderer {
     room_gi_capture_meta: Option<crate::room_gi_bake::RoomGiBake>,
     room_gi_captured: Option<crate::room_gi_bake::RoomGiBake>,
     /// Offline baked room shadow maps (one per static room); lazy-uploaded on first draw.
-    room_baked_shadow_gpu: [Option<impl_room_shadow::RoomBakedShadowGpu>;
-        crate::room_gi_bake::ROOM_GI_ROOM_COUNT],
+    room_baked_shadow_gpu:
+        [Option<impl_room_shadow::RoomBakedShadowGpu>; crate::room_gi_bake::ROOM_GI_ROOM_COUNT],
     active_room_baked_shadow: Option<crate::room_gi_bake::RoomGiRoom>,
     /// Synthetic contact-AO bake for [`crate::shadow_ao_lab`] (layout, GPU resources).
-    lab_baked_shadow: Option<(crate::shadow_ao_lab::ShadowAoLabLayout, impl_room_shadow::RoomBakedShadowGpu)>,
+    lab_baked_shadow: Option<(
+        crate::shadow_ao_lab::ShadowAoLabLayout,
+        impl_room_shadow::RoomBakedShadowGpu,
+    )>,
     active_lab_baked_shadow: bool,
     room_shadow_capture_pending: Option<crate::room_gi_bake::RoomGiRoom>,
     room_shadow_captured: Option<crate::room_shadow_bake::RoomShadowBake>,
@@ -581,8 +586,10 @@ pub struct WgpuRenderer {
     /// Per-kind mask-extruded pendant meshes (shop). Falls back to [`Self::talisman_mesh`].
     talisman_meshes: rustc_hash::FxHashMap<mahjuro_core::core::talisman::TalismanKind, LitMeshGpu>,
     /// Per-kind mask-extruded pendant meshes (memorial).
-    memorial_talisman_meshes:
-        rustc_hash::FxHashMap<mahjuro_core::core::memorial_talisman::MemorialTalismanKind, LitMeshGpu>,
+    memorial_talisman_meshes: rustc_hash::FxHashMap<
+        mahjuro_core::core::memorial_talisman::MemorialTalismanKind,
+        LitMeshGpu,
+    >,
     talisman_meshes_ready: bool,
     /// Which heightmap is currently bound per talisman slot. Used to skip
     /// rebinding when the kind hasn't changed since last frame. Indexed
@@ -618,8 +625,10 @@ pub struct WgpuRenderer {
     relic_slot_texture: Vec<Option<RelicId>>,
     /// Per-slot boss-icon meshes/textures (archive catalog).
     ordeal_icon_instances: Vec<LitMeshInstance>,
-    ordeal_icon_meshes: rustc_hash::FxHashMap<mahjuro_core::core::ordeal_kind::OrdealKind, LitMeshGpu>,
-    ordeal_icon_textures: rustc_hash::FxHashMap<mahjuro_core::core::ordeal_kind::OrdealKind, RelicTextureGpu>,
+    ordeal_icon_meshes:
+        rustc_hash::FxHashMap<mahjuro_core::core::ordeal_kind::OrdealKind, LitMeshGpu>,
+    ordeal_icon_textures:
+        rustc_hash::FxHashMap<mahjuro_core::core::ordeal_kind::OrdealKind, RelicTextureGpu>,
     ordeal_icon_slot_texture: Vec<Option<mahjuro_core::core::ordeal_kind::OrdealKind>>,
     /// Pre-allocated per-pack instances (lit-mesh foil; uses `pack_mesh` geometry).
     pack_instances: Vec<LitMeshInstance>,
@@ -741,8 +750,7 @@ pub struct WgpuRenderer {
     /// specified albedo + relief textures at instance creation instead
     /// of the default white + flat relief. Used by meshes whose
     /// material samples a heightmap (e.g. engraved coin faces).
-    primitive_textures:
-        FxHashMap<crate::primitive::MeshId, (wgpu::TextureView, wgpu::TextureView)>,
+    primitive_textures: FxHashMap<crate::primitive::MeshId, (wgpu::TextureView, wgpu::TextureView)>,
     /// Authored mesh + material slots from [`coin.glb`](../../../assets/3d/coin.glb).
     coin_glb_primitives: Vec<TilePrimitiveGpu>,
     /// Per-instance uniforms/bind groups for [`DrawKind::GltfCoin`].
@@ -837,8 +845,7 @@ mod impl_screenshot;
 
 pub use constants::{
     MAIN_MENU_PICK_MOON, MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT,
-    MAX_BOOK_SLOTS,
-    MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_COIN_GLTF_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS,
+    MAX_BOOK_SLOTS, MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_COIN_GLTF_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS,
     MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_ORDEAL_ICON_SLOTS, MAX_POINT_LIGHTS, MAX_RELIC_SLOTS,
     MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
@@ -860,8 +867,8 @@ pub(crate) use lighting_buffers::{
     PointLightsBuf, PunctualLightBakeParams, PunctualLightBakeShopCameraParams, SpotLightsBuf,
     TileOccludersBuf,
 };
-pub(crate) use moon::{current_moon_phase, main_menu_moon_phase_for_render};
 pub use moon::moon_phase_short_name;
+pub(crate) use moon::{current_moon_phase, main_menu_moon_phase_for_render};
 pub(crate) use resources::{create_depth, create_depth_r32_snapshot};
 pub(crate) use screenshot::ScreenshotStaging;
 pub(crate) use targets::RenderTarget;

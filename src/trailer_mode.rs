@@ -6,8 +6,8 @@ use crate::game::run::RunState;
 use crate::render::draw_cmd::CameraParams;
 use crate::render::hallway_glb::HallwayDistortionDebugSnapshot;
 use crate::render::main_menu_glb::{self, main_menu_env_height_scale};
-use crate::scenes::object3d_inspect::lerp_camera;
 use crate::scenes::Scene;
+use crate::scenes::object3d_inspect::lerp_camera;
 
 const HALLWAY_DURATION_SECS: f32 = 5.0;
 const MAIN_MENU_DURATION_SECS: f32 = 7.0;
@@ -88,9 +88,7 @@ impl HallwayTrailer {
     }
 
     fn snapshot_at(&self, now: Instant) -> Option<HallwayDistortionDebugSnapshot> {
-        let elapsed = now
-            .saturating_duration_since(self.started_at)
-            .as_secs_f32();
+        let elapsed = now.saturating_duration_since(self.started_at).as_secs_f32();
         if elapsed >= HALLWAY_DURATION_SECS {
             return None;
         }
@@ -122,8 +120,9 @@ impl MainMenuTrailer {
             return None;
         }
         let end_cam = main_menu_glb::main_menu_camera_base(window_w, window_h, env_h);
-        let start_cam =
-            main_menu_glb::main_menu_moon_trailer_start_camera(window_w, window_h, env_h, &end_cam)?;
+        let start_cam = main_menu_glb::main_menu_moon_trailer_start_camera(
+            window_w, window_h, env_h, &end_cam,
+        )?;
         Some(Self {
             started_at: Instant::now(),
             start_cam,
@@ -132,20 +131,13 @@ impl MainMenuTrailer {
     }
 
     fn camera_at(&self, now: Instant, window_h: f32) -> Option<CameraParams> {
-        let elapsed = now
-            .saturating_duration_since(self.started_at)
-            .as_secs_f32();
+        let elapsed = now.saturating_duration_since(self.started_at).as_secs_f32();
         if elapsed >= MAIN_MENU_DURATION_SECS {
             return None;
         }
         let t = (elapsed / MAIN_MENU_DURATION_SECS).clamp(0.0, 1.0);
         let t = smoothstep(t);
-        Some(lerp_camera(
-            &self.start_cam,
-            &self.end_cam,
-            t,
-            window_h,
-        ))
+        Some(lerp_camera(&self.start_cam, &self.end_cam, t, window_h))
     }
 
     fn finished_at(&self, now: Instant) -> bool {

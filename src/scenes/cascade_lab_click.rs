@@ -250,7 +250,10 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for &click in PANEL_CLICKS {
             let id = click.id();
-            assert!(seen.insert(id), "duplicate click id 0x{id:08X} for {click:?}");
+            assert!(
+                seen.insert(id),
+                "duplicate click id 0x{id:08X} for {click:?}"
+            );
             assert_eq!(LabClick::from_id(id), Some(click));
         }
     }
@@ -260,6 +263,9 @@ mod tests {
         let beggars = LabClick::PickRelicDef(87).id();
         let wind = LabClick::RoundWindSlot(0).id();
         assert_ne!(beggars, wind);
-        assert!(matches!(LabClick::from_id(beggars), Some(LabClick::PickRelicDef(87))));
+        assert!(matches!(
+            LabClick::from_id(beggars),
+            Some(LabClick::PickRelicDef(87))
+        ));
     }
 }

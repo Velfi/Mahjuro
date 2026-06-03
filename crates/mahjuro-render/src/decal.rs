@@ -2598,10 +2598,7 @@ pub fn rasterize_decal(
 /// host object's world-space extents. Mirrors the per-kind sizing math
 /// in the legacy dispatch arms ([wgpu_renderer.rs:7868-7872] for
 /// plaque, [`CABINET_DECAL_CELL_W`] × 6 for cabinet, etc.).
-pub fn decal_dimensions(
-    layout: &crate::primitive::DecalLayout,
-    extents: [f32; 3],
-) -> (u32, u32) {
+pub fn decal_dimensions(layout: &crate::primitive::DecalLayout, extents: [f32; 3]) -> (u32, u32) {
     use crate::primitive::DecalLayout;
     match layout {
         DecalLayout::Fit { target_short_edge } => {

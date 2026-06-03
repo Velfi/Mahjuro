@@ -76,7 +76,13 @@ impl CascadeTuningTimelineGeom {
         let flight = tuning.discard_flight_ms;
         let land = tuning.discard_landing_ms;
         let sink = tuning.discard_river_sink_ms;
-        [0, lift, lift + flight, lift + flight + land, lift + flight + land + sink]
+        [
+            0,
+            lift,
+            lift + flight,
+            lift + flight + land,
+            lift + flight + land + sink,
+        ]
     }
 
     fn track_max(boundaries: &[u64]) -> u64 {
@@ -93,7 +99,12 @@ impl CascadeTuningTimelineGeom {
         snap_ms((t * max_ms as f32).round() as u64)
     }
 
-    pub fn hit_handle(&self, mx: f32, my: f32, tuning: &CascadeTuning) -> Option<TimelineDragTarget> {
+    pub fn hit_handle(
+        &self,
+        mx: f32,
+        my: f32,
+        tuning: &CascadeTuning,
+    ) -> Option<TimelineDragTarget> {
         let hit = self.handle_r * 2.2;
         for handle in (1..=3).rev() {
             let max_ms = Self::track_max(&Self::score_boundaries_ms(tuning));
@@ -131,7 +142,12 @@ pub fn snap_ms(ms: u64) -> u64 {
     snapped.clamp(TUNING_MIN_MS, TUNING_MAX_MS)
 }
 
-pub fn apply_timeline_drag(tuning: &mut CascadeTuning, target: TimelineDragTarget, mx: f32, geom: &CascadeTuningTimelineGeom) {
+pub fn apply_timeline_drag(
+    tuning: &mut CascadeTuning,
+    target: TimelineDragTarget,
+    mx: f32,
+    geom: &CascadeTuningTimelineGeom,
+) {
     match target {
         TimelineDragTarget::Score(handle) => {
             let mut b = CascadeTuningTimelineGeom::score_boundaries_ms(tuning);
@@ -350,7 +366,11 @@ fn draw_track(
         if seg_w < 0.5 {
             continue;
         }
-        let seg_color = spec.segment_colors.get(i).copied().unwrap_or(color::WALNUT_SOFT);
+        let seg_color = spec
+            .segment_colors
+            .get(i)
+            .copied()
+            .unwrap_or(color::WALNUT_SOFT);
         let highlighted = spec.highlight_segments.contains(&i);
         let fill = if highlighted {
             color::lighten(seg_color, 0.12)
@@ -370,16 +390,17 @@ fn draw_track(
             });
         }
         if seg_w > 24.0
-            && let Some(lbl) = spec.segment_labels.get(i) {
-                labels.push(TextLabel {
-                    rect: [seg_x, spec.bar_y, seg_w, geom.bar_h],
-                    text: (*lbl).into(),
-                    color: color::alpha(color::WALNUT_INK, 0.88),
-                    font_px: Some(font_sm),
-                    align: TextAlign::Center,
-                    ..Default::default()
-                });
-            }
+            && let Some(lbl) = spec.segment_labels.get(i)
+        {
+            labels.push(TextLabel {
+                rect: [seg_x, spec.bar_y, seg_w, geom.bar_h],
+                text: (*lbl).into(),
+                color: color::alpha(color::WALNUT_INK, 0.88),
+                font_px: Some(font_sm),
+                align: TextAlign::Center,
+                ..Default::default()
+            });
+        }
         if spec.show_tick_marks && ms > 0 {
             let tick_w = 1.0;
             let step_px = geom.inner_w * (spec.tick_ms as f32 / max_ms as f32);
@@ -398,16 +419,29 @@ fn draw_track(
         seg_x += seg_w;
     }
 
-    if let Some(stagger) = spec.stagger_ms.filter(|&s| s > 0 && spec.label == "Discard") {
+    if let Some(stagger) = spec
+        .stagger_ms
+        .filter(|&s| s > 0 && spec.label == "Discard")
+    {
         let land_x = geom.ms_to_x(spec.boundaries[3], max_ms);
         let fuzz_w = (geom.inner_w * (stagger as f32 / max_ms as f32)).clamp(4.0, 28.0);
         instances.push(GpuInstance {
-            rect: [land_x - fuzz_w * 0.3, spec.bar_y + geom.bar_h * 0.15, fuzz_w, geom.bar_h * 0.7],
+            rect: [
+                land_x - fuzz_w * 0.3,
+                spec.bar_y + geom.bar_h * 0.15,
+                fuzz_w,
+                geom.bar_h * 0.7,
+            ],
             color: color::alpha(color::PARCHMENT, 0.22),
             user: 0,
         });
         labels.push(TextLabel {
-            rect: [land_x, spec.bar_y + geom.bar_h + 1.0, fuzz_w + 20.0, 10.0 * scale],
+            rect: [
+                land_x,
+                spec.bar_y + geom.bar_h + 1.0,
+                fuzz_w + 20.0,
+                10.0 * scale,
+            ],
             text: format!("±{stagger}ms stagger"),
             color: color::alpha(color::STONE, 0.55),
             font_px: Some(font_sm * 0.9),
@@ -427,7 +461,12 @@ fn draw_track(
             color::alpha(color::STONE, 0.7)
         };
         instances.push(GpuInstance {
-            rect: [hx - handle_d * 0.5, spec.bar_y + geom.bar_h * 0.5 - handle_d * 0.5, handle_d, handle_d],
+            rect: [
+                hx - handle_d * 0.5,
+                spec.bar_y + geom.bar_h * 0.5 - handle_d * 0.5,
+                handle_d,
+                handle_d,
+            ],
             color: handle_color,
             user: 0,
         });
@@ -447,16 +486,17 @@ fn draw_track(
         });
 
         if let Some(ev) = spec.event_labels.get(i)
-            && !ev.is_empty() {
-                labels.push(TextLabel {
-                    rect: [hx - 28.0, spec.bar_y - 12.0 * scale, 56.0, 11.0 * scale],
-                    text: (*ev).into(),
-                    color: color::alpha(color::STONE, 0.78),
-                    font_px: Some(font_sm * 0.92),
-                    align: TextAlign::Center,
-                    ..Default::default()
-                });
-            }
+            && !ev.is_empty()
+        {
+            labels.push(TextLabel {
+                rect: [hx - 28.0, spec.bar_y - 12.0 * scale, 56.0, 11.0 * scale],
+                text: (*ev).into(),
+                color: color::alpha(color::STONE, 0.78),
+                font_px: Some(font_sm * 0.92),
+                align: TextAlign::Center,
+                ..Default::default()
+            });
+        }
         if i > 0 {
             labels.push(TextLabel {
                 rect: [hx - 24.0, spec.bar_y + geom.bar_h + 2.0, 48.0, 10.0 * scale],

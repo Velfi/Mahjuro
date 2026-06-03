@@ -2,7 +2,6 @@
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::sfx_id::SfxId;
 use crate::core::tile::{Suit, Tile};
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
@@ -18,6 +17,7 @@ use crate::render::table_transform;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::render::world_space::LayoutAnchorPx;
+use crate::sfx_id::SfxId;
 use crate::ui::colored_keywords;
 use crate::ui::controller_hints::{
     HintStyle, menu_footer_row, push_screen_footer_hint, screen_footer_reserve,
@@ -2118,9 +2118,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     1.95,
                 ),
             ]
-        } else if let (Some(ref layout), Some(scoring)) =
-            (try_it_layout, scoring_layout.as_ref())
-        {
+        } else if let (Some(ref layout), Some(scoring)) = (try_it_layout, scoring_layout.as_ref()) {
             let prop_light_y = layout.discard_rect[1] + layout.discard_rect[3] * 0.35;
             &[
                 (

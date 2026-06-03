@@ -20,10 +20,7 @@ pub(crate) enum RenderTarget {
 /// `Headless`.
 pub enum TargetInit {
     #[cfg(feature = "windowed")]
-    Windowed {
-        window: Window,
-        hdr_enabled: bool,
-    },
+    Windowed { window: Window, hdr_enabled: bool },
     Headless {
         width: u32,
         height: u32,

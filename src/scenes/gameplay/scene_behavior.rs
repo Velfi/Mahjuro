@@ -1,14 +1,12 @@
-use super::*;
 use super::focus::GameplayButton;
+use super::*;
 use super::{animation_state, cascade_controller, input_handler};
 use crate::core::consumable::Consumable;
 use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
 use crate::render::theme::color;
 use crate::scenes::options;
 use crate::scenes::{BackgroundId, GuideScene, OverlayRequest};
-use crate::ui::controller_hints::{
-    HintStyle, gameplay_help_footer_row, push_screen_footer_hint,
-};
+use crate::ui::controller_hints::{HintStyle, gameplay_help_footer_row, push_screen_footer_hint};
 use crate::ui::inspect_plaque::{
     FocusTooltipPanelParams, dora_focus_tooltip_strings, gameplay_consumable_description_full,
     hand_tile_focus_tooltip, push_focus_tooltip_panel_2d, round_wind_focus_tooltip_strings,
@@ -508,7 +506,7 @@ impl SceneBehavior for GameplayScene {
         structure_showcase.extend(yaku_structure_showcase);
 
         let paused = self.pause_menu.paused;
-        
+
         let cash_in_blocked = gameplay.cash_in_blocked_until_discards_spent;
         let cash_in_visible = gameplay.trigger_enabled || cash_in_blocked;
         let _cash_in_enabled = gameplay.trigger_enabled;
@@ -704,9 +702,7 @@ impl SceneBehavior for GameplayScene {
             cash_in_visible,
             &mut focus_rect_graph,
         );
-        if !vis.hide_journal
-            && self.journal_transition.is_none()
-        {
+        if !vis.hide_journal && self.journal_transition.is_none() {
             let journal_rect = crate::render::gameplay_glb::gameplay_journal_book_screen_rect(
                 layout.window_w,
                 layout.window_h,
@@ -732,32 +728,33 @@ impl SceneBehavior for GameplayScene {
             .map(|r| r.w)
             .unwrap_or(layout.window_w * crate::ui::layout::HAND_SLOT_W_RATIO);
         let tile_size_px = hand_slot_w * (22.0 / crate::ui::layout::TILE_WIDTH_MM);
-        let (boss_ordeal_obj, ordeal_icon_rect, boss_ordeal_glow, boss_ordeal_wiggle) =
-            if !vis.hide_boss_icon && let Some(kind) = gameplay.ordeal_kind {
-                let (boss_glow, boss_wiggle) =
-                    self.boss_rule_feedback(now, boss_blocks_selection);
-                let obj = crate::render::gameplay_glb::gameplay_boss_ordeal_object3d(
-                    &glb_anchors.tile_plinth_poses[2],
-                    layout.window_w,
-                    layout.window_h,
-                    env_h,
-                    &scene_camera,
-                    tile_size_px,
-                    kind,
-                    boss_glow,
-                );
-                let rect = crate::render::gameplay_glb::gameplay_boss_ordeal_screen_rect(
-                    &glb_anchors.tile_plinth_poses[2],
-                    layout.window_w,
-                    layout.window_h,
-                    env_h,
-                    &scene_camera,
-                    tile_size_px,
-                );
-                (Some(obj), Some(rect), boss_glow, boss_wiggle)
-            } else {
-                (None, None, 0.0, 0.0)
-            };
+        let (boss_ordeal_obj, ordeal_icon_rect, boss_ordeal_glow, boss_ordeal_wiggle) = if !vis
+            .hide_boss_icon
+            && let Some(kind) = gameplay.ordeal_kind
+        {
+            let (boss_glow, boss_wiggle) = self.boss_rule_feedback(now, boss_blocks_selection);
+            let obj = crate::render::gameplay_glb::gameplay_boss_ordeal_object3d(
+                &glb_anchors.tile_plinth_poses[2],
+                layout.window_w,
+                layout.window_h,
+                env_h,
+                &scene_camera,
+                tile_size_px,
+                kind,
+                boss_glow,
+            );
+            let rect = crate::render::gameplay_glb::gameplay_boss_ordeal_screen_rect(
+                &glb_anchors.tile_plinth_poses[2],
+                layout.window_w,
+                layout.window_h,
+                env_h,
+                &scene_camera,
+                tile_size_px,
+            );
+            (Some(obj), Some(rect), boss_glow, boss_wiggle)
+        } else {
+            (None, None, 0.0, 0.0)
+        };
         let discard_undo_rect = if !paused
             && !ctx.modal_active
             && self.cascade_queue.is_empty()
@@ -900,11 +897,7 @@ impl SceneBehavior for GameplayScene {
                     hand.len(),
                     hand_scale_mul,
                 );
-                let (cx, cy, lift) = (
-                    px + slide_x_px + reject_shake_x,
-                    py + pop_offset,
-                    lift_z,
-                );
+                let (cx, cy, lift) = (px + slide_x_px + reject_shake_x, py + pop_offset, lift_z);
                 hand_placements.push(crate::render::draw_cmd::ShowcaseTilePlacement {
                     tile,
                     center_pos: [cx, cy, lift],
@@ -1733,25 +1726,15 @@ impl SceneBehavior for GameplayScene {
                                 boss_title_text.clone()
                             };
                             let discards = gameplay.discards_remaining;
-                            let discard_word = if discards == 1 {
-                                "discard"
-                            } else {
-                                "discards"
-                            };
+                            let discard_word = if discards == 1 { "discard" } else { "discards" };
                             let desc = if boss_rule_text.is_empty() {
                                 format!(
                                     "{boss} is blocking cash-in until you use all discards ({discards} {discard_word} left)."
                                 )
                             } else {
-                                format!(
-                                    "{boss_rule_text} ({discards} {discard_word} left)."
-                                )
+                                format!("{boss_rule_text} ({discards} {discard_word} left).")
                             };
-                            (
-                                "Cash In".to_string(),
-                                desc,
-                                color::RUBY,
-                            )
+                            ("Cash In".to_string(), desc, color::RUBY)
                         } else {
                             (
                                 "Cash In".to_string(),
@@ -1769,11 +1752,7 @@ impl SceneBehavior for GameplayScene {
                                 anchor_rect: Some(rect),
                                 title: title.as_str(),
                                 desc: desc.as_str(),
-                                cta: if cash_in_blocked {
-                                    "Ordeal Rule"
-                                } else {
-                                    ""
-                                },
+                                cta: if cash_in_blocked { "Ordeal Rule" } else { "" },
                                 accent_color: accent,
                                 hover_is_owned: false,
                                 skip_title_block: false,
@@ -1912,10 +1891,7 @@ impl SceneBehavior for GameplayScene {
         use crate::render::wgpu_renderer::GameplayPick;
         let push_3d_hit = if self.lab_mode {
             gameplay.trigger_enabled
-                && matches!(
-                    ctx.picked_gameplay_object,
-                    Some(GameplayPick::CashInButton)
-                )
+                && matches!(ctx.picked_gameplay_object, Some(GameplayPick::CashInButton))
         } else {
             ctx.picked_gameplay_object.is_some()
         };

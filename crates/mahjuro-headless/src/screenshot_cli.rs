@@ -4,7 +4,10 @@ use clap::{ArgAction, Parser};
 
 /// Offscreen PNG capture for marketing, docs, and regression baselines.
 #[derive(Debug, Parser)]
-#[command(name = "mahjuro-screenshot", about = "Render one offscreen frame to a PNG")]
+#[command(
+    name = "mahjuro-screenshot",
+    about = "Render one offscreen frame to a PNG"
+)]
 pub struct ScreenshotCli {
     /// Root scene id (e.g. `main_menu`, `shop`, `hallway`, `archive`, `defeat`, `showcase`, …).
     #[arg(long)]

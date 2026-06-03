@@ -123,9 +123,7 @@ pub fn main_menu_rain_collision_mesh() -> Option<crate::room_env_gltf::RoomColli
 
 /// Room collision meshes for analytic punctual occlusion (roof, etc.).
 pub fn main_menu_collision_meshes() -> Vec<crate::room_env_gltf::RoomCollisionMesh> {
-    with_main_menu_glb_cpu(|opt| {
-        opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
-    })
+    with_main_menu_glb_cpu(|opt| opt.map(|c| c.collision_meshes.clone()).unwrap_or_default())
 }
 
 /// Visible ground mesh node in [`main_menu.glb`](../../../assets/3d/main_menu.glb) (spawn fallback only).
@@ -182,20 +180,16 @@ pub fn main_menu_rain_hit_spawn_aabb(
     with_main_menu_glb_cpu(|opt| {
         let cpu = opt?;
         let center = cpu.environment_bounds_doc?.center();
-        let bounds_doc = room_env_gltf::RoomEnvironmentBounds::from_collision_meshes(
-            &cpu.rain_surface_meshes,
-        )
-        .or_else(|| {
-            room_env_gltf::room_env_primitive_bounds_doc(
-                &cpu.environment_primitives,
-                MAIN_MENU_RAIN_GROUND_NODE,
-            )
-        })?;
+        let bounds_doc =
+            room_env_gltf::RoomEnvironmentBounds::from_collision_meshes(&cpu.rain_surface_meshes)
+                .or_else(|| {
+                room_env_gltf::room_env_primitive_bounds_doc(
+                    &cpu.environment_primitives,
+                    MAIN_MENU_RAIN_GROUND_NODE,
+                )
+            })?;
         Some(room_env_gltf::room_world_bounds_aabb_centered(
-            bounds_doc,
-            center,
-            window_h,
-            env_scale,
+            bounds_doc, center, window_h, env_scale,
         ))
     })
 }
@@ -227,10 +221,7 @@ pub fn with_main_menu_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R 
 
 /// True once `main_menu.glb` CPU decode finished (worker or main thread).
 pub fn main_menu_cpu_decoded() -> bool {
-    matches!(
-        *MAIN_MENU_GLB_CPU.read(),
-        MainMenuGlbCache::Ready(Some(_))
-    )
+    matches!(*MAIN_MENU_GLB_CPU.read(), MainMenuGlbCache::Ready(Some(_)))
 }
 
 /// Idempotent CPU decode for background prefetch (see [`crate::room_preload`]).
@@ -240,9 +231,7 @@ pub fn decode_main_menu_glb_into_cache() {
 
 /// True while environment mesh buffers are still on the CPU (ready for GPU upload).
 pub fn main_menu_cpu_ready_for_gpu_upload() -> bool {
-    with_main_menu_glb_cpu(|opt| {
-        opt.is_some_and(|c| !c.environment_primitives.is_empty())
-    })
+    with_main_menu_glb_cpu(|opt| opt.is_some_and(|c| !c.environment_primitives.is_empty()))
 }
 
 pub fn release_main_menu_environment_cpu_sources_after_gpu_upload() {
@@ -374,13 +363,9 @@ pub fn main_menu_moon_trailer_start_camera(
             env_height_scale,
             MAIN_MENU_MOON_MESH_NODE,
         )?;
-        let moon_radius = room_node_mesh_radius_world(
-            cpu,
-            window_h,
-            env_height_scale,
-            MAIN_MENU_MOON_MESH_NODE,
-        )
-        .unwrap_or(window_h * 0.015);
+        let moon_radius =
+            room_node_mesh_radius_world(cpu, window_h, env_height_scale, MAIN_MENU_MOON_MESH_NODE)
+                .unwrap_or(window_h * 0.015);
 
         let end_eye = glam::Vec3::from_array(end_cam.eye);
         let to_moon = moon - end_eye;
@@ -451,7 +436,8 @@ pub fn main_menu_moon_screen_hit_rect(w: f32, h: f32, env_h: f32) -> Option<[f32
             min_rh: (48.0 * scale).max(32.0),
         };
         room_glb::screen_rect_for_marker_mesh_bounds(&params).or_else(|| {
-            let center = room_glb::room_node_mesh_center_world(cpu, h, env_h, MAIN_MENU_MOON_MESH_NODE)?;
+            let center =
+                room_glb::room_node_mesh_center_world(cpu, h, env_h, MAIN_MENU_MOON_MESH_NODE)?;
             let (sx, sy) = cam.project_world_to_screen(w, h, center);
             let r = (56.0 * scale).max(40.0);
             Some([sx - r, sy - r, r * 2.0, r * 2.0])
@@ -541,12 +527,13 @@ mod tests {
         let bytes = include_bytes!("../../../assets/3d/main_menu.glb");
         let cpu = load_main_menu_glb_from_bytes(bytes).expect("decode main_menu.glb");
         assert!(
-            cpu.marker_mesh_bounds_doc_for(MAIN_MENU_MOON_MESH_NODE).is_some(),
+            cpu.marker_mesh_bounds_doc_for(MAIN_MENU_MOON_MESH_NODE)
+                .is_some(),
             "MoonObject must merge mesh bounds for hub click targets"
         );
         let env_h = main_menu_env_height_scale(crate::room_glb::SHOP_ENV_HEIGHT_SCALE);
-        let rect = main_menu_moon_screen_hit_rect(1280.0, 720.0, env_h)
-            .expect("projected moon hit rect");
+        let rect =
+            main_menu_moon_screen_hit_rect(1280.0, 720.0, env_h).expect("projected moon hit rect");
         assert!(rect[2] > 0.0 && rect[3] > 0.0);
     }
 }

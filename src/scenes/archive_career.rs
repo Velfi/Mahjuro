@@ -1,8 +1,8 @@
 //! Career stats for the Archive: Chronicle dashboard copy, folio labels, and
 //! personal-record / rivalry helpers.
 
-use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
 use crate::core::OrdealKindExt;
+use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
 use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};
 use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::YakuKind;
@@ -121,7 +121,10 @@ pub fn chronicle_footer_value_color(label: &str) -> [f32; 4] {
 }
 
 /// Medal emoji when `rec` ranks 1st–3rd among serious runs by total score.
-fn chronicle_run_score_rank_medal(progress: &PlayerProgress, rec: &RunRecord) -> Option<&'static str> {
+fn chronicle_run_score_rank_medal(
+    progress: &PlayerProgress,
+    rec: &RunRecord,
+) -> Option<&'static str> {
     match chronicle_run_score_rank(progress, rec)? {
         0 => Some("🥇 "),
         1 => Some("🥈 "),
@@ -647,23 +650,23 @@ pub fn run_detail_model(
 
     let (mut yaku_rows, yaku_value_suffix): (Vec<(YakuKind, u32)>, &str) =
         if !rec.chronicle.yaku_contributions.is_empty() {
-        (
-            rec.chronicle
-                .yaku_contributions
-                .iter()
-                .map(|(k, v)| (*k, v.han))
-                .collect(),
-            " han",
-        )
-    } else {
-        (
-            rec.yaku_times_played
-                .iter()
-                .map(|(k, v)| (*k, *v))
-                .collect(),
-            "×",
-        )
-    };
+            (
+                rec.chronicle
+                    .yaku_contributions
+                    .iter()
+                    .map(|(k, v)| (*k, v.han))
+                    .collect(),
+                " han",
+            )
+        } else {
+            (
+                rec.yaku_times_played
+                    .iter()
+                    .map(|(k, v)| (*k, *v))
+                    .collect(),
+                "×",
+            )
+        };
     yaku_rows.sort_by(|a, b| b.1.cmp(&a.1));
 
     let mut score_lines = Vec::new();
@@ -980,7 +983,9 @@ mod tests {
     #[test]
     fn chronicle_run_log_title_skips_medals_for_lone_run() {
         let mut progress = PlayerProgress::new();
-        progress.run_history.push(defeat_against(OrdealKind::Whisper, 10_000));
+        progress
+            .run_history
+            .push(defeat_against(OrdealKind::Whisper, 10_000));
         let rec = &progress.run_history[0];
         let title = chronicle_run_log_title(&progress, 1, rec);
         assert!(!title.contains("🥇"));
@@ -1001,11 +1006,18 @@ mod tests {
     #[test]
     fn chronicle_run_log_title_shows_best_hand_pin_on_signature_pr() {
         let mut progress = PlayerProgress::new();
-        progress.run_history.push(defeat_against_hand(OrdealKind::Whisper, 10_000, 50_000));
-        progress.run_history.push(defeat_against_hand(OrdealKind::Gate, 20_000, 30_000));
+        progress
+            .run_history
+            .push(defeat_against_hand(OrdealKind::Whisper, 10_000, 50_000));
+        progress
+            .run_history
+            .push(defeat_against_hand(OrdealKind::Gate, 20_000, 30_000));
         let pr_hand = &progress.run_history[0];
         let title = chronicle_run_log_title(&progress, 2, pr_hand);
-        assert!(title.contains('\u{1F004}'), "expected best-hand pin: {title}");
+        assert!(
+            title.contains('\u{1F004}'),
+            "expected best-hand pin: {title}"
+        );
         let other = &progress.run_history[1];
         let other_title = chronicle_run_log_title(&progress, 1, other);
         assert!(
@@ -1017,19 +1029,34 @@ mod tests {
     #[test]
     fn chronicle_run_log_title_shows_score_rank_medals_for_top_three() {
         let mut progress = PlayerProgress::new();
-        progress.run_history.push(defeat_against(OrdealKind::Whisper, 10_000));
-        progress.run_history.push(defeat_against(OrdealKind::Gate, 5_000));
-        progress.run_history.push(defeat_against(OrdealKind::Drought, 1_000));
+        progress
+            .run_history
+            .push(defeat_against(OrdealKind::Whisper, 10_000));
+        progress
+            .run_history
+            .push(defeat_against(OrdealKind::Gate, 5_000));
+        progress
+            .run_history
+            .push(defeat_against(OrdealKind::Drought, 1_000));
         let best = &progress.run_history[0];
         let title = chronicle_run_log_title(&progress, 3, best);
-        assert!(title.starts_with("🥇 "), "expected 1st-place medal: {title}");
+        assert!(
+            title.starts_with("🥇 "),
+            "expected 1st-place medal: {title}"
+        );
         assert!(title.contains("Run 3 — Defeat"));
         let second = &progress.run_history[1];
         let second_title = chronicle_run_log_title(&progress, 2, second);
-        assert!(second_title.starts_with("🥈 "), "expected 2nd-place medal: {second_title}");
+        assert!(
+            second_title.starts_with("🥈 "),
+            "expected 2nd-place medal: {second_title}"
+        );
         let third = &progress.run_history[2];
         let third_title = chronicle_run_log_title(&progress, 1, third);
-        assert!(third_title.starts_with("🥉 "), "expected 3rd-place medal: {third_title}");
+        assert!(
+            third_title.starts_with("🥉 "),
+            "expected 3rd-place medal: {third_title}"
+        );
     }
 
     #[test]

@@ -628,10 +628,8 @@ fn select_present_mode(caps: &wgpu::SurfaceCapabilities) -> wgpu::PresentMode {
         // 30 Hz on low-motion scenes. Prefer Mailbox to avoid that.
         #[cfg(target_os = "macos")]
         {
-            const PREFERENCE: &[wgpu::PresentMode] = &[
-                wgpu::PresentMode::Mailbox,
-                wgpu::PresentMode::FifoRelaxed,
-            ];
+            const PREFERENCE: &[wgpu::PresentMode] =
+                &[wgpu::PresentMode::Mailbox, wgpu::PresentMode::FifoRelaxed];
             for &mode in PREFERENCE {
                 if caps.present_modes.contains(&mode) {
                     log::info!("macOS: using present mode {mode:?} to avoid ProMotion throttle");

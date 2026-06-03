@@ -19,7 +19,10 @@ use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind};
 use crate::scenes::gameplay::RELIC_GLOW_LIFETIME;
 use crate::scenes::journal_transition::{JournalDirection, JournalTransition};
-use crate::scenes::{GuideScene, OverlayRequest, Scene, SceneTransition, UpdateCtx, WallLedgerScene, YakuJournalScene};
+use crate::scenes::{
+    GuideScene, OverlayRequest, Scene, SceneTransition, UpdateCtx, WallLedgerScene,
+    YakuJournalScene,
+};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
 use crate::ui::input::{UiAction, apply_ui_actions};
 
@@ -924,8 +927,7 @@ fn process_lab_cash_in(
             continue;
         }
         let cash_in_enabled = GameEngine::read(ctx.run).trigger_enabled;
-        if matches!(ctx.picked_gameplay_object, Some(GameplayPick::CashInButton))
-            && cash_in_enabled
+        if matches!(ctx.picked_gameplay_object, Some(GameplayPick::CashInButton)) && cash_in_enabled
         {
             scene.lab_cash_in(ctx);
         }
@@ -941,7 +943,7 @@ pub(super) fn build_relic_tray(
     env_height_scale: f32,
     glb_relic_poses: &[crate::render::gameplay_glb::GameplayMarkerPose],
 ) -> Vec<Object3d> {
-    use crate::core::relic::{all_relic_defs, RelicId};
+    use crate::core::relic::{RelicId, all_relic_defs};
     use crate::render::table_transform::{compose_rotation_euler, rot_euler_xyz_rad};
     use crate::render::world_space::pixel_to_world;
 
@@ -1321,7 +1323,9 @@ pub(super) struct YakuPanelOutputs {
 }
 
 /// Median of packed object3d anchor triples (matches showcase tile `center_pos` encoding).
-pub(super) fn median_layout_anchor(centers: &[[f32; 3]]) -> crate::render::world_space::LayoutAnchorPx {
+pub(super) fn median_layout_anchor(
+    centers: &[[f32; 3]],
+) -> crate::render::world_space::LayoutAnchorPx {
     debug_assert!(!centers.is_empty());
     let median = |values: &mut Vec<f32>| {
         values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -1439,8 +1443,7 @@ pub(super) fn build_yaku_panel_and_tablets(
 
     // Cash-in clears live structure immediately; keep the scored melds for
     // yaku tablets until the scoring cascade finishes.
-    let (base_structure_tiles, base_structure_sets) = if let Some(showcase) = cascade_showcase_ref
-    {
+    let (base_structure_tiles, base_structure_sets) = if let Some(showcase) = cascade_showcase_ref {
         (showcase.tiles.clone(), showcase.sets.clone())
     } else {
         (
@@ -1485,7 +1488,10 @@ pub(super) fn build_yaku_panel_and_tablets(
 
     let mut structure_showcase: Vec<ShowcaseTilePlacement> = Vec::new();
 
-    let wave_t = cascade_frame.as_ref().map(|frame| frame.wave_t).unwrap_or(0.0);
+    let wave_t = cascade_frame
+        .as_ref()
+        .map(|frame| frame.wave_t)
+        .unwrap_or(0.0);
     let active_yaku = cascade_frame
         .as_ref()
         .and_then(|frame| frame.active_yaku.as_deref());

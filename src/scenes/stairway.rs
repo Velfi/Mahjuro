@@ -10,11 +10,11 @@ use crate::render::wgpu_renderer::PointLight;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 use crate::scenes::shop::ShopScene;
 use crate::ui::colored_keywords;
-use crate::ui::inspect_plaque::estimated_flavor_line_count;
 use crate::ui::controller_hints::{
     HintStyle, confirm_continue_footer_row, hint_style_with_alpha, push_inline_hint_rows,
 };
 use crate::ui::input::UiAction;
+use crate::ui::inspect_plaque::estimated_flavor_line_count;
 
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
@@ -98,16 +98,18 @@ impl SceneBehavior for StairwayScene {
             let room_glb = staircase_glb::staircase_glb_has_embedded_lights();
             frame.scene_lighting.embedded_gltf_punctual = room_glb;
             frame.scene_lighting.room_glb_brdf = room_glb;
-            frame.scene_lighting.set_gltf_embedded_spot_lights(if room_glb {
-                staircase_glb::staircase_embedded_spot_lights_runtime(
-                    w,
-                    h,
-                    ctx.room_gltf_height_scale,
-                    &ctx.room_env_for(scene_keys::STAIRWAY).0,
-                )
-            } else {
-                Vec::new()
-            });
+            frame
+                .scene_lighting
+                .set_gltf_embedded_spot_lights(if room_glb {
+                    staircase_glb::staircase_embedded_spot_lights_runtime(
+                        w,
+                        h,
+                        ctx.room_gltf_height_scale,
+                        &ctx.room_env_for(scene_keys::STAIRWAY).0,
+                    )
+                } else {
+                    Vec::new()
+                });
             let (inverse_punctual, punctual_gltf_nodes) = if room_glb {
                 crate::render::room_gltf_punctual::tagged_to_scene_punctual(
                     staircase_glb::staircase_embedded_point_lights_runtime_tagged(

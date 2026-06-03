@@ -131,8 +131,6 @@ fn default_tile_material() -> TileMaterial {
     TileMaterial::Bamboo
 }
 
-
-
 fn default_tileset_name() -> String {
     "original".to_string()
 }
@@ -321,11 +319,7 @@ fn load_settings_uncached() -> AppSettings {
             .get("shadow_quality")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_else(|| {
-                if raw
-                    .get("shadows_enabled")
-                    .and_then(|v| v.as_bool())
-                    == Some(false)
-                {
+                if raw.get("shadows_enabled").and_then(|v| v.as_bool()) == Some(false) {
                     ShadowQuality::Off
                 } else {
                     ShadowQuality::High

@@ -8,7 +8,9 @@ use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::DrawCtx;
 use crate::ui::clip::intersect_rect;
-use crate::ui::controller_hints::{HintStyle, confirm_continue_footer_row, push_inline_hint_rows};
+use crate::ui::controller_hints::{
+    HintSegment, HintStyle, confirm_continue_footer_row, push_inline_hint_rows,
+};
 use crate::ui::input::InputMode;
 use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::widget::wrap_text;
@@ -81,6 +83,7 @@ pub struct RunSummaryPanelLayout {
     pub headline_rect: [f32; 4],
     pub subtitle_rect: [f32; 4],
     pub rule_rect: [f32; 4],
+    pub hint_flavor_rect: Option<[f32; 4]>,
     pub hint_rect: [f32; 4],
     pub level_rect: [f32; 4],
     pub level_inner_rect: [f32; 4],
@@ -122,8 +125,7 @@ impl RunSummaryPanelScroll {
     }
 
     pub fn sync(&self, layout: &RunSummaryPanelLayout) {
-        self.scroll
-            .set_max(layout.max_scroll_px.ceil() as u32);
+        self.scroll.set_max(layout.max_scroll_px.ceil() as u32);
     }
 
     pub fn handle_wheel(
@@ -165,11 +167,7 @@ fn push_clipped_quad(frame: &mut UiFrame, rect: [f32; 4], color: [f32; 4], clip:
 fn cursor_over_scroll_area(cursor: (f32, f32), layout: &RunSummaryPanelLayout) -> bool {
     let (cx, cy) = cursor;
     let clip = layout.scroll_clip_rect;
-    if cx >= clip[0]
-        && cx <= clip[0] + clip[2]
-        && cy >= clip[1]
-        && cy <= clip[1] + clip[3]
-    {
+    if cx >= clip[0] && cx <= clip[0] + clip[2] && cy >= clip[1] && cy <= clip[1] + clip[3] {
         return true;
     }
     layout.scrollbar_track.is_some_and(|track| {
@@ -194,14 +192,15 @@ fn scrollbar_thumb(
     } else {
         0.0
     };
-    [track[0], track[1] + thumb_travel * thumb_t, track[2], thumb_h]
+    [
+        track[0],
+        track[1] + thumb_travel * thumb_t,
+        track[2],
+        thumb_h,
+    ]
 }
 
-fn push_scrollbar(
-    frame: &mut UiFrame,
-    layout: &RunSummaryPanelLayout,
-    scroll_offset_px: f32,
-) {
+fn push_scrollbar(frame: &mut UiFrame, layout: &RunSummaryPanelLayout, scroll_offset_px: f32) {
     let Some(track) = layout.scrollbar_track else {
         return;
     };
@@ -274,7 +273,12 @@ fn depth_well_draw_rect(viewport: [f32; 4]) -> [f32; 4] {
 }
 
 impl RunSummaryPanelLayout {
-    pub fn compute(w: f32, h: f32, content: &RunSummaryPanelContent, theme: &RunSummaryPanelTheme) -> Self {
+    pub fn compute(
+        w: f32,
+        h: f32,
+        content: &RunSummaryPanelContent,
+        theme: &RunSummaryPanelTheme,
+    ) -> Self {
         let row_font_px = typography::size(typography::H36, h);
         let row_line_h = row_font_px * 1.35;
         let pad_v = row_font_px * 0.8;
@@ -290,7 +294,11 @@ impl RunSummaryPanelLayout {
         let has_transition = content.level.level_transition.is_some();
         let leveled_up = content.level.current_level > content.level.prev_level;
         let header_h = row_line_h * 1.30;
-        let transition_h = if has_transition { row_line_h * 1.05 } else { 0.0 };
+        let transition_h = if has_transition {
+            row_line_h * 1.05
+        } else {
+            0.0
+        };
         let progress_h = row_line_h * 1.05;
         let well_gap = row_font_px * 0.28;
         let level_header_h = header_h + transition_h + progress_h + well_gap;
@@ -319,14 +327,17 @@ impl RunSummaryPanelLayout {
         let top_pad = (h * 0.04).max(row_font_px * 0.6);
         let subtitle_slot_h = sub_line_h * SUBTITLE_SLOT_LINES;
 
-        let hint_font = typography::size(typography::H42, h);
-        let hint_h = crate::ui::colored_keywords::colored_row_line_step(hint_font);
-        let hint_gap = hint_font * 0.6;
+        let hint_style = HintStyle::standard(h);
+        let hint_h = hint_style.line_h;
+        let hint_gap = hint_h * 0.35;
+        let hint_row_gap = hint_h * 0.20;
+        let hint_rows = if content.hint.is_empty() { 1.0 } else { 2.0 };
+        let hint_stack_h = hint_h * hint_rows + hint_row_gap * (hint_rows - 1.0);
         let bottom_pad = row_font_px * 0.4;
         let rule_h = 2.0;
 
         let fixed_top = top_pad + headline_h + gap + subtitle_slot_h + gap + rule_h + gap;
-        let fixed_bottom = hint_gap + hint_h + bottom_pad;
+        let fixed_bottom = hint_gap + hint_stack_h + bottom_pad;
         let available_panel_h = (h - fixed_top - fixed_bottom).max(row_line_h * 3.0);
 
         let scroll_content_h = level_block_h + level_block_gap + stats_h;
@@ -372,9 +383,17 @@ impl RunSummaryPanelLayout {
         let headline_rect = [headline_x, headline_y, content_w, headline_h];
         let rule_rect = [panel_x, rule_y, panel_w, rule_h];
 
+        let hint_base_y = panel_y + panel_h + hint_gap;
+        let hint_flavor_rect =
+            (!content.hint.is_empty()).then_some([panel_x, hint_base_y, panel_w, hint_h]);
         let hint_rect = [
             panel_x,
-            panel_y + panel_h + hint_gap,
+            hint_base_y
+                + if hint_flavor_rect.is_some() {
+                    hint_h + hint_row_gap
+                } else {
+                    0.0
+                },
             panel_w,
             hint_h,
         ];
@@ -432,8 +451,7 @@ impl RunSummaryPanelLayout {
         let row_y1 = row_y0 + header_h;
         let transition_rect = content.level.level_transition.as_ref().map(|_| {
             let chip_gap = row_font_px * 0.16;
-            let transition_w =
-                level_inner_rect[2] - side_pad * 2.0 - points_chip_w - chip_gap;
+            let transition_w = level_inner_rect[2] - side_pad * 2.0 - points_chip_w - chip_gap;
             [
                 level_inner_rect[0] + side_pad,
                 row_y1,
@@ -488,6 +506,7 @@ impl RunSummaryPanelLayout {
             headline_rect,
             subtitle_rect: subtitle_slot_rect,
             rule_rect,
+            hint_flavor_rect,
             hint_rect,
             level_rect,
             level_inner_rect,
@@ -733,7 +752,12 @@ pub fn push_run_summary_panel(
             ..Default::default()
         });
         frame.text(TextLabel {
-            rect: [row_rect[0] + inner_w * 0.50, row_rect[1], value_col_w, row_h],
+            rect: [
+                row_rect[0] + inner_w * 0.50,
+                row_rect[1],
+                value_col_w,
+                row_h,
+            ],
             text: value_lines.join("\n"),
             color: color::PARCHMENT,
             font_px: Some(row_font_px),
@@ -743,14 +767,15 @@ pub fn push_run_summary_panel(
         });
     }
 
-    let hint_row = confirm_continue_footer_row(ctx.input_mode, &content.hint);
-    push_inline_hint_rows(
-        frame,
-        ctx,
-        &[layout.hint_rect],
-        &[hint_row],
-        HintStyle::standard(h),
-    );
+    let mut hint_rects = Vec::with_capacity(2);
+    let mut hint_rows = Vec::with_capacity(2);
+    if let Some(flavor_rect) = layout.hint_flavor_rect {
+        hint_rects.push(flavor_rect);
+        hint_rows.push(vec![HintSegment::text(content.hint.clone())]);
+    }
+    hint_rects.push(layout.hint_rect);
+    hint_rows.push(confirm_continue_footer_row(ctx.input_mode, ""));
+    push_inline_hint_rows(frame, ctx, &hint_rects, &hint_rows, HintStyle::standard(h));
 
     let elapsed = opened_at.elapsed().as_secs_f32();
     let displayed_fill = (elapsed * 4.0).min(content.level.into_level as f32);

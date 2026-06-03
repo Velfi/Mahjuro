@@ -7,9 +7,9 @@
 //! turn it into rectangular prisms of varying sizes.
 
 use crate::cap_extrude::{
-    self, outward_wall_normal_for_silhouette_edge, parametric_cap_uv, parametric_cap_uv_mirror_u,
+    self, CAP_REFERENCE_AREA, CapExtrudeKind, SilhouetteUnionBounds,
+    outward_wall_normal_for_silhouette_edge, parametric_cap_uv, parametric_cap_uv_mirror_u,
     pixel_to_albedo_uv, pixel_to_cap_local, side_wall_quad_indices_oriented,
-    CapExtrudeKind, SilhouetteUnionBounds, CAP_REFERENCE_AREA,
 };
 use crate::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::theme::color;
@@ -1538,8 +1538,8 @@ fn build_extruded_talisman_mesh_from_solid(
     source_label: &str,
 ) -> Option<MeshCpu> {
     use crate::lit_mesh::MaterialKind;
-    use crate::theme::color;
     use crate::talisman_mesh::TALISMAN_HALF_THICKNESS;
+    use crate::theme::color;
 
     let w = width as usize;
     let h = height as usize;
@@ -1744,8 +1744,9 @@ mod extruded_tests {
     fn talisman_side_wall_face_normals_match_vertices() {
         use crate::talisman_mesh::build_talisman_mesh_from_mask_asset;
 
-        let mesh = build_talisman_mesh_from_mask_asset("textures/talismans/talisman_wildflower_mask.png")
-            .expect("wildflower mesh");
+        let mesh =
+            build_talisman_mesh_from_mask_asset("textures/talismans/talisman_wildflower_mask.png")
+                .expect("wildflower mesh");
         let mut bad = 0usize;
         for tri in mesh.indices.chunks_exact(3) {
             let v = [
@@ -1769,7 +1770,10 @@ mod extruded_tests {
                 bad += 1;
             }
         }
-        assert_eq!(bad, 0, "{bad} side-wall tris had reversed winding vs normals");
+        assert_eq!(
+            bad, 0,
+            "{bad} side-wall tris had reversed winding vs normals"
+        );
     }
 }
 

@@ -119,7 +119,10 @@ mod tests {
         let h = 600.0;
         let host = [720.0, 400.0, 90.0, 60.0];
         let badge = corner_badge_rect(host, w, h, "NEW").expect("badge");
-        assert!(badge[0] + badge[2] <= w + 0.5, "badge should not extend past viewport");
+        assert!(
+            badge[0] + badge[2] <= w + 0.5,
+            "badge should not extend past viewport"
+        );
         assert!(badge[0] >= 0.0);
     }
 }

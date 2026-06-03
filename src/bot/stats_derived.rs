@@ -447,7 +447,11 @@ fn build_zodiac_balance(
         });
     }
 
-    rows.sort_by(|a, b| b.acquired.cmp(&a.acquired).then_with(|| a.zodiac.cmp(&b.zodiac)));
+    rows.sort_by(|a, b| {
+        b.acquired
+            .cmp(&a.acquired)
+            .then_with(|| a.zodiac.cmp(&b.zodiac))
+    });
 
     let mut alarms = Vec::new();
     for row in &rows {
@@ -465,7 +469,10 @@ fn build_zodiac_balance(
                 threshold: ZODIAC_WIN_DELTA_ALERT_PCT,
                 detail: format!(
                     "Win% when acquired is {:.1}% vs baseline {:.1}% (95% CI {:.1}–{:.1}).",
-                    row.win_pct_when_acquired, overall_win_pct, row.win_pct_ci_lo, row.win_pct_ci_hi
+                    row.win_pct_when_acquired,
+                    overall_win_pct,
+                    row.win_pct_ci_lo,
+                    row.win_pct_ci_hi
                 ),
             });
         }
@@ -480,7 +487,10 @@ fn build_zodiac_balance(
                 threshold: -ZODIAC_WIN_DELTA_ALERT_PCT,
                 detail: format!(
                     "Win% when acquired is {:.1}% vs baseline {:.1}% (95% CI {:.1}–{:.1}).",
-                    row.win_pct_when_acquired, overall_win_pct, row.win_pct_ci_lo, row.win_pct_ci_hi
+                    row.win_pct_when_acquired,
+                    overall_win_pct,
+                    row.win_pct_ci_lo,
+                    row.win_pct_ci_hi
                 ),
             });
         }

@@ -33,20 +33,20 @@
 //! `MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1`, `MAHJURO_SKIP_OFFLINE_BAKES=1`, or a per-bake
 //! `MAHJURO_SKIP_*_BAKE=1`.
 
-#[path = "build/offline_bake.rs"]
-mod offline_bake;
 #[path = "build/asset_pack_bake.rs"]
 mod asset_pack_bake;
-#[path = "build/room_gi_bake.rs"]
-mod room_gi_bake;
-#[path = "build/room_shadow_bake.rs"]
-mod room_shadow_bake;
-#[path = "build/room_gpu_bake.rs"]
-mod room_gpu_bake;
-#[path = "build/showcase_decal_bake.rs"]
-mod showcase_decal_bake;
+#[path = "build/offline_bake.rs"]
+mod offline_bake;
 #[path = "build/relic_bake.rs"]
 mod relic_bake;
+#[path = "build/room_gi_bake.rs"]
+mod room_gi_bake;
+#[path = "build/room_gpu_bake.rs"]
+mod room_gpu_bake;
+#[path = "build/room_shadow_bake.rs"]
+mod room_shadow_bake;
+#[path = "build/showcase_decal_bake.rs"]
+mod showcase_decal_bake;
 
 use std::env;
 use std::fs;
@@ -69,8 +69,14 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=STEAM_SDK_LOCATION");
     println!("cargo:rerun-if-env-changed=MAHJURO_SKIP_ASSET_BAKE");
-    println!("cargo:rerun-if-env-changed={}", mahjuro_bake_stamp::SKIP_COMMITTED_BAKE_CHECKS_ENV);
-    println!("cargo:rerun-if-env-changed={}", mahjuro_bake_stamp::SKIP_OFFLINE_BAKES_ENV);
+    println!(
+        "cargo:rerun-if-env-changed={}",
+        mahjuro_bake_stamp::SKIP_COMMITTED_BAKE_CHECKS_ENV
+    );
+    println!(
+        "cargo:rerun-if-env-changed={}",
+        mahjuro_bake_stamp::SKIP_OFFLINE_BAKES_ENV
+    );
     println!("cargo:rerun-if-changed=build.rs");
     offline_bake::emit_rerun_if_changed();
     room_gpu_bake::emit_rerun_if_changed();

@@ -1,12 +1,12 @@
 //! Full-screen credits roll loaded from `assets/data/credits.json`.
 
-use crate::sfx_id::SfxId;
 use crate::core::attribution::attribution_catalog;
 use crate::core::credits::{CreditEntry, credits_catalog};
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{
     HintStyle, back_scroll_footer_row, push_screen_footer_hint, screen_footer_reserve,
 };
@@ -92,10 +92,7 @@ enum CreditLine {
     SectionHeader(String),
     Entry(CreditEntry),
     Footer(String),
-    BodyText {
-        text: String,
-        center: bool,
-    },
+    BodyText { text: String, center: bool },
 }
 
 fn push_wrapped_text_lines(lines: &mut Vec<CreditLine>, text: &str, center: bool) {
@@ -122,7 +119,9 @@ fn build_lines(
         lines.push(CreditLine::Footer(catalog.footer.clone()));
     }
 
-    if attribution.sections.is_empty() && attribution.subtitle.is_empty() && attribution.footer.is_empty()
+    if attribution.sections.is_empty()
+        && attribution.subtitle.is_empty()
+        && attribution.footer.is_empty()
     {
         return lines;
     }

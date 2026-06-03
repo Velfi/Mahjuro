@@ -83,7 +83,12 @@ fn season_presentation(season: Season) -> &'static SeasonPresentation {
 impl Season {
     /// Every season, ordered by difficulty. Used by the modal picker and the
     /// unlock-chain logic.
-    pub const ALL: [Season; 4] = [Season::Spring, Season::Summer, Season::Autumn, Season::Winter];
+    pub const ALL: [Season; 4] = [
+        Season::Spring,
+        Season::Summer,
+        Season::Autumn,
+        Season::Winter,
+    ];
 
     /// Short display label for the HUD badge / picker row.
     pub fn label(self) -> &'static str {
@@ -211,5 +216,4 @@ mod tests {
             );
         }
     }
-
 }

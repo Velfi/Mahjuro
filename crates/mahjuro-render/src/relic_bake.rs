@@ -135,8 +135,8 @@ pub fn decode_baked_relic(bytes: &[u8]) -> anyhow::Result<DecodedRelicImage> {
     );
 
     let slug = read_slug(&header.slug)?;
-    let id = relic_id_from_slug(slug)
-        .with_context(|| format!("relic bake: unknown slug {slug:?}"))?;
+    let id =
+        relic_id_from_slug(slug).with_context(|| format!("relic bake: unknown slug {slug:?}"))?;
     let name = all_relic_defs()
         .iter()
         .find(|d| d.id == id)

@@ -287,9 +287,12 @@ impl MemorialTalismanKind {
     pub fn salvage_candidates(reason: GameOverReason) -> &'static [MemorialTalismanKind] {
         match reason {
             GameOverReason::OutOfPlays => &[Self::Exhausted, Self::BossMark, Self::TagBearer],
-            GameOverReason::NoActionsRemaining => {
-                &[Self::FrozenHand, Self::FullDish, Self::Discarded, Self::TagBearer]
-            }
+            GameOverReason::NoActionsRemaining => &[
+                Self::FrozenHand,
+                Self::FullDish,
+                Self::Discarded,
+                Self::TagBearer,
+            ],
         }
     }
 

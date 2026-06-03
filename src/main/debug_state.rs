@@ -11,9 +11,9 @@ use crate::debug_overlays::{
     SceneLookDebugOverlay, SfxTestOverlay, TuningOverlay,
 };
 use crate::render::draw_cmd::CameraParams;
-use crate::trailer_mode::TrailerMode;
 use crate::render::flame_debug_overlay::FlameDebugOverlay;
 use crate::render::rain_debug_overlay::RainDebugOverlay;
+use crate::trailer_mode::TrailerMode;
 
 /// Debug-only state: overlays, visibility toggles, FPS counter, and the
 /// one-shot object-hit-test picker.
@@ -65,8 +65,10 @@ impl DebugState {
             trailer_mode: None,
             rain_debug_overlay: None,
             flame_debug_overlay: None,
-            main_menu_pride_rainbow_debug: crate::render::main_menu_glb::main_menu_pride_rainbow_default_enabled(),
-            main_menu_moon_phase_debug: crate::render::main_menu_moon_tuning::MainMenuMoonPhaseDebug::default(),
+            main_menu_pride_rainbow_debug:
+                crate::render::main_menu_glb::main_menu_pride_rainbow_default_enabled(),
+            main_menu_moon_phase_debug:
+                crate::render::main_menu_moon_tuning::MainMenuMoonPhaseDebug::default(),
             last_effective_camera: CameraParams::default_table_camera(800.0),
         }
     }

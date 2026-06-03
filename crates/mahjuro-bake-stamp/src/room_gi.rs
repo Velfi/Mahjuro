@@ -24,8 +24,7 @@ impl BakeKind for RoomGi {
     const SKIP_ENV: &'static str = "MAHJURO_SKIP_ROOM_GI_BAKE";
     const BUILD_TOOL_CMD: &'static str =
         "cargo build -p mahjuro-headless --bin mahjuro-bake --features bake";
-    const REBAKE_CMD: &'static str =
-        "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds gi";
+    const REBAKE_CMD: &'static str = "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds gi";
     const COMMIT_PATHS: &'static str =
         "assets/data/room_gi/*.mgi assets/data/room_gi/.inputs_stamp";
 

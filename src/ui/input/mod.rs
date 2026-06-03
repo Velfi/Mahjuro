@@ -6,7 +6,6 @@ use std::time::Instant;
 use sdl3::gamepad::Button as GpButton;
 use sdl3::keyboard::Scancode;
 
-
 use crate::game::run::RunState;
 use crate::render::animation::AnimationController;
 use crate::ui::button_prompts::GamepadStyle;
@@ -395,9 +394,9 @@ impl InputState {
             // **Q** / **E** = gamepad West / North (see [`UiAction::WestFacePress`], [`UiAction::NorthFacePress`]).
             Scancode::E => actions.push(UiAction::NorthFacePress),
             Scancode::Q => actions.push(UiAction::WestFacePress),
-            // Glossary / help — `?`, `/`, `H`, `F1`; controller Select / View / −
+            // Glossary / help — `?`, `/`, `F1`; controller Select / View / −
             // (`GpButton::Back`, touchpad click, PS5 Create) via [`UiAction::Help`].
-            Scancode::Slash | Scancode::H | Scancode::F1 => actions.push(UiAction::Help),
+            Scancode::Slash | Scancode::F1 => actions.push(UiAction::Help),
             _ => {}
         }
         if actions.len() > before && self.mode != InputMode::Keyboard {

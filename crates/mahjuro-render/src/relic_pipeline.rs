@@ -7,9 +7,9 @@
 use std::sync::mpsc;
 use std::time::Instant;
 
-use mahjuro_core::core::relic::{RelicId, all_relic_defs};
 use crate::gpu_types::DecodedRelicImage;
 use crate::relic_dish::build_relic_mesh_from_rgba;
+use mahjuro_core::core::relic::{RelicId, all_relic_defs};
 
 fn flat_relief_rgba() -> (Vec<u8>, u32, u32) {
     (vec![128, 128, 128, 255], 1, 1)
@@ -167,31 +167,33 @@ pub fn decode_relic_assets(
 
     let relief_path = id.source_heightmap_path();
     let specular_path = id.source_specular_path();
-    let (relief_rgba, relief_width, relief_height) = if let Some(file) =
-        mahjuro_assets::asset_path::get(&relief_path)
-    {
-        match image::load_from_memory(&file.data) {
-            Ok(himg) => {
-                let height = himg.into_rgba8();
-                let specular = mahjuro_assets::asset_path::get(&specular_path).and_then(|spec_file| {
-                    match image::load_from_memory(&spec_file.data) {
-                        Ok(sim) => Some(sim.into_luma8()),
-                        Err(e) => {
-                            log::warn!("failed to decode relic specular map {specular_path}: {e}");
-                            None
-                        }
-                    }
-                });
-                pack_relief_rgba(&height, specular.as_ref())
+    let (relief_rgba, relief_width, relief_height) =
+        if let Some(file) = mahjuro_assets::asset_path::get(&relief_path) {
+            match image::load_from_memory(&file.data) {
+                Ok(himg) => {
+                    let height = himg.into_rgba8();
+                    let specular =
+                        mahjuro_assets::asset_path::get(&specular_path).and_then(|spec_file| {
+                            match image::load_from_memory(&spec_file.data) {
+                                Ok(sim) => Some(sim.into_luma8()),
+                                Err(e) => {
+                                    log::warn!(
+                                        "failed to decode relic specular map {specular_path}: {e}"
+                                    );
+                                    None
+                                }
+                            }
+                        });
+                    pack_relief_rgba(&height, specular.as_ref())
+                }
+                Err(e) => {
+                    log::warn!("failed to decode relic heightmap {relief_path}: {e}");
+                    flat_relief_rgba()
+                }
             }
-            Err(e) => {
-                log::warn!("failed to decode relic heightmap {relief_path}: {e}");
-                flat_relief_rgba()
-            }
-        }
-    } else {
-        flat_relief_rgba()
-    };
+        } else {
+            flat_relief_rgba()
+        };
 
     let mesh_source = mesh_rgba
         .as_ref()
@@ -260,9 +262,7 @@ fn spawn_relic_bake_loader() -> mpsc::Receiver<DecodedRelicImage> {
             crate::startup_profile::record("relic.decode_thread", thread_total);
             crate::startup_profile::record("relic.decode_cpu", thread_total);
             crate::startup_profile::record("relic.mesh_build_thread", std::time::Duration::ZERO);
-            log::debug!(
-                "relic-loader (RLC1): loaded {decoded} baked relics in {thread_total:?}",
-            );
+            log::debug!("relic-loader (RLC1): loaded {decoded} baked relics in {thread_total:?}",);
         })
         .expect("failed to spawn relic-loader thread");
     rx

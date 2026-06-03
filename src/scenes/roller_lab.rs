@@ -163,7 +163,12 @@ impl SceneBehavior for RollerLabScene {
             user: 0,
         });
         frame.text(TextLabel {
-            rect: [panel[0], panel[1] + panel[3] * 0.10, panel[2], panel[3] * 0.28],
+            rect: [
+                panel[0],
+                panel[1] + panel[3] * 0.10,
+                panel[2],
+                panel[3] * 0.28,
+            ],
             text: format!("Score: {}   Target: {}", self.score, self.target),
             color: color::PARCHMENT,
             align: TextAlign::Center,
@@ -171,7 +176,12 @@ impl SceneBehavior for RollerLabScene {
             ..Default::default()
         });
         frame.text(TextLabel {
-            rect: [panel[0], panel[1] + panel[3] * 0.42, panel[2], panel[3] * 0.24],
+            rect: [
+                panel[0],
+                panel[1] + panel[3] * 0.42,
+                panel[2],
+                panel[3] * 0.24,
+            ],
             text: "Presets: Prev/Next or confirm. Esc: exit.".into(),
             color: color::STONE,
             align: TextAlign::Center,

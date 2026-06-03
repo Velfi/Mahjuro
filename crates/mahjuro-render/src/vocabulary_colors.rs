@@ -32,13 +32,7 @@ pub const COLORED_KEYWORD_TABLE: &[(&str, [f32; 4])] = &[
 /// letters, but we **decline** to tint when the surface token looks like a
 /// title-cased word (leading upper + at least one later lower). Pure
 /// lowercase, ALL CAPS, and numeric/punct-heavy tokens are unaffected.
-const SKIP_WHEN_TITLE_CASED: &[&str] = &[
-    "winds",
-    "dragons",
-    "flowers",
-    "seasons",
-    "honors",
-];
+const SKIP_WHEN_TITLE_CASED: &[&str] = &["winds", "dragons", "flowers", "seasons", "honors"];
 
 #[inline]
 fn looks_like_title_cased_word(s: &str) -> bool {

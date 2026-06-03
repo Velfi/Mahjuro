@@ -128,8 +128,10 @@ impl<'a> BootSplash<'a> {
         screen_h: u32,
     ) -> anyhow::Result<Self> {
         let meta = boot_meta();
-        let msdf_texture = upload_rgba_texture(device, queue, "boot-loading-msdf", boot_png_bytes())?;
-        let logo_texture = upload_rgba_texture(device, queue, "boot-loading-logo", logo_png_bytes())?;
+        let msdf_texture =
+            upload_rgba_texture(device, queue, "boot-loading-msdf", boot_png_bytes())?;
+        let logo_texture =
+            upload_rgba_texture(device, queue, "boot-loading-logo", logo_png_bytes())?;
         let msdf_view = msdf_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let logo_view = logo_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -344,7 +346,8 @@ impl<'a> BootSplash<'a> {
             return Ok(());
         };
         let frame = match surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated => {
                 surface.configure(self.device, config);
                 return Ok(());
@@ -359,11 +362,8 @@ impl<'a> BootSplash<'a> {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let instances = self.build_instances(progress.clamp(0.0, 1.0), alphas);
-        self.queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&instances),
-        );
+        self.queue
+            .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
 
         let mut encoder = self
             .device
@@ -428,7 +428,12 @@ impl<'a> BootSplash<'a> {
             let fill_w = (layout.bar_rect[2] * progress).max(0.0);
             if fill_w > 0.5 {
                 out.push(GpuInstance {
-                    rect: [layout.bar_rect[0], layout.bar_rect[1], fill_w, layout.bar_rect[3]],
+                    rect: [
+                        layout.bar_rect[0],
+                        layout.bar_rect[1],
+                        fill_w,
+                        layout.bar_rect[3],
+                    ],
                     color: [
                         layout.fill_color[0],
                         layout.fill_color[1],

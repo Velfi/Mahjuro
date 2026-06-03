@@ -49,5 +49,4 @@ impl EffectsQuality {
             Self::High => 2.0,
         }
     }
-
 }

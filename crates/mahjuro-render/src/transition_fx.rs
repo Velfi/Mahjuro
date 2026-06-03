@@ -1,9 +1,9 @@
 use std::f32::consts::PI;
 
-use mahjuro_core::core::tile::{Suit, Tile};
 use crate::draw_cmd::{TileFaceQuad, UiFrame};
 use crate::theme::color;
 use crate::wgpu_renderer::GpuInstance;
+use mahjuro_core::core::tile::{Suit, Tile};
 
 /// ~1080p; scales particle-style transitions so tile count tracks screen area.
 const TRANSITION_REF_AREA: f32 = 1920.0 * 1080.0;

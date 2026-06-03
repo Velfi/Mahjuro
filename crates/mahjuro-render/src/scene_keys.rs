@@ -13,15 +13,7 @@ pub const SHADOW_AO_LAB: &str = "shadow_ao_lab";
 
 /// Primary navigable scenes — the names used in docs, CLI, and persistence keys.
 pub const PRIMARY: &[&str] = &[
-    MAIN_MENU,
-    SHOP,
-    HALLWAY,
-    GAMEPLAY,
-    ARCHIVE,
-    OPTIONS,
-    STAIRWAY,
-    VICTORY,
-    DEFEAT,
+    MAIN_MENU, SHOP, HALLWAY, GAMEPLAY, ARCHIVE, OPTIONS, STAIRWAY, VICTORY, DEFEAT,
 ];
 
 /// Legacy `active_scene_key` / tuning suffixes still accepted when parsing input.

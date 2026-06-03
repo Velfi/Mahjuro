@@ -1,10 +1,10 @@
 //! Archive catalog "seen" state — which unlocked entries the player has
 //! focused since they appeared in the Collection grids.
 
+use crate::core::memorial_talisman::MemorialTalismanKind;
 use crate::core::ordeal_kind::OrdealKind;
 use crate::core::progression::{PlayerProgress, is_transformation_successor_relic};
 use crate::core::relic::{RelicId, all_relic_defs};
-use crate::core::memorial_talisman::MemorialTalismanKind;
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
 
@@ -65,7 +65,8 @@ pub fn archive_new_counts(
             .iter()
             .filter(|id| !progress.archive_seen_relics.contains(id))
             .count(),
-        talismans: unseen_archive_shop_talismans(progress) + unseen_archive_memorial_talismans(progress),
+        talismans: unseen_archive_shop_talismans(progress)
+            + unseen_archive_memorial_talismans(progress),
         yaku: visible_archive_yaku(progress)
             .iter()
             .filter(|id| !progress.archive_seen_yaku.contains(id))
@@ -189,7 +190,9 @@ impl PlayerProgress {
             ArchiveSeenMark::Yaku(yk) => self.archive_seen_yaku.insert(yk),
             ArchiveSeenMark::Ordeal(bk) => self.archive_seen_ordeals.insert(bk),
             ArchiveSeenMark::Talisman(tk) => self.archive_seen_talismans.insert(tk),
-            ArchiveSeenMark::MemorialTalisman(mk) => self.archive_seen_memorial_talismans.insert(mk),
+            ArchiveSeenMark::MemorialTalisman(mk) => {
+                self.archive_seen_memorial_talismans.insert(mk)
+            }
         }
     }
 }

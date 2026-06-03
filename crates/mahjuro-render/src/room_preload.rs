@@ -2,8 +2,8 @@
 //!
 //! Chain: main menu → shop → archive (hub); shop → hallway → gameplay (run).
 
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread::JoinHandle;
 
 use parking_lot::Mutex;
@@ -59,7 +59,12 @@ impl PrefetchSlot {
         }
         if self
             .state
-            .compare_exchange(PREFETCH_IDLE, PREFETCH_IN_FLIGHT, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(
+                PREFETCH_IDLE,
+                PREFETCH_IN_FLIGHT,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
             .is_err()
         {
             return;
@@ -109,9 +114,10 @@ impl PrefetchSlot {
         if self.state.load(Ordering::Acquire) == PREFETCH_IN_FLIGHT {
             let handle = self.thread.lock().take();
             if let Some(handle) = handle
-                && let Err(e) = handle.join() {
-                    log::error!("room preload thread panicked: {e:?}");
-                }
+                && let Err(e) = handle.join()
+            {
+                log::error!("room preload thread panicked: {e:?}");
+            }
             *self.worker_tid.lock() = None;
             self.state.store(PREFETCH_DONE, Ordering::Release);
         }

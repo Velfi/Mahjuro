@@ -3,30 +3,32 @@
 use std::cell::RefCell;
 use std::time::Instant;
 
-use crate::sfx_id::SfxId;
 use crate::core::moon_quips;
 use crate::core::progression::PlayerProgress;
-use crate::ui::colored_keywords;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::{self, ResumeScene, TileMaterial};
-use crate::render::draw_cmd::{CameraParams, ImageQuad, ImageQuadSource, ScenePunctualLight, UiFrame};
-use crate::render::scene_keys;
+use crate::render::draw_cmd::{
+    CameraParams, ImageQuad, ImageQuadSource, ScenePunctualLight, UiFrame,
+};
 use crate::render::main_menu_glb;
 use crate::render::rain_field::{RainField, main_menu_rain_spawn_volume};
 use crate::render::room_glb::{self, RoomEnvLightingTune};
+use crate::render::scene_keys;
 use crate::render::scene_light_sample::{
     PunctualOccluderAabb, RainVolumetricLit, SceneLightSampleCtx,
 };
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{
-    GpuInstance, PointLight, SpotLight, TextAlign, TextLabel, MAIN_MENU_PICK_MOON,
+    GpuInstance, MAIN_MENU_PICK_MOON, PointLight, SpotLight, TextAlign, TextLabel,
 };
-use crate::ui::tooltip;
+use crate::sfx_id::SfxId;
+use crate::ui::colored_keywords;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
 use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::UiAction;
+use crate::ui::tooltip;
 
 use super::archive::ArchiveScene;
 use super::lamp_moths::{self, BUG_COUNT};
@@ -140,18 +142,14 @@ fn main_menu_scene_punctual(
         Vec::new()
     };
     let (mut punctual, mut nodes): (Vec<ScenePunctualLight>, Vec<Option<String>>) = if room_glb {
-        let tagged = main_menu_glb::main_menu_embedded_point_lights_runtime_tagged(
-            w, h, env_scale, tune,
-        );
+        let tagged =
+            main_menu_glb::main_menu_embedded_point_lights_runtime_tagged(w, h, env_scale, tune);
         (
             tagged
                 .iter()
                 .map(|t| ScenePunctualLight::InverseSquare(t.light))
                 .collect(),
-            tagged
-                .into_iter()
-                .map(|t| Some(t.gltf_node_name))
-                .collect(),
+            tagged.into_iter().map(|t| Some(t.gltf_node_name)).collect(),
         )
     } else {
         (Vec::new(), Vec::new())
@@ -259,9 +257,8 @@ fn push_main_menu_room_frame(
     }
     frame.background(BackgroundId::Black);
     frame.main_menu_environment();
-    frame.camera_override = Some(
-        camera.unwrap_or_else(|| main_menu_glb::main_menu_camera_base(w, h, env_scale)),
-    );
+    frame.camera_override =
+        Some(camera.unwrap_or_else(|| main_menu_glb::main_menu_camera_base(w, h, env_scale)));
     let room_glb = main_menu_glb::main_menu_glb_has_embedded_lights();
     frame.scene_lighting.embedded_gltf_punctual = room_glb;
     frame.scene_lighting.room_glb_brdf = room_glb;
@@ -285,9 +282,7 @@ pub(crate) fn scene_from_resume(
                 Scene::Shop(ShopScene::new(run, progress))
             }
         }
-        ResumeScene::Hallway => {
-            Scene::Hallway(super::hallway::HallwayScene::new())
-        }
+        ResumeScene::Hallway => Scene::Hallway(super::hallway::HallwayScene::new()),
     }
 }
 
@@ -394,7 +389,8 @@ fn push_moon_quip_bubble(
     let max_inner_w = metrics::tooltip_max_panel_px(w, h) * 0.72;
     let inner_w = colored_keywords::colored_paragraph_preferred_width(message, line_h, max_inner_w)
         .clamp(72.0, max_inner_w);
-    let lines = colored_keywords::wrap_colored_text_multiline(message, inner_w, line_h, color::PARCHMENT);
+    let lines =
+        colored_keywords::wrap_colored_text_multiline(message, inner_w, line_h, color::PARCHMENT);
     let inner_h = colored_keywords::colored_multiline_block_height(lines.len(), line_h);
     let panel_w = inner_w + pad * 2.0;
     let panel_h = inner_h + pad * 2.0;
@@ -694,7 +690,8 @@ impl SceneBehavior for MainMenuScene {
                 });
             }
 
-            if let Some(moon_rect) = main_menu_glb::main_menu_moon_screen_hit_rect(w, h, env_scale) {
+            if let Some(moon_rect) = main_menu_glb::main_menu_moon_screen_hit_rect(w, h, env_scale)
+            {
                 buttons.push(ButtonDef::scene(
                     (moon_rect[0], moon_rect[1], moon_rect[2], moon_rect[3]),
                     MAIN_MENU_PICK_MOON,

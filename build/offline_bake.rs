@@ -14,8 +14,8 @@ use mahjuro_bake_stamp::room_gi::RoomGi;
 use mahjuro_bake_stamp::room_shadow::RoomShadow;
 use mahjuro_bake_stamp::showcase_decal::ShowcaseDecal;
 use mahjuro_bake_stamp::{
-    auto_offline_rebake_enabled, ensure_bake_current, skip_committed_bake_checks,
-    write_stamp_line, BakeKind,
+    BakeKind, auto_offline_rebake_enabled, ensure_bake_current, skip_committed_bake_checks,
+    write_stamp_line,
 };
 
 const EXPECTED_GI_STAMP_HASH_ENV: &str = "MAHJURO_EXPECT_ROOM_GI_STAMP_HASH";

@@ -3,8 +3,8 @@ mod cases {
     use std::collections::BTreeMap;
 
     use crate::OrdealKindExt;
-use crate::core::debuff::{TileDebuff, TileDebuffClass};
     use crate::core::consumable::{Consumable, ConsumableInventory};
+    use crate::core::debuff::{TileDebuff, TileDebuffClass};
     use crate::core::deck::Wall;
     use crate::core::deck::build_wall;
     use crate::core::hand::{DetectedMeld, MeldKind};
@@ -619,12 +619,10 @@ use crate::core::debuff::{TileDebuff, TileDebuffClass};
         );
         assert_eq!(run.plays_remaining, 1);
         assert!(run.consumables.items.is_empty());
-        assert!(
-            bus.queue.iter().any(|ev| matches!(
-                ev,
-                GameEvent::MemorialTalismanUsed(MemorialTalismanKind::BossMark)
-            ))
-        );
+        assert!(bus.queue.iter().any(|ev| matches!(
+            ev,
+            GameEvent::MemorialTalismanUsed(MemorialTalismanKind::BossMark)
+        )));
     }
 
     #[test]
@@ -647,12 +645,10 @@ use crate::core::debuff::{TileDebuff, TileDebuffClass};
             run.consumables.items,
             vec![Consumable::Memorial(MemorialTalismanKind::BossMark)]
         );
-        assert!(
-            bus.queue.iter().any(|ev| matches!(
-                ev,
-                GameEvent::MemorialTalismanUsed(MemorialTalismanKind::Exhausted)
-            ))
-        );
+        assert!(bus.queue.iter().any(|ev| matches!(
+            ev,
+            GameEvent::MemorialTalismanUsed(MemorialTalismanKind::Exhausted)
+        )));
     }
 
     #[test]
@@ -1466,10 +1462,7 @@ mod joker_tile_tests {
     fn joker_tile_adds_permanent_copy_from_starting_hand() {
         let mut run = RunState::new(GameMode::standard());
         run.grant_relic(RelicId::JokerTile);
-        run.hand = vec![
-            Tile::new(Suit::Manzu, 1, 0),
-            Tile::new(Suit::Souzu, 5, 1),
-        ];
+        run.hand = vec![Tile::new(Suit::Manzu, 1, 0), Tile::new(Suit::Souzu, 5, 1)];
         run.selected = vec![false; run.hand.len()];
         run.wall = Wall::from_unshuffled(build_wall());
         let remaining_before = run.wall.remaining();

@@ -238,21 +238,15 @@ pub fn parse_gltf_anim_library(
                 continue;
             };
             let Some(bind) = node_binds.get(node_name) else {
-                log::warn!(
-                    "{asset_label} anim {clip_name}: no bind pose for node {node_name}"
-                );
+                log::warn!("{asset_label} anim {clip_name}: no bind pose for node {node_name}");
                 continue;
             };
             let Some(times) = harvest.times else {
-                log::warn!(
-                    "{asset_label} anim {clip_name}: node {node_name} has no key times"
-                );
+                log::warn!("{asset_label} anim {clip_name}: node {node_name} has no key times");
                 continue;
             };
             if times.is_empty() {
-                log::warn!(
-                    "{asset_label} anim {clip_name}: node {node_name} has empty key times"
-                );
+                log::warn!("{asset_label} anim {clip_name}: node {node_name} has empty key times");
                 continue;
             }
             if !harvest.translations.is_empty() && harvest.translations.len() != times.len() {
@@ -379,7 +373,10 @@ impl GltfAnimPlayback {
             self.elapsed_secs
         } else {
             let started = self.started?;
-            self.elapsed_secs + Instant::now().saturating_duration_since(started).as_secs_f32()
+            self.elapsed_secs
+                + Instant::now()
+                    .saturating_duration_since(started)
+                    .as_secs_f32()
         };
         if !self.looping && elapsed >= self.duration_secs {
             return None;
@@ -478,8 +475,7 @@ mod tests {
     fn eyeball_travel_anim() -> crate::room_gltf_anim::RoomNodeAnim {
         mahjuro_assets::asset_path::init();
         let file = mahjuro_assets::asset_path::get("3d/shop.glb").expect("shop.glb embedded");
-        let cpu =
-            crate::room_glb::load_shop_glb_from_bytes(&file.data).expect("load shop");
+        let cpu = crate::room_glb::load_shop_glb_from_bytes(&file.data).expect("load shop");
         cpu.gltf_anim_library
             .clips
             .get("eyeball_travel")
@@ -519,7 +515,10 @@ mod tests {
     }
 }
 
-fn read_accessor_f32(accessor: gltf::Accessor<'_>, buffers: &[Vec<u8>]) -> anyhow::Result<Vec<f32>> {
+fn read_accessor_f32(
+    accessor: gltf::Accessor<'_>,
+    buffers: &[Vec<u8>],
+) -> anyhow::Result<Vec<f32>> {
     anyhow::ensure!(
         accessor.dimensions() == gltf::accessor::Dimensions::Scalar,
         "expected scalar accessor"
@@ -531,7 +530,10 @@ fn read_accessor_f32(accessor: gltf::Accessor<'_>, buffers: &[Vec<u8>]) -> anyho
         .collect())
 }
 
-fn read_accessor_vec3(accessor: gltf::Accessor<'_>, buffers: &[Vec<u8>]) -> anyhow::Result<Vec<Vec3>> {
+fn read_accessor_vec3(
+    accessor: gltf::Accessor<'_>,
+    buffers: &[Vec<u8>],
+) -> anyhow::Result<Vec<Vec3>> {
     anyhow::ensure!(
         accessor.dimensions() == gltf::accessor::Dimensions::Vec3,
         "expected vec3 accessor"
@@ -549,7 +551,10 @@ fn read_accessor_vec3(accessor: gltf::Accessor<'_>, buffers: &[Vec<u8>]) -> anyh
         .collect())
 }
 
-fn read_accessor_vec4(accessor: gltf::Accessor<'_>, buffers: &[Vec<u8>]) -> anyhow::Result<Vec<[f32; 4]>> {
+fn read_accessor_vec4(
+    accessor: gltf::Accessor<'_>,
+    buffers: &[Vec<u8>],
+) -> anyhow::Result<Vec<[f32; 4]>> {
     anyhow::ensure!(
         accessor.dimensions() == gltf::accessor::Dimensions::Vec4,
         "expected vec4 accessor"

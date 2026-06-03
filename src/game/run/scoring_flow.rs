@@ -1,6 +1,5 @@
 use super::relic_removal::TransformationPrimaryRelic;
 use crate::{
-    sfx_id::SfxId,
     OrdealKindExt,
     core::{
         debuff::TileDebuff,
@@ -12,9 +11,7 @@ use crate::{
             ScoreRoundBundle, ScoreTileBundle,
         },
         rules::{ChamberKind, RuleModifier},
-        scoring::{
-            EffectiveRelics, ScoreBreakdown, score_sets_with_original, tile_is_debuffed,
-        },
+        scoring::{EffectiveRelics, ScoreBreakdown, score_sets_with_original, tile_is_debuffed},
         structure::{
             StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure,
             is_winning_structure_shape, star_tile_yaku_pool,
@@ -26,6 +23,7 @@ use crate::{
         game_mode::HAND_SIZE,
         run::{RunState, enumerate_candidate_play_masks, structure_label_from_yaku},
     },
+    sfx_id::SfxId,
 };
 
 impl RunState {
@@ -91,16 +89,10 @@ impl RunState {
             }
         }
         if self.relics.has(RelicId::XxxlEgg) {
-            let v = self
-                .relic_counters
-                .entry(RelicId::XxxlEgg)
-                .or_insert(3);
+            let v = self.relic_counters.entry(RelicId::XxxlEgg).or_insert(3);
             *v -= 1;
             if *v <= 0 {
-                self.on_transformation_primary_burned(
-                    TransformationPrimaryRelic::XxxlEgg,
-                    bus,
-                );
+                self.on_transformation_primary_burned(TransformationPrimaryRelic::XxxlEgg, bus);
             }
         }
         let has_honors = scoring_tiles
@@ -382,7 +374,9 @@ impl RunState {
                 } else {
                     1
                 };
-                if rng.random_ratio(prob, 4) && let Some(&y) = star_pool.choose(&mut rng) {
+                if rng.random_ratio(prob, 4)
+                    && let Some(&y) = star_pool.choose(&mut rng)
+                {
                     let _new_level = self.yaku_levels.level_up(y);
                     self.push_relic_activation(RelicId::StarTile);
                 }
