@@ -1043,7 +1043,7 @@ pub fn format_shadow_hand_inventory_help(relics: &RelicState, shadow_slot: usize
 /// tip (`COPY_RELIC_COMPATIBLE_SCORING_LINE`): meta copies, shop-only relics,
 /// draw/validation/wall hooks that do not go through [`EffectiveRelics`](crate::core::scoring::EffectiveRelics),
 /// **blind-clear round payout** gold only (Gold Idol, Jade Abacus, Patience, Green Luck,
-/// Beggar’s Cup, Cosmopolitan — see `RunState::emit_round_resolution_events`), sell-value
+/// Beggar’s Cup, Cosmopolitan — see `RunState::resolve_round_end`), sell-value
 /// growth (`NestEgg`), round-start rolls (`Sweepstakes`), or post-score bookkeeping unrelated
 /// to in-round play (`StarTile`, `Chrysalis`).
 ///

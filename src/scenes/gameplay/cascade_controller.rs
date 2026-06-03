@@ -11,6 +11,7 @@ use crate::game::engine::GameEngine;
 use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::score_popups::PopupMotionTiming;
 use crate::scenes::{SceneTransition, UpdateCtx};
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
 use crate::sfx_id::SfxId;
 use crate::ui::input::UiAction;
 
@@ -51,16 +52,20 @@ pub(super) fn tick_active_cascade(
                 if let Some(yk) = first_yaku_step(&cascade.breakdown, step_index)
                     && cascade.mark_yaku_voiced(yk)
                 {
-                    let sfx = SfxId::for_yaku(yk);
-                    let voice_dur = ctx
-                        .audio
-                        .as_mut()
-                        .and_then(|audio| {
-                            audio
-                                .play_sfx(sfx)
-                                .or_else(|| audio.sfx_duration(sfx))
-                        })
-                        .unwrap_or_else(|| std::time::Duration::from_millis(700));
+                    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
+                    let voice_dur = {
+                        let sfx = SfxId::for_yaku(yk);
+                        ctx.audio
+                            .as_mut()
+                            .and_then(|audio| {
+                                audio
+                                    .play_sfx(sfx)
+                                    .or_else(|| audio.sfx_duration(sfx))
+                            })
+                            .unwrap_or_else(|| std::time::Duration::from_millis(700))
+                    };
+                    #[cfg(not(any(feature = "game", feature = "headless-screenshot")))]
+                    let voice_dur = std::time::Duration::from_millis(700);
                     cascade.extend_yaku_hold(
                         now + voice_dur
                             + std::time::Duration::from_millis(YAKU_NAME_POST_PAUSE_MS),
