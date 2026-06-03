@@ -763,7 +763,7 @@ impl SceneBehavior for MainMenuScene {
                 &mut frame,
                 &ctx,
                 menu_footer_row(ctx.input_mode),
-                HintStyle::profile_footer(h),
+                HintStyle::standard(h),
             );
         }
         frame.window_title = format!(

@@ -35,6 +35,7 @@ fn hide_ui_draw_cmds(frame: &mut UiFrame) {
                 | render::draw_cmd::DrawCmd::OverlayQuad(_)
                 | render::draw_cmd::DrawCmd::OverlaySquircleQuad(_)
                 | render::draw_cmd::DrawCmd::GradientQuad(_)
+                | render::draw_cmd::DrawCmd::ArcRingQuad(_)
                 | render::draw_cmd::DrawCmd::SquircleQuad(_)
                 | render::draw_cmd::DrawCmd::Text(_)
                 | render::draw_cmd::DrawCmd::ImageQuad(_)

@@ -46,3 +46,15 @@ pub struct GradientQuadInstance {
     pub color: [f32; 4],
     pub feather: [f32; 4],
 }
+
+/// Instance for the `arc_ring_quad_pipeline` — square bbox plus fill/track
+/// colours and ring params (`inner_r_norm`, `progress`, …). See
+/// `shaders/arc_ring_quad.wgsl`.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ArcRingQuadInstance {
+    pub rect: [f32; 4],
+    pub fill_color: [f32; 4],
+    pub track_color: [f32; 4],
+    pub params: [f32; 4],
+}

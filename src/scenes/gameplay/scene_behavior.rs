@@ -1333,7 +1333,6 @@ impl SceneBehavior for GameplayScene {
                         cash_in_enabled: gameplay.trigger_enabled,
                         show_discard_legend,
                         show_play_legend,
-                        hud_text: &mut hud_text,
                     },
                 );
             }
@@ -1934,7 +1933,7 @@ impl SceneBehavior for GameplayScene {
                 &mut frame,
                 &ctx,
                 gameplay_help_footer_row(ctx.input_mode),
-                HintStyle::archive_footer(layout.window_h),
+                HintStyle::standard(layout.window_h),
             );
         }
 

@@ -44,8 +44,8 @@ use crate::scenes::object3d_inspect::{
 use crate::scenes::options::OptionsScene;
 use crate::scenes::{ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
 use crate::ui::controller_hints::{
-    ColumnHintEntry, ColumnHintLayout, ColumnHintStyle, HintKey, HintStyle,
-    inspect_camera_hint_row, push_column_hints, push_inline_hint_rows,
+    HintStyle, InlineHintIconSlot, inspect_camera_hint_row, is_hold_sell_hint_key,
+    push_screen_footer_hint, screen_footer_top, shop_storeroom_footer_row,
 };
 use crate::ui::focus_nav::{clamp_rect_to_viewport, push_focus_ring, rect_center};
 use crate::ui::input::InputMode;
@@ -1064,11 +1064,6 @@ pub(crate) fn render_shop_frame(
     if !shop.pause_menu.paused {
         let _g = crate::render::cpu_profiler::scope("draw_frame.shop_floating_hints");
         let inspect_active = inspect.is_some();
-        let x = w * 0.05;
-        let bw = w * 0.90;
-        let inner_left = x + bw * 0.02;
-        let inner_right = x + bw * 0.98;
-        let inner_w = (inner_right - inner_left).max(8.0);
 
         let sell_hint_hit = ctx
             .picked_shop_object
@@ -1111,80 +1106,43 @@ pub(crate) fn render_shop_frame(
         let show_hold_sell_hint =
             inspect.is_none() && (shop.west_sell_hold_started.is_some() || hover_sellable);
 
-        let pad_bottom = h * 0.014;
-        let hint_band_top = if inspect_active {
-            let inspect_style = HintStyle::shop_inspect_camera(h);
-            let hint_line_h = inspect_style.line_h;
-            let hint_top = h - pad_bottom - hint_line_h;
-            push_inline_hint_rows(
-                &mut frame,
-                &ctx,
-                &[[inner_left, hint_top, inner_w, hint_line_h]],
-                &[inspect_camera_hint_row(ctx.input_mode)],
-                inspect_style,
-            );
-            hint_top
+        let hint_style = HintStyle::standard(h);
+        let hint_row = if inspect_active {
+            inspect_camera_hint_row(ctx.input_mode)
         } else {
-            let layout = ColumnHintLayout::shop_floating_band(
-                w,
-                h,
-                if show_hold_sell_hint { 2 } else { 1 },
-            );
-            let keyboard_icons = crate::ui::kenney_prompt_paths::shop_action_prompt_icons();
-            let mut entries: Vec<ColumnHintEntry> = Vec::with_capacity(2);
-            let mut hold_sell_col: Option<usize> = None;
-            if show_hold_sell_hint {
-                hold_sell_col = Some(entries.len());
-                entries.push(ColumnHintEntry::surrounding_icon(
-                    HintKey::Action(crate::ui::input::UiAction::WestFacePress),
-                    keyboard_icons[0].clone(),
-                    "Hold ",
-                    " Sell",
-                ));
-            }
-            entries.push(ColumnHintEntry::new(
-                HintKey::Action(crate::ui::input::UiAction::NorthFacePress),
-                keyboard_icons[1].clone(),
-                "Inspect",
-            ));
-
-            let mut legend_texts: Vec<TextLabel> = Vec::with_capacity(entries.len());
-            let slots = push_column_hints(
-                &mut frame,
-                &ctx,
-                layout,
-                &entries,
-                ColumnHintStyle::shop_floating(h),
-                &mut legend_texts,
-            );
-
-            if let (Some(started), Some(col)) = (shop.west_sell_hold_started, hold_sell_col)
-                && let Some(slot) = slots.iter().find(|s| s.column_index == col)
-            {
-                let elapsed = Instant::now()
-                    .saturating_duration_since(started)
-                    .as_secs_f32();
-                let progress = (elapsed / super::SHOP_SELL_HOLD_SECONDS).clamp(0.0, 1.0);
-                let [ix, iy, icon_px, _] = slot.icon_rect;
-                let cx = ix + icon_px * 0.5;
-                let cy = iy + icon_px * 0.5;
-                let r = icon_px * 0.58;
-                let thickness = (icon_px * 0.12).max(3.5);
-                let mut ring_quads: Vec<GpuInstance> = Vec::with_capacity(72);
-                crate::ui::prompt_hold_ring::push_hold_prompt_ring(
-                    &mut ring_quads,
-                    cx,
-                    cy,
-                    r,
-                    thickness,
-                    progress,
-                );
-                frame.quads(ring_quads);
-            }
-
-            frame.texts(legend_texts);
-            layout.row_top
+            shop_storeroom_footer_row(ctx.input_mode, show_hold_sell_hint)
         };
+        let icon_slots = push_screen_footer_hint(&mut frame, &ctx, hint_row, hint_style);
+        let hint_band_top = screen_footer_top(h, hint_style);
+
+        if !inspect_active
+            && (shop.west_sell_hold_started.is_some() || hover_sellable)
+            && let Some(InlineHintIconSlot { icon_rect, .. }) =
+                icon_slots.iter().find(|s| is_hold_sell_hint_key(s.key))
+        {
+            let progress = shop
+                .west_sell_hold_started
+                .map(|started| {
+                    (Instant::now()
+                        .saturating_duration_since(started)
+                        .as_secs_f32()
+                        / super::SHOP_SELL_HOLD_SECONDS)
+                        .clamp(0.0, 1.0)
+                })
+                .unwrap_or(0.0);
+            let [ix, iy, icon_px, _] = *icon_rect;
+            let cx = ix + icon_px * 0.5;
+            let cy = iy + icon_px * 0.5;
+            let r = icon_px * 0.58;
+            let thickness = (icon_px * 0.12).max(3.5);
+            frame.arc_ring_quads([crate::ui::prompt_hold_ring::hold_prompt_ring(
+                cx,
+                cy,
+                r,
+                thickness,
+                progress,
+            )]);
+        }
 
         if inspect_active && let Some(ShopFocus::Relic(i)) = shop.focus {
             let n_sale = shop.items.len();

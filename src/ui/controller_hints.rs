@@ -647,7 +647,7 @@ pub fn push_screen_footer_hint(
     ctx: &DrawCtx<'_>,
     row: Vec<HintSegment>,
     style: HintStyle,
-) {
+) -> Vec<InlineHintIconSlot> {
     push_screen_footer_hint_for(
         frame,
         ctx.layout.window_w,
@@ -656,7 +656,7 @@ pub fn push_screen_footer_hint(
         ctx.glyphs,
         row,
         style,
-    );
+    )
 }
 
 /// Like [`push_screen_footer_hint`] when [`DrawCtx`] was already consumed.
@@ -668,7 +668,7 @@ pub fn push_screen_footer_hint_for(
     glyphs: GlyphResolver,
     row: Vec<HintSegment>,
     style: HintStyle,
-) {
+) -> Vec<InlineHintIconSlot> {
     let line_h = style.line_h;
     let y = window_h - line_h - window_h * SCREEN_FOOTER_BOTTOM_FRAC;
     push_inline_hint_rows_for(
@@ -678,7 +678,12 @@ pub fn push_screen_footer_hint_for(
         &[[0.0, y, window_w, line_h]],
         &[row],
         style,
-    );
+    )
+}
+
+/// Y coordinate of the top edge of a [`push_screen_footer_hint`] row.
+pub fn screen_footer_top(window_h: f32, style: HintStyle) -> f32 {
+    window_h - style.line_h - window_h * SCREEN_FOOTER_BOTTOM_FRAC
 }
 
 /// Apply alpha scaling to hint colours (celebration overlays).
@@ -804,6 +809,21 @@ fn measure_inline_row(
     })
 }
 
+/// Icon geometry emitted for one bind key in an inline hint row (e.g. hold-progress rings).
+#[derive(Clone, Copy, Debug)]
+pub struct InlineHintIconSlot {
+    pub key: HintKey,
+    pub icon_rect: [f32; 4],
+}
+
+/// Whether `key` is the face/key glyph for shop hold-to-sell (West / Q).
+pub fn is_hold_sell_hint_key(key: HintKey) -> bool {
+    matches!(
+        key,
+        HintKey::Action(UiAction::WestFacePress) | HintKey::Keyboard("keyboard_q")
+    )
+}
+
 fn emit_inline_row(
     glyphs: GlyphResolver,
     surface: PromptInputSurface,
@@ -814,7 +834,8 @@ fn emit_inline_row(
     segments: &[InlineSegmentRef<'_>],
     icon_cmds: &mut Vec<ImageQuad>,
     texts: &mut Vec<TextLabel>,
-) {
+) -> Vec<InlineHintIconSlot> {
+    let mut slots = Vec::new();
     let [rx, ry, rw, rh] = rect;
     let row_w = measure_inline_row(
         glyphs,
@@ -871,14 +892,16 @@ fn emit_inline_row(
                     }
                     InlineBindPart::Key(key, last_icon) => {
                         if let Some(source) = resolve_hint_key(glyphs, surface, key) {
+                            let icon_rect = [x, iy, icon_px, icon_px];
                             icon_cmds.push(ImageQuad {
                                 inst: GpuInstance {
-                                    rect: [x, iy, icon_px, icon_px],
+                                    rect: icon_rect,
                                     color: style.icon_tint,
                                     user: 0,
                                 },
                                 source,
                             });
+                            slots.push(InlineHintIconSlot { key, icon_rect });
                             x += icon_px;
                             if last_icon {
                                 x += gap_after_icon;
@@ -897,6 +920,7 @@ fn emit_inline_row(
             }
         }
     }
+    slots
 }
 
 /// Push one or more centred inline hint rows.
@@ -906,7 +930,7 @@ pub fn push_inline_hint_rows(
     row_rects: &[[f32; 4]],
     rows: &[Vec<HintSegment>],
     style: HintStyle,
-) {
+) -> Vec<InlineHintIconSlot> {
     push_inline_hint_rows_for(
         frame,
         ctx.input_mode,
@@ -914,7 +938,7 @@ pub fn push_inline_hint_rows(
         row_rects,
         rows,
         style,
-    );
+    )
 }
 
 /// Like [`push_inline_hint_rows`] when [`DrawCtx`] was already consumed.
@@ -925,9 +949,9 @@ pub fn push_inline_hint_rows_for(
     row_rects: &[[f32; 4]],
     rows: &[Vec<HintSegment>],
     style: HintStyle,
-) {
+) -> Vec<InlineHintIconSlot> {
     if row_rects.is_empty() || rows.is_empty() || row_rects.len() != rows.len() {
-        return;
+        return Vec::new();
     }
 
     let surface = prompt_surface(input_mode);
@@ -961,11 +985,12 @@ pub fn push_inline_hint_rows_for(
 
     let mut icon_cmds: Vec<ImageQuad> = Vec::new();
     let mut texts: Vec<TextLabel> = Vec::new();
+    let mut slots = Vec::new();
 
     for (row, rect) in rows.iter().zip(row_rects.iter()) {
         let mut scratch: Vec<InlineSegmentRef<'_>> = Vec::new();
         let segs = inline_segment_refs(&mut scratch, row);
-        emit_inline_row(
+        slots.extend(emit_inline_row(
             glyphs,
             surface,
             icon_px,
@@ -975,7 +1000,7 @@ pub fn push_inline_hint_rows_for(
             segs,
             &mut icon_cmds,
             &mut texts,
-        );
+        ));
     }
 
     if !icon_cmds.is_empty() {
@@ -984,6 +1009,7 @@ pub fn push_inline_hint_rows_for(
     if !texts.is_empty() {
         frame.texts(texts);
     }
+    slots
 }
 
 fn inline_text_label(rect: [f32; 4], text: &str, style: HintStyle) -> TextLabel {
@@ -995,377 +1021,4 @@ fn inline_text_label(rect: [f32; 4], text: &str, style: HintStyle) -> TextLabel 
         align: TextAlign::Left,
         ..Default::default()
     }
-}
-
-// ── Column layout ─────────────────────────────────────────────────────────────
-
-/// One equal-width column in a floating hint band.
-#[derive(Clone, Debug)]
-pub struct ColumnHintEntry {
-    pub controller: HintKey,
-    pub keyboard: ImageQuadSource,
-    /// When set, layout is `label_before` + icon + `label` (e.g. "Hold " + Q + " Sell").
-    pub label_before: Option<&'static str>,
-    pub label: &'static str,
-    pub disabled: bool,
-}
-
-impl ColumnHintEntry {
-    pub fn new(controller: HintKey, keyboard: ImageQuadSource, label: &'static str) -> Self {
-        Self {
-            controller,
-            keyboard,
-            label_before: None,
-            label,
-            disabled: false,
-        }
-    }
-
-    /// `before` + bind icon + `after` (shop hold-to-sell, etc.).
-    pub fn surrounding_icon(
-        controller: HintKey,
-        keyboard: ImageQuadSource,
-        before: &'static str,
-        after: &'static str,
-    ) -> Self {
-        Self {
-            controller,
-            keyboard,
-            label_before: Some(before),
-            label: after,
-            disabled: false,
-        }
-    }
-}
-
-/// Placement for a column hint band.
-#[derive(Clone, Copy, Debug)]
-pub struct ColumnHintLayout {
-    pub inner_left: f32,
-    pub inner_width: f32,
-    pub row_top: f32,
-    pub row_height: f32,
-    pub column_count: usize,
-    /// When set, used instead of the default floating-band icon cap.
-    pub icon_px: Option<f32>,
-}
-
-impl ColumnHintLayout {
-    /// Shop-style bottom band: 90% window width, inset 2%.
-    pub fn shop_floating_band(w: f32, h: f32, column_count: usize) -> Self {
-        let pad_bottom = h * 0.014;
-        let x = w * 0.05;
-        let bw = w * 0.90;
-        let inner_left = x + bw * 0.02;
-        let inner_right = x + bw * 0.98;
-        let inner_width = (inner_right - inner_left).max(8.0);
-
-        let metrics = HintMetrics::primary(h);
-        let row_top = h - pad_bottom - metrics.row_height;
-
-        Self {
-            inner_left,
-            inner_width,
-            row_top,
-            row_height: metrics.row_height,
-            column_count: column_count.max(1),
-            icon_px: Some(metrics.icon_px),
-        }
-    }
-
-    /// Gameplay-style bottom band (non-inspect icon scale).
-    pub fn gameplay_floating_band(w: f32, h: f32, column_count: usize) -> Self {
-        Self::shop_floating_band(w, h, column_count)
-    }
-}
-
-/// Visual parameters for column hint rows.
-#[derive(Clone, Copy, Debug)]
-pub struct ColumnHintStyle {
-    pub legend_font_px: f32,
-    pub icon_scale: f32,
-    pub icon_tint: [f32; 4],
-    pub label_color: [f32; 4],
-    pub disabled_icon_tint: [f32; 4],
-    pub disabled_label_color: [f32; 4],
-    pub pill_bg: Option<[f32; 4]>,
-    pub pill_bg_disabled: Option<[f32; 4]>,
-    pub label_pad_x: f32,
-    pub label_pad_y: f32,
-}
-
-impl ColumnHintStyle {
-    pub fn shop_floating(h: f32) -> Self {
-        let metrics = HintMetrics::primary(h);
-        let pill_bg = [0.06_f32, 0.055, 0.07, 0.82];
-        Self {
-            legend_font_px: metrics.legend_font_px,
-            icon_scale: 1.0,
-            icon_tint: color::alpha(color::PORCELAIN_AGED, 0.96),
-            label_color: color::alpha(color::PORCELAIN_AGED, 0.96),
-            disabled_icon_tint: color::alpha(color::PORCELAIN_AGED, 0.96),
-            disabled_label_color: color::alpha(color::PORCELAIN_AGED, 0.96),
-            pill_bg: Some(pill_bg),
-            pill_bg_disabled: Some(pill_bg),
-            label_pad_x: 0.0,
-            label_pad_y: 0.0,
-        }
-    }
-
-    pub fn gameplay_floating(h: f32) -> Self {
-        let metrics = HintMetrics::primary(h);
-        let pill_bg = [0.06_f32, 0.055, 0.07, 0.82];
-        Self {
-            legend_font_px: metrics.legend_font_px,
-            icon_scale: 1.0,
-            icon_tint: color::alpha(color::PORCELAIN_AGED, 0.96),
-            label_color: color::alpha(color::PORCELAIN_AGED, 0.96),
-            disabled_icon_tint: color::alpha(
-                color::darken(color::alpha(color::PORCELAIN_AGED, 0.96), 0.45),
-                0.5,
-            ),
-            disabled_label_color: color::alpha(color::UMBER, 0.72),
-            pill_bg: Some(pill_bg),
-            pill_bg_disabled: Some([0.045_f32, 0.042, 0.048, 0.55]),
-            label_pad_x: 4.0,
-            label_pad_y: 3.0,
-        }
-    }
-}
-
-/// Per-column geometry after [`push_column_hints`].
-#[derive(Clone, Copy, Debug)]
-pub struct ColumnHintSlot {
-    pub column_index: usize,
-    pub icon_rect: [f32; 4],
-}
-
-/// Render a column hint row; returns slot geometry (icon rects) for overlays such as hold rings.
-pub fn push_column_hints(
-    frame: &mut UiFrame,
-    ctx: &DrawCtx<'_>,
-    layout: ColumnHintLayout,
-    entries: &[ColumnHintEntry],
-    style: ColumnHintStyle,
-    text_out: &mut Vec<TextLabel>,
-) -> Vec<ColumnHintSlot> {
-    if entries.is_empty() {
-        return Vec::new();
-    }
-
-    let h = ctx.layout.window_h;
-    let surface = prompt_surface(ctx.input_mode);
-    let glyphs = ctx.glyphs;
-    let metrics = HintMetrics::primary(h);
-
-    let col_w = layout.inner_width / layout.column_count as f32;
-    let col_pad = (col_w * 0.045).clamp(2.0, 8.0);
-
-    let mut icon_px = layout.icon_px.unwrap_or(metrics.icon_px) * style.icon_scale;
-    let mut gap_after_icon = icon_px * 0.18;
-
-    let ui_font = load_ui_font();
-    let legend_line_h = metrics.legend_line_h;
-    let legend_text_h_px = legend_line_h.max(8.0).round().max(1.0) as u32;
-    let label_block_h = legend_line_h + style.label_pad_y * 2.0;
-
-    let measure_label = |text: &str| -> f32 {
-        if let Some(font) = ui_font {
-            let (_, _, advances) = measure_label_advances(
-                font,
-                text,
-                8192,
-                legend_text_h_px,
-                Some(style.legend_font_px),
-            );
-            advances.iter().copied().sum()
-        } else {
-            let est_ch = text.chars().count().max(1) as f32;
-            (style.legend_font_px * 0.52 * est_ch).max(8.0)
-        }
-    };
-
-    let measured: Vec<(f32, f32)> = entries
-        .iter()
-        .map(|entry| {
-            let before_w = entry
-                .label_before
-                .map(measure_label)
-                .unwrap_or(0.0);
-            let after_w = measure_label(entry.label);
-            (before_w, after_w)
-        })
-        .collect();
-
-    loop {
-        let mut fits = true;
-        for (i, entry) in entries.iter().enumerate().take(entries.len()) {
-            let (before_w, after_w) = measured[i];
-            let label_inner = (before_w + after_w) + style.label_pad_x * 2.0;
-            let cluster = match entry.label_before {
-                None => icon_px + gap_after_icon + label_inner,
-                Some(_) => {
-                    before_w + gap_after_icon + icon_px + gap_after_icon + label_inner
-                }
-            };
-            if cluster > col_w - col_pad * 2.0 {
-                fits = false;
-                break;
-            }
-        }
-        if fits || icon_px <= 18.0 {
-            break;
-        }
-        icon_px -= 1.0;
-        gap_after_icon = icon_px * 0.18;
-    }
-
-    let row_h = layout.row_height;
-    let iy = layout.row_top + (row_h - icon_px) * 0.5;
-    let label_top = layout.row_top + (row_h - label_block_h) * 0.5;
-    let pill_pad_x = (icon_px * 0.10).clamp(6.0, 16.0) + (h * 0.003).clamp(4.0, 8.0);
-    let pill_pad_y = if style.label_pad_y > 0.0 {
-        style.label_pad_y
-    } else {
-        (legend_line_h * 0.14).clamp(3.0, 9.0)
-    };
-
-    let mut pill_quads: Vec<GpuInstance> = Vec::with_capacity(entries.len());
-    let mut icon_cmds: Vec<ImageQuad> = Vec::with_capacity(entries.len());
-    let mut slots: Vec<ColumnHintSlot> = Vec::with_capacity(entries.len());
-
-    for (col_i, entry) in entries.iter().enumerate().take(layout.column_count) {
-        let col_x = layout.inner_left + col_i as f32 * col_w;
-        let cluster_left = col_x + col_pad;
-        let (before_w, after_w) = measured[col_i];
-        let max_cluster_w = (col_w - col_pad * 2.0).max(10.0);
-
-        let icon_tint = if entry.disabled {
-            style.disabled_icon_tint
-        } else {
-            style.icon_tint
-        };
-        let label_color = if entry.disabled {
-            style.disabled_label_color
-        } else {
-            style.label_color
-        };
-
-        let source = match surface {
-            PromptInputSurface::Controller => resolve_hint_key(glyphs, surface, entry.controller),
-            PromptInputSurface::MouseOrKeyboard => Some(entry.keyboard.clone()),
-        };
-
-        let (icon_rect, cluster_w) = if let Some(before) = entry.label_before {
-            let gap = gap_after_icon;
-            let mut x = cluster_left;
-            let before_draw_w = before_w.min((max_cluster_w - icon_px - gap * 2.0 - after_w).max(1.0));
-            text_out.push(TextLabel {
-                rect: [
-                    x + style.label_pad_x,
-                    label_top + style.label_pad_y,
-                    before_draw_w.max(1.0),
-                    legend_line_h,
-                ],
-                text: before.to_string(),
-                color: label_color,
-                font_px: Some(style.legend_font_px),
-                align: TextAlign::Left,
-                ..Default::default()
-            });
-            x += before_draw_w + gap;
-            let icon_rect = [x, iy, icon_px, icon_px];
-            if let Some(source) = source.clone() {
-                icon_cmds.push(ImageQuad {
-                    inst: GpuInstance {
-                        rect: icon_rect,
-                        color: icon_tint,
-                        user: 0,
-                    },
-                    source,
-                });
-            }
-            x += icon_px + gap;
-            let after_draw_w = after_w.min((max_cluster_w - (x - cluster_left)).max(1.0));
-            text_out.push(TextLabel {
-                rect: [
-                    x + style.label_pad_x,
-                    label_top + style.label_pad_y,
-                    after_draw_w.max(1.0),
-                    legend_line_h,
-                ],
-                text: entry.label.to_string(),
-                color: label_color,
-                font_px: Some(style.legend_font_px),
-                align: TextAlign::Left,
-                ..Default::default()
-            });
-            let cluster_w = (x + after_draw_w + style.label_pad_x - cluster_left).max(1.0);
-            (icon_rect, cluster_w)
-        } else {
-            let ix = cluster_left;
-            let text_x = ix + icon_px + gap_after_icon;
-            let max_text_w = (col_x + col_w - col_pad - text_x).max(10.0);
-            let text_w = after_w.min(max_text_w).max(1.0);
-            let icon_rect = [ix, iy, icon_px, icon_px];
-            if let Some(source) = source {
-                icon_cmds.push(ImageQuad {
-                    inst: GpuInstance {
-                        rect: icon_rect,
-                        color: icon_tint,
-                        user: 0,
-                    },
-                    source,
-                });
-            }
-            text_out.push(TextLabel {
-                rect: [
-                    text_x + style.label_pad_x,
-                    label_top + style.label_pad_y,
-                    text_w,
-                    legend_line_h,
-                ],
-                text: entry.label.to_string(),
-                color: label_color,
-                font_px: Some(style.legend_font_px),
-                align: TextAlign::Left,
-                ..Default::default()
-            });
-            let cluster_w = icon_px + gap_after_icon + text_w + style.label_pad_x * 2.0;
-            (icon_rect, cluster_w)
-        };
-
-        if let Some(pill_bg) = if entry.disabled {
-            style.pill_bg_disabled
-        } else {
-            style.pill_bg
-        } {
-            let pill_left = cluster_left - pill_pad_x;
-            let pill_w = (cluster_w + pill_pad_x * 2.0).max(1.0);
-            pill_quads.push(GpuInstance {
-                rect: [
-                    pill_left,
-                    label_top - pill_pad_y,
-                    pill_w,
-                    label_block_h + pill_pad_y * 2.0,
-                ],
-                color: pill_bg,
-                user: 0,
-            });
-        }
-
-        slots.push(ColumnHintSlot {
-            column_index: col_i,
-            icon_rect,
-        });
-    }
-
-    if !pill_quads.is_empty() {
-        frame.squircle_quads(pill_quads);
-    }
-    if !icon_cmds.is_empty() {
-        frame.image_quads(icon_cmds);
-    }
-
-    slots
 }

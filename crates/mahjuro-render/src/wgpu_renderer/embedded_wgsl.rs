@@ -34,6 +34,7 @@ pub const DEPTH_QUAD: &str = wgsl_file!("depth_quad.wgsl");
 pub const DEPTH_QUAD_DEBUG: &str = wgsl_file!("depth_quad_debug.wgsl");
 pub const TEXT_QUAD: &str = wgsl_file!("text_quad.wgsl");
 pub const GRADIENT_QUAD: &str = wgsl_file!("gradient_quad.wgsl");
+pub const ARC_RING_QUAD: &str = wgsl_file!("arc_ring_quad.wgsl");
 pub const SQUIRCLE_QUAD: &str = wgsl_file!("squircle_quad.wgsl");
 pub const FLAME: &str = concat!(
     include_str!(concat!(

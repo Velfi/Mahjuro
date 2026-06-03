@@ -133,6 +133,9 @@ pub struct WgpuRenderer {
     /// Display-format twin of `depth_quad_debug_pipeline`.
     depth_quad_debug_pipeline_display: wgpu::RenderPipeline,
     gradient_quad_pipeline: wgpu::RenderPipeline,
+    arc_ring_quad_pipeline: wgpu::RenderPipeline,
+    /// Display-format twin of `arc_ring_quad_pipeline` (post-tonemap UI).
+    arc_ring_quad_pipeline_display: wgpu::RenderPipeline,
     squircle_quad_pipeline: wgpu::RenderPipeline,
     /// Display-format twin of `squircle_quad_pipeline` (post-tonemap UI).
     squircle_quad_pipeline_display: wgpu::RenderPipeline,
@@ -846,7 +849,7 @@ pub use layout_instances::build_instances_from_layout;
 pub use picking_types::{GameplayPick, MainMenuPick, ShopHit};
 pub use projection::ProjectionCache;
 pub use targets::TargetInit;
-pub use ui_instances::{GpuInstance, GradientQuadInstance, RenderSettings};
+pub use ui_instances::{ArcRingQuadInstance, GpuInstance, GradientQuadInstance, RenderSettings};
 
 pub(crate) use constants::clamp_render_physical_size;
 pub(crate) use hash_util::tablet_label_hash;

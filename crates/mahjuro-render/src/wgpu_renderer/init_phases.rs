@@ -58,6 +58,7 @@ pub(super) struct RendererShaderPack {
     pub shop: wgpu::ShaderModule,
     pub text: wgpu::ShaderModule,
     pub gradient: wgpu::ShaderModule,
+    pub arc_ring: wgpu::ShaderModule,
     pub squircle: wgpu::ShaderModule,
     pub flame: wgpu::ShaderModule,
     pub starfield: wgpu::ShaderModule,
@@ -113,6 +114,10 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
         gradient: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gradient_quad.wgsl"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::GRADIENT_QUAD.into()),
+        }),
+        arc_ring: device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("arc_ring_quad.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::ARC_RING_QUAD.into()),
         }),
         squircle: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("squircle_quad.wgsl"),

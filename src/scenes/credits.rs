@@ -501,7 +501,7 @@ impl SceneBehavior for CreditsScene {
             &mut frame,
             &ctx,
             back_scroll_footer_row(ctx.input_mode),
-            HintStyle::archive_footer(h),
+            HintStyle::standard(h),
         );
         frame.window_title = "Mahjuro — Credits".into();
         frame

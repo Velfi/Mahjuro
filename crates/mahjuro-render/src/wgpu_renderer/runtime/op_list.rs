@@ -50,6 +50,10 @@ pub(super) enum RenderOp {
         buf_idx: usize,
         count: u32,
     },
+    ArcRingQuadBatch {
+        buf_idx: usize,
+        count: u32,
+    },
     SquircleQuadBatch {
         buf_idx: usize,
         count: u32,

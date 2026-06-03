@@ -310,7 +310,7 @@ impl SceneBehavior for GuideScene {
             &mut frame,
             &ctx,
             guide_footer_row(ctx.input_mode),
-            HintStyle::archive_footer(h),
+            HintStyle::standard(h),
         );
 
         frame.window_title = "Mahjuro \u{2014} Guide".into();

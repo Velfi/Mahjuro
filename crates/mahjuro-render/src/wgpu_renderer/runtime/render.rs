@@ -558,6 +558,8 @@ impl WgpuRenderer {
             Vec::new();
         let mut gradient_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
             Vec::new();
+        let mut arc_ring_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
+            Vec::new();
         let mut squircle_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
             Vec::new();
         // TODO(perf): route flame / tile-face / prompt-icon / tile-glow /
@@ -736,6 +738,22 @@ impl WgpuRenderer {
                     let buf_idx = gradient_quad_buffers.len();
                     gradient_quad_buffers.push(slice);
                     ops.push(RenderOp::GradientQuadBatch {
+                        buf_idx,
+                        count: batch.len() as u32,
+                    });
+                }
+                DrawCmd::ArcRingQuad(_) => {
+                    let mut batch: Vec<ArcRingQuadInstance> = Vec::new();
+                    while let Some(DrawCmd::ArcRingQuad(inst)) = frame.cmds.get(i) {
+                        batch.push(*inst);
+                        i += 1;
+                    }
+                    let slice = self
+                        .frame_buffer_pool
+                        .alloc(&self.device, &self.queue, &batch);
+                    let buf_idx = arc_ring_quad_buffers.len();
+                    arc_ring_quad_buffers.push(slice);
+                    ops.push(RenderOp::ArcRingQuadBatch {
                         buf_idx,
                         count: batch.len() as u32,
                     });
@@ -1461,6 +1479,7 @@ impl WgpuRenderer {
             overlay_quad_buffers: &overlay_quad_buffers,
             overlay_squircle_quad_buffers: &overlay_squircle_quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
+            arc_ring_quad_buffers: &arc_ring_quad_buffers,
             squircle_quad_buffers: &squircle_quad_buffers,
             flame_buffers: &flame_buffers,
             text_draws: &text_draws,
@@ -1493,6 +1512,7 @@ impl WgpuRenderer {
             overlay_quad_buffers: &overlay_quad_buffers,
             overlay_squircle_quad_buffers: &overlay_squircle_quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
+            arc_ring_quad_buffers: &arc_ring_quad_buffers,
             squircle_quad_buffers: &squircle_quad_buffers,
             flame_buffers: &flame_buffers,
             text_draws: &text_draws,
@@ -1568,6 +1588,7 @@ impl WgpuRenderer {
                             op,
                             RenderOp::TextDraw(_)
                                 | RenderOp::ImageQuad(_)
+                                | RenderOp::ArcRingQuadBatch { .. }
                                 | RenderOp::OverlayQuadBatch { .. }
                                 | RenderOp::OverlaySquircleQuadBatch { .. }
                         ) {
@@ -1585,6 +1606,7 @@ impl WgpuRenderer {
                             op,
                             RenderOp::TextDraw(_)
                                 | RenderOp::ImageQuad(_)
+                                | RenderOp::ArcRingQuadBatch { .. }
                                 | RenderOp::OverlayQuadBatch { .. }
                                 | RenderOp::OverlaySquircleQuadBatch { .. }
                         ) {
@@ -2624,7 +2646,8 @@ impl WgpuRenderer {
         if ops.iter().any(|o| {
             matches!(
                 o,
-                RenderOp::TextDraw(_) | RenderOp::ImageQuad(_) | RenderOp::OverlayQuadBatch { .. }
+                RenderOp::TextDraw(_) | RenderOp::ImageQuad(_) | RenderOp::ArcRingQuadBatch { .. }
+                    | RenderOp::OverlayQuadBatch { .. }
                     | RenderOp::OverlaySquircleQuadBatch { .. }
             )
         }) {
@@ -2659,6 +2682,7 @@ impl WgpuRenderer {
                     op,
                     RenderOp::TextDraw(_)
                         | RenderOp::ImageQuad(_)
+                        | RenderOp::ArcRingQuadBatch { .. }
                         | RenderOp::OverlayQuadBatch { .. }
                         | RenderOp::OverlaySquircleQuadBatch { .. }
                 ) {

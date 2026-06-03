@@ -1204,7 +1204,7 @@ fn draw_plaque(
         color: color::alpha(color::WALNUT_DEEP, 0.92),
         user: 0,
     });
-    let hint_style = HintStyle::journal_plaque_footer(h);
+    let hint_style = HintStyle::standard(h);
     let hint_rect = [
         face_x + header_pad * 0.35,
         footer_y + footer_h * 0.14,

@@ -181,7 +181,7 @@ impl SceneBehavior for MaterialViewerScene {
             &mut frame,
             &ctx,
             back_footer_row(ctx.input_mode),
-            HintStyle::archive_footer(h),
+            HintStyle::standard(h),
         );
         frame.window_title = "Mahjuro \u{2014} Material Viewer".into();
         frame

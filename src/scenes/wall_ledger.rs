@@ -603,7 +603,7 @@ impl SceneBehavior for WallLedgerScene {
 
         let (_, hints_bottom) = footer_hint_metrics(h, jr);
         let hints_y = h - hints_bottom - layout.hints_h;
-        let hint_style = HintStyle::archive_footer(h);
+        let hint_style = HintStyle::standard(h);
         let hint_rect = [0.0, hints_y, w, layout.hints_h];
         let hint_row = back_scroll_footer_row(ctx.input_mode);
         push_inline_hint_rows(&mut frame, &ctx, &[hint_rect], &[hint_row], hint_style);

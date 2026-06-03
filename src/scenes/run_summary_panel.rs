@@ -749,7 +749,7 @@ pub fn push_run_summary_panel(
         ctx,
         &[layout.hint_rect],
         &[hint_row],
-        HintStyle::archive_footer(h),
+        HintStyle::standard(h),
     );
 
     let elapsed = opened_at.elapsed().as_secs_f32();

@@ -297,7 +297,7 @@ impl SceneBehavior for AnimationLabScene {
             &mut frame,
             &ctx,
             back_footer_row(ctx.input_mode),
-            HintStyle::archive_footer(h),
+            HintStyle::standard(h),
         );
         frame.window_title = "Mahjuro — Animation Lab".into();
         frame
