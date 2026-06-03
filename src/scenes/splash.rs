@@ -31,7 +31,7 @@ impl SplashScene {
         }
     }
 
-    /// Mark the loading plate as on-screen (continues the boot logo timeline).
+    /// Mark the loading plate as on-screen and start the production-logo timeline.
     pub fn mark_visible(&mut self) {
         if !self.visible {
             loading_screen::touch_splash_logo_frame();

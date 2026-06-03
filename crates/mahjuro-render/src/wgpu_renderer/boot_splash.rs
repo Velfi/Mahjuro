@@ -468,7 +468,7 @@ pub(super) fn boot_present<'a>(
     if let Some(poll) = input_poll.as_mut() {
         poll();
     }
-    let alphas = loading_screen::current_alphas();
+    let alphas = loading_screen::current_boot_alphas();
     let progress = loading_screen::combined_progress(0.0);
     if let Some(s) = splash.as_mut() {
         let _ = s.present(target, config, progress, alphas);
