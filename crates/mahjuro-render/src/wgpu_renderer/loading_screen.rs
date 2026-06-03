@@ -56,11 +56,11 @@ pub fn touch_boot_frame() {
     }
 }
 
-/// Anchor the full-renderer splash to the boot logo timeline (no replay after init).
+/// Begin the production-logo timeline on the full-renderer splash (not during boot).
 pub fn touch_splash_logo_frame() {
     let mut c = clock().lock().expect("loading clock");
     if c.splash_start.is_none() {
-        c.splash_start = Some(c.boot_start.unwrap_or_else(Instant::now));
+        c.splash_start = Some(Instant::now());
     }
 }
 
@@ -81,19 +81,20 @@ pub fn combined_progress(splash_hub: f32) -> f32 {
         .clamp(0.0, 1.0)
 }
 
-pub fn current_alphas() -> LoadingAlphas {
-    let c = clock().lock().expect("loading clock");
-    let start = c.boot_start.unwrap_or_else(Instant::now);
-    alphas_for_elapsed(start, c.skip_at)
+/// Boot presenter only: progress bar + "loading…", no production logo.
+pub fn current_boot_alphas() -> LoadingAlphas {
+    LoadingAlphas {
+        logo: 0.0,
+        loading_ui: 1.0,
+    }
 }
 
-/// Alphas for the unified splash plate (same timeline as boot, once anchored).
+/// Alphas for the full-renderer splash plate (production logo sequence).
 pub fn current_splash_alphas() -> LoadingAlphas {
     let c = clock().lock().expect("loading clock");
-    let start = c
-        .splash_start
-        .or(c.boot_start)
-        .unwrap_or_else(Instant::now);
+    let Some(start) = c.splash_start else {
+        return LoadingAlphas::default();
+    };
     alphas_for_elapsed(start, c.skip_at)
 }
 
@@ -111,7 +112,7 @@ pub fn take_production_logo_stinger() -> bool {
         return false;
     }
     let c = clock().lock().expect("loading clock");
-    let Some(start) = c.splash_start.or(c.boot_start) else {
+    let Some(start) = c.splash_start else {
         return false;
     };
     let alphas = alphas_for_elapsed(start, c.skip_at);
@@ -337,6 +338,13 @@ mod tests {
         assert!((alphas_at_time(5.0).logo).abs() < 0.01);
         assert!((alphas_at_time(5.5).loading_ui - 0.5).abs() < 0.01);
         assert!((alphas_at_time(6.0).loading_ui - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn boot_alphas_hide_production_logo() {
+        let alphas = current_boot_alphas();
+        assert_eq!(alphas.logo, 0.0);
+        assert!((alphas.loading_ui - 1.0).abs() < 1e-3);
     }
 
     #[test]

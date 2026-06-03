@@ -790,17 +790,23 @@ impl App {
             .as_ref()
             .map(|i| i.last_cursor)
             .unwrap_or((0.0, 0.0));
-        let loading_done = match &self.scene {
-            // Splash stays up until showcase atlases exist and every runtime offline
-            // room shadow bake is on the GPU (see prepare_splash_hub_boot).
-            Scene::Splash(_) => {
-                if let Some(r) = self.renderer.as_mut() {
-                    r.prepare_splash_hub_boot();
-                }
-                self.renderer
-                    .as_ref()
-                    .is_some_and(|r| r.splash_hub_boot_ready())
+        let warm_gameplay_for_resume =
+            matches!(self.resume_scene, crate::persistence::ResumeScene::Gameplay);
+        if matches!(&self.scene, Scene::Splash(_)) {
+            if let Some(r) = self.renderer.as_mut() {
+                r.tick_splash_hub_boot();
+                r.poll_pending_texture_uploads();
+                let tileset = self.gfx.tileset_name.clone();
+                r.ensure_active_showcase_decal_atlas(&tileset);
+                r.poll_pending_texture_uploads();
             }
+        }
+        let loading_done = match &self.scene {
+            // Splash stays up until showcase atlases and main_menu.glb are on the GPU.
+            Scene::Splash(_) => self
+                .renderer
+                .as_ref()
+                .is_some_and(|r| r.splash_hub_boot_ready()),
             _ => self.renderer.as_ref().is_none_or(|r| !r.is_loading()),
         };
         // Compute every scene pick once per frame. The same four results
@@ -808,9 +814,10 @@ impl App {
         // `App::frame_picks`). Without this caching, each gameplay frame
         // pays for two full walks of the per-class matrix lists for
         // shop/gameplay objects in particular.
-        let scene_key = crate::scenes::active_scene_key(&self.scene);
-        let warm_gameplay_for_resume =
-            matches!(self.resume_scene, crate::persistence::ResumeScene::Gameplay);
+        let scene_key = match &self.scene {
+            Scene::Splash(_) => Some(scene_keys::MAIN_MENU),
+            _ => crate::scenes::active_scene_key(&self.scene),
+        };
         self.frame_picks = if let Some(r) = self.renderer.as_mut() {
             r.poll_room_prefetch_gpu_uploads(
                 scene_key,
@@ -1342,17 +1349,6 @@ impl App {
         // the background saver. Cheap (one clone). The cache is updated
         // synchronously inside `enqueue` so subsequent loads see fresh data.
         self.flush_dirty_profile();
-
-        // After the splash plate has been presented, upload the active tileset
-        // showcase decal atlas from its baked PNG.
-        if matches!(self.scene, Scene::Splash(_)) {
-            let tileset = self.gfx.tileset_name.clone();
-            if let Some(renderer) = self.renderer.as_mut() {
-                renderer.poll_pending_texture_uploads();
-                renderer.ensure_active_showcase_decal_atlas(&tileset);
-                renderer.poll_pending_texture_uploads();
-            }
-        }
 
         // Profile capture completion chime: each profiler latches a one-shot
         // flag the frame its report is logged. Both latches are polled here

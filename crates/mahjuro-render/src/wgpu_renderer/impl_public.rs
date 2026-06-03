@@ -65,9 +65,16 @@ impl WgpuRenderer {
             && self.main_menu_environment.is_some()
     }
 
+    /// Upload hub `main_menu.glb` (and advance CPU prefetch) while the splash plate is up.
+    pub fn tick_splash_hub_boot(&mut self) {
+        crate::room_preload::try_drain_room_cpu_prefetch_threads();
+        self.ensure_main_menu_room_gpu();
+        crate::room_preload::advance_hub_cpu_prefetch_chain();
+    }
+
     /// Upload the hub room while the splash loading screen is still up.
     pub fn prepare_splash_hub_boot(&mut self) {
-        self.ensure_main_menu_room_gpu();
+        self.tick_splash_hub_boot();
     }
 
     /// Partial hub readiness for the unified loading progress bar (0–1).

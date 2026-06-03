@@ -95,6 +95,8 @@ impl App {
         if let Some(renderer) = self.renderer.as_mut() {
             use crate::persistence::ResumeScene;
             use crate::render::room_preload::RoomSceneChain;
+            // Begin hub GLB GPU upload as soon as the renderer exists (splash plate).
+            renderer.tick_splash_hub_boot();
             // Shop is always first in the hub chain; start CPU decode early.
             renderer.prefetch_room_chain_next(RoomSceneChain::Shop);
             match self.resume_scene {
@@ -185,7 +187,7 @@ impl App {
                         did_loader_work = true;
                     }
                     if matches!(self.scene, Scene::Splash(_)) {
-                        renderer.prepare_splash_hub_boot();
+                        renderer.tick_splash_hub_boot();
                         did_loader_work = true;
                     }
                     if matches!(

@@ -4,7 +4,8 @@
 // Uses per-pixel `n_world` so the terminator stays smooth on the low-poly sphere.
 
 fn moon_phase_sun_dir_world(model: mat4x4<f32>, phase: f32) -> vec3<f32> {
-    let phase_angle = phase * 6.2831853;
+    // +180° so phase 0 (new) faces the camera with the dark hemisphere.
+    let phase_angle = (phase + 0.5) * 6.2831853;
     // Synodic light sweeps the mesh equator (pole = +Z in `MoonObject` mesh space).
     let sun_mesh = vec3(cos(phase_angle), sin(phase_angle), 0.0);
     return normalize((model * vec4<f32>(sun_mesh, 0.0)).xyz);
