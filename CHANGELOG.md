@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.3 — 2026-06-03
+
+### Fixed
+- The shop’s hold-to-sell prompt now draws a smooth circular progress ring around the sell button (Q or West), including on keyboard, and the ring stays visible while you charge the sell.
+
 ## 0.5.2 — 2026-06-03
 
 ### Changed
