@@ -2770,7 +2770,7 @@ impl HallwayDistortionDebugOverlay {
         labels.push(TextLabel {
             rect: [px, py + row_gap + title_h, pw, subtitle_h],
             text:
-                "breathe · ripple · wall bow (bow.w world units) · tint (bow.rgb) · squeeze/stretch"
+                "breathe · ripple · wall bow (bow.w × |side_c|) · tint (bow.rgb) · squeeze/stretch"
                     .into(),
             color: color::alpha(color::STONE, 0.88),
             ..Default::default()

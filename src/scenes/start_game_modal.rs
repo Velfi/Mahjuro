@@ -12,9 +12,10 @@ use crate::persistence::TileMaterial;
 use crate::render::theme::{ButtonState, ButtonVariant, button_colors, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
+use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, TextStyle};
-use crate::ui::widget_tree::{self as wt, FlatItem, FocusId, Tree, TreeFrame, TreeInput, TreeState};
+use crate::ui::widget_tree::FocusId;
 
 use super::main_menu::MainMenuScene;
 use super::shop::ShopScene;
@@ -49,7 +50,7 @@ impl ModalAction {
     }
 }
 
-/// Material row: mouse/touch prev/next arrows (same ids as [`ModalAction`] focus targets). for copy, material picker, and button stack.
+/// Shared left-column geometry for copy, material picker, and button stack.
 struct LeftPanelLayout {
     x: f32,
     w: f32,
@@ -143,17 +144,11 @@ impl LeftPanelLayout {
         }
     }
 
-    fn menu_block_height(&self, tutorial_mode: bool) -> f32 {
-        let item_h = (38.0 * self.scale).max(24.0);
-        let rows = if tutorial_mode { 3.0 } else { 3.0 };
-        rows * item_h + (rows - 1.0) * self.menu_gap
-    }
-
     fn menu_item_h(&self) -> f32 {
         (38.0 * self.scale).max(24.0)
     }
 
-    /// Season token, Play, and Back rects — matches [`TileSelectScene::build_tree`] layout.
+    /// Season token, Play, and Back rects for spatial nav + draw.
     fn menu_button_rects(&self) -> (Vec<(Season, [f32; 4])>, [f32; 4], [f32; 4]) {
         let row_h = self.menu_item_h();
         let row_y = self.menu_y;
@@ -219,6 +214,52 @@ fn push_material_arrow(
     ));
 }
 
+fn push_modal_button(
+    instances: &mut Vec<GpuInstance>,
+    text_labels: &mut Vec<TextLabel>,
+    buttons: &mut Vec<ButtonDef>,
+    rect: [f32; 4],
+    label: &str,
+    click_id: u32,
+    variant: ButtonVariant,
+    enabled: bool,
+    focused: bool,
+    hovered: bool,
+    scale: f32,
+    window_w: f32,
+    window_h: f32,
+) {
+    let state = if !enabled {
+        ButtonState::Disabled
+    } else if focused || hovered {
+        ButtonState::Hover
+    } else {
+        ButtonState::Rest
+    };
+    if focused {
+        focus_nav::push_focus_ring(rect, scale, window_w, window_h, instances);
+    }
+    let colors = button_colors(variant, state);
+    instances.push(GpuInstance {
+        rect,
+        color: colors.bg,
+        user: 0,
+    });
+    text_labels.push(TextLabel {
+        rect,
+        text: label.into(),
+        color: colors.text,
+        align: TextAlign::Center,
+        ..Default::default()
+    });
+    if enabled {
+        buttons.push(ButtonDef::scene(
+            (rect[0], rect[1], rect[2], rect[3]),
+            click_id,
+        ));
+    }
+}
+
 /// Season emoji for the season switcher tokens. Matches the seasonal naming
 /// scheme (Spring → Summer → Autumn → Winter).
 fn season_glyph(season: Season) -> &'static str {
@@ -231,7 +272,7 @@ fn season_glyph(season: Season) -> &'static str {
 }
 
 pub struct TileSelectScene {
-    tree: TreeState,
+    focus: Option<ModalAction>,
     pub positions: crate::ui::scene_layout::TileSelectPositions,
     material: TileMaterial,
     /// Currently-selected difficulty season. Cycled by SeasonPrev/SeasonNext
@@ -252,7 +293,7 @@ impl Default for TileSelectScene {
 impl TileSelectScene {
     pub fn new() -> Self {
         Self {
-            tree: TreeState::new(),
+            focus: None,
             positions: crate::ui::scene_layout::TileSelectPositions::default(),
             material: TileMaterial::default(),
             season: Season::default(),
@@ -263,7 +304,7 @@ impl TileSelectScene {
     /// Create a tile-select scene that will start a tutorial run.
     pub fn new_tutorial() -> Self {
         Self {
-            tree: TreeState::new(),
+            focus: None,
             positions: crate::ui::scene_layout::TileSelectPositions::default(),
             material: TileMaterial::Bamboo,
             season: Season::Spring,
@@ -296,170 +337,238 @@ impl TileSelectScene {
         self.clamp_season_to_unlocks(progress);
     }
 
-    /// Build the button-only widget tree. Text labels are emitted separately
-    /// in `draw()` because `draw_decoration_top` doesn't support column layout.
-    fn build_tree(
+    /// Spatial focus graph: `(action, screen rect)` for every navigable control.
+    fn focus_targets(
         &self,
         window_w: f32,
         window_h: f32,
         progress: &crate::core::progression::PlayerProgress,
         positions: &crate::ui::scene_layout::TileSelectPositions,
-    ) -> Tree<ModalAction> {
+    ) -> Vec<(ModalAction, [f32; 4])> {
         let panel = LeftPanelLayout::compute(window_w, window_h, positions, self.tutorial_mode);
-        let scale = panel.scale;
-        let btn_gap = panel.menu_gap;
-        let block_h = panel.menu_block_height(self.tutorial_mode);
-
-        let root = if self.tutorial_mode {
-            let items = vec![
-                wt::button_id(
-                    ModalAction::Play.id(),
-                    "Play Tutorial",
-                    ModalAction::Play,
-                    ButtonVariant::Primary,
-                ),
-                wt::button_id(
-                    ModalAction::SkipTutorial.id(),
-                    "Skip Tutorial",
-                    ModalAction::SkipTutorial,
-                    ButtonVariant::Default,
-                ),
-                wt::button_id(
-                    ModalAction::Back.id(),
-                    "Back",
-                    ModalAction::Back,
-                    ButtonVariant::Default,
-                ),
-            ];
-            wt::Node::Column {
-                gap: btn_gap,
-                align: wt::HAlign::Stretch,
-                children: items,
-            }
-        } else {
-            // Season token row: one focusable button per season. Selected
-            // season gets Primary (gold) for the "select box" look; locked
-            // seasons are disabled Subtle so focus traversal skips them.
-            let token_children: Vec<_> = Season::ALL
-                .iter()
-                .map(|&s| {
-                    let unlocked = progress.season_unlocked_for(self.material, s);
-                    let variant = if s == self.season {
-                        ButtonVariant::Primary
-                    } else {
-                        ButtonVariant::Subtle
-                    };
-                    // Locked seasons rely on the disabled button-state
-                    // desaturation (handled by the theme) — no padlock glyph,
-                    // the dimmed treatment is enough to read "locked".
-                    let label = season_glyph(s).to_string();
-                    wt::Node::Item(wt::Item {
-                        id: ModalAction::SeasonSelect(s).id(),
-                        enabled: unlocked,
-                        tooltip: None,
-                        label,
-                        variant,
-                        on_activate: ModalAction::SeasonSelect(s),
-                    })
-                })
-                .collect();
-            let token_row = wt::Node::Row {
-                gap: (8.0 * scale).max(4.0),
-                align: wt::VAlign::Center,
-                children: token_children,
-            };
-            // Play is the dominant CTA; Back sits below.
-            let children = vec![
-                token_row,
-                wt::button_id(
-                    ModalAction::Play.id(),
-                    "Play",
-                    ModalAction::Play,
-                    ButtonVariant::Primary,
-                ),
-                wt::button_id(
-                    ModalAction::Back.id(),
-                    "Back",
-                    ModalAction::Back,
-                    ButtonVariant::Default,
-                ),
-            ];
-            wt::Node::Column {
-                gap: btn_gap,
-                align: wt::HAlign::Stretch,
-                children,
-            }
-        };
-
-        Tree {
-            root,
-            anchor: Some([panel.x, panel.menu_y, panel.w, block_h]),
-        }
-    }
-
-    /// Interactive hit targets in focus order (material arrows, seasons, Play, Back).
-    fn flat_items(
-        &self,
-        window_w: f32,
-        window_h: f32,
-        progress: &crate::core::progression::PlayerProgress,
-        positions: &crate::ui::scene_layout::TileSelectPositions,
-    ) -> Vec<FlatItem<ModalAction>> {
-        let panel = LeftPanelLayout::compute(window_w, window_h, positions, self.tutorial_mode);
-        let mut items = Vec::new();
+        let mut targets = Vec::new();
 
         if !self.tutorial_mode {
             let material_row = panel.material_row(window_h, positions);
-            items.push(FlatItem::new(
-                ModalAction::MaterialPrev.id(),
-                material_row.prev,
-                ModalAction::MaterialPrev,
-            ));
-            items.push(FlatItem::new(
-                ModalAction::MaterialNext.id(),
-                material_row.next,
-                ModalAction::MaterialNext,
-            ));
+            targets.push((ModalAction::MaterialPrev, material_row.prev));
+            targets.push((ModalAction::MaterialNext, material_row.next));
 
             let (season_rects, play_rect, back_rect) = panel.menu_button_rects();
             for (season, rect) in season_rects {
                 if progress.season_unlocked_for(self.material, season) {
-                    items.push(FlatItem::new(
-                        ModalAction::SeasonSelect(season).id(),
-                        rect,
-                        ModalAction::SeasonSelect(season),
-                    ));
+                    targets.push((ModalAction::SeasonSelect(season), rect));
                 }
             }
-            items.push(FlatItem::new(
-                ModalAction::Play.id(),
-                play_rect,
-                ModalAction::Play,
-            ));
-            items.push(FlatItem::new(
-                ModalAction::Back.id(),
-                back_rect,
-                ModalAction::Back,
-            ));
+            targets.push((ModalAction::Play, play_rect));
+            targets.push((ModalAction::Back, back_rect));
         } else {
             let row_h = panel.menu_item_h();
             let mut y = panel.menu_y;
-            let buttons = [
-                (ModalAction::Play, "Play Tutorial"),
-                (ModalAction::SkipTutorial, "Skip Tutorial"),
-                (ModalAction::Back, "Back"),
-            ];
-            for (action, _) in buttons {
-                items.push(FlatItem::new(
-                    action.id(),
-                    [panel.x, y, panel.w, row_h],
-                    action,
-                ));
+            for action in [
+                ModalAction::Play,
+                ModalAction::SkipTutorial,
+                ModalAction::Back,
+            ] {
+                targets.push((action, [panel.x, y, panel.w, row_h]));
                 y += row_h + panel.menu_gap;
             }
         }
 
-        items
+        targets
+    }
+
+    fn default_focus(
+        &self,
+        targets: &[(ModalAction, [f32; 4])],
+    ) -> Option<ModalAction> {
+        targets
+            .iter()
+            .find(|(action, _)| matches!(action, ModalAction::Play))
+            .map(|(action, _)| *action)
+            .or_else(|| targets.first().map(|(action, _)| *action))
+    }
+
+    fn clamp_focus(&mut self, targets: &[(ModalAction, [f32; 4])]) {
+        let valid = |focus: ModalAction| targets.iter().any(|(action, _)| *action == focus);
+        if self.focus.is_none_or(|focus| !valid(focus)) {
+            self.focus = self.default_focus(targets);
+        }
+    }
+
+    fn current_focus_rect(
+        focus: Option<ModalAction>,
+        targets: &[(ModalAction, [f32; 4])],
+    ) -> Option<[f32; 4]> {
+        let focus = focus?;
+        targets
+            .iter()
+            .find(|(action, _)| *action == focus)
+            .map(|(_, rect)| *rect)
+    }
+
+    fn activate_focus(
+        &mut self,
+        action: ModalAction,
+        ctx: &mut UpdateCtx<'_>,
+    ) -> SceneTransition {
+        match action {
+            ModalAction::MaterialPrev => {
+                self.material = ctx.progress.prev_unlocked_material(self.material);
+                self.clamp_season_to_unlocks(ctx.progress);
+                ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                None
+            }
+            ModalAction::MaterialNext => {
+                self.material = ctx.progress.next_unlocked_material(self.material);
+                self.clamp_season_to_unlocks(ctx.progress);
+                ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                None
+            }
+            ModalAction::Play => {
+                if !ctx.loading_done {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
+                    return None;
+                }
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                self.start_game(ctx.run, ctx.progress)
+            }
+            ModalAction::SkipTutorial => {
+                if !ctx.loading_done {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
+                    return None;
+                }
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                *ctx.complete_onboarding = true;
+                let settings = crate::persistence::load_settings();
+                GameEngine::start_run_with_material(
+                    ctx.run,
+                    TileMaterial::default(),
+                    ctx.progress,
+                    &settings,
+                );
+                Some(Scene::Shop(ShopScene::new(ctx.run, ctx.progress)))
+            }
+            ModalAction::Back => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+                Some(Scene::MainMenu(MainMenuScene::new()))
+            }
+            ModalAction::SeasonSelect(season) => {
+                if ctx.progress.season_unlocked_for(self.material, season) {
+                    if self.season != season {
+                        self.season = season;
+                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                    }
+                } else {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+                }
+                None
+            }
+        }
+    }
+
+    fn draw_menu_buttons(
+        &self,
+        panel: &LeftPanelLayout,
+        progress: &crate::core::progression::PlayerProgress,
+        cursor_pos: (f32, f32),
+        input_mode: InputMode,
+        window_w: f32,
+        window_h: f32,
+        instances: &mut Vec<GpuInstance>,
+        text_labels: &mut Vec<TextLabel>,
+        buttons: &mut Vec<ButtonDef>,
+    ) {
+        let scale = panel.scale;
+        let focused = self.focus;
+        let cursor_hover =
+            |rect: [f32; 4]| input_mode == InputMode::Cursor && point_in_rect(cursor_pos, rect);
+
+        if self.tutorial_mode {
+            let row_h = panel.menu_item_h();
+            let mut y = panel.menu_y;
+            for (action, label, variant) in [
+                (ModalAction::Play, "Play Tutorial", ButtonVariant::Primary),
+                (ModalAction::SkipTutorial, "Skip Tutorial", ButtonVariant::Default),
+                (ModalAction::Back, "Back", ButtonVariant::Default),
+            ] {
+                let rect = [panel.x, y, panel.w, row_h];
+                let is_focused = focused == Some(action);
+                push_modal_button(
+                    instances,
+                    text_labels,
+                    buttons,
+                    rect,
+                    label,
+                    action.id().0,
+                    variant,
+                    true,
+                    is_focused,
+                    cursor_hover(rect),
+                    scale,
+                    window_w,
+                    window_h,
+                );
+                y += row_h + panel.menu_gap;
+            }
+            return;
+        }
+
+        let (season_rects, play_rect, back_rect) = panel.menu_button_rects();
+        for (season, rect) in season_rects {
+            let action = ModalAction::SeasonSelect(season);
+            let unlocked = progress.season_unlocked_for(self.material, season);
+            let variant = if self.season == season {
+                ButtonVariant::Primary
+            } else {
+                ButtonVariant::Subtle
+            };
+            push_modal_button(
+                instances,
+                text_labels,
+                buttons,
+                rect,
+                season_glyph(season),
+                action.id().0,
+                variant,
+                unlocked,
+                focused == Some(action),
+                cursor_hover(rect),
+                scale,
+                window_w,
+                window_h,
+            );
+        }
+
+        push_modal_button(
+            instances,
+            text_labels,
+            buttons,
+            play_rect,
+            "Play",
+            ModalAction::Play.id().0,
+            ButtonVariant::Primary,
+            true,
+            focused == Some(ModalAction::Play),
+            cursor_hover(play_rect),
+            scale,
+            window_w,
+            window_h,
+        );
+        push_modal_button(
+            instances,
+            text_labels,
+            buttons,
+            back_rect,
+            "Back",
+            ModalAction::Back.id().0,
+            ButtonVariant::Default,
+            true,
+            focused == Some(ModalAction::Back),
+            cursor_hover(back_rect),
+            scale,
+            window_w,
+            window_h,
+        );
     }
 
     fn start_game(
@@ -571,7 +680,7 @@ fn grid_slots(grid_x: f32, grid_y: f32, grid_w: f32, grid_h: f32) -> Vec<(f32, f
 }
 
 impl SceneBehavior for TileSelectScene {
-    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+    fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
 
@@ -579,91 +688,87 @@ impl SceneBehavior for TileSelectScene {
             self.clamp_material_to_unlocks(ctx.progress);
         }
 
-        let mut filtered: Vec<UiAction> = Vec::new();
+        let targets = self.focus_targets(w, h, ctx.progress, &self.positions);
+        self.clamp_focus(&targets);
+        let prev_focus = self.focus;
+
         for &a in ctx.actions {
-            match a {
-                UiAction::Cancel | UiAction::Pause => {
-                    ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                    return Some(Scene::MainMenu(MainMenuScene::new()));
-                }
-                other => filtered.push(other),
+            if matches!(a, UiAction::Cancel | UiAction::Pause) {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+                return Some(Scene::MainMenu(MainMenuScene::new()));
             }
         }
 
-        let items = self.flat_items(w, h, ctx.progress, &self.positions);
-        let action = self.tree.update_flat(
-            &items,
-            TreeInput {
-                actions: &filtered,
-                button_clicks: ctx.button_clicks,
-                cursor_pos: ctx.cursor_pos,
-                window: (w, h),
-                input_mode: ctx.input_mode,
-                scroll_lines: 0.0,
-            },
-        );
-        if self.tree.take_focus_changed() {
+        let pointer_pick = if ctx.input_mode == InputMode::Cursor && !targets.is_empty() {
+            focus_nav::focus_target_at_cursor(&targets, ctx.cursor_pos.0, ctx.cursor_pos.1)
+        } else {
+            None
+        };
+
+        if ctx.input_mode == InputMode::Cursor
+            && let Some(action) = pointer_pick
+        {
+            self.focus = Some(action);
+        }
+
+        for &cid in ctx.button_clicks {
+            if let Some(action) = targets
+                .iter()
+                .find(|(target, _)| target.id().0 == cid)
+                .map(|(target, _)| *target)
+            {
+                self.focus = Some(action);
+                let transition = self.activate_focus(action, &mut ctx);
+                let targets = self.focus_targets(w, h, ctx.progress, &self.positions);
+                self.clamp_focus(&targets);
+                return transition;
+            }
+        }
+
+        let current_rect = Self::current_focus_rect(self.focus, &targets);
+        let mut activated = false;
+        for &a in ctx.actions {
+            let dir = match a {
+                UiAction::FocusUp => Some(FocusDir::Up),
+                UiAction::FocusDown => Some(FocusDir::Down),
+                UiAction::FocusPrev => Some(FocusDir::Left),
+                UiAction::FocusNext => Some(FocusDir::Right),
+                UiAction::Confirm | UiAction::CommitDiscard => {
+                    activated = true;
+                    None
+                }
+                _ => None,
+            };
+            if let Some(dir) = dir
+                && let Some(rect) = current_rect
+                && let Some(next) = focus_nav::pick_neighbor(rect, dir, &targets)
+            {
+                self.focus = Some(next);
+            }
+        }
+
+        if ctx.input_mode == InputMode::Cursor
+            && !ctx.button_clicks.is_empty()
+            && pointer_pick.is_some()
+        {
+            activated = true;
+        }
+
+        if self.focus != prev_focus {
             ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
         }
 
-        match action {
-            Some(ModalAction::MaterialPrev) => {
-                self.material = ctx.progress.prev_unlocked_material(self.material);
-                self.clamp_season_to_unlocks(ctx.progress);
-                ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                None
-            }
-            Some(ModalAction::MaterialNext) => {
-                self.material = ctx.progress.next_unlocked_material(self.material);
-                self.clamp_season_to_unlocks(ctx.progress);
-                ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                None
-            }
-            Some(ModalAction::Play) => {
-                if !ctx.loading_done {
-                    ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
-                    return None;
-                }
-                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                self.start_game(ctx.run, ctx.progress)
-            }
-            Some(ModalAction::SkipTutorial) => {
-                if !ctx.loading_done {
-                    ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
-                    return None;
-                }
-                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                *ctx.complete_onboarding = true;
-                let settings = crate::persistence::load_settings();
-                GameEngine::start_run_with_material(
-                    ctx.run,
-                    TileMaterial::default(),
-                    ctx.progress,
-                    &settings,
-                );
-                Some(Scene::Shop(ShopScene::new(ctx.run, ctx.progress)))
-            }
-            Some(ModalAction::Back) => {
-                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                Some(Scene::MainMenu(MainMenuScene::new()))
-            }
-            Some(ModalAction::SeasonSelect(s)) => {
-                // Locked seasons are non-focusable + disabled, so activation
-                // here should only ever arrive for unlocked seasons; guard
-                // anyway so a mouse click on a visible-but-locked token
-                // can't slip through.
-                if ctx.progress.season_unlocked_for(self.material, s) {
-                    if self.season != s {
-                        self.season = s;
-                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                    }
-                } else {
-                    ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                }
-                None
-            }
-            None => None,
+        if activated {
+            let Some(action) = self.focus else {
+                return None;
+            };
+            let transition = self.activate_focus(action, &mut ctx);
+            let targets = self.focus_targets(w, h, ctx.progress, &self.positions);
+            self.clamp_focus(&targets);
+            return transition;
         }
+
+        None
     }
 
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
@@ -740,11 +845,11 @@ impl SceneBehavior for TileSelectScene {
                 ..Default::default()
             });
             let cursor_pos = ctx.cursor_pos;
-            let focused = self.tree.focused();
-            let hover_prev = focused == Some(ModalAction::MaterialPrev.id())
+            let focused = self.focus;
+            let hover_prev = focused == Some(ModalAction::MaterialPrev)
                 || (ctx.input_mode == InputMode::Cursor
                     && point_in_rect(cursor_pos, material_row.prev));
-            let hover_next = focused == Some(ModalAction::MaterialNext.id())
+            let hover_next = focused == Some(ModalAction::MaterialNext)
                 || (ctx.input_mode == InputMode::Cursor
                     && point_in_rect(cursor_pos, material_row.next));
             push_material_arrow(
@@ -798,14 +903,17 @@ impl SceneBehavior for TileSelectScene {
             });
         }
 
-        // ── Buttons (via widget tree) ──────────────────────────────
-        let tree = self.build_tree(w, h, ctx.progress, &self.positions);
-        let mut tree_frame = TreeFrame {
-            instances: &mut instances,
-            labels: &mut text_labels,
-            buttons: &mut buttons,
-        };
-        self.tree.draw(&tree, &mut tree_frame);
+        self.draw_menu_buttons(
+            &panel,
+            ctx.progress,
+            ctx.cursor_pos,
+            ctx.input_mode,
+            w,
+            h,
+            &mut instances,
+            &mut text_labels,
+            &mut buttons,
+        );
 
         // ── Tile preview grid on the right ─────────────────────────
         let (grid_x, grid_y, grid_w, grid_h) = self.preview_grid_rect(w, h);

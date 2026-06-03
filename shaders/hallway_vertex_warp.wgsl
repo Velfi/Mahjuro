@@ -12,6 +12,9 @@ const HALLWAY_RIPPLE_STAND_FREQ_RATIO: f32 = 2.37;
 const HALLWAY_RIPPLE_WALL_POWER: f32 = 1.28;
 /// Floor Z for vertical barrel midline only (walls bow — floor/ceiling stay put).
 const HALLWAY_BALLOON_FLOOR_Z: f32 = 0.08;
+/// Minimum depth/height barrel factors so corridor ends still read curved (not flat panels).
+const HALLWAY_BALLOON_DEPTH_FLOOR: f32 = 0.52;
+const HALLWAY_BALLOON_VERT_FLOOR: f32 = 0.62;
 
 struct HallwayDistortion {
     bow: vec4<f32>,
@@ -91,17 +94,16 @@ fn apply_hallway_distortion(world_in: vec3<f32>, h: HallwayDistortion) -> vec3<f
         w = w + lateral * (sign(side_c) * h.ripple.x * ripple_h * ripple_wall * mask_f);
     }
 
-    // Wall barrel bow (`bow.w` world units). `wall_dist = |side_c|` — not normalized by `flags.w`.
+    // Wall barrel bow: `bow.w` × |side_c| ≈ lateral bulge in world units (~5–8% of wall distance at default tuning).
     if (h.bow.w > 1e-6) {
         let balloon_k = h.bow.w * mask_f * mix(1.0, 1.0 + bp * 0.65, sm0);
-        let wall_dist = abs(side_c);
-        let on_wall = smoothstep(0.12, 1.35, wall_dist);
-        let depth_barrel = max(sin(u * HALLWAY_TAU * 0.5), 0.22);
+        let wall_gain = abs(side_c);
+        let depth_barrel = max(sin(u * HALLWAY_TAU * 0.5), HALLWAY_BALLOON_DEPTH_FLOOR);
         let z_mid = mix(HALLWAY_BALLOON_FLOOR_Z, h.ceiling.y, 0.5);
         let z_half = max((h.ceiling.y - HALLWAY_BALLOON_FLOOR_Z) * 0.5, 0.18);
         let z_n = clamp((w.z - z_mid) / z_half, -1.0, 1.0);
-        let vert_barrel = max(1.0 - z_n * z_n, 0.4);
-        let bulge = balloon_k * on_wall * depth_barrel * vert_barrel;
+        let vert_barrel = max(1.0 - z_n * z_n, HALLWAY_BALLOON_VERT_FLOOR);
+        let bulge = balloon_k * wall_gain * depth_barrel * vert_barrel;
         w = w + lateral * (sign(side_c) * bulge);
     }
 
