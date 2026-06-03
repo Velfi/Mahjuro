@@ -274,6 +274,8 @@ impl HeadlessApp {
                 seed_archive_seen: &mut scratch.seed_archive_seen,
                 archive_chronicle_last_seen: 0,
                 main_menu_effects: self.renderer.main_menu_effects,
+                flame_tuning: self.renderer.flame_tuning,
+                audio: None,
             })
         } else {
             let showcase_shop_inspect = self.overlay_stack.last().is_some_and(|top| {
@@ -344,6 +346,8 @@ impl HeadlessApp {
                     seed_archive_seen: &mut scratch.seed_archive_seen,
                     archive_chronicle_last_seen: 0,
                     main_menu_effects: self.renderer.main_menu_effects,
+                    flame_tuning: self.renderer.flame_tuning,
+                    audio: None,
                 })
         };
         match scratch.overlay_request {

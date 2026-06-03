@@ -577,6 +577,22 @@ impl AudioManager {
         self.play_sfx_with_speed(SfxId::ScoreTick, speed);
     }
 
+    /// Nominal playback length for a loaded SFX clip at 1.0 speed (no sink started).
+    pub fn sfx_duration(&self, id: SfxId) -> Option<Duration> {
+        self.sfx_duration_with_speed(id, 1.0)
+    }
+
+    fn sfx_duration_with_speed(&self, id: SfxId, speed: f32) -> Option<Duration> {
+        if let Some(variants) = self.sfx_variant_data.get(&id) {
+            return variants
+                .first()
+                .map(|clip| clip_duration_at_speed(clip, speed));
+        }
+        self.sfx_data
+            .get(&id)
+            .map(|clip| clip_duration_at_speed(clip, speed))
+    }
+
     /// Play a sound effect. No-op if audio is unavailable or the SFX file wasn't loaded.
     /// Returns the clip duration (adjusted for `speed`) when playback started.
     pub fn play_sfx(&mut self, id: SfxId) -> Option<Duration> {

@@ -6,10 +6,12 @@ use std::time::Instant;
 
 use super::GameplayScene;
 use crate::core::scoring::StepKind;
+use crate::game::cascade::{YAKU_NAME_POST_PAUSE_MS, first_yaku_step};
 use crate::game::engine::GameEngine;
 use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::score_popups::PopupMotionTiming;
 use crate::scenes::{SceneTransition, UpdateCtx};
+use crate::sfx_id::SfxId;
 use crate::ui::input::UiAction;
 
 /// Advance the active scoring cascade. Returns `Some(transition)` when
@@ -44,6 +46,27 @@ pub(super) fn tick_active_cascade(
             scene.last_revealed_step = Some(ordinal);
             ctx.bus
                 .push(crate::game::event_bus::GameEvent::ScoreStepRevealed { index: ordinal });
+            if ordinal >= cascade.breakdown.base_steps.len() {
+                let step_index = ordinal - cascade.breakdown.base_steps.len();
+                if let Some(yk) = first_yaku_step(&cascade.breakdown, step_index)
+                    && cascade.mark_yaku_voiced(yk)
+                {
+                    let sfx = SfxId::for_yaku(yk);
+                    let voice_dur = ctx
+                        .audio
+                        .as_mut()
+                        .and_then(|audio| {
+                            audio
+                                .play_sfx(sfx)
+                                .or_else(|| audio.sfx_duration(sfx))
+                        })
+                        .unwrap_or_else(|| std::time::Duration::from_millis(700));
+                    cascade.extend_yaku_hold(
+                        now + voice_dur
+                            + std::time::Duration::from_millis(YAKU_NAME_POST_PAUSE_MS),
+                    );
+                }
+            }
             let step = if ordinal < cascade.breakdown.base_steps.len() {
                 cascade.breakdown.base_steps.get(ordinal)
             } else {

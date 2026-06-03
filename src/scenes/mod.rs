@@ -198,6 +198,8 @@ pub struct UpdateCtx<'a> {
     pub archive_chronicle_last_seen: u32,
     pub main_menu_effects: crate::render::main_menu_effects_tuning::MainMenuEffectsTuning,
     pub flame_tuning: crate::render::flame_tuning::FlameTuning,
+    /// Live audio when the main app is ticking; `None` in headless harnesses.
+    pub audio: Option<&'a mut crate::audio::AudioManager>,
 }
 
 /// Pushdown-stack action a scene's `update()` can request. Scenes do this
