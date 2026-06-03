@@ -131,10 +131,13 @@ pub const HALLWAY_WING_FINAL: u32 = 7;
 /// Pick-blind warp scale at wing 1 vs [`HALLWAY_WING_FINAL`].
 pub const HALLWAY_WING_INTENSITY_AT_FIRST: f32 = 0.82;
 pub const HALLWAY_WING_INTENSITY_AT_FINAL: f32 = 1.28;
-/// Wall barrel-bow displacement at the wall surface (world units; shader `bow.w`).
-pub const HALLWAY_BALLOON_AMOUNT: f32 = 0.065;
+/// Fraction of lateral distance (`|side_c|`) for wall barrel bow at full mask (WGSL `bow.w`).
+pub const HALLWAY_BALLOON_AMOUNT: f32 = 0.42;
 /// World Z for vertical barrel midline in WGSL (`mix(floor, ceiling, 0.5)`); keep in sync with shaders.
 pub const HALLWAY_BALLOON_FLOOR_Z: f32 = 0.08;
+/// Minimum depth/height barrel factors (keep in sync with `hallway_vertex_warp.wgsl`).
+pub const HALLWAY_BALLOON_DEPTH_FLOOR: f32 = 0.52;
+pub const HALLWAY_BALLOON_VERT_FLOOR: f32 = 0.62;
 
 // Left/right in `room_glb.wgsl` / `tile_3d.wgsl` (all use the same lateral frame):
 // - `lateral = normalize(cross(depth_axis, world_up))` (handedness follows depth sign in `mask.y`).
@@ -142,7 +145,7 @@ pub const HALLWAY_BALLOON_FLOOR_Z: f32 = 0.08;
 // - `side_n = clamp(side_c / flags.w, −1, 1)`; `flags.w` = lateral corridor half-width (bounds span).
 // - Twist: rigid spiral around depth (`u`); sign from `twist.w` (+1 / −1 per run). Not `side_n`.
 // - `twist.w` flips rotation hand; breathe/pulse depth phase uses normalized `u` along `mask` span.
-// - `stretch.z` stores glTF root depth (CPU). `bow.rgb` = per-run wall tint; `bow.w` = balloon amp.
+// - `stretch.z` stores glTF root depth (CPU). `bow.rgb` = per-run wall tint; `bow.w` = barrel bow strength (× |side_c| in WGSL).
 // - `ripple` = lateral waves.
 // - Stretch displaces along depth × `u` (not a rigid translate).
 // - `ripple`: x = amplitude, y = waves along `u`, z = travel speed, w = travel mix (0 standing .. 1 travel).
@@ -165,7 +168,7 @@ fn hallway_depth_axis_doc() -> Vec3 {
 #[repr(C)]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct HallwayDistortion {
-    /// Pick-blind wall tint (linear RGB). `w` = wall barrel-bow strength (× lateral half-width).
+    /// Pick-blind wall tint (linear RGB). `w` = wall barrel-bow strength (× |side_c| at wall verts).
     /// Only meshes tagged with [`HALLWAY_WALL_TINT_COLOR_TAG`] multiply albedo by `bow.rgb`.
     pub bow: [f32; 4],
     /// x = breathe amplitude, y = angular frequency, z = phase (rad), w = side falloff power.
@@ -185,8 +188,9 @@ pub struct HallwayDistortion {
     pub mask: [f32; 4],
     /// x = time (sec, filled by renderer), y = drift speed, z = pulse speed, w = pulse amount.
     pub time_pulse: [f32; 4],
-    /// x = enabled (1), y = boss pressure 0..1 (`1` on boss blind — red-shifted punctual lights;
-    /// vertex warp scales this by 0.25 in WGSL so distortion strength stays tuned), z =
+    /// x = enabled (1), y = boss pressure 0..1 (`1` on boss blind — red-shifted punctual +
+    /// emissive lights in `room_glb.wgsl`; vertex warp scales this by 0.25 in WGSL so distortion
+    /// strength stays tuned), z =
     /// global_intensity, w = corridor lateral half-width in world units (`(lat_max − lat_min) / 2`).
     pub flags: [f32; 4],
     /// x = lateral ripple amplitude, y = wave count along depth `u`, z = travel speed (rad/s),
@@ -301,9 +305,9 @@ impl HallwayDistortion {
 
         let (mut global_intensity, breathe_mul, stretch_mul, twist_mul, ripple_mul, balloon_mul) =
             match blind {
-                ChamberKind::Small => (0.58, 0.58, 0.7, 0.52, 0.5, 0.5),
-                ChamberKind::Big => (0.74, 0.68, 0.85, 0.72, 0.75, 0.75),
-                ChamberKind::Ordeal => (0.25, 0.82, 1.15, 1.08, 0.4, 1.0),
+                ChamberKind::Small => (0.58, 0.58, 0.7, 0.52, 0.5, 0.72),
+                ChamberKind::Big => (0.74, 0.68, 0.85, 0.72, 0.75, 1.0),
+                ChamberKind::Ordeal => (0.25, 0.82, 1.15, 1.08, 0.4, 1.15),
             };
         global_intensity *= hallway_wing_intensity_scale(wing);
         let boss_pressure = match blind {
@@ -942,25 +946,19 @@ mod tests {
         for v in &walls.mesh.vertices {
             let p = m.transform_point3(Vec3::from(v.position));
             let wall_dist = (p.dot(lateral_n) - lat_ref).abs();
-            let on_wall = test_smoothstep(0.12, 1.35, wall_dist);
+            let wall_gain = wall_dist;
             let u = ((p.dot(axis_n) - d0) / span).clamp(0.0, 1.0);
-            let depth_barrel = (u * std::f32::consts::PI).sin().max(0.22);
+            let depth_barrel = (u * std::f32::consts::PI).sin().max(super::HALLWAY_BALLOON_DEPTH_FLOOR);
             let z_mid = (super::HALLWAY_BALLOON_FLOOR_Z + dist.ceiling[1]) * 0.5;
             let z_half = ((dist.ceiling[1] - super::HALLWAY_BALLOON_FLOOR_Z) * 0.5).max(0.18);
             let z_n = ((p.z - z_mid) / z_half).clamp(-1.0, 1.0);
-            let vert_barrel = (1.0 - z_n * z_n).max(0.4);
-            max_bulge = max_bulge.max(balloon_amp * on_wall * depth_barrel * vert_barrel);
+            let vert_barrel = (1.0 - z_n * z_n).max(super::HALLWAY_BALLOON_VERT_FLOOR);
+            max_bulge = max_bulge.max(balloon_amp * wall_gain * depth_barrel * vert_barrel);
         }
         assert!(
-            max_bulge > 0.002,
+            max_bulge > 8.0,
             "wall barrel bow should displace wall verts; max_bulge={max_bulge} bow.w={balloon_amp}"
         );
-    }
-
-    #[inline]
-    fn test_smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
-        let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-        t * t * (3.0 - 2.0 * t)
     }
 
     #[test]

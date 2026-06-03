@@ -332,9 +332,9 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let F0 = mix(vec3<f32>(0.04), f0_base, metallic);
 
     var Lo = vec3<f32>(0.0);
-    // Boss blind (`hd.flags.y` ≈ 1): wash punctual + spots toward red without touching emissive.
+    // Boss blind (`hd.flags.y` ≈ 1): wash punctual, spots, and lamp emissive toward red.
     let boss_press = clamp(hd.flags.y, 0.0, 1.0);
-    let punctual_rgb_mul = mix(
+    let boss_light_rgb_mul = mix(
         vec3<f32>(1.0),
         vec3<f32>(1.14, 0.42, 0.36),
         boss_press,
@@ -354,7 +354,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
             punctual_attenuation_with_inv_doc_scale(dist, range_w, cam.decal_atlas_uv.y),
             kind > 0.5,
         );
-        let radiance = pl.color.rgb * punctual_rgb_mul * pl.color.a * atten;
+        let radiance = pl.color.rgb * boss_light_rgb_mul * pl.color.a * atten;
         let NdotL = max(dot(n_world, L), 0.0);
         if (NdotL <= 0.0 || length(radiance) <= 0.0) {
             continue;
@@ -402,7 +402,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         if (spot_factor <= 0.0) {
             continue;
         }
-        let radiance = s.color.rgb * punctual_rgb_mul * s.color.a * atten_spot * spot_factor;
+        let radiance = s.color.rgb * boss_light_rgb_mul * s.color.a * atten_spot * spot_factor;
         let NdotL = max(dot(n_world, L), 0.0);
         if (NdotL <= 0.0) {
             continue;
@@ -463,8 +463,9 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     var lit_hdr = Lo * cam.tile_seed + ambient + metal_hemi;
     lit_hdr = lit_hdr * sample_contact_ao(in.world_pos);
     // Per-light projected shadows are applied in the punctual / spot loops above.
-    let hdr = lit_hdr + emissive;
-    return ShopShaded(hdr, emissive, out_alpha);
+    let emissive_out = emissive * boss_light_rgb_mul;
+    let hdr = lit_hdr + emissive_out;
+    return ShopShaded(hdr, emissive_out, out_alpha);
 }
 
 @fragment
