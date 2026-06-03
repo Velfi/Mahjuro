@@ -182,6 +182,31 @@ impl HeadlessApp {
         self.modal_overlay = Some(queue);
     }
 
+    #[cfg(feature = "screenshot")]
+    pub(crate) fn force_round_win_modal(&mut self) {
+        use mahjuro::game::event_bus::RoundPayout;
+        use mahjuro::ui::modal::{Modal, ModalQueue, ModalTheme};
+
+        let w = self.width as f32;
+        let h = self.height as f32;
+        let modal = Modal::new("Winner!", "", ModalTheme::Success)
+            .with_payout_breakdown(
+                self.run.round_score,
+                u64::from(self.run.target_score),
+                RoundPayout {
+                    base_reward: 4,
+                    unused_play_bonus: 5,
+                    interest: 1,
+                    green_luck_bonus: 0,
+                    total: 10,
+                },
+            )
+            .with_fireworks(w * 0.5, h * 0.8, w * 0.6, 5);
+        let mut queue = ModalQueue::default();
+        queue.push(modal);
+        self.modal_overlay = Some(queue);
+    }
+
     fn tick_warmup(&mut self, frames: u32) {
         for _ in 0..frames {
             self.tick();

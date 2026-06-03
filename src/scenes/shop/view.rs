@@ -1111,83 +1111,80 @@ pub(crate) fn render_shop_frame(
         let show_hold_sell_hint =
             inspect.is_none() && (shop.west_sell_hold_started.is_some() || hover_sellable);
 
-        let layout = ColumnHintLayout::shop_floating_band(
-            w,
-            h,
-            inspect_active,
-            if show_hold_sell_hint { 2 } else { 1 },
-        );
-        let keyboard_icons = crate::ui::kenney_prompt_paths::shop_action_prompt_icons();
-        let mut entries: Vec<ColumnHintEntry> = Vec::with_capacity(2);
-        let mut hold_sell_col: Option<usize> = None;
-        if show_hold_sell_hint {
-            hold_sell_col = Some(entries.len());
-            entries.push(ColumnHintEntry::surrounding_icon(
-                HintKey::Action(crate::ui::input::UiAction::WestFacePress),
-                keyboard_icons[0].clone(),
-                "Hold ",
-                " Sell",
-            ));
-        }
-        entries.push(ColumnHintEntry::new(
-            HintKey::Action(crate::ui::input::UiAction::NorthFacePress),
-            keyboard_icons[1].clone(),
-            "Inspect",
-        ));
-
-        let mut legend_texts: Vec<TextLabel> = Vec::with_capacity(entries.len());
-        let slots = push_column_hints(
-            &mut frame,
-            &ctx,
-            layout,
-            &entries,
-            ColumnHintStyle::shop_floating(h),
-            &mut legend_texts,
-        );
-
-        if let (Some(started), Some(col)) = (shop.west_sell_hold_started, hold_sell_col)
-            && let Some(slot) = slots.iter().find(|s| s.column_index == col)
-        {
-            let elapsed = Instant::now()
-                .saturating_duration_since(started)
-                .as_secs_f32();
-            let progress = (elapsed / super::SHOP_SELL_HOLD_SECONDS).clamp(0.0, 1.0);
-            let [ix, iy, icon_px, _] = slot.icon_rect;
-            let cx = ix + icon_px * 0.5;
-            let cy = iy + icon_px * 0.5;
-            let r = icon_px * 0.58;
-            let thickness = (icon_px * 0.12).max(3.5);
-            let mut ring_quads: Vec<GpuInstance> = Vec::with_capacity(72);
-            crate::ui::prompt_hold_ring::push_hold_prompt_ring(
-                &mut ring_quads,
-                cx,
-                cy,
-                r,
-                thickness,
-                progress,
-            );
-            frame.quads(ring_quads);
-        }
-
-        if inspect_active {
+        let pad_bottom = h * 0.014;
+        let hint_band_top = if inspect_active {
             let inspect_style = HintStyle::shop_inspect_camera(h);
-            let gap_before_inspect_line = h * 0.01;
-            let inspect_rect = [
-                inner_left,
-                layout.row_top + layout.row_height + gap_before_inspect_line,
-                inner_w,
-                inspect_style.line_h,
-            ];
+            let hint_line_h = inspect_style.line_h;
+            let hint_top = h - pad_bottom - hint_line_h;
             push_inline_hint_rows(
                 &mut frame,
                 &ctx,
-                &[inspect_rect],
+                &[[inner_left, hint_top, inner_w, hint_line_h]],
                 &[inspect_camera_hint_row(ctx.input_mode)],
                 inspect_style,
             );
-        }
+            hint_top
+        } else {
+            let layout = ColumnHintLayout::shop_floating_band(
+                w,
+                h,
+                if show_hold_sell_hint { 2 } else { 1 },
+            );
+            let keyboard_icons = crate::ui::kenney_prompt_paths::shop_action_prompt_icons();
+            let mut entries: Vec<ColumnHintEntry> = Vec::with_capacity(2);
+            let mut hold_sell_col: Option<usize> = None;
+            if show_hold_sell_hint {
+                hold_sell_col = Some(entries.len());
+                entries.push(ColumnHintEntry::surrounding_icon(
+                    HintKey::Action(crate::ui::input::UiAction::WestFacePress),
+                    keyboard_icons[0].clone(),
+                    "Hold ",
+                    " Sell",
+                ));
+            }
+            entries.push(ColumnHintEntry::new(
+                HintKey::Action(crate::ui::input::UiAction::NorthFacePress),
+                keyboard_icons[1].clone(),
+                "Inspect",
+            ));
 
-        frame.texts(legend_texts);
+            let mut legend_texts: Vec<TextLabel> = Vec::with_capacity(entries.len());
+            let slots = push_column_hints(
+                &mut frame,
+                &ctx,
+                layout,
+                &entries,
+                ColumnHintStyle::shop_floating(h),
+                &mut legend_texts,
+            );
+
+            if let (Some(started), Some(col)) = (shop.west_sell_hold_started, hold_sell_col)
+                && let Some(slot) = slots.iter().find(|s| s.column_index == col)
+            {
+                let elapsed = Instant::now()
+                    .saturating_duration_since(started)
+                    .as_secs_f32();
+                let progress = (elapsed / super::SHOP_SELL_HOLD_SECONDS).clamp(0.0, 1.0);
+                let [ix, iy, icon_px, _] = slot.icon_rect;
+                let cx = ix + icon_px * 0.5;
+                let cy = iy + icon_px * 0.5;
+                let r = icon_px * 0.58;
+                let thickness = (icon_px * 0.12).max(3.5);
+                let mut ring_quads: Vec<GpuInstance> = Vec::with_capacity(72);
+                crate::ui::prompt_hold_ring::push_hold_prompt_ring(
+                    &mut ring_quads,
+                    cx,
+                    cy,
+                    r,
+                    thickness,
+                    progress,
+                );
+                frame.quads(ring_quads);
+            }
+
+            frame.texts(legend_texts);
+            layout.row_top
+        };
 
         if inspect_active && let Some(ShopFocus::Relic(i)) = shop.focus {
             let n_sale = shop.items.len();
@@ -1212,7 +1209,7 @@ pub(crate) fn render_shop_frame(
                     w,
                     h,
                     d.flavor,
-                    h - layout.row_top,
+                    h - hint_band_top,
                 );
                 frame.gradient_quads(flavor_gradients);
                 frame.texts(flavor_texts);

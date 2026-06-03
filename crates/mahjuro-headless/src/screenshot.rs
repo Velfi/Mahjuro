@@ -63,6 +63,9 @@ pub fn run(cli: ScreenshotCli) -> anyhow::Result<()> {
     if setup.force_relic_modal {
         app.force_relic_unlock_modal();
     }
+    if setup.force_round_win_modal {
+        app.force_round_win_modal();
+    }
     if let Some(mul) = cli.gltf_emissive_scale {
         app.shop_env_lighting.gltf_emissive_scale = mul;
     }

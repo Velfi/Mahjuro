@@ -89,6 +89,21 @@ pub(crate) fn setup_gameplay_screenshot_state(run: &mut RunState) {
     crate::room_bake::setup_gameplay_bake_state(run);
 }
 
+/// Gameplay backdrop for the round-win celebration modal capture.
+#[cfg(feature = "screenshot")]
+pub(crate) fn setup_round_win_screenshot_state(run: &mut RunState) {
+    use mahjuro::core::rules::ChamberKind;
+
+    setup_gameplay_screenshot_state(run);
+    run.wing = 2;
+    run.chamber = ChamberKind::Small;
+    run.round_score = 4688;
+    run.target_score = 1000;
+    run.yen = 18;
+    run.plays_remaining = 0;
+    run.discards_remaining = 4;
+}
+
 #[cfg(feature = "screenshot")]
 pub(crate) fn force_ordeal_chamber(run: &mut RunState, kind: mahjuro::core::ordeal::OrdealKind) {
     use mahjuro::OrdealKindExt;

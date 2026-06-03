@@ -230,6 +230,7 @@ pub(crate) struct ScreenshotSceneSetup {
     pub unlock_yaku: bool,
     pub unlock_collection: bool,
     pub force_relic_modal: bool,
+    pub force_round_win_modal: bool,
 }
 
 pub(crate) fn resolve_screenshot_scene(
@@ -241,6 +242,7 @@ pub(crate) fn resolve_screenshot_scene(
     let mut unlock_yaku = false;
     let mut unlock_collection = false;
     let mut force_relic_modal = false;
+    let mut force_round_win_modal = false;
 
     if let Some(tab) = collection_screenshot_tab(&s.scene) {
         unlock_collection = true;
@@ -251,6 +253,7 @@ pub(crate) fn resolve_screenshot_scene(
             unlock_yaku,
             unlock_collection,
             force_relic_modal,
+            force_round_win_modal,
         });
     }
 
@@ -269,6 +272,11 @@ pub(crate) fn resolve_screenshot_scene(
         "gameplay_hero" => {
             setup_hero_state(run);
             hero_play = true;
+            (Scene::Gameplay(Box::new(GameplayScene::new())), true)
+        }
+        "round_win" | "winner" | "winner_modal" => {
+            crate::fixtures::setup_round_win_screenshot_state(run);
+            force_round_win_modal = true;
             (Scene::Gameplay(Box::new(GameplayScene::new())), true)
         }
         "hallway" | "pick_chamber" | "pick_blind" => (
@@ -377,7 +385,7 @@ pub(crate) fn resolve_screenshot_scene(
         other => {
             anyhow::bail!(
                 "unsupported --scene '{other}' (supported: archive, archive_ordeals, chronicle, \
-                yaku_journal, gameplay, gameplay_hero, hallway, stairway, shop, options, \
+                yaku_journal, gameplay, gameplay_hero, round_win, hallway, stairway, shop, options, \
                 main_menu, tile_select, guide, tutorial, transition_playground, \
                 material_viewer, tile_anchor_lab, tixels, relic_unlock, game_over_level_up, defeat, victory, meta_level_up, \
                 showcase, zodiac_celebration, tile_pack_celebration)"
@@ -392,5 +400,6 @@ pub(crate) fn resolve_screenshot_scene(
         unlock_yaku,
         unlock_collection,
         force_relic_modal,
+        force_round_win_modal,
     })
 }
