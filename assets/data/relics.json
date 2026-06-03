@@ -1409,7 +1409,7 @@
   {
     "id": "eulers_number",
     "name": "Euler's Number",
-    "description": "Cashing in a structure: +e mult (Euler's constant ≈ 2.71828…)",
+    "description": "Cashing in a structure: ×e mult (Euler's constant ≈ 2.71828…)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1452,7 +1452,7 @@
   {
     "id": "pi_constant",
     "name": "Pi",
-    "description": "Cashing in a structure: +π mult (≈ 3.14159…)",
+    "description": "Cashing in a structure: ×π mult (≈ 3.14159…)",
     "rarity": "rare",
     "flavor_spans": [
       {

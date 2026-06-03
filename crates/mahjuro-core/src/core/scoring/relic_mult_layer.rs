@@ -287,11 +287,13 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     for _ in 0..count(RelicId::EulersNumber) {
-        push_mult(steps, *chips, mult, "Euler's Number", std::f64::consts::E);
+        let delta = *mult * (std::f64::consts::E - 1.0);
+        push_mult(steps, *chips, mult, "Euler's Number", delta);
     }
 
     for _ in 0..count(RelicId::PiConstant) {
-        push_mult(steps, *chips, mult, "Pi", std::f64::consts::PI);
+        let delta = *mult * (std::f64::consts::PI - 1.0);
+        push_mult(steps, *chips, mult, "Pi", delta);
     }
 
     if has(RelicId::Humility) {

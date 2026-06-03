@@ -137,10 +137,6 @@ impl App {
         shell.prepare_gamepad_frame();
 
         // 1. Drain event bus — bus events can trigger scene transitions.
-        // Track yaku stinger offsets so multiple yaku scored in the
-        // same frame roll out as a staggered sequence rather than
-        // stacking on the same tick.
-        let mut yaku_stinger_index: u32 = 0;
         if let Some(input) = self.input.as_mut() {
             input.tick_scoring_rumble_keepalive(shell, now);
         }
@@ -295,13 +291,6 @@ impl App {
                 GameEvent::YakuScored(yk) => {
                     *self.progress.yaku_times_scored.entry(yk).or_insert(0) += 1;
                     self.mark_profile_dirty();
-                    const YAKU_STINGER_SPACING_MS: u64 = 200;
-                    let offset = std::time::Duration::from_millis(
-                        (yaku_stinger_index as u64) * YAKU_STINGER_SPACING_MS,
-                    );
-                    self.audio
-                        .schedule_sfx(audio::SfxId::for_yaku(yk), now + offset);
-                    yaku_stinger_index += 1;
                 }
                 GameEvent::AchievementUnlocked(ach) => {
                     self.steam.unlock_achievement(ach);
@@ -977,6 +966,7 @@ impl App {
                     .as_ref()
                     .map(|r| r.flame_tuning)
                     .unwrap_or_else(crate::render::flame_tuning::FlameTuning::load),
+                audio: Some(&mut self.audio),
             })
         } else {
             let showcase_shop_inspect = self.overlay_stack.last().is_some_and(|top| {
@@ -1069,6 +1059,7 @@ impl App {
                         .as_ref()
                         .map(|r| r.flame_tuning)
                         .unwrap_or_else(crate::render::flame_tuning::FlameTuning::load),
+                    audio: Some(&mut self.audio),
                 })
         };
         if matches!(&self.scene, crate::scenes::Scene::MainMenu(_)) {

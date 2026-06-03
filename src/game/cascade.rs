@@ -8,9 +8,14 @@
 
 use std::time::{Duration, Instant};
 
+use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::core::scoring::{ScoreBreakdown, StepKind};
+use crate::core::yaku::{YakuKind, yaku_kind_by_display_name};
+
+/// Brief beat after a yaku name voice line before the cascade advances to the next yaku.
+pub const YAKU_NAME_POST_PAUSE_MS: u64 = 250;
 
 /// Tunable timing parameters for the scoring cascade animation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -193,6 +198,38 @@ pub struct ScoringCascade {
     pub earned: u64,
     /// Timing parameters.
     tuning: CascadeTuning,
+    /// Do not leave the final step of a yaku until this instant (voice + post pause).
+    yaku_hold_until: Instant,
+    /// Yaku whose name voice has already fired this cascade.
+    yaku_voiced: FxHashSet<YakuKind>,
+}
+
+/// First scoring step for a yaku (chips line, or mult-only when chips are zero).
+pub fn first_yaku_step(breakdown: &ScoreBreakdown, step_index: usize) -> Option<YakuKind> {
+    let step = breakdown.steps.get(step_index)?;
+    let yk = yaku_kind_by_display_name(&step.source)?;
+    if step_index > 0 {
+        let prev = &breakdown.steps[step_index - 1];
+        if prev.source == step.source {
+            return None;
+        }
+    }
+    Some(yk)
+}
+
+/// Final scoring step for a yaku (always the mult line when chips precede it).
+pub fn last_yaku_step(breakdown: &ScoreBreakdown, step_index: usize) -> Option<YakuKind> {
+    let step = breakdown.steps.get(step_index)?;
+    let yk = yaku_kind_by_display_name(&step.source)?;
+    let next_same = breakdown
+        .steps
+        .get(step_index + 1)
+        .is_some_and(|next| next.source == step.source);
+    if next_same {
+        None
+    } else {
+        Some(yk)
+    }
 }
 
 /// What the UI should display for the current cascade frame.
@@ -242,7 +279,21 @@ impl ScoringCascade {
             score_before,
             earned,
             tuning,
+            yaku_hold_until: Instant::now(),
+            yaku_voiced: FxHashSet::default(),
         }
+    }
+
+    /// Extend the hold after the current yaku's final step until `until`.
+    pub fn extend_yaku_hold(&mut self, until: Instant) {
+        if until > self.yaku_hold_until {
+            self.yaku_hold_until = until;
+        }
+    }
+
+    /// Record that this yaku's name voice has started so we only play it once.
+    pub fn mark_yaku_voiced(&mut self, yk: YakuKind) -> bool {
+        self.yaku_voiced.insert(yk)
     }
 
     /// Advance the cascade state machine. Call once per frame.
@@ -277,6 +328,9 @@ impl ScoringCascade {
             Phase::ShowStep(i) => {
                 let i = *i;
                 if elapsed >= self.tuning.step_hold() {
+                    if last_yaku_step(&self.breakdown, i).is_some() && now < self.yaku_hold_until {
+                        return;
+                    }
                     if i + 1 < self.breakdown.steps.len() {
                         self.phase = Phase::ShowStep(i + 1);
                     } else {
