@@ -86,6 +86,7 @@ pub(super) fn build_renderer_new(
         shop: shop_shader,
         text: text_shader,
         gradient: gradient_shader,
+        arc_ring: arc_ring_shader,
         squircle: squircle_shader,
         flame: flame_shader,
         starfield: starfield_shader,
@@ -899,6 +900,91 @@ pub(super) fn build_renderer_new(
         multiview_mask: None,
         cache: None,
     });
+
+    let arc_ring_instance_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<ArcRingQuadInstance>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &[
+            wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 16,
+                shader_location: 2,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 32,
+                shader_location: 3,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 48,
+                shader_location: 4,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+        ],
+    };
+
+    let arc_ring_quad_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("arc-ring-quad-pipeline"),
+        layout: Some(&quad_layout),
+        vertex: wgpu::VertexState {
+            module: &arc_ring_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[vertex_layout.clone(), arc_ring_instance_layout.clone()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &arc_ring_shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: scene_hdr_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: Some(depth_ui.clone()),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    let arc_ring_quad_pipeline_display =
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("arc-ring-quad-pipeline-display"),
+            layout: Some(&quad_layout),
+            vertex: wgpu::VertexState {
+                module: &arc_ring_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[vertex_layout.clone(), arc_ring_instance_layout],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &arc_ring_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_ui.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
 
     let squircle_quad_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("squircle-quad-pipeline"),
@@ -3198,6 +3284,8 @@ pub(super) fn build_renderer_new(
         depth_quad_debug_pipeline,
         depth_quad_debug_pipeline_display,
         gradient_quad_pipeline,
+        arc_ring_quad_pipeline,
+        arc_ring_quad_pipeline_display,
         squircle_quad_pipeline,
         squircle_quad_pipeline_display,
         flame_pipeline,

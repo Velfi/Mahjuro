@@ -53,7 +53,7 @@ impl ProfileCardLayout {
 
     fn compute(w: f32, h: f32) -> Self {
         let scale = (w.min(h)) / 600.0;
-        let hint_style = HintStyle::profile_footer(h);
+        let hint_style = HintStyle::standard(h);
         let footer_reserve = hint_style.line_h + h * 0.02;
         let title_font = typography::size(typography::H20, h);
         let title_h = title_font * 1.35;
@@ -570,7 +570,7 @@ impl SceneBehavior for ProfileSelectScene {
         }
 
         // Scene-specific action hints (delete is not a universal face-button mapping).
-        let hint_style = HintStyle::profile_footer(h);
+        let hint_style = HintStyle::standard(h);
         let hint_h = hint_style.line_h;
         let hint_y = h - hint_h - h * 0.02;
         let bottom_rect = [0.0, hint_y, w, hint_h];

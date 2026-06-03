@@ -2,13 +2,11 @@
 
 use super::focus::FocusTarget;
 use crate::render::draw_cmd::UiFrame;
-use crate::render::wgpu_renderer::TextLabel;
 use crate::scenes::DrawCtx;
 use crate::ui::controller_hints::{
-    ColumnHintEntry, ColumnHintLayout, ColumnHintStyle, HintKey, push_column_hints,
+    HintStyle, gameplay_action_footer_row, push_screen_footer_hint,
 };
 use crate::ui::input::InputMode;
-use crate::ui::kenney_prompt_paths::gameplay_keyboard_prompt_icons;
 
 /// Whether to show the West / North (keyboard **Q** / **E**) gameplay legend for discard or play.
 ///
@@ -48,10 +46,7 @@ pub fn gameplay_west_north_legend_active(
     }
 }
 
-/// Matches [`crate::scenes::gameplay::scene_behavior`] copy: discard → bowl, play → mirror, cash in → trigger.
-const GAMEPLAY_ACTION_PROMPT_LABELS: [&str; 3] = ["Discard", "Play", "Cash In"];
-
-pub struct GameplayActionPromptInput<'a> {
+pub struct GameplayActionPromptInput {
     pub discard_btn_rect: (f32, f32, f32, f32),
     pub play_btn_rect: (f32, f32, f32, f32),
     pub trigger_btn_rect: (f32, f32, f32, f32),
@@ -59,7 +54,6 @@ pub struct GameplayActionPromptInput<'a> {
     pub cash_in_enabled: bool,
     pub show_discard_legend: bool,
     pub show_play_legend: bool,
-    pub hud_text: &'a mut Vec<TextLabel>,
 }
 
 /// Which action-prompt slots (0 = discard, 1 = play, 2 = cash in) should render.
@@ -91,7 +85,7 @@ pub fn gameplay_action_prompt_visible_indices(
 pub fn push_gameplay_action_prompts(
     frame: &mut UiFrame,
     ctx: &DrawCtx<'_>,
-    input: GameplayActionPromptInput<'_>,
+    input: GameplayActionPromptInput,
 ) {
     let GameplayActionPromptInput {
         discard_btn_rect,
@@ -100,32 +94,10 @@ pub fn push_gameplay_action_prompts(
         cash_in_enabled,
         show_discard_legend,
         show_play_legend,
-        hud_text,
     } = input;
     let h = ctx.layout.window_h;
-    let w = ctx.layout.window_w;
-
-    let keyboard_icons = gameplay_keyboard_prompt_icons();
-    let all_entries = [
-        ColumnHintEntry::new(
-            HintKey::Action(crate::ui::input::UiAction::WestFacePress),
-            keyboard_icons[0].clone(),
-            GAMEPLAY_ACTION_PROMPT_LABELS[0],
-        ),
-        ColumnHintEntry::new(
-            HintKey::Action(crate::ui::input::UiAction::NorthFacePress),
-            keyboard_icons[1].clone(),
-            GAMEPLAY_ACTION_PROMPT_LABELS[1],
-        ),
-        ColumnHintEntry::new(
-            HintKey::Action(crate::ui::input::UiAction::TriggerStructure),
-            keyboard_icons[2].clone(),
-            GAMEPLAY_ACTION_PROMPT_LABELS[2],
-        ),
-    ];
 
     let rects: [(f32, f32, f32, f32); 3] = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
-
     let visible = gameplay_action_prompt_visible_indices(
         rects,
         show_discard_legend,
@@ -136,19 +108,11 @@ pub fn push_gameplay_action_prompts(
         return;
     }
 
-    let entries: Vec<ColumnHintEntry> = visible.iter().map(|&i| all_entries[i].clone()).collect();
-
-    let layout = ColumnHintLayout::gameplay_floating_band(w, h, visible.len());
-    let mut prompt_texts = Vec::new();
-    push_column_hints(
-        frame,
-        ctx,
-        layout,
-        &entries,
-        ColumnHintStyle::gameplay_floating(h),
-        &mut prompt_texts,
-    );
-    hud_text.extend(prompt_texts);
+    let show_discard = visible.contains(&0);
+    let show_play = visible.contains(&1);
+    let show_cash_in = visible.contains(&2);
+    let row = gameplay_action_footer_row(ctx.input_mode, show_discard, show_play, show_cash_in);
+    push_screen_footer_hint(frame, ctx, row, HintStyle::standard(h));
 }
 
 #[cfg(test)]

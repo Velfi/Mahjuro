@@ -1649,7 +1649,7 @@ impl SceneBehavior for OptionsScene {
             &mut frame,
             &ctx,
             options_footer_row(ctx.input_mode),
-            HintStyle::archive_footer(h),
+            HintStyle::standard(h),
         );
         frame.window_title = "Mahjuro — Options".into();
         frame

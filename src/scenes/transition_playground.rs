@@ -543,7 +543,7 @@ impl SceneBehavior for TransitionPlaygroundScene {
             &mut frame,
             &ctx,
             back_footer_row(ctx.input_mode),
-            HintStyle::archive_footer(h),
+            HintStyle::standard(h),
         );
         frame.window_title = "Mahjuro — Transition Playground".into();
         frame

@@ -1094,7 +1094,7 @@ impl ArchiveScene {
             tab_artifacts(self.active_tab, ctx.progress, chronicle_last_seen).len();
         let archive_page_count_now = archive_page_count(all_count_hint);
         let archive_multi_page = archive_page_count_now > 1;
-        let hint_style = HintStyle::archive_footer(h);
+        let hint_style = HintStyle::standard(h);
         let hint_line_h = hint_style.line_h;
         let hint_band_x = margin_x * 0.5;
         let hint_band_w = w - margin_x;

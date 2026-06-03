@@ -1933,7 +1933,7 @@ impl SceneBehavior for CascadeLabScene {
             input_mode,
             glyphs,
             back_footer_row(input_mode),
-            HintStyle::archive_footer(h),
+            HintStyle::standard(h),
         );
 
         frame

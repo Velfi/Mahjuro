@@ -2168,7 +2168,7 @@ impl SceneBehavior for TutorialCampaignScene {
             &mut frame,
             &ctx,
             menu_footer_row(ctx.input_mode),
-            HintStyle::archive_footer(h),
+            HintStyle::standard(h),
         );
         frame.window_title = format!("Mahjuro — {}", page.title);
         frame

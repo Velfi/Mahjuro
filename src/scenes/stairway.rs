@@ -145,7 +145,7 @@ impl SceneBehavior for StairwayScene {
             ..Default::default()
         });
 
-        let hint_style = hint_style_with_alpha(HintStyle::archive_footer(h), 0.92);
+        let hint_style = hint_style_with_alpha(HintStyle::standard(h), 0.92);
         let hint_line_h = hint_style.line_h;
         let hint_y = prompt_y + prompt_font * 2.0 + prompt_font * 0.55;
         push_inline_hint_rows(

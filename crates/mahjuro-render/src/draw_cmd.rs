@@ -810,6 +810,8 @@ pub enum DrawCmd {
     /// behind HUD content so panels read against busy backgrounds without
     /// a hard-edged letterbox. See `shaders/gradient_quad.wgsl`.
     GradientQuad(crate::wgpu_renderer::GradientQuadInstance),
+    /// Circular hold-to-act progress ring. See `shaders/arc_ring_quad.wgsl`.
+    ArcRingQuad(crate::wgpu_renderer::ArcRingQuadInstance),
     /// Triggers the volumetric flame batch (`procedural_flame_emitters` on the frame).
     Flame,
     /// Rasterized text label.
@@ -1061,6 +1063,15 @@ impl UiFrame {
         self.cmds
             .extend(iter.into_iter().map(DrawCmd::GradientQuad));
     }
+    pub fn arc_ring_quads<
+        I: IntoIterator<Item = crate::wgpu_renderer::ArcRingQuadInstance>,
+    >(
+        &mut self,
+        iter: I,
+    ) {
+        self.cmds
+            .extend(iter.into_iter().map(DrawCmd::ArcRingQuad));
+    }
     pub fn flame_batch(&mut self) {
         self.cmds.push(DrawCmd::Flame);
     }
@@ -1105,6 +1116,10 @@ impl UiFrame {
                 DrawCmd::TileFaceQuad(face) => face.inst.color[3] *= alpha,
                 DrawCmd::ImageQuad(icon) => icon.inst.color[3] *= alpha,
                 DrawCmd::GradientQuad(inst) => inst.color[3] *= alpha,
+                DrawCmd::ArcRingQuad(inst) => {
+                    inst.fill_color[3] *= alpha;
+                    inst.track_color[3] *= alpha;
+                }
                 // Flame `color.a` is a phase offset, not a transparency.
                 // Don't scale it on transitions — the flame fades naturally
                 // because the underlying scene quads behind it fade.

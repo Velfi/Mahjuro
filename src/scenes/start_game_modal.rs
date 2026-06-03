@@ -989,7 +989,7 @@ impl SceneBehavior for TileSelectScene {
             &mut frame,
             &ctx,
             menu_footer_row(ctx.input_mode),
-            HintStyle::profile_footer(h),
+            HintStyle::standard(h),
         );
         frame.window_title = if self.tutorial_mode {
             "Mahjuro — Tutorial Prompt".into()

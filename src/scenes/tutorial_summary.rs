@@ -302,7 +302,7 @@ impl SceneBehavior for TutorialSummaryScene {
             &mut frame,
             &ctx,
             menu_footer_row(ctx.input_mode),
-            HintStyle::archive_footer(h),
+            HintStyle::standard(h),
         );
         frame.window_title = "Mahjuro — Tutorial Summary".to_string();
         frame
