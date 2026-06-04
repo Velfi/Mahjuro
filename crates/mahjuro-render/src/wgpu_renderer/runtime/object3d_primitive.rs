@@ -310,6 +310,7 @@ impl WgpuRenderer {
         let mut hdr_tonemap = self.tile_hdr_tonemap(frame);
         hdr_tonemap[3] =
             self.room_punctual_inv_doc_scale(camera, frame.scene_lighting.embedded_gltf_punctual);
+        let punctual_tuning = self.tile_punctual_tuning(frame);
         let inst = &mut self.coin_glb_instances[slot_i];
         self.queue.write_buffer(
             &inst.uniform_buffer,
@@ -327,6 +328,7 @@ impl WgpuRenderer {
                 tile_seed: 0.0,
                 decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
                 hdr_tonemap,
+                punctual_tuning,
             }),
         );
 

@@ -672,6 +672,26 @@ fn wood_sample_world(world_xy: vec2<f32>) -> WoodSample {
     return wood_sample_basis(wood_basis_world(world_xy));
 }
 
+// Gameplay-table marker spawns (`gameplay.glb` empties) use Lambert materials without
+// catalog prop diffuse pullbacks — halve punctual intensity via `shop_punctual.w`.
+fn gameplay_marker_spawn_punctual_mul(
+    table_mul: f32,
+    kind: f32,
+    spec_strength: f32,
+    spec_power: f32,
+    is_leather: bool,
+    is_water_mat: bool,
+    is_wood: bool,
+) -> f32 {
+    if (table_mul >= 0.999) {
+        return 1.0;
+    }
+    let is_flat_wood = is_wood && kind > 3.5;
+    let is_tally_plain = kind < 0.5 && spec_power < 50.0 && spec_strength < 0.45;
+    let is_marker = is_leather || is_water_mat || is_flat_wood || is_tally_plain;
+    return select(1.0, table_mul, is_marker);
+}
+
 @fragment
 fn fs_main(
     in: VsOut,
@@ -713,6 +733,15 @@ fn fs_main(
     let is_emissive  = (kind > 19.5 && kind < 20.5);
     let is_chitin    = (kind > 20.5 && kind < 21.5);
     let is_unshaded  = (kind > 21.5 && kind < 22.5);
+    let marker_punctual_mul = gameplay_marker_spawn_punctual_mul(
+        ssr_globals.shop_punctual.w,
+        kind,
+        spec_strength,
+        spec_power,
+        is_leather,
+        is_water_mat,
+        is_wood,
+    );
     let phys_hdr = clamp(ssr_globals.hdr_tonemap.x, 0.0, 1.0);
     // Shop storeroom catalog balance (see `shop_catalog_balance` in lit_mesh.rs).
     let shop_display_case_tuning = phys_hdr > 0.5 && ssr_globals.shop_punctual.y > 0.5;
@@ -1299,7 +1328,7 @@ fn fs_main(
             let range_w = pl.pos.w;
             let lc = pl.color.rgb;
             let is_inv = pl.params.x > 0.5;
-            let intensity = pl.color.a * select(1.0, lights.extras.w, is_inv);
+            let intensity = pl.color.a * select(1.0, lights.extras.w, is_inv) * marker_punctual_mul;
             let to_light = lp - in.world_pos;
             let dist = length(to_light);
             let atten = select(
@@ -1341,7 +1370,7 @@ fn fs_main(
             let to_light = -frag_dir;
             let nl = max(dot(water_n, to_light), 0.0);
             let lambert_sp = select(0.30, 0.38, is_water) + 0.55 * nl;
-            let sc = s.color.rgb * s.color.a * atten_sp * spot_factor * lights.extras.w;
+            let sc = s.color.rgb * s.color.a * atten_sp * spot_factor * lights.extras.w * marker_punctual_mul;
             lit_water = lit_water + sc * lambert_sp;
 
             if (water_spec_strength > 0.001) {
@@ -1685,7 +1714,7 @@ fn fs_main(
         let range_w = pl.pos.w;
         let lc = pl.color.rgb;
         let is_inv = pl.params.x > 0.5;
-        let intensity = pl.color.a * select(1.0, lights.extras.w, is_inv);
+        let intensity = pl.color.a * select(1.0, lights.extras.w, is_inv) * marker_punctual_mul;
         let to_light = lp - in.world_pos;
         let dist = length(to_light);
         let atten = select(
@@ -2110,7 +2139,7 @@ fn fs_main(
     // ── Spotlights (same cone + falloff as `tile_3d.wgsl`) ─────────────
     // Unified shop path matches `room_glb.wgsl` punctual attenuation and omits
     // the dual-buffer intensity product.
-    let lm_punctual_scale = select(lights.extras.w, 1.0, phys_hdr > 0.5);
+    let lm_punctual_scale = select(lights.extras.w, 1.0, phys_hdr > 0.5) * marker_punctual_mul;
     let spot_count_fs = spot_lights.count.x;
     for (var si: u32 = 0u; si < spot_count_fs; si = si + 1u) {
         let s = spot_lights.lights[si];

@@ -82,6 +82,9 @@ pub(crate) struct CameraUniform {
     /// w = tile shader inverse document scale for embedded glTF punctual attenuation.
     /// Matches `SsrGlobals.hdr_tonemap.xyz` on `lit_mesh` for the same frame; `w` differs.
     pub hdr_tonemap: [f32; 4],
+    /// x = embedded glTF inverse-square intensity scale for tiles (`tile_3d` only; `lit_mesh` uses
+    /// point-light `extras.w`). yzw reserved.
+    pub punctual_tuning: [f32; 4],
 }
 
 /// Per-frame data for `tile_outline.wgsl` group 0 binding 0.

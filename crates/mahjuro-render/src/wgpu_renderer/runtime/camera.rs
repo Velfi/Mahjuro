@@ -170,6 +170,19 @@ impl CameraFrame {
 }
 
 impl WgpuRenderer {
+    /// Per-frame embedded glTF punctual intensity for `tile_3d` (not `lit_mesh` `extras.w`).
+    pub(super) fn tile_punctual_tuning(
+        &self,
+        frame: &crate::draw_cmd::UiFrame,
+    ) -> [f32; 4] {
+        let scale = if frame.scene_lighting.embedded_gltf_punctual {
+            self.active_frame_env().tile_gltf_punctual_scale
+        } else {
+            1.0
+        };
+        [scale, 0.0, 0.0, 0.0]
+    }
+
     pub(super) fn room_punctual_inv_doc_scale(&self, cam: &CameraFrame, enabled: bool) -> f32 {
         if !enabled {
             return 0.0;
@@ -345,6 +358,14 @@ impl WgpuRenderer {
         } else {
             (0.0, 0.0)
         };
+        let table_proc_punctual_mul =
+            if matches!(self.active_scene_key, Some(scene_keys::GAMEPLAY) | Some("tutorial"))
+                && frame.scene_lighting.embedded_gltf_punctual
+            {
+                crate::room_glb::GAMEPLAY_TABLE_PROCEDURAL_PUNCTUAL_MUL
+            } else {
+                1.0
+            };
         let ssr_max_distance = cam.h * 2.0;
         let ssr_stride = cam.h * 0.04;
         let ssr_max_steps = 24.0;
@@ -363,7 +384,7 @@ impl WgpuRenderer {
                 shop_punctual_inv_doc,
                 shop_punctual_display_case,
                 shop_cat_amb,
-                0.0,
+                table_proc_punctual_mul,
             ],
         }
     }

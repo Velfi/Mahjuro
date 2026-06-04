@@ -29,7 +29,7 @@ impl Default for SceneLookTuning {
 }
 
 /// Slider rows for [`SceneLookDebugOverlay`](crate::debug_overlays::SceneLookDebugOverlay).
-/// Order: tonemap (5) then room / height (12). Must match [`scene_look_row_value`] /
+/// Order: tonemap (5) then room / height (13). Must match [`scene_look_row_value`] /
 /// [`scene_look_row_set`].
 pub const SCENE_LOOK_SLIDER_META: &[(&str, f32, f32, f32)] = &[
     ("Exposure (post)", 0.25, 2.50, 0.01),
@@ -42,6 +42,7 @@ pub const SCENE_LOOK_SLIDER_META: &[(&str, f32, f32, f32)] = &[
     ("Room linear exposure", 0.001, 40.0, 0.0025),
     ("Room ambient", 0.0, 10.0, 0.0025),
     ("Lit-mesh glTF scale", 0.0, 20.0, 0.005),
+    ("Tile glTF punctual scale", 0.0, 20.0, 0.005),
     ("glTF emissive scale", 0.1, 48.0, 0.05),
     ("Candle hue", 0.0, 1.0, 1.0 / 360.0),
     ("Candle saturation", 0.0, 1.0, 0.01),
@@ -52,10 +53,10 @@ pub const SCENE_LOOK_SLIDER_META: &[(&str, f32, f32, f32)] = &[
 ];
 
 /// First row of each punctual-tint HSL group — used for color swatches in the overlay.
-pub const SCENE_LOOK_CANDLE_TINT_ROW: usize = 11;
-pub const SCENE_LOOK_LANTERN_TINT_ROW: usize = 14;
+pub const SCENE_LOOK_CANDLE_TINT_ROW: usize = 12;
+pub const SCENE_LOOK_LANTERN_TINT_ROW: usize = 15;
 
-pub const SCENE_LOOK_SLIDER_COUNT: usize = 17;
+pub const SCENE_LOOK_SLIDER_COUNT: usize = 18;
 
 pub fn scene_look_row_value(look: &SceneLookTuning, row: usize) -> f32 {
     match row {
@@ -65,12 +66,13 @@ pub fn scene_look_row_value(look: &SceneLookTuning, row: usize) -> f32 {
         7 => look.room.linear_exposure,
         8 => look.room.ambient_scale,
         9 => look.room.lit_mesh_gltf_punctual_scale,
-        10 => look.room.gltf_emissive_scale,
-        11..=13 => {
-            punctual_tint_mul_to_hsv(look.room.candle_light_color_mul).component_at(row - 11)
+        10 => look.room.tile_gltf_punctual_scale,
+        11 => look.room.gltf_emissive_scale,
+        12..=14 => {
+            punctual_tint_mul_to_hsv(look.room.candle_light_color_mul).component_at(row - 12)
         }
-        14..=16 => {
-            punctual_tint_mul_to_hsv(look.room.lantern_light_color_mul).component_at(row - 14)
+        15..=17 => {
+            punctual_tint_mul_to_hsv(look.room.lantern_light_color_mul).component_at(row - 15)
         }
         _ => 0.0,
     }
@@ -86,15 +88,16 @@ pub fn scene_look_row_set(look: &mut SceneLookTuning, row: usize, v: f32) {
         7 => look.room.linear_exposure = v,
         8 => look.room.ambient_scale = v,
         9 => look.room.lit_mesh_gltf_punctual_scale = v,
-        10 => look.room.gltf_emissive_scale = v,
-        11..=13 => {
+        10 => look.room.tile_gltf_punctual_scale = v,
+        11 => look.room.gltf_emissive_scale = v,
+        12..=14 => {
             let (h, s, i) = punctual_tint_mul_to_hsv(look.room.candle_light_color_mul);
-            let (h, s, i) = (h, s, i).with_component(row - 11, v);
+            let (h, s, i) = (h, s, i).with_component(row - 12, v);
             look.room.candle_light_color_mul = hsv_to_punctual_tint_mul(h, s, i);
         }
-        14..=16 => {
+        15..=17 => {
             let (h, s, i) = punctual_tint_mul_to_hsv(look.room.lantern_light_color_mul);
-            let (h, s, i) = (h, s, i).with_component(row - 14, v);
+            let (h, s, i) = (h, s, i).with_component(row - 15, v);
             look.room.lantern_light_color_mul = hsv_to_punctual_tint_mul(h, s, i);
         }
         _ => {}
@@ -284,7 +287,7 @@ pub fn scene_look_row_is_hue(row: usize) -> bool {
 }
 
 pub fn scene_look_row_is_saturation(row: usize) -> bool {
-    matches!(row, 12 | 15)
+    matches!(row, 13 | 16)
 }
 
 /// Linear RGB preview (channels clamped to 0–1) for a punctual tint swatch.
@@ -302,8 +305,8 @@ pub fn punctual_tint_preview_linear(rgb_mul: [f32; 3]) -> [f32; 3] {
 
 pub fn scene_look_tint_swatch_rgb(look: &SceneLookTuning, row: usize) -> Option<[f32; 3]> {
     let rgb = match row {
-        11..=13 => look.room.candle_light_color_mul,
-        14..=16 => look.room.lantern_light_color_mul,
+        12..=14 => look.room.candle_light_color_mul,
+        15..=17 => look.room.lantern_light_color_mul,
         _ => return None,
     };
     Some(punctual_tint_preview_linear(rgb))

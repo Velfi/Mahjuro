@@ -42,6 +42,7 @@ pub(super) fn make_showcase_tile_gpu(
             tile_seed: 0.0,
             decal_atlas_uv,
             hdr_tonemap: [0.0; 4],
+            punctual_tuning: [0.0; 4],
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });

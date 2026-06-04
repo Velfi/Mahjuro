@@ -358,7 +358,7 @@ pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
 pub const SHOP_ENV_DIELECTRIC_AMBIENT_MIN: f32 = 0.24;
 
 /// Lower bound for `hdr_tonemap.z` on candle-key **table** scenes (`gameplay`, `tutorial`,
-/// `pick_chamber`, `collection`). Shop keeps authored ambient only. Tiles and `lit_mesh` add
+/// `pick_chamber`, `collection`). Shop keeps authored ambient only. Tiles (`tile_3d`) and `lit_mesh` add
 /// `albedo * scale * 0.08` before ACES — without this, shadowed areas read as pure black and
 /// lit areas clip warm, which feels flat and hyper-saturated.
 pub const GAMEPLAY_TABLE_AMBIENT_MIN: f32 = 0.52;
@@ -368,11 +368,19 @@ pub const GAMEPLAY_TABLE_AMBIENT_MIN: f32 = 0.52;
 /// before ACES so highlights retain separation from midtones.
 pub const GAMEPLAY_TABLE_HDR_LINEAR_MUL: f32 = 1.0;
 
-/// Applied to procedural tile / lit-mesh shaders as punctual buffer `extras.w` when
+/// Applied to `lit_mesh` as punctual buffer `extras.w` when
 /// [`crate::draw_cmd::SceneLighting::embedded_gltf_punctual`] is set (`room_glb.wgsl` ignores it).
-/// The procedural shaders are Lambert-forward and skip the room PBR diffuse `/PI` term, so keep this
-/// below 1.0 to sit in the same brightness band as imported GLB geometry.
+/// Catalog props (relics, talismans, packs) are tuned at this scale; marker spawns from
+/// `gameplay.glb` empties apply [`GAMEPLAY_TABLE_PROCEDURAL_PUNCTUAL_MUL`] in-shader on top.
 pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 2.0;
+
+/// Extra punctual-intensity multiplier for [`lit_mesh.wgsl`] draws of gameplay-table marker
+/// spawns (books, discard river, tally fans, wood tablets). Passed via `SsrGlobals.shop_punctual.w`.
+pub const GAMEPLAY_TABLE_PROCEDURAL_PUNCTUAL_MUL: f32 = 0.5;
+
+/// Inverse-square intensity scale for hand/structure tiles (`tile_3d.wgsl` via
+/// `CameraUniform.punctual_tuning.x`). Tiles share the same candle pools as `lit_mesh`.
+pub const TILE_GLTF_PUNCTUAL_SCALE: f32 = 1.0;
 
 /// glTF **node** name prefix for punctual lights that should read as warm candles
 /// (`light_candle`, `light_candle.001`, `light_candle_06`, …).
@@ -400,11 +408,17 @@ pub struct RoomEnvLightingTune {
     pub linear_exposure: f32,
     pub ambient_scale: f32,
     pub lit_mesh_gltf_punctual_scale: f32,
+    #[serde(default = "tile_gltf_punctual_scale_default")]
+    pub tile_gltf_punctual_scale: f32,
     /// Room glTF emissive strength ([`SHOP_GLTF_EMISSIVE_SCALE`] default).
     pub gltf_emissive_scale: f32,
     pub candle_light_color_mul: [f32; 3],
     #[serde(default = "lantern_light_color_mul_default")]
     pub lantern_light_color_mul: [f32; 3],
+}
+
+fn tile_gltf_punctual_scale_default() -> f32 {
+    TILE_GLTF_PUNCTUAL_SCALE
 }
 
 fn lantern_light_color_mul_default() -> [f32; 3] {
@@ -423,6 +437,7 @@ impl RoomEnvLightingTune {
         linear_exposure: SHOP_ENV_LINEAR_EXPOSURE,
         ambient_scale: SHOP_ENV_AMBIENT_SCALE,
         lit_mesh_gltf_punctual_scale: SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
+        tile_gltf_punctual_scale: TILE_GLTF_PUNCTUAL_SCALE,
         gltf_emissive_scale: SHOP_GLTF_EMISSIVE_SCALE,
         candle_light_color_mul: SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL,
         lantern_light_color_mul: SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL,
@@ -435,6 +450,7 @@ pub struct RoomEnvFrameTune {
     pub linear_exposure: f32,
     pub ambient_scale: f32,
     pub lit_mesh_gltf_punctual_scale: f32,
+    pub tile_gltf_punctual_scale: f32,
     pub gltf_emissive_scale: f32,
     pub height_scale: f32,
 }
@@ -445,6 +461,7 @@ impl RoomEnvFrameTune {
             linear_exposure: room.linear_exposure,
             ambient_scale: room.ambient_scale,
             lit_mesh_gltf_punctual_scale: room.lit_mesh_gltf_punctual_scale,
+            tile_gltf_punctual_scale: room.tile_gltf_punctual_scale,
             gltf_emissive_scale: room.gltf_emissive_scale,
             height_scale,
         }

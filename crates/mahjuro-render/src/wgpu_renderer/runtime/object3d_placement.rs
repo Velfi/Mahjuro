@@ -172,6 +172,7 @@ impl WgpuRenderer {
         let tile_pack_celebration = matches!(self.active_scene_key, Some("tile_pack_celebration"))
             || (self.active_scene_key == Some("showcase")
                 && frame.showcase_render_hints.tile_pack_celebration_tonemap);
+        let skip_relic_shadow = frame.showcase_render_hints.modal_relic_staging;
         let project_unit_cube_rect =
             |model: Mat4| -> [f32; 4] { camera.project_unit_cube_rect(model) };
         let project_aabb_rect = |model: Mat4, half: [f32; 3], center_y: f32| -> [f32; 4] {
@@ -654,12 +655,14 @@ impl WgpuRenderer {
                                     false,
                                 );
                             }
-                            self.write_lit_mesh_shadow(
-                                &mut shadow,
-                                &self.relic_instances[slot_i],
-                                model,
-                                material.kind,
-                            );
+                            if !skip_relic_shadow {
+                                self.write_lit_mesh_shadow(
+                                    &mut shadow,
+                                    &self.relic_instances[slot_i],
+                                    model,
+                                    material.kind,
+                                );
+                            }
                             // Silhouette pass skips the relic albedo/relief
                             // texture — we want the shape only, not the
                             // engraved artwork.
@@ -741,12 +744,10 @@ impl WgpuRenderer {
                                     user: 0,
                                 });
                             }
-                            self.push_object3d_draw(
-                                object3d_draw_list,
-                                object3d_shadow_draw_list,
-                                DrawKind::Relic,
-                                slot_i,
-                            );
+                            object3d_draw_list.push((DrawKind::Relic, slot_i));
+                            if !skip_relic_shadow {
+                                object3d_shadow_draw_list.push((DrawKind::Relic, slot_i));
+                            }
                         }
                         Object3dKind::BossIcon {
                             kind,

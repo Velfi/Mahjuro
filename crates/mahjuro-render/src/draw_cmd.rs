@@ -134,6 +134,7 @@ pub struct ShowcaseRenderHints {
     /// Paginated relic unlock hero (`apply_modal_relic_staging`): black void +
     /// staging camera; keep lights/meshes on [`pixel_to_world`] and disable
     /// directional shadows (main menu would otherwise ray-map lights only).
+    /// Hero relic meshes also skip the punctual shadow caster pass.
     pub modal_relic_staging: bool,
     /// Zodiac level-up ribbon on the showcase overlay: hero receives punctual
     /// light but should not cast a drop shadow on the black void (same as pack
