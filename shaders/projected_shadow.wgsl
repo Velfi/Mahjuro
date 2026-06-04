@@ -50,7 +50,10 @@ fn sample_projected_depth(
     for (var dy = -1; dy <= 1; dy = dy + 1) {
         for (var dx = -1; dx <= 1; dx = dx + 1) {
             let off = vec2<f32>(f32(dx), f32(dy)) * texel;
-            sum = sum + textureSampleCompare(depth_tex, shadow_samp, uv + off, layer, depth_ref);
+            // FXC (DX12 shader model 5.1 path used by some Windows drivers) can fail to
+            // compile when gradient-based compare sampling appears under variable-trip loops.
+            // Use explicit-level compare sampling so the backend does not require derivatives.
+            sum = sum + textureSampleCompareLevel(depth_tex, shadow_samp, uv + off, layer, depth_ref);
         }
     }
     return sum / 9.0;
