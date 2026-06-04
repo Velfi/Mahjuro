@@ -1785,13 +1785,14 @@ fn fs_main(
                 let vdh = max(dot(view_dir, h), 0.0);
                 let ndv = max(dot(n, view_dir), 0.0);
                 let fresnel = 0.04 + 0.96 * pow(1.0 - vdh, 5.0);
-                let wrap_tint = mix(vec3<f32>(0.98, 0.99, 1.02), mesh.base_color.rgb, 0.12);
-                let pinpoint = pow(nh, max(spec_power * 0.85, 32.0)) * 1.85;
-                let wide = pow(nh, max(spec_power * 0.22, 6.0)) * 0.42;
-                let rim = 0.32 * pow(1.0 - ndv, 2.4);
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * fresnel * wrap_tint * pinpoint;
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * wide * wrap_tint;
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * rim * wrap_tint * 0.55;
+                let wrap_tint = mix(vec3<f32>(0.97, 0.98, 1.0), mesh.base_color.rgb, 0.22);
+                let pack_spec_gain = clamp(spec_strength / 0.55, 0.0, 1.0);
+                let pinpoint = pow(nh, max(spec_power * 0.85, 32.0)) * 1.10;
+                let wide = pow(nh, max(spec_power * 0.22, 6.0)) * 0.24;
+                let rim = 0.20 * pow(1.0 - ndv, 2.4);
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * fresnel * wrap_tint * pinpoint * pack_spec_gain;
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * wide * wrap_tint * pack_spec_gain;
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * rim * wrap_tint * 0.55 * pack_spec_gain;
             } else if (is_porcelain) {
                 // Porcelain glaze (chiclet/pillow look): a tight pinpoint
                 // highlight sits inside a broader wet-glaze lobe, then a
@@ -2270,6 +2271,11 @@ fn fs_main(
             sheen_acc = sheen_acc * 0.26;
         }
     }
+    if (is_pack_wrap) {
+        // Soft-knee the clearcoat peak so cover art stays readable under
+        // stacked highlights (multiple candles + punctuals).
+        spec_acc = spec_acc / (vec3<f32>(1.0) + spec_acc * 0.18);
+    }
     // ── Talisman Fresnel albedo tint ───────────────────────────────
     // View-dependent color shift baked into the surface albedo so it
     // reads as a material property (always visible), not just a specular
@@ -2375,8 +2381,8 @@ fn fs_main(
     }
     if (is_pack_wrap) {
         let edge = 1.0 - ndv_view;
-        let rim = pow(edge, 2.1) * 0.26;
-        let clear = mix(vec3<f32>(0.94, 0.97, 1.0), mesh.base_color.rgb, 0.18);
+        let rim = pow(edge, 2.1) * 0.16;
+        let clear = mix(vec3<f32>(0.94, 0.97, 1.0), mesh.base_color.rgb, 0.12);
         albedo = mix(albedo, clear, rim);
     }
     // Foil Fresnel edge tint (talisman / legacy decal path only).

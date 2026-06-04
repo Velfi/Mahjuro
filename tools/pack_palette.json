@@ -25,9 +25,9 @@
       "bg_name": "deep forest-black",
       "display_name": "Souzu Pack",
       "foil": [
-        0.48,
-        0.78,
-        0.52,
+        0.0235,
+        0.0235,
+        0.0196,
         1.0
       ],
       "insignia": "B",
@@ -48,9 +48,9 @@
       "bg_name": "burgundy-black",
       "display_name": "Pinzu Pack",
       "foil": [
-        0.78,
-        0.82,
-        0.88,
+        0.0235,
+        0.0235,
+        0.0196,
         1.0
       ],
       "insignia": "C",
@@ -71,9 +71,9 @@
       "bg_name": "plum-black",
       "display_name": "Flowers Pack",
       "foil": [
-        0.92,
-        0.62,
-        0.7,
+        0.0235,
+        0.0235,
+        0.0196,
         1.0
       ],
       "insignia": "F",
@@ -94,9 +94,9 @@
       "bg_name": "deep navy",
       "display_name": "Honors Pack",
       "foil": [
-        0.92,
-        0.78,
-        0.38,
+        0.0235,
+        0.0235,
+        0.0196,
         1.0
       ],
       "insignia": "H",
@@ -117,9 +117,9 @@
       "bg_name": "sepia-black",
       "display_name": "Manzu Pack",
       "foil": [
-        0.42,
-        0.48,
-        0.78,
+        0.0235,
+        0.0235,
+        0.0196,
         1.0
       ],
       "insignia": "S",
@@ -140,9 +140,9 @@
       "bg_name": "warm obsidian",
       "display_name": "Terminals Pack",
       "foil": [
-        0.78,
-        0.52,
-        0.32,
+        0.0235,
+        0.0235,
+        0.0196,
         1.0
       ],
       "insignia": "9",
