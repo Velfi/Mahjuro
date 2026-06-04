@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.5-0 — 2026-06-03
+
+- maintenance, development, and bugfixes.
+
+
 ## 0.5.4 — 2026-06-03
 
 - maintenance, development, and bugfixes.
