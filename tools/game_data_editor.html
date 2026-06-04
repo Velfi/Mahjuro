@@ -71,6 +71,18 @@
     button:hover { background: var(--btn-hi); }
     button.primary { border-color: var(--accent); color: var(--accent); }
     button.warn { border-color: var(--warn); color: var(--warn); }
+    #new-row-id {
+      min-width: 12rem;
+      padding: 0.45rem 0.5rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font: inherit;
+    }
+    #new-row-id:focus { border-color: var(--accent); outline: none; }
+    .row-picker { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+    .row-picker select { flex: 1 1 14rem; min-width: 10rem; }
     #flavor-editor {
       min-height: 7rem;
       padding: 0.75rem 1rem;
@@ -164,7 +176,7 @@
 <body>
   <h1>Mahjuro — game data JSON editor</h1>
   <p class="hint">
-    Load ship data from <code>assets/data/</code> (e.g. <code>relics.json</code>, <code>bosses.json</code>, <code>yaku.json</code>, <code>seasons.json</code>, <code>tags.json</code>, <code>talismans.json</code>, <code>tile_packs.json</code>, <code>zodiacs.json</code>) via the file picker or <strong>drag and drop</strong>.
+    Load ship data from <code>assets/data/</code> (e.g. <code>relics.json</code>, <code>staircase_flavor.json</code>, <code>bosses.json</code>, <code>yaku.json</code>, <code>seasons.json</code>, <code>tags.json</code>, <code>talismans.json</code>, <code>tile_packs.json</code>, <code>zodiacs.json</code>) via the file picker or <strong>drag and drop</strong>.
     Row pick is by <code>id</code>. Save writes the full document (array or <code>zodiacs.json</code> wrapper). Browsers with <code>showSaveFilePicker</code> get a save dialog; others download using the loaded filename.
   </p>
 
@@ -181,6 +193,7 @@
     <select id="dataset" disabled>
       <option value="auto">Auto (from filename / shape)</option>
       <option value="relics">Relics — flavor_spans</option>
+      <option value="staircase_flavor">Staircase flavor — flavor_spans</option>
       <option value="bosses">Bosses — table fields</option>
       <option value="yaku">Yaku — table fields</option>
       <option value="seasons">Seasons — table fields</option>
@@ -193,7 +206,12 @@
 
   <div class="row">
     <label for="row">Row</label>
-    <select id="row" disabled></select>
+    <div class="row-picker">
+      <select id="row" disabled></select>
+      <input type="text" id="new-row-id" placeholder="new_row_id" disabled spellcheck="false" />
+      <button type="button" id="btnAddRow" disabled>Add row</button>
+    </div>
+    <p class="hint" style="margin-top:0.35rem;margin-bottom:0;">New rows need a unique <code>id</code> (snake_case). Other fields start at mode defaults.</p>
   </div>
 
   <div id="panel-relics" class="hidden">
@@ -217,7 +235,7 @@
       <div id="flavor-editor" contenteditable="true" data-placeholder="Type flavor text…"></div>
     </div>
     <div class="row">
-      <label>Preview <code>flavor_spans</code> (this relic only)</label>
+      <label id="preview-flavor-label">Preview <code>flavor_spans</code> (current row)</label>
       <pre id="preview-flavor" class="preview">{}</pre>
     </div>
       </div>
@@ -571,10 +589,20 @@
       return parts[parts.length - 1];
     }
 
+    function isFlavorSpansMode(m) {
+      return m === "relics" || m === "staircase_flavor";
+    }
+
+    function isStaircaseFlavorRow(s) {
+      if (!s || typeof s !== "object" || !("flavor_spans" in s)) return false;
+      return Object.keys(s).every((k) => k === "id" || k === "flavor_spans");
+    }
+
     function detectModeFromFilename(name) {
       const b = basenameLower(name);
       const map = {
         "relics.json": "relics",
+        "staircase_flavor.json": "staircase_flavor",
         "bosses.json": "bosses",
         "yaku.json": "yaku",
         "seasons.json": "seasons",
@@ -585,6 +613,7 @@
       };
       if (map[b]) return map[b];
       if (b.endsWith("/relics.json")) return "relics";
+      if (b.endsWith("/staircase_flavor.json")) return "staircase_flavor";
       return null;
     }
 
@@ -596,7 +625,9 @@
       if ("texture_file" in s) return "tile_packs";
       if (Array.isArray(s.accent) && s.accent.length) return "talismans";
       if ("gold_value" in s) return "tags";
-      if ("rarity" in s || "flavor_spans" in s) return "relics";
+      if ("rarity" in s || ("name" in s && "description" in s)) return "relics";
+      if (isStaircaseFlavorRow(s)) return "staircase_flavor";
+      if ("flavor_spans" in s) return "relics";
       if ("slug" in s && "yaku" in s && typeof s.yaku === "string") return "zodiacs";
       return null;
     }
@@ -630,7 +661,14 @@
     }
 
     function isGenericTableMode(m) {
-      return !!(m && m !== "relics" && manifest && manifest[m] && Array.isArray(manifest[m].fields) && manifest[m].fields.length);
+      return !!(
+        m &&
+        !isFlavorSpansMode(m) &&
+        manifest &&
+        manifest[m] &&
+        Array.isArray(manifest[m].fields) &&
+        manifest[m].fields.length
+      );
     }
 
     function ensureZodiacParsedRoot() {
@@ -646,11 +684,12 @@
       const spec = mode && manifest?.[mode];
       if (spec?.suggestedFilename) return spec.suggestedFilename;
       if (mode === "relics") return "relics.json";
+      if (mode === "staircase_flavor") return "staircase_flavor.json";
       return "data.json";
     }
 
-    function commitRelicFlavor() {
-      if (effectiveMode !== "relics" || !data || !currentRowId) return;
+    function commitFlavorSpans() {
+      if (!isFlavorSpansMode(effectiveMode) || !data || !currentRowId) return;
       const idx = data.findIndex((x) => x.id === currentRowId);
       if (idx < 0) return;
       const spans = editorToSpans($("flavor-editor"));
@@ -689,6 +728,70 @@
       return data.find((x) => x.id === currentRowId) || null;
     }
 
+    function defaultValueForField(f) {
+      if (f.key === "id") return null;
+      if (f.type === "enum") return f.options?.[0] ?? "";
+      if (f.type === "number") return 0;
+      if (f.type === "json") return f.key === "accent" ? [] : {};
+      return "";
+    }
+
+    function defaultRowForMode(mode, id) {
+      if (mode === "staircase_flavor") return { id, flavor_spans: [] };
+      if (mode === "relics") {
+        return { id, name: "", description: "", rarity: "common", flavor_spans: [] };
+      }
+      const spec = manifest?.[mode];
+      if (spec?.fields) {
+        const row = { id };
+        for (const f of spec.fields) {
+          if (f.key === "id") continue;
+          row[f.key] = defaultValueForField(f);
+        }
+        if (mode === "zodiacs" && row.slug === "") row.slug = id;
+        return row;
+      }
+      return { id };
+    }
+
+    function validateNewRowId(raw) {
+      const id = raw.trim();
+      if (!id) return "Enter an id.";
+      if (/\s/.test(id)) return "Id must not contain spaces.";
+      if (!/^[A-Za-z0-9_]+$/.test(id)) return "Use letters, numbers, and underscores only.";
+      if (data.some((r) => r.id === id)) return `Id “${id}” already exists.`;
+      return null;
+    }
+
+    function updateRowToolbarState() {
+      const ready = !!(data && data.length && effectiveMode);
+      $("new-row-id").disabled = !ready;
+      $("btnAddRow").disabled = !ready;
+    }
+
+    function commitCurrentRow() {
+      if (isFlavorSpansMode(effectiveMode)) commitFlavorSpans();
+    }
+
+    function addNewRow() {
+      if (!data || !effectiveMode) return;
+      const raw = $("new-row-id").value;
+      const err = validateNewRowId(raw);
+      if (err) {
+        alert(err);
+        $("new-row-id").focus();
+        return;
+      }
+      const id = raw.trim();
+      commitCurrentRow();
+      data.push(defaultRowForMode(effectiveMode, id));
+      populateRowSelect();
+      $("row").value = id;
+      $("new-row-id").value = "";
+      onRowChange(id);
+      setStatus(`Added row “${id}” — ${data.length} row(s). Save to write out.`);
+    }
+
     function populateRowSelect() {
       const sel = $("row");
       sel.innerHTML = "";
@@ -721,11 +824,21 @@
     }
 
     function applyPanelsVisibility() {
-      const relics = effectiveMode === "relics";
-      $("panel-relics").classList.toggle("hidden", !relics);
-      $("panel-generic").classList.toggle("hidden", relics || !effectiveMode);
-      $("btnCopy").textContent = relics ? "Copy flavor_spans JSON" : "Copy row JSON";
-      if (!relics) updateRelicObjectArt(null);
+      const flavorMode = isFlavorSpansMode(effectiveMode);
+      $("panel-relics").classList.toggle("hidden", !flavorMode);
+      $("panel-generic").classList.toggle("hidden", flavorMode || !effectiveMode);
+      $("btnCopy").textContent = flavorMode ? "Copy flavor_spans JSON" : "Copy row JSON";
+      const previewLabel = $("preview-flavor-label");
+      if (previewLabel) {
+        previewLabel.innerHTML =
+          effectiveMode === "relics"
+            ? "Preview <code>flavor_spans</code> (this relic only)"
+            : effectiveMode === "staircase_flavor"
+              ? "Preview <code>flavor_spans</code> (this entry only)"
+              : "Preview <code>flavor_spans</code> (current row)";
+      }
+      if (effectiveMode === "relics") updateRelicObjectArt(currentRowId);
+      else updateRelicObjectArt(null);
     }
 
     function buildGenericFields() {
@@ -872,12 +985,13 @@
 
     function loadRowIntoEditors(id) {
       currentRowId = id;
-      if (effectiveMode === "relics") {
+      if (isFlavorSpansMode(effectiveMode)) {
         const r = data.find((x) => x.id === id);
         const spans = (r && r.flavor_spans) || [];
         $("flavor-editor").innerHTML = spansToHtml(spans);
         updateFlavorPreview();
-        updateRelicObjectArt(id);
+        if (effectiveMode === "relics") updateRelicObjectArt(id);
+        else updateRelicObjectArt(null);
       } else {
         loadGenericFormFromRow();
         updateRelicObjectArt(null);
@@ -886,7 +1000,7 @@
     }
 
     function onRowChange(newId) {
-      if (effectiveMode === "relics") commitRelicFlavor();
+      if (isFlavorSpansMode(effectiveMode)) commitFlavorSpans();
       loadRowIntoEditors(newId);
     }
 
@@ -899,6 +1013,7 @@
       }
       $("btnSave").disabled = !effectiveMode;
       $("btnCopy").disabled = !data || !effectiveMode;
+      updateRowToolbarState();
       $("banner-unknown").classList.add("hidden");
       if (!effectiveMode) {
         $("banner-unknown").textContent =
@@ -961,7 +1076,7 @@
 
     $("dataset").addEventListener("change", () => {
       if (!data) return;
-      commitRelicFlavor();
+      commitFlavorSpans();
       const v = $("dataset").value;
       const prev = effectiveMode;
       let next =
@@ -981,6 +1096,14 @@
 
     $("row").addEventListener("change", () => {
       onRowChange($("row").value);
+    });
+
+    $("btnAddRow").addEventListener("click", addNewRow);
+    $("new-row-id").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addNewRow();
+      }
     });
 
     $("file").addEventListener("change", async (e) => {
@@ -1089,8 +1212,8 @@
         $("row").value = String(obj.id);
         currentRowId = String(obj.id);
       }
-      if (effectiveMode !== "relics" && isGenericTableMode(effectiveMode)) loadGenericFormFromRow();
-      if (effectiveMode === "relics") {
+      if (!isFlavorSpansMode(effectiveMode) && isGenericTableMode(effectiveMode)) loadGenericFormFromRow();
+      if (isFlavorSpansMode(effectiveMode)) {
         const spans = obj.flavor_spans || [];
         $("flavor-editor").innerHTML = spansToHtml(spans);
         updateFlavorPreview();
@@ -1140,7 +1263,7 @@
 
     $("btnCopy").addEventListener("click", async () => {
       let snippet;
-      if (effectiveMode === "relics") {
+      if (isFlavorSpansMode(effectiveMode)) {
         const spans = editorToSpans($("flavor-editor"));
         snippet = JSON.stringify(spans, null, 2);
       } else {
@@ -1149,7 +1272,7 @@
       }
       try {
         await navigator.clipboard.writeText(snippet);
-        alert(effectiveMode === "relics" ? "Copied flavor_spans array." : "Copied row JSON.");
+        alert(isFlavorSpansMode(effectiveMode) ? "Copied flavor_spans array." : "Copied row JSON.");
       } catch {
         prompt("Copy:", snippet);
       }
@@ -1157,7 +1280,7 @@
 
     async function saveFullJson() {
       if (!data) return;
-      if (effectiveMode === "relics") commitRelicFlavor();
+      if (isFlavorSpansMode(effectiveMode)) commitFlavorSpans();
       let outObj;
       if (effectiveMode === "zodiacs") {
         if (parsedRoot) {

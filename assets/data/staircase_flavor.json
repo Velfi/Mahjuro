@@ -1,12 +1,262 @@
 [
-    {
-      "id": "testing",
-      "flavor_spans": [
-        {
-          "text": "It's quiet. Your footsteps are soft on the carpet. How can a house staircase be so long?",
-          "bold": false,
-          "italic": true
-        }
-      ]
-    }
+  {
+    "id": "testing",
+    "flavor_spans": [
+      {
+        "text": "It's quiet. Your footsteps are soft on the carpet. How can a staircase in The House be so long?",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "hot_summer_winds",
+    "flavor_spans": [
+      {
+        "text": "Hot summer winds blew\nthe day you walked in.\nBut in here, ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "stale air.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "cold_feet",
+    "flavor_spans": [
+      {
+        "text": "Cold feet on the landing.\nEach wing is harder than the last.\nThe inner room is climbed\nstep by step.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "one_more_wing",
+    "flavor_spans": [
+      {
+        "text": "The tiles weren't enough.\nThe yen wasn't enough either.\nOne more wing,\nthat will be enough.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "cooled_tea",
+    "flavor_spans": [
+      {
+        "text": "In the storeroom, tea sets sit in lacquer boxes with the cups already poured. No one has touched them. The House has little patience for ceremony.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "lantern_ahead",
+    "flavor_spans": [
+      {
+        "text": "One lantern\nshows the next step.\nThe rest of the wing\nis ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "dark.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "chalk_tally",
+    "flavor_spans": [
+      {
+        "text": "Someone scratched a tally into the bannister — seven marks, then eight, then the numbers stop and start again lower down, as if the wall moved overnight.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "issued_yen",
+    "flavor_spans": [
+      {
+        "text": "The House pays in yen\nyou cannot spend\noutside these walls.\nYou count them anyway.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "wrong_door",
+    "flavor_spans": [
+      {
+        "text": "The door you came through\nis not the door\nyou leave by.\nYou stopped checking\nafter the third wing.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "dust_shaft",
+    "flavor_spans": [
+      {
+        "text": "Dust falls\nthrough a shaft\nwith no window above it.\nThe inner room\nmust be ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "near.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "cracked_screen",
+    "flavor_spans": [
+      {
+        "text": "A cracked screen in the corridor shows another table, another hand being played, always one move ahead of yours. You walk faster. The image does not change.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "ordeal_draft",
+    "flavor_spans": [
+      {
+        "text": "After the ordeal\nthis staircase feels longer.\nIt wasn't longer yesterday.\nYou know it wasn't.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "lost_run",
+    "flavor_spans": [
+      {
+        "text": "When you fell last time, The House took your yen and your relics. You started again with someone else's leftovers in your pockets and pretended that was a fresh beginning.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "wall_tile",
+    "flavor_spans": [
+      {
+        "text": "A tile\nface-down\non the carpet.\nNot yours.\nNot yet.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "interest_purse",
+    "flavor_spans": [
+      {
+        "text": "The House rewards a fat purse with interest, the way a host refills your cup so you'll stay at the table. You know who wins in aggregate. You stay anyway.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "storeroom_memory",
+    "flavor_spans": [
+      {
+        "text": "The storeroom remembers\nits losers\ndisplayed and priced.\nYou browse\nyour predecessors.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "contestant_guest",
+    "flavor_spans": [
+      {
+        "text": "\"We have a winner! You, our most honored contestant and guest!\" A banner said that. The banner has been here longer than you have.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "sealed_table",
+    "flavor_spans": [
+      {
+        "text": "They say the sealed table\nis one wing deeper.\nYou've heard that\nsince wing one.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "sound_nowhere",
+    "flavor_spans": [
+      {
+        "text": "Tiles clack somewhere behind the wall — a full hand being played in a room with no door. You pause on the landing. The sound stops when you listen for it.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "shuttered_venue",
+    "flavor_spans": [
+      {
+        "text": "The gambling house shut its doors to the world years ago. Inside, the lamps still burn. You wonder who keeps the ledger.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "footstep_echo",
+    "flavor_spans": [
+      {
+        "text": "Your footsteps\nand another\none echo behind.\nYou stop.\nSilence.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "inner_quiet",
+    "flavor_spans": [
+      {
+        "text": "The outer wings are cluttered — racks, screens, closed doors.\nDeeper in, it gets quieter.\nThe quiet feels like ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "certainty.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "stair_count",
+    "flavor_spans": [
+      {
+        "text": "Thirty-seven steps\nthis landing.\nYesterday\nthere were forty-one.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "hope_shattered",
+    "flavor_spans": [
+      {
+        "text": "A hope-shattered gambler sat on this step once. The cushion still holds his shape. You sit beside it and don't ask how long they've been gone.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  }
 ]
