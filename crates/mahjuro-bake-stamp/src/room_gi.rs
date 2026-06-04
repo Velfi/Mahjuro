@@ -60,6 +60,6 @@ pub fn rerun_if_changed_paths() -> &'static [&'static str] {
         "shaders/emissive_probe_update.wgsl",
         "shaders/emissive_probe_apply.wgsl",
         "shaders/emissive_gi_composite.wgsl",
-        "shaders/shop_glb.wgsl",
+        "shaders/room_glb.wgsl",
     ]
 }

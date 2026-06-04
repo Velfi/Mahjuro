@@ -7,7 +7,7 @@ type: project
 # Emissive materials — global illumination transport
 
 ## Why
-Emissive is applied correctly on the **emitting** fragment (`shop_glb.wgsl`, `tile_3d.wgsl`, `lit_mesh.wgsl`), but that energy does not **transport** to neighbors: receivers only see punctual lights, ambient, and SSR where applicable. Artists must duplicate lamps with `KHR_lights_punctual` if the room should be lit by fixtures. Real “emissive drives the scene” needs an explicit global-illumination or area-light path, not shader-only add.
+Emissive is applied correctly on the **emitting** fragment (`room_glb.wgsl`, `tile_3d.wgsl`, `lit_mesh.wgsl`), but that energy does not **transport** to neighbors: receivers only see punctual lights, ambient, and SSR where applicable. Artists must duplicate lamps with `KHR_lights_punctual` if the room should be lit by fixtures. Real “emissive drives the scene” needs an explicit global-illumination or area-light path, not shader-only add.
 
 **Product constraint:** Gameplay uses a **fixed camera** and **scenes change slowly**. That favors **offline bakes**, **temporal accumulation** of a cheap screen-space or probe pass across frames, or **amortized** updates (recompute indirect only when the room or major props change), instead of paying full dynamic GI cost every frame at full resolution.
 
@@ -20,7 +20,7 @@ Emissive is applied correctly on the **emitting** fragment (`shop_glb.wgsl`, `ti
 Out of scope for this doc: automatic **punctual proxies** derived from emissive (cheap but not area/GI transport). Out of scope for v1: full path tracing or changing glTF import semantics.
 
 ## Touchpoints
-- [shaders/shop_glb.wgsl](../../shaders/shop_glb.wgsl) — emissive term today; MRT output or separate pass emission; composite input for bounce.
+- [shaders/room_glb.wgsl](../../shaders/room_glb.wgsl) — emissive term today; MRT output or separate pass emission; composite input for bounce.
 - [shaders/tile_3d.wgsl](../../shaders/tile_3d.wgsl) — same for tiled GLB / shared env path; `gltf_emissive_hdr` split from final color is already a hook.
 - [shaders/scene_pbr_lights.wgsl](../../shaders/scene_pbr_lights.wgsl) — shared attenuation; GI pass may stay separate but lives alongside punctual math.
 - [src/render/wgpu_renderer/runtime/render.rs](../../src/render/wgpu_renderer/runtime/render.rs) — Pass A / composite order; where bloom and tonemap run; new fullscreen or compute pass before `post_bloom` / tonemap.

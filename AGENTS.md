@@ -2,7 +2,7 @@
 
 Short pointers to deeper context. Read the linked file before working in the area.
 
-- **CI locally** — `./scripts/check.sh` mirrors the GitHub `build-and-test` job (bake tools → `cargo build` → `cargo test`; Linux needs `xvfb-run`). Optional `--extras` for fmt/clippy/Python (not in CI).
+- **CI locally** — `./scripts/check.sh` mirrors the GitHub `build-and-test` job (bake tools → `cargo build` → `cargo test`; Linux needs `xvfb-run`). Optional `--extras` for fmt/clippy/Python (not in CI). Hot-build wall times: `./scripts/profile-build.sh --hot` (add `--timings` for per-crate HTML under `target/cargo-timings/`).
 
 - [3D world space](docs/agents/world-space.md) — Z-up frame, table at `z = 0`, anchors, screen vs world placement.
 - [Cap-mesh coordinates](docs/agents/cap-mesh-coordinates.md) — image → cap-local → UV for relic pins (+Y) and talismans (+Z); `cap_extrude.rs` source of truth.
