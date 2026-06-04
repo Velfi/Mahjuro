@@ -23,6 +23,7 @@ use crate::ui::colored_keywords;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
 use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
+use crate::ui::score_format::format_score;
 use crate::ui::ordeal_icons::ordeal_icon_source;
 use crate::ui::skip_tag_icons::skip_tag_icon_source;
 use crate::ui::widget::wrap_text;
@@ -147,7 +148,7 @@ fn hallway_button_screen_rect(
 fn wrapped_text_height(text: &str, col_w: f32, font_px: f32, _line_h: f32) -> f32 {
     let default = [0.0; 4];
     let wrapped =
-        colored_keywords::wrap_colored_text_multiline(text, col_w, font_px / 0.99, default);
+        colored_keywords::wrap_colored_text_multiline(text, col_w, font_px / 0.99, default, false);
     colored_keywords::colored_wrapped_rows_height(&wrapped, font_px)
 }
 
@@ -175,7 +176,7 @@ fn push_wrapped_column_line(line: WrappedColumnLine<'_>) {
         color,
         align,
     } = line;
-    let wrapped = colored_keywords::wrap_colored_text_multiline(text, col_w, font_px / 0.99, color);
+    let wrapped = colored_keywords::wrap_colored_text_multiline(text, col_w, font_px / 0.99, color, false);
     let block_h = colored_keywords::colored_wrapped_rows_height(&wrapped, font_px);
     colored_keywords::push_colored_rows_in_width(
         texts,
@@ -186,6 +187,7 @@ fn push_wrapped_column_line(line: WrappedColumnLine<'_>) {
             line_h: font_px,
             fallback_plain: text,
             fallback_color: color,
+            italic: false,
         },
         &wrapped,
         align,
@@ -575,7 +577,7 @@ impl SceneBehavior for HallwayScene {
                                 "Wing {}/{} · Target {}",
                                 pick.wing,
                                 crate::game::run::FINAL_WING,
-                                target_value,
+                                format_score(target_value as u64),
                             ),
                             text_w_play,
                             px_detail,
@@ -682,7 +684,7 @@ impl SceneBehavior for HallwayScene {
                         "Wing {}/{} · Target {}",
                         pick.wing,
                         crate::game::run::FINAL_WING,
-                        target_value,
+                        format_score(target_value as u64),
                     ),
                     color: play_color,
                     align: TextAlign::Right,

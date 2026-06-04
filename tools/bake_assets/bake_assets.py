@@ -287,6 +287,16 @@ def process_file(src: Path, rel: str, tmp_out: Path, lossy: bool) -> None:
         )
 
 
+def atomic_zip_path(out_dir: Path, final_name: str) -> Path:
+    """Per-process staging path in `out_dir` (same filesystem → atomic os.replace).
+
+    Includes the pid so two concurrent bakes (two `cargo` processes running
+    build.rs at once) stage to distinct files; each then atomically replaces the
+    final, last-writer-wins, and neither ever exposes a half-written pack.
+    """
+    return out_dir / f".{final_name}.{os.getpid()}.tmp"
+
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -366,19 +376,32 @@ def main() -> int:
                 "root_globs": rule.root_globs,
             }
 
-            with zipfile.ZipFile(zip_path, "w") as zf:
-                for rel, src in sorted(items, key=lambda x: x[0]):
-                    tmp = tdir / rel.replace("/", "__")
-                    process_file(src, rel, tmp, lossy=args.lossy)
-                    ct, cl = zip_write_params(rel)
-                    if cl is None:
-                        zf.write(tmp, arcname=rel, compress_type=ct)
-                    else:
-                        zf.write(tmp, arcname=rel, compress_type=ct, compresslevel=cl)
-                    tmp.unlink(missing_ok=True)
+            # Build into a temp file in `out_dir`, then atomically replace the
+            # final zip. The game (and concurrent bakes — two `cargo` processes
+            # can run build.rs at once) read these packs from `out_dir`; an
+            # in-place `ZipFile(zip_path, "w")` truncates and streams hundreds of
+            # MB, so a reader opening mid-write sees a torn archive (missing or
+            # corrupt entries → runtime "asset missing"). os.replace on the same
+            # filesystem is atomic, so readers only ever observe a complete pack.
+            staged_zip = atomic_zip_path(out_dir, rule.file)
+            try:
+                with zipfile.ZipFile(staged_zip, "w") as zf:
+                    for rel, src in sorted(items, key=lambda x: x[0]):
+                        tmp = tdir / rel.replace("/", "__")
+                        process_file(src, rel, tmp, lossy=args.lossy)
+                        ct, cl = zip_write_params(rel)
+                        if cl is None:
+                            zf.write(tmp, arcname=rel, compress_type=ct)
+                        else:
+                            zf.write(tmp, arcname=rel, compress_type=ct, compresslevel=cl)
+                        tmp.unlink(missing_ok=True)
 
-            entry["sha256"] = sha256_file(zip_path)
-            entry["size_bytes"] = zip_path.stat().st_size
+                entry["sha256"] = sha256_file(staged_zip)
+                entry["size_bytes"] = staged_zip.stat().st_size
+                os.replace(staged_zip, zip_path)
+            except BaseException:
+                staged_zip.unlink(missing_ok=True)
+                raise
             manifest_packs.append(entry)
 
     manifest = {
@@ -388,9 +411,17 @@ def main() -> int:
         "bake_profile": "release" if args.lossy else "lossless",
         "packs": manifest_packs,
     }
-    (out_dir / "pack_manifest.json").write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-    )
+    # Manifest last + atomically: readers gate everything on it, so it must only
+    # appear once all packs it references are in place.
+    manifest_tmp = atomic_zip_path(out_dir, "pack_manifest.json")
+    try:
+        manifest_tmp.write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
+        os.replace(manifest_tmp, out_dir / "pack_manifest.json")
+    except BaseException:
+        manifest_tmp.unlink(missing_ok=True)
+        raise
     print(f"Wrote packs to {out_dir} (game_version={game_version} sha={sha})")
     return 0
 

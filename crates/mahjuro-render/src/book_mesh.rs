@@ -273,3 +273,13 @@ fn book_material() -> MaterialParams {
         specular_power: 22.0,
     }
 }
+
+/// Leather tint for the gameplay-table guide book (`player_guidebook`).
+pub fn guide_book_cover_tint() -> [f32; 4] {
+    crate::theme::color::keyword::PINZU
+}
+
+/// Leather tint for the gameplay-table yaku journal (`player_yaku_journal`).
+pub fn yaku_journal_cover_tint() -> [f32; 4] {
+    crate::theme::color::keyword::HONORS
+}

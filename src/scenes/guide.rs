@@ -1196,7 +1196,7 @@ fn push_dense_text_lines_aligned(
 ) -> f32 {
     let line_h = font_px * line_mul;
     let wrapped =
-        colored_keywords::wrap_colored_text_multiline(text, rect[2], font_px / 0.99, color);
+        colored_keywords::wrap_colored_text_multiline(text, rect[2], font_px / 0.99, color, false);
     let block_h = line_h * wrapped.len().max(1) as f32;
     let Some(font) = load_ui_font() else {
         let wrapped = wrap_text(text, rect[2], font_px / 0.99);
@@ -2690,7 +2690,7 @@ fn push_flowers_margin_scrawl(
     let inner_w = (w - pad * 2.0).max(1.0);
     let default = color::alpha(color::STONE, 0.72);
     let wrapped =
-        colored_keywords::wrap_colored_text_multiline(text, inner_w, font / 0.99, default);
+        colored_keywords::wrap_colored_text_multiline(text, inner_w, font / 0.99, default, true);
     let line_h = font;
     let block_h = colored_keywords::colored_wrapped_rows_height(&wrapped, line_h);
     let y = bottom - block_h - h * 0.008;
@@ -2704,13 +2704,11 @@ fn push_flowers_margin_scrawl(
             line_h,
             fallback_plain: text,
             fallback_color: default,
+            italic: true,
         },
         &wrapped,
     );
-    for mut label in labels {
-        label.italic = true;
-        frame.text(label);
-    }
+    frame.texts(labels);
 }
 
 fn push_melds_left_cards(
@@ -3180,6 +3178,7 @@ fn push_tile_group_labels(
                 ml.w,
                 label_font / 0.99,
                 default,
+                false,
             );
             colored_keywords::push_colored_rows_in_width(
                 &mut text_labels,
@@ -3190,6 +3189,7 @@ fn push_tile_group_labels(
                     line_h: label_font,
                     fallback_plain: &ml.text,
                     fallback_color: default,
+                    italic: false,
                 },
                 &wrapped,
                 TextAlign::Center,

@@ -43,7 +43,10 @@ impl ZodiacPresenter {
     }
 
     pub fn render_hints() -> ShowcaseRenderHints {
-        ShowcaseRenderHints::default()
+        ShowcaseRenderHints {
+            zodiac_celebration_no_shadow: true,
+            ..Default::default()
+        }
     }
 
     fn elapsed(&self) -> f32 {

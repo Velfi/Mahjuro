@@ -16,7 +16,8 @@
 //! together with the same per-word tinting, use [`crate::ui::widget::push_text_block`]
 //! (`glossary_tint: true`) instead of this module’s plain-text wrappers.
 
-use crate::render::decal::{load_mono_font, load_ui_font};
+use crate::render::decal::{load_mono_font, load_ui_font, load_ui_font_italic};
+use crate::render::theme::color;
 #[allow(unused_imports)] // Re-exported for API parity; table lives in `vocabulary_colors`.
 pub use crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE;
 #[allow(unused_imports)]
@@ -32,6 +33,49 @@ use crate::ui::widget;
 /// All measure helpers and push paths must use this — do not duplicate the multiplier elsewhere.
 pub const COLORED_ROW_LINE_STEP_MUL: f32 = 1.4;
 
+/// Dark stroke for glossary keyword tints on light panel fills (e.g. mint "Play" on white).
+pub const KEYWORD_OUTLINE_COLOR: [f32; 4] = color::WALNUT_INK;
+
+#[inline]
+pub fn keyword_is_tinted(segment_color: [f32; 4], default_color: [f32; 4]) -> bool {
+    segment_color != default_color
+}
+
+#[inline]
+fn keyword_outline_offsets(font_px: f32) -> [(f32, f32); 8] {
+    let d = (font_px * 0.055).clamp(1.0, 2.0);
+    [
+        (-d, 0.0),
+        (d, 0.0),
+        (0.0, -d),
+        (0.0, d),
+        (-d, -d),
+        (d, -d),
+        (-d, d),
+        (d, d),
+    ]
+}
+
+/// Push `label`, optionally preceded by an ink outline when it is a glossary tint.
+pub fn push_keyword_label(
+    out: &mut Vec<TextLabel>,
+    label: TextLabel,
+    default_color: [f32; 4],
+    outline_tinted: bool,
+) {
+    let font_px = label.font_px.unwrap_or(label.rect[3]);
+    if outline_tinted && keyword_is_tinted(label.color, default_color) {
+        for (dx, dy) in keyword_outline_offsets(font_px) {
+            let mut stroke = label.clone();
+            stroke.rect[0] += dx;
+            stroke.rect[1] += dy;
+            stroke.color = KEYWORD_OUTLINE_COLOR;
+            out.push(stroke);
+        }
+    }
+    out.push(label);
+}
+
 #[inline]
 pub fn colored_row_line_step(line_h: f32) -> f32 {
     line_h * COLORED_ROW_LINE_STEP_MUL
@@ -44,7 +88,7 @@ pub fn colored_wrapped_rows_height(rows: &[Vec<(String, [f32; 4])>], line_h: f32
 
 /// Measure a single left-aligned colored line (same wrap + step as [`push_colored_line_left`]).
 pub fn colored_line_block_height(text: &str, inner_w: f32, line_h: f32, default: [f32; 4]) -> f32 {
-    let wrapped = wrap_colored_words(text, inner_w, line_h, default);
+    let wrapped = wrap_colored_words(text, inner_w, line_h, default, false);
     colored_wrapped_rows_height(&wrapped, line_h)
 }
 
@@ -55,7 +99,7 @@ pub fn colored_multiline_text_height(
     line_h: f32,
     default: [f32; 4],
 ) -> f32 {
-    let lines = wrap_colored_text_multiline(text, inner_w, line_h, default);
+    let lines = wrap_colored_text_multiline(text, inner_w, line_h, default, false);
     colored_wrapped_rows_height(&lines, line_h)
 }
 
@@ -81,7 +125,7 @@ pub struct ColoredLineBlock {
 impl ColoredLineBlock {
     pub fn measure(text: &str, inner_w: f32, line_h: f32, default: [f32; 4]) -> Self {
         Self {
-            wrapped: wrap_colored_words(text, inner_w, line_h, default),
+            wrapped: wrap_colored_words(text, inner_w, line_h, default, false),
             line_h,
         }
     }
@@ -108,6 +152,7 @@ impl ColoredLineBlock {
                 line_h: self.line_h,
                 fallback_plain,
                 fallback_color,
+                italic: false,
             },
             &self.wrapped,
         );
@@ -134,6 +179,19 @@ fn word_width(font: &fontdue::Font, word: &str, font_px: f32) -> f32 {
     word.chars()
         .map(|ch| font.metrics(ch, font_px).advance_width)
         .sum()
+}
+
+fn wrap_measure_font(italic: bool) -> Option<&'static fontdue::Font> {
+    if italic {
+        load_ui_font_italic().or_else(load_ui_font)
+    } else {
+        load_ui_font()
+    }
+}
+
+/// Extra width on the last segment of an italic row — glyph ink can extend past advance.
+fn italic_trailing_slack(font_px: f32) -> f32 {
+    font_px * 0.05
 }
 
 /// Single-line advance width for a colored paragraph at `line_h`, capped by `max_width_px`.
@@ -179,8 +237,9 @@ pub fn wrap_colored_words(
     max_width_px: f32,
     line_h: f32,
     default: [f32; 4],
+    italic: bool,
 ) -> Vec<Vec<(String, [f32; 4])>> {
-    let Some(font) = load_ui_font() else {
+    let Some(font) = wrap_measure_font(italic) else {
         return vec![vec![(text.to_string(), default)]];
     };
     let font_px = line_h * 0.99;
@@ -232,8 +291,9 @@ pub fn wrap_colored_text_multiline(
     max_width_px: f32,
     line_h: f32,
     default: [f32; 4],
+    italic: bool,
 ) -> Vec<Vec<(String, [f32; 4])>> {
-    if load_ui_font().is_none() {
+    if wrap_measure_font(italic).is_none() {
         return widget::wrap_text(text, max_width_px, line_h)
             .into_iter()
             .map(|s| vec![(s, default)])
@@ -245,7 +305,13 @@ pub fn wrap_colored_text_multiline(
             out.push(vec![(String::new(), default)]);
             continue;
         }
-        out.extend(wrap_colored_words(paragraph, max_width_px, line_h, default));
+        out.extend(wrap_colored_words(
+            paragraph,
+            max_width_px,
+            line_h,
+            default,
+            italic,
+        ));
     }
     if out.is_empty() {
         out.push(vec![(String::new(), default)]);
@@ -266,6 +332,8 @@ pub struct ColoredRowsLayout<'a> {
     pub line_h: f32,
     pub fallback_plain: &'a str,
     pub fallback_color: [f32; 4],
+    /// When true, measure and rasterize with the italic UI face (margin scrawl, etc.).
+    pub italic: bool,
 }
 
 /// Left-aligned rows (focus inspect, shop tooltips).
@@ -281,10 +349,11 @@ pub fn push_colored_rows_left(
         line_h,
         fallback_plain,
         fallback_color,
+        italic,
     } = layout;
     let font_px = line_h;
     let line_step = colored_row_line_step(line_h);
-    let Some(font) = load_ui_font() else {
+    let Some(font) = wrap_measure_font(italic) else {
         let wrapped = widget::wrap_text(fallback_plain, inner_w, line_h);
         let joined = wrapped.join("\n");
         let h = colored_multiline_block_height(wrapped.len().max(1), line_h);
@@ -294,6 +363,7 @@ pub fn push_colored_rows_left(
             color: fallback_color,
             font_px: Some(font_px),
             align: TextAlign::Left,
+            italic,
             ..Default::default()
         });
         return;
@@ -303,7 +373,17 @@ pub fn push_colored_rows_left(
         let line_y = top_y + row as f32 * line_step;
         let mut cx = text_left;
         push_tinted_segment_run(
-            out, chunks, font, font_px, line_y, line_step, &mut cx, None, false,
+            out,
+            chunks,
+            font,
+            font_px,
+            line_y,
+            line_step,
+            &mut cx,
+            None,
+            false,
+            fallback_color,
+            italic,
         );
     }
 }
@@ -333,19 +413,35 @@ fn push_tinted_segment_run(
     cursor_x: &mut f32,
     clip_rect: Option<[f32; 4]>,
     mono: bool,
+    default_color: [f32; 4],
+    italic: bool,
 ) {
-    for (s, c) in segments {
-        let piece_w = word_width(font, s, font_px).max(1.0);
-        out.push(TextLabel {
-            rect: [*cursor_x, y, piece_w, row_h],
-            text: s.clone(),
-            color: *c,
-            font_px: Some(font_px),
-            align: TextAlign::Left,
-            clip_rect,
-            mono,
-            ..Default::default()
-        });
+    let trailing_slack = if italic {
+        italic_trailing_slack(font_px)
+    } else {
+        0.0
+    };
+    for (i, (s, c)) in segments.iter().enumerate() {
+        let mut piece_w = word_width(font, s, font_px).max(1.0);
+        if italic && i + 1 == segments.len() {
+            piece_w += trailing_slack;
+        }
+        push_keyword_label(
+            out,
+            TextLabel {
+                rect: [*cursor_x, y, piece_w, row_h],
+                text: s.clone(),
+                color: *c,
+                font_px: Some(font_px),
+                align: TextAlign::Left,
+                clip_rect,
+                mono,
+                italic,
+                ..Default::default()
+            },
+            default_color,
+            true,
+        );
         *cursor_x += piece_w;
     }
 }
@@ -410,6 +506,8 @@ pub fn push_colored_line_clipped(
         &mut x,
         Some(clipped),
         mono,
+        default,
+        false,
     );
 }
 
@@ -427,10 +525,11 @@ pub fn push_colored_rows_in_width(
         line_h,
         fallback_plain,
         fallback_color,
+        italic,
     } = layout;
     let font_px = line_h;
     let line_step = colored_row_line_step(line_h);
-    let Some(font) = load_ui_font() else {
+    let Some(font) = wrap_measure_font(italic) else {
         let wrapped = widget::wrap_text(fallback_plain, inner_w, line_h);
         let joined = wrapped.join("\n");
         let h = colored_multiline_block_height(wrapped.len().max(1), line_h);
@@ -440,6 +539,7 @@ pub fn push_colored_rows_in_width(
             color: fallback_color,
             font_px: Some(font_px),
             align,
+            italic,
             ..Default::default()
         });
         return;
@@ -450,7 +550,17 @@ pub fn push_colored_rows_in_width(
         let total_w = measure_tinted_run(font, chunks, font_px);
         let mut cx = line_start_x(block_left, inner_w, total_w, align);
         push_tinted_segment_run(
-            out, chunks, font, font_px, line_y, line_step, &mut cx, None, false,
+            out,
+            chunks,
+            font,
+            font_px,
+            line_y,
+            line_step,
+            &mut cx,
+            None,
+            false,
+            fallback_color,
+            italic,
         );
     }
 }
@@ -490,7 +600,7 @@ mod tests {
         let font = load_ui_font().expect("ui font");
         let max_w = word_width(font, "An East Wind is blowing", font_px) + 2.0;
         let default = [1.0, 1.0, 1.0, 1.0];
-        let lines = wrap_colored_words(text, max_w, line_h, default);
+        let lines = wrap_colored_words(text, max_w, line_h, default, false);
         let joined: Vec<String> = lines
             .iter()
             .map(|row| row.iter().map(|(s, _)| s.as_str()).collect::<String>())

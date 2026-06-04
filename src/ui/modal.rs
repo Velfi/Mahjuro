@@ -20,6 +20,7 @@ use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
+use crate::ui::score_format::format_score;
 use crate::ui::styled_text::{StyledBlockStyle, StyledTextBlock};
 
 /// Assembled render data emitted by `ModalQueue::draw`: instanced quads,
@@ -802,7 +803,8 @@ fn measure_payout_ledger_layout(
     let rows = payout_ledger_rows(breakdown.payout);
     let score_line = format!(
         "Score: {} / {}",
-        breakdown.round_score, breakdown.target_score
+        format_score(breakdown.round_score),
+        format_score(breakdown.target_score)
     );
     let font = load_mono_font().or_else(load_ui_font).expect("ui font");
     let mut label_col_w = measure_text_width(&font, "Unused plays", font_px);

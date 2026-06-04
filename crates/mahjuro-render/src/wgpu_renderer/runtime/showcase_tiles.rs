@@ -358,7 +358,7 @@ impl WgpuRenderer {
                 .ribbon_rects
                 .push(project_aabb_rect(*model, [0.5, 0.5, 0.05], 0.0));
         }
-        // Talismans: local mesh AABB is `TALISMAN_LOCAL_HALF` (regular octagon r=0.5, z=0.045),
+        // Talismans: local mesh AABB is `TALISMAN_LOCAL_HALF` (normalized cap half-extent 0.5, z=0.045),
         // not ±0.5. The model already bakes the world scale (see sx/sy/sz
         // derivations against `TALISMAN_LOCAL_HALF * 2`), so we must project
         // the real local bounds — unit-cube projection clips ~30% off height

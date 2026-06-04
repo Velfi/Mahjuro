@@ -2,27 +2,17 @@
 //!
 //! Each kind uses a **mask-extruded** organic silhouette (see
 //! [`crate::relic_dish::build_talisman_mesh_from_rgba`]). Caps face ±Z; thickness
-//! along Z. A legacy octagonal prism ([`build_talisman_mesh`]) remains as fallback
-//! until all per-kind masks are available.
-
-use std::f32::consts::TAU;
+//! along Z.
 
 use crate::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::relic_dish::build_talisman_mesh_from_rgba;
 use crate::table_transform::euler_xyz_rad_from_deg;
-use crate::theme::color;
-use crate::tile_glb::Vertex3dTex;
 
-const SIDES: usize = 8;
-/// Circumradius of the octagon in local XY (fallback mesh + extent scaling).
-const RADIUS: f32 = 0.50;
+/// Normalized cap half-extent after footprint scaling (see `CAP_REFERENCE_AREA`).
+const CAP_HALF_EXTENT: f32 = 0.50;
 /// Half-thickness of extruded pendant slabs along ±Z.
 pub const TALISMAN_HALF_THICKNESS: f32 = 0.045;
 const HALF_T: f32 = TALISMAN_HALF_THICKNESS;
-
-/// Rotate the octagon so a horizontal edge sits on −Y (not a vertex).
-/// `π/8` rad (`TAU/16`) puts edge midpoints at ±Y/±X; `0` puts vertices on cardinals.
-const OCTAGON_ANGLE_OFFSET: f32 = TAU / 16.0;
 
 /// Pitch (degrees) that aims carved +local Z at cameras on world −Y (table / shop / archive).
 pub const TALISMAN_FACE_CAMERA_RX_DEG: f32 = 90.0;
@@ -33,33 +23,9 @@ pub fn talisman_face_camera_rotation(yaw_y_deg: f32) -> [f32; 3] {
     euler_xyz_rad_from_deg(TALISMAN_FACE_CAMERA_RX_DEG, yaw_y_deg, 0.0)
 }
 
-use crate::cap_extrude::parametric_cap_uv;
-
-/// Face-plate UV for the legacy octagon mesh (cap coords ±RADIUS → parametric ±0.5).
-#[inline]
-fn talisman_face_uv(x: f32, y: f32) -> [f32; 2] {
-    parametric_cap_uv(x / (2.0 * RADIUS), y / (2.0 * RADIUS))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn face_uv_maps_plus_y_to_top_of_heightmap() {
-        let uv_top = talisman_face_uv(0.0, RADIUS * 0.92);
-        assert!(
-            uv_top[1] < 0.1,
-            "top of tablet should sample low v (got {})",
-            uv_top[1]
-        );
-        let uv_bottom = talisman_face_uv(0.0, -RADIUS * 0.92);
-        assert!(
-            uv_bottom[1] > 0.9,
-            "flat edge should sample high v (got {})",
-            uv_bottom[1]
-        );
-    }
 
     /// End-to-end axis chain for mask-extruded pendants (Z-up world):
     /// image top → +local Y → v≈0; placement Rx(90°) → world +Z up, +local Z → world −Y (camera).
@@ -139,13 +105,6 @@ mod tests {
     }
 }
 
-fn octagon_rim() -> [(f32, f32); SIDES] {
-    std::array::from_fn(|i| {
-        let theta = (i as f32) * TAU / SIDES as f32 + OCTAGON_ANGLE_OFFSET;
-        (theta.cos() * RADIUS, theta.sin() * RADIUS)
-    })
-}
-
 /// Build an extruded pendant mesh from an embedded mask asset path.
 pub fn build_talisman_mesh_from_mask_asset(path: &str) -> Option<MeshCpu> {
     let file = mahjuro_assets::asset_path::get(path)?;
@@ -153,133 +112,12 @@ pub fn build_talisman_mesh_from_mask_asset(path: &str) -> Option<MeshCpu> {
     build_talisman_mesh_from_rgba(img.as_raw(), img.width(), img.height(), path)
 }
 
-/// Build the legacy octagonal fallback mesh (flat edge down).
-pub fn build_talisman_mesh() -> MeshCpu {
-    let mut vertices: Vec<Vertex3dTex> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    let rim = octagon_rim();
-
-    // ── Front face (+Z normal): triangle fan from center vertex.
-    let front_z = HALF_T;
-    let front_normal = [0.0, 0.0, 1.0];
-    let front_center_idx = vertices.len() as u32;
-    vertices.push(Vertex3dTex {
-        position: [0.0, 0.0, front_z],
-        normal: front_normal,
-        uv: [0.5, 0.5],
-        tangent: Vertex3dTex::DEFAULT_TANGENT,
-        uv_emr: [0.0, 0.0],
-        color: [1.0, 1.0, 1.0, 1.0],
-    });
-    let front_ring_start = vertices.len() as u32;
-    for &(x, y) in &rim {
-        vertices.push(Vertex3dTex {
-            position: [x, y, front_z],
-            normal: front_normal,
-            uv: talisman_face_uv(x, y),
-            tangent: Vertex3dTex::DEFAULT_TANGENT,
-            uv_emr: [0.0, 0.0],
-            color: [1.0, 1.0, 1.0, 1.0],
-        });
-    }
-    for i in 0..SIDES {
-        let i0 = front_ring_start + i as u32;
-        let i1 = front_ring_start + ((i + 1) % SIDES) as u32;
-        indices.extend_from_slice(&[front_center_idx, i0, i1]);
-    }
-
-    // ── Back face (-Z normal): triangle fan, opposite winding.
-    let back_z = -HALF_T;
-    let back_normal = [0.0, 0.0, -1.0];
-    let back_center_idx = vertices.len() as u32;
-    vertices.push(Vertex3dTex {
-        position: [0.0, 0.0, back_z],
-        normal: back_normal,
-        uv: [0.5, 0.5],
-        tangent: Vertex3dTex::DEFAULT_TANGENT,
-        uv_emr: [0.0, 0.0],
-        color: [1.0, 1.0, 1.0, 1.0],
-    });
-    let back_ring_start = vertices.len() as u32;
-    for &(x, y) in &rim {
-        vertices.push(Vertex3dTex {
-            position: [x, y, back_z],
-            normal: back_normal,
-            uv: talisman_face_uv(x, y),
-            tangent: Vertex3dTex::DEFAULT_TANGENT,
-            uv_emr: [0.0, 0.0],
-            color: [1.0, 1.0, 1.0, 1.0],
-        });
-    }
-    for i in 0..SIDES {
-        let i0 = back_ring_start + i as u32;
-        let i1 = back_ring_start + ((i + 1) % SIDES) as u32;
-        indices.extend_from_slice(&[back_center_idx, i1, i0]);
-    }
-
-    // ── Rim: eight flat side planes (one quad per edge, outward XY normal).
-    for i in 0..SIDES {
-        let (x0, y0) = rim[i];
-        let (x1, y1) = rim[(i + 1) % SIDES];
-        let mx = (x0 + x1) * 0.5;
-        let my = (y0 + y1) * 0.5;
-        let len = (mx * mx + my * my).sqrt().max(1e-6);
-        let n = [mx / len, my / len, 0.0];
-        let base = vertices.len() as u32;
-        // UVs span the plane (u along edge, v front→back); never sampled for mask.
-        vertices.push(Vertex3dTex {
-            position: [x0, y0, front_z],
-            normal: n,
-            uv: [0.0, 0.0],
-            tangent: Vertex3dTex::DEFAULT_TANGENT,
-            uv_emr: [0.0, 0.0],
-            color: [1.0, 1.0, 1.0, 1.0],
-        });
-        vertices.push(Vertex3dTex {
-            position: [x1, y1, front_z],
-            normal: n,
-            uv: [1.0, 0.0],
-            tangent: Vertex3dTex::DEFAULT_TANGENT,
-            uv_emr: [0.0, 0.0],
-            color: [1.0, 1.0, 1.0, 1.0],
-        });
-        vertices.push(Vertex3dTex {
-            position: [x1, y1, back_z],
-            normal: n,
-            uv: [1.0, 1.0],
-            tangent: Vertex3dTex::DEFAULT_TANGENT,
-            uv_emr: [0.0, 0.0],
-            color: [1.0, 1.0, 1.0, 1.0],
-        });
-        vertices.push(Vertex3dTex {
-            position: [x0, y0, back_z],
-            normal: n,
-            uv: [0.0, 1.0],
-            tangent: Vertex3dTex::DEFAULT_TANGENT,
-            uv_emr: [0.0, 0.0],
-            color: [1.0, 1.0, 1.0, 1.0],
-        });
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    }
-
-    MeshCpu {
-        vertices,
-        indices,
-        default_material: MaterialParams {
-            kind: MaterialKind::Chitin,
-            base_color: color::PARCHMENT,
-            specular_strength: 0.78,
-            specular_power: 56.0,
-        },
-    }
-}
-
-/// Local AABB half-extents for picking / projection (regular octagon × thickness).
-pub const TALISMAN_LOCAL_HALF: [f32; 3] = [RADIUS, RADIUS, HALF_T];
+/// Local AABB half-extents for picking / projection (normalized cap × slab thickness).
+pub const TALISMAN_LOCAL_HALF: [f32; 3] = [CAP_HALF_EXTENT, CAP_HALF_EXTENT, HALF_T];
 
 /// World-space `Object3d::extents` matching [`TALISMAN_LOCAL_HALF`].
 pub fn talisman_object_extents(xy_extent: f32) -> [f32; 3] {
-    let thickness = xy_extent * (HALF_T * 2.0) / (RADIUS * 2.0);
+    let thickness = xy_extent * (HALF_T * 2.0) / (CAP_HALF_EXTENT * 2.0);
     [xy_extent, xy_extent, thickness]
 }
 

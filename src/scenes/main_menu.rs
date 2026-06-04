@@ -390,7 +390,7 @@ fn push_moon_quip_bubble(
     let inner_w = colored_keywords::colored_paragraph_preferred_width(message, line_h, max_inner_w)
         .clamp(72.0, max_inner_w);
     let lines =
-        colored_keywords::wrap_colored_text_multiline(message, inner_w, line_h, color::PARCHMENT);
+        colored_keywords::wrap_colored_text_multiline(message, inner_w, line_h, color::PARCHMENT, false);
     let inner_h = colored_keywords::colored_multiline_block_height(lines.len(), line_h);
     let panel_w = inner_w + pad * 2.0;
     let panel_h = inner_h + pad * 2.0;
@@ -434,6 +434,7 @@ fn push_moon_quip_bubble(
             line_h,
             fallback_plain: message,
             fallback_color: color::PARCHMENT,
+            italic: false,
         },
         &lines,
         TextAlign::Center,

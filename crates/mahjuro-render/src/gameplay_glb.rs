@@ -621,6 +621,7 @@ fn gameplay_pick_table_book(
     spine_label: &'static str,
     pick_id: u32,
     open_amount: f32,
+    cover_tint: [f32; 4],
 ) -> anyhow::Result<Object3d> {
     use crate::scene_glue::{BOOK_SPINE_THICKNESS_MM, book_cover_face_extents_xy};
 
@@ -649,7 +650,7 @@ fn gameplay_pick_table_book(
         pos: pose.anchor,
         extents,
         rotation: rotate_marker_pose_x_180(pose.rotation_rad),
-        color: [1.0, 1.0, 1.0, 1.0],
+        color: cover_tint,
         kind: Object3dKind::Book {
             spine_label: std::borrow::Cow::Borrowed(spine_label),
             pick_id: Some(pick_id),
@@ -668,6 +669,7 @@ pub fn gameplay_pick_journal_book(
     cpu: &RoomGlbCpu,
     open_amount: f32,
 ) -> anyhow::Result<Object3d> {
+    use crate::book_mesh::yaku_journal_cover_tint;
     use mahjuro_types::shop_pick::YAKU_JOURNAL_BOOK_PICK_ID;
     gameplay_pick_table_book(
         window_w,
@@ -678,6 +680,7 @@ pub fn gameplay_pick_journal_book(
         "Yaku",
         YAKU_JOURNAL_BOOK_PICK_ID,
         open_amount,
+        yaku_journal_cover_tint(),
     )
 }
 
@@ -688,6 +691,7 @@ pub fn gameplay_pick_guidebook(
     env_height_scale: f32,
     cpu: &RoomGlbCpu,
 ) -> anyhow::Result<Object3d> {
+    use crate::book_mesh::guide_book_cover_tint;
     use mahjuro_types::shop_pick::GUIDE_BOOK_PICK_ID;
     gameplay_pick_table_book(
         window_w,
@@ -698,6 +702,7 @@ pub fn gameplay_pick_guidebook(
         "Guide",
         GUIDE_BOOK_PICK_ID,
         0.0,
+        guide_book_cover_tint(),
     )
 }
 

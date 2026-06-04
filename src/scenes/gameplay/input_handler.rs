@@ -555,6 +555,8 @@ pub(super) fn process_focus_and_actions(
             UiAction::WestFacePress => {
                 if ctx.run.onboarding_discard_allowed() {
                     actions_for_scene.push(UiAction::CommitDiscard);
+                } else if ctx.run.onboarding_lessons_active() {
+                    scene.reject_tutorial_gated_action(ctx.bus);
                 } else {
                     ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
                         crate::sfx_id::SfxId::InvalidAction,
@@ -718,12 +720,14 @@ pub(super) fn process_focus_and_actions(
                         &interaction.hand,
                         &interaction.selected,
                     );
+                    ctx.run.onboarding_notify_invalid_play();
                     ctx.anim
                         .shake(crate::render::animation::ENTITY_HAND_STRIP, 8.0, 200);
                 } else {
                     scene.invalid_meld_flash_at = None;
                     scene.invalid_meld_flash_slots.clear();
                     scene.clear_boss_rule_feedback();
+                    ctx.run.onboarding_clear_invalid_meld_hint();
                     if gained > 0 {
                         ctx.anim.pulse(ENTITY_SCORE_PANEL);
                         scene.begin_scoring_cascade(ctx, score_before, gained, cascade_showcase);
@@ -809,9 +813,13 @@ pub(super) fn process_focus_and_actions(
             }
             UiAction::CommitDiscard => {
                 if !ctx.run.onboarding_discard_allowed() {
-                    ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
-                        crate::sfx_id::SfxId::InvalidAction,
-                    ));
+                    if ctx.run.onboarding_lessons_active() {
+                        scene.reject_tutorial_gated_action(ctx.bus);
+                    } else {
+                        ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
+                            crate::sfx_id::SfxId::InvalidAction,
+                        ));
+                    }
                     continue;
                 }
                 let gameplay = GameEngine::read(ctx.run);

@@ -551,6 +551,41 @@ fn non_contributing_all_when_nothing_forms() {
     assert_eq!(non_contributing_tile_ids(&tiles, &[]), ids);
 }
 
+#[test]
+fn selection_rejection_hint_pair_mismatch() {
+    let tiles = vec![t(Suit::Souzu, 2, 0), t(Suit::Souzu, 5, 1)];
+    assert_eq!(
+        selection_rejection_hint(&tiles, &[]),
+        "These two tiles aren't a pair — select two of the same tile."
+    );
+}
+
+#[test]
+fn selection_rejection_hint_extra_tile() {
+    let tiles = vec![
+        t(Suit::Souzu, 3, 0),
+        t(Suit::Souzu, 3, 1),
+        t(Suit::Souzu, 7, 2),
+    ];
+    assert_eq!(
+        selection_rejection_hint(&tiles, &[]),
+        "Some selected tiles don't fit this meld — deselect the extras."
+    );
+}
+
+#[test]
+fn selection_rejection_hint_bad_run() {
+    let tiles = vec![
+        t(Suit::Souzu, 1, 0),
+        t(Suit::Souzu, 2, 1),
+        t(Suit::Souzu, 4, 2),
+    ];
+    assert_eq!(
+        selection_rejection_hint(&tiles, &[]),
+        "These tiles aren't a run — pick three consecutive tiles in the same suit."
+    );
+}
+
 /// 1-1-1-2-3: triplet(1) leaves orphans, but pair(1,1) + sequence(1,2,3) works.
 #[test]
 fn tricky_shared_rank_ambiguity_11123() {

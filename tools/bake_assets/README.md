@@ -26,6 +26,7 @@ Outputs `pack_manifest.json`, `mahjuro-pack-shared.zip`, `mahjuro-pack-gameplay.
 - **Default** (`--lossy`): minifies JSON; runs `pngquant`/`oxipng` and `ffmpeg` when installed.
 - **`--no-lossy`**: copies bytes except JSON minify (faster local checks).
 - **ZIP**: already-compressed types (e.g. PNG, OGG, MP3, GLB) are stored uncompressed in the archive; JSON and similar use DEFLATE.
+- **Atomic outputs**: each zip and `pack_manifest.json` is built to a per-pid `.<name>.<pid>.tmp` file in the output dir, then `os.replace`d into place (same filesystem → atomic). The manifest is written last. Readers — the running game, or a second `cargo` process running `build.rs` concurrently — therefore only ever see complete packs, never a half-written zip mid-rebake.
 
 Release CI (Windows / macOS) installs `ffmpeg`, `pngquant`, and `oxipng` before baking so `--lossy` optimizers run on tagged builds.
 

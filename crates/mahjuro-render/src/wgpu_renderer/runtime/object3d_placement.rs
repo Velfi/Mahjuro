@@ -473,6 +473,9 @@ impl WgpuRenderer {
                             // (back cover, page block, spine) ignore
                             // alpha and render normally.
                             let mut body_material = self.book_mesh.default_material;
+                            body_material.base_color[0] = obj.color[0];
+                            body_material.base_color[1] = obj.color[1];
+                            body_material.base_color[2] = obj.color[2];
                             body_material.base_color[3] = *open_amount;
                             body_inst.write_uniform_with_decal(
                                 &self.queue,
@@ -559,18 +562,22 @@ impl WgpuRenderer {
                                     0.0,
                                 ));
                             let cover_model = model * hinge;
+                            let mut cover_material = self.book_cover_mesh.default_material;
+                            cover_material.base_color[0] = obj.color[0];
+                            cover_material.base_color[1] = obj.color[1];
+                            cover_material.base_color[2] = obj.color[2];
                             cover_inst.write_uniform_with_decal(
                                 &self.queue,
                                 view_proj_arr,
                                 cover_model,
-                                self.book_cover_mesh.default_material,
+                                cover_material,
                                 true,
                             );
                             self.write_lit_mesh_shadow(
                                 &mut shadow,
                                 &self.book_cover_instances[slot_i],
                                 cover_model,
-                                self.book_cover_mesh.default_material.kind,
+                                cover_material.kind,
                             );
                             self.push_object3d_draw(
                                 object3d_draw_list,

@@ -686,19 +686,24 @@ fn push_styled_visual_lines(
         };
         for chunk in chunks {
             let piece_w = chunk.advance_width.max(1.0);
-            out.push(TextLabel {
-                rect: [cx, line_y, piece_w, line_step],
-                text: chunk.text,
-                color: chunk.color,
-                font_px: Some(font_px),
-                align: TextAlign::Left,
-                underline: chunk.underline,
-                text_effect: chunk.effect,
-                bold: chunk.bold,
-                italic: chunk.italic,
-                flavor_spans: None,
-                ..Default::default()
-            });
+            crate::ui::colored_keywords::push_keyword_label(
+                out,
+                TextLabel {
+                    rect: [cx, line_y, piece_w, line_step],
+                    text: chunk.text,
+                    color: chunk.color,
+                    font_px: Some(font_px),
+                    align: TextAlign::Left,
+                    underline: chunk.underline,
+                    text_effect: chunk.effect,
+                    bold: chunk.bold,
+                    italic: chunk.italic,
+                    flavor_spans: None,
+                    ..Default::default()
+                },
+                style.color,
+                style.glossary_tint,
+            );
             cx += piece_w;
         }
     }

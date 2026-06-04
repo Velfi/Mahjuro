@@ -66,7 +66,11 @@ fn run_chamber_wins_and_total(run: &RunState) -> (u32, u32) {
 impl RunSummaryStats {
     fn from_run(run: &RunState) -> Self {
         let best_structure = if run.best_structure_score > 0 {
-            format!("{} ({})", run.best_structure_name, run.best_structure_score)
+            format!(
+                "{} ({})",
+                run.best_structure_name,
+                format_score(run.best_structure_score)
+            )
         } else {
             "None".to_string()
         };
@@ -162,7 +166,11 @@ impl RunSummaryScene {
         } else if let Some(ref line) = self.memorial_subtitle {
             line.clone()
         } else {
-            format!("{} / {}", self.final_score, self.target_score)
+            format!(
+                "{} / {}",
+                format_score(self.final_score),
+                format_score(self.target_score as u64)
+            )
         };
         let points_earned = if self.won {
             LEVEL_UP_POINTS_FOR_WIN
@@ -346,7 +354,11 @@ impl SceneBehavior for RunSummaryScene {
         frame.window_title = if self.won {
             "Victory! — Final wing cleared".to_string()
         } else {
-            format!("Game Over — {} / {}", self.final_score, self.target_score)
+            format!(
+                "Game Over — {} / {}",
+                format_score(self.final_score),
+                format_score(self.target_score as u64)
+            )
         };
         frame
     }

@@ -40,7 +40,7 @@ Two deliberate conventions — pick by how the texture was authored:
 
 Silhouette extrusion albedo always uses `pixel_to_albedo_uv` (no V flip). Only cap-local placement uses `pixel_to_cap_local` + optional Y flip per `CapExtrudeKind`.
 
-**Meshes now routed through `cap_extrude`:** relic/talisman extrusion, pack card, octagon talisman, ribbon, ofuda, coin, mirror, reliquary tray, bone tablet, wood tablet.
+**Meshes now routed through `cap_extrude`:** relic/talisman extrusion, pack card, ribbon, ofuda, coin, mirror, reliquary tray, bone tablet, wood tablet.
 
 **Still bespoke (OK):** cabinet hex caps (polar θ), side walls / rims with `[0,0]` placeholder UVs, GLB-imported geometry.
 

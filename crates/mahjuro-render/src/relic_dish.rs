@@ -9,7 +9,7 @@
 use crate::cap_extrude::{
     self, CAP_REFERENCE_AREA, CapExtrudeKind, SilhouetteUnionBounds,
     outward_wall_normal_for_silhouette_edge, parametric_cap_uv, parametric_cap_uv_mirror_u,
-    pixel_to_albedo_uv, pixel_to_cap_local, side_wall_quad_indices_oriented,
+    pixel_to_albedo_uv, pixel_to_cap_local,
 };
 use crate::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::theme::color;
@@ -1316,6 +1316,170 @@ fn silhouette_solid_luma(rgba: &[u8], w: usize, h: usize) -> Vec<bool> {
     solid
 }
 
+/// Drop disconnected mask speckles so extrusion traces one pendant body.
+///
+/// Generated masks often contain 1–20 px islands (AA residue, heightmap noise).
+/// Each island becomes its own extruded slab with side walls, which reads as
+/// triangle junk around the silhouette in inspect wireframe.
+fn keep_largest_solid_component(solid: &mut [bool], w: usize, h: usize) {
+    let n = w * h;
+    if n == 0 {
+        return;
+    }
+    let mut labels = vec![0u32; n];
+    let mut sizes: Vec<u32> = Vec::new();
+    let mut next_label = 0u32;
+
+    for start in 0..n {
+        if !solid[start] || labels[start] != 0 {
+            continue;
+        }
+        next_label += 1;
+        sizes.push(0);
+        let li = (next_label - 1) as usize;
+        let mut stack = vec![start];
+        labels[start] = next_label;
+        while let Some(i) = stack.pop() {
+            sizes[li] += 1;
+            let x = i % w;
+            let y = i / w;
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    let nx = x as i32 + dx;
+                    let ny = y as i32 + dy;
+                    if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                        continue;
+                    }
+                    let ni = ny as usize * w + nx as usize;
+                    if solid[ni] && labels[ni] == 0 {
+                        labels[ni] = next_label;
+                        stack.push(ni);
+                    }
+                }
+            }
+        }
+    }
+
+    if next_label <= 1 {
+        return;
+    }
+    let keep = sizes
+        .iter()
+        .enumerate()
+        .max_by_key(|(i, sz)| (*sz, std::cmp::Reverse(*i)))
+        .map(|(i, _)| (i + 1) as u32)
+        .unwrap_or(1);
+    for (i, label) in labels.iter().enumerate() {
+        if *label != 0 && *label != keep {
+            solid[i] = false;
+        }
+    }
+}
+
+/// Extra ring simplification before extrusion — marching-squares stairsteps
+/// create dense 90° concave corners; per-edge side walls overlapped there.
+const SILHOUETTE_RING_SIMPLIFY: f32 = 1.25;
+
+fn simplify_polygon_rings(poly: &mut SilhouettePolygon, tolerance: f32) {
+    simplify_polyline(&mut poly.outer, tolerance);
+    for hole in poly.holes.iter_mut() {
+        simplify_polyline(hole, tolerance);
+    }
+}
+
+fn ring_vertex_wall_normal(
+    ring: &[(f32, f32)],
+    i: usize,
+    solid: &[bool],
+    grid_w: i32,
+    grid_h: i32,
+    bounds: SilhouetteUnionBounds,
+    kind: CapExtrudeKind,
+) -> [f32; 3] {
+    let n = ring.len();
+    if n < 2 {
+        return [0.0, 1.0, 0.0];
+    }
+    let (x0, y0) = ring[i];
+    let (xp, yp) = ring[(i + n - 1) % n];
+    let (xn, yn) = ring[(i + 1) % n];
+    let n_prev = outward_wall_normal_for_silhouette_edge(
+        xp, yp, x0, y0, solid, grid_w, grid_h, bounds, kind,
+    );
+    let n_next = outward_wall_normal_for_silhouette_edge(
+        x0, y0, xn, yn, solid, grid_w, grid_h, bounds, kind,
+    );
+    let sum = glam::Vec3::from(n_prev) + glam::Vec3::from(n_next);
+    let n = sum.normalize_or_zero();
+    [n.x, n.y, n.z]
+}
+
+/// Shared-vertex side strip (two verts per ring point). Avoids overlapping
+/// per-edge quads at marching-squares concave corners — see `build_pack_mesh`.
+fn append_side_wall_strip_from_ring(
+    vertices: &mut Vec<Vertex3dTex>,
+    indices: &mut Vec<u32>,
+    ring: &[(f32, f32)],
+    solid: &[bool],
+    grid_w: i32,
+    grid_h: i32,
+    bounds: SilhouetteUnionBounds,
+    kind: CapExtrudeKind,
+    half_thick: f32,
+) {
+    let n_pts = ring.len();
+    if n_pts < 3 {
+        return;
+    }
+    let strip_base = vertices.len() as u32;
+    for i in 0..n_pts {
+        let (x, y) = ring[i];
+        let (lx, ly) = pixel_to_cap_local(x, y, bounds, kind);
+        let normal = ring_vertex_wall_normal(ring, i, solid, grid_w, grid_h, bounds, kind);
+        let uv = pixel_to_albedo_uv(x, y, bounds);
+        let (back, front) = match kind {
+            CapExtrudeKind::RelicPinY => (
+                [lx, -half_thick, ly],
+                [lx, half_thick, ly],
+            ),
+            CapExtrudeKind::TalismanZ => (
+                [lx, ly, -half_thick],
+                [lx, ly, half_thick],
+            ),
+        };
+        vertices.push(Vertex3dTex {
+            position: back,
+            normal,
+            uv,
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: front,
+            normal,
+            uv,
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+        });
+    }
+
+    for i in 0..n_pts {
+        let next = (i + 1) % n_pts;
+        let b0 = strip_base + 2 * i as u32;
+        let t0 = b0 + 1;
+        let b1 = strip_base + 2 * next as u32;
+        let t1 = b1 + 1;
+        indices.extend_from_slice(&cap_extrude::side_wall_strip_quad_indices(
+            b0, t0, t1, b1, vertices,
+        ));
+    }
+}
+
 fn build_extruded_pin_mesh_from_solid(
     solid: &[bool],
     width: u32,
@@ -1346,6 +1510,11 @@ fn build_extruded_pin_mesh_from_solid(
     let mut emitted_any = false;
 
     for poly in &polygons {
+        let mut poly = poly.clone();
+        simplify_polygon_rings(&mut poly, SILHOUETTE_RING_SIMPLIFY);
+        if poly.outer.len() < 3 {
+            continue;
+        }
         // Feed the polygon to lyon as an outer loop + one sub-path per hole.
         let mut builder = Path::builder();
         if !push_ring_to_lyon_path(&mut builder, &poly.outer) {
@@ -1414,66 +1583,30 @@ fn build_extruded_pin_mesh_from_solid(
             ]);
         }
 
-        // Side walls: extrude every contour edge (outer + holes). The
-        // polygons come from marching squares which produces consistently
-        // oriented closed loops, so consecutive points in each ring already
-        // give us the wall edges.
-        let mut rings: Vec<&Vec<(f32, f32)>> = Vec::with_capacity(1 + poly.holes.len());
-        rings.push(&poly.outer);
+        // Side walls: shared-vertex strip around outer + holes.
+        append_side_wall_strip_from_ring(
+            &mut vertices,
+            &mut indices,
+            &poly.outer,
+            solid,
+            w as i32,
+            h as i32,
+            bounds,
+            KIND,
+            HALF_Y,
+        );
         for hole in &poly.holes {
-            rings.push(hole);
-        }
-        for ring in rings {
-            let n_pts = ring.len();
-            if n_pts < 3 {
-                continue;
-            }
-            for i in 0..n_pts {
-                let (x0, y0) = ring[i];
-                let (x1, y1) = ring[(i + 1) % n_pts];
-                let (lx0, lz0) = pixel_to_cap_local(x0, y0, bounds, KIND);
-                let (lx1, lz1) = pixel_to_cap_local(x1, y1, bounds, KIND);
-                let normal = outward_wall_normal_for_silhouette_edge(
-                    x0, y0, x1, y1, solid, w as i32, h as i32, bounds, KIND,
-                );
-                let uv0 = pixel_to_albedo_uv(x0, y0, bounds);
-                let uv1 = pixel_to_albedo_uv(x1, y1, bounds);
-                let base = vertices.len() as u32;
-                // bot0, top0, top1, bot1
-                vertices.push(Vertex3dTex {
-                    position: [lx0, -HALF_Y, lz0],
-                    normal: [normal[0], normal[1], normal[2]],
-                    uv: uv0,
-                    tangent: Vertex3dTex::DEFAULT_TANGENT,
-                    uv_emr: [0.0, 0.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                });
-                vertices.push(Vertex3dTex {
-                    position: [lx0, HALF_Y, lz0],
-                    normal: [normal[0], normal[1], normal[2]],
-                    uv: uv0,
-                    tangent: Vertex3dTex::DEFAULT_TANGENT,
-                    uv_emr: [0.0, 0.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                });
-                vertices.push(Vertex3dTex {
-                    position: [lx1, HALF_Y, lz1],
-                    normal: [normal[0], normal[1], normal[2]],
-                    uv: uv1,
-                    tangent: Vertex3dTex::DEFAULT_TANGENT,
-                    uv_emr: [0.0, 0.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                });
-                vertices.push(Vertex3dTex {
-                    position: [lx1, -HALF_Y, lz1],
-                    normal: [normal[0], normal[1], normal[2]],
-                    uv: uv1,
-                    tangent: Vertex3dTex::DEFAULT_TANGENT,
-                    uv_emr: [0.0, 0.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                });
-                indices.extend_from_slice(&side_wall_quad_indices_oriented(base, &vertices));
-            }
+            append_side_wall_strip_from_ring(
+                &mut vertices,
+                &mut indices,
+                hole,
+                solid,
+                w as i32,
+                h as i32,
+                bounds,
+                KIND,
+                HALF_Y,
+            );
         }
 
         emitted_any = true;
@@ -1544,7 +1677,10 @@ fn build_extruded_talisman_mesh_from_solid(
     let w = width as usize;
     let h = height as usize;
 
-    let contours = trace_silhouette_contours(solid, w as i32, h as i32);
+    let mut solid = solid.to_vec();
+    keep_largest_solid_component(&mut solid, w, h);
+
+    let contours = trace_silhouette_contours(&solid, w as i32, h as i32);
     let contours = filter_border_noise_loops(contours, width as f32, height as f32, source_label);
     let polygons = group_contours_into_polygons(contours);
     if polygons.is_empty() {
@@ -1560,6 +1696,11 @@ fn build_extruded_talisman_mesh_from_solid(
     let mut emitted_any = false;
 
     for poly in &polygons {
+        let mut poly = poly.clone();
+        simplify_polygon_rings(&mut poly, SILHOUETTE_RING_SIMPLIFY);
+        if poly.outer.len() < 3 {
+            continue;
+        }
         let mut builder = Path::builder();
         if !push_ring_to_lyon_path(&mut builder, &poly.outer) {
             continue;
@@ -1571,7 +1712,7 @@ fn build_extruded_talisman_mesh_from_solid(
 
         let mut buffers: VertexBuffers<(f32, f32), u32> = VertexBuffers::new();
         let mut tess = FillTessellator::new();
-        let fill_options = FillOptions::tolerance(0.25).with_fill_rule(FillRule::NonZero);
+        let fill_options = FillOptions::tolerance(1.0).with_fill_rule(FillRule::NonZero);
         let result = tess.tessellate_path(
             &path,
             &fill_options,
@@ -1624,61 +1765,29 @@ fn build_extruded_talisman_mesh_from_solid(
             ]);
         }
 
-        let mut rings: Vec<&Vec<(f32, f32)>> = Vec::with_capacity(1 + poly.holes.len());
-        rings.push(&poly.outer);
+        append_side_wall_strip_from_ring(
+            &mut vertices,
+            &mut indices,
+            &poly.outer,
+            &solid,
+            w as i32,
+            h as i32,
+            bounds,
+            KIND,
+            half_z,
+        );
         for hole in &poly.holes {
-            rings.push(hole);
-        }
-        for ring in rings {
-            let n_pts = ring.len();
-            if n_pts < 3 {
-                continue;
-            }
-            for i in 0..n_pts {
-                let (x0, y0) = ring[i];
-                let (x1, y1) = ring[(i + 1) % n_pts];
-                let (lx0, ly0) = pixel_to_cap_local(x0, y0, bounds, KIND);
-                let (lx1, ly1) = pixel_to_cap_local(x1, y1, bounds, KIND);
-                let normal = outward_wall_normal_for_silhouette_edge(
-                    x0, y0, x1, y1, solid, w as i32, h as i32, bounds, KIND,
-                );
-                let uv0 = pixel_to_albedo_uv(x0, y0, bounds);
-                let uv1 = pixel_to_albedo_uv(x1, y1, bounds);
-                let base = vertices.len() as u32;
-                vertices.push(Vertex3dTex {
-                    position: [lx0, ly0, -half_z],
-                    normal: [normal[0], normal[1], normal[2]],
-                    uv: uv0,
-                    tangent: Vertex3dTex::DEFAULT_TANGENT,
-                    uv_emr: [0.0, 0.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                });
-                vertices.push(Vertex3dTex {
-                    position: [lx0, ly0, half_z],
-                    normal: [normal[0], normal[1], normal[2]],
-                    uv: uv0,
-                    tangent: Vertex3dTex::DEFAULT_TANGENT,
-                    uv_emr: [0.0, 0.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                });
-                vertices.push(Vertex3dTex {
-                    position: [lx1, ly1, half_z],
-                    normal: [normal[0], normal[1], normal[2]],
-                    uv: uv1,
-                    tangent: Vertex3dTex::DEFAULT_TANGENT,
-                    uv_emr: [0.0, 0.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                });
-                vertices.push(Vertex3dTex {
-                    position: [lx1, ly1, -half_z],
-                    normal: [normal[0], normal[1], normal[2]],
-                    uv: uv1,
-                    tangent: Vertex3dTex::DEFAULT_TANGENT,
-                    uv_emr: [0.0, 0.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                });
-                indices.extend_from_slice(&side_wall_quad_indices_oriented(base, &vertices));
-            }
+            append_side_wall_strip_from_ring(
+                &mut vertices,
+                &mut indices,
+                hole,
+                &solid,
+                w as i32,
+                h as i32,
+                bounds,
+                KIND,
+                half_z,
+            );
         }
 
         emitted_any = true;
@@ -1738,6 +1847,65 @@ mod extruded_tests {
         let has_front = mesh.vertices.iter().any(|v| v.position[2] > 0.01);
         let has_back = mesh.vertices.iter().any(|v| v.position[2] < -0.01);
         assert!(has_front && has_back);
+    }
+
+    #[test]
+    fn talisman_rim_geometry_sanity() {
+        use crate::talisman_mesh::build_talisman_mesh_from_mask_asset;
+        let mesh =
+            build_talisman_mesh_from_mask_asset("textures/talismans/talisman_wildflower_mask.png")
+                .expect("wildflower mesh");
+        let half_z = crate::talisman_mesh::TALISMAN_HALF_THICKNESS;
+        let mut cap_slivers = 0usize;
+        let mut wall_bad_z = 0usize;
+        let mut wall_folded = 0usize;
+        for tri in mesh.indices.chunks_exact(3) {
+            let p = [
+                glam::Vec3::from(mesh.vertices[tri[0] as usize].position),
+                glam::Vec3::from(mesh.vertices[tri[1] as usize].position),
+                glam::Vec3::from(mesh.vertices[tri[2] as usize].position),
+            ];
+            let n = mesh.vertices[tri[0] as usize].normal;
+            let face = (p[1] - p[0]).cross(p[2] - p[0]);
+            if face.length_squared() < 1e-14 {
+                continue;
+            }
+            let fnorm = face.normalize();
+            let all_top = p.iter().all(|v| v.z > half_z - 1e-4);
+            let all_bot = p.iter().all(|v| v.z < -half_z + 1e-4);
+            let spans_z = p.iter().map(|v| v.z).fold(f32::INFINITY, f32::min)
+                < half_z - 1e-4
+                && p.iter().map(|v| v.z).fold(f32::NEG_INFINITY, f32::max) > -half_z + 1e-4;
+            if all_top || all_bot {
+                let edges = [
+                    (p[1] - p[0]).length(),
+                    (p[2] - p[1]).length(),
+                    (p[0] - p[2]).length(),
+                ];
+                let max_e = edges.iter().cloned().fold(0.0_f32, f32::max);
+                let min_e = edges.iter().cloned().fold(f32::INFINITY, f32::min);
+                if min_e > 1e-6 && max_e / min_e > 40.0 {
+                    cap_slivers += 1;
+                }
+            } else if spans_z && n[2].abs() < 0.05 {
+                if fnorm.z.abs() > 0.15 {
+                    wall_bad_z += 1;
+                }
+                let vn = glam::Vec3::from(n);
+                if fnorm.dot(vn) < 0.0 {
+                    wall_folded += 1;
+                }
+            }
+        }
+        eprintln!(
+            "wildflower: cap_slivers={cap_slivers} wall_bad_z={wall_bad_z} wall_folded={wall_folded}"
+        );
+        assert_eq!(wall_folded, 0, "folded side-wall tris");
+        assert_eq!(wall_bad_z, 0, "side-wall tris with Z in face normal");
+        assert!(
+            cap_slivers <= 8,
+            "expected few cap slivers after ring simplify + lyon tolerance (got {cap_slivers})"
+        );
     }
 
     #[test]
@@ -1848,6 +2016,7 @@ fn filter_border_noise_loops(
 }
 
 /// A closed polygon in pixel coords: one outer contour and zero or more holes.
+#[derive(Clone)]
 struct SilhouettePolygon {
     outer: Vec<(f32, f32)>,
     holes: Vec<Vec<(f32, f32)>>,
@@ -2285,5 +2454,51 @@ mod silhouette_tests {
         let filtered = filter_border_noise_loops(vec![border_outer.clone()], 16.0, 16.0, "test");
         assert_eq!(filtered.len(), 1, "single full-bleed loop should be kept");
         assert_eq!(filtered[0], border_outer);
+    }
+
+    #[test]
+    fn keep_largest_component_drops_speck_islands() {
+        let mut g = grid(9, 9, &[(4, 4)]);
+        // Main 3×3 block centered.
+        for y in 3..6 {
+            for x in 3..6 {
+                g[y * 9 + x] = true;
+            }
+        }
+        keep_largest_solid_component(&mut g, 9, 9);
+        assert!(g[4 * 9 + 4], "main body should remain");
+        assert!(!g[0], "corner speck should be removed");
+        let loops = trace_silhouette_contours(&g, 9, 9);
+        let polys = group_contours_into_polygons(loops);
+        assert_eq!(polys.len(), 1, "expected one pendant body");
+    }
+
+    #[test]
+    fn talisman_masks_extrude_single_body() {
+        for path in mahjuro_core::core::talisman::TalismanKind::all()
+            .iter()
+            .map(|k| k.mask_asset_path())
+            .chain(
+                mahjuro_core::core::memorial_talisman::MemorialTalismanKind::all()
+                    .iter()
+                    .map(|k| k.mask_asset_path()),
+            )
+        {
+            let file = mahjuro_assets::asset_path::get(path).expect(path);
+            let img = image::load_from_memory(&file.data).unwrap().into_rgba8();
+            let w = img.width() as usize;
+            let h = img.height() as usize;
+            let mut solid = silhouette_solid_luma(img.as_raw(), w, h);
+            keep_largest_solid_component(&mut solid, w, h);
+            let loops =
+                filter_border_noise_loops(trace_silhouette_contours(&solid, w as i32, h as i32), w as f32, h as f32, path);
+            let polys = group_contours_into_polygons(loops);
+            assert_eq!(
+                polys.len(),
+                1,
+                "{path} should extrude as one body (got {} islands)",
+                polys.len()
+            );
+        }
     }
 }

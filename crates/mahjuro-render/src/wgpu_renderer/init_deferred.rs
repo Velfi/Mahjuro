@@ -114,26 +114,28 @@ impl WgpuRenderer {
         for &kind in mahjuro_core::core::talisman::TalismanKind::all() {
             let mask_path = kind.mask_asset_path();
             let slug = kind.asset_slug();
-            if let Some(cpu) = build_talisman_mesh_from_mask_asset(mask_path) {
-                self.talisman_meshes.insert(
-                    kind,
-                    LitMeshGpu::new(&self.device, &cpu, &format!("talisman-mesh-{slug}")),
-                );
-            }
+            let cpu = build_talisman_mesh_from_mask_asset(mask_path).unwrap_or_else(|| {
+                panic!("failed to build shop talisman mesh from {mask_path} ({slug})")
+            });
+            self.talisman_meshes.insert(
+                kind,
+                LitMeshGpu::new(&self.device, &cpu, &format!("talisman-mesh-{slug}")),
+            );
         }
         for &kind in mahjuro_core::core::memorial_talisman::MemorialTalismanKind::all() {
             let mask_path = kind.mask_asset_path();
             let slug = kind.asset_slug();
-            if let Some(cpu) = build_talisman_mesh_from_mask_asset(mask_path) {
-                self.memorial_talisman_meshes.insert(
-                    kind,
-                    LitMeshGpu::new(
-                        &self.device,
-                        &cpu,
-                        &format!("memorial-talisman-mesh-{slug}"),
-                    ),
-                );
-            }
+            let cpu = build_talisman_mesh_from_mask_asset(mask_path).unwrap_or_else(|| {
+                panic!("failed to build memorial talisman mesh from {mask_path} ({slug})")
+            });
+            self.memorial_talisman_meshes.insert(
+                kind,
+                LitMeshGpu::new(
+                    &self.device,
+                    &cpu,
+                    &format!("memorial-talisman-mesh-{slug}"),
+                ),
+            );
         }
         self.talisman_meshes_ready = true;
     }

@@ -133,6 +133,41 @@ impl RunState {
         self.try_validate_with_wildcards(&selected_tiles).is_some()
     }
 
+    /// Player-facing copy for the current selection when Play is rejected.
+    pub fn rejected_play_hint(&self) -> Option<String> {
+        let selected_tiles: Vec<Tile> = self
+            .hand
+            .iter()
+            .zip(self.selected.iter())
+            .filter(|&(_, &sel)| sel)
+            .map(|(t, _)| *t)
+            .collect();
+        if selected_tiles.is_empty() {
+            return None;
+        }
+        let rules = self.validation_rules_for_structure_commits();
+        let Some((sets, scoring_tiles)) = self.try_validate_with_wildcards(&selected_tiles) else {
+            return Some(crate::core::hand::selection_rejection_hint(
+                &selected_tiles,
+                &rules,
+            ));
+        };
+        use crate::core::hand::MeldKind;
+        use crate::game::game_mode::HAND_SIZE;
+        let kongs_after = self
+            .structure_sets
+            .iter()
+            .chain(sets.iter())
+            .filter(|s| s.kind == MeldKind::Kong)
+            .count();
+        if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
+            return Some(
+                "Your structure can't hold that many tiles — cash in first.".to_string(),
+            );
+        }
+        None
+    }
+
     /// Discard all selected tiles (costs 1 discard), then auto-draw back to HAND_SIZE.
     /// Returns the number of tiles discarded, or 0 if nothing was selected or no discards left.
     pub fn discard_selected(&mut self, bus: &mut EventBus) -> usize {
