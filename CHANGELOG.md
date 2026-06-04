@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.6-1 — 2026-06-04
+
+### Changed
+- Moving focus with the left stick, d-pad, or arrow keys during a scoring cascade no longer skips the reveal. Confirm and other actions still let you fast-forward as before.
+
 ## 0.5.6-0 — 2026-06-04
 
 - maintenance, development, and bugfixes.
