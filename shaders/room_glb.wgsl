@@ -296,9 +296,9 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     if (pbr.emissive_factor.w > 1.5) {
         let V = normalize(cam.cam_pos - in.world_pos);
         let phase_col =
-            moon_hub_phase_emissive(albedo, n_world, V, cam.decal_atlas_uv.w, cam.model);
+            moon_hub_phase_emissive(albedo, n_world, V, cam.decal_atlas_uv.w);
         if (cam.hdr_tonemap.w > 0.0) {
-            let lit_mask = moon_phase_lit_mask(n_world, cam.model, cam.decal_atlas_uv.w);
+            let lit_mask = moon_phase_lit_mask(n_world, V, cam.decal_atlas_uv.w);
             let mask = max(emissive.r, max(emissive.g, emissive.b));
             let swirl_uv = in.uv_emr * 0.65
                 + vec2<f32>(in.world_pos.x, in.world_pos.y) * 0.004;

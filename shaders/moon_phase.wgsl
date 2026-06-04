@@ -1,23 +1,33 @@
 // Synodic lunar phase shading for the main-menu `MoonObject` mesh.
 //
 // `phase` is 0..1 (0 = new, 0.25 = first quarter, 0.5 = full, 0.75 = last quarter).
-// Uses per-pixel `n_world` so the terminator stays smooth on the low-poly sphere.
+// Sun direction is derived from observer view so gibbous phases are not locked to 50% lit.
 
-fn moon_phase_sun_dir_world(model: mat4x4<f32>, phase: f32) -> vec3<f32> {
-    // +180° so phase 0 (new) faces the camera with the dark hemisphere.
-    let phase_angle = (phase + 0.5) * 6.2831853;
-    // Synodic light sweeps the mesh equator (pole = +Z in `MoonObject` mesh space).
-    let sun_mesh = vec3(cos(phase_angle), sin(phase_angle), 0.0);
-    return normalize((model * vec4<f32>(sun_mesh, 0.0)).xyz);
+fn moon_phase_orbit_tangent(view_dir: vec3<f32>) -> vec3<f32> {
+    let O = normalize(view_dir);
+    // Z-up world; stable axis in the plane perpendicular to the view ray.
+    var tangent = cross(vec3<f32>(0.0, 0.0, 1.0), O);
+    if (dot(tangent, tangent) < 1e-8) {
+        tangent = cross(vec3<f32>(1.0, 0.0, 0.0), O);
+    }
+    return normalize(tangent);
 }
 
-fn moon_phase_ndotl(n_world: vec3<f32>, model: mat4x4<f32>, phase: f32) -> f32 {
-    return dot(n_world, moon_phase_sun_dir_world(model, phase));
+fn moon_phase_sun_dir_world(view_dir: vec3<f32>, phase: f32) -> vec3<f32> {
+    // 0 = new (sun opposite viewer), 0.5 = full (sun ~ viewer direction).
+    let phase_angle = phase * 6.2831853;
+    let O = normalize(view_dir);
+    let tangent = moon_phase_orbit_tangent(view_dir);
+    return normalize(-O * cos(phase_angle) + tangent * sin(phase_angle));
+}
+
+fn moon_phase_ndotl(n_world: vec3<f32>, view_dir: vec3<f32>, phase: f32) -> f32 {
+    return dot(n_world, moon_phase_sun_dir_world(view_dir, phase));
 }
 
 /// Hard terminator with a hairline soften (avoids aliasing, not a foggy ramp).
-fn moon_phase_lit_mask(n_world: vec3<f32>, model: mat4x4<f32>, phase: f32) -> f32 {
-    let ndotl = moon_phase_ndotl(n_world, model, phase);
+fn moon_phase_lit_mask(n_world: vec3<f32>, view_dir: vec3<f32>, phase: f32) -> f32 {
+    let ndotl = moon_phase_ndotl(n_world, view_dir, phase);
     return smoothstep(-0.008, 0.012, ndotl);
 }
 
@@ -26,10 +36,8 @@ fn moon_hub_phase_emissive(
     n_world: vec3<f32>,
     view_dir: vec3<f32>,
     phase: f32,
-    model: mat4x4<f32>,
 ) -> vec3<f32> {
-    let ndotl = moon_phase_ndotl(n_world, model, phase);
-    let lit_mask = moon_phase_lit_mask(n_world, model, phase);
+    let lit_mask = moon_phase_lit_mask(n_world, view_dir, phase);
 
     let mu = max(dot(n_world, normalize(view_dir)), 0.0);
     let limb_att = mix(0.82, 1.0, smoothstep(0.15, 0.65, mu));

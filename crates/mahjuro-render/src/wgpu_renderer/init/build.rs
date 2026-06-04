@@ -2890,7 +2890,6 @@ pub(super) fn build_renderer_new(
     let relic_box_mesh = LitMeshGpu::new(&device, &relic_box_cpu, "relic-mesh");
     let pack_mesh = LitMeshGpu::new(&device, &build_pack_mesh(), "pack-mesh");
     let ribbon_mesh = LitMeshGpu::new(&device, &build_ribbon_mesh(), "ribbon");
-    let talisman_mesh = LitMeshGpu::new(&device, &build_talisman_mesh(), "talisman");
     let bug_body_mesh = LitMeshGpu::new(&device, &build_bug_body_mesh(), "bug-body");
     let bug_wing_mesh = LitMeshGpu::new(&device, &build_bug_wing_mesh(), "bug-wing");
     let bug_wing_blur_mesh = LitMeshGpu::new(&device, &build_bug_wing_blur_mesh(), "bug-wing-blur");
@@ -3442,7 +3441,6 @@ pub(super) fn build_renderer_new(
         pack_instances,
         pack_slot_texture: vec![None; 4],
         ribbon_mesh,
-        talisman_mesh,
         ribbon_instances,
         ribbon_slot_zodiac,
         ribbon_zodiac_tex,

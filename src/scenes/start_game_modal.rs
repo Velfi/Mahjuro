@@ -818,7 +818,7 @@ impl SceneBehavior for TileSelectScene {
             widget::push_text_block(
                 &mut text_labels,
                 [panel.x, cursor_y, panel.w, intro_h],
-                "A short guided campaign teaches melds, structure scoring, relics, bosses, and the shop before one final practice fight.",
+                "A short guided run teaches melds, structure building, relics, ordeals, and the shop before one final test.",
                 TextStyle {
                     tier: typography::H28,
                     color: color::STONE,
@@ -833,7 +833,7 @@ impl SceneBehavior for TileSelectScene {
             widget::push_text_block(
                 &mut text_labels,
                 [panel.x, cursor_y, panel.w, skip_h],
-                "Skip marks the tutorial complete for this profile and starts a normal run immediately.",
+                "Once completed or skipped, you can't return to the tutorial without creating a new profile.",
                 TextStyle {
                     tier: typography::H42,
                     color: color::PARCHMENT,

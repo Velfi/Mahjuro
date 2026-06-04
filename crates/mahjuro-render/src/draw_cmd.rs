@@ -135,6 +135,10 @@ pub struct ShowcaseRenderHints {
     /// staging camera; keep lights/meshes on [`pixel_to_world`] and disable
     /// directional shadows (main menu would otherwise ray-map lights only).
     pub modal_relic_staging: bool,
+    /// Zodiac level-up ribbon on the showcase overlay: hero receives punctual
+    /// light but should not cast a drop shadow on the black void (same as pack
+    /// celebration tiles / pack mesh).
+    pub zodiac_celebration_no_shadow: bool,
 }
 
 impl ShowcaseRenderHints {

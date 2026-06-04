@@ -174,7 +174,7 @@ pub fn push_focus_tooltip_panel_2d(
             Tier::Body => body_px,
         };
         let h_block = block_height(text, *col, *tier);
-        let lines = colored_keywords::wrap_colored_text_multiline(text, inner_w, line_h, *col);
+        let lines = colored_keywords::wrap_colored_text_multiline(text, inner_w, line_h, *col, false);
         colored_keywords::push_colored_rows_left(
             texts,
             colored_keywords::ColoredRowsLayout {
@@ -184,6 +184,7 @@ pub fn push_focus_tooltip_panel_2d(
                 line_h,
                 fallback_plain: text,
                 fallback_color: *col,
+                italic: false,
             },
             &lines,
         );

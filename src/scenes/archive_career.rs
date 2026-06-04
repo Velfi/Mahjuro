@@ -245,11 +245,11 @@ pub fn chronicle_run_description(rec: &RunRecord) -> String {
         "{outcome}\n{boss}Wing {} · {} chamber\nRound score {} / target {}\nRun total score {}\nBest hand: {} ({})\nMaterial {} · season {}",
         rec.final_wing,
         rec.final_chamber.name(),
-        rec.round_score,
-        rec.target_score,
-        rec.total_score_earned,
+        format_score(rec.round_score),
+        format_score(rec.target_score as u64),
+        format_score(rec.total_score_earned),
         rec.best_structure_name,
-        rec.best_structure_score,
+        format_score(rec.best_structure_score),
         rec.tile_material.label(),
         rec.season.label(),
     )
@@ -671,17 +671,20 @@ pub fn run_detail_model(
 
     let mut score_lines = Vec::new();
     if let Some(snap) = rec.chronicle.terminal_score.as_ref() {
-        score_lines.push(format!("Base {} chips", snap.base_chips));
-        score_lines.push(format!("Yaku +{} chips", snap.yaku_chips));
-        score_lines.push(format!("Dora +{} chips", snap.dora_chips));
+        score_lines.push(format!("Base {} chips", format_score(snap.base_chips as u64)));
+        score_lines.push(format!("Yaku +{} chips", format_score(snap.yaku_chips as u64)));
+        score_lines.push(format!("Dora +{} chips", format_score(snap.dora_chips as u64)));
         if snap.relic_chips > 0 {
-            score_lines.push(format!("Relics +{} chips", snap.relic_chips));
+            score_lines.push(format!(
+                "Relics +{} chips",
+                format_score(snap.relic_chips as u64)
+            ));
         }
         score_lines.push(format!(
             "Boss mult ×{:.2} · Season mult ×{:.2}",
             snap.boss_mult_factor, snap.season_mult_factor
         ));
-        score_lines.push(format!("Total {} chips", snap.total));
+        score_lines.push(format!("Total {} chips", format_score(snap.total)));
     } else {
         score_lines.push(format!(
             "Round {} / {} chips target",
@@ -843,20 +846,7 @@ pub fn tile_image_source(tile: &Tile) -> Option<ImageQuadSource> {
     })
 }
 
-pub fn format_score(n: u64) -> String {
-    let s = n.to_string();
-    if s.len() <= 3 {
-        return s;
-    }
-    let mut out = String::new();
-    for (i, ch) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out.chars().rev().collect()
-}
+pub use crate::ui::score_format::format_score;
 
 /// Score with unit for Chronicle copy (career ledger, run detail).
 pub fn format_chips(n: u64) -> String {

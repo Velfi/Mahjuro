@@ -12,8 +12,8 @@ mod validation;
 pub use decomposition::find_pairs_and_triplets;
 pub use decomposition::{detect_all_sets, enumerate_decompositions};
 pub use validation::{
-    non_contributing_tile_ids, suggest_completions, validate_selection,
-    validate_selection_with_rules,
+    non_contributing_tile_ids, selection_rejection_hint, suggest_completions,
+    validate_selection, validate_selection_with_rules,
 };
 
 /// Player-facing meld variant. `Single` is a decomposition artefact (only

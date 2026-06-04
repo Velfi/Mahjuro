@@ -726,13 +726,13 @@ fn fs_main(
     let is_talisman  = (is_chitin || is_jade || is_moonstone || is_pearl || is_goldnug || is_poly);
     // Chitin: classify by local normal — rim verts share |z| with caps but face outward.
     // Displaced inspect caps tilt their normals; also accept +Z half-space by position.
-    let chitin_front_face = is_chitin && (in.local_n.z > 0.9 || in.local_pos.z > 0.01);
-    let chitin_rim_face = is_chitin && abs(in.local_n.z) <= 0.9 && in.local_pos.z <= 0.01;
+    let chitin_front_face = is_chitin && in.local_n.z > 0.9;
+    let chitin_rim_face = is_chitin && abs(in.local_n.z) <= 0.9;
     let is_memorial_chitin = is_chitin && mesh.material_params.w >= 127.5;
     let talisman_lustrous = is_chitin && !is_memorial_chitin;
     var talisman_relief_h = 0.5;
 
-    // Octagon mask on the carved front cap only (not rim planes or back).
+    // Silhouette mask on the carved front cap only (not rim planes or back).
     if (chitin_front_face) {
         let tablet_mask = textureSampleLevel(relief_tex, albedo_samp, in.uv, 0.0).r;
         if (tablet_mask < (8.0 / 255.0)) {

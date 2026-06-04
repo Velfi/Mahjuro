@@ -291,6 +291,23 @@ impl WgpuRenderer {
                         pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
                         continue;
                     }
+                    if matches!(kind, DrawKind::Talisman) {
+                        let Some(mesh) = self
+                            .talisman_slot_kind
+                            .get(slot_i)
+                            .and_then(|k| k.and_then(|idx| self.talisman_mesh_for_kind_idx(idx)))
+                        else {
+                            continue;
+                        };
+                        let Some(inst) = self.talisman_instances.get(slot_i) else {
+                            continue;
+                        };
+                        pass.set_bind_group(0, &inst.bind_group, &[]);
+                        pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                        pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                        continue;
+                    }
                     let (mesh, inst_opt): (&LitMeshGpu, Option<&LitMeshInstance>) = match kind {
                         DrawKind::YakuTablet => (
                             &self.bone_tablet_mesh,
@@ -306,14 +323,7 @@ impl WgpuRenderer {
                         }
                         DrawKind::Pack => (&self.pack_mesh, self.pack_instances.get(slot_i)),
                         DrawKind::Ribbon => (&self.ribbon_mesh, self.ribbon_instances.get(slot_i)),
-                        DrawKind::Talisman => {
-                            let mesh = self
-                                .talisman_slot_kind
-                                .get(slot_i)
-                                .and_then(|k| k.map(|idx| self.talisman_mesh_for_kind_idx(idx)))
-                                .unwrap_or(&self.talisman_mesh);
-                            (mesh, self.talisman_instances.get(slot_i))
-                        }
+                        DrawKind::Talisman => unreachable!("handled above"),
                         DrawKind::BugBody => {
                             (&self.bug_body_mesh, self.bug_body_instances.get(slot_i))
                         }

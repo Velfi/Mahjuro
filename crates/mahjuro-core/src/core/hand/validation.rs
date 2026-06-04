@@ -165,6 +165,60 @@ pub fn non_contributing_tile_ids(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<
     out
 }
 
+/// Short player-facing copy for why a selection cannot be played as a meld.
+pub fn selection_rejection_hint(tiles: &[Tile], rules: &[RuleModifier]) -> String {
+    if tiles.is_empty() {
+        return "Select tiles to form a valid meld.".to_string();
+    }
+    if rules.contains(&RuleModifier::MustPlayFive) && tiles.len() != 5 {
+        return format!(
+            "This round requires exactly 5 tiles per play — you selected {}.",
+            tiles.len()
+        );
+    }
+    if tiles.len() == 1 {
+        return "A meld needs at least two matching tiles, or three for a run.".to_string();
+    }
+
+    let bad_ids = non_contributing_tile_ids(tiles, rules);
+    if bad_ids.len() == tiles.len() {
+        return match tiles.len() {
+            2 => "These two tiles aren't a pair — select two of the same tile.".to_string(),
+            _ if same_numbered_suit(tiles) => {
+                "These tiles aren't a run — pick three consecutive tiles in the same suit."
+                    .to_string()
+            }
+            _ => {
+                "These tiles don't form a valid meld — try a pair, triplet, or three-in-a-row."
+                    .to_string()
+            }
+        };
+    }
+    if !bad_ids.is_empty() {
+        return "Some selected tiles don't fit this meld — deselect the extras.".to_string();
+    }
+    "These tiles don't form a valid meld.".to_string()
+}
+
+fn same_numbered_suit(tiles: &[Tile]) -> bool {
+    use crate::core::tile::Suit;
+    let mut suit = None;
+    for tile in tiles {
+        if tile.is_flower() {
+            return false;
+        }
+        if !matches!(tile.suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu) {
+            return false;
+        }
+        match suit {
+            None => suit = Some(tile.suit),
+            Some(s) if s == tile.suit => {}
+            _ => return false,
+        }
+    }
+    suit.is_some()
+}
+
 /// For each unselected tile in the hand, check if adding it to the current selection
 /// would form a valid meld. Returns hand indices of tiles that would complete a meld.
 pub fn suggest_completions(hand: &[Tile], selected_indices: &[usize]) -> Vec<usize> {

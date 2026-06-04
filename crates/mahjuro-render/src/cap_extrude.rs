@@ -247,6 +247,33 @@ fn tri_face_normal_dot(v: [&Vertex3dTex; 3], want: glam::Vec3) -> f32 {
     f.normalize().dot(want)
 }
 
+/// Triangle indices for a side-wall strip quad (shared corner verts).
+/// Layout: `b0`/`t0` at corner i, `b1`/`t1` at corner i+1.
+pub fn side_wall_strip_quad_indices(
+    b0: u32,
+    t0: u32,
+    t1: u32,
+    b1: u32,
+    vertices: &[Vertex3dTex],
+) -> [u32; 6] {
+    let v = |i: u32| &vertices[i as usize];
+    let want = glam::Vec3::from(v(b0).normal);
+
+    let a: [[u32; 3]; 2] = [[b0, t0, t1], [b1, t1, t0]];
+    let b: [[u32; 3]; 2] = [[t0, b1, b0], [t1, b1, t0]];
+    let score = |tris: &[[u32; 3]; 2]| -> f32 {
+        tris.iter()
+            .map(|tri| tri_face_normal_dot([v(tri[0]), v(tri[1]), v(tri[2])], want))
+            .fold(f32::INFINITY, f32::min)
+    };
+
+    if score(&a) >= score(&b) {
+        [b0, t0, t1, b1, t1, t0]
+    } else {
+        [t0, b1, b0, t1, b1, t0]
+    }
+}
+
 /// Triangle indices for a side-wall quad, oriented so face normals agree with
 /// the quad's assigned vertex normal. Vert layout: 0=bot0, 1=top0, 2=top1, 3=bot1.
 pub fn side_wall_quad_indices_oriented(base: u32, vertices: &[Vertex3dTex]) -> [u32; 6] {
@@ -354,7 +381,7 @@ mod tests {
     }
 
     #[test]
-    fn parametric_cap_uv_matches_legacy_talisman_formula() {
+    fn parametric_cap_uv_matches_normalized_cap_coords() {
         const R: f32 = 0.5;
         let x = R * 0.4;
         let y = R * 0.92;

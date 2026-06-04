@@ -13,7 +13,7 @@ impl WgpuRenderer {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn place_object3d_ribbon(
         &mut self,
-        _frame: &crate::draw_cmd::UiFrame,
+        frame: &crate::draw_cmd::UiFrame,
         camera: &CameraFrame,
         obj: &crate::draw_cmd::Object3d,
         center: glam::Vec3,
@@ -102,17 +102,18 @@ impl WgpuRenderer {
             full_ribbon_model,
             silk_mat,
         );
-        self.write_lit_mesh_shadow(
-            shadow,
-            &self.ribbon_instances[slot_i],
-            full_ribbon_model,
-            silk_mat.kind,
-        );
-        self.push_object3d_draw(
-            object3d_draw_list,
-            object3d_shadow_draw_list,
-            DrawKind::Ribbon,
-            slot_i,
-        );
+        let skip_shadow = frame.showcase_render_hints.zodiac_celebration_no_shadow;
+        if !skip_shadow {
+            self.write_lit_mesh_shadow(
+                shadow,
+                &self.ribbon_instances[slot_i],
+                full_ribbon_model,
+                silk_mat.kind,
+            );
+        }
+        object3d_draw_list.push((DrawKind::Ribbon, slot_i));
+        if !skip_shadow {
+            object3d_shadow_draw_list.push((DrawKind::Ribbon, slot_i));
+        }
     }
 }

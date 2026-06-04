@@ -37,6 +37,7 @@ impl MetaLevelUpPresenter {
             shop_tonemap_and_lit_mesh_context: false,
             collection_tonemap_context: true,
             modal_relic_staging: true,
+            zodiac_celebration_no_shadow: false,
         }
     }
 

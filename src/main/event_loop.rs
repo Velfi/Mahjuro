@@ -42,6 +42,12 @@ fn poll_loading_logo_skip(shell: &mut SdlShell) {
             } => {
                 crate::render::wgpu_renderer::loading_screen::request_skip();
             }
+            Event::MouseButtonDown {
+                mouse_btn: SdlMouseButton::Left,
+                ..
+            } => {
+                crate::render::wgpu_renderer::loading_screen::request_skip();
+            }
             _ => {}
         }
     }

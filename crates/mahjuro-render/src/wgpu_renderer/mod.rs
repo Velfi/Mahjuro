@@ -87,7 +87,7 @@ use crate::shop_bell_mesh::build_shop_bell_mesh;
 use crate::table_transform::{
     ribbon_submesh, rot_fixed_axes_deg_matrix, tile_mesh_local_to_world, translate_rot_scale,
 };
-use crate::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh};
+use crate::talisman_mesh::TALISMAN_LOCAL_HALF;
 use crate::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip_mesh};
 use crate::tile_glb::Vertex3dTex;
 use crate::wood_tablet_mesh::build_wood_tablet_mesh;
@@ -594,7 +594,7 @@ pub struct WgpuRenderer {
     memorial_talisman_height_views: Vec<wgpu::TextureView>,
     /// Per-kind organic silhouette masks for memorial pendants — [`MemorialTalismanKind::all()`] order.
     memorial_talisman_mask_views: Vec<wgpu::TextureView>,
-    /// Per-kind mask-extruded pendant meshes (shop). Falls back to [`Self::talisman_mesh`].
+    /// Per-kind mask-extruded pendant meshes (shop).
     talisman_meshes: rustc_hash::FxHashMap<mahjuro_core::core::talisman::TalismanKind, LitMeshGpu>,
     /// Per-kind mask-extruded pendant meshes (memorial).
     memorial_talisman_meshes: rustc_hash::FxHashMap<
@@ -646,7 +646,6 @@ pub struct WgpuRenderer {
     pack_slot_texture: Vec<Option<TilePackKind>>,
     // ── Shop scene meshes (curio cabinet + ribbons + talismans) ─
     ribbon_mesh: LitMeshGpu,
-    talisman_mesh: LitMeshGpu,
     /// Per-ribbon draw-slot instances (shop scene). One slot per ribbon —
     /// the whole ribbon is a single textured mesh now. Truncated at
     /// `MAX_RIBBON_SLOTS`.

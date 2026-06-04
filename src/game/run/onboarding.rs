@@ -72,6 +72,7 @@ impl RunState {
             onboarding.step = 0;
             onboarding.discard_river_tooltip_shown = false;
             onboarding.scored_once = false;
+            onboarding.clear_invalid_meld_hint();
         }
         self.mode.hand_size = LESSONS_HAND_SIZE;
         self.mode.starting_plays = LESSONS_PLAYS;
@@ -112,6 +113,7 @@ impl RunState {
             onboarding.step = 0;
             onboarding.discard_river_tooltip_shown = false;
             onboarding.scored_once = false;
+            onboarding.clear_invalid_meld_hint();
         }
         self.round_score = 0;
         self.round_rules.clear();
@@ -174,6 +176,43 @@ impl RunState {
             if onboarding.step == 3 {
                 onboarding.step = 4;
             }
+        }
+    }
+
+    pub fn onboarding_notify_invalid_play(&mut self) {
+        let Some(hint) = self.rejected_play_hint() else {
+            return;
+        };
+        let selected_tile_ids: Vec<u32> = self
+            .hand
+            .iter()
+            .zip(self.selected.iter())
+            .filter(|&(_, &sel)| sel)
+            .map(|(t, _)| t.id)
+            .collect();
+        if let Some(ref mut onboarding) = self.onboarding
+            && onboarding.lessons_active()
+        {
+            onboarding.set_invalid_meld_hint(hint, selected_tile_ids);
+        }
+    }
+
+    pub fn sync_onboarding_invalid_meld_hint(&mut self) {
+        let selected_tile_ids: Vec<u32> = self
+            .hand
+            .iter()
+            .zip(self.selected.iter())
+            .filter(|&(_, &sel)| sel)
+            .map(|(t, _)| t.id)
+            .collect();
+        if let Some(ref mut onboarding) = self.onboarding {
+            onboarding.sync_invalid_meld_hint(&selected_tile_ids);
+        }
+    }
+
+    pub fn onboarding_clear_invalid_meld_hint(&mut self) {
+        if let Some(ref mut onboarding) = self.onboarding {
+            onboarding.clear_invalid_meld_hint();
         }
     }
 

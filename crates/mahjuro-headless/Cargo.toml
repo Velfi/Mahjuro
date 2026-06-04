@@ -7,7 +7,11 @@ publish.workspace = true
 
 [features]
 default = ["bake"]
-bake = ["mahjuro-render/bake", "mahjuro/offline-bake-support"]
+bake = [
+    "mahjuro-render/bake",
+    "mahjuro/offline-bake-support",
+    "mahjuro/headless-screenshot",
+]
 screenshot = ["mahjuro/headless-screenshot"]
 
 [dependencies]

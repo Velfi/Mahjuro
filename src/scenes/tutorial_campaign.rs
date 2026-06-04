@@ -264,15 +264,15 @@ const PAGES: &[TutorialPage] = &[
         title: "Part 2 — How to Score",
         subtitle: "**Play** melds, **Discard** tiles you don't need, then **Cash In** to score. Score equals **chips** × **mult**.",
         glossary: &[
-            "Melds — valid groups of tiles (pairs, sequences, triplets)",
-            "Structure — banked melds that will score when you cash in",
-            "Discard — remove unwanted tiles from your hand by sending them to the river",
-            "Play — bank melds to your structure",
-            "Cash In — score your structure",
+            "Melds — valid groups of tiles (pairs, sequences, triplets, kongs).",
+            "Structure — played melds that will score when you cash in.",
+            "Discard — remove unwanted tiles from your hand. Discards are a limited resource.",
+            "Play — play melds to your structure. Plays are a limited resource.",
+            "Cash In — Pressing this button scores your structure.",
             "Chips — base points",
             "Mult — multiplier on chips",
         ],
-        callout: Some("Can't decide whether to discard or play? Do whatever moves the most tiles."),
+        callout: Some("Your actions are limited, make them count."),
         try_it_demo: true,
         groups: SCORING_DEMO_GROUPS,
     },
@@ -379,7 +379,7 @@ impl TutorialCampaignScene {
         let prop_area_h = (h * 0.145).clamp(130.0 * scale, 175.0 * scale);
         let slot_h = prop_area_h;
         let heading_h = 22.0 * scale;
-        let demo_line_h = 24.0 * scale;
+        let demo_line_h = Self::try_it_demo_callout_max_height(col_w, scale, h);
         let heading_y = row_top_y + 4.0 * scale;
         let strip_y = heading_y + heading_h + 4.0 * scale + strip_drop;
         let slot_y = strip_y;
@@ -440,7 +440,7 @@ impl TutorialCampaignScene {
         panel_x: f32,
         panel_y: f32,
         panel_w: f32,
-        panel_h: f32,
+        _panel_h: f32,
     ) -> ScoringPageLayout {
         let scale = metrics::scene_scale(w, h);
         let pad_x = 34.0 * scale;
@@ -481,12 +481,12 @@ impl TutorialCampaignScene {
             Self::glossary_term_metrics(page.glossary, glossary_w, term_font, scale);
         let glossary_block_h = 28.0 * scale + 24.0 * scale + terms_h;
 
-        let panel_bottom = panel_y + panel_h;
+        let nav_top = Self::tutorial_nav_top(h, scale);
         let callout_rect = page.callout.map(|callout| {
             let callout_w = right_col_w - 8.0 * scale;
             let callout_x = right_col_x + 4.0 * scale;
-            let callout_h = Self::callout_box_height(callout, callout_w, scale, h, None);
-            let callout_y = panel_bottom - callout_h - 14.0 * scale;
+            let callout_h = Self::callout_box_height(callout, callout_w, scale, h, None, typography::H36);
+            let callout_y = nav_top - callout_h - 14.0 * scale;
             [callout_x, callout_y, callout_w, callout_h]
         });
 
@@ -571,25 +571,67 @@ impl TutorialCampaignScene {
         (callout_w - 40.0 * scale).max(1.0)
     }
 
-    /// Callout background height from wrapped copy — must match the text rect in `draw_frame`.
+    /// Callout background height from wrapped copy — must match the text rect in `push_cta_callout`.
     fn callout_box_height(
         callout: &str,
         callout_w: f32,
         scale: f32,
         h: f32,
         min_h: Option<f32>,
+        tier: f32,
     ) -> f32 {
         let inner_w = Self::callout_text_inner_w(callout_w, scale);
         let text_h = styled_text::styled_line_block_height(
             callout,
             inner_w,
-            typography::H36,
+            tier,
             h,
             true,
             color::CHAMPAGNE,
         );
         let box_h = text_h + 28.0 * scale;
         min_h.map(|m| box_h.max(m)).unwrap_or(box_h)
+    }
+
+    fn push_cta_callout(
+        quads: &mut Vec<GpuInstance>,
+        texts: &mut Vec<TextLabel>,
+        rect: [f32; 4],
+        text: &str,
+        tier: f32,
+        align: TextAlign,
+        h: f32,
+        scale: f32,
+    ) {
+        widget::push_panel_colored(quads, rect, color::WALNUT_SOFT, color::BRASS);
+        Self::push_tutorial_text_block(
+            texts,
+            [
+                rect[0] + 24.0 * scale,
+                rect[1] + 14.0 * scale,
+                rect[2] - 40.0 * scale,
+                rect[3] - 28.0 * scale,
+            ],
+            text,
+            Self::tutorial_text_style(tier, color::CHAMPAGNE, align),
+            h,
+        );
+    }
+
+    fn try_it_demo_callout_max_height(col_w: f32, scale: f32, h: f32) -> f32 {
+        const LINES: &[&str] = &[
+            "These are the **Discard**, **Play**, and **Cash In** buttons. Try them.",
+            "Demo: 4 **chips** × 3 **mult** = 12",
+            "You **Play**ed a meld to your structure.",
+            "Discarded tiles are removed to the river.",
+        ];
+        let callout_w = col_w - 8.0 * scale;
+        LINES
+            .iter()
+            .map(|line| {
+                Self::callout_box_height(line, callout_w, scale, h, None, typography::H42)
+            })
+            .fold(0.0f32, f32::max)
     }
 
     fn colored_copy_block_height(text: &str, w: f32, tier: f32, h: f32) -> f32 {
@@ -677,6 +719,10 @@ impl TutorialCampaignScene {
 
     /// Left copy may extend below the tile-column `content_floor` — the page
     /// callout only occupies the right column, not this text stack.
+    fn tutorial_nav_top(h: f32, scale: f32) -> f32 {
+        h - screen_footer_reserve(h) - (46.0 * scale).max(30.0) - 22.0 * scale
+    }
+
     fn tutorial_tiles_copy_floor(nav_top: f32, scale: f32) -> f32 {
         nav_top - (24.0 * scale).max(18.0)
     }
@@ -932,7 +978,7 @@ impl TutorialCampaignScene {
         let btn_w = (170.0 * scale).max(120.0);
         let btn_h = (46.0 * scale).max(30.0);
         let gap = 14.0 * scale;
-        let y = h - screen_footer_reserve(h) - btn_h - 22.0 * scale;
+        let y = Self::tutorial_nav_top(h, scale);
         let next_x = w * 0.5 + gap * 0.5;
         let back_x = next_x - btn_w - gap;
 
@@ -1645,7 +1691,7 @@ impl SceneBehavior for TutorialCampaignScene {
             ..Default::default()
         });
 
-        let nav_top = h - screen_footer_reserve(h) - (46.0 * scale).max(30.0) - 22.0 * scale;
+        let nav_top = Self::tutorial_nav_top(h, scale);
         let content_top = panel_y + panel_h * 0.11;
         let pad_x = panel_w * 0.04;
         // Wider copy column — fewer wraps so body text can scale up to fill height.
@@ -1658,7 +1704,7 @@ impl SceneBehavior for TutorialCampaignScene {
 
         let tiles_callout_h = if self.page == TUTORIAL_PAGE_TILES {
             page.callout.map_or(0.0, |callout| {
-                Self::callout_box_height(callout, tile_col_w, scale, h, None)
+                Self::callout_box_height(callout, tile_col_w, scale, h, None, typography::H36)
             })
         } else {
             0.0
@@ -1903,17 +1949,19 @@ impl SceneBehavior for TutorialCampaignScene {
             });
 
             if let Some(line) = Self::try_it_demo_line(self.page, self.try_it_flash) {
-                Self::push_tutorial_text_block(
+                let callout_w = scoring.right_col_w - 8.0 * scale;
+                let callout_x = scoring.right_col_x + 4.0 * scale;
+                let callout_h =
+                    Self::callout_box_height(line, callout_w, scale, h, None, typography::H42);
+                Self::push_cta_callout(
+                    &mut fg_quads,
                     &mut texts,
-                    [
-                        scoring.right_col_x + 4.0 * scale,
-                        layout.demo_line_y,
-                        scoring.right_col_w - 8.0 * scale,
-                        44.0 * scale,
-                    ],
+                    [callout_x, layout.demo_line_y, callout_w, callout_h],
                     line,
-                    Self::tutorial_text_style(typography::H42, color::CHAMPAGNE, TextAlign::Center),
+                    typography::H42,
+                    TextAlign::Center,
                     h,
+                    scale,
                 );
             }
         }
@@ -1988,30 +2036,25 @@ impl SceneBehavior for TutorialCampaignScene {
                     } else {
                         Some(112.0 * scale)
                     };
-                    let callout_h = Self::callout_box_height(callout, callout_w, scale, h, min_h);
+                    let callout_h = Self::callout_box_height(
+                        callout,
+                        callout_w,
+                        scale,
+                        h,
+                        min_h,
+                        typography::H36,
+                    );
                     (callout_x, callout_y, callout_w, callout_h)
                 };
-            fg_quads.push(GpuInstance {
-                rect: [callout_x, callout_y, callout_w, callout_h],
-                color: color::alpha(color::WALNUT_INK, 0.85),
-                user: 0,
-            });
-            fg_quads.push(GpuInstance {
-                rect: [callout_x, callout_y, 4.0 * scale, callout_h],
-                color: color::GOLD,
-                user: 0,
-            });
-            Self::push_tutorial_text_block(
+            Self::push_cta_callout(
+                &mut fg_quads,
                 &mut texts,
-                [
-                    callout_x + 24.0 * scale,
-                    callout_y + 14.0 * scale,
-                    callout_w - 40.0 * scale,
-                    callout_h - 28.0 * scale,
-                ],
+                [callout_x, callout_y, callout_w, callout_h],
                 callout,
-                Self::tutorial_text_style(typography::H36, color::CHAMPAGNE, TextAlign::Left),
+                typography::H36,
+                TextAlign::Left,
                 h,
+                scale,
             );
         }
 
@@ -2182,7 +2225,7 @@ mod tests {
         let panel_y = h * 0.07;
         let panel_w = w * 0.88;
         let panel_h = h * 0.84;
-        let nav_top = h - screen_footer_reserve(h) - (46.0 * scale).max(30.0) - 22.0 * scale;
+        let nav_top = TutorialCampaignScene::tutorial_nav_top(h, scale);
         let content_top = panel_y + panel_h * 0.11;
         let copy_frac = if h < 820.0 { 0.46 } else { 0.40 };
         let copy_w = panel_w * copy_frac;
@@ -2258,6 +2301,28 @@ mod tests {
     }
 
     #[test]
+    fn scoring_page_callout_clears_nav_buttons() {
+        let w = 1920.0;
+        let h = 1080.0;
+        let scale = metrics::scene_scale(w, h);
+        let page = &PAGES[TUTORIAL_PAGE_SCORING];
+        let panel_x = w * 0.06;
+        let panel_y = h * 0.07;
+        let panel_w = w * 0.88;
+        let panel_h = h * 0.84;
+        let nav_top = TutorialCampaignScene::tutorial_nav_top(h, scale);
+        let layout = TutorialCampaignScene::compute_scoring_page_layout(
+            page, w, h, panel_x, panel_y, panel_w, panel_h,
+        );
+        let [_, callout_y, _, callout_h] = layout.callout_rect.expect("callout rect");
+        assert!(
+            callout_y + callout_h <= nav_top - 14.0 * scale + 0.5,
+            "callout bottom={} should sit above nav top={nav_top}",
+            callout_y + callout_h,
+        );
+    }
+
+    #[test]
     fn scoring_page_callout_fits_wrapped_text() {
         let w = 1920.0;
         let h = 1080.0;
@@ -2275,19 +2340,18 @@ mod tests {
         let inner_w = TutorialCampaignScene::callout_text_inner_w(callout_w, scale);
         let inner_h = (callout_h - 28.0 * scale).max(1.0);
         let font_px = typography::size(typography::H36, h);
-        let line_count = styled_text::StyledTextBlock::measure_at_font_px(
+        let block = styled_text::StyledTextBlock::measure_at_font_px(
             callout,
             inner_w,
             font_px,
             true,
             color::CHAMPAGNE,
-        )
-        .line_count();
-        let line_step = colored_keywords::colored_row_line_step(font_px);
-        let max_lines = (inner_h / line_step).floor() as usize;
+        );
         assert!(
-            max_lines >= line_count,
-            "callout box should fit all wrapped lines (max_lines={max_lines}, line_count={line_count})"
+            inner_h + 0.01 >= block.block_height(),
+            "callout box should fit all wrapped lines (inner_h={inner_h}, need={}, line_count={})",
+            block.block_height(),
+            block.line_count(),
         );
     }
 

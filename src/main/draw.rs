@@ -11,6 +11,8 @@ use crate::scenes::{DefeatScene, VictoryScene};
 use crate::core;
 use crate::render;
 use crate::ui::modal::{Modal, ModalTheme, UnlockPage};
+#[cfg(feature = "game")]
+use crate::ui::score_format::format_score;
 
 #[cfg(feature = "game")]
 #[inline]
@@ -106,10 +108,12 @@ impl App {
                             let cleared_target_score = self.run.target_score;
                             let mut lines = vec![format!(
                                 "Score: {} / {}",
-                                cleared_round_score, cleared_target_score
+                                format_score(cleared_round_score),
+                                format_score(cleared_target_score as u64)
                             )];
-                            lines.push("Nice work — you cleared your first blind.".to_string());
-                            lines.push("Next: browse the shop, then face the boss.".to_string());
+                            lines.push("Well done — you have overcome your first chamber".to_string());
+                            lines.push("Remember: Play melds, build a structure, then cash in to score. Bigger structures score more".to_string());
+                            lines.push("Next: buy supplies from the shop, then face an ordeal".to_string());
                             self.modals.push(
                                 Modal::new(
                                     "Lesson Complete!",
@@ -157,7 +161,8 @@ impl App {
                         "Second Wind",
                         format!(
                             "The relic shatters. No payout for this blind — only your other relics matter now.\n\nScore: {} / {}",
-                            cleared_round_score, cleared_target_score
+                            format_score(cleared_round_score),
+                            format_score(cleared_target_score as u64)
                         ),
                         ModalTheme::Info,
                     );
@@ -279,7 +284,6 @@ impl App {
                     let target_score = self.run.target_score;
                     let discards_left = self.run.discards_remaining;
                     let plays_left = self.run.plays_remaining;
-                    let last = self.run.last_breakdown.as_ref();
                     let (feedback, retry_blind) = match self.run.onboarding_phase() {
                         Some(crate::game::onboarding::OnboardingPhase::Lessons) => {
                             let feedback = crate::game::onboarding::lessons_failure_feedback(
@@ -295,7 +299,6 @@ impl App {
                                 round_score,
                                 target_score,
                                 discards_left,
-                                last,
                             );
                             self.run.retry_onboarding_finale();
                             (feedback, self.run.chamber)
@@ -732,6 +735,7 @@ impl App {
                     inner_w,
                     line_h,
                     parchment,
+                    false,
                 );
                 let content_h = crate::ui::colored_keywords::colored_multiline_block_height(
                     color_lines.len(),
@@ -770,6 +774,7 @@ impl App {
                         line_h,
                         fallback_plain: label.as_ref(),
                         fallback_color: parchment,
+                        italic: false,
                     },
                     &color_lines,
                     crate::render::wgpu_renderer::TextAlign::Center,

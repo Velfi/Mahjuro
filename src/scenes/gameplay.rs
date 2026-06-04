@@ -247,6 +247,8 @@ pub struct GameplayScene {
     invalid_meld_flash_at: Option<Instant>,
     /// Wall time when a boss-rule rejection last fired (boss icon wiggle decay).
     invalid_boss_flash_at: Option<Instant>,
+    /// Wall time when a tutorial-gated action was rejected (lessons panel wiggle).
+    tutorial_panel_wiggle_at: Option<Instant>,
     /// Cached each `update`: selection is invalid only because of boss rules.
     boss_rule_feedback_live: bool,
 }
@@ -271,6 +273,8 @@ const FINAL_TILES_FOV_POP_DEGREES: f32 = 3.6;
 const INVALID_MELD_FLASH_SECS: f32 = 0.55;
 /// How long the boss icon keeps its reject wiggle after a failed commit.
 const INVALID_BOSS_FLASH_SECS: f32 = 0.55;
+/// How long the lessons tutorial panel wiggles after a blocked action.
+const TUTORIAL_PANEL_WIGGLE_SECS: f32 = 0.55;
 
 /// Click-id base for the Zodiac inventory bar. `ZODIAC_USE_BASE + slot_idx`
 /// is the click id for using the Zodiac in slot `slot_idx`.
@@ -395,6 +399,7 @@ impl GameplayScene {
             || !self.relic_glow_starts.is_empty()
             || self.final_tiles_fov_pop_active()
             || self.boss_rule_feedback_active(Instant::now())
+            || self.tutorial_panel_wiggle_active(Instant::now())
     }
 
     fn final_tiles_fov_pop_active(&self) -> bool {
@@ -440,6 +445,38 @@ impl GameplayScene {
 
     pub(super) fn clear_boss_rule_feedback(&mut self) {
         self.invalid_boss_flash_at = None;
+    }
+
+    pub(super) fn trigger_tutorial_panel_wiggle(&mut self) {
+        self.tutorial_panel_wiggle_at = Some(Instant::now());
+    }
+
+    pub(super) fn reject_tutorial_gated_action(
+        &mut self,
+        bus: &mut crate::game::event_bus::EventBus,
+    ) {
+        bus.push(crate::game::event_bus::GameEvent::UiSound(
+            crate::sfx_id::SfxId::InvalidAction,
+        ));
+        self.trigger_tutorial_panel_wiggle();
+    }
+
+    fn tutorial_panel_wiggle_active(&self, now: Instant) -> bool {
+        self.tutorial_panel_wiggle_at.is_some_and(|t0| {
+            now.saturating_duration_since(t0).as_secs_f32() < TUTORIAL_PANEL_WIGGLE_SECS
+        })
+    }
+
+    pub(super) fn tutorial_panel_wiggle_x(&self, now: Instant) -> f32 {
+        let Some(t0) = self.tutorial_panel_wiggle_at else {
+            return 0.0;
+        };
+        let elapsed = now.saturating_duration_since(t0).as_secs_f32();
+        if elapsed >= TUTORIAL_PANEL_WIGGLE_SECS {
+            return 0.0;
+        }
+        let fade = 1.0 - (elapsed / TUTORIAL_PANEL_WIGGLE_SECS);
+        10.0 * fade * (elapsed * 34.0).sin()
     }
 
     /// True while the boss icon should pulse (live boss-blocked selection or reject decay).
@@ -557,6 +594,7 @@ impl GameplayScene {
             invalid_meld_flash_slots: Vec::new(),
             invalid_meld_flash_at: None,
             invalid_boss_flash_at: None,
+            tutorial_panel_wiggle_at: None,
             boss_rule_feedback_live: false,
         }
     }

@@ -24,6 +24,7 @@ pub enum TextAlign {
 /// When `bold`, `italic`, or `underline` is set (and `flavor_spans` is `None`),
 /// the renderer uses the multi-face CPU raster path. [`text_effect`](crate::text_effect::TextEffectId)
 /// is applied in the fragment shader and does not change the raster cache key.
+#[derive(Clone)]
 pub struct TextLabel {
     /// Position in screen pixels: [x, y, w, h].
     pub rect: [f32; 4],

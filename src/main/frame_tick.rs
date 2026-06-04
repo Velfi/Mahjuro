@@ -769,6 +769,14 @@ impl App {
             self.modals.cancel_released();
         }
 
+        // Splash: LMB dismisses the production logo (same as Confirm/Cancel).
+        if matches!(self.scene, Scene::Splash(_))
+            && self.mouse_clicked
+            && !self.modals.is_active()
+        {
+            crate::render::wgpu_renderer::loading_screen::request_skip();
+        }
+
         // Clear one-shot mouse click flag so it doesn't bleed into
         // the next frame if no overlay consumed it.
         self.mouse_clicked = false;

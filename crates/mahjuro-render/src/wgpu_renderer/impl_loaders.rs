@@ -16,27 +16,18 @@ impl WgpuRenderer {
             .unwrap_or(&self.relic_box_mesh)
     }
 
-    pub(crate) fn talisman_mesh_for_kind_idx(&self, kind_idx: u8) -> &LitMeshGpu {
+    pub(crate) fn talisman_mesh_for_kind_idx(&self, kind_idx: u8) -> Option<&LitMeshGpu> {
         use crate::wgpu_renderer::constants::MEMORIAL_TALISMAN_TEXTURE_BASE;
         if kind_idx >= MEMORIAL_TALISMAN_TEXTURE_BASE {
             let idx = (kind_idx - MEMORIAL_TALISMAN_TEXTURE_BASE) as usize;
-            if let Some(&kind) =
-                mahjuro_core::core::memorial_talisman::MemorialTalismanKind::all().get(idx)
-            {
-                return self
-                    .memorial_talisman_meshes
-                    .get(&kind)
-                    .unwrap_or(&self.talisman_mesh);
-            }
-        } else if let Some(&kind) =
-            mahjuro_core::core::talisman::TalismanKind::all().get(kind_idx as usize)
-        {
-            return self
-                .talisman_meshes
-                .get(&kind)
-                .unwrap_or(&self.talisman_mesh);
+            mahjuro_core::core::memorial_talisman::MemorialTalismanKind::all()
+                .get(idx)
+                .and_then(|&kind| self.memorial_talisman_meshes.get(&kind))
+        } else {
+            mahjuro_core::core::talisman::TalismanKind::all()
+                .get(kind_idx as usize)
+                .and_then(|&kind| self.talisman_meshes.get(&kind))
         }
-        &self.talisman_mesh
     }
 
     /// Lazy-upload one boss atlas cell into [`Self::ordeal_icon_meshes`] /

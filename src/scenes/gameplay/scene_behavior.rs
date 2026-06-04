@@ -11,6 +11,7 @@ use crate::ui::inspect_plaque::{
     FocusTooltipPanelParams, dora_focus_tooltip_strings, gameplay_consumable_description_full,
     hand_tile_focus_tooltip, push_focus_tooltip_panel_2d, round_wind_focus_tooltip_strings,
 };
+use crate::ui::score_format::format_score;
 fn plinth_focus_rect_from_anchor(
     anchor: &[f32; 3],
     layout: &crate::ui::layout::LayoutResult,
@@ -348,8 +349,8 @@ impl SceneBehavior for GameplayScene {
         // the screen.
         let window_title = format!(
             "Mahjuro — {chamber_name} {current_chamber}/{total_chambers} - Score {} / {}  Target-  Yen: {}  Plays: {}  Discards: {}",
-            live_score,
-            gameplay.target_score,
+            format_score(live_score),
+            format_score(gameplay.target_score as u64),
             gameplay.yen,
             gameplay.plays_remaining,
             gameplay.discards_remaining,
@@ -1902,7 +1903,12 @@ impl SceneBehavior for GameplayScene {
             ));
         }
         if !self.pause_menu.paused && self.cascade_queue.is_empty() {
-            onboarding_hints::push_lessons_banner(&mut frame, &ctx, ctx.run);
+            onboarding_hints::push_lessons_banner(
+                &mut frame,
+                &ctx,
+                ctx.run,
+                self.tutorial_panel_wiggle_x(now),
+            );
             onboarding_hints::push_finale_intro_banner(&mut frame, &ctx, ctx.run);
         }
 

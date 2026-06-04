@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::core::ordeal::OrdealKind;
-use crate::core::scoring::ScoreBreakdown;
 use crate::core::yaku::YakuKind;
 use crate::game::engine::GameEngine;
+use crate::ui::score_format::format_score;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OnboardingPhase {
@@ -23,6 +23,12 @@ pub struct OnboardingState {
     pub scored_once: bool,
     /// One-shot boss debrief banner at the start of the Finale blind.
     pub finale_intro_shown: bool,
+    /// Shown in the Lessons banner after a rejected Play attempt.
+    #[serde(default)]
+    pub invalid_meld_hint: Option<String>,
+    /// Selected tile ids tied to [`Self::invalid_meld_hint`]; cleared when selection changes.
+    #[serde(default)]
+    invalid_meld_hint_tile_ids: Vec<u32>,
 }
 
 impl Default for OnboardingState {
@@ -39,6 +45,31 @@ impl OnboardingState {
             discard_river_tooltip_shown: false,
             scored_once: false,
             finale_intro_shown: false,
+            invalid_meld_hint: None,
+            invalid_meld_hint_tile_ids: Vec::new(),
+        }
+    }
+
+    pub fn clear_invalid_meld_hint(&mut self) {
+        self.invalid_meld_hint = None;
+        self.invalid_meld_hint_tile_ids.clear();
+    }
+
+    pub fn set_invalid_meld_hint(&mut self, hint: String, tile_ids: Vec<u32>) {
+        self.invalid_meld_hint = Some(hint);
+        self.invalid_meld_hint_tile_ids = tile_ids;
+    }
+
+    pub fn sync_invalid_meld_hint(&mut self, selected_tile_ids: &[u32]) {
+        if self.invalid_meld_hint.is_none() {
+            return;
+        }
+        let mut current = selected_tile_ids.to_vec();
+        current.sort_unstable();
+        let mut stored = self.invalid_meld_hint_tile_ids.clone();
+        stored.sort_unstable();
+        if current != stored {
+            self.clear_invalid_meld_hint();
         }
     }
 
@@ -50,7 +81,11 @@ impl OnboardingState {
         self.step >= 3
     }
 
-    pub fn lessons_prompt(&self, run: &crate::game::run::RunState) -> &'static str {
+    pub fn lessons_prompt<'a>(&'a self, run: &crate::game::run::RunState) -> &'a str {
+        if let Some(ref hint) = self.invalid_meld_hint {
+            return hint;
+        }
+
         let gameplay = GameEngine::read(run);
         let has_selection = gameplay.selected_count > 0;
         let has_structure = gameplay.has_structure;
@@ -65,7 +100,7 @@ impl OnboardingState {
                 "Swap a tile you don't need — select it, then Discard."
             }
             3 => "Try a discard to improve your hand.",
-            4 => "Bank another meld, then Cash In again to reach the target.",
+            4 => "Play another meld, then Cash In again to reach the target.",
             _ if !has_selection => "Select tiles to form a valid meld.",
             _ if has_selection && !has_structure => "Press Play to bank your meld.",
             _ if has_structure => "Press Cash In when you're ready to score.",
@@ -98,17 +133,18 @@ pub fn lessons_failure_feedback(round_score: u64, target: u32, plays_remaining: 
     if plays_remaining > 0 {
         return format!(
             "You scored {} / {}. You still had {} play{} left — bank another meld and Cash In again.",
-            round_score,
-            target,
+            format_score(round_score),
+            format_score(target as u64),
             plays_remaining,
             if plays_remaining == 1 { "" } else { "s" },
         );
     }
+    let gap = target.saturating_sub(round_score.min(u32::MAX as u64) as u32);
     format!(
         "You scored {} / {} — {} short. Try discarding a useless tile, then bank another meld before you Cash In.",
-        round_score,
-        target,
-        target.saturating_sub(round_score.min(u32::MAX as u64) as u32),
+        format_score(round_score),
+        format_score(target as u64),
+        format_score(gap as u64),
     )
 }
 
@@ -117,7 +153,6 @@ pub fn finale_failure_feedback(
     round_score: u64,
     target: u32,
     discards_left: u32,
-    last_breakdown: Option<&ScoreBreakdown>,
 ) -> String {
     let gap = target.saturating_sub(round_score.min(u32::MAX as u64) as u32);
     let score_pct = if target > 0 {
@@ -126,46 +161,40 @@ pub fn finale_failure_feedback(
         100
     };
 
-    let chicken_only = last_breakdown.is_some_and(|b| {
-        b.detected_yaku.contains(&YakuKind::ChickenHand)
-            && !b.detected_yaku.contains(&YakuKind::FullHand)
-            && !b.detected_yaku.contains(&YakuKind::Chiitoitsu)
-    });
-
     if round_score == 0 {
         return "You scored 0 — bank valid melds with Play, then press Cash In. If you run out of plays first, the round ends.".to_string();
     }
 
-    if chicken_only {
-        return format!(
-            "Your last cash-in was a Chicken Hand — legal, but the lowest-scoring yaku (no mult or chip bonus). Full Hand and Chiitoitsu raise mult much more on this shrine. You were {} / {} ({}%).",
-            round_score, target, score_pct,
-        );
-    }
-
     if discards_left >= 2 {
         return format!(
-            "You scored {} / {} ({}%) but had {} discards left. The Iconoclast weakens honors — favor triplets and runs in souzu, pinzu, or manzu, then cash in with a yaku.",
-            round_score, target, score_pct, discards_left,
+            "You scored {} / {} ({}%) but had {} discards left. Honors are debuffed during this ordeal — discard them in favor of Souzu, Pinzu, or Manzu tiles.",
+            format_score(round_score),
+            format_score(target as u64),
+            score_pct,
+            discards_left,
         );
     }
 
     if score_pct >= 75 {
         return format!(
-            "Close — {} / {} ({}%). Honors are debuffed on this shrine; lean on the three suits. Bigger melds and a yaku raise mult more than pairs alone.",
-            round_score, target, score_pct,
+            "Close — {} / {} ({}%). Honors are debuffed during this ordeal; lean on Souzu, Pinzu, and Manzu tiles. A bigger structure pays out more points.",
+            format_score(round_score),
+            format_score(target as u64),
+            score_pct,
         );
     }
 
     format!(
-        "You scored {} / {} — {} short of the target. The Iconoclast debuffs winds and dragons; build melds in souzu, pinzu, and manzu, bank with Play, then Cash In. Chips × mult: Full Hand or Chiitoitsu is your main mult lever here.",
-        round_score, target, gap,
+        "You scored {} / {} — {} short of the target. Honors are debuffed during this ordeal; lean on Souzu, Pinzu, and Manzu tiles. A bigger structure pays out more points.",
+        format_score(round_score),
+        format_score(target as u64),
+        format_score(gap as u64),
     )
 }
 
 pub fn finale_intro_message() -> &'static str {
     "You must now prepare to undergo an ordeal — The Iconoclast\n\n\
      The Iconoclast changes the rules of the game, debuffing Wind and Dragon tiles. \
-     They still form melds, but they score for nothing. \
-     The bigger the structure, the bigger the score. Open the Guide book on the table to learn more."
+     Debuffed tiles still form melds and yaku, but score for nothing. \
+     The blue guide book on the table contains a refresher of mechanics."
 }

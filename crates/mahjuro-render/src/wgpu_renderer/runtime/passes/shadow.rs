@@ -269,11 +269,13 @@ impl WgpuRenderer {
                 let Some(inst) = self.talisman_instances.get(slot_i) else {
                     return;
                 };
-                let mesh = self
+                let Some(mesh) = self
                     .talisman_slot_kind
                     .get(slot_i)
-                    .and_then(|k| k.map(|idx| self.talisman_mesh_for_kind_idx(idx)))
-                    .unwrap_or(&self.talisman_mesh);
+                    .and_then(|k| k.and_then(|idx| self.talisman_mesh_for_kind_idx(idx)))
+                else {
+                    return;
+                };
                 self.draw_lit_mesh_shadow(pass, mesh, inst);
             }
             DrawKind::BugBody => {
