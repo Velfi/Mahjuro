@@ -12,10 +12,6 @@ use crate::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
 use crate::wgpu_renderer::{PointLight, SpotLight};
 
-/// Multiplies `tile_seed` exposure in `room_glb.wgsl` for this room.
-pub const STAIRCASE_ENV_LINEAR_EXPOSURE_MUL: f32 = 1.0;
-pub const STAIRCASE_ENV_AMBIENT_SCALE_MIN: f32 = 0.0;
-
 enum StaircaseGlbCache {
     Uninit,
     Ready(Option<Box<RoomGlbCpu>>),

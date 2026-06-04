@@ -45,6 +45,11 @@ pub(crate) struct TonemapParams {
     pub vhs_vignette: f32,
     /// Monotonic frame counter for in-place VHS grain re-roll (not spatial scroll).
     pub grain_frame: f32,
+    /// User display-gamma slider (`AppSettings::gamma`, default 1.0). Applied as
+    /// `pow(color, 1/gamma)` at the end of the composite so the HDR scene path
+    /// respects it — the per-shader gamma in `lit_mesh`/`tile_3d` is a no-op on
+    /// the HDR path, which previously left only the UI honoring the slider.
+    pub gamma: f32,
 }
 
 /// Shared by `emissive_probe_update.wgsl` and `emissive_probe_apply.wgsl` (must match WGSL layout).

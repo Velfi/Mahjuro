@@ -2352,7 +2352,7 @@ impl WgpuRenderer {
         // pixel, which half-res blur turns into large glowing discs. Strength scales
         // with room linear exposure — emissive is absolute HDR while lit crush is not.
         let (bloom_threshold, bloom_strength, bloom_extract_scale) =
-            Self::bloom_render_tuning(frame, self.active_frame_env().linear_exposure);
+            Self::bloom_render_tuning(frame, &self.active_frame_env());
         let extract_params = BloomParams {
             data0: [
                 bloom_threshold,
@@ -2582,6 +2582,9 @@ impl WgpuRenderer {
                 vhs_grain: self.tonemap_vhs_grain,
                 vhs_vignette: self.tonemap_vhs_vignette,
                 grain_frame,
+                // Prepass float target must stay un-gamma'd (the book mesh
+                // resamples it); only the visible swapchain honors the slider.
+                gamma: if is_prepass { 1.0 } else { gamma.max(0.01) },
             }),
         );
         let tonemap_pipe = if is_prepass {

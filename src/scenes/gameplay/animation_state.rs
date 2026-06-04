@@ -39,10 +39,11 @@ pub(super) fn tick_basic_animations(
         scene.score_reel.reset_for_target(cur_target);
         scene.score_reel_target = cur_target;
     }
-    // When idle (no cascade), snap the reel to the real score so scene
-    // init and round transitions display the correct value immediately.
-    if scene.cascade_queue.is_empty() {
+    // Snap only once cascade / popups / reel rolls have finished so we do not
+    // cut off the odometer mid-spin (deferred round-end uses the same gate).
+    if !scene.scoring_presentation_active(now) {
         scene.score_reel.snap(gameplay.round_score);
+        scene.displayed_score = gameplay.round_score;
     }
 
     // Hand tile animation state: resize vecs to current hand length,

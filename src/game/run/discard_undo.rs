@@ -45,6 +45,7 @@ impl super::RunState {
     ) {
         let yen_delta = snap.yen - self.yen;
         self.discards_remaining = snap.discards_remaining;
+        self.discard_refill_pending = false;
         self.wall = snap.wall;
         self.yen = snap.yen;
         self.tiles_discarded = snap.tiles_discarded;

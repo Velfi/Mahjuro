@@ -129,7 +129,7 @@ pub(super) fn process_focus_and_actions(
             FocusTarget::DiscardUndo => {
                 crate::persistence::load_settings().discard_undo_enabled
                     && scene.discard_undo.is_some()
-                    && scene.pending_refill.is_none()
+                    && scene.pending_discard_refill.is_none()
             }
         };
         if !still_valid {
@@ -148,7 +148,7 @@ pub(super) fn process_focus_and_actions(
     if matches!(scene.focus, Some(FocusTarget::DiscardUndo)) {
         let ok = crate::persistence::load_settings().discard_undo_enabled
             && scene.discard_undo.is_some()
-            && scene.pending_refill.is_none();
+            && scene.pending_discard_refill.is_none();
         if !ok {
             scene.focus = None;
         }
@@ -219,7 +219,7 @@ pub(super) fn process_focus_and_actions(
     // discard-undo anchor (Accessibility) without relying on spatial nav.
     let undo_hud_eligible = crate::persistence::load_settings().discard_undo_enabled
         && scene.discard_undo.is_some()
-        && scene.pending_refill.is_none();
+        && scene.pending_discard_refill.is_none();
     let mut hud_cycle: Vec<FocusTarget> = consumable_targets.clone();
     if undo_hud_eligible {
         hud_cycle.push(FocusTarget::DiscardUndo);
@@ -249,6 +249,8 @@ pub(super) fn process_focus_and_actions(
             _ => None,
         };
         if let Some(dir) = dir {
+            // Moving focus abandons any in-progress hold-to-cash-in.
+            scene.cash_in_hold_started = None;
             // Seed focus on first directional press from None: prefer
             // the cursor's last hit, else the first hand tile in the
             // graph, else any first entry.
@@ -408,6 +410,19 @@ pub(super) fn process_focus_and_actions(
                         actions_for_scene.push(UiAction::UndoDiscard);
                         continue;
                     }
+                    Some(FocusTarget::Button(GameplayButton::Trigger)) => {
+                        // Cash in is hold-to-confirm (see `cash_in_hold_started`):
+                        // charging the timer commits; releasing early cancels.
+                        if GameEngine::read(ctx.run).trigger_enabled {
+                            if scene.cash_in_hold_started.is_none() {
+                                scene.cash_in_hold_started = Some(now);
+                            }
+                        } else {
+                            // Blocked (e.g. discards must be spent first): fire
+                            // immediately so the rejection feedback still plays.
+                            actions_for_scene.push(UiAction::TriggerStructure);
+                        }
+                    }
                     Some(FocusTarget::Button(b)) => {
                         if let Some(a) = b.ui_action() {
                             actions_for_scene.push(a);
@@ -509,6 +524,7 @@ pub(super) fn process_focus_and_actions(
                 continue;
             }
             UiAction::ConfirmRelease => {
+                scene.cash_in_hold_started = None;
                 if let Some(from_idx) = scene.held_relic_drag.take()
                     && let Some(FocusTarget::Relic(to_idx)) = scene.focus
                 {
@@ -525,6 +541,7 @@ pub(super) fn process_focus_and_actions(
             UiAction::Cancel => {
                 scene.held_relic_drag = None;
                 scene.marquee = None;
+                scene.cash_in_hold_started = None;
                 scene.focus = default_hand_tile_focus(interaction.hand_len, &focus_rects);
                 actions_for_scene.push(a);
                 continue;
@@ -571,6 +588,24 @@ pub(super) fn process_focus_and_actions(
             UiAction::WestFaceRelease => {
                 continue;
             }
+            // Cash in is hold-to-confirm for keyboard (T) and gamepad triggers.
+            // The instant mouse path lives in the 3D-pick dispatcher below.
+            UiAction::TriggerStructure => {
+                if GameEngine::read(ctx.run).trigger_enabled {
+                    if scene.cash_in_hold_started.is_none() {
+                        scene.cash_in_hold_started = Some(now);
+                    }
+                } else {
+                    // Nothing to cash in: fire immediately so the rejection
+                    // feedback (shake) still plays.
+                    actions_for_scene.push(UiAction::TriggerStructure);
+                }
+                continue;
+            }
+            UiAction::TriggerStructureRelease => {
+                scene.cash_in_hold_started = None;
+                continue;
+            }
             _ => {}
         }
         actions_for_scene.push(a);
@@ -590,7 +625,7 @@ pub(super) fn process_focus_and_actions(
         if cid == super::UNDO_DISCARD_CLICK_ID {
             if crate::persistence::load_settings().discard_undo_enabled
                 && scene.discard_undo.is_some()
-                && scene.pending_refill.is_none()
+                && scene.pending_discard_refill.is_none()
             {
                 actions_for_scene.push(UiAction::UndoDiscard);
             }
@@ -767,49 +802,9 @@ pub(super) fn process_focus_and_actions(
                 }
             }
             UiAction::TriggerStructure => {
-                let score_before = GameEngine::read(ctx.run).round_score;
-                let gameplay = GameEngine::read(ctx.run);
-                let cascade_showcase = Some(CascadeShowcase {
-                    tiles: GameplayScene::display_tiles(
-                        gameplay.structure_tiles.iter().copied(),
-                        ctx.run,
-                    ),
-                    sets: gameplay.structure_sets.clone(),
-                });
-                let outcome = {
-                    let mut engine = GameEngine::new(ctx.run, ctx.bus);
-                    engine.dispatch(GameCommand::TriggerStructure)
-                };
-                let earned = match outcome.data {
-                    CommandData::TriggerStructure { earned } => earned,
-                    _ => 0,
-                };
-                if earned > 0 {
-                    scene.clear_discard_undo();
-                }
-                let gained = outcome.after.round_score.saturating_sub(score_before);
-                log::info!(
-                    "[score] TriggerStructure: earned={} gained={} breakdown_steps={} base_steps={}",
-                    earned,
-                    gained,
-                    ctx.run
-                        .last_breakdown
-                        .as_ref()
-                        .map(|b| b.steps.len())
-                        .unwrap_or(0),
-                    ctx.run
-                        .last_breakdown
-                        .as_ref()
-                        .map(|b| b.base_steps.len())
-                        .unwrap_or(0),
-                );
-                if earned == 0 {
-                    ctx.anim
-                        .shake(crate::render::animation::ENTITY_HAND_STRIP, 6.0, 160);
-                } else {
-                    ctx.anim.pulse(ENTITY_SCORE_PANEL);
-                    scene.begin_scoring_cascade(ctx, score_before, gained, cascade_showcase);
-                }
+                // Instant path (mouse pick on the Cash In tablet). Keyboard /
+                // gamepad route through `cash_in_hold_started` instead.
+                execute_cash_in(scene, ctx);
             }
             UiAction::CommitDiscard => {
                 if !ctx.run.onboarding_discard_allowed() {
@@ -870,12 +865,12 @@ pub(super) fn process_focus_and_actions(
                         .as_ref()
                         .map(|b| b.total_duration(ctx.cascade_tuning))
                         .unwrap_or(fallback);
-                    scene.pending_refill = Some(now + anim_dur.max(fallback));
+                    scene.pending_discard_refill = Some(now + anim_dur.max(fallback));
                 }
             }
             UiAction::UndoDiscard => {
                 if crate::persistence::load_settings().discard_undo_enabled
-                    && scene.pending_refill.is_none()
+                    && scene.pending_discard_refill.is_none()
                     && let Some(snap) = scene.discard_undo.take()
                 {
                     scene.active_discard_anim = None;
@@ -891,6 +886,21 @@ pub(super) fn process_focus_and_actions(
             _ => {}
         }
     }
+    // Complete (or invalidate) an in-progress hold-to-cash-in. Mirrors the
+    // shop's hold-to-sell: the action fires once the timer crosses the
+    // threshold without waiting for release; an early release cancels it
+    // (handled above), and losing cash-in eligibility drops the charge.
+    if let Some(start) = scene.cash_in_hold_started {
+        if !GameEngine::read(ctx.run).trigger_enabled {
+            scene.cash_in_hold_started = None;
+        } else if now.saturating_duration_since(start).as_secs_f32()
+            >= super::CASH_IN_HOLD_SECONDS
+        {
+            scene.cash_in_hold_started = None;
+            execute_cash_in(scene, ctx);
+        }
+    }
+
     // Let apply_ui_actions handle toggle-select, cancel, and focus movement.
     let non_handled: Vec<_> = actions_for_scene
         .iter()
@@ -920,6 +930,51 @@ pub(super) fn process_focus_and_actions(
             .push(crate::game::event_bus::GameEvent::UiSound(sfx));
     }
     None
+}
+
+/// Run the cash-in (TriggerStructure) command and its scoring feedback. Shared
+/// by the instant mouse path and the hold-to-cash-in completion.
+fn execute_cash_in(scene: &mut GameplayScene, ctx: &mut UpdateCtx<'_>) {
+    let score_before = GameEngine::read(ctx.run).round_score;
+    let gameplay = GameEngine::read(ctx.run);
+    let cascade_showcase = Some(CascadeShowcase {
+        tiles: GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), ctx.run),
+        sets: gameplay.structure_sets.clone(),
+    });
+    let outcome = {
+        let mut engine = GameEngine::new(ctx.run, ctx.bus);
+        engine.dispatch(GameCommand::TriggerStructure)
+    };
+    let earned = match outcome.data {
+        CommandData::TriggerStructure { earned } => earned,
+        _ => 0,
+    };
+    if earned > 0 {
+        scene.clear_discard_undo();
+    }
+    let gained = outcome.after.round_score.saturating_sub(score_before);
+    log::info!(
+        "[score] TriggerStructure: earned={} gained={} breakdown_steps={} base_steps={}",
+        earned,
+        gained,
+        ctx.run
+            .last_breakdown
+            .as_ref()
+            .map(|b| b.steps.len())
+            .unwrap_or(0),
+        ctx.run
+            .last_breakdown
+            .as_ref()
+            .map(|b| b.base_steps.len())
+            .unwrap_or(0),
+    );
+    if earned == 0 {
+        ctx.anim
+            .shake(crate::render::animation::ENTITY_HAND_STRIP, 6.0, 160);
+    } else {
+        ctx.anim.pulse(ENTITY_SCORE_PANEL);
+        scene.begin_scoring_cascade(ctx, score_before, gained, cascade_showcase);
+    }
 }
 
 /// Cascade Lab: only the authored 3D cash-in control — no table focus/hover.

@@ -13,6 +13,9 @@ pub enum UiAction {
     CancelRelease,
     ScoreHand,
     TriggerStructure,
+    /// Release edge for the cash-in hold (gamepad trigger / keyboard **T** /
+    /// Confirm on the Cash In button). Cancels an in-progress hold-to-cash-in.
+    TriggerStructureRelease,
     CommitDiscard,
     InvertSelection,
     UndoDiscard,

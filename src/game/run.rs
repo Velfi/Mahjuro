@@ -265,6 +265,11 @@ pub struct RunState {
     /// for the current chamber. Cleared on [`RunState::apply_chamber`].
     #[serde(skip)]
     pub round_end_queued: bool,
+    /// Discards are the only tile action that removes from hand before redraw: the UI
+    /// waits for the river animation, then calls [`RunState::refill_hand`]. While true,
+    /// an empty hand must not count as "no actions remaining."
+    #[serde(skip)]
+    pub discard_refill_pending: bool,
     #[serde(default = "default_hints_enabled")]
     pub hints_enabled: bool,
     // ── Boss blind state ─────────────────────────────────────────────────
@@ -823,6 +828,7 @@ impl RunState {
             auto_cash_in_on_full_structure: true,
             suppress_chamber_resolution: false,
             round_end_queued: false,
+            discard_refill_pending: false,
             hints_enabled: false,
             ordeal: OrdealState {
                 pool_remaining: ordeal_pool_remaining,

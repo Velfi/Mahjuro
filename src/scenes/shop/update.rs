@@ -351,6 +351,15 @@ impl ShopScene {
             ctx.overlay_request,
             (w, h),
         );
+        self.try_complete_buy_hold(
+            now,
+            &shop,
+            ctx.run,
+            ctx.bus,
+            ctx.cursor_pos,
+            ctx.overlay_request,
+            (w, h),
+        );
 
         for &a in ctx.actions {
             if matches!(a, UiAction::NorthFacePress) {
@@ -370,12 +379,17 @@ impl ShopScene {
                 .is_some()
                     && self.west_sell_hold_started.is_none()
                 {
+                    self.buy_hold_started = None;
                     self.west_sell_hold_started = Some(now);
                 }
                 continue;
             }
             if matches!(a, UiAction::WestFaceRelease) {
                 self.west_sell_hold_started = None;
+                continue;
+            }
+            if matches!(a, UiAction::ConfirmRelease) {
+                self.buy_hold_started = None;
                 continue;
             }
 
@@ -387,6 +401,9 @@ impl ShopScene {
                 _ => None,
             };
             if let Some(dir) = dir {
+                // Moving focus abandons any in-progress hold-to-buy/sell.
+                self.buy_hold_started = None;
+                self.west_sell_hold_started = None;
                 if self.focus.is_none() {
                     let seed = focus_rects
                         .iter()
@@ -459,21 +476,22 @@ impl ShopScene {
                         return None;
                     }
                     if let Some(hit) = focus.to_hit() {
-                        if let Some(action) = shop_action_for_hit(
+                        if shop_action_for_hit(
                             hit,
                             &self.items,
                             &self.zodiac_items,
                             &self.talisman_items,
                             &shop,
-                        ) {
-                            self.apply_buy_action(
-                                action,
-                                ctx.run,
-                                ctx.bus,
-                                ctx.cursor_pos,
-                                ctx.overlay_request,
-                                (w, h),
-                            );
+                        )
+                        .is_some()
+                        {
+                            // Hold-to-buy: charging the timer commits the
+                            // purchase (see `try_complete_buy_hold`); a quick
+                            // tap-and-release is cancelled by `ConfirmRelease`.
+                            if self.buy_hold_started.is_none() {
+                                self.west_sell_hold_started = None;
+                                self.buy_hold_started = Some(now);
+                            }
                         } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
                             *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
                                 Scene::YakuJournal(YakuJournalScene::new()),
@@ -487,6 +505,7 @@ impl ShopScene {
 
             if matches!(a, UiAction::Cancel) {
                 self.west_sell_hold_started = None;
+                self.buy_hold_started = None;
                 self.focus = Some(ShopFocus::NextRound);
                 continue;
             }

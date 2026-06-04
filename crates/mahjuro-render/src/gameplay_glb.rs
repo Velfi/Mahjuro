@@ -66,11 +66,6 @@ pub const GAMEPLAY_CAMERA_NODE: &str = "default";
 const GAMEPLAY_ACTION_PICK_SHRINK_MUL: f32 = 0.125;
 const GAMEPLAY_DISCARD_RIVER_SIZE_MUL: f32 = 1.5;
 
-/// Per-room linear HDR multiplier for `gameplay.glb` **and** showcase tiles when
-/// [`DrawCmd::GameplayEnvironment`] is active — same path as hallway/archive in
-/// [`crate::wgpu_renderer::runtime::camera::WgpuRenderer::tile_hdr_tonemap`].
-pub const GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL: f32 = 1.0;
-
 pub const PLAYER_RELIC_MARKERS: [&str; 5] = [
     "player_relic",
     "player_relic.001",

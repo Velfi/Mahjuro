@@ -259,6 +259,7 @@ impl ShopScene {
             }),
             last_inspect_cam: std::cell::Cell::new(None),
             west_sell_hold_started: None,
+            buy_hold_started: None,
             storeroom_orbit_yaw: 0.0,
             storeroom_orbit_pitch: 0.0,
             gltf_anims: crate::render::room_gltf_anim::GltfAnimPlaybackSet::default(),
@@ -361,6 +362,7 @@ impl ShopScene {
         window_wh: (f32, f32),
     ) {
         self.west_sell_hold_started = None;
+        self.buy_hold_started = None;
         let prev_focus = self.focus;
         let before = (
             self.items.len(),
@@ -424,6 +426,39 @@ impl ShopScene {
         self.apply_sell_action(action, run, bus, cursor_pos, overlay_request, window_wh);
     }
 
+    /// Buy as soon as the Confirm hold-to-buy timer reaches its threshold (do not
+    /// wait for button release). Mirrors [`Self::try_complete_west_sell_hold`].
+    pub(super) fn try_complete_buy_hold(
+        &mut self,
+        now: std::time::Instant,
+        shop: &crate::game::engine::ShopReadModel,
+        run: &mut crate::game::run::RunState,
+        bus: &mut crate::game::event_bus::EventBus,
+        cursor_pos: (f32, f32),
+        overlay_request: &mut Option<OverlayRequest>,
+        window_wh: (f32, f32),
+    ) {
+        let Some(start) = self.buy_hold_started else {
+            return;
+        };
+        if now.saturating_duration_since(start).as_secs_f32() < super::SHOP_BUY_HOLD_SECONDS {
+            return;
+        }
+        let Some(action) = self.focus.and_then(|f| f.to_hit()).and_then(|hit| {
+            super::shared::shop_action_for_hit(
+                hit,
+                &self.items,
+                &self.zodiac_items,
+                &self.talisman_items,
+                shop,
+            )
+        }) else {
+            self.buy_hold_started = None;
+            return;
+        };
+        self.apply_buy_action(action, run, bus, cursor_pos, overlay_request, window_wh);
+    }
+
     /// Apply a sell action; on success, move focus like [`Self::apply_buy_action`]
     /// (nearest purchasable, or leave when the shelf is cleared).
     pub(super) fn apply_sell_action(
@@ -436,6 +471,7 @@ impl ShopScene {
         window_wh: (f32, f32),
     ) {
         self.west_sell_hold_started = None;
+        self.buy_hold_started = None;
         let prev_focus = self.focus;
         let shop_before = GameEngine::read_shop(run);
         let before_owned = (
@@ -514,6 +550,7 @@ impl ShopScene {
         }
         run.chronicle.note_restock();
         self.west_sell_hold_started = None;
+        self.buy_hold_started = None;
         match outcome.data {
             ShopCommandData::Restocked {
                 skip_cost_escalation: true,

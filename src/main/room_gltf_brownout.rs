@@ -201,6 +201,7 @@ impl RoomGltfBrownout {
         RoomEnvLightingTune {
             gltf_light_intensity_scale: base.gltf_light_intensity_scale * gltf_mul,
             linear_exposure: base.linear_exposure * exp_mul,
+            linear_exposure_base: base.linear_exposure_base,
             ambient_scale: base.ambient_scale * amb_mul,
             lit_mesh_gltf_punctual_scale: base.lit_mesh_gltf_punctual_scale * punct_mul,
             tile_gltf_punctual_scale: base.tile_gltf_punctual_scale * punct_mul,

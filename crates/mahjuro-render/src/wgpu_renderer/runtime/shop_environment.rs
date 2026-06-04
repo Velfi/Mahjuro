@@ -67,9 +67,6 @@ struct GltfRoomEnvUniformParams<'a> {
     camera: &'a CameraFrame,
     env_scene_key: &'static str,
     embedded_gltf_punctual: bool,
-    hallway_env: bool,
-    staircase_env: bool,
-    archive_env: bool,
     main_menu_env: bool,
     bloom_linear_hdr_output: bool,
     model: Mat4,
@@ -460,9 +457,6 @@ impl WgpuRenderer {
             camera,
             env_scene_key,
             embedded_gltf_punctual,
-            hallway_env,
-            staircase_env,
-            archive_env,
             main_menu_env,
             bloom_linear_hdr_output,
             model,
@@ -496,34 +490,10 @@ impl WgpuRenderer {
             0.0
         };
         let (exposure, ambient_x) = if embedded_gltf_punctual {
-            let gameplay_table = matches!(env_scene_key, scene_keys::GAMEPLAY | "tutorial");
-            // `gameplay.glb` room + tiles share `ROOM_GLB_LINEAR_EXPOSURE_BASE` × this mul via `tile_hdr_tonemap`.
-            let mut e = env_tune.linear_exposure * crate::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
-            if gameplay_table {
-                e *= crate::gameplay_glb::GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL;
-            }
-            let mut a = env_tune.ambient_scale;
-            if hallway_env {
-                e *= crate::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
-                a = a.max(crate::hallway_glb::HALLWAY_ENV_AMBIENT_SCALE_MIN);
-            }
-            if staircase_env {
-                e *= crate::staircase_glb::STAIRCASE_ENV_LINEAR_EXPOSURE_MUL;
-                a = a.max(crate::staircase_glb::STAIRCASE_ENV_AMBIENT_SCALE_MIN);
-            }
-            if archive_env {
-                e *= crate::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
-                a = a.max(crate::archive_glb::ARCHIVE_ENV_AMBIENT_SCALE_MIN);
-            }
-            if main_menu_env {
-                e *= crate::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
-                a = a.max(crate::main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
-            }
-            // Gameplay/tutorial GLB: windowless interior — authored ambient only (usually 0).
-            if !gameplay_table && !hallway_env && !staircase_env && !archive_env && !main_menu_env {
-                a = a.max(crate::room_glb::SHOP_ENV_DIELECTRIC_AMBIENT_MIN);
-            }
-            (e, a)
+            (
+                env_tune.room_glb_linear_hdr_gain(),
+                env_tune.ambient_scale,
+            )
         } else {
             (0.0, 0.0)
         };
@@ -644,9 +614,6 @@ impl WgpuRenderer {
             camera,
             env_scene_key: scene_keys::SHOP,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
-            hallway_env: false,
-            staircase_env: false,
-            archive_env: false,
             main_menu_env: false,
             bloom_linear_hdr_output,
             model,
@@ -683,14 +650,11 @@ impl WgpuRenderer {
             camera,
             env_scene_key: env_key,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
-            hallway_env: false,
-            archive_env: false,
             main_menu_env: false,
             bloom_linear_hdr_output,
             model,
             gpu,
             shadow_upload,
-            staircase_env: false,
             prim_deltas: &prim_deltas,
         });
     }
@@ -717,9 +681,6 @@ impl WgpuRenderer {
             camera,
             env_scene_key: scene_keys::HALLWAY,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
-            hallway_env: true,
-            staircase_env: false,
-            archive_env: false,
             main_menu_env: false,
             bloom_linear_hdr_output,
             model,
@@ -755,9 +716,6 @@ impl WgpuRenderer {
             camera,
             env_scene_key: scene_keys::STAIRWAY,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
-            hallway_env: false,
-            staircase_env: true,
-            archive_env: false,
             main_menu_env: false,
             bloom_linear_hdr_output,
             model,
@@ -873,9 +831,6 @@ impl WgpuRenderer {
             camera,
             env_scene_key: scene_keys::ARCHIVE,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
-            hallway_env: false,
-            staircase_env: false,
-            archive_env: true,
             main_menu_env: false,
             bloom_linear_hdr_output,
             model,
@@ -928,9 +883,6 @@ impl WgpuRenderer {
             camera,
             env_scene_key: scene_keys::MAIN_MENU,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
-            hallway_env: false,
-            staircase_env: false,
-            archive_env: false,
             main_menu_env: true,
             bloom_linear_hdr_output,
             model,

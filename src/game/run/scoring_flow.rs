@@ -564,7 +564,8 @@ impl RunState {
 
     /// Idempotent: enqueue blind clear / run loss when terminal predicates hold.
     pub fn resolve_round_end(&mut self, bus: &mut EventBus) {
-        if self.suppress_chamber_resolution || self.round_end_queued {
+        if self.suppress_chamber_resolution || self.round_end_queued || self.discard_refill_pending
+        {
             return;
         }
         if self.round_score >= self.target_score as u64 {
@@ -988,6 +989,9 @@ impl RunState {
     }
 
     fn no_actions_remaining(&self) -> bool {
+        if self.discard_refill_pending {
+            return false;
+        }
         if self.round_score >= self.target_score as u64 || self.plays_remaining == 0 {
             return false;
         }

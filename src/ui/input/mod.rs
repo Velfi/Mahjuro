@@ -421,6 +421,9 @@ impl InputState {
         if matches!(code, Scancode::Q) {
             actions.push(UiAction::WestFaceRelease);
         }
+        if matches!(code, Scancode::T) {
+            actions.push(UiAction::TriggerStructureRelease);
+        }
         if matches!(code, Scancode::Backspace | Scancode::Escape) {
             actions.push(UiAction::CancelRelease);
         }
@@ -476,6 +479,7 @@ pub fn apply_ui_actions(
                 run.clear_selection();
             }
             UiAction::TriggerStructure
+            | UiAction::TriggerStructureRelease
             | UiAction::InvertSelection
             | UiAction::UndoDiscard
             | UiAction::Pause

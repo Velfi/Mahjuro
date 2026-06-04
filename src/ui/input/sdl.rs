@@ -391,22 +391,24 @@ impl InputState {
                     GpAxis::TriggerLeft => {
                         let cur = trigger_norm(value);
                         let prev = shell.lt_prev.get(&id).copied().unwrap_or(0.0);
-                        if prev < TRIG_PRESS
-                            && cur >= TRIG_PRESS
-                            && !poll_ctx.face_bindings.suppress_trigger_structure
-                        {
-                            actions.push(UiAction::TriggerStructure);
+                        if !poll_ctx.face_bindings.suppress_trigger_structure {
+                            if prev < TRIG_PRESS && cur >= TRIG_PRESS {
+                                actions.push(UiAction::TriggerStructure);
+                            } else if prev >= TRIG_PRESS && cur < TRIG_PRESS {
+                                actions.push(UiAction::TriggerStructureRelease);
+                            }
                         }
                         shell.lt_prev.insert(id, cur);
                     }
                     GpAxis::TriggerRight => {
                         let cur = trigger_norm(value);
                         let prev = shell.rt_prev.get(&id).copied().unwrap_or(0.0);
-                        if prev < TRIG_PRESS
-                            && cur >= TRIG_PRESS
-                            && !poll_ctx.face_bindings.suppress_trigger_structure
-                        {
-                            actions.push(UiAction::TriggerStructure);
+                        if !poll_ctx.face_bindings.suppress_trigger_structure {
+                            if prev < TRIG_PRESS && cur >= TRIG_PRESS {
+                                actions.push(UiAction::TriggerStructure);
+                            } else if prev >= TRIG_PRESS && cur < TRIG_PRESS {
+                                actions.push(UiAction::TriggerStructureRelease);
+                            }
                         }
                         shell.rt_prev.insert(id, cur);
                     }

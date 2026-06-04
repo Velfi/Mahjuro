@@ -6,7 +6,10 @@ use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
 use crate::render::theme::color;
 use crate::scenes::options;
 use crate::scenes::{BackgroundId, GuideScene, OverlayRequest};
-use crate::ui::controller_hints::{HintStyle, gameplay_help_footer_row, push_screen_footer_hint};
+use crate::ui::controller_hints::{
+    HintStyle, InlineHintIconSlot, gameplay_footer_row, is_cash_in_hint_key,
+    push_screen_footer_hint,
+};
 use crate::ui::inspect_plaque::{
     FocusTooltipPanelParams, dora_focus_tooltip_strings, gameplay_consumable_description_full,
     hand_tile_focus_tooltip, push_focus_tooltip_panel_2d, round_wind_focus_tooltip_strings,
@@ -283,7 +286,7 @@ impl SceneBehavior for GameplayScene {
         // If a discard is waiting for the river animation to finish,
         // hold input until the animation completes and the fallback deadline
         // passes, then auto-draw replacements.
-        if let Some(deadline) = self.pending_refill {
+        if let Some(deadline) = self.pending_discard_refill {
             let anim_done = !discard_animation::discard_animation_active(self);
             if anim_done && now >= deadline {
                 let outcome = {
@@ -295,7 +298,7 @@ impl SceneBehavior for GameplayScene {
                 {
                     ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
                 }
-                self.pending_refill = None;
+                self.pending_discard_refill = None;
             } else {
                 return None;
             }
@@ -762,7 +765,7 @@ impl SceneBehavior for GameplayScene {
             && self.journal_transition.is_none()
             && crate::persistence::load_settings().discard_undo_enabled
             && self.discard_undo.is_some()
-            && self.pending_refill.is_none()
+            && self.pending_discard_refill.is_none()
             && discard_btn_rect.2 > 1.0
             && discard_btn_rect.3 > 1.0
         {
@@ -1047,10 +1050,9 @@ impl SceneBehavior for GameplayScene {
         // really *lands* visually. Drawn before the modifier-strip text
         // so 2D HUD labels stay readable through the flash.
         if let Some(t0) = self.gold_flash_at {
-            const FLASH_MS: f32 = 400.0;
             let elapsed_ms = now.saturating_duration_since(t0).as_secs_f32() * 1000.0;
-            if elapsed_ms < FLASH_MS {
-                let t = elapsed_ms / FLASH_MS;
+            if elapsed_ms < super::GOLD_FLASH_SECS * 1000.0 {
+                let t = elapsed_ms / (super::GOLD_FLASH_SECS * 1000.0);
                 // Ease-out-cubic decay: 1 → 0
                 let env = (1.0 - t).powi(3);
                 let alpha = 0.22 * env;
@@ -1309,33 +1311,6 @@ impl SceneBehavior for GameplayScene {
                         ..Default::default()
                     });
                 }
-            }
-            let settings = crate::persistence::load_settings();
-            let show_discard_legend = super::action_prompts::gameplay_west_north_legend_active(
-                ctx.input_mode,
-                settings.xy_quick_action,
-                self.focus,
-                discard_enabled,
-            );
-            let show_play_legend = super::action_prompts::gameplay_west_north_legend_active(
-                ctx.input_mode,
-                settings.xy_quick_action,
-                self.focus,
-                play_enabled,
-            );
-            if settings.hints_enabled {
-                super::action_prompts::push_gameplay_action_prompts(
-                    &mut frame,
-                    &ctx,
-                    super::action_prompts::GameplayActionPromptInput {
-                        discard_btn_rect,
-                        play_btn_rect,
-                        trigger_btn_rect,
-                        cash_in_enabled: gameplay.trigger_enabled,
-                        show_discard_legend,
-                        show_play_legend,
-                    },
-                );
             }
             if let Some(undo_rect) = discard_undo_rect {
                 let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
@@ -1918,12 +1893,48 @@ impl SceneBehavior for GameplayScene {
             && !ctx.modal_active
             && self.cascade_queue.is_empty()
         {
-            push_screen_footer_hint(
+            // Single combined footer: available table actions (discard / play /
+            // cash in) plus the guide hint, so the controls never collide with
+            // or hide each other.
+            let show_discard = super::action_prompts::gameplay_west_north_legend_active(
+                ctx.input_mode,
+                settings.xy_quick_action,
+                self.focus,
+                discard_enabled,
+            );
+            let show_play = super::action_prompts::gameplay_west_north_legend_active(
+                ctx.input_mode,
+                settings.xy_quick_action,
+                self.focus,
+                play_enabled,
+            );
+            let show_cash_in = gameplay.trigger_enabled;
+            let icon_slots = push_screen_footer_hint(
                 &mut frame,
                 &ctx,
-                gameplay_help_footer_row(ctx.input_mode),
+                gameplay_footer_row(ctx.input_mode, show_discard, show_play, show_cash_in),
                 HintStyle::standard(layout.window_h),
             );
+
+            // Hold-to-cash-in progress ring around the cash-in glyph (mirrors the
+            // shop's hold-to-sell ring).
+            let cash_in_focused =
+                matches!(self.focus, Some(FocusTarget::Button(GameplayButton::Trigger)));
+            if show_cash_in
+                && (self.cash_in_hold_in_progress() || cash_in_focused)
+                && let Some(InlineHintIconSlot { icon_rect, .. }) =
+                    icon_slots.iter().find(|s| is_cash_in_hint_key(s.key))
+            {
+                let progress = self.cash_in_hold_progress(now).unwrap_or(0.0);
+                let [ix, iy, icon_px, _] = *icon_rect;
+                let cx = ix + icon_px * 0.5;
+                let cy = iy + icon_px * 0.5;
+                let r = icon_px * 0.58;
+                let thickness = (icon_px * 0.12).max(3.5);
+                frame.arc_ring_quads([crate::ui::prompt_hold_ring::hold_prompt_ring(
+                    cx, cy, r, thickness, progress,
+                )]);
+            }
         }
 
         frame.buttons = buttons;

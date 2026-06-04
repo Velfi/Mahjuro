@@ -3299,6 +3299,7 @@ pub(super) fn build_renderer_new(
             vhs_grain: 0.0,
             vhs_vignette: 0.0,
             grain_frame: 0.0,
+            gamma: 1.0,
         }),
     );
 

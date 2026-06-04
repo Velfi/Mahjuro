@@ -235,10 +235,24 @@ fn push_cell_tiles(
     }
     let tile_size = (cw * 0.82).min(ch * 0.88);
     let has_mixed = entries.iter().any(|e| e.drawn) && entries.iter().any(|e| !e.drawn);
-    let stack_dx = if has_mixed { cw * 0.065 } else { cw * 0.04 };
-    let stack_dy = if has_mixed { ch * 0.05 } else { ch * 0.035 };
-    let base_x = cx + (cw - tile_size) * 0.5 - stack_dx * (n.saturating_sub(1) as f32) * 0.5;
-    let row_center_y = cy + ch * 0.5;
+    // Cap the per-copy offset so the whole stack stays inside the cell even when
+    // a face has extra copies (e.g. 6 with Strength in Numbers); otherwise the
+    // stack spills into the row below and overlaps neighbouring tiles.
+    let span = (n.saturating_sub(1)) as f32;
+    let max_dx = if span > 0.0 {
+        (cw - tile_size).max(0.0) / span
+    } else {
+        0.0
+    };
+    let max_dy = if span > 0.0 {
+        (ch - tile_size).max(0.0) / span
+    } else {
+        0.0
+    };
+    let stack_dx = (if has_mixed { cw * 0.065 } else { cw * 0.04 }).min(max_dx);
+    let stack_dy = (if has_mixed { ch * 0.05 } else { ch * 0.035 }).min(max_dy);
+    let base_x = cx + (cw - tile_size) * 0.5 - stack_dx * span * 0.5;
+    let row_center_y = cy + ch * 0.5 - stack_dy * span * 0.5;
 
     let mut ordered: Vec<&crate::game::wall_ledger::WallTileEntry> = entries.iter().collect();
     // Drawn copies first (back), undrawn last (front) so fade reads in mixed stacks.

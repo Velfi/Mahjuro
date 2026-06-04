@@ -122,6 +122,7 @@ mod cases {
             chronicle: crate::core::run_chronicle::RunChronicle::default(),
             suppress_chamber_resolution: false,
             round_end_queued: false,
+            discard_refill_pending: false,
         }
     }
 

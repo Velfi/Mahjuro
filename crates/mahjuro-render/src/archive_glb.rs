@@ -126,12 +126,6 @@ pub fn archive_inspect_plaque_decal_extents() -> [f32; 3] {
     })
 }
 
-/// Linear HDR exposure multiplier for `archive.glb` (applied when embedded punctual lights are active).
-pub const ARCHIVE_ENV_LINEAR_EXPOSURE_MUL: f32 = 1.0;
-
-/// Minimum hemispheric ambient (`decal_atlas_uv.x`) for this room.
-pub const ARCHIVE_ENV_AMBIENT_SCALE_MIN: f32 = 0.075;
-
 /// Visible item slots in the authored room (3×7 = 21).
 pub const ARCHIVE_SLOT_COLS: usize = 3;
 pub const ARCHIVE_SLOT_ROWS: usize = 7;

@@ -180,7 +180,11 @@ impl RunState {
 
     /// Remove all selected tiles and decrement the discard counter, but do NOT
     /// auto-draw replacements. The caller is responsible for invoking
-    /// `refill_hand` once the discard river animation has finished.
+    /// [`Self::refill_hand`] once the discard river animation has finished.
+    ///
+    /// This is the **only** hand mutation that splits removal from redraw; plays
+    /// commit and refill atomically in [`super::scoring_flow::RunState::commit_selection_to_structure`].
+    /// Sets [`super::RunState::discard_refill_pending`] until refill completes.
     /// Returns the number of tiles removed, or 0 if nothing was selected or no
     /// discards remain.
     pub fn discard_selected_no_refill(&mut self, bus: &mut EventBus) -> usize {
@@ -245,6 +249,7 @@ impl RunState {
         }
 
         self.onboarding_notify_discard();
+        self.discard_refill_pending = true;
         count
     }
 
@@ -254,6 +259,7 @@ impl RunState {
     pub fn refill_hand(&mut self, bus: &mut EventBus) {
         use crate::game::engine_state::GameplayCoreState;
 
+        self.discard_refill_pending = false;
         let target = ordeal::effective_hand_size(self);
         let lotus = self.relics.has(RelicId::LotusBloom);
         let mut drawn: Vec<Tile> = Vec::new();
