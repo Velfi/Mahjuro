@@ -155,6 +155,28 @@ impl SceneBehavior for GuideScene {
             }
         }
 
+        for a in ctx.actions {
+            match a {
+                UiAction::TabPrev | UiAction::PagePrev => {
+                    if self.page > 0 {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::TileClick));
+                        self.page -= 1;
+                    } else {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
+                    }
+                }
+                UiAction::TabNext | UiAction::PageNext => {
+                    if self.page + 1 < pages {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::TileClick));
+                        self.page += 1;
+                    } else {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
+                    }
+                }
+                _ => {}
+            }
+        }
+
         let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h);
         let action = self.tree.update_flat(
             &items,
