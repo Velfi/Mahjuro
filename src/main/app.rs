@@ -7,6 +7,16 @@ use crate::scenes::{Scene, SceneBehavior};
 use sdl3::keyboard::{Mod, Scancode};
 
 impl crate::App {
+    /// Prefetch / upload `gameplay.glb` during the hub only when Continue will
+    /// land in an in-progress run saved mid-gameplay (~600 MiB VRAM).
+    pub(crate) fn warm_gameplay_gpu_for_resume(&self) -> bool {
+        self.run.is_in_progress()
+            && matches!(
+                self.resume_scene,
+                crate::persistence::ResumeScene::Gameplay
+            )
+    }
+
     pub(crate) fn saved_resume_scene_for(scene: &Scene) -> Option<crate::persistence::ResumeScene> {
         match scene {
             Scene::Shop(_) => Some(crate::persistence::ResumeScene::Shop),
