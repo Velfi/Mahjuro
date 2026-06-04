@@ -12,6 +12,8 @@ struct CameraUniform {
     /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient (albedo * 0.08);
     /// w = inverse document scale for embedded glTF punctual attenuation.
     hdr_tonemap: vec4<f32>,
+    /// x = embedded glTF inverse-square intensity scale (see `TILE_GLTF_PUNCTUAL_SCALE`).
+    punctual_tuning: vec4<f32>,
 };
 
 // ACES tonemapping is applied once in `tonemap_composite.wgsl`. This shader
@@ -55,7 +57,7 @@ struct PointLight {
 struct PointLights {
     // count.x = number of active lights; rest is std140 padding.
     count: vec4<u32>,
-    // extras.x = display gamma; extras.w = inverse-square scale for procedural meshes when embedded GLB.
+    // extras.x = display gamma; extras.w = lit_mesh inverse-square scale (tiles use `punctual_tuning.x`).
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
@@ -504,7 +506,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let radius = lights.lights[i].pos.w;
         let kind = lights.lights[i].params.x;
         let lc = lights.lights[i].color.rgb * punc_rgb_mul;
-        let intensity = lights.lights[i].color.a * select(1.0, lights.extras.w, kind > 0.5);
+        let intensity = lights.lights[i].color.a * select(1.0, cam.punctual_tuning.x, kind > 0.5);
         let to_light = lp - in.world_pos;
         let dist = length(to_light);
         // `hdr_tonemap.w` carries inverse document scale on tile draws (see

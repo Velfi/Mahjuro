@@ -641,6 +641,7 @@ pub fn create_room_env_camera_uniform_buffers(
         tile_seed: 0.0,
         decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
         hdr_tonemap: [0.0; 4],
+        punctual_tuning: [0.0; 4],
     };
     (0..count)
         .map(|i| {
@@ -963,7 +964,8 @@ pub struct SsrGlobals {
     pub hdr_tonemap: [f32; 4],
     /// x = `1/room_env_world_scale` for embedded glTF punctual attenuation in `lit_mesh`
     /// (document-space distance; **0** = world-space / gameplay).
-    /// y = shop display-case material tuning (1 = shop + embedded punctual only); zw unused.
+    /// y = shop display-case material tuning (1 = shop + embedded punctual only).
+    /// z = art-forward ambient mul when `y == 1`; w = gameplay marker-spawn punctual mul.
     pub shop_punctual: [f32; 4],
 }
 

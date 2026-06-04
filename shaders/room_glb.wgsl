@@ -26,6 +26,8 @@ struct CameraUniform {
     /// `w` = main-menu pride rainbow scene time when active (`0` = off); moon/star
     /// meshes tagged via `pbr.emissive_factor.w`.
     hdr_tonemap: vec4<f32>,
+    /// Layout parity with `tile_3d.wgsl` (`punctual_tuning` unused in this shader).
+    punctual_tuning: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> cam: CameraUniform;

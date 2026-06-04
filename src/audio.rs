@@ -346,7 +346,7 @@ impl crate::sfx_id::SfxId {
             SfxId::OrdealDefeated => "ordeal_defeated.ogg",
             SfxId::TalismanPurchased => "talisman_purchased.ogg",
             SfxId::TalismanUsed => "talisman_used.ogg",
-            SfxId::RollersSpin => "sfx/rollers.ogg",
+            SfxId::RollersSpin => "sfx/bike_spin.ogg",
         }
     }
 

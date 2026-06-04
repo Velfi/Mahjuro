@@ -557,6 +557,7 @@ impl WgpuRenderer {
                 },
             ],
             hdr_tonemap,
+            punctual_tuning: [0.0; 4],
         };
         for (pi, buf) in gpu.uniform_buffers.iter().enumerate() {
             let prim_model = if let Some(delta) = prim_deltas.get(&pi) {

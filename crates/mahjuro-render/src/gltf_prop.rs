@@ -213,6 +213,7 @@ pub(crate) fn make_gltf_prop_gpu(
             tile_seed: 0.0,
             decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
             hdr_tonemap: [0.0; 4],
+            punctual_tuning: [0.0; 4],
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });

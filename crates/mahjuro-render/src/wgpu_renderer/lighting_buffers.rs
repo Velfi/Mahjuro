@@ -134,7 +134,8 @@ pub(crate) struct PointLightsBuf {
     /// to scroll the river surface and animate foam crests).
     /// `extras.z` = candle flame height in world units (for shaders that
     /// key flame envelope size off the shared point-light buffer).
-    /// `extras.w` = inverse-square intensity scale in `lit_mesh` when embedded GLB punctual is active.
+    /// `extras.w` = inverse-square intensity scale in `lit_mesh` when embedded GLB punctual is active
+    /// (tiles use `CameraUniform.punctual_tuning.x` instead).
     pub extras: [f32; 4],
     pub lights: [PointLightGpu; MAX_POINT_LIGHTS],
 }

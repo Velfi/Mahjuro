@@ -203,6 +203,7 @@ impl RoomGltfBrownout {
             linear_exposure: base.linear_exposure * exp_mul,
             ambient_scale: base.ambient_scale * amb_mul,
             lit_mesh_gltf_punctual_scale: base.lit_mesh_gltf_punctual_scale * punct_mul,
+            tile_gltf_punctual_scale: base.tile_gltf_punctual_scale * punct_mul,
             gltf_emissive_scale: base.gltf_emissive_scale * emissive_mul,
             candle_light_color_mul: [
                 base.candle_light_color_mul[0] * candle_dim,

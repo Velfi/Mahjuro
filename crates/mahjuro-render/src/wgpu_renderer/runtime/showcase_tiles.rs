@@ -25,6 +25,7 @@ impl WgpuRenderer {
         let mut hdr_tonemap = self.tile_hdr_tonemap(frame);
         hdr_tonemap[3] =
             self.room_punctual_inv_doc_scale(camera, frame.scene_lighting.embedded_gltf_punctual);
+        let punctual_tuning = self.tile_punctual_tuning(frame);
         self.queue.write_buffer(
             &self.tile_outline_frame_uniform_buffer,
             0,
@@ -273,6 +274,7 @@ impl WgpuRenderer {
                             tile_seed,
                             decal_atlas_uv: stg.decal_atlas_uv,
                             hdr_tonemap,
+                            punctual_tuning,
                         }),
                     );
                     if p.outline {
