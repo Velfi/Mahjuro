@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.5-1 — 2026-06-03
+
+### Added
+- Options now includes a **Low memory** graphics preset for weaker GPUs: slightly lower internal resolution, shadows and screen-space reflections off, and tighter room loading so 1080p stays playable on cards with about 4 GB of VRAM. On first launch the game may choose it automatically when it detects an integrated or entry-level GPU.
+
 ## 0.5.5-0 — 2026-06-03
 
 - maintenance, development, and bugfixes.
