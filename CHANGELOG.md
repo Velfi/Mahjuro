@@ -7,6 +7,13 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.6-3 — 2026-06-04
+
+### Fixed
+- Zodiac level-up ribbons and meta level-up relic unlock screens no longer cast a drop shadow on the black celebration backdrop.
+- Discarding your entire hand at once no longer ends the round early — tiles are redrawn as usual after the discard animation.
+- The in-game Guide now turns pages with LB and RB on controller (and Page Up / Page Down on keyboard), matching the footer hint.
+
 ## 0.5.6-1 — 2026-06-04
 
 ### Changed
