@@ -29,6 +29,8 @@ use crate::core::tile_pack::TilePackKind;
 
 /// Matches [`mahjuro_render::theme::color::RUBY`] (theme token for Honors seal).
 const RUBY: [f32; 4] = [0.611, 0.438, 0.459, 1.0];
+/// Unified pack sleeve tint (`#060605`) so cover labels stay dominant.
+const PACK_SLEEVE_BLACK: [f32; 4] = [0.0235, 0.0235, 0.0196, 1.0];
 
 /// Per-pack visual signature. All four colors are RGBA in linear-ish
 /// 0..1 space matching the rest of the rendering pipeline.
@@ -60,7 +62,7 @@ pub struct PackPalette {
 pub const HONORS: PackPalette = PackPalette {
     slug: "honors",
     display_name: "Honors Pack",
-    foil: [0.92, 0.78, 0.38, 1.0],
+    foil: PACK_SLEEVE_BLACK,
     seal: RUBY,
     bg: [0.055, 0.094, 0.220, 1.0], // #0E1838
     bg_name: "deep navy",
@@ -70,7 +72,7 @@ pub const HONORS: PackPalette = PackPalette {
 pub const TERMINALS: PackPalette = PackPalette {
     slug: "terminals",
     display_name: "Terminals Pack",
-    foil: [0.78, 0.52, 0.32, 1.0],
+    foil: PACK_SLEEVE_BLACK,
     seal: [0.56, 0.14, 0.12, 1.0],
     bg: [0.102, 0.078, 0.071, 1.0], // #1A1412
     bg_name: "warm obsidian",
@@ -80,7 +82,7 @@ pub const TERMINALS: PackPalette = PackPalette {
 pub const FLOWERS: PackPalette = PackPalette {
     slug: "flowers",
     display_name: "Flowers Pack",
-    foil: [0.92, 0.62, 0.70, 1.0],
+    foil: PACK_SLEEVE_BLACK,
     seal: [0.52, 0.14, 0.30, 1.0],
     bg: [0.110, 0.059, 0.118, 1.0], // #1C0F1E
     bg_name: "plum-black",
@@ -90,7 +92,7 @@ pub const FLOWERS: PackPalette = PackPalette {
 pub const SOUZU: PackPalette = PackPalette {
     slug: "souzu",
     display_name: "Souzu Pack",
-    foil: [0.48, 0.78, 0.52, 1.0],
+    foil: PACK_SLEEVE_BLACK,
     seal: [0.78, 0.18, 0.14, 1.0],
     bg: [0.039, 0.102, 0.055, 1.0], // #0A1A0E
     bg_name: "deep forest-black",
@@ -100,7 +102,7 @@ pub const SOUZU: PackPalette = PackPalette {
 pub const PINZU: PackPalette = PackPalette {
     slug: "pinzu",
     display_name: "Pinzu Pack",
-    foil: [0.78, 0.82, 0.88, 1.0],
+    foil: PACK_SLEEVE_BLACK,
     seal: [0.58, 0.10, 0.18, 1.0],
     bg: [0.102, 0.055, 0.071, 1.0], // #1A0E12
     bg_name: "burgundy-black",
@@ -110,7 +112,7 @@ pub const PINZU: PackPalette = PackPalette {
 pub const MANZU: PackPalette = PackPalette {
     slug: "manzu",
     display_name: "Manzu Pack",
-    foil: [0.42, 0.48, 0.78, 1.0],
+    foil: PACK_SLEEVE_BLACK,
     seal: [0.72, 0.18, 0.18, 1.0],
     bg: [0.102, 0.078, 0.039, 1.0], // #1A140A
     bg_name: "sepia-black",

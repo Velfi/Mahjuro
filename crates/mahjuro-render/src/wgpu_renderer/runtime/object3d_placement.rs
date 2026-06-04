@@ -169,6 +169,9 @@ impl WgpuRenderer {
         let view_proj_arr = camera.view_proj_arr;
         let w = camera.w;
         let h = camera.h;
+        let tile_pack_celebration = matches!(self.active_scene_key, Some("tile_pack_celebration"))
+            || (self.active_scene_key == Some("showcase")
+                && frame.showcase_render_hints.tile_pack_celebration_tonemap);
         let project_unit_cube_rect =
             |model: Mat4| -> [f32; 4] { camera.project_unit_cube_rect(model) };
         let project_aabb_rect = |model: Mat4, half: [f32; 3], center_y: f32| -> [f32; 4] {
@@ -871,8 +874,6 @@ impl WgpuRenderer {
                             };
                             // Pack shrink-wrap keeps `material_params.w == 0` for
                             // front-face decal composite. Talisman tablets pass kind index in `.w`.
-                            // Showcase pack celebrations already disable the
-                            // directional shadow map in `shadow_setup.rs`.
                             self.pack_instances[slot_i].write_uniform_with_decal(
                                 &self.queue,
                                 view_proj_arr,
@@ -880,12 +881,14 @@ impl WgpuRenderer {
                                 material,
                                 false,
                             );
-                            self.write_lit_mesh_shadow(
-                                &mut shadow,
-                                &self.pack_instances[slot_i],
-                                model,
-                                material.kind,
-                            );
+                            if !tile_pack_celebration {
+                                self.write_lit_mesh_shadow(
+                                    &mut shadow,
+                                    &self.pack_instances[slot_i],
+                                    model,
+                                    material.kind,
+                                );
+                            }
                             let want_tex = if self.pack_textures.contains_key(kind) {
                                 Some(*kind)
                             } else {
@@ -966,12 +969,10 @@ impl WgpuRenderer {
                                     user: 0,
                                 });
                             }
-                            self.push_object3d_draw(
-                                object3d_draw_list,
-                                object3d_shadow_draw_list,
-                                DrawKind::Pack,
-                                slot_i,
-                            );
+                            object3d_draw_list.push((DrawKind::Pack, slot_i));
+                            if !tile_pack_celebration {
+                                object3d_shadow_draw_list.push((DrawKind::Pack, slot_i));
+                            }
                         }
                         Object3dKind::Talisman { .. } | Object3dKind::MemorialTalisman { .. } => {
                             self.ensure_talisman_textures();
