@@ -26,6 +26,7 @@ impl WgpuRenderer {
             let _ = self.showcase_decal_atlas_cache.remove(pos);
         }
         self.showcase_decal_atlas_cache.push_front((tileset, atlas));
+        self.trim_showcase_decal_atlas_cache();
     }
 
     fn activate_cached_showcase_decal_atlas(&mut self, tileset_name: &str) -> bool {

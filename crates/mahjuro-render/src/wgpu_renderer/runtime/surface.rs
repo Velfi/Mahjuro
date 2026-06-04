@@ -172,6 +172,9 @@ impl WgpuRenderer {
         }
         let new_size = super::super::clamp_render_physical_size(new_size);
         self.size = new_size;
+        self.render_size =
+            super::super::constants::scaled_render_size(new_size, self.render_scale);
+        let rs = self.render_size;
         self.config.width = new_size.width;
         self.config.height = new_size.height;
         match &self.target {
@@ -185,14 +188,18 @@ impl WgpuRenderer {
         }
 
         self.depth_texture.destroy();
-        let (dt, dv) = create_depth(&self.device, new_size.width, new_size.height);
+        let (dt, dv) = create_depth(&self.device, rs.width, rs.height);
         self.depth_texture = dt;
         self.depth_view = dv;
+        self.overlay_depth_texture.destroy();
+        let (odt, odv) = create_depth(&self.device, new_size.width, new_size.height);
+        self.overlay_depth_texture = odt;
+        self.overlay_depth_view = odv;
         self.ssr_prev_depth_texture.destroy();
         let (sdt, sdv) = create_depth_r32_snapshot(
             &self.device,
-            new_size.width,
-            new_size.height,
+            rs.width,
+            rs.height,
             "ssr-prev-depth",
         );
         self.ssr_prev_depth_texture = sdt;
@@ -200,15 +207,15 @@ impl WgpuRenderer {
         self.depth_r32_snapshot_texture.destroy();
         let (drt, drv) = create_depth_r32_snapshot(
             &self.device,
-            new_size.width,
-            new_size.height,
+            rs.width,
+            rs.height,
             "depth-r32-snapshot",
         );
         self.depth_r32_snapshot_texture = drt;
         self.depth_r32_snapshot_view = drv;
         self.depth_copy_staging_buffer.destroy();
         self.depth_copy_staging_buffer =
-            create_depth_copy_staging(&self.device, new_size.width, new_size.height);
+            create_depth_copy_staging(&self.device, rs.width, rs.height);
 
         // SSR scene history texture lives at *half* the swapchain size
         // (see `scene_color_downsample.wgsl`); rebuild the bind group so
@@ -217,7 +224,7 @@ impl WgpuRenderer {
         // `ssr_prev_depth_view` is fine.
         self.scene_prev_texture.destroy();
         let (scene_prev_w, scene_prev_h) =
-            scene_prev_size(new_size.width.max(1), new_size.height.max(1));
+            scene_prev_size(rs.width.max(1), rs.height.max(1));
         let (spt, spv) =
             create_scene_prev(&self.device, SCENE_HDR_FORMAT, scene_prev_w, scene_prev_h);
         self.scene_prev_texture = spt;
@@ -226,8 +233,8 @@ impl WgpuRenderer {
         let (sct, scv) = create_scene_color(
             &self.device,
             SCENE_HDR_FORMAT,
-            new_size.width,
-            new_size.height,
+            rs.width,
+            rs.height,
         );
         self.scene_color_texture = sct;
         self.scene_color_view = scv;
@@ -235,8 +242,8 @@ impl WgpuRenderer {
         let (re_t, re_v) = create_scene_color(
             &self.device,
             SCENE_HDR_FORMAT,
-            new_size.width,
-            new_size.height,
+            rs.width,
+            rs.height,
         );
         self.room_emissive_texture = re_t;
         self.room_emissive_view = re_v;
@@ -244,8 +251,8 @@ impl WgpuRenderer {
         let (pbt, pbv) = create_scene_color(
             &self.device,
             SCENE_HDR_FORMAT,
-            new_size.width,
-            new_size.height,
+            rs.width,
+            rs.height,
         );
         self.post_bloom_texture = pbt;
         self.post_bloom_view = pbv;
@@ -253,8 +260,8 @@ impl WgpuRenderer {
         let (jst, jsv) = create_journal_scene(
             &self.device,
             SCENE_HDR_FORMAT,
-            new_size.width,
-            new_size.height,
+            rs.width,
+            rs.height,
         );
         self.journal_scene_texture = jst;
         self.journal_scene_view = jsv;
@@ -269,8 +276,8 @@ impl WgpuRenderer {
         let (cot, cov) = create_cascade_offscreen(
             &self.device,
             SCENE_HDR_FORMAT,
-            new_size.width,
-            new_size.height,
+            rs.width,
+            rs.height,
         );
         self.cascade_offscreen_texture = cot;
         self.cascade_offscreen_view = cov;
@@ -307,8 +314,8 @@ impl WgpuRenderer {
         self.bloom_ping_texture.destroy();
         self.bloom_pong_texture.destroy();
         self.emissive_gi_texture.destroy();
-        let bloom_w = (new_size.width.max(1) / 2).max(1);
-        let bloom_h = (new_size.height.max(1) / 2).max(1);
+        let bloom_w = (rs.width.max(1) / 2).max(1);
+        let bloom_h = (rs.height.max(1) / 2).max(1);
         let (egi_t, egi_v) = create_post_texture(
             &self.device,
             SCENE_HDR_FORMAT,

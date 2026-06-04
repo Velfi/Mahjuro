@@ -511,6 +511,7 @@ pub struct OptionsScene {
     pub available_tilesets: Vec<String>,
     pub gamma: f32,
     pub graphics_mode: crate::persistence::GraphicsMode,
+    pub graphics_mode_user_set: bool,
     pub hdr_enabled: bool,
     pub borderless_fullscreen: bool,
     borderless_fullscreen_apply_armed: Cell<bool>,
@@ -573,6 +574,7 @@ impl OptionsScene {
             available_tilesets,
             gamma: settings.gamma,
             graphics_mode: settings.graphics_mode,
+            graphics_mode_user_set: settings.graphics_mode_user_set,
             hdr_enabled: settings.hdr_enabled,
             borderless_fullscreen: settings.borderless_fullscreen,
             borderless_fullscreen_apply_armed: Cell::new(false),
@@ -619,6 +621,7 @@ impl OptionsScene {
         settings.tileset_name = self.tileset_name.clone();
         settings.gamma = self.gamma;
         settings.graphics_mode = self.graphics_mode;
+        settings.graphics_mode_user_set = self.graphics_mode_user_set;
         settings.hdr_enabled = self.hdr_enabled;
         settings.borderless_fullscreen = self.borderless_fullscreen;
         settings.swap_ab = self.swap_ab;
@@ -807,7 +810,10 @@ impl OptionsScene {
             Row::Tile => self.tile_preset = self.tile_preset.next(),
             Row::Tileset => self.cycle_tileset(1),
             Row::BorderlessFullscreen => self.toggle_borderless_fullscreen(),
-            Row::Graphics => self.graphics_mode = self.graphics_mode.next(),
+            Row::Graphics => {
+                self.graphics_mode = self.graphics_mode.next();
+                self.graphics_mode_user_set = true;
+            }
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => {
                 self.swap_ab = !self.swap_ab;
@@ -844,7 +850,10 @@ impl OptionsScene {
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
             Row::Tileset => self.cycle_tileset(-1),
             Row::BorderlessFullscreen => self.toggle_borderless_fullscreen(),
-            Row::Graphics => self.graphics_mode = self.graphics_mode.prev(),
+            Row::Graphics => {
+                self.graphics_mode = self.graphics_mode.prev();
+                self.graphics_mode_user_set = true;
+            }
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => {
                 self.swap_ab = !self.swap_ab;
@@ -907,6 +916,7 @@ impl OptionsScene {
             }
             Row::Graphics => {
                 self.graphics_mode = self.graphics_mode.next();
+                self.graphics_mode_user_set = true;
                 self.save_settings();
             }
             Row::Hdr => {

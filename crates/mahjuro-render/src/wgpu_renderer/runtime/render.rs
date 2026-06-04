@@ -263,6 +263,8 @@ impl WgpuRenderer {
         // The 2D UI overlays (score panel, buttons, text) keep using the
         // pixel-orthographic quad pipeline and float over the 3D scene as
         // a HUD.
+        // Camera / room GLB use window-space layout (`layout.window_*`); only the
+        // offscreen targets are allocated at `render_size`.
         let camera = CameraFrame::build(frame, self.size);
         self.upload_camera_uniforms(&camera, ssr_enabled, frame);
         let look_target = camera.look_target;
@@ -2114,8 +2116,8 @@ impl WgpuRenderer {
             4
         };
 
-        let gw = self.size.width.max(1) as f32;
-        let gh = self.size.height.max(1) as f32;
+        let gw = self.render_size.width.max(1) as f32;
+        let gh = self.render_size.height.max(1) as f32;
         let use_baked_probes = if room_gi_bake_capture {
             false
         } else if gi_runs_this_frame && !frame.room_gi_dynamic {
@@ -2230,8 +2232,8 @@ impl WgpuRenderer {
                 &self.depth_copy_staging_buffer,
                 &self.depth_texture,
                 &self.depth_r32_snapshot_texture,
-                self.size.width,
-                self.size.height,
+                self.render_size.width,
+                self.render_size.height,
             );
 
             if probe_count > 0 {
@@ -2334,13 +2336,13 @@ impl WgpuRenderer {
                 &self.depth_copy_staging_buffer,
                 &self.depth_texture,
                 &self.ssr_prev_depth_texture,
-                self.size.width,
-                self.size.height,
+                self.render_size.width,
+                self.render_size.height,
             );
         }
 
-        let bloom_w = (self.size.width.max(1) / 2).max(1);
-        let bloom_h = (self.size.height.max(1) / 2).max(1);
+        let bloom_w = (self.render_size.width.max(1) / 2).max(1);
+        let bloom_h = (self.render_size.height.max(1) / 2).max(1);
         // `scene_color` is linear HDR — see `tonemap_composite.wgsl`.
         //
         // Bloom extract threshold must stay **high (~1.0+ scene-linear luminance)**:
@@ -2648,9 +2650,9 @@ impl WgpuRenderer {
                     depth_slice: None,
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
+                    view: &self.overlay_depth_view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,

@@ -12,6 +12,8 @@ pub(super) fn build_renderer_new(
     let super::super::init_phases::EarlyGpuState {
         device,
         queue,
+        adapter_name,
+        integrated_gpu,
         size,
         target,
         config,
@@ -52,10 +54,17 @@ pub(super) fn build_renderer_new(
         0.06,
         &mut boot_poll_slot,
     );
+    let suggested_graphics_mode =
+        mahjuro_gfx_types::GraphicsMode::suggest_for_adapter(&adapter_name, integrated_gpu);
+    let render_scale = 1.0f32;
+    let render_size =
+        super::super::constants::scaled_render_size(size, render_scale);
+    let (overlay_depth_texture, overlay_depth_view) =
+        super::super::resources::create_depth(&device, size.width.max(1), size.height.max(1));
     let depth_copy_staging_buffer = super::super::resources::create_depth_copy_staging(
         &device,
-        config.width.max(1),
-        config.height.max(1),
+        render_size.width.max(1),
+        render_size.height.max(1),
     );
 
     {
@@ -432,7 +441,7 @@ pub(super) fn build_renderer_new(
     use crate::wgpu_renderer::constants::{MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS};
     use mahjuro_gfx_types::ShadowQuality;
 
-    let default_shadow_quality = ShadowQuality::High;
+    let default_shadow_quality = ShadowQuality::Off;
     let point_shadow_array = create_shadow_depth_array(
         &device,
         "point-shadow-array",
@@ -1789,40 +1798,41 @@ pub(super) fn build_renderer_new(
         mipmap_filter: wgpu::MipmapFilterMode::Nearest,
         ..Default::default()
     });
-    let (scene_prev_w, scene_prev_h) = scene_prev_size(size.width.max(1), size.height.max(1));
+    let (scene_prev_w, scene_prev_h) =
+        scene_prev_size(render_size.width.max(1), render_size.height.max(1));
     let (scene_prev_texture, scene_prev_view) =
         create_scene_prev(&device, scene_hdr_format, scene_prev_w, scene_prev_h);
     let (scene_color_texture, scene_color_view) = create_scene_color(
         &device,
         scene_hdr_format,
-        size.width.max(1),
-        size.height.max(1),
+        render_size.width.max(1),
+        render_size.height.max(1),
     );
     let (post_bloom_texture, post_bloom_view) = create_scene_color(
         &device,
         scene_hdr_format,
-        size.width.max(1),
-        size.height.max(1),
+        render_size.width.max(1),
+        render_size.height.max(1),
     );
     let (room_emissive_texture, room_emissive_view) = create_scene_color(
         &device,
         scene_hdr_format,
-        size.width.max(1),
-        size.height.max(1),
+        render_size.width.max(1),
+        render_size.height.max(1),
     );
     // Fullscreen offscreen for the live yaku-journal GPU render (book
     // page surface samples this in screen space; see `lit_mesh.wgsl`).
     let (journal_scene_texture, journal_scene_view) = create_journal_scene(
         &device,
         scene_hdr_format,
-        size.width.max(1),
-        size.height.max(1),
+        render_size.width.max(1),
+        render_size.height.max(1),
     );
     let (cascade_offscreen_texture, cascade_offscreen_view) = create_cascade_offscreen(
         &device,
         scene_hdr_format,
-        size.width.max(1),
-        size.height.max(1),
+        render_size.width.max(1),
+        render_size.height.max(1),
     );
     let cascade_composite_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("cascade-composite-bg"),
@@ -1854,8 +1864,8 @@ pub(super) fn build_renderer_new(
             },
         ],
     });
-    let bloom_w = (size.width.max(1) / 2).max(1);
-    let bloom_h = (size.height.max(1) / 2).max(1);
+    let bloom_w = (render_size.width.max(1) / 2).max(1);
+    let bloom_h = (render_size.height.max(1) / 2).max(1);
 
     let bloom_bundle = super::bloom::build_bloom(&super::bloom::BloomBuildParams {
         device: &device,
@@ -2891,9 +2901,12 @@ pub(super) fn build_renderer_new(
         Some(crate::coin_glb::COIN_GLB_NODE),
     )
     .expect("coin.glb node decode");
-    crate::tile_glb::normalize_mesh(&mut coin_tile);
+    crate::tile_glb::reorient_mesh_to_engine_axes(&mut coin_tile);
+    crate::tile_glb::center_mesh_at_origin(&mut coin_tile);
+    let coin_half = crate::tile_glb::mesh_local_half_extents(&coin_tile);
+    crate::coin_glb::init_coin_glb_half_extents(coin_half);
     log::info!(
-        "Loaded coin.glb: {} material slot(s)",
+        "Loaded coin.glb: {} material slot(s), half_extents={coin_half:?}",
         coin_tile.primitives.len()
     );
     // Phase-1 primitive registry: parallel GPU copies of meshes
@@ -3406,6 +3419,13 @@ pub(super) fn build_renderer_new(
         ui_font_italic,
         mono_font,
         size,
+        render_size,
+        render_scale,
+        overlay_depth_texture,
+        overlay_depth_view,
+        graphics_mode: mahjuro_gfx_types::GraphicsMode::Visuals,
+        suggested_graphics_mode,
+        room_gpu_lru: std::collections::VecDeque::new(),
         tile_anim_y: Vec::new(),
         tile_anim_x: Vec::new(),
         tile_uids: Vec::new(),

@@ -7,12 +7,12 @@ use crate::scene_keys;
 use crate::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
 use wgpu::util::DeviceExt;
 
-const ROOM_SHOP: u8 = 1 << 0;
-const ROOM_HALLWAY: u8 = 1 << 1;
-const ROOM_STAIRCASE: u8 = 1 << 2;
-const ROOM_ARCHIVE: u8 = 1 << 3;
-const ROOM_GAMEPLAY: u8 = 1 << 4;
-const ROOM_MAIN_MENU: u8 = 1 << 5;
+pub(super) const ROOM_SHOP: u8 = 1 << 0;
+pub(super) const ROOM_HALLWAY: u8 = 1 << 1;
+pub(super) const ROOM_STAIRCASE: u8 = 1 << 2;
+pub(super) const ROOM_ARCHIVE: u8 = 1 << 3;
+pub(super) const ROOM_GAMEPLAY: u8 = 1 << 4;
+pub(super) const ROOM_MAIN_MENU: u8 = 1 << 5;
 
 use crate::score_roller_layout::{self, GAMEPLAY_SCORE_ROLLER_SLOT_COUNT};
 
@@ -1648,6 +1648,7 @@ impl WgpuRenderer {
                     });
                 crate::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
                 self.rooms_gpu_loaded |= ROOM_MAIN_MENU;
+                self.note_room_gpu_resident(ROOM_MAIN_MENU);
             },
         );
     }
@@ -1686,6 +1687,7 @@ impl WgpuRenderer {
                 });
                 crate::room_glb::release_shop_environment_cpu_sources_after_gpu_upload();
                 self.rooms_gpu_loaded |= ROOM_SHOP;
+                self.note_room_gpu_resident(ROOM_SHOP);
             },
         );
     }
@@ -1718,6 +1720,7 @@ impl WgpuRenderer {
                 self.hallway_environment = gpu_wrap;
                 crate::hallway_glb::release_hallway_environment_cpu_sources_after_gpu_upload();
                 self.rooms_gpu_loaded |= ROOM_HALLWAY;
+                self.note_room_gpu_resident(ROOM_HALLWAY);
             },
         );
     }
@@ -1744,6 +1747,7 @@ impl WgpuRenderer {
                 self.staircase_environment = gpu_wrap;
                 crate::staircase_glb::release_staircase_environment_cpu_sources_after_gpu_upload();
                 self.rooms_gpu_loaded |= ROOM_STAIRCASE;
+                self.note_room_gpu_resident(ROOM_STAIRCASE);
             },
         );
     }
@@ -1793,6 +1797,7 @@ impl WgpuRenderer {
                 self.archive_page_right_prim_indices = page_right;
                 crate::archive_glb::release_archive_environment_cpu_sources_after_gpu_upload();
                 self.rooms_gpu_loaded |= ROOM_ARCHIVE;
+                self.note_room_gpu_resident(ROOM_ARCHIVE);
             },
         );
     }
@@ -1837,6 +1842,7 @@ impl WgpuRenderer {
                     });
                 crate::gameplay_glb::release_gameplay_environment_cpu_sources_after_gpu_upload();
                 self.rooms_gpu_loaded |= ROOM_GAMEPLAY;
+                self.note_room_gpu_resident(ROOM_GAMEPLAY);
             },
         );
         crate::startup_profile::log_sample("wgpu.room.gameplay", "first gameplay GPU upload");

@@ -507,6 +507,43 @@ fn ensure_tile_engine_local_axes(tile: &mut LoadedTile) {
     ensure_face_normal_points_up(tile);
 }
 
+/// Recenter mesh vertices so the AABB center sits at the local origin.
+pub fn center_mesh_at_origin(tile: &mut LoadedTile) {
+    let Some(center) = mesh_aabb_center(tile) else {
+        return;
+    };
+    for prim in &mut tile.primitives {
+        for v in &mut prim.vertices {
+            v.position[0] -= center[0];
+            v.position[1] -= center[1];
+            v.position[2] -= center[2];
+        }
+    }
+}
+
+fn mesh_aabb_center(tile: &LoadedTile) -> Option<[f32; 3]> {
+    let mut min = [f32::MAX; 3];
+    let mut max = [f32::MIN; 3];
+    let mut any = false;
+    for prim in &tile.primitives {
+        for v in &prim.vertices {
+            any = true;
+            for i in 0..3 {
+                min[i] = min[i].min(v.position[i]);
+                max[i] = max[i].max(v.position[i]);
+            }
+        }
+    }
+    if !any {
+        return None;
+    }
+    Some([
+        (min[0] + max[0]) * 0.5,
+        (min[1] + max[1]) * 0.5,
+        (min[2] + max[2]) * 0.5,
+    ])
+}
+
 /// Center mesh at origin and scale so the largest AABB extent is 1.0.
 pub fn normalize_mesh(tile: &mut LoadedTile) {
     ensure_tile_engine_local_axes(tile);
@@ -548,6 +585,40 @@ pub fn normalize_mesh(tile: &mut LoadedTile) {
             v.position[2] = (v.position[2] - center[2]) * s;
         }
     }
+}
+
+/// Rotate decoded mesh data into the engine's expected local frame
+/// (**+Y** is thickness / face-normal axis) without recentering or
+/// renormalizing authored scale.
+///
+/// Use this when caller wants Blender-authored dimensions to pass
+/// through unchanged.
+pub fn reorient_mesh_to_engine_axes(tile: &mut LoadedTile) {
+    ensure_tile_engine_local_axes(tile);
+}
+
+/// Half-extents of the mesh AABB after load-time reorientation/centering.
+pub fn mesh_local_half_extents(tile: &LoadedTile) -> [f32; 3] {
+    let mut min = [f32::MAX; 3];
+    let mut max = [f32::MIN; 3];
+    let mut any = false;
+    for prim in &tile.primitives {
+        for v in &prim.vertices {
+            any = true;
+            for i in 0..3 {
+                min[i] = min[i].min(v.position[i]);
+                max[i] = max[i].max(v.position[i]);
+            }
+        }
+    }
+    if !any {
+        return [0.5, 0.5, 0.5];
+    }
+    [
+        (max[0] - min[0]) * 0.5,
+        (max[1] - min[1]) * 0.5,
+        (max[2] - min[2]) * 0.5,
+    ]
 }
 
 fn decode_tile_primitive(
