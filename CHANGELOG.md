@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.6-4 — 2026-06-04
+
+### Fixed
+- Win and loss screens now wait until the scoring cascade, score counter rolls, and flying score popups finish before the round resolves, so the full score beat is not cut off by the celebration modal.
+
 ## 0.5.6-3 — 2026-06-04
 
 ### Fixed
