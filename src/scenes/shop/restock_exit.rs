@@ -79,7 +79,7 @@ impl ShopScene {
         !self.departing_stock.is_empty()
     }
 
-    /// Back-compat name used across shop input/layout guards (reroll only).
+    /// Back-compat name used across shop input/layout guards (restock only).
     #[inline]
     pub(super) fn restock_exit_active(&self) -> bool {
         self.departing_stock_active()

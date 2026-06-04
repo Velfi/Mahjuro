@@ -1,4 +1,4 @@
-//! Procedural mesh for the shop counter's reroll prop — a Chinese
+//! Procedural mesh for the shop counter's restock prop — a Chinese
 //! suanpan abacus.
 //!
 //! Frame is laid out in the local XZ plane (X = horizontal, Z = vertical).

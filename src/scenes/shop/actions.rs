@@ -6,7 +6,7 @@ use super::*;
 use crate::scenes::{GameplayScene, OverlayRequest};
 
 /// Generate randomized shop stock (relics + consumables) from the player's
-/// unowned-relic pool. Shared between initial shop creation and rerolls.
+/// unowned-relic pool. Shared between initial shop creation and restocks.
 pub(super) fn generate_shop_stock(
     relics: &RelicState,
     available_relics: &[RelicId],
@@ -216,15 +216,15 @@ impl ShopScene {
         }
 
         let consumed_tags = GameEngine::consume_shop_tags(run);
-        let remaining_free_rerolls = consumed_tags.free_reroll;
-        // Reroll base cost is driven by the run's season; tutorial and
-        // free-reroll tags still override it.
-        let reroll_cost = if mode == ShopMode::Tutorial {
+        let remaining_free_restocks = consumed_tags.free_restock;
+        // Restock base cost is driven by the run's season; tutorial and
+        // free-restock tags still override it.
+        let restock_cost = if mode == ShopMode::Tutorial {
             u32::MAX
-        } else if remaining_free_rerolls > 0 {
+        } else if remaining_free_restocks > 0 {
             0
         } else {
-            season.reroll_base_cost()
+            season.restock_base_cost()
         };
 
         let focus = Some(default_shop_focus_for_stock(
@@ -239,8 +239,8 @@ impl ShopScene {
             zodiac_items,
             talisman_items,
             pack_items,
-            reroll_cost,
-            remaining_free_rerolls,
+            restock_cost,
+            remaining_free_restocks,
             pause_menu: PauseMenu::new(),
             focus,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
@@ -501,43 +501,43 @@ impl ShopScene {
     }
 
     /// Replace all unsold stock with fresh random items and bump the cost.
-    pub(super) fn reroll(&mut self, run: &mut crate::game::run::RunState) {
+    pub(super) fn restock(&mut self, run: &mut crate::game::run::RunState) {
         if self.mode == ShopMode::Tutorial || self.restock_exit_active() {
             return;
         }
         let mut bus = crate::game::event_bus::EventBus::default();
-        let outcome = GameEngine::new(run, &mut bus).dispatch_shop(ShopCommand::RerollShop {
-            cost: self.reroll_cost,
+        let outcome = GameEngine::new(run, &mut bus).dispatch_shop(ShopCommand::RestockShop {
+            cost: self.restock_cost,
         });
         if outcome.rejection.is_some() {
             return;
         }
-        run.chronicle.note_reroll();
+        run.chronicle.note_restock();
         self.west_sell_hold_started = None;
         match outcome.data {
-            ShopCommandData::Rerolled {
+            ShopCommandData::Restocked {
                 skip_cost_escalation: true,
                 ..
             } => {
-                // Free reroll (skip tag or I Got A Guy): spend one queued waiver.
-                if self.remaining_free_rerolls > 0 {
-                    self.remaining_free_rerolls -= 1;
+                // Free restock (skip tag or I Got A Guy): spend one queued waiver.
+                if self.remaining_free_restocks > 0 {
+                    self.remaining_free_restocks -= 1;
                 }
-                self.reroll_cost = if self.remaining_free_rerolls > 0 {
+                self.restock_cost = if self.remaining_free_restocks > 0 {
                     0
                 } else {
-                    run.mode.season.reroll_base_cost()
+                    run.mode.season.restock_base_cost()
                 };
             }
-            _ => self.reroll_cost += REROLL_COST_INCREMENT,
+            _ => self.restock_cost += RESTOCK_COST_INCREMENT,
         }
         let shop = GameEngine::read_shop(run);
         let pending = self.pending_shop_stock_from_run(&shop, run);
         self.begin_restock_exit(pending, std::time::Instant::now(), true);
     }
 
-    /// Debug-only: reroll stock without deducting gold or incrementing cost.
-    pub fn debug_reroll(&mut self, run: &crate::game::run::RunState) {
+    /// Debug-only: restock stock without deducting gold or incrementing cost.
+    pub fn debug_restock(&mut self, run: &crate::game::run::RunState) {
         let shop = GameEngine::read_shop(run);
         let pending = self.pending_shop_stock_from_run(&shop, run);
         self.begin_restock_exit(pending, std::time::Instant::now(), true);

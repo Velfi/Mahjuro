@@ -108,8 +108,8 @@ pub struct RunChronicle {
     pub tiles_drawn: u32,
     #[serde(default)]
     pub shops_visited: u32,
-    #[serde(default)]
-    pub rerolls_used: u32,
+    #[serde(default, alias = "rerolls_used")]
+    pub restocks_used: u32,
     #[serde(default)]
     pub relic_triggers: u32,
     /// Total yen gained during the run (not ending balance).
@@ -163,8 +163,8 @@ impl RunChronicle {
         self.shops_visited = self.shops_visited.saturating_add(1);
     }
 
-    pub fn note_reroll(&mut self) {
-        self.rerolls_used = self.rerolls_used.saturating_add(1);
+    pub fn note_restock(&mut self) {
+        self.restocks_used = self.restocks_used.saturating_add(1);
     }
 
     pub fn note_relic_trigger(&mut self) {

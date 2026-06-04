@@ -54,8 +54,8 @@ pub(crate) enum ShopFocus {
     Pack(u32),
     /// The 2D "Leave" button (top-right) — also maps to PICK_LEAVE_PROP.
     NextRound,
-    /// The 2D "Reroll" button at the bottom of the screen — also maps to PICK_REROLL_PROP.
-    Reroll,
+    /// The 2D "Restock" button at the bottom of the screen — also maps to PICK_RESTOCK_PROP.
+    Restock,
     /// Lower-right wall supply HUD (opens Wall Ledger overlay).
     WallHud,
 }
@@ -73,7 +73,7 @@ impl ShopFocus {
             ShopHit::Ribbon(i) => Self::Ribbon(i),
             ShopHit::Talisman(i) => Self::Talisman(i),
             ShopHit::Dish(id) if id == PICK_LEAVE_PROP => Self::NextRound,
-            ShopHit::Dish(id) if id == PICK_REROLL_PROP => Self::Reroll,
+            ShopHit::Dish(id) if id == PICK_RESTOCK_PROP => Self::Restock,
             ShopHit::Dish(id) => Self::Dish(id),
             ShopHit::TilePack(id) => Self::Pack(id),
             ShopHit::EnvSpawnSlot(_) | ShopHit::EnvInvSlot(_) | ShopHit::EnvConsumableOrd(_) => {
@@ -93,7 +93,7 @@ impl ShopFocus {
             Self::Dish(id) => Some(ShopHit::Dish(id)),
             Self::Pack(id) => Some(ShopHit::TilePack(id)),
             Self::NextRound => Some(ShopHit::Dish(PICK_LEAVE_PROP)),
-            Self::Reroll => Some(ShopHit::Dish(PICK_REROLL_PROP)),
+            Self::Restock => Some(ShopHit::Dish(PICK_RESTOCK_PROP)),
             Self::WallHud => None,
         }
     }

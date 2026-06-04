@@ -50,7 +50,7 @@ pub enum MeshId {
     Ofuda,
     /// Chinese suanpan abacus — wooden frame, reckoning beam, and vertical
     /// rods only (no beads). Pair with [`MeshId::AbacusHeavenBeads`] +
-    /// [`MeshId::AbacusEarthBeads`] for the shop reroll prop.
+    /// [`MeshId::AbacusEarthBeads`] for the shop restock prop.
     Abacus,
     /// Heaven deck beads (upper two per rod) — same layout as [`MeshId::Abacus`].
     AbacusHeavenBeads,

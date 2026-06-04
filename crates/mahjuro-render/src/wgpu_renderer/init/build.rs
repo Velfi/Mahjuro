@@ -54,11 +54,52 @@ pub(super) fn build_renderer_new(
         0.06,
         &mut boot_poll_slot,
     );
-    let suggested_graphics_mode =
-        mahjuro_gfx_types::GraphicsMode::suggest_for_adapter(&adapter_name, integrated_gpu);
+    // Offline bakes/screenshots must match `room_gi` / `room_shadow` stamp resolution (native).
+    let suggested_graphics_mode = if matches!(
+        &target,
+        super::super::targets::RenderTarget::Offscreen { .. }
+    ) {
+        mahjuro_gfx_types::GraphicsMode::Visuals
+    } else {
+        mahjuro_gfx_types::GraphicsMode::suggest_for_adapter(&adapter_name, integrated_gpu)
+    };
     let render_scale = suggested_graphics_mode.render_scale();
     let render_size =
         super::super::constants::scaled_render_size(size, render_scale);
+    // `early_gpu_and_depth` allocates scene depth at window size; recreate when scaled down.
+    let (depth_texture, depth_view, ssr_prev_depth_texture, ssr_prev_depth_view, depth_r32_snapshot_texture, depth_r32_snapshot_view) =
+        if render_size.width != size.width || render_size.height != size.height {
+            depth_texture.destroy();
+            ssr_prev_depth_texture.destroy();
+            depth_r32_snapshot_texture.destroy();
+            let (dt, dv) = super::super::resources::create_depth(
+                &device,
+                render_size.width.max(1),
+                render_size.height.max(1),
+            );
+            let (sdt, sdv) = super::super::resources::create_depth_r32_snapshot(
+                &device,
+                render_size.width.max(1),
+                render_size.height.max(1),
+                "ssr-prev-depth",
+            );
+            let (drt, drv) = super::super::resources::create_depth_r32_snapshot(
+                &device,
+                render_size.width.max(1),
+                render_size.height.max(1),
+                "depth-r32-snapshot",
+            );
+            (dt, dv, sdt, sdv, drt, drv)
+        } else {
+            (
+                depth_texture,
+                depth_view,
+                ssr_prev_depth_texture,
+                ssr_prev_depth_view,
+                depth_r32_snapshot_texture,
+                depth_r32_snapshot_view,
+            )
+        };
     let (overlay_depth_texture, overlay_depth_view) =
         super::super::resources::create_depth(&device, size.width.max(1), size.height.max(1));
     let depth_copy_staging_buffer = super::super::resources::create_depth_copy_staging(

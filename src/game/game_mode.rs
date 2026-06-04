@@ -32,7 +32,7 @@ pub struct GameMode {
     /// gameplay bonuses (e.g. Plastic grants +1 discard).
     #[serde(default)]
     pub tile_material: TileMaterial,
-    /// Difficulty tier selected at run start. Modulates target score, reroll
+    /// Difficulty tier selected at run start. Modulates target score, restock
     /// base cost, and boss min_ante floor — see `core::season`.
     #[serde(default, alias = "stake")]
     pub season: Season,
@@ -62,7 +62,7 @@ impl GameMode {
     }
 
     /// Build a game mode for the given tile material AND difficulty season.
-    /// The season's numeric deltas (target mult, reroll base cost, boss floor)
+    /// The season's numeric deltas (target mult, restock base cost, boss floor)
     /// are folded in here so `RunState::new` and the shop never reach back to
     /// the season enum directly.
     /// Apply the mode's shop price multiplier to a base price. Returns at

@@ -2499,8 +2499,8 @@ fn visit_shop(
     // Consume tag-granted shop modifiers (headless analogue of ShopScene::new).
     let extra_relics: usize = (run.tag_rich_stock as usize * 2).max(run.tag_patron_gift as usize);
     let patron_gifts = run.tag_patron_gift;
-    // Free reroll is a no-op for the bot (it doesn't reroll).
-    run.tag_free_reroll = 0;
+    // Free restock is a no-op for the bot (it doesn't restock).
+    run.tag_free_restock = 0;
     run.tag_patron_gift = 0;
     run.tag_rich_stock = 0;
 

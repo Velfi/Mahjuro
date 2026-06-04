@@ -240,12 +240,12 @@ impl App {
                 self.mouse_actions.push(UiAction::DebugToggleAxes);
                 log::debug!("World-axes overlay toggled");
             }
-            DebugAction::RerollShop => match &mut self.scene {
+            DebugAction::RestockShop => match &mut self.scene {
                 Scene::Shop(s) => {
-                    s.debug_reroll(&self.run);
-                    log::debug!("Rerolled shop stock (free)");
+                    s.debug_restock(&self.run);
+                    log::debug!("Restocked shop stock (free)");
                 }
-                _ => log::warn!("Reroll Shop ignored — not in shop scene"),
+                _ => log::warn!("Restock Shop ignored — not in shop scene"),
             },
             DebugAction::OpenPack => match &mut self.scene {
                 Scene::Shop(s) => {

@@ -34,7 +34,7 @@ use self::layout::*;
 use self::shared::*;
 
 pub(super) use self::pick_ids::{
-    N_TILE_PACKS, PICK_COIN_DISH, PICK_JOURNAL_BOOK, PICK_LEAVE_PROP, PICK_REROLL_PROP,
+    N_TILE_PACKS, PICK_COIN_DISH, PICK_JOURNAL_BOOK, PICK_LEAVE_PROP, PICK_RESTOCK_PROP,
     PICK_TILE_PACK_BASE,
 };
 
@@ -67,11 +67,11 @@ pub struct ShopScene {
     talisman_items: Vec<ConsumableShopItem>,
     /// Tile packs for sale this shop visit (always up to `N_TILE_PACKS`).
     pack_items: Vec<TilePackShopItem>,
-    /// Current reroll cost — starts at `REROLL_BASE_COST` and increases by
-    /// `REROLL_COST_INCREMENT` each time the player rerolls this shop visit.
-    reroll_cost: u32,
-    /// Skip-tag free rerolls still owed this visit (consumed one at a time).
-    remaining_free_rerolls: u32,
+    /// Current restock cost — starts at `RESTOCK_BASE_COST` and increases by
+    /// `RESTOCK_COST_INCREMENT` each time the player restocks this shop visit.
+    restock_cost: u32,
+    /// Skip-tag free restocks still owed this visit (consumed one at a time).
+    remaining_free_restocks: u32,
     pause_menu: PauseMenu,
     /// Currently focused shop element. Starts on the first for-sale shelf item
     /// (or the leave bell when the shelf is empty). In cursor mode, hover follows
@@ -129,16 +129,16 @@ pub const SHOP_3D_HIT_ID: u32 = 0x9200;
 pub(crate) const SHOP_SELL_HOLD_SECONDS: f32 = 1.0;
 /// Click id for the Leave / advance 2D button (kept for focus-nav compat).
 const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
-/// Click id for the Reroll 2D button (kept for focus-nav compat).
-const SHOP_REROLL_ID: u32 = 0x9400;
+/// Click id for the Restock 2D button (kept for focus-nav compat).
+const SHOP_RESTOCK_ID: u32 = 0x9400;
 /// Floating sell button for hovered owned relics.
 const SHOP_SELL_RELIC_BASE: u32 = 0x9500;
 /// Floating sell button for hovered owned consumables.
 const SHOP_SELL_CONSUMABLE_BASE: u32 = 0x9600;
 /// How long a relic glow + wiggle lasts after activation.
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
-/// How much the reroll cost increases per use within a single shop visit.
-const REROLL_COST_INCREMENT: u32 = 5;
+/// How much the restock cost increases per use within a single shop visit.
+const RESTOCK_COST_INCREMENT: u32 = 5;
 
 /// Pitch relic cuboids toward the camera ([`crate::render::table_transform::rot_fixed_axes_deg`]).
 /// The relic front cap is at local +Y; pitching past 90° tilts it to face -Y
@@ -193,7 +193,7 @@ impl ShopScene {
             match slug {
                 "journal" => ShopFocus::Dish(PICK_JOURNAL_BOOK),
                 "bell" | "leave" | "next-round" => ShopFocus::NextRound,
-                "abacus" | "reroll" => ShopFocus::Reroll,
+                "abacus" | "restock" => ShopFocus::Restock,
                 other => {
                     return Err(format!(
                         "--shop-focus '{other}' — supported: journal, bell, abacus, relic:N, ribbon:N, talisman:N, pack:N"

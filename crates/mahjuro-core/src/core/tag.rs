@@ -23,8 +23,9 @@ pub enum TagKind {
     TreasureChest,
 
     // ── Shop modifiers (affect the next shop visit) ───────────────────
-    /// Next shop's first reroll is free.
-    FreeReroll,
+    /// Next shop's first restock is free.
+    #[serde(alias = "free_reroll")]
+    FreeRestock,
     /// One random relic in the next shop costs 0 (lets you sell first if full).
     PatronGift,
     /// Next shop stocks 2 extra relics.
@@ -131,7 +132,7 @@ impl TagKind {
         &[
             TagKind::GoldIngot,
             TagKind::TreasureChest,
-            TagKind::FreeReroll,
+            TagKind::FreeRestock,
             TagKind::PatronGift,
             TagKind::RichStock,
             TagKind::ZodiacBlessing,
@@ -151,7 +152,7 @@ impl TagKind {
         match self {
             TagKind::GoldIngot => "gold_ingot",
             TagKind::TreasureChest => "treasure_chest",
-            TagKind::FreeReroll => "free_reroll",
+            TagKind::FreeRestock => "free_restock",
             TagKind::PatronGift => "patron_gift",
             TagKind::RichStock => "rich_stock",
             TagKind::ZodiacBlessing => "zodiac_blessing",
