@@ -1479,6 +1479,23 @@ pub(super) fn build_yaku_panel_and_tablets(
         yaku_preview_sets.extend(selected_sets.iter().cloned());
     }
 
+    // Banked melds alone cover cash-in preview; when the row is still empty,
+    // treat structure + rack as one hand so a complete chicken shape shows its
+    // tablet before every tile is played to structure.
+    if yaku_preview_sets.is_empty() && selected_tiles_for_yaku.is_empty() {
+        let mut combined: Vec<crate::core::tile::Tile> =
+            run.structure_tiles().iter().copied().collect();
+        combined.extend(interaction.hand.iter().copied());
+        if combined.len() == run.mode.hand_size
+            && let Some((sets, scoring_tiles)) = GameEngine::validate_with_wildcards(run, &combined)
+        {
+            yaku_preview_original_tiles = GameplayScene::display_tiles(combined, run);
+            yaku_preview_effective_tiles =
+                GameplayScene::display_tiles(scoring_tiles, run);
+            yaku_preview_sets = sets;
+        }
+    }
+
     let previews = if yaku_preview_sets.is_empty() {
         Vec::new()
     } else {
@@ -1606,11 +1623,13 @@ pub(super) fn build_yaku_panel_and_tablets(
 
     // If the selection is a valid hand but triggers no yaku, show a
     // chicken-hand tablet so the player knows the hand is legal.
-    let is_chicken_hand = visible_previews.is_empty()
-        && !yaku_preview_sets.is_empty()
-        && crate::core::yaku::is_complete_winning_hand(
+    let is_chicken_hand = !yaku_preview_sets.is_empty()
+        && crate::core::yaku::would_inject_chicken_hand(
             &yaku_preview_effective_tiles,
             &yaku_preview_sets,
+            round_wind_for_yaku,
+            bonus_round_wind_for_yaku,
+            &gameplay.available_yaku,
         );
 
     // Phase 3: yaku selectors are now physical bone tablets sitting in
@@ -1642,11 +1661,16 @@ pub(super) fn build_yaku_panel_and_tablets(
         let tablet_step_t = ((card_w + card_gap) / span).clamp(0.0, 1.0);
         let tablet_thickness = (8.0 * layout_scale).max(6.0) * yaku_scale;
         let tablet_depth = panel_h * yaku_scale;
-        let mut push_tablet = |i: usize, label: std::borrow::Cow<'static, str>, active: bool| {
+        let mut push_tablet = |i: usize,
+                               label: std::borrow::Cow<'static, str>,
+                               active: bool,
+                               kind: Option<crate::core::yaku::YakuKind>| {
             let t = (i as f32 * tablet_step_t).clamp(0.0, 1.0);
             let mut pos = crate::render::gameplay_glb::lerp_marker_anchor(a_l, a_r, t);
             let rotation = crate::render::gameplay_glb::lerp_marker_rotation_rad(rot_l, rot_r, t);
-            let yaku_wave = active_yaku.is_some_and(|name| label.contains(name));
+            let yaku_wave = active_yaku.is_some_and(|name| {
+                kind.is_some_and(|yk| yk.name() == name) || label.contains(name)
+            });
             if yaku_wave {
                 pos[2] += layout.mm(SCORE_WAVE_YAKU_MM * wave_t);
             }
@@ -1671,8 +1695,11 @@ pub(super) fn build_yaku_panel_and_tablets(
         if is_chicken_hand {
             push_tablet(
                 0,
-                std::borrow::Cow::Borrowed("\u{1F414} Chicken Hand"),
+                std::borrow::Cow::Borrowed(crate::core::yaku::YakuKind::ChickenHand.gameplay_tablet_label(
+                    true,
+                )),
                 true,
+                Some(crate::core::yaku::YakuKind::ChickenHand),
             );
         } else {
             for (i, p) in visible_previews.iter().enumerate() {
@@ -1683,12 +1710,10 @@ pub(super) fn build_yaku_panel_and_tablets(
                     .copied()
                     .unwrap_or(0)
                     >= 1;
-                let tablet_label: std::borrow::Cow<'static, str> = if yaku_discovered {
-                    std::borrow::Cow::Borrowed(p.kind.name())
-                } else {
-                    std::borrow::Cow::Borrowed("???")
-                };
-                push_tablet(i, tablet_label, p.active);
+                let tablet_label = std::borrow::Cow::Borrowed(
+                    p.kind.gameplay_tablet_label(yaku_discovered),
+                );
+                push_tablet(i, tablet_label, p.active, Some(p.kind));
             }
         }
     }

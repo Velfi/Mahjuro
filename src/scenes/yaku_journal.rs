@@ -16,8 +16,13 @@ use crate::core::tile::Tile;
 use crate::core::yaku::YakuKind;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
+use crate::render::decal::{load_mono_font, load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{CameraParams, ShowcaseTilePlacement, UiFrame};
-use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
+use crate::render::theme::{
+    ButtonState, ButtonVariant, color,
+    color::score_cascade::{CHIPS as CHIPS_COLOR, MULT as MULT_COLOR},
+    typography,
+};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{HintStyle, journal_plaque_footer_row, push_inline_hint_rows};
@@ -642,24 +647,37 @@ impl SceneBehavior for YakuJournalScene {
                 ..Default::default()
             });
 
-            let payout_text = match state {
-                ProgressionState::Unseen => "—".into(),
-                _ => format!("+{} chips / +{}", chips, format_yaku_mult_bonus(mult)),
-            };
-            frame.text(TextLabel {
-                rect: [
-                    col_x[3] + col_pad,
-                    row_y,
-                    row_payout_w - col_pad * 2.0,
-                    table.row_h,
-                ],
-                text: payout_text,
-                color: row_text_color,
-                align: TextAlign::Left,
-                font_px: Some(tiny_font),
-                clip_rect: Some(body_clip_rect),
-                ..Default::default()
-            });
+            let payout_rect = [
+                col_x[3] + col_pad,
+                row_y,
+                row_payout_w - col_pad * 2.0,
+                table.row_h,
+            ];
+            match state {
+                ProgressionState::Unseen => {
+                    frame.text(TextLabel {
+                        rect: payout_rect,
+                        text: "—".into(),
+                        color: row_text_color,
+                        align: TextAlign::Left,
+                        font_px: Some(tiny_font),
+                        clip_rect: Some(body_clip_rect),
+                        ..Default::default()
+                    });
+                }
+                _ => {
+                    push_chips_mult_stat_line(
+                        &mut frame,
+                        payout_rect[0],
+                        payout_rect[1],
+                        payout_rect[3],
+                        tiny_font,
+                        chips,
+                        mult,
+                        Some(body_clip_rect),
+                    );
+                }
+            }
             frame.text(TextLabel {
                 rect: [
                     col_x[4] + col_pad,
@@ -944,6 +962,111 @@ fn format_yaku_mult_bonus(mult: f64) -> String {
     }
 }
 
+fn format_yaku_mult_plus(mult: f64) -> String {
+    format!("+{}", format_yaku_mult_bonus(mult))
+}
+
+/// Fixed glyph width for payout numerals so the table column lines up row to row.
+const PAYOUT_VALUE_COL_W: usize = 5;
+
+fn measure_payout_text_width(text: &str, font_px: f32) -> f32 {
+    let text_h_px = font_px.max(8.0).round().max(1.0) as u32;
+    let font = load_mono_font().or_else(load_ui_font);
+    if let Some(font) = font {
+        let (_, _, advances) = measure_label_advances(font, text, 8192, text_h_px, Some(font_px));
+        advances.iter().copied().sum()
+    } else {
+        (font_px * 0.52 * text.chars().count().max(1) as f32).max(8.0)
+    }
+}
+
+fn format_payout_value_col(raw: &str) -> String {
+    if raw.len() >= PAYOUT_VALUE_COL_W {
+        raw.to_string()
+    } else {
+        format!("{raw:>PAYOUT_VALUE_COL_W$}")
+    }
+}
+
+fn chips_mult_stat_segments(chips: i32, mult: f64) -> Vec<(String, [f32; 4])> {
+    let sep_color = color::alpha(color::CHAMPAGNE, 0.50);
+    vec![
+        (format_payout_value_col(&format!("+{chips}")), CHIPS_COLOR),
+        (" cp ".into(), CHIPS_COLOR),
+        ("/".into(), sep_color),
+        (
+            format_payout_value_col(&format_yaku_mult_plus(mult)),
+            MULT_COLOR,
+        ),
+        (" mu".into(), MULT_COLOR),
+    ]
+}
+
+fn push_chips_mult_stat_segments(
+    frame: &mut UiFrame,
+    x: f32,
+    y: f32,
+    band_h: f32,
+    font_px: f32,
+    segments: &[(String, [f32; 4])],
+    clip_rect: Option<[f32; 4]>,
+) {
+    let mut cursor_x = x;
+    for (text, seg_color) in segments {
+        let w = measure_payout_text_width(text, font_px).max(1.0);
+        frame.text(TextLabel {
+            rect: [cursor_x, y, w, band_h],
+            text: text.clone(),
+            color: *seg_color,
+            align: TextAlign::Left,
+            font_px: Some(font_px),
+            mono: true,
+            clip_rect,
+            ..Default::default()
+        });
+        cursor_x += w;
+    }
+}
+
+fn push_chips_mult_stat_line(
+    frame: &mut UiFrame,
+    x: f32,
+    y: f32,
+    band_h: f32,
+    font_px: f32,
+    chips: i32,
+    mult: f64,
+    clip_rect: Option<[f32; 4]>,
+) {
+    let segments = chips_mult_stat_segments(chips, mult);
+    push_chips_mult_stat_segments(frame, x, y, band_h, font_px, &segments, clip_rect);
+}
+
+fn push_chips_mult_stat_line_right(
+    frame: &mut UiFrame,
+    right_x: f32,
+    y: f32,
+    band_h: f32,
+    font_px: f32,
+    chips: i32,
+    mult: f64,
+) {
+    let segments = chips_mult_stat_segments(chips, mult);
+    let total_w: f32 = segments
+        .iter()
+        .map(|(t, _)| measure_payout_text_width(t, font_px))
+        .sum();
+    push_chips_mult_stat_segments(
+        frame,
+        (right_x - total_w).max(0.0),
+        y,
+        band_h,
+        font_px,
+        &segments,
+        None,
+    );
+}
+
 /// Draw the floating plaque: a bamboo-lacquer panel across the bottom of the
 /// screen showing the selected yaku's canonical 14-tile hand, scoring
 /// values, name, and description. The hand comes from
@@ -1034,10 +1157,15 @@ fn draw_plaque(
     });
     let label_champagne = color::CHAMPAGNE;
     let label_champagne_soft = color::alpha(color::CHAMPAGNE, 0.88);
-    let _label_champagne_muted = color::alpha(color::CHAMPAGNE, 0.52);
+    let label_champagne_muted = color::alpha(color::CHAMPAGNE, 0.52);
+
+    let yaku_progress = GameEngine::read_yaku_progress(ctx.run);
+    let lvl = yaku_progress.level_of(yk);
+    let chips = yk.chip_bonus_at(lvl);
+    let mult = yk.mult_bonus_at(lvl);
 
     // ── Header ───────────────────────────────────────────────────
-    // Title first, then the current run stats as distinct cards.
+    // Title + level pill (left); chips / mult strip (right).
     let header_pad = ((18.0 * shadow_scale).max(12.0)) * pad_scale;
     let header_x = face_x + header_pad;
     let header_w = face_w - header_pad * 2.0;
@@ -1047,6 +1175,7 @@ fn draw_plaque(
     // gameplay bone tablets).
     let title_font = typography::size(typography::H20, h);
     let title_h = title_font * 1.05;
+    let title_lane_w = header_w * 0.52;
     if matches!(state, ProgressionState::Unseen) {
         let title_glyph = title_font * 1.02;
         let title_pill_w = title_glyph * 2.38;
@@ -1064,7 +1193,7 @@ fn draw_plaque(
         );
     } else {
         frame.text(TextLabel {
-            rect: [header_x, header_y, header_w, title_h],
+            rect: [header_x, header_y, title_lane_w, title_h],
             text: yk.name().into(),
             color: label_champagne,
             align: TextAlign::Left,
@@ -1073,9 +1202,76 @@ fn draw_plaque(
         });
     }
 
-    // Rule line under the title — 1-2px ANTIQUE strip, separating the
-    // identity header from the description/hand below.
-    let rule_y = header_y + title_h + header_pad * 0.35;
+    let pill_font = typography::size(typography::H45, h);
+    let pill_h = pill_font * 1.75;
+    let pill_w = pill_font * 5.6;
+    let pill_x = header_x;
+    let pill_y = header_y + title_h * 0.94;
+    let badge_ink = color::darken(color::WALNUT_INK, 0.12);
+    let (pill_bg, pill_fg) = match state {
+        ProgressionState::Leveled => (color::darken(color::GOLD, 0.06), badge_ink),
+        ProgressionState::Unseen => (color::darken(bamboo_face, 0.28), label_champagne_soft),
+        ProgressionState::Played => (color::darken(color::BRASS, 0.07), badge_ink),
+    };
+    frame.quad(GpuInstance {
+        rect: [
+            pill_x + 1.5 * shadow_scale,
+            pill_y + 2.0 * shadow_scale,
+            pill_w,
+            pill_h,
+        ],
+        color: color::alpha([0.08, 0.04, 0.02, 1.0], 0.35),
+        user: 0,
+    });
+    frame.quad(GpuInstance {
+        rect: [pill_x, pill_y, pill_w, pill_h],
+        color: pill_bg,
+        user: 0,
+    });
+    frame.text(TextLabel {
+        rect: [pill_x, pill_y + pill_h * 0.18, pill_w, pill_h * 0.8],
+        text: format!("Lv  {lvl}"),
+        color: pill_fg,
+        align: TextAlign::Center,
+        font_px: Some(pill_font * 1.22),
+        ..Default::default()
+    });
+
+    let stat_font = typography::size(typography::H24, h);
+    let stat_band_h = stat_font * 1.2;
+    let stat_y = header_y + (title_h - stat_band_h) * 0.45;
+    match state {
+        ProgressionState::Unseen => {
+            frame.text(TextLabel {
+                rect: [
+                    header_x + header_w * 0.42,
+                    stat_y,
+                    header_w * 0.58,
+                    stat_band_h,
+                ],
+                text: "— — —".into(),
+                color: label_champagne_muted,
+                align: TextAlign::Right,
+                font_px: Some(stat_font * 0.95),
+                ..Default::default()
+            });
+        }
+        _ => {
+            push_chips_mult_stat_line_right(
+                frame,
+                header_x + header_w,
+                stat_y,
+                stat_band_h,
+                stat_font * 0.95,
+                chips,
+                mult,
+            );
+        }
+    }
+
+    // Rule line under the header — clears the level pill bottom.
+    let header_bottom = (pill_y + pill_h).max(header_y + title_h);
+    let rule_y = header_bottom + header_pad * 0.4;
     let rule_h = (1.5 * shadow_scale).max(1.0);
     frame.quad(GpuInstance {
         rect: [header_x, rule_y, header_w, rule_h],
@@ -1111,10 +1307,12 @@ fn draw_plaque(
         return;
     }
 
+    // Brass footer — reserve the bottom band before sizing the hand strip.
+    let footer_h = ((34.0 * shadow_scale).max(28.0)) * pad_scale;
+    let footer_y = plaque_y + plaque_h - footer_h - pad * 0.28;
+
     let hand_top = desc_y + desc_h + header_pad * 0.35;
-    // Hand sits inside the lacquer face only; the footer owns the
-    // band below `face_y + face_h`.
-    let hand_bot = face_y + face_h - header_pad * 0.2;
+    let hand_bot = (footer_y - header_pad * 0.25).min(face_y + face_h - header_pad * 0.2);
     let hand_band_h = (hand_bot - hand_top).max(0.0);
 
     let num_gaps = groups.len().saturating_sub(1);
@@ -1182,9 +1380,6 @@ fn draw_plaque(
         }
     }
 
-    // Brass footer — control hints along the plaque's bottom edge.
-    let footer_h = ((26.0 * shadow_scale).max(20.0)) * pad_scale;
-    let footer_y = plaque_y + plaque_h - footer_h - pad * 0.28;
     frame.quad(GpuInstance {
         rect: [face_x, footer_y, face_w, footer_h],
         color: color::BRASS,
@@ -1200,13 +1395,13 @@ fn draw_plaque(
         color: color::alpha(color::WALNUT_DEEP, 0.92),
         user: 0,
     });
-    let hint_style = HintStyle::standard(h);
     let hint_rect = [
         face_x + header_pad * 0.35,
         footer_y + footer_h * 0.14,
         face_w - header_pad * 0.7,
         footer_h * 0.72,
     ];
+    let hint_style = HintStyle::fit_inline_rect(h, hint_rect[3]);
     push_inline_hint_rows(
         frame,
         ctx,

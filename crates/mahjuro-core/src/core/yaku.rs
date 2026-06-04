@@ -210,6 +210,17 @@ impl YakuKind {
         yaku_def(self).name
     }
 
+    /// Engraved label for the in-play bone yaku tablet row.
+    pub fn gameplay_tablet_label(self, discovered: bool) -> &'static str {
+        if self == YakuKind::ChickenHand {
+            "\u{1F414}"
+        } else if discovered {
+            self.name()
+        } else {
+            "???"
+        }
+    }
+
     /// Sort key for reference UIs (journal, guide): lowest base payout first.
     pub fn cmp_by_base_score(a: &Self, b: &Self) -> std::cmp::Ordering {
         a.mult_bonus()
@@ -438,6 +449,25 @@ fn yaku_bundle_weight(yaku: &[YakuKind]) -> i64 {
 /// True if `tiles`/`sets` form a complete standard win (4 melds + pair or chiitoitsu).
 pub fn is_complete_winning_hand(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
     is_full_hand(tiles, sets) || is_chiitoitsu(sets) || is_kokushi_musou(sets, tiles)
+}
+
+/// True when a structure cash-in would inject Chicken Hand: complete shape and
+/// no detected yaku in the player's unlocked pool.
+pub fn would_inject_chicken_hand(
+    tiles: &[Tile],
+    sets: &[DetectedMeld],
+    round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
+    available: &[YakuKind],
+) -> bool {
+    if sets.is_empty() || !is_complete_winning_hand(tiles, sets) {
+        return false;
+    }
+    let detected = detect_yaku_with_wind(tiles, sets, round_wind, bonus_round_wind, None);
+    if available.is_empty() {
+        return detected.is_empty();
+    }
+    detected.iter().all(|y| !available.contains(y))
 }
 
 /// Kokushi Musō: twelve [`MeldKind::Single`] and one [`MeldKind::Pair`], using exactly
@@ -1721,6 +1751,36 @@ mod tests {
         ];
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(!yaku.contains(&YakuKind::Pinfu));
+    }
+
+    #[test]
+    fn would_inject_chicken_hand_when_complete_and_no_unlocked_yaku() {
+        let tiles = vec![
+            t(Suit::Manzu, 1, 0),
+            t(Suit::Manzu, 2, 1),
+            t(Suit::Manzu, 3, 2),
+            t(Suit::Manzu, 4, 3),
+            t(Suit::Manzu, 5, 4),
+            t(Suit::Manzu, 6, 5),
+            t(Suit::Manzu, 7, 6),
+            t(Suit::Manzu, 8, 7),
+            t(Suit::Manzu, 9, 8),
+            t(Suit::Pinzu, 2, 9),
+            t(Suit::Pinzu, 3, 10),
+            t(Suit::Pinzu, 4, 11),
+            t(Suit::Pinzu, 5, 12),
+            t(Suit::Pinzu, 5, 13),
+        ];
+        let sets = validate_selection(&tiles).expect("complete hand");
+        let available = vec![YakuKind::Tanyao];
+        assert!(!detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Tanyao));
+        assert!(would_inject_chicken_hand(
+            &tiles,
+            &sets,
+            None,
+            None,
+            &available,
+        ));
     }
 
     #[test]

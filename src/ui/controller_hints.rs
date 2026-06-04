@@ -279,6 +279,22 @@ impl HintStyle {
             color::alpha(color::PORCELAIN_AGED, 0.94),
         )
     }
+
+    /// Scale [`standard`] metrics down so icons and labels fit a short inline band.
+    pub fn fit_inline_rect(window_h: f32, rect_h: f32) -> Self {
+        let mut style = Self::standard(window_h);
+        let cap = rect_h.max(10.0);
+        let tallest = style.line_h.max(style.icon_px);
+        if tallest > cap {
+            let scale = cap / tallest;
+            style.icon_px *= scale;
+            style.gap_after_icon = style.icon_px * 0.18;
+            style.font_px *= scale;
+            style.line_h = cap;
+        }
+        style.icon_px = style.icon_px.min(cap);
+        style
+    }
 }
 
 fn inspect_exit_bind(input_mode: InputMode) -> HintBind {
@@ -832,6 +848,8 @@ fn emit_inline_row(
 ) -> Vec<InlineHintIconSlot> {
     let mut slots = Vec::new();
     let [rx, ry, rw, rh] = rect;
+    let icon_px = icon_px.min(rh);
+    let line_h = style.line_h.min(rh);
     let row_w = measure_inline_row(
         glyphs,
         surface,
@@ -842,14 +860,14 @@ fn emit_inline_row(
     );
     let mut x = rx + (rw - row_w).max(0.0) * 0.5;
     let iy = ry + (rh - icon_px).max(0.0) * 0.5;
-    let text_y = ry + (rh - style.line_h).max(0.0) * 0.5;
+    let text_y = ry + (rh - line_h).max(0.0) * 0.5;
 
     for seg in segments {
         match *seg {
             InlineSegmentRef::Sep => {
                 let w = measure_text(style.font_px, INLINE_SEP);
                 texts.push(inline_text_label(
-                    [x, text_y, w, style.line_h],
+                    [x, text_y, w, line_h],
                     INLINE_SEP,
                     style,
                 ));
@@ -858,7 +876,7 @@ fn emit_inline_row(
             InlineSegmentRef::PlainText(text) => {
                 let w = measure_text(style.font_px, text);
                 texts.push(inline_text_label(
-                    [x, text_y, w.max(1.0), style.line_h],
+                    [x, text_y, w.max(1.0), line_h],
                     text,
                     style,
                 ));
@@ -870,7 +888,7 @@ fn emit_inline_row(
                     InlineBindPart::GroupSep => {
                         let w = measure_text(style.font_px, INLINE_SLASH);
                         texts.push(inline_text_label(
-                            [x, text_y, w, style.line_h],
+                            [x, text_y, w, line_h],
                             INLINE_SLASH,
                             style,
                         ));
@@ -879,7 +897,7 @@ fn emit_inline_row(
                     InlineBindPart::WithinSep => {
                         let w = measure_text(style.font_px, within_text);
                         texts.push(inline_text_label(
-                            [x, text_y, w, style.line_h],
+                            [x, text_y, w, line_h],
                             within_text,
                             style,
                         ));
@@ -907,7 +925,7 @@ fn emit_inline_row(
                 let suffix = bind_suffix(&bind.label);
                 let w = measure_text(style.font_px, &suffix);
                 texts.push(inline_text_label(
-                    [x, text_y, w.max(1.0), style.line_h],
+                    [x, text_y, w.max(1.0), line_h],
                     &suffix,
                     style,
                 ));
@@ -951,6 +969,13 @@ pub fn push_inline_hint_rows_for(
         .map(|r| r[2])
         .fold(0.0_f32, f32::max)
         .max(1.0);
+    let max_row_h = row_rects
+        .iter()
+        .map(|r| r[3])
+        .fold(0.0_f32, f32::max)
+        .max(1.0);
+    icon_px = icon_px.min(max_row_h);
+    gap_after_icon = gap_after_icon.min(icon_px * 0.18);
     loop {
         let fits = rows.iter().all(|row| {
             let mut scratch: Vec<InlineSegmentRef<'_>> = Vec::new();

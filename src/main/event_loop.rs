@@ -110,16 +110,18 @@ impl App {
             renderer.tick_splash_hub_boot();
             // Shop is always first in the hub chain; start CPU decode early.
             renderer.prefetch_room_chain_next(RoomSceneChain::Shop);
-            match self.resume_scene {
-                ResumeScene::Gameplay => {
-                    renderer.prefetch_room_chain_next(RoomSceneChain::Hallway);
-                    renderer.prefetch_room_chain_next(RoomSceneChain::Gameplay);
+            if self.run.is_in_progress() {
+                match self.resume_scene {
+                    ResumeScene::Gameplay => {
+                        renderer.prefetch_room_chain_next(RoomSceneChain::Hallway);
+                        renderer.prefetch_room_chain_next(RoomSceneChain::Gameplay);
+                    }
+                    ResumeScene::Hallway => {
+                        renderer.prefetch_room_chain_next(RoomSceneChain::Hallway);
+                        renderer.prefetch_room_chain_next(RoomSceneChain::Gameplay);
+                    }
+                    ResumeScene::Shop => {}
                 }
-                ResumeScene::Hallway => {
-                    renderer.prefetch_room_chain_next(RoomSceneChain::Hallway);
-                    renderer.prefetch_room_chain_next(RoomSceneChain::Gameplay);
-                }
-                ResumeScene::Shop => {}
             }
         }
         self.input = {
@@ -182,6 +184,7 @@ impl App {
                 // Still drain async relic/background uploads and run the splash decal
                 // atlas pre-bake so boot loading does not stall until the window refocuses.
                 let mut did_loader_work = false;
+                let warm_gameplay_for_resume = self.warm_gameplay_gpu_for_resume();
                 if let Some(renderer) = self.renderer.as_mut() {
                     if renderer.is_loading() {
                         renderer.poll_pending_texture_uploads();
@@ -205,7 +208,7 @@ impl App {
                         renderer.poll_room_prefetch_gpu_uploads(
                             crate::scenes::active_scene_key(&self.scene),
                             self.last_frame_dt * 1000.0,
-                            matches!(self.resume_scene, crate::persistence::ResumeScene::Gameplay),
+                            warm_gameplay_for_resume,
                             self.pending_scene
                                 .as_ref()
                                 .and_then(crate::scenes::active_scene_key),

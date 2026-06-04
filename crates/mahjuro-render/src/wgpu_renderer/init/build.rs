@@ -56,7 +56,7 @@ pub(super) fn build_renderer_new(
     );
     let suggested_graphics_mode =
         mahjuro_gfx_types::GraphicsMode::suggest_for_adapter(&adapter_name, integrated_gpu);
-    let render_scale = 1.0f32;
+    let render_scale = suggested_graphics_mode.render_scale();
     let render_size =
         super::super::constants::scaled_render_size(size, render_scale);
     let (overlay_depth_texture, overlay_depth_view) =
@@ -3423,7 +3423,7 @@ pub(super) fn build_renderer_new(
         render_scale,
         overlay_depth_texture,
         overlay_depth_view,
-        graphics_mode: mahjuro_gfx_types::GraphicsMode::Visuals,
+        graphics_mode: suggested_graphics_mode,
         suggested_graphics_mode,
         room_gpu_lru: std::collections::VecDeque::new(),
         tile_anim_y: Vec::new(),

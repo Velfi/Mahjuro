@@ -796,8 +796,7 @@ impl App {
             .as_ref()
             .map(|i| i.last_cursor)
             .unwrap_or((0.0, 0.0));
-        let warm_gameplay_for_resume =
-            matches!(self.resume_scene, crate::persistence::ResumeScene::Gameplay);
+        let warm_gameplay_for_resume = self.warm_gameplay_gpu_for_resume();
         if matches!(&self.scene, Scene::Splash(_)) {
             if let Some(r) = self.renderer.as_mut() {
                 r.tick_splash_hub_boot();

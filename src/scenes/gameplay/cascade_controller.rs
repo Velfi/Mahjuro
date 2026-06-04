@@ -215,7 +215,7 @@ pub(super) fn tick_active_cascade(
             let skip_request = ctx
                 .actions
                 .iter()
-                .any(|a| !matches!(a, UiAction::ConfirmRelease));
+                .any(|a| action_skips_cascade(*a));
             if skip_request {
                 scene.displayed_score = GameEngine::read(ctx.run).round_score;
                 scene.score_reel.set_score(scene.displayed_score, now);
@@ -232,6 +232,18 @@ pub(super) fn tick_active_cascade(
         }
     }
     None
+}
+
+/// Focus moves from left stick / d-pad / arrow keys; must not fast-forward the reveal.
+fn action_skips_cascade(a: UiAction) -> bool {
+    !matches!(
+        a,
+        UiAction::ConfirmRelease
+            | UiAction::FocusNext
+            | UiAction::FocusPrev
+            | UiAction::FocusUp
+            | UiAction::FocusDown
+    )
 }
 
 fn popup_motion_timing(t: crate::game::cascade::PopupTiming) -> PopupMotionTiming {
