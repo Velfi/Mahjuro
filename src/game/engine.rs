@@ -137,20 +137,6 @@ pub struct CommandOutcome {
     pub ui_hints: Vec<UiHint>,
 }
 
-impl CommandOutcome {
-    fn rejected(command: GameCommand, before: EngineSnapshot, rejection: CommandRejection) -> Self {
-        Self {
-            command,
-            data: CommandData::None,
-            rejection: Some(rejection),
-            before,
-            after: before,
-            events: Vec::new(),
-            ui_hints: Vec::new(),
-        }
-    }
-}
-
 pub struct GameEngine<'a> {
     run: &'a mut RunState,
     bus: &'a mut EventBus,

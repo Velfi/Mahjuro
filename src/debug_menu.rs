@@ -117,7 +117,6 @@ pub enum DebugAction {
     OpenShadowAoLab,
     OpenTileAnchorLab,
     OpenButtonAabbLab,
-    OpenTixels,
     /// Open a simple in-app About modal. Used on macOS to avoid the native
     /// About panel's icon conversion path in `muda`.
     #[cfg(target_os = "macos")]
@@ -435,10 +434,6 @@ impl DebugMenuBar {
             DebugAction::OpenTileAnchorLab,
         ));
         let _ = debug_menu.append(&tile_anchor_lab_item);
-
-        let tixels_item = MenuItem::new("Tixels...", true, None);
-        mappings.push((tixels_item.id().clone(), DebugAction::OpenTixels));
-        let _ = debug_menu.append(&tixels_item);
 
         let transition_playground_item = MenuItem::new("Transition Playground...", true, None);
         mappings.push((

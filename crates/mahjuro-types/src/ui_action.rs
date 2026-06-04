@@ -31,12 +31,4 @@ pub enum UiAction {
     NorthFacePress,
     WestFacePress,
     WestFaceRelease,
-    TixelsLoadImage,
-    TixelsResolutionDown,
-    TixelsResolutionUp,
-    TixelsTileDown,
-    TixelsTileUp,
-    TixelsToggleBayer,
-    TixelsToggleColor,
-    TixelsReset,
 }

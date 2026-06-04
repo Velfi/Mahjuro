@@ -38,7 +38,6 @@ pub mod stairway;
 pub mod start_game_modal;
 pub mod tile_anchor_lab;
 pub(crate) mod tiles_intro_copy;
-pub mod tixels;
 pub mod transition_playground;
 pub mod tutorial_campaign;
 pub mod tutorial_summary;
@@ -72,7 +71,6 @@ pub use splash::SplashScene;
 pub use stairway::StairwayScene;
 pub use start_game_modal::TileSelectScene;
 pub use tile_anchor_lab::TileAnchorLabScene;
-pub use tixels::TixelsScene;
 pub use transition_playground::TransitionPlaygroundScene;
 pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_summary::TutorialSummaryScene;
@@ -493,7 +491,6 @@ pub enum Scene {
     MaterialViewer(MaterialViewerScene),
     TileAnchorLab(TileAnchorLabScene),
     ButtonAabbLab(ButtonAabbLabScene),
-    Tixels(TixelsScene),
     Options(OptionsScene),
     Credits(CreditsScene),
     Archive(ArchiveScene),
@@ -532,7 +529,6 @@ pub fn active_scene_key(scene: &Scene) -> Option<&'static str> {
         Scene::RollerLab(_) => Some(scene_keys::GAMEPLAY),
         Scene::CascadeLab(_) => Some(scene_keys::GAMEPLAY),
         Scene::ShadowAoLab(_) => Some(scene_keys::SHADOW_AO_LAB),
-        Scene::Tixels(_) => Some("tixels"),
         Scene::TileSelect(_) => Some("tile_select"),
         _ => None,
     }

@@ -180,7 +180,6 @@ impl RoomBakeApp {
             archive_chronicle_last_seen: 0,
             main_menu_effects: self.renderer.main_menu_effects,
             flame_tuning: self.renderer.flame_tuning,
-            #[cfg(feature = "screenshot")]
             audio: None,
         });
 

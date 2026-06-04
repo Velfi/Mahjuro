@@ -598,35 +598,6 @@ impl App {
             }
         }
 
-        let tixels_active = self
-            .overlay_stack
-            .last()
-            .is_some_and(|s| matches!(s, Scene::Tixels(_)))
-            || matches!(self.scene, Scene::Tixels(_));
-        if tixels_active {
-            let mapped = match scancode {
-                Some(Scancode::O) if !repeat => Some(UiAction::TixelsLoadImage),
-                Some(Scancode::LeftBracket) => Some(UiAction::TixelsResolutionDown),
-                Some(Scancode::RightBracket) => Some(UiAction::TixelsResolutionUp),
-                Some(Scancode::Minus) => Some(UiAction::TixelsTileDown),
-                Some(Scancode::Equals) => Some(UiAction::TixelsTileUp),
-                Some(Scancode::D) if !repeat => Some(UiAction::TixelsToggleBayer),
-                Some(Scancode::C) if !repeat => Some(UiAction::TixelsToggleColor),
-                Some(Scancode::R) if !repeat => Some(UiAction::TixelsReset),
-                _ => None,
-            };
-            if let Some(action) = mapped {
-                self.mouse_actions.push(action);
-                if let Some(input) = self.input.as_mut()
-                    && input.mode != InputMode::Keyboard
-                {
-                    input.mode = InputMode::Keyboard;
-                    shell.show_cursor(false);
-                }
-                return Ok(());
-            }
-        }
-
         let mut v = Vec::new();
         let shift = mod_shift(self.modifiers);
         let orbit_overlay_active = self
