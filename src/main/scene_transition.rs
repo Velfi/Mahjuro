@@ -257,6 +257,9 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
             }
             SceneTag::Shop => {
                 r.prefetch_room_chain_next(crate::render::room_preload::RoomSceneChain::Hallway);
+                // Decode gameplay.glb on a worker while the player shops so hallway → gameplay
+                // does not block the main thread on CPU join at the fade.
+                r.prefetch_room_chain_next(crate::render::room_preload::RoomSceneChain::Gameplay);
             }
             SceneTag::Hallway => {
                 r.prefetch_room_chain_next(crate::render::room_preload::RoomSceneChain::Gameplay);
@@ -283,6 +286,9 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
     };
     if ctx.to == SceneTag::MainMenu {
         crate::asset_path::prefetch_lazy_packs_after_menu_once();
+    }
+    if matches!(ctx.to, SceneTag::Shop | SceneTag::Hallway) {
+        ctx.audio.prefetch_gameplay_music();
     }
     sync_music_for_scene(
         ctx.audio,

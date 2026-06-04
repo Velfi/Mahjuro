@@ -824,11 +824,24 @@ impl App {
             Scene::Splash(_) => Some(scene_keys::MAIN_MENU),
             _ => crate::scenes::active_scene_key(&self.scene),
         };
+        let pending_scene_key = self
+            .pending_scene
+            .as_ref()
+            .and_then(crate::scenes::active_scene_key);
+        if pending_scene_key.is_some_and(|k| {
+            matches!(
+                k,
+                scene_keys::GAMEPLAY | scene_keys::VICTORY | scene_keys::DEFEAT | "tutorial"
+            )
+        }) {
+            self.audio.prefetch_gameplay_music();
+        }
         self.frame_picks = if let Some(r) = self.renderer.as_mut() {
             r.poll_room_prefetch_gpu_uploads(
                 scene_key,
                 self.last_frame_dt * 1000.0,
                 warm_gameplay_for_resume,
+                pending_scene_key,
             );
             r.ensure_rooms_for_scene_key(scene_key);
             FramePicks {

@@ -4,7 +4,11 @@ use super::*;
 
 use crate::scene_keys;
 
+use std::time::{Duration, Instant};
+
 use crate::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
+use crate::room_env_gltf::RoomEnvPrimitiveCpu;
+use crate::wgpu_renderer::resources::RoomEnvTextureCache;
 use wgpu::util::DeviceExt;
 
 pub(super) const ROOM_SHOP: u8 = 1 << 0;
@@ -15,6 +19,26 @@ pub(super) const ROOM_GAMEPLAY: u8 = 1 << 4;
 pub(super) const ROOM_MAIN_MENU: u8 = 1 << 5;
 
 use crate::score_roller_layout::{self, GAMEPLAY_SCORE_ROLLER_SLOT_COUNT};
+
+/// Max main-thread wall time for one gameplay env upload slice during prefetch / fade.
+const GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS: f32 = 6.0;
+
+pub(super) struct GameplayRoomGpuUpload {
+    prim_count: usize,
+    next_prim: usize,
+    prims: Vec<TilePrimitiveGpu>,
+    room_tex_cache: RoomEnvTextureCache,
+    _white_albedo_tex: wgpu::Texture,
+    white_albedo_view: wgpu::TextureView,
+    _decal_tex: wgpu::Texture,
+    gameplay_decal_view: wgpu::TextureView,
+    cash_in_prim_indices: Vec<usize>,
+    score_roller_prim_groups: Vec<Vec<usize>>,
+    score_roller_pivots_doc: Vec<[f32; 3]>,
+    score_roller_axes_doc: Vec<[f32; 3]>,
+    score_roller_found: [bool; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT],
+    started_at: Instant,
+}
 
 fn require_room_environment_loaded(
     glb: &str,
@@ -1182,7 +1206,165 @@ fn load_archive_room_gpu(
     })
 }
 
-fn load_gameplay_room_gpu(
+fn record_gameplay_env_prim_metadata(
+    upload: &mut GameplayRoomGpuUpload,
+    i: usize,
+    env_prim: &RoomEnvPrimitiveCpu,
+    cpu: &crate::room_glb::RoomGlbCpu,
+) {
+    if let Some(ref name) = env_prim.gltf_node_name {
+        if matches!(
+            name.as_str(),
+            crate::gameplay_glb::BTN_CASH_IN | crate::gameplay_glb::LABEL_CASH_IN
+        ) {
+            upload.cash_in_prim_indices.push(i);
+        }
+        if let Some(raw_idx) = score_roller_layout::gameplay_score_roller_raw_index(name)
+            && let Some(slot) = score_roller_layout::gameplay_score_roller_slot_remap(raw_idx)
+        {
+            upload.score_roller_prim_groups[slot].push(i);
+            upload.score_roller_found[slot] = true;
+            if let Some(bind) = cpu.node_bind_poses.get(name) {
+                let pivot = bind.bind_world_doc.w_axis.truncate();
+                upload.score_roller_pivots_doc[slot] = pivot.to_array();
+                let axis = bind
+                    .bind_world_doc
+                    .transform_vector3(glam::Vec3::X)
+                    .normalize_or_zero();
+                upload.score_roller_axes_doc[slot] = axis.to_array();
+            }
+        }
+    }
+}
+
+fn upload_gameplay_env_prim_gpu(
+    i: usize,
+    env_prim: &RoomEnvPrimitiveCpu,
+    ctx: &RoomGpuUploadCtx<'_>,
+    white_albedo_view: &wgpu::TextureView,
+    room_tex_cache: &mut RoomEnvTextureCache,
+) -> TilePrimitiveGpu {
+    let prim = &env_prim.mesh;
+    let vb = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("gameplay-env-verts-{i}")),
+            contents: bytemuck::cast_slice(&prim.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+    let ib = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("gameplay-env-idx-{i}")),
+            contents: bytemuck::cast_slice(&prim.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+    let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
+    let albedo_view = room_tex_cache.upload_slot(
+        ctx.device,
+        ctx.queue,
+        format!("gameplay-env-albedo-{i}"),
+        prim.albedo_rgba.as_ref(),
+        prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        mips,
+        white_albedo_view,
+    );
+    let normal_view = room_tex_cache.upload_slot(
+        ctx.device,
+        ctx.queue,
+        format!("gameplay-env-normal-{i}"),
+        prim.normal_rgba.as_ref(),
+        prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
+        wgpu::TextureFormat::Rgba8Unorm,
+        mips,
+        ctx.tile_default_normal_view,
+    );
+    let metallic_roughness_view = room_tex_cache.upload_slot(
+        ctx.device,
+        ctx.queue,
+        format!("gameplay-env-mr-{i}"),
+        prim.metallic_roughness_rgba.as_ref(),
+        prim.metallic_roughness_mip_chain
+            .as_deref()
+            .map(|c| c.as_slice()),
+        wgpu::TextureFormat::Rgba8Unorm,
+        mips,
+        ctx.tile_glb_default_mr_view,
+    );
+    let emissive_view = room_tex_cache.upload_slot(
+        ctx.device,
+        ctx.queue,
+        format!("gameplay-env-emissive-{i}"),
+        prim.emissive_rgba.as_ref(),
+        prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        mips,
+        ctx.tile_glb_default_emissive_view,
+    );
+    let pbr_uniform_buffer = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("gameplay-pbr-{i}")),
+            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
+                prim.metallic_factor,
+                prim.roughness_factor,
+                prim.emissive_factor,
+                prim.alpha_mode,
+                prim.alpha_cutoff,
+            )),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+    let sampler = ctx
+        .device
+        .create_sampler(&build_sampler_descriptor(prim.sampler, None));
+    TilePrimitiveGpu {
+        vertex_buffer: vb,
+        index_buffer: ib,
+        index_count: prim.indices.len() as u32,
+        albedo_view,
+        normal_view,
+        metallic_roughness_view,
+        emissive_view,
+        pbr_uniform_buffer,
+        sampler,
+        pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+    }
+}
+
+fn begin_gameplay_room_gpu_upload(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> Option<GameplayRoomGpuUpload> {
+    crate::gameplay_glb::with_gameplay_glb_cpu(|cpu_opt| {
+        let cpu = cpu_opt?;
+        if cpu.environment_primitives.is_empty() {
+            return None;
+        }
+        let prim_count = cpu.environment_primitives.len();
+        let (white_tex, white_view) = white_albedo(device, queue);
+        let (decal_tex, decal_view) = white_albedo(device, queue);
+        Some(GameplayRoomGpuUpload {
+            prim_count,
+            next_prim: 0,
+            prims: Vec::with_capacity(prim_count),
+            room_tex_cache: RoomEnvTextureCache::new(),
+            _white_albedo_tex: white_tex,
+            white_albedo_view: white_view,
+            _decal_tex: decal_tex,
+            gameplay_decal_view: decal_view,
+            cash_in_prim_indices: Vec::new(),
+            score_roller_prim_groups: vec![Vec::new(); GAMEPLAY_SCORE_ROLLER_SLOT_COUNT],
+            score_roller_pivots_doc: vec![[0.0, 0.0, 0.0]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT],
+            score_roller_axes_doc: vec![[1.0, 0.0, 0.0]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT],
+            score_roller_found: [false; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT],
+            started_at: Instant::now(),
+        })
+    })
+}
+
+fn finalize_gameplay_room_gpu_upload(
+    upload: GameplayRoomGpuUpload,
     ctx: RoomGpuUploadCtx<'_>,
 ) -> (
     Vec<TilePrimitiveGpu>,
@@ -1192,266 +1374,247 @@ fn load_gameplay_room_gpu(
     Vec<[f32; 3]>,
     Vec<[f32; 3]>,
 ) {
-    crate::gameplay_glb::with_gameplay_glb_cpu(|cpu_opt| {
-        let mut prims = Vec::new();
-        let mut gpu_wrap = None;
-        let mut gameplay_cash_in_prim_indices = Vec::new();
-        let mut gameplay_score_roller_prim_groups =
-            vec![Vec::new(); GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
-        let mut gameplay_score_roller_pivots_doc =
-            vec![[0.0, 0.0, 0.0]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
-        let mut gameplay_score_roller_axes_doc =
-            vec![[1.0, 0.0, 0.0]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
-        let mut gameplay_score_roller_found = [false; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
-        let Some(cpu) = cpu_opt else {
-            return (
-                prims,
-                gpu_wrap,
-                gameplay_cash_in_prim_indices,
-                gameplay_score_roller_prim_groups,
-                gameplay_score_roller_pivots_doc,
-                gameplay_score_roller_axes_doc,
-            );
+    let GameplayRoomGpuUpload {
+        prim_count,
+        prims,
+        gameplay_decal_view,
+        cash_in_prim_indices,
+        score_roller_prim_groups,
+        score_roller_pivots_doc,
+        score_roller_axes_doc,
+        score_roller_found,
+        ..
+    } = upload;
+    debug_assert_eq!(prims.len(), prim_count);
+
+    let distortion_buffer = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gameplay-env-distortion"),
+            contents: bytemuck::bytes_of(&crate::hallway_glb::HallwayDistortion::default()),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+    let uniform_buffers =
+        create_room_env_camera_uniform_buffers(ctx.device, prim_count, "gameplay-env-uniform");
+    let bind_groups: Vec<wgpu::BindGroup> = prims
+        .iter()
+        .enumerate()
+        .map(|(pi, p)| {
+            ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("gameplay-env-bg"),
+                layout: ctx.tile_material_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffers[pi].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&p.albedo_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&p.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&gameplay_decal_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(&p.normal_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: p.pbr_uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(&p.metallic_roughness_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::TextureView(&p.emissive_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: distortion_buffer.as_entire_binding(),
+                    },
+                ],
+            })
+        })
+        .collect();
+    let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
+        ctx.device,
+        ctx.shadow_caster_layout,
+        prim_count,
+        "gameplay-env-shadow",
+    );
+    let shadow_warp_bind_group = create_shadow_warp_bind_group(
+        ctx.device,
+        ctx.shadow_warp_layout,
+        &distortion_buffer,
+        "gameplay-env-shadow-warp",
+    );
+    let gpu_wrap = Some(ShopEnvironmentGpu {
+        uniform_buffers,
+        distortion_buffer,
+        shadow_uniform_buffers,
+        shadow_bind_groups,
+        shadow_warp_bind_group,
+        bind_groups,
+        archive_sign_decal_texture: None,
+        archive_sign_decal_size: None,
+        archive_inspect_plaque_decal_texture: None,
+        archive_inspect_plaque_decal_size: None,
+    });
+    log::info!("gameplay.glb GPU: {prim_count} primitive draw(s)");
+    let mapped_rolls = score_roller_found.iter().filter(|&&b| b).count();
+    log::debug!(
+        "gameplay.glb score rollers: all_found={} ({mapped_rolls}/{GAMEPLAY_SCORE_ROLLER_SLOT_COUNT})",
+        mapped_rolls == GAMEPLAY_SCORE_ROLLER_SLOT_COUNT
+    );
+    if mapped_rolls != GAMEPLAY_SCORE_ROLLER_SLOT_COUNT {
+        log::warn!(
+            "gameplay.glb score rollers missing: found {mapped_rolls}/{GAMEPLAY_SCORE_ROLLER_SLOT_COUNT}"
+        );
+    }
+    (
+        prims,
+        gpu_wrap,
+        cash_in_prim_indices,
+        score_roller_prim_groups,
+        score_roller_pivots_doc,
+        score_roller_axes_doc,
+    )
+}
+
+impl WgpuRenderer {
+    fn cancel_gameplay_room_gpu_upload(&mut self) {
+        self.gameplay_room_gpu_upload = None;
+    }
+
+    /// Upload gameplay room env prims across frames when `budget_ms` is finite.
+    /// Returns `true` once the room is resident on the GPU.
+    fn tick_gameplay_room_gpu_upload(&mut self, budget_ms: f32) -> bool {
+        if self.rooms_gpu_loaded & ROOM_GAMEPLAY != 0 {
+            self.cancel_gameplay_room_gpu_upload();
+            return true;
+        }
+        if !crate::gameplay_glb::gameplay_cpu_ready_for_gpu_upload() {
+            crate::room_preload::join_gameplay_cpu_prefetch_blocking();
+            if !crate::gameplay_glb::gameplay_cpu_ready_for_gpu_upload() {
+                crate::gameplay_glb::decode_gameplay_glb_into_cache();
+            }
+        }
+
+        if self.gameplay_room_gpu_upload.is_none() {
+            let ctx = self.room_gpu_upload_ctx();
+            self.gameplay_room_gpu_upload =
+                begin_gameplay_room_gpu_upload(ctx.device, ctx.queue);
+        }
+        let Some(mut upload) = self.gameplay_room_gpu_upload.take() else {
+            panic!("gameplay.glb environment failed to load (required for this scene)");
         };
-        if !cpu.environment_primitives.is_empty() {
-            let mut room_tex_cache = RoomEnvTextureCache::new();
-            let (_white_tex, white_albedo_view) = white_albedo(ctx.device, ctx.queue);
-            for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
-                if let Some(ref name) = env_prim.gltf_node_name {
-                    if matches!(
-                        name.as_str(),
-                        crate::gameplay_glb::BTN_CASH_IN | crate::gameplay_glb::LABEL_CASH_IN
-                    ) {
-                        gameplay_cash_in_prim_indices.push(i);
-                    }
-                    if let Some(raw_idx) =
-                        score_roller_layout::gameplay_score_roller_raw_index(name)
-                        && let Some(slot) =
-                            score_roller_layout::gameplay_score_roller_slot_remap(raw_idx)
-                    {
-                        gameplay_score_roller_prim_groups[slot].push(i);
-                        gameplay_score_roller_found[slot] = true;
-                        if let Some(bind) = cpu.node_bind_poses.get(name) {
-                            let pivot = bind.bind_world_doc.w_axis.truncate();
-                            gameplay_score_roller_pivots_doc[slot] = pivot.to_array();
-                            let axis = bind
-                                .bind_world_doc
-                                .transform_vector3(glam::Vec3::X)
-                                .normalize_or_zero();
-                            let axis = if axis.length_squared() > 1e-6 {
-                                axis
-                            } else {
-                                glam::Vec3::X
-                            };
-                            gameplay_score_roller_axes_doc[slot] = axis.to_array();
-                        }
-                    }
-                }
-                let prim = &env_prim.mesh;
-                let vb = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("gameplay-env-verts-{i}")),
-                        contents: bytemuck::cast_slice(&prim.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                let ib = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("gameplay-env-idx-{i}")),
-                        contents: bytemuck::cast_slice(&prim.indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
-                let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                let albedo_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
-                    format!("gameplay-env-albedo-{i}"),
-                    prim.albedo_rgba.as_ref(),
-                    prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
-                    wgpu::TextureFormat::Rgba8UnormSrgb,
-                    mips,
-                    &white_albedo_view,
-                );
-                let normal_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
-                    format!("gameplay-env-normal-{i}"),
-                    prim.normal_rgba.as_ref(),
-                    prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
-                    wgpu::TextureFormat::Rgba8Unorm,
-                    mips,
-                    ctx.tile_default_normal_view,
-                );
-                let metallic_roughness_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
-                    format!("gameplay-env-mr-{i}"),
-                    prim.metallic_roughness_rgba.as_ref(),
-                    prim.metallic_roughness_mip_chain
-                        .as_deref()
-                        .map(|c| c.as_slice()),
-                    wgpu::TextureFormat::Rgba8Unorm,
-                    mips,
-                    ctx.tile_glb_default_mr_view,
-                );
-                let emissive_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
-                    format!("gameplay-env-emissive-{i}"),
-                    prim.emissive_rgba.as_ref(),
-                    prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
-                    wgpu::TextureFormat::Rgba8UnormSrgb,
-                    mips,
-                    ctx.tile_glb_default_emissive_view,
-                );
-                let pbr_uniform_buffer =
-                    ctx.device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some(&format!("gameplay-pbr-{i}")),
-                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
-                                prim.metallic_factor,
-                                prim.roughness_factor,
-                                prim.emissive_factor,
-                                prim.alpha_mode,
-                                prim.alpha_cutoff,
-                            )),
-                            usage: wgpu::BufferUsages::UNIFORM,
-                        });
-                let sampler = ctx
-                    .device
-                    .create_sampler(&build_sampler_descriptor(prim.sampler, None));
-                prims.push(TilePrimitiveGpu {
-                    vertex_buffer: vb,
-                    index_buffer: ib,
-                    index_count: prim.indices.len() as u32,
-                    albedo_view,
-                    normal_view,
-                    metallic_roughness_view,
-                    emissive_view,
-                    pbr_uniform_buffer,
-                    sampler,
-                    pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
-                });
+
+        let unlimited = budget_ms >= 1.0e6;
+        let deadline = if unlimited {
+            None
+        } else {
+            Some(Instant::now() + Duration::from_secs_f32((budget_ms / 1000.0).max(0.0)))
+        };
+
+        while upload.next_prim < upload.prim_count {
+            if let Some(dl) = deadline
+                && Instant::now() >= dl
+            {
+                break;
             }
-            let (_white_tex, gameplay_decal_view) = white_albedo(ctx.device, ctx.queue);
-            let uniform_buffers = create_room_env_camera_uniform_buffers(
-                ctx.device,
-                prims.len(),
-                "gameplay-env-uniform",
-            );
-            let distortion_buffer =
-                ctx.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("gameplay-env-distortion"),
-                        contents: bytemuck::bytes_of(
-                            &crate::hallway_glb::HallwayDistortion::default(),
-                        ),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-            let bind_groups: Vec<wgpu::BindGroup> = prims
-                .iter()
-                .enumerate()
-                .map(|(pi, p)| {
-                    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("gameplay-env-bg"),
-                        layout: ctx.tile_material_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: uniform_buffers[pi].as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&p.albedo_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Sampler(&p.sampler),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: wgpu::BindingResource::TextureView(&gameplay_decal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: wgpu::BindingResource::TextureView(&p.normal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: p.pbr_uniform_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 6,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &p.metallic_roughness_view,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 7,
-                                resource: wgpu::BindingResource::TextureView(&p.emissive_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 8,
-                                resource: distortion_buffer.as_entire_binding(),
-                            },
-                        ],
-                    })
-                })
-                .collect();
-            let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
-                ctx.device,
-                ctx.shadow_caster_layout,
-                prims.len(),
-                "gameplay-env-shadow",
-            );
-            let shadow_warp_bind_group = create_shadow_warp_bind_group(
-                ctx.device,
-                ctx.shadow_warp_layout,
-                &distortion_buffer,
-                "gameplay-env-shadow-warp",
-            );
-            gpu_wrap = Some(ShopEnvironmentGpu {
-                uniform_buffers,
-                distortion_buffer,
-                shadow_uniform_buffers,
-                shadow_bind_groups,
-                shadow_warp_bind_group,
-                bind_groups,
-                archive_sign_decal_texture: None,
-                archive_sign_decal_size: None,
-                archive_inspect_plaque_decal_texture: None,
-                archive_inspect_plaque_decal_size: None,
+            let i = upload.next_prim;
+            let ctx = self.room_gpu_upload_ctx();
+            let prim_gpu = crate::gameplay_glb::with_gameplay_glb_cpu(|cpu_opt| {
+                let cpu = cpu_opt.expect("gameplay CPU cache missing during GPU upload");
+                let env_prim = &cpu.environment_primitives[i];
+                record_gameplay_env_prim_metadata(&mut upload, i, env_prim, cpu);
+                upload_gameplay_env_prim_gpu(
+                    i,
+                    env_prim,
+                    &ctx,
+                    &upload.white_albedo_view,
+                    &mut upload.room_tex_cache,
+                )
             });
-            log::info!("gameplay.glb GPU: {} primitive draw(s)", prims.len());
-            let mapped_rolls = gameplay_score_roller_found.iter().filter(|&&b| b).count();
-            log::debug!(
-                "gameplay.glb score rollers: all_found={} ({mapped_rolls}/{GAMEPLAY_SCORE_ROLLER_SLOT_COUNT})",
-                mapped_rolls == GAMEPLAY_SCORE_ROLLER_SLOT_COUNT
-            );
-            if mapped_rolls != GAMEPLAY_SCORE_ROLLER_SLOT_COUNT {
-                log::warn!(
-                    "gameplay.glb score rollers missing: found {mapped_rolls}/{GAMEPLAY_SCORE_ROLLER_SLOT_COUNT}"
-                );
-            }
-            return (
-                prims,
-                gpu_wrap,
-                gameplay_cash_in_prim_indices,
-                gameplay_score_roller_prim_groups,
-                gameplay_score_roller_pivots_doc,
-                gameplay_score_roller_axes_doc,
+            upload.prims.push(prim_gpu);
+            upload.next_prim += 1;
+        }
+
+        if upload.next_prim < upload.prim_count {
+            self.gameplay_room_gpu_upload = Some(upload);
+            return false;
+        }
+
+        let started_at = upload.started_at;
+        self.ensure_gameplay_hud_pools();
+        let payload = crate::gameplay_glb::with_gameplay_glb_cpu(|o| {
+            o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+                .unwrap_or_default()
+        });
+        let frame_dt_ms = self.room_profile_frame_dt_ms;
+        let _cpu = crate::cpu_profiler::scope("wgpu.room.gameplay");
+        let _startup = crate::startup_profile::scope("wgpu.room.gameplay");
+        let finalize_t0 = Instant::now();
+        let (prims, gpu_wrap, cash_in, roller_groups, roller_pivots, roller_axes) = {
+            let ctx = self.room_gpu_upload_ctx();
+            finalize_gameplay_room_gpu_upload(upload, ctx)
+        };
+        require_room_environment_loaded("gameplay.glb", &prims, &gpu_wrap);
+        self.gameplay_env_primitives = prims;
+        self.gameplay_environment = gpu_wrap;
+        self.gameplay_cash_in_prim_indices = cash_in;
+        self.gameplay_score_roller_prim_groups = roller_groups;
+        self.gameplay_score_roller_pivots_doc = roller_pivots;
+        self.gameplay_score_roller_axes_doc = roller_axes;
+        self.gameplay_score_roller_drive_initialized
+            .replace([false; 2]);
+        self.gameplay_env_collision_meshes = crate::gameplay_glb::with_gameplay_glb_cpu(|o| {
+            o.map(|c| c.collision_meshes.clone()).unwrap_or_default()
+        });
+        crate::gameplay_glb::release_gameplay_environment_cpu_sources_after_gpu_upload();
+        self.rooms_gpu_loaded |= ROOM_GAMEPLAY;
+        self.note_room_gpu_resident(ROOM_GAMEPLAY);
+        if crate::room_gpu_profile::enabled() {
+            let finalize_ms = finalize_t0.elapsed().as_secs_f64() * 1000.0;
+            let total_ms = started_at.elapsed().as_secs_f64() * 1000.0;
+            let mb = payload.total_bytes() as f64 / (1024.0 * 1024.0);
+            let hitch = if frame_dt_ms >= 33.0 {
+                "HITCH"
+            } else if frame_dt_ms >= 20.0 {
+                "slow"
+            } else {
+                "ok"
+            };
+            log::info!(
+                "room gpu profile: gameplay.glb GPU upload — finalize {finalize_ms:.1} ms | \
+                 {total_ms:.1} ms total wall | {prims} prims | {total_mb:.2} MiB CPU payload | \
+                 prev frame dt {frame_dt_ms:.1} ms ({hitch})",
+                prims = payload.primitives,
+                total_mb = mb,
             );
         }
-        (
-            prims,
-            gpu_wrap,
-            gameplay_cash_in_prim_indices,
-            gameplay_score_roller_prim_groups,
-            gameplay_score_roller_pivots_doc,
-            gameplay_score_roller_axes_doc,
-        )
-    })
+        crate::startup_profile::log_sample("wgpu.room.gameplay", "first gameplay GPU upload");
+        true
+    }
+
+    fn drive_gameplay_room_gpu_upload(&mut self, budget_ms: f32) {
+        if self.rooms_gpu_loaded & ROOM_GAMEPLAY != 0 {
+            return;
+        }
+        if budget_ms >= 1.0e6 {
+            while !self.tick_gameplay_room_gpu_upload(budget_ms) {}
+        } else {
+            let _ = self.tick_gameplay_room_gpu_upload(budget_ms);
+        }
+    }
 }
 
 impl WgpuRenderer {
@@ -1529,11 +1692,15 @@ impl WgpuRenderer {
     /// [`crate::room_gpu_profile`] is enabled.
     /// `warm_gameplay_for_resume` — when true (Continue → gameplay), also upload
     /// `gameplay.glb` on the main menu once its CPU prefetch finishes.
+    ///
+    /// `pending_scene_key` — scene we are fading into (`App::pending_scene`), if any;
+    /// uploads the destination room during fade-out so the black-frame swap does not stall.
     pub fn poll_room_prefetch_gpu_uploads(
         &mut self,
         scene_key: Option<&str>,
         frame_dt_ms: f32,
         warm_gameplay_for_resume: bool,
+        pending_scene_key: Option<&str>,
     ) {
         self.room_profile_frame_dt_ms = frame_dt_ms;
         crate::room_preload::try_drain_room_cpu_prefetch_threads();
@@ -1560,11 +1727,13 @@ impl WgpuRenderer {
             }
         };
         let upload_gameplay = |this: &mut Self| {
-            if this.rooms_gpu_loaded & ROOM_GAMEPLAY == 0
-                && crate::gameplay_glb::gameplay_cpu_ready_for_gpu_upload()
-            {
-                this.ensure_gameplay_room_gpu();
+            if this.rooms_gpu_loaded & ROOM_GAMEPLAY != 0 {
+                return;
             }
+            if !crate::gameplay_glb::gameplay_cpu_ready_for_gpu_upload() {
+                return;
+            }
+            this.drive_gameplay_room_gpu_upload(GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
         };
 
         match scene_key {
@@ -1584,12 +1753,16 @@ impl WgpuRenderer {
             | Some("pick_chamber") => {
                 upload_shop(self);
                 upload_hallway(self);
+                if self.rooms_gpu_loaded & ROOM_HALLWAY != 0
+                    && self.rooms_gpu_loaded & ROOM_GAMEPLAY == 0
+                {
+                    crate::room_preload::start_gameplay_cpu_prefetch();
+                }
                 if matches!(scene_key, Some(scene_keys::HALLWAY) | Some("pick_chamber")) {
-                    if self.rooms_gpu_loaded & ROOM_HALLWAY != 0
-                        && self.rooms_gpu_loaded & ROOM_GAMEPLAY == 0
-                    {
-                        crate::room_preload::start_gameplay_cpu_prefetch();
-                    }
+                    upload_gameplay(self);
+                } else if matches!(scene_key, Some(scene_keys::SHOP) | Some("showcase"))
+                    && self.graphics_mode.max_room_gpu_residents() >= 3
+                {
                     upload_gameplay(self);
                 }
             }
@@ -1600,6 +1773,35 @@ impl WgpuRenderer {
             | Some("game_over")
             | Some("tutorial") => upload_gameplay(self),
             _ => {}
+        }
+
+        if let Some(pending) = pending_scene_key {
+            match pending {
+                scene_keys::GAMEPLAY
+                | scene_keys::VICTORY
+                | scene_keys::DEFEAT
+                | "game_over"
+                | "tutorial" => {
+                    crate::room_preload::start_gameplay_cpu_prefetch();
+                    upload_gameplay(self);
+                }
+                scene_keys::HALLWAY | "pick_chamber" => {
+                    crate::room_preload::start_hallway_cpu_prefetch();
+                    upload_hallway(self);
+                }
+                scene_keys::SHOP | "showcase" => {
+                    crate::room_preload::start_shop_cpu_prefetch();
+                    upload_shop(self);
+                }
+                scene_keys::ARCHIVE | "collection" => {
+                    crate::room_preload::start_archive_cpu_prefetch();
+                    upload_archive(self);
+                }
+                scene_keys::STAIRWAY | "staircase" => {
+                    self.ensure_staircase_room_gpu();
+                }
+                _ => {}
+            }
         }
     }
 
@@ -1803,48 +2005,6 @@ impl WgpuRenderer {
     }
 
     pub(super) fn ensure_gameplay_room_gpu(&mut self) {
-        if self.rooms_gpu_loaded & ROOM_GAMEPLAY != 0 {
-            return;
-        }
-        if !crate::gameplay_glb::gameplay_cpu_ready_for_gpu_upload() {
-            crate::room_preload::join_gameplay_cpu_prefetch_blocking();
-            if !crate::gameplay_glb::gameplay_cpu_ready_for_gpu_upload() {
-                crate::gameplay_glb::decode_gameplay_glb_into_cache();
-            }
-        }
-        self.ensure_gameplay_hud_pools();
-        let payload = crate::gameplay_glb::with_gameplay_glb_cpu(|o| {
-            o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
-                .unwrap_or_default()
-        });
-        let frame_dt_ms = self.room_profile_frame_dt_ms;
-        crate::room_gpu_profile::measure_gpu_upload(
-            "gameplay.glb",
-            "wgpu.room.gameplay",
-            payload,
-            frame_dt_ms,
-            || {
-                let ctx = self.room_gpu_upload_ctx();
-                let (prims, gpu_wrap, cash_in, roller_groups, roller_pivots, roller_axes) =
-                    load_gameplay_room_gpu(ctx);
-                require_room_environment_loaded("gameplay.glb", &prims, &gpu_wrap);
-                self.gameplay_env_primitives = prims;
-                self.gameplay_environment = gpu_wrap;
-                self.gameplay_cash_in_prim_indices = cash_in;
-                self.gameplay_score_roller_prim_groups = roller_groups;
-                self.gameplay_score_roller_pivots_doc = roller_pivots;
-                self.gameplay_score_roller_axes_doc = roller_axes;
-                self.gameplay_score_roller_drive_initialized
-                    .replace([false; 2]);
-                self.gameplay_env_collision_meshes =
-                    crate::gameplay_glb::with_gameplay_glb_cpu(|o| {
-                        o.map(|c| c.collision_meshes.clone()).unwrap_or_default()
-                    });
-                crate::gameplay_glb::release_gameplay_environment_cpu_sources_after_gpu_upload();
-                self.rooms_gpu_loaded |= ROOM_GAMEPLAY;
-                self.note_room_gpu_resident(ROOM_GAMEPLAY);
-            },
-        );
-        crate::startup_profile::log_sample("wgpu.room.gameplay", "first gameplay GPU upload");
+        self.drive_gameplay_room_gpu_upload(f32::MAX);
     }
 }

@@ -108,6 +108,7 @@ impl WgpuRenderer {
                 self.archive_page_right_prim_indices.clear();
             }
             super::room_gpu_load::ROOM_GAMEPLAY => {
+                self.gameplay_room_gpu_upload = None;
                 self.gameplay_env_primitives.clear();
                 self.gameplay_environment = None;
                 self.gameplay_cash_in_prim_indices.clear();

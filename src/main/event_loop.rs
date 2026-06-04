@@ -206,6 +206,9 @@ impl App {
                             crate::scenes::active_scene_key(&self.scene),
                             self.last_frame_dt * 1000.0,
                             matches!(self.resume_scene, crate::persistence::ResumeScene::Gameplay),
+                            self.pending_scene
+                                .as_ref()
+                                .and_then(crate::scenes::active_scene_key),
                         );
                         did_loader_work = true;
                     }

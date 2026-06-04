@@ -962,6 +962,18 @@ impl AudioManager {
         }
     }
 
+    /// Decode round BGM clips ahead of the hallway → gameplay transition.
+    pub fn prefetch_gameplay_music(&mut self) {
+        for id in [
+            MusicId::GameplayIntro,
+            MusicId::Gameplay,
+            MusicId::GameplayIntenseIntro,
+            MusicId::GameplayIntense,
+        ] {
+            self.ensure_music_loaded(id);
+        }
+    }
+
     fn start_music_track(&mut self, id: MusicId) {
         self.ensure_music_loaded(id);
         let Some(clip) = self.music_data.get(&id).cloned() else {

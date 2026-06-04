@@ -261,6 +261,8 @@ pub struct WgpuRenderer {
     /// Continuous roll time while either bank is catching up (resets on stop, not retarget).
     gameplay_score_roller_roll_elapsed: std::cell::RefCell<f64>,
     gameplay_environment: Option<ShopEnvironmentGpu>,
+    /// In-progress time-sliced upload for [`gameplay.glb`](../../assets/3d/gameplay.glb).
+    gameplay_room_gpu_upload: Option<room_gpu_load::GameplayRoomGpuUpload>,
     /// GPU primitive index of `inspect_plaque` in `archive_env_primitives` (inspect decal host).
     archive_inspect_plaque_prim_idx: Option<usize>,
     /// GPU primitive index of `plaque_backing` (inspect overlay frame).
