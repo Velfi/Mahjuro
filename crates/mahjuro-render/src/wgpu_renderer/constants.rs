@@ -4,6 +4,42 @@
 /// Caps bogus platform `Resized` values that can otherwise allocate tens of GB.
 pub(crate) const MAX_RENDER_DIMENSION: u32 = 8192;
 
+/// Scene/depth/bloom allocation size from window size and [`mahjuro_gfx_types::GraphicsMode::render_scale`].
+/// Preserves the window aspect ratio when enforcing minimum dimensions.
+pub(crate) fn scaled_render_size(
+    window: crate::physical_size::PhysicalSize,
+    scale: f32,
+) -> crate::physical_size::PhysicalSize {
+    let scale = scale.clamp(0.5, 1.0);
+    let aspect = window.width as f32 / window.height.max(1) as f32;
+    let mut w = ((window.width as f32) * scale).round() as u32;
+    let mut h = ((window.height as f32) * scale).round() as u32;
+    w = w.clamp(1, window.width);
+    h = h.clamp(1, window.height);
+
+    let min_w = mahjuro_gfx_types::MIN_RENDER_WIDTH.min(window.width);
+    let min_h = mahjuro_gfx_types::MIN_RENDER_HEIGHT.min(window.height);
+    if w < min_w {
+        w = min_w;
+        h = (w as f32 / aspect).round().clamp(1.0, window.height as f32) as u32;
+    }
+    if h < min_h {
+        h = min_h;
+        w = (h as f32 * aspect).round().clamp(1.0, window.width as f32) as u32;
+    }
+
+    if w != window.width || h != window.height {
+        log::debug!(
+            "internal render size {}×{} (window {}×{}, scale={scale})",
+            w,
+            h,
+            window.width,
+            window.height,
+        );
+    }
+    crate::physical_size::PhysicalSize::new(w, h)
+}
+
 pub(crate) fn clamp_render_physical_size(
     size: crate::physical_size::PhysicalSize,
 ) -> crate::physical_size::PhysicalSize {
@@ -40,6 +76,30 @@ pub(crate) const MAX_SHOWCASE_TILE_SLOTS: usize = 160;
 
 /// Frames an unused entry stays in `text_label_cache` before eviction.
 pub(crate) const TEXT_CACHE_TTL_FRAMES: u64 = 120;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scaled_render_size_075_at_1080p() {
+        let window = crate::physical_size::PhysicalSize::new(1920, 1080);
+        let rs = scaled_render_size(window, 0.75);
+        assert_eq!(rs.width, 1440);
+        assert_eq!(rs.height, 810);
+    }
+
+    #[test]
+    fn scaled_render_size_min_clamp_preserves_aspect() {
+        let window = crate::physical_size::PhysicalSize::new(1440, 900);
+        let rs = scaled_render_size(window, 0.75);
+        let window_aspect = window.width as f32 / window.height as f32;
+        let rs_aspect = rs.width as f32 / rs.height as f32;
+        assert!((rs_aspect - window_aspect).abs() < 0.02);
+        assert!(rs.width <= window.width);
+        assert!(rs.height <= window.height);
+    }
+}
 
 // Tile-mesh local extents (after `normalize_mesh` in tile_glb.rs):
 //   local X — long face axis  (extent ~1.000) → table-Z (front-back)

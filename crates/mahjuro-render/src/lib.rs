@@ -24,6 +24,7 @@ pub mod gameplay_glb;
 pub mod gltf_helpers;
 pub mod gltf_prop;
 pub mod glyph_mesh;
+pub mod gpu_memory_profile;
 pub mod gpu_profiler;
 pub mod gpu_types;
 pub mod hallway_glb;

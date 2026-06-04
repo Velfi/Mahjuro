@@ -26,6 +26,109 @@ impl WgpuRenderer {
         self.active_scene_key = key;
     }
 
+    /// Graphics preset suggested from the active adapter at renderer init.
+    pub fn suggested_graphics_mode(&self) -> mahjuro_gfx_types::GraphicsMode {
+        self.suggested_graphics_mode
+    }
+
+    /// Apply VRAM budget: internal render scale, room/atlas residency caps, optional resize.
+    pub fn set_graphics_budget(&mut self, mode: mahjuro_gfx_types::GraphicsMode) {
+        let new_scale = mode.render_scale();
+        let scale_changed = (self.render_scale - new_scale).abs() > f32::EPSILON;
+        let mode_changed = self.graphics_mode != mode;
+        self.graphics_mode = mode;
+        self.render_scale = new_scale;
+        if scale_changed && self.size.width > 0 && self.size.height > 0 {
+            self.resize(self.size);
+        }
+        if mode_changed || scale_changed {
+            self.trim_room_gpu_residency();
+            self.trim_showcase_decal_atlas_cache();
+        }
+    }
+
+    pub(super) fn trim_showcase_decal_atlas_cache(&mut self) {
+        let cap = self.graphics_mode.max_showcase_decal_atlas_cache();
+        while self.showcase_decal_atlas_cache.len() > cap {
+            self.showcase_decal_atlas_cache.pop_back();
+        }
+    }
+
+    pub(super) fn trim_room_gpu_residency(&mut self) {
+        let cap = self.graphics_mode.max_room_gpu_residents();
+        while self.room_gpu_lru.len() > cap {
+            let Some(bit) = self.room_gpu_lru.pop_back() else {
+                break;
+            };
+            self.evict_room_gpu(bit);
+        }
+    }
+
+    pub(super) fn note_room_gpu_resident(&mut self, bit: u8) {
+        if let Some(i) = self.room_gpu_lru.iter().position(|&b| b == bit) {
+            self.room_gpu_lru.remove(i);
+        }
+        self.room_gpu_lru.push_front(bit);
+        self.trim_room_gpu_residency();
+    }
+
+    pub(super) fn evict_room_gpu(&mut self, bit: u8) {
+        if self.rooms_gpu_loaded & bit == 0 {
+            return;
+        }
+        match bit {
+            super::room_gpu_load::ROOM_MAIN_MENU => {
+                self.main_menu_env_primitives.clear();
+                self.main_menu_environment = None;
+                self.main_menu_env_collision_meshes.clear();
+            }
+            super::room_gpu_load::ROOM_SHOP => {
+                self.shop_env_primitives.clear();
+                self.shop_environment = None;
+                self.shop_gltf_anim = crate::room_gltf_anim::RoomGltfAnimGpu::default();
+                self.shop_eyeball_prim_indices.clear();
+                self.shop_env_collision_meshes.clear();
+            }
+            super::room_gpu_load::ROOM_HALLWAY => {
+                self.hallway_env_primitives.clear();
+                self.hallway_environment = None;
+            }
+            super::room_gpu_load::ROOM_STAIRCASE => {
+                self.staircase_env_primitives.clear();
+                self.staircase_environment = None;
+            }
+            super::room_gpu_load::ROOM_ARCHIVE => {
+                self.archive_env_primitives.clear();
+                self.archive_environment = None;
+                self.archive_sign_left_prim_idx = None;
+                self.archive_sign_right_prim_idx = None;
+                self.archive_inspect_plaque_prim_idx = None;
+                self.archive_plaque_backing_prim_idx = None;
+                self.archive_page_left_prim_indices.clear();
+                self.archive_page_right_prim_indices.clear();
+            }
+            super::room_gpu_load::ROOM_GAMEPLAY => {
+                self.gameplay_env_primitives.clear();
+                self.gameplay_environment = None;
+                self.gameplay_cash_in_prim_indices.clear();
+                self.gameplay_score_roller_prim_groups.clear();
+                self.gameplay_score_roller_pivots_doc.clear();
+                self.gameplay_score_roller_axes_doc.clear();
+                self.gameplay_env_collision_meshes.clear();
+            }
+            _ => {}
+        }
+        self.rooms_gpu_loaded &= !bit;
+        if let Some(i) = self.room_gpu_lru.iter().position(|&b| b == bit) {
+            self.room_gpu_lru.remove(i);
+        }
+        if self.probe_gi_gpu_room.is_some() {
+            self.probe_gi_gpu_room = None;
+            self.probe_gi_had_room = false;
+        }
+        crate::gpu_memory_profile::log_device_allocator(&self.device, "room_evict");
+    }
+
     /// Push the per-scene tonemap + VHS tuning the next `render` call should
     /// upload. The renderer keeps the values across frames; the Options
     /// "VHS overlay" gate (passed via `RenderSettings.vhs_enabled`) can

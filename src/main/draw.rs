@@ -858,6 +858,7 @@ impl App {
         if let Some(q) = frame.shadow_quality_override {
             render_settings.shadow_quality = q;
         }
+        renderer.set_graphics_budget(self.gfx.graphics_mode);
         renderer.set_hdr_enabled(self.effect_layers.hdr_enabled(&self.gfx));
         renderer.main_menu_pride_rainbow_debug = self.debug.main_menu_pride_rainbow_debug;
         renderer.main_menu_moon_phase_debug = self.debug.main_menu_moon_phase_debug;

@@ -9,7 +9,9 @@ pub mod tile;
 pub mod tuning;
 
 pub use effects::EffectsQuality;
-pub use graphics_mode::GraphicsMode;
+pub use graphics_mode::{
+    GraphicsMode, LOW_MEMORY_RENDER_SCALE, MIN_RENDER_HEIGHT, MIN_RENDER_WIDTH,
+};
 pub use shadow::ShadowQuality;
 pub use tile::{TileMaterial, TilePreset};
 pub use tuning::{

@@ -286,10 +286,11 @@ impl WgpuRenderer {
         *cursor += 1;
 
         let orient = crate::primitive::shape_orientation(MeshId::Coin);
+        let scale = crate::coin_glb::layout_scale_for_extents(obj.extents);
         let model = translate_rot_scale(
             pixel_to_world(camera.w, camera.h, obj.pos[0], obj.pos[1], obj.pos[2]),
             obj.rotation_matrix() * orient,
-            glam::Vec3::from(obj.extents),
+            scale,
         );
         if let Some(pid) = pick_id {
             self.last_primitive_pick_models.insert(*pid, model);

@@ -93,6 +93,11 @@ impl App {
         };
         self.renderer = Some(renderer);
         if let Some(renderer) = self.renderer.as_mut() {
+            let settings = crate::persistence::load_settings();
+            if !settings.graphics_mode_user_set {
+                self.gfx.graphics_mode = renderer.suggested_graphics_mode();
+            }
+            renderer.set_graphics_budget(self.gfx.graphics_mode);
             use crate::persistence::ResumeScene;
             use crate::render::room_preload::RoomSceneChain;
             // Begin hub GLB GPU upload as soon as the renderer exists (splash plate).

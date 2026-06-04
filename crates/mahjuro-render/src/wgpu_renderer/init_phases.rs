@@ -210,6 +210,8 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
 pub(super) struct EarlyGpuState {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    pub adapter_name: String,
+    pub integrated_gpu: bool,
     pub size: crate::physical_size::PhysicalSize,
     pub target: RenderTarget,
     pub config: wgpu::SurfaceConfiguration,
@@ -454,6 +456,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         trace: wgpu::Trace::default(),
     }))
     .map_err(|e| anyhow::anyhow!("device: {e:?}"))?;
+    crate::gpu_memory_profile::log_adapter_startup(&adapter, &device);
     log::debug!("wgpu: device + queue OK");
 
     let (target, config) = match surface_opt {
@@ -536,23 +539,30 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         }
     };
 
-    let (depth_texture, depth_view) = create_depth(&device, size.width.max(1), size.height.max(1));
+    let render_size = super::constants::scaled_render_size(size, 1.0);
+    let (depth_texture, depth_view) = create_depth(
+        &device,
+        render_size.width.max(1),
+        render_size.height.max(1),
+    );
     let (ssr_prev_depth_texture, ssr_prev_depth_view) = create_depth_r32_snapshot(
         &device,
-        size.width.max(1),
-        size.height.max(1),
+        render_size.width.max(1),
+        render_size.height.max(1),
         "ssr-prev-depth",
     );
     let (depth_r32_snapshot_texture, depth_r32_snapshot_view) = create_depth_r32_snapshot(
         &device,
-        size.width.max(1),
-        size.height.max(1),
+        render_size.width.max(1),
+        render_size.height.max(1),
         "depth-r32-snapshot",
     );
 
     Ok(EarlyGpuState {
         device,
         queue,
+        adapter_name: ai.name.clone(),
+        integrated_gpu: ai.device_type == wgpu::DeviceType::IntegratedGpu,
         size,
         target,
         config,

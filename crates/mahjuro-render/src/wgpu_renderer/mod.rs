@@ -343,6 +343,17 @@ pub struct WgpuRenderer {
     ui_font_italic: Option<fontdue::Font>,
     mono_font: Option<fontdue::Font>,
     pub size: crate::physical_size::PhysicalSize,
+    /// Internal resolution for 3D scene / depth / bloom (≤ [`Self::size`]).
+    pub(super) render_size: crate::physical_size::PhysicalSize,
+    pub(super) render_scale: f32,
+    /// Full-window depth for post-tonemap UI (orthogonal to scene depth).
+    overlay_depth_texture: wgpu::Texture,
+    overlay_depth_view: wgpu::TextureView,
+    pub(super) graphics_mode: mahjuro_gfx_types::GraphicsMode,
+    /// Heuristic preset from adapter name / class at init (see [`Self::suggested_graphics_mode`]).
+    suggested_graphics_mode: mahjuro_gfx_types::GraphicsMode,
+    /// LRU order of [`room_gpu_load`] room bits (front = most recent).
+    room_gpu_lru: std::collections::VecDeque<u8>,
     /// Per-tile Y animation offset (positive = below rest position). Lerped toward 0 each frame.
     tile_anim_y: Vec<f32>,
     /// Per-tile X animation offset (in slot-width units). Used for sort shuffle animations.

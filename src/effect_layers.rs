@@ -71,6 +71,6 @@ impl EffectLayers {
     }
 
     pub fn hdr_enabled(self, gfx: &AppRenderSettings) -> bool {
-        gfx.hdr_enabled && self.hdr
+        gfx.hdr_enabled && gfx.graphics_mode.hdr_swapchain_enabled() && self.hdr
     }
 }

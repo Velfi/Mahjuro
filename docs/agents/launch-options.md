@@ -26,6 +26,9 @@ Headless tools (`mahjuro-bake`, `mahjuro-screenshot`) and bot/sweep always skip 
 | `MAHJURO_LOG_FILE` | Append `log` output to this path (also mirrors startup errors). |
 | `RUST_LOG` | Standard `env_logger` filter (e.g. `mahjuro=debug`). |
 | `MAHJURO_STARTUP_PROFILE` | Startup timing tables + room GLB CPU/GPU upload metrics. |
+| `MAHJURO_GPU_MEM_PROFILE` | Log adapter hint + wgpu allocator totals (also on when `MAHJURO_STARTUP_PROFILE=1`). |
+| `MAHJURO_GRAPHICS_MODE` | Force preset at startup: `performance`, `low_memory`, or `visuals`. |
+| `MAHJURO_AUTO_LOW_MEMORY` | Default graphics preset to **Low memory** (testing / 4 GB soak). |
 | `MAHJURO_PRESENT_MODE` | WSI override: `fifo`, `mailbox`, `immediate`, `auto`, … |
 | `MAHJURO_SKIP_VULKAN_WSI_PROBE` | Force Vulkan without parent WSI smoke test. |
 | `MAHJURO_VULKAN_WIN_SURFACE_COPY` | Opt-in Windows Vulkan swapchain `COPY_SRC` (screenshots). |

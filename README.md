@@ -69,6 +69,7 @@ Every third blind is a **boss** with a special rule that forces you to adapt:
 - [Rust](https://rustup.rs/) (2024 edition)
 - [Python](https://www.python.org/) 3 on `PATH` (`python3` or `python`) — `build.rs` runs `tools/bake_assets/bake_assets.py` so packs sit next to the binary (set `MAHJURO_SKIP_ASSET_BAKE=1` only if you supply packs or `MAHJURO_ASSETS` yourself)
 - A GPU with Vulkan, Metal, or DX12 support
+- **Minimum (discrete 4 GB VRAM @ 1080p):** choose **Low memory** in Options → Graphics (or let the game suggest it on first launch). Uses 75% internal render resolution, no dynamic shadows/SSR, and tight room/atlas GPU residency. **Recommended:** 6 GB+ VRAM for **Visuals** at native resolution.
 
 ### Build & Run
 

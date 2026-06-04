@@ -160,6 +160,9 @@ pub struct AppSettings {
     pub gamma: f32,
     #[serde(default = "default_graphics_mode")]
     pub graphics_mode: GraphicsMode,
+    /// When false, the first launch may apply [`GraphicsMode::suggest_for_adapter`].
+    #[serde(default)]
+    pub graphics_mode_user_set: bool,
     #[serde(default)]
     pub hdr_enabled: bool,
     /// Master kill-switch for the per-scene VHS overlay. Defaults to `true`
@@ -254,6 +257,7 @@ impl Default for AppSettings {
             tileset_name: default_tileset_name(),
             gamma: 1.0,
             graphics_mode: GraphicsMode::Visuals,
+            graphics_mode_user_set: false,
             hdr_enabled: false,
             vhs_enabled: true,
             borderless_fullscreen: true,
