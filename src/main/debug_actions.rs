@@ -6,8 +6,7 @@ use crate::game::engine::GameEngine;
 use crate::scenes::shop::PackCelebration;
 use crate::scenes::{
     ButtonAabbLabScene, CascadeLabScene, DefeatScene, RollerLabScene, ShadowAoLabScene,
-    ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter, TixelsScene,
-    VictoryScene,
+    ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter, VictoryScene,
 };
 use crate::trailer_mode::TrailerMode;
 use rand::RngExt;
@@ -297,7 +296,6 @@ impl App {
                         Scene::CascadeLab(_) => "CascadeLab",
                         Scene::RumbleLab(_) => "RumbleLab",
                         Scene::ShadowAoLab(_) => "ShadowAoLab",
-                        Scene::Tixels(_) => "Tixels",
                         Scene::YakuJournal(_) => "YakuJournal",
                         Scene::WallLedger(_) => "WallLedger",
                     };
@@ -376,11 +374,6 @@ impl App {
                 self.overlay_stack
                     .push(Scene::ButtonAabbLab(ButtonAabbLabScene::new(true)));
                 log::debug!("Opened button AABB lab");
-            }
-            DebugAction::OpenTixels => {
-                self.overlay_stack
-                    .push(Scene::Tixels(TixelsScene::new(true)));
-                log::debug!("Opened tixels scene");
             }
             #[cfg(target_os = "macos")]
             DebugAction::OpenAbout => {

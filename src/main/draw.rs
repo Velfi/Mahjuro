@@ -402,7 +402,6 @@ impl App {
                     | Scene::RollerLab(_)
                     | Scene::CascadeLab(_)
                     | Scene::ShadowAoLab(_)
-                    | Scene::Tixels(_)
             )
         );
         let scene_look = self.resolved_scene_look();

@@ -59,7 +59,6 @@ pub(crate) enum SceneTag {
     AnimationLab,
     RumbleLab,
     ShadowAoLab,
-    Tixels,
     YakuJournal,
     WallLedger,
 }
@@ -93,7 +92,6 @@ impl From<&Scene> for SceneTag {
             Scene::CascadeLab(_) => SceneTag::Gameplay,
             Scene::RumbleLab(_) => SceneTag::RumbleLab,
             Scene::ShadowAoLab(_) => SceneTag::ShadowAoLab,
-            Scene::Tixels(_) => SceneTag::Tixels,
             Scene::YakuJournal(_) => SceneTag::YakuJournal,
             Scene::WallLedger(_) => SceneTag::WallLedger,
         }

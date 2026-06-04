@@ -496,15 +496,7 @@ pub fn apply_ui_actions(
             | UiAction::PagePrev => {}
             UiAction::NorthFacePress
             | UiAction::WestFacePress
-            | UiAction::WestFaceRelease
-            | UiAction::TixelsLoadImage
-            | UiAction::TixelsResolutionDown
-            | UiAction::TixelsResolutionUp
-            | UiAction::TixelsTileDown
-            | UiAction::TixelsTileUp
-            | UiAction::TixelsToggleBayer
-            | UiAction::TixelsToggleColor
-            | UiAction::TixelsReset => {}
+            | UiAction::WestFaceRelease => {}
             UiAction::CancelRelease => {}
         }
     }

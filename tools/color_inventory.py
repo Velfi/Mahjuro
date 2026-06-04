@@ -2,9 +2,11 @@
 """Inventory every ad-hoc color literal in src/ and bucket by closest
 theme token.
 
-Walks `src/**/*.rs`, finds `[r, g, b, a]` / `[r, g, b]` / `(r, g, b, a)` /
-`(r, g, b)` literals where every component is in [0, 1], measures Euclidean
-distance to each token in `src/render/theme.rs`, and emits a markdown report
+Walks `src/**/*.rs` and `crates/*/src/**/*.rs`, finds `[r, g, b, a]` /
+`[r, g, b]` / `(r, g, b, a)` / `(r, g, b)` literals where every component is
+in [0, 1], measures Euclidean distance to each token in
+`crates/mahjuro-render/src/theme.rs` (plus shared aliases in
+`crates/mahjuro-types/src/theme_tokens.rs`), and emits a markdown report
 grouped by suggested replacement.
 
 Usage:
@@ -23,15 +25,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-THEME_RS = SRC_ROOT / "render" / "theme.rs"
-TILE_RS = SRC_ROOT / "core" / "tile.rs"
+THEME_RS = REPO_ROOT / "crates" / "mahjuro-render" / "src" / "theme.rs"
+THEME_TOKENS_RS = REPO_ROOT / "crates" / "mahjuro-types" / "src" / "theme_tokens.rs"
+TILE_RS = REPO_ROOT / "crates" / "mahjuro-core" / "src" / "core" / "tile.rs"
 
 # Files we deliberately skip:
-#   theme.rs        — defines the tokens; not "ad-hoc" by definition.
-#   tile.rs         — suit colors are documented in COLOR_THEME.md and live
-#                     here on purpose; nothing to consolidate.
-SKIP_FILES = {THEME_RS, TILE_RS}
+#   theme.rs / theme_tokens.rs — define the tokens; not "ad-hoc" by definition.
+#   tile.rs                    — suit keyword colors are documented in
+#                                COLOR_THEME.md and live here on purpose.
+SKIP_FILES = {THEME_RS, THEME_TOKENS_RS, TILE_RS}
 
 
 # ───────────────────────── token loading ──────────────────────────────
@@ -59,19 +61,19 @@ CONST_RE = re.compile(
 
 
 def load_tokens() -> list[Token]:
-    text = THEME_RS.read_text(encoding="utf-8")
-    tokens: list[Token] = []
-    for m in CONST_RE.finditer(text):
-        if m.group("name") == "CLEAR":
-            continue
-        tokens.append(
-            Token(
-                name=m.group("name"),
+    by_name: dict[str, Token] = {}
+    for path in (THEME_RS, THEME_TOKENS_RS):
+        text = path.read_text(encoding="utf-8")
+        for m in CONST_RE.finditer(text):
+            name = m.group("name")
+            if name == "CLEAR":
+                continue
+            by_name[name] = Token(
+                name=name,
                 rgb=(float(m.group("r")), float(m.group("g")), float(m.group("b"))),
                 a=float(m.group("a")),
             )
-        )
-    return tokens
+    return list(by_name.values())
 
 
 # ───────────────────────── literal scanning ───────────────────────────
@@ -287,9 +289,23 @@ def parse_file(path: Path) -> list[Literal]:
     return out
 
 
+def iter_source_rs_files() -> list[Path]:
+    paths: list[Path] = []
+    src = REPO_ROOT / "src"
+    if src.is_dir():
+        paths.extend(src.rglob("*.rs"))
+    crates = REPO_ROOT / "crates"
+    if crates.is_dir():
+        for crate in sorted(crates.iterdir()):
+            crate_src = crate / "src"
+            if crate_src.is_dir():
+                paths.extend(crate_src.rglob("*.rs"))
+    return sorted(set(paths))
+
+
 def scan_src() -> list[Literal]:
     out: list[Literal] = []
-    for path in sorted(SRC_ROOT.rglob("*.rs")):
+    for path in iter_source_rs_files():
         if path in SKIP_FILES:
             continue
         out.extend(parse_file(path))
@@ -401,7 +417,9 @@ def write_report(
     lines.append(
         "Distance is Euclidean in linear-RGB space (channels in [0, 1]). "
         "Pure black / pure white are skipped (used as identity tints). "
-        "`src/render/theme.rs` and `src/core/tile.rs` are skipped (they "
+        "`crates/mahjuro-render/src/theme.rs`, "
+        "`crates/mahjuro-types/src/theme_tokens.rs`, and "
+        "`crates/mahjuro-core/src/core/tile.rs` are skipped (they "
         "*are* the source of truth)."
     )
     lines.append("")
