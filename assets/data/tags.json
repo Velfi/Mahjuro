@@ -16,9 +16,9 @@
     "yen_value": 20
   },
   {
-    "id": "free_reroll",
-    "name": "Free Reroll",
-    "description": "Next shop reroll is free",
+    "id": "free_restock",
+    "name": "Free Restock",
+    "description": "Next shop restock is free",
     "rarity": "common",
     "min_wing": 1,
     "yen_value": 5

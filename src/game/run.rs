@@ -372,9 +372,9 @@ pub struct RunState {
     /// Tag assigned to the Big blind this ante.
     #[serde(default)]
     pub big_chamber_tag: Option<crate::core::tag::TagKind>,
-    /// Tag-granted: free shop rerolls queued for the next visit (stacking).
+    /// Tag-granted: free shop restocks queued for the next visit (stacking).
     #[serde(default, deserialize_with = "save_compat::u32_from_bool_or_u32")]
-    pub tag_free_reroll: u32,
+    pub tag_free_restock: u32,
     /// Tag-granted: free relics queued for the next shop (stacking).
     #[serde(default, deserialize_with = "save_compat::u32_from_bool_or_u32")]
     pub tag_patron_gift: u32,
@@ -470,8 +470,8 @@ impl RunState {
             .unwrap_or(0)
     }
 
-    pub(crate) fn can_afford_shop_reroll(&self, reroll_cost: u32) -> bool {
-        reroll_cost == 0 || self.yen >= reroll_cost as i32 || self.i_got_a_guy_restock_charges() > 0
+    pub(crate) fn can_afford_shop_restock(&self, restock_cost: u32) -> bool {
+        restock_cost == 0 || self.yen >= restock_cost as i32 || self.i_got_a_guy_restock_charges() > 0
     }
 
     pub fn hand(&self) -> &[Tile] {
@@ -859,7 +859,7 @@ impl RunState {
             joker_extra_faces: Vec::new(),
             small_chamber_tag: None,
             big_chamber_tag: None,
-            tag_free_reroll: 0,
+            tag_free_restock: 0,
             tag_patron_gift: 0,
             tag_rich_stock: 0,
             tag_bonus_plays: 0,

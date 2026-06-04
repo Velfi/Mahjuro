@@ -372,7 +372,7 @@ pub const GAMEPLAY_TABLE_HDR_LINEAR_MUL: f32 = 1.0;
 /// [`crate::draw_cmd::SceneLighting::embedded_gltf_punctual`] is set (`room_glb.wgsl` ignores it).
 /// The procedural shaders are Lambert-forward and skip the room PBR diffuse `/PI` term, so keep this
 /// below 1.0 to sit in the same brightness band as imported GLB geometry.
-pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 0.28;
+pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 2.0;
 
 /// glTF **node** name prefix for punctual lights that should read as warm candles
 /// (`light_candle`, `light_candle.001`, `light_candle_06`, …).

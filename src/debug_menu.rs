@@ -91,8 +91,8 @@ pub enum DebugAction {
     /// over the next 100 rendered frames and log the result. Always
     /// available; safe to run while the GPU profile is *not* active.
     ProfileCpu,
-    /// Reroll the shop stock for free (no gold cost, no cost increment).
-    RerollShop,
+    /// Restock the shop stock for free (no gold cost, no cost increment).
+    RestockShop,
     /// Force-open a random tile pack celebration (free, ignores shop stock).
     OpenPack,
     /// Spawn a burst of demo score popups streaming toward the reel —
@@ -287,9 +287,9 @@ impl DebugMenuBar {
         // In-run shortcuts: shop, FX demos, and direct state overrides.
         let run_sub = Submenu::new("Run", true);
 
-        let reroll_item = MenuItem::new("Reroll Shop", true, None);
-        mappings.push((reroll_item.id().clone(), DebugAction::RerollShop));
-        let _ = run_sub.append(&reroll_item);
+        let restock_item = MenuItem::new("Restock Shop", true, None);
+        mappings.push((restock_item.id().clone(), DebugAction::RestockShop));
+        let _ = run_sub.append(&restock_item);
 
         let open_pack_item = MenuItem::new("Open Tile Pack", true, None);
         mappings.push((open_pack_item.id().clone(), DebugAction::OpenPack));

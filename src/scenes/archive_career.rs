@@ -715,7 +715,7 @@ pub fn run_detail_model(
         ("Drawn".into(), format!("{}", c.tiles_drawn)),
         ("Discarded".into(), format!("{}", rec.tiles_discarded)),
         ("Shops".into(), format!("{}", c.shops_visited)),
-        ("Rerolls".into(), format!("{}", c.rerolls_used)),
+        ("Restocks".into(), format!("{}", c.restocks_used)),
         ("Relic triggers".into(), format!("{}", c.relic_triggers)),
         ("Yen earned".into(), format!("¥{}", c.yen_earned)),
         (

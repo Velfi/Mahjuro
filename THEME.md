@@ -41,7 +41,7 @@ The shop is **the House’s memory of its losers**, displayed and resold.
 
 ## Yen (economy skin)
 
-**Yen** replace “gold” / “coins” in **player-facing copy** and HUD branding. Mechanics stay: earn from chambers, spend in storeroom, interest on savings, reroll costs, sell refunds.
+**Yen** replace “gold” / “coins” in **player-facing copy** and HUD branding. Mechanics stay: earn from chambers, spend in storeroom, interest on savings, restock costs, sell refunds.
 
 **Fiction:**
 

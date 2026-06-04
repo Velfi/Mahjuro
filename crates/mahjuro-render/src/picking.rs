@@ -19,7 +19,7 @@ use crate::wgpu_renderer::{
     GameplayPick, LOCAL_X_EXTENT, LOCAL_Y_EXTENT, LOCAL_Z_EXTENT, MAIN_MENU_PICK_OPTIONS,
     MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MainMenuPick, ShopHit, WgpuRenderer,
 };
-use mahjuro_types::shop_pick::{PICK_LEAVE_PROP, PICK_REROLL_PROP, YAKU_JOURNAL_BOOK_PICK_ID};
+use mahjuro_types::shop_pick::{PICK_LEAVE_PROP, PICK_RESTOCK_PROP, YAKU_JOURNAL_BOOK_PICK_ID};
 
 fn gameplay_env_collision_node_to_hit(node_name: &str) -> Option<GameplayPick> {
     match node_name {
@@ -31,7 +31,7 @@ fn gameplay_env_collision_node_to_hit(node_name: &str) -> Option<GameplayPick> {
 fn shop_env_collision_node_to_hit(node_name: &str) -> Option<ShopHit> {
     match node_name {
         "journal_btn" => Some(ShopHit::Dish(YAKU_JOURNAL_BOOK_PICK_ID)),
-        "restock_btn" => Some(ShopHit::Dish(PICK_REROLL_PROP)),
+        "restock_btn" => Some(ShopHit::Dish(PICK_RESTOCK_PROP)),
         "exit_btn" => Some(ShopHit::Dish(PICK_LEAVE_PROP)),
         _ if node_name.starts_with("shop_spawn_relic_") => {
             let n = node_name.strip_prefix("shop_spawn_relic_")?;
@@ -261,7 +261,7 @@ impl WgpuRenderer {
                 consider(ShopHit::Talisman(i), t);
             }
         }
-        // Shop action props (Leave / Reroll counter-end) — any
+        // Shop action props (Leave / Restock counter-end) — any
         // Primitive with a pick_id that isn't already covered by
         // `aux_dish_rects` falls through here. The shop scene maps
         // `ShopHit::Dish(pid)` to the right action downstream.

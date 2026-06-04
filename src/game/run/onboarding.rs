@@ -37,7 +37,7 @@ impl RunState {
         state.resolve_upcoming_ordeal();
         state.small_chamber_tag = None;
         state.big_chamber_tag = None;
-        state.tag_free_reroll = 0;
+        state.tag_free_restock = 0;
         state.tag_patron_gift = 0;
         state.tag_rich_stock = 0;
         state.tag_bonus_plays = 0;

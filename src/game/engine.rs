@@ -144,7 +144,7 @@ pub struct GameEngine<'a> {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ConsumedShopTags {
-    pub free_reroll: u32,
+    pub free_restock: u32,
     pub patron_gift: u32,
     pub rich_stock: u32,
 }
@@ -182,7 +182,7 @@ pub enum ShopCommand {
         kind: TilePackKind,
         price: u32,
     },
-    RerollShop {
+    RestockShop {
         cost: u32,
     },
 }
@@ -208,8 +208,8 @@ pub enum ShopCommandData {
         pack_name: &'static str,
         pack_kind: TilePackKind,
     },
-    Rerolled {
-        /// True for a skip-tag free reroll (`cost == 0`) or when [RelicId::IGotAGuy] waived yen.
+    Restocked {
+        /// True for a skip-tag free restock (`cost == 0`) or when [RelicId::IGotAGuy] waived yen.
         skip_cost_escalation: bool,
     },
 }
@@ -432,11 +432,11 @@ impl<'a> GameEngine<'a> {
 
     pub fn consume_shop_tags(run: &mut RunState) -> ConsumedShopTags {
         let tags = ConsumedShopTags {
-            free_reroll: run.tag_free_reroll,
+            free_restock: run.tag_free_restock,
             patron_gift: run.tag_patron_gift,
             rich_stock: run.tag_rich_stock,
         };
-        run.tag_free_reroll = 0;
+        run.tag_free_restock = 0;
         run.tag_patron_gift = 0;
         run.tag_rich_stock = 0;
         tags
@@ -915,7 +915,19 @@ impl<'a> GameEngine<'a> {
         data: CommandData,
         rejection: Option<CommandRejection>,
     ) -> CommandOutcome {
-        self.run.resolve_round_end(self.bus);
+        // Discard removes tiles immediately but the UI defers refill until the
+        // river animation finishes. An empty hand mid-discard is not terminal.
+        let defer_round_resolution = matches!(
+            (command, &data, rejection),
+            (
+                GameCommand::DiscardSelectionNoRefill,
+                CommandData::DiscardSelection { count },
+                None
+            ) if *count > 0
+        );
+        if !defer_round_resolution {
+            self.run.resolve_round_end(self.bus);
+        }
         self.finish_outcome(command, before, queue_start, data, rejection)
     }
 
@@ -1120,9 +1132,9 @@ impl<'a> GameEngine<'a> {
                     pack_kind: kind,
                 }
             }
-            ShopCommand::RerollShop { cost } => {
+            ShopCommand::RestockShop { cost } => {
                 let mut yen_cost = cost;
-                // Skip-tag free reroll (`cost == 0`) and I Got A Guy waivers keep the listed price.
+                // Skip-tag free restock (`cost == 0`) and I Got A Guy waivers keep the listed price.
                 let mut skip_cost_escalation = cost == 0;
                 if yen_cost > 0
                     && self.run.relics.has(RelicId::IGotAGuy)
@@ -1149,7 +1161,7 @@ impl<'a> GameEngine<'a> {
                 }
                 self.run
                     .apply_yen_delta(-(yen_cost as i32), Some(&mut self.bus));
-                ShopCommandData::Rerolled {
+                ShopCommandData::Restocked {
                     skip_cost_escalation,
                 }
             }
@@ -1405,6 +1417,44 @@ mod tests {
         assert!(outcome.ui_hints.contains(&UiHint::Hand));
         assert_eq!(outcome.after.hand_len, outcome.before.hand_len - 2);
         assert_hand_selection_invariant(&run);
+    }
+
+    #[test]
+    fn discard_all_tiles_defers_game_over_until_refill() {
+        use crate::game::game_mode::HAND_SIZE;
+
+        let mut run = deterministic_run();
+        for i in 0..HAND_SIZE {
+            run.selected_mut()[i] = true;
+        }
+        let mut bus = EventBus::default();
+        let mut engine = GameEngine::new(&mut run, &mut bus);
+
+        let outcome = engine.dispatch(GameCommand::DiscardSelectionNoRefill);
+
+        assert_eq!(
+            outcome.data,
+            CommandData::DiscardSelection {
+                count: HAND_SIZE
+            }
+        );
+        assert_eq!(outcome.after.hand_len, 0);
+        assert!(
+            !outcome
+                .events
+                .iter()
+                .any(|ev| matches!(ev, EngineEvent::GameOver { .. })),
+            "empty hand mid-discard must not trigger game over before refill"
+        );
+
+        let refill = engine.dispatch(GameCommand::RefillHand);
+        assert_eq!(refill.rejection, None);
+        assert_eq!(run.hand().len(), HAND_SIZE);
+        assert!(
+            !bus.queue
+                .iter()
+                .any(|ev| matches!(ev, GameEvent::GameOver { .. }))
+        );
     }
 
     #[test]
@@ -1694,14 +1744,14 @@ mod tests {
     }
 
     #[test]
-    fn reroll_shop_rejects_without_mutation_when_yen_is_low() {
+    fn restock_shop_rejects_without_mutation_when_yen_is_low() {
         let mut run = deterministic_run();
         run.yen = 1;
         let before = run.yen;
         let mut bus = EventBus::default();
 
         let outcome =
-            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RerollShop { cost: 2 });
+            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RestockShop { cost: 2 });
 
         assert_eq!(
             outcome.rejection,
@@ -1712,7 +1762,7 @@ mod tests {
     }
 
     #[test]
-    fn reroll_shop_spends_i_got_a_guy_charge_when_yen_is_low() {
+    fn restock_shop_spends_i_got_a_guy_charge_when_yen_is_low() {
         let mut run = deterministic_run();
         run.yen = 0;
         run.relics
@@ -1723,7 +1773,7 @@ mod tests {
         let mut bus = EventBus::default();
 
         let outcome =
-            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RerollShop { cost: 5 });
+            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RestockShop { cost: 5 });
 
         assert_eq!(outcome.rejection, None);
         assert_eq!(run.yen, 0);
@@ -1735,32 +1785,32 @@ mod tests {
         );
         assert_eq!(
             outcome.data,
-            ShopCommandData::Rerolled {
+            ShopCommandData::Restocked {
                 skip_cost_escalation: true,
             }
         );
     }
 
     #[test]
-    fn reroll_shop_paid_does_not_skip_cost_escalation() {
+    fn restock_shop_paid_does_not_skip_cost_escalation() {
         let mut run = deterministic_run();
         run.yen = 100;
         let mut bus = EventBus::default();
 
         let outcome =
-            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RerollShop { cost: 5 });
+            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RestockShop { cost: 5 });
 
         assert_eq!(outcome.rejection, None);
         assert_eq!(
             outcome.data,
-            ShopCommandData::Rerolled {
+            ShopCommandData::Restocked {
                 skip_cost_escalation: false,
             }
         );
     }
 
     #[test]
-    fn reroll_shop_rejects_when_yen_low_and_no_i_got_a_guy_charges() {
+    fn restock_shop_rejects_when_yen_low_and_no_i_got_a_guy_charges() {
         let mut run = deterministic_run();
         run.yen = 0;
         run.relics
@@ -1772,7 +1822,7 @@ mod tests {
         let mut bus = EventBus::default();
 
         let outcome =
-            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RerollShop { cost: 3 });
+            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RestockShop { cost: 3 });
 
         assert_eq!(
             outcome.rejection,
@@ -1782,7 +1832,7 @@ mod tests {
     }
 
     #[test]
-    fn reroll_shop_zero_cost_does_not_spend_i_got_a_guy_charge() {
+    fn restock_shop_zero_cost_does_not_spend_i_got_a_guy_charge() {
         let mut run = deterministic_run();
         run.yen = 0;
         run.relics
@@ -1793,7 +1843,7 @@ mod tests {
         let mut bus = EventBus::default();
 
         let outcome =
-            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RerollShop { cost: 0 });
+            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RestockShop { cost: 0 });
 
         assert_eq!(outcome.rejection, None);
         assert_eq!(
@@ -1804,7 +1854,7 @@ mod tests {
         );
         assert_eq!(
             outcome.data,
-            ShopCommandData::Rerolled {
+            ShopCommandData::Restocked {
                 skip_cost_escalation: true,
             }
         );

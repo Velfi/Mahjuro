@@ -116,7 +116,7 @@ TAG_VISUALS: dict[str, str] = {
         "silhouette: dark walnut body, one brass hasp, one brass band. "
         "Readable as 'loot' from the wedge of light alone."
     ),
-    "free_reroll": (
+    "free_restock": (
         "One antique price tag hanging straight, face-on to camera. The tag "
         "is parchment ivory with a single bold circular arrow loop (↻) "
         "embossed in dark umber — the arrow must be thick, occupying most of "

@@ -70,12 +70,12 @@ impl ShopScene {
         if matches!(hit, ShopHit::Dish(id) if id == PICK_LEAVE_PROP) {
             return Some(self.continue_scene(ctx.run));
         }
-        if matches!(hit, ShopHit::Dish(id) if id == PICK_REROLL_PROP) {
+        if matches!(hit, ShopHit::Dish(id) if id == PICK_RESTOCK_PROP) {
             if !self.restock_exit_active()
                 && self.mode == ShopMode::Standard
-                && ctx.run.can_afford_shop_reroll(self.reroll_cost)
+                && ctx.run.can_afford_shop_restock(self.restock_cost)
             {
-                self.reroll(ctx.run);
+                self.restock(ctx.run);
             }
             return None;
         }
@@ -444,12 +444,12 @@ impl ShopScene {
                     if matches!(focus, ShopFocus::NextRound) {
                         return Some(self.continue_scene(ctx.run));
                     }
-                    if matches!(focus, ShopFocus::Reroll)
+                    if matches!(focus, ShopFocus::Restock)
                         && !self.restock_exit_active()
                         && self.mode == ShopMode::Standard
-                        && ctx.run.can_afford_shop_reroll(self.reroll_cost)
+                        && ctx.run.can_afford_shop_restock(self.restock_cost)
                     {
-                        self.reroll(ctx.run);
+                        self.restock(ctx.run);
                         continue;
                     }
                     if matches!(focus, ShopFocus::WallHud) {
@@ -525,12 +525,12 @@ impl ShopScene {
             if cid == SHOP_NEXT_ROUND_ID {
                 return Some(self.continue_scene(ctx.run));
             }
-            if cid == SHOP_REROLL_ID
+            if cid == SHOP_RESTOCK_ID
                 && !self.restock_exit_active()
                 && self.mode == ShopMode::Standard
-                && ctx.run.can_afford_shop_reroll(self.reroll_cost)
+                && ctx.run.can_afford_shop_restock(self.restock_cost)
             {
-                self.reroll(ctx.run);
+                self.restock(ctx.run);
                 return None;
             }
         }

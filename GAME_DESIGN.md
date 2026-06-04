@@ -21,7 +21,7 @@ Mahjuro is a mahjong-inspired roguelite that makes mahjong approachable for west
 4. **Score the Hand** — Chips × Mult in the style of Balatro, modified by yaku, relics, tile enhancements, dora, and the active rule modifier. Valid plays **commit** melds until you **cash in** for that scoring cascade.
 5. **Discard to Refine** — Sacrifice unwanted tiles from a limited discard budget (4/round by default) to redraw from the wall. Unused discards can still pay out via relics and end-of-round bonuses.
 6. **Repeat Plays** — Each round gives a fixed number of plays and discards to meet the blind's score target. The default **Bamboo** tileset starts with **5 plays** and **4 discards** (material bonuses and meta upgrades can change this).
-7. **Shop Phase** — Between blinds, spend earned coins on relics, zodiacs, talismans, packs, and rerolls from a 3D curio cabinet.
+7. **Shop Phase** — Between blinds, spend earned coins on relics, zodiacs, talismans, packs, and restocks from a 3D curio cabinet.
 8. **Advance Antes** — Clear **Small → Big → Boss** on each ante from the first through the **final ante**; beating the boss on the final ante wins the run (`FINAL_ANTE` in `run.rs` is the single source of truth for how many antes that is).
 
 ---
@@ -145,7 +145,7 @@ Tracked in `PlayerProgress` with a **tiered unlock ladder** driven by **runs com
 
 * Each tier unlocks **relic shop pools**, **round rules** available in shops/runs, and milestone copy for **yaku** / **dora** (dora scoring is active whenever indicators are on the wall; tier **L6** surfaces dora in level-up tables). The full yaku list scores in normal runs; **Kokushi Musō** stays hidden in reference UI until first cash-in.
 * A capped **high-score list** per profile; **run history** records finished runs for analytics and season unlocks.
-* **Season** ladder (**Spring → Summer → Autumn → Winter**) raises targets, shop prices, reroll base cost, and boss floors; **Winter** also adds the **No-Sequence Bonus** rule every round. Higher seasons unlock per **tile material** after clearing the previous season with that material.
+* **Season** ladder (**Spring → Summer → Autumn → Winter**) raises targets, shop prices, restock base cost, and boss floors; **Winter** also adds the **No-Sequence Bonus** rule every round. Higher seasons unlock per **tile material** after clearing the previous season with that material.
 * First **victory** unlocks **Plastic** tiles (+1 starting discard); **Tortoise Shell** grants bonus starting yen (material choice at run start).
 
 ### **C. Knowledge Progression**

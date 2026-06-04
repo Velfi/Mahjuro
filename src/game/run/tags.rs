@@ -39,9 +39,9 @@ impl RunState {
                 self.apply_yen_reward(20, bus);
                 "+20 yen"
             }
-            TagKind::FreeReroll => {
-                self.tag_free_reroll += 1;
-                "Free reroll"
+            TagKind::FreeRestock => {
+                self.tag_free_restock += 1;
+                "Free restock"
             }
             TagKind::PatronGift => {
                 self.tag_patron_gift += 1;

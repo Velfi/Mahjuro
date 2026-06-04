@@ -4,7 +4,7 @@
 //! no per-season relic or yaku pools. The three knobs are:
 //!
 //! * `base_target_mult` — scales `GameMode::base_target` once at `RunState::new`.
-//! * `reroll_base_cost` — replaces `REROLL_BASE_COST` for the active run.
+//! * `restock_base_cost` — replaces `RESTOCK_BASE_COST` for the active run.
 //! * `ordeal_min_wing_floor` — reduces `OrdealDef::min_ante` in the filter in
 //!   `core::ordeal::pick_for_wing`, letting harder bosses appear earlier.
 //!
@@ -40,7 +40,8 @@ struct SeasonPresentationRaw {
     label: String,
     description: String,
     base_target_mult: f32,
-    reroll_base_cost: u32,
+    #[serde(alias = "reroll_base_cost")]
+    restock_base_cost: u32,
     ordeal_min_wing_floor: u32,
 }
 
@@ -48,7 +49,7 @@ struct SeasonPresentation {
     label: &'static str,
     description: &'static str,
     base_target_mult: f32,
-    reroll_base_cost: u32,
+    restock_base_cost: u32,
     ordeal_min_wing_floor: u32,
 }
 
@@ -65,7 +66,7 @@ fn season_presentations() -> &'static HashMap<Season, SeasonPresentation> {
                         label: Box::leak(r.label.into_boxed_str()),
                         description: Box::leak(r.description.into_boxed_str()),
                         base_target_mult: r.base_target_mult,
-                        reroll_base_cost: r.reroll_base_cost,
+                        restock_base_cost: r.restock_base_cost,
                         ordeal_min_wing_floor: r.ordeal_min_wing_floor,
                     },
                 )
@@ -105,9 +106,9 @@ impl Season {
         season_presentation(self).base_target_mult
     }
 
-    /// Base reroll cost in the shop. Increment-per-reroll still applies on top.
-    pub fn reroll_base_cost(self) -> u32 {
-        season_presentation(self).reroll_base_cost
+    /// Base restock cost in the shop. Increment-per-restock still applies on top.
+    pub fn restock_base_cost(self) -> u32 {
+        season_presentation(self).restock_base_cost
     }
 
     /// Subtracted from a boss's `min_ante` in `pick_for_wing`, letting higher

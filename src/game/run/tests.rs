@@ -102,7 +102,7 @@ mod cases {
             chrysalis_extinct: false,
             small_chamber_tag: None,
             big_chamber_tag: None,
-            tag_free_reroll: 0,
+            tag_free_restock: 0,
             tag_patron_gift: 0,
             tag_rich_stock: 0,
             tag_bonus_plays: 0,
@@ -798,8 +798,8 @@ mod cases {
         use crate::core::tag::TagKind;
 
         let mut run = test_run();
-        run.apply_tag(TagKind::FreeReroll, None);
-        run.apply_tag(TagKind::FreeReroll, None);
+        run.apply_tag(TagKind::FreeRestock, None);
+        run.apply_tag(TagKind::FreeRestock, None);
         run.apply_tag(TagKind::PatronGift, None);
         run.apply_tag(TagKind::PatronGift, None);
         run.apply_tag(TagKind::RichStock, None);
@@ -809,7 +809,7 @@ mod cases {
         run.apply_tag(TagKind::WideHand, None);
         run.apply_tag(TagKind::WideHand, None);
 
-        assert_eq!(run.tag_free_reroll, 2);
+        assert_eq!(run.tag_free_restock, 2);
         assert_eq!(run.tag_patron_gift, 2);
         assert_eq!(run.tag_rich_stock, 2);
         assert_eq!(run.tag_bonus_plays, 2);
@@ -898,13 +898,13 @@ mod cases {
         let mut bus = bus();
         run.chamber = ChamberKind::Ordeal;
         run.upcoming_chamber = ChamberKind::Ordeal;
-        run.tag_free_reroll = 1;
+        run.tag_free_restock = 1;
         run.tag_patron_gift = 1;
         run.tag_rich_stock = 1;
 
         run.advance_round(&mut bus);
 
-        assert_eq!(run.tag_free_reroll, 1);
+        assert_eq!(run.tag_free_restock, 1);
         assert_eq!(run.tag_patron_gift, 1);
         assert_eq!(run.tag_rich_stock, 1);
     }

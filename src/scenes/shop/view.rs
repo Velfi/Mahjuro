@@ -88,7 +88,7 @@ const SHOP_SHELF_CLICK_BASE: u32 = 0xD000;
 /// One UI/hit slot per `shop_spawn_relic_00` … `shop_spawn_relic_08` in shop.glb.
 pub(in crate::scenes::shop) const SHOP_SPAWN_SLOT_COUNT: usize = 9;
 const SHOP_CLICK_JOURNAL: u32 = 0xD011;
-const SHOP_CLICK_REROLL: u32 = 0xD012;
+const SHOP_CLICK_RESTOCK: u32 = 0xD012;
 const SHOP_CLICK_LEAVE: u32 = 0xD013;
 const SHOP_CLICK_WALL: u32 = 0xD014;
 
@@ -969,7 +969,7 @@ pub(crate) fn render_shop_frame(
             ShopHit::Dish(id)
                 if id == super::PICK_JOURNAL_BOOK
                     || id == super::PICK_LEAVE_PROP
-                    || id == super::PICK_REROLL_PROP
+                    || id == super::PICK_RESTOCK_PROP
         );
         let mut tip_quads = Vec::new();
         let mut tip_texts = Vec::new();
@@ -1039,10 +1039,10 @@ pub(crate) fn render_shop_frame(
             (jr[0], jr[1], jr[2], jr[3]),
             SHOP_CLICK_JOURNAL,
         ));
-        let rr = reroll_btn_rect(w, h, &cam, env_h);
+        let rr = restock_btn_rect(w, h, &cam, env_h);
         frame.buttons.push(ButtonDef::scene(
             (rr[0], rr[1], rr[2], rr[3]),
-            SHOP_CLICK_REROLL,
+            SHOP_CLICK_RESTOCK,
         ));
         let lr = leave_btn_rect(w, h, &cam, env_h);
         frame.buttons.push(ButtonDef::scene(
@@ -1216,9 +1216,9 @@ fn hover_tooltip_content(
     } else {
         0
     };
-    let reroll_affordable = matches!(scene.mode, ShopMode::Standard)
-        && (scene.reroll_cost == 0
-            || shop.yen >= scene.reroll_cost as i32
+    let restock_affordable = matches!(scene.mode, ShopMode::Standard)
+        && (scene.restock_cost == 0
+            || shop.yen >= scene.restock_cost as i32
             || i_got_a_guy_charges > 0);
 
     let tuple_opt = match hit {
@@ -1354,7 +1354,7 @@ fn hover_tooltip_content(
             String::new(),
             color::CHAMPAGNE,
         )),
-        ShopHit::Dish(id) if id == super::PICK_REROLL_PROP => {
+        ShopHit::Dish(id) if id == super::PICK_RESTOCK_PROP => {
             Some(if matches!(scene.mode, ShopMode::Tutorial) {
                 (
                     "Curated Stock".to_string(),
@@ -1362,7 +1362,7 @@ fn hover_tooltip_content(
                     String::new(),
                     color::CHAMPAGNE,
                 )
-            } else if scene.reroll_cost == 0 {
+            } else if scene.restock_cost == 0 {
                 (
                     "Restock".to_string(),
                     "Refresh the shop once at no gold cost.".to_string(),
@@ -1377,16 +1377,16 @@ fn hover_tooltip_content(
                     color::GOLD,
                 )
             } else {
-                let cta = if shop.yen >= scene.reroll_cost as i32 {
-                    format!("¥{}", scene.reroll_cost)
+                let cta = if shop.yen >= scene.restock_cost as i32 {
+                    format!("¥{}", scene.restock_cost)
                 } else {
-                    format!("${} (have ¥{})", scene.reroll_cost, shop.display_yen)
+                    format!("${} (have ¥{})", scene.restock_cost, shop.display_yen)
                 };
                 (
                     "Restock".to_string(),
-                    format!("Refresh shop for ¥{}", scene.reroll_cost),
+                    format!("Refresh shop for ¥{}", scene.restock_cost),
                     cta,
-                    if reroll_affordable {
+                    if restock_affordable {
                         color::GOLD
                     } else {
                         color::RUBY
@@ -1495,7 +1495,7 @@ fn cursor_hover_rect(ctx: CursorHoverCtx<'_>) -> Option<[f32; 4]> {
     }
     [
         journal_btn_rect(w, h, cam, env_h),
-        reroll_btn_rect(w, h, cam, env_h),
+        restock_btn_rect(w, h, cam, env_h),
         leave_btn_rect(w, h, cam, env_h),
     ]
     .into_iter()
@@ -2463,7 +2463,7 @@ fn journal_btn_rect(w: f32, h: f32, cam: &CameraParams, env_h: f32) -> [f32; 4] 
     rect_center_n(w, h, 0.905, 0.14, rw, rh)
 }
 
-fn reroll_btn_rect(w: f32, h: f32, cam: &CameraParams, env_h: f32) -> [f32; 4] {
+fn restock_btn_rect(w: f32, h: f32, cam: &CameraParams, env_h: f32) -> [f32; 4] {
     let rw = w * 0.11;
     let rh = h * 0.22;
     if let Some(r) = marker_screen_rect(w, h, cam, "restock_btn", rw, rh, env_h) {
@@ -2696,7 +2696,7 @@ fn build_focus_rects(
         ShopFocus::Dish(super::PICK_JOURNAL_BOOK),
         journal_btn_rect(w, h, cam, env_h),
     ));
-    v.push((ShopFocus::Reroll, reroll_btn_rect(w, h, cam, env_h)));
+    v.push((ShopFocus::Restock, restock_btn_rect(w, h, cam, env_h)));
     v.push((ShopFocus::NextRound, leave_btn_rect(w, h, cam, env_h)));
     let wall_count = crate::game::wall_ledger::shop_wall_hud_count(run);
     let wall = crate::render::wall_display::wall_hud_layout(w, h, wall_count);
@@ -2707,7 +2707,7 @@ fn build_focus_rects(
 fn map_shop_ui_click_to_hit(cid: u32, scene: &ShopScene, _shop: &ShopReadModel) -> Option<ShopHit> {
     match cid {
         SHOP_CLICK_JOURNAL => Some(ShopHit::Dish(super::PICK_JOURNAL_BOOK)),
-        SHOP_CLICK_REROLL => Some(ShopHit::Dish(super::PICK_REROLL_PROP)),
+        SHOP_CLICK_RESTOCK => Some(ShopHit::Dish(super::PICK_RESTOCK_PROP)),
         SHOP_CLICK_LEAVE => Some(ShopHit::Dish(super::PICK_LEAVE_PROP)),
         _ => {
             if (SHOP_SHELF_CLICK_BASE..SHOP_SHELF_CLICK_BASE + SHOP_SPAWN_SLOT_COUNT as u32)

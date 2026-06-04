@@ -23,7 +23,7 @@ pub(super) fn live_shop_hit(
         ShopHit::Dish(id) => {
             if matches!(
                 id,
-                PICK_COIN_DISH | PICK_JOURNAL_BOOK | PICK_LEAVE_PROP | PICK_REROLL_PROP
+                PICK_COIN_DISH | PICK_JOURNAL_BOOK | PICK_LEAVE_PROP | PICK_RESTOCK_PROP
             ) {
                 true
             } else if let Some(idx) = tile_pack_index_from_pick(id) {

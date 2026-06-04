@@ -267,7 +267,7 @@ commit history.
 - Release builds no longer ship the Debug menu, and on Windows the game now launches without a black console window behind it. Both are still present in development builds.
 - Reworked the Leading Tile relic into Geese — it now retriggers the first 5 scored tiles in the hand instead of just the first tile of each scored set.
 - I redid the art for many relics to make them more mahjong themed, added some relics, and reworked some relics. Stuff that expires should be more fun now.
-- Shop counter interaction props (sell tray, reroll, leave, journal) are tuned for clearer silhouettes and contrast under the lamp, including a lacquered wood pedestal under the sell tray.
+- Shop counter interaction props (sell tray, restock, leave, journal) are tuned for clearer silhouettes and contrast under the lamp, including a lacquered wood pedestal under the sell tray.
 - When launched through Steam, Mahjuro no longer runs its built-in updater — Steam handles updates instead, so the two won't fight over replacing the game. Non-Steam builds keep updating themselves like before.
 
 ### Fixed
@@ -314,7 +314,7 @@ commit history.
 - New Ant Trail relic: sequences may wrap around the ends, letting hands like 9-1-2 or 8-9-1 count as valid runs.
 - New Brocade Pouch relic: buff talismans (Jade, Pearl, Gilded, Polychrome) mark every tile you draw for the rest of the run, not just the 14 in hand when you use them. Also grants +1 consumable slot.
 - New Kintsugi relic: each time another relic is destroyed, gain a permanent +1 mult. Kintsugi rewards fragile builds.
-- Seasons — four difficulty tiers (Spring, Summer, Autumn, Winter) with progressively higher target scores, shop prices, reroll costs, and earlier boss appearances. Winter also disables the sequence scoring bonus. Each tile material has its own unlock ladder: clear a season on any deck to unlock the next season for that deck. The start-game modal picks the season, the blind plaque shows which season you're playing, and the Collection footer lists the highest season cleared per material.
+- Seasons — four difficulty tiers (Spring, Summer, Autumn, Winter) with progressively higher target scores, shop prices, restock costs, and earlier boss appearances. Winter also disables the sequence scoring bonus. Each tile material has its own unlock ladder: clear a season on any deck to unlock the next season for that deck. The start-game modal picks the season, the blind plaque shows which season you're playing, and the Collection footer lists the highest season cleared per material.
 - New Tortoise Shell tile material: honey-amber blonde bekko with dark mahogany mottling, a warm backlit rim at grazing angles, and unique blotch patterns per tile. Grants +$10 starting gold.
 - Tutorial now celebrates your first Yakuhai (dragon/wind triplet bonus) and your first boss defeat with fireworks, matching the existing first-pair/triplet/sequence celebrations.
 - Victory and defeat screens now play a short stinger about a second after they appear, on top of the existing transition sound.
