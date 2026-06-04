@@ -153,7 +153,7 @@ fn dielectric_kD(kS: vec3<f32>, metallic: f32) -> vec3<f32> {
 }
 
 /// Warm sky / darker ground hemispheric fill (Z-up). `ambient_scale` is runtime-tuned
-/// (`SHOP_ENV_DIELECTRIC_AMBIENT_MIN` floor on shop) to stand in for glTF's missing World node.
+/// (`RoomEnvLightingTune::ambient_scale`) to stand in for glTF's missing World node.
 fn room_world_hemisphere_ambient(n_world: vec3<f32>, albedo: vec3<f32>, metallic: f32, ambient_scale: f32) -> vec3<f32> {
     let dielectric = 1.0 - metallic;
     let world_up = vec3<f32>(0.0, 0.0, 1.0);
@@ -329,8 +329,12 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     // baseColor + metallic≈1 makes F0≈0 so large flat facets read black while bevels
     // still catch specular. Floor F0 for that case and add a small metal ambient fill.
     let metal_f0_floor = vec3<f32>(0.52, 0.42, 0.24);
-    let boost_dark_metal_f0 = metallic > 0.55 && albedo_lum < 0.07;
-    let f0_base = select(albedo, max(albedo, metal_f0_floor), boost_dark_metal_f0);
+    // Smoothly floor F0 toward gold for dark metallic facets (embossed text fronts).
+    // Hard thresholds flip across GPU backends when albedo sits on the boundary.
+    let metal_ramp = smoothstep(0.45, 0.65, metallic);
+    let dark_ramp = 1.0 - smoothstep(0.04, 0.16, albedo_lum);
+    let f0_boost = metal_ramp * dark_ramp;
+    let f0_base = mix(albedo, max(albedo, metal_f0_floor), f0_boost);
     let F0 = mix(vec3<f32>(0.04), f0_base, metallic);
 
     var Lo = vec3<f32>(0.0);
@@ -443,27 +447,35 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let amb_metal = ambient_scale * metallic * metal_amb_tint * vec3<f32>(0.14);
     let ambient = amb_dielectric + amb_metal;
 
-    // Shop authoring may set ambient scale to 0; runtime still floors dielectric fill via
-    // `SHOP_ENV_DIELECTRIC_AMBIENT_MIN` so punctual-only interiors do not black out.
+    // Authoring may set ambient scale to 0; tune via RoomEnvLightingTune if fill is needed.
     // Without IBL, dark-metallic facets still need a tiny direction-dependent fill so
     // flat faces toward the camera read as metal, not void.
-    let dark_metal_face = metallic > 0.5 && albedo_lum < 0.08;
+    let dark_metal_ramp = (1.0 - smoothstep(0.04, 0.18, albedo_lum))
+        * smoothstep(0.40, 0.60, metallic);
     let hemi_tint = mix(
         vec3<f32>(0.062, 0.054, 0.041),
         albedo,
         clamp(albedo_lum * 15.0, 0.0, 1.0),
     );
-    let metal_hemi = select(
-        vec3<f32>(0.0),
-        metallic * hemi_tint * (0.10 + 0.26 * NdotV),
-        dark_metal_face,
-    );
+    let metal_hemi = dark_metal_ramp * metallic * hemi_tint * (0.10 + 0.26 * NdotV);
+
+    // Shop gold lettering (SHOP / tagline): bright baseColor + high metallic suppresses
+    // diffuse; flat facets toward the camera miss punctual N·L. View-facing body fill
+    // keeps the front face gold instead of edge-only specular (GPU-stable; not thresholded).
+    let warm_gold_sign = albedo_lum > 0.45
+        && albedo.r > albedo.g * 0.90
+        && albedo.g > albedo.b * 1.20
+        && albedo.r > albedo.b * 2.2;
+    let gold_sign_ramp = smoothstep(0.45, 0.85, metallic)
+        * select(0.0, 1.0, warm_gold_sign);
+    let gold_sign_body = gold_sign_ramp * albedo * (0.22 + 0.40 * pow(NdotV, 0.7));
 
     // `tile_seed` is scene exposure for punctual PBR (often ≪ 1 to tame imported
     // glTF light energy). Keep the runtime hemisphere fill in scene-linear units
     // so the Scene Look "Room ambient" slider remains visible.
     var lit_hdr = Lo * cam.tile_seed + ambient + metal_hemi;
     lit_hdr = lit_hdr * sample_contact_ao(in.world_pos);
+    lit_hdr = lit_hdr + gold_sign_body;
     // Per-light projected shadows are applied in the punctual / spot loops above.
     let emissive_out = emissive * boss_light_rgb_mul;
     let hdr = lit_hdr + emissive_out;

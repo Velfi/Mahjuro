@@ -53,8 +53,8 @@ use crate::scenes::options::OptionsScene;
 use crate::scenes::{ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
 use crate::scenes::{OverlayRequest, Scene, WallLedgerScene};
 use crate::ui::controller_hints::{
-    HintStyle, InlineHintIconSlot, inspect_camera_hint_row, is_hold_sell_hint_key,
-    push_screen_footer_hint, screen_footer_top, shop_storeroom_footer_row,
+    HintStyle, InlineHintIconSlot, inspect_camera_hint_row, is_hold_buy_hint_key,
+    is_hold_sell_hint_key, push_screen_footer_hint, screen_footer_top, shop_storeroom_footer_row,
 };
 use crate::ui::focus_nav::{clamp_rect_to_viewport, push_focus_ring, rect_center};
 use crate::ui::input::InputMode;
@@ -1106,17 +1106,41 @@ pub(crate) fn render_shop_frame(
             )
             .is_some()
         });
+        let hover_buyable = sell_hint_hit.is_some_and(|hit| {
+            super::shared::shop_action_for_hit(
+                hit,
+                &shop.items,
+                &shop.zodiac_items,
+                &shop.talisman_items,
+                &shop_rm,
+            )
+            .is_some()
+        });
         let show_hold_sell_hint =
             inspect.is_none() && (shop.west_sell_hold_started.is_some() || hover_sellable);
+        let show_hold_buy_hint =
+            inspect.is_none() && (shop.buy_hold_started.is_some() || hover_buyable);
 
         let hint_style = HintStyle::standard(h);
         let hint_row = if inspect_active {
             inspect_camera_hint_row(ctx.input_mode)
         } else {
-            shop_storeroom_footer_row(ctx.input_mode, show_hold_sell_hint)
+            shop_storeroom_footer_row(ctx.input_mode, show_hold_buy_hint, show_hold_sell_hint)
         };
         let icon_slots = push_screen_footer_hint(&mut frame, &ctx, hint_row, hint_style);
         let hint_band_top = screen_footer_top(h, hint_style);
+
+        let push_hold_ring =
+            |frame: &mut crate::render::draw_cmd::UiFrame, icon_rect: &[f32; 4], progress: f32| {
+                let [ix, iy, icon_px, _] = *icon_rect;
+                let cx = ix + icon_px * 0.5;
+                let cy = iy + icon_px * 0.5;
+                let r = icon_px * 0.58;
+                let thickness = (icon_px * 0.12).max(3.5);
+                frame.arc_ring_quads([crate::ui::prompt_hold_ring::hold_prompt_ring(
+                    cx, cy, r, thickness, progress,
+                )]);
+            };
 
         if !inspect_active
             && (shop.west_sell_hold_started.is_some() || hover_sellable)
@@ -1133,14 +1157,25 @@ pub(crate) fn render_shop_frame(
                         .clamp(0.0, 1.0)
                 })
                 .unwrap_or(0.0);
-            let [ix, iy, icon_px, _] = *icon_rect;
-            let cx = ix + icon_px * 0.5;
-            let cy = iy + icon_px * 0.5;
-            let r = icon_px * 0.58;
-            let thickness = (icon_px * 0.12).max(3.5);
-            frame.arc_ring_quads([crate::ui::prompt_hold_ring::hold_prompt_ring(
-                cx, cy, r, thickness, progress,
-            )]);
+            push_hold_ring(&mut frame, icon_rect, progress);
+        }
+
+        if !inspect_active
+            && (shop.buy_hold_started.is_some() || hover_buyable)
+            && let Some(InlineHintIconSlot { icon_rect, .. }) =
+                icon_slots.iter().find(|s| is_hold_buy_hint_key(s.key))
+        {
+            let progress = shop
+                .buy_hold_started
+                .map(|started| {
+                    (Instant::now()
+                        .saturating_duration_since(started)
+                        .as_secs_f32()
+                        / super::SHOP_BUY_HOLD_SECONDS)
+                        .clamp(0.0, 1.0)
+                })
+                .unwrap_or(0.0);
+            push_hold_ring(&mut frame, icon_rect, progress);
         }
 
         if inspect_active && let Some(ShopFocus::Relic(i)) = shop.focus {

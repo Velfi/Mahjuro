@@ -84,13 +84,6 @@ pub fn hallway_pick_chamber_play_button_node(ordeal_chamber: bool) -> &'static s
     })
 }
 
-/// Applied in [`crate::wgpu_renderer::WgpuRenderer`] when writing hallway env uniforms:
-/// multiplies `tile_seed` on top of the shared shop/storeroom exposure path.
-pub const HALLWAY_ENV_LINEAR_EXPOSURE_MUL: f32 = 1.0;
-
-/// Hemispheric fill in `room_glb.wgsl` (`decal_atlas_uv.x`). Windowless interior — no sky ambient.
-pub const HALLWAY_ENV_AMBIENT_SCALE_MIN: f32 = 0.0;
-
 // ── Pick-blind hallway vertex distortion (`room_glb.wgsl` / `tile_3d.wgsl` @group(0) @binding(8)) ──
 
 /// Inward/outward wall pulse amplitude (world units).

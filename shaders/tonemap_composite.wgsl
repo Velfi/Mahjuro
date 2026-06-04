@@ -25,6 +25,9 @@ struct TonemapParams {
     vhs_vignette: f32,
     /// Monotonic present counter — re-rolls tape grain each frame without UV scroll.
     grain_frame: f32,
+    /// User display-gamma slider; applied as pow(color, 1/gamma) at the end of
+    /// the visible swapchain path. 1.0 (or the prepass) is a no-op.
+    gamma: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: TonemapParams;
@@ -175,6 +178,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             color = color * (1.0 - vig * params.vhs_vignette);
         }
     }
+
+    // User gamma slider. Matches the UI/legacy convention (pow(color, 1/gamma))
+    // so the HDR scene path honors the Options slider, not just the 2D UI.
+    let inv_g = 1.0 / max(params.gamma, 0.01);
+    color = pow(max(color, vec3<f32>(0.0)), vec3<f32>(inv_g));
 
     return vec4<f32>(color, 1.0);
 }

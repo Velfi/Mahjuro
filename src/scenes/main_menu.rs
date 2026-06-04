@@ -221,13 +221,9 @@ fn main_menu_rain_light_sample_ctx<'a>(
     } else {
         0.0
     };
-    let ambient = tune
-        .ambient_scale
-        .max(main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
+    let ambient = tune.ambient_scale;
     let linear_exposure = if room_glb {
-        tune.linear_exposure
-            * room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE
-            * main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL
+        tune.room_glb_linear_hdr_gain()
     } else {
         1.0
     };

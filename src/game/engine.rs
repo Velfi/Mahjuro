@@ -915,17 +915,7 @@ impl<'a> GameEngine<'a> {
         data: CommandData,
         rejection: Option<CommandRejection>,
     ) -> CommandOutcome {
-        // Discard removes tiles immediately but the UI defers refill until the
-        // river animation finishes. An empty hand mid-discard is not terminal.
-        let defer_round_resolution = matches!(
-            (command, &data, rejection),
-            (
-                GameCommand::DiscardSelectionNoRefill,
-                CommandData::DiscardSelection { count },
-                None
-            ) if *count > 0
-        );
-        if !defer_round_resolution {
+        if !self.run.discard_refill_pending {
             self.run.resolve_round_end(self.bus);
         }
         self.finish_outcome(command, before, queue_start, data, rejection)
@@ -1455,6 +1445,25 @@ mod tests {
                 .iter()
                 .any(|ev| matches!(ev, GameEvent::GameOver { .. }))
         );
+    }
+
+    #[test]
+    fn discard_refill_pending_blocks_round_failure_until_refill() {
+        use crate::game::game_mode::HAND_SIZE;
+
+        let mut run = deterministic_run();
+        for i in 0..HAND_SIZE {
+            run.selected_mut()[i] = true;
+        }
+        let mut bus = EventBus::default();
+        run.discard_selected_no_refill(&mut bus);
+        assert!(run.discard_refill_pending);
+        assert!(run.hand().is_empty());
+        assert_eq!(run.round_failure_reason(), None);
+
+        run.refill_hand(&mut bus);
+        assert!(!run.discard_refill_pending);
+        assert_eq!(run.hand().len(), HAND_SIZE);
     }
 
     #[test]

@@ -16,6 +16,7 @@ impl RunState {
     pub(super) fn clear_round_resolution_state(&mut self) {
         self.round_score = 0;
         self.round_end_queued = false;
+        self.discard_refill_pending = false;
     }
 
     /// Zero round score and set the upcoming chamber target before the gameplay

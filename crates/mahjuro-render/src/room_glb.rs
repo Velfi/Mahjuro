@@ -39,7 +39,7 @@
 //!
 //! **Blender parity:** The viewport almost always adds **World** lighting (sky/ground) and often
 //! EEVEE indirect; glTF export does not include World. Runtime approximates that with hemispheric
-//! ambient in `room_glb.wgsl` ([`SHOP_ENV_DIELECTRIC_AMBIENT_MIN`]) plus emissive-probe GI from
+//! ambient in `room_glb.wgsl` ([`SHOP_ENV_AMBIENT_SCALE`] / [`RoomEnvLightingTune`]) plus emissive-probe GI from
 //! candles/lanterns. In Blender before export: glTF *Data → Lighting* units match Khronos, disable
 //! viewport-only overlays, and compare in Don McCurdy’s viewer at exposure **−9** (same as
 //! [`ROOM_GLB_LINEAR_EXPOSURE_BASE`]). Warm candle/lantern tints are intentional game grading.
@@ -237,10 +237,10 @@ pub const SHOP_ENV_HEIGHT_SCALE: f32 = 1.0;
 /// export; lower only if punctuals clip after ACES (debug **glTF light intensity** slider).
 pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 1.0;
 
-/// Shared linear HDR gain for embedded GLB rooms (shop, hallway, archive, main menu): `2^-9` ≈
-/// Don McCurdy glTF viewer exposure **−9** (EV on linear HDR). Multiplied with
-/// [`RoomEnvLightingTune::linear_exposure`] and per-room [`crate::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL`]
-/// (etc.) before tonemap in `room_glb.wgsl` / matching `lit_mesh` paths.
+/// Default shared linear HDR gain for embedded GLB rooms (shop, hallway, archive, main menu):
+/// `2^-9` ≈ Don McCurdy glTF viewer exposure **−9** (EV on linear HDR). Overridable per scene via
+/// [`RoomEnvLightingTune::linear_exposure_base`]; multiplied with
+/// [`RoomEnvLightingTune::linear_exposure`] before tonemap in `room_glb.wgsl` / matching `lit_mesh` paths.
 pub const ROOM_GLB_LINEAR_EXPOSURE_BASE: f32 = 1.0 / 512.0; // 2^-9
 
 /// Extra multiplier on room glTF emissive (`CameraUniform.decal_atlas_uv.z`), after
@@ -333,50 +333,17 @@ pub fn room_probe_world_aabb(corners: &[Vec3], pad_frac: f32) -> Option<(Vec3, V
     Some((mn - pad, mx + pad))
 }
 
-/// Default **tuning** multiplier for linear HDR (debug overlay); shop applies [`ROOM_GLB_LINEAR_EXPOSURE_BASE`]
-/// on top. Table scenes use this value alone (no shop base).
+/// Default **tuning** multiplier for linear HDR (debug overlay). With embedded glTF punctual
+/// lights, multiplied by [`ROOM_GLB_LINEAR_EXPOSURE_BASE`] before tonemap.
 pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = 1.0;
 
-/// Linear HDR multiplier for tile-pack celebration (`Scene::TilePackCelebration`): no
-/// [`crate::draw_cmd::DrawCmd::ShopEnvironment`], but showcase tiles still use shop-style
-/// punctual lights — without this, `tile_hdr_tonemap` falls back to `linear_hdr ≈ 1` and faces clip.
-/// Between full shop (`×`[`ROOM_GLB_LINEAR_EXPOSURE_BASE`]) and isolation showcase.
-/// `lit_mesh` (pack box) shares this with showcase tiles; too low reads as black with zero ambient.
-pub const TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE: f32 = 1.0 / 3.8;
-
-/// Floor for `hdr_tonemap.z` → `lit_mesh` hemispheric fill (`× 0.08` in shader) on pack scenes
-/// when [`SHOP_ENV_AMBIENT_SCALE`] is 0.
-pub const TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN: f32 = 0.62;
-
 /// Hemispheric fill in `room_glb.wgsl` (`decal_atlas_uv.x`). Authoring default is 0
-/// (punctual-forward interior); [`SHOP_ENV_DIELECTRIC_AMBIENT_MIN`] is still applied so
-/// low-roughness dielectrics (porcelain trays) do not go black on faces away from lights.
+/// (punctual-forward interior); tune via debug overlay [`RoomEnvLightingTune::ambient_scale`].
 pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
-
-/// Minimum `decal_atlas_uv.x` for shop storeroom `room_glb.wgsl` draws — scales the
-/// hemispheric sky/ground fill that stands in for Blender's World node (see `room_world_hemisphere_ambient`).
-pub const SHOP_ENV_DIELECTRIC_AMBIENT_MIN: f32 = 0.24;
-
-/// Lower bound for `hdr_tonemap.z` on candle-key **table** scenes (`gameplay`, `tutorial`,
-/// `pick_chamber`, `collection`). Shop keeps authored ambient only. Tiles (`tile_3d`) and `lit_mesh` add
-/// `albedo * scale * 0.08` before ACES — without this, shadowed areas read as pure black and
-/// lit areas clip warm, which feels flat and hyper-saturated.
-pub const GAMEPLAY_TABLE_AMBIENT_MIN: f32 = 0.52;
-
-/// Linear HDR multiplier for table scenes only (after [`RoomEnvLightingTune::linear_exposure`];
-/// shop still applies [`ROOM_GLB_LINEAR_EXPOSURE_BASE`]). Slightly <1 reins in peak energy
-/// before ACES so highlights retain separation from midtones.
-pub const GAMEPLAY_TABLE_HDR_LINEAR_MUL: f32 = 1.0;
 
 /// Applied to `lit_mesh` as punctual buffer `extras.w` when
 /// [`crate::draw_cmd::SceneLighting::embedded_gltf_punctual`] is set (`room_glb.wgsl` ignores it).
-/// Catalog props (relics, talismans, packs) are tuned at this scale; marker spawns from
-/// `gameplay.glb` empties apply [`GAMEPLAY_TABLE_PROCEDURAL_PUNCTUAL_MUL`] in-shader on top.
 pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 2.0;
-
-/// Extra punctual-intensity multiplier for [`lit_mesh.wgsl`] draws of gameplay-table marker
-/// spawns (books, discard river, tally fans, wood tablets). Passed via `SsrGlobals.shop_punctual.w`.
-pub const GAMEPLAY_TABLE_PROCEDURAL_PUNCTUAL_MUL: f32 = 0.5;
 
 /// Inverse-square intensity scale for hand/structure tiles (`tile_3d.wgsl` via
 /// `CameraUniform.punctual_tuning.x`). Tiles share the same candle pools as `lit_mesh`.
@@ -406,6 +373,9 @@ pub const SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL: [f32; 3] =
 pub struct RoomEnvLightingTune {
     pub gltf_light_intensity_scale: f32,
     pub linear_exposure: f32,
+    /// Shared linear HDR base (`2^-9` default) before tonemap when embedded glTF punctual is on.
+    #[serde(default = "linear_exposure_base_default")]
+    pub linear_exposure_base: f32,
     pub ambient_scale: f32,
     pub lit_mesh_gltf_punctual_scale: f32,
     #[serde(default = "tile_gltf_punctual_scale_default")]
@@ -419,6 +389,10 @@ pub struct RoomEnvLightingTune {
 
 fn tile_gltf_punctual_scale_default() -> f32 {
     TILE_GLTF_PUNCTUAL_SCALE
+}
+
+fn linear_exposure_base_default() -> f32 {
+    ROOM_GLB_LINEAR_EXPOSURE_BASE
 }
 
 fn lantern_light_color_mul_default() -> [f32; 3] {
@@ -435,6 +409,7 @@ impl RoomEnvLightingTune {
     pub const SOURCE_DEFAULTS: Self = Self {
         gltf_light_intensity_scale: SHOP_GLTF_LIGHT_INTENSITY_SCALE,
         linear_exposure: SHOP_ENV_LINEAR_EXPOSURE,
+        linear_exposure_base: ROOM_GLB_LINEAR_EXPOSURE_BASE,
         ambient_scale: SHOP_ENV_AMBIENT_SCALE,
         lit_mesh_gltf_punctual_scale: SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
         tile_gltf_punctual_scale: TILE_GLTF_PUNCTUAL_SCALE,
@@ -442,12 +417,18 @@ impl RoomEnvLightingTune {
         candle_light_color_mul: SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL,
         lantern_light_color_mul: SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL,
     };
+
+    /// Linear HDR gain before tonemap when embedded glTF punctual is active.
+    pub fn room_glb_linear_hdr_gain(&self) -> f32 {
+        self.linear_exposure * self.linear_exposure_base
+    }
 }
 
 /// GPU + collision scale for one scene's room GLB pass (brownout already applied on room fields).
 #[derive(Clone, Copy, Debug)]
 pub struct RoomEnvFrameTune {
     pub linear_exposure: f32,
+    pub linear_exposure_base: f32,
     pub ambient_scale: f32,
     pub lit_mesh_gltf_punctual_scale: f32,
     pub tile_gltf_punctual_scale: f32,
@@ -459,12 +440,18 @@ impl RoomEnvFrameTune {
     pub fn from_room_and_height(room: RoomEnvLightingTune, height_scale: f32) -> Self {
         Self {
             linear_exposure: room.linear_exposure,
+            linear_exposure_base: room.linear_exposure_base,
             ambient_scale: room.ambient_scale,
             lit_mesh_gltf_punctual_scale: room.lit_mesh_gltf_punctual_scale,
             tile_gltf_punctual_scale: room.tile_gltf_punctual_scale,
             gltf_emissive_scale: room.gltf_emissive_scale,
             height_scale,
         }
+    }
+
+    /// Linear HDR gain before tonemap when embedded glTF punctual is active.
+    pub fn room_glb_linear_hdr_gain(&self) -> f32 {
+        self.linear_exposure * self.linear_exposure_base
     }
 }
 
@@ -964,4 +951,155 @@ pub fn shop_camera_from_glb_if_present(
 /// for world space consistent with the centered shop model matrix).
 pub fn marker_translation(cpu: &RoomGlbCpu, name: &str) -> Option<Vec3> {
     marker_translation_doc(&cpu.markers, cpu.environment_bounds_doc, name)
+}
+
+#[cfg(test)]
+mod tests {
+    /// Keep in sync with `gold_sign_body` in `shaders/room_glb.wgsl` `shop_shade`.
+    fn gold_sign_body_fill_lum(albedo: [f32; 3], metallic: f32, ndotv: f32) -> f32 {
+        let smoothstep = |e0: f32, e1: f32, x: f32| {
+            let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        let albedo_lum = 0.299 * albedo[0] + 0.587 * albedo[1] + 0.114 * albedo[2];
+        let warm_gold_sign = albedo_lum > 0.45
+            && albedo[0] > albedo[1] * 0.90
+            && albedo[1] > albedo[2] * 1.20
+            && albedo[0] > albedo[2] * 2.2;
+        if !warm_gold_sign {
+            return 0.0;
+        }
+        let gold_sign_ramp = smoothstep(0.45, 0.85, metallic);
+        let scale = (0.22 + 0.40 * ndotv.powf(0.7)) * gold_sign_ramp;
+        let rgb = [albedo[0] * scale, albedo[1] * scale, albedo[2] * scale];
+        0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+    }
+
+    /// Keep in sync with the F0 gold-boost ramp in `shaders/room_glb.wgsl` `shop_shade`.
+    fn gold_f0_boost(metallic: f32, albedo_lum: f32) -> f32 {
+        let smoothstep = |e0: f32, e1: f32, x: f32| {
+            let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        let metal_ramp = smoothstep(0.45, 0.65, metallic);
+        let dark_ramp = 1.0 - smoothstep(0.04, 0.16, albedo_lum);
+        metal_ramp * dark_ramp
+    }
+
+    const ROOM_GLB_WGSL: &str =
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../shaders/room_glb.wgsl"));
+
+    #[test]
+    fn gold_f0_boost_is_continuous_near_old_threshold() {
+        let metallic = 1.0;
+        for &lum in &[0.05_f32, 0.065, 0.07, 0.075, 0.085, 0.09] {
+            let b0 = gold_f0_boost(metallic, lum);
+            let b1 = gold_f0_boost(metallic, lum + 0.005);
+            assert!(
+                (b0 - b1).abs() < 0.1,
+                "boost should not cliff at lum={lum}: {b0} vs {b1}"
+            );
+        }
+    }
+
+    #[test]
+    fn gold_f0_boost_dark_gold_front_face_is_strong() {
+        for lum in [0.05_f32, 0.065, 0.075, 0.085, 0.09] {
+            let boost = gold_f0_boost(1.0, lum);
+            assert!(
+                boost > 0.5,
+                "dark gold front face should get strong F0 boost at lum={lum}, got {boost}"
+            );
+        }
+    }
+
+    #[test]
+    fn gold_f0_boost_endpoints_untouched() {
+        assert_eq!(gold_f0_boost(0.0, 0.05), 0.0);
+        assert_eq!(gold_f0_boost(0.0, 0.09), 0.0);
+        assert_eq!(gold_f0_boost(1.0, 0.16), 0.0);
+        assert_eq!(gold_f0_boost(1.0, 0.20), 0.0);
+    }
+
+    #[test]
+    fn shop_gold_text_has_bright_warm_albedo_not_alpha_mask() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/3d/Shop.glb");
+        let data = std::fs::read(&path).expect("Shop.glb");
+        let cpu = crate::room_glb::load_shop_glb_from_bytes(&data).expect("load shop");
+        for name in ["Text", "SHOP"] {
+            let ep = cpu
+                .environment_primitives
+                .iter()
+                .find(|ep| ep.gltf_node_name.as_deref() == Some(name))
+                .unwrap_or_else(|| panic!("missing node {name}"));
+            let (pix, w, h) = ep
+                .mesh
+                .albedo_rgba
+                .as_ref()
+                .expect("Gold text should have base color texture");
+            let sample = |u: f32, v: f32| -> [f32; 3] {
+                let wf = *w as f32;
+                let hf = *h as f32;
+                let x = ((u * wf - 0.5).clamp(0.0, wf - 1.0)) as u32;
+                let y = ((v * hf - 0.5).clamp(0.0, hf - 1.0)) as u32;
+                let i = ((y * w + x) * 4) as usize;
+                let c = &pix[i..i + 4];
+                [
+                    c[0] as f32 / 255.0,
+                    c[1] as f32 / 255.0,
+                    c[2] as f32 / 255.0,
+                ]
+            };
+            for v in &ep.mesh.vertices {
+                let rgb = sample(v.uv[0], v.uv[1]);
+                let lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+                assert!(
+                    lum > 0.35,
+                    "{name}: expected bright gold albedo at vertex UV, got lum={lum:.3}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gold_sign_body_fill_strong_for_shop_gold_facing_camera() {
+        // Representative decoded Gold_BaseColor sample (~linear sRGB after upload).
+        let albedo = [0.88_f32, 0.72, 0.32];
+        let fill = gold_sign_body_fill_lum(albedo, 1.0, 1.0);
+        assert!(
+            fill > 0.25,
+            "camera-facing shop gold should get visible body fill, got {fill}"
+        );
+    }
+
+    #[test]
+    fn gold_sign_body_fill_off_for_dielectric_wood() {
+        let wood = [0.35_f32, 0.22, 0.12];
+        assert_eq!(gold_sign_body_fill_lum(wood, 0.0, 1.0), 0.0);
+        assert_eq!(gold_sign_body_fill_lum(wood, 1.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn room_glb_wgsl_uses_smooth_gold_ramps_not_hard_cliffs() {
+        assert!(
+            !ROOM_GLB_WGSL.contains("albedo_lum < 0.07"),
+            "hard F0 cliff should be replaced by smooth ramps"
+        );
+        assert!(
+            !ROOM_GLB_WGSL.contains("albedo_lum < 0.08"),
+            "hard hemi cliff should be replaced by smooth ramps"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("smoothstep(0.45, 0.65, metallic)"),
+            "F0 gold-boost ramp missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("gold_sign_body"),
+            "shop gold signage body fill missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("warm_gold_sign"),
+            "warm gold signage detection missing from room_glb.wgsl"
+        );
+    }
 }

@@ -474,6 +474,17 @@ fn hold_sell_bind(input_mode: InputMode) -> HintBind {
     )
 }
 
+fn hold_buy_bind(input_mode: InputMode) -> HintBind {
+    HintBind::alternatives(
+        "hold buy",
+        vec![HintKey::for_input(
+            input_mode,
+            UiAction::Confirm,
+            "keyboard_return",
+        )],
+    )
+}
+
 fn gameplay_discard_bind(input_mode: InputMode) -> HintBind {
     HintBind::alternatives(
         "discard",
@@ -507,9 +518,17 @@ fn gameplay_cash_in_bind(input_mode: InputMode) -> HintBind {
     )
 }
 
-/// Storeroom browse: optional hold-to-sell, then inspect.
-pub fn shop_storeroom_footer_row(input_mode: InputMode, show_hold_sell: bool) -> Vec<HintSegment> {
+/// Storeroom browse: optional hold-to-buy / hold-to-sell, then inspect.
+pub fn shop_storeroom_footer_row(
+    input_mode: InputMode,
+    show_hold_buy: bool,
+    show_hold_sell: bool,
+) -> Vec<HintSegment> {
     let mut row = HintRow::new();
+    if show_hold_buy {
+        row = row.push(hold_buy_bind(input_mode).into());
+        row = row.sep();
+    }
     if show_hold_sell {
         row = row.push(hold_sell_bind(input_mode).into());
         row = row.sep();
@@ -517,8 +536,9 @@ pub fn shop_storeroom_footer_row(input_mode: InputMode, show_hold_sell: bool) ->
     row.push(inspect_bind(input_mode).into()).into_segments()
 }
 
-/// Gameplay HUD action prompts along the bottom edge.
-pub fn gameplay_action_footer_row(
+/// Gameplay HUD footer: available table actions (discard / play / cash in)
+/// plus the guide hint, all on one centred row so they never overlap.
+pub fn gameplay_footer_row(
     input_mode: InputMode,
     show_discard: bool,
     show_play: bool,
@@ -542,8 +562,12 @@ pub fn gameplay_action_footer_row(
             row = row.sep();
         }
         row = row.push(gameplay_cash_in_bind(input_mode).into());
+        any = true;
     }
-    row.into_segments()
+    if any {
+        row = row.sep();
+    }
+    row.push(help_bind(input_mode).into()).into_segments()
 }
 
 /// Hub / modal menus: move focus, then confirm the highlighted row.
@@ -628,13 +652,6 @@ pub fn confirm_continue_footer_row(input_mode: InputMode, flavor: &str) -> Vec<H
 pub fn confirm_action_footer_row(input_mode: InputMode, action_label: &str) -> Vec<HintSegment> {
     HintRow::new()
         .push(confirm_bind(input_mode, action_label).into())
-        .into_segments()
-}
-
-/// Gameplay HUD: open the full guide reference.
-pub fn gameplay_help_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
-    HintRow::new()
-        .push(help_bind(input_mode).into())
         .into_segments()
 }
 
@@ -832,6 +849,22 @@ pub fn is_hold_sell_hint_key(key: HintKey) -> bool {
     matches!(
         key,
         HintKey::Action(UiAction::WestFacePress) | HintKey::Keyboard("keyboard_q")
+    )
+}
+
+/// Whether `key` is the face/key glyph for shop hold-to-buy (Confirm / Enter).
+pub fn is_hold_buy_hint_key(key: HintKey) -> bool {
+    matches!(
+        key,
+        HintKey::Action(UiAction::Confirm) | HintKey::Keyboard("keyboard_return")
+    )
+}
+
+/// Whether `key` is the face/key glyph for gameplay hold-to-cash-in (Trigger / T).
+pub fn is_cash_in_hint_key(key: HintKey) -> bool {
+    matches!(
+        key,
+        HintKey::Action(UiAction::TriggerStructure) | HintKey::Keyboard("keyboard_t")
     )
 }
 

@@ -1157,14 +1157,36 @@ impl App {
         // is false, sync stops motors — if we ran that every frame globally it
         // would cancel rumble lab / scoring pulses the same tick they fire.
         if shop_ready && let Some(input) = self.input.as_ref() {
-            let hold = matches!(&self.scene, Scene::Shop(s) if s.sell_hold_in_progress());
+            let hold = matches!(
+                &self.scene,
+                Scene::Shop(s) if s.sell_hold_in_progress() || s.buy_hold_in_progress()
+            );
             let progress = match &self.scene {
-                Scene::Shop(s) if hold => s.sell_hold_progress(now).unwrap_or(0.0),
+                Scene::Shop(s) if hold => s
+                    .sell_hold_progress(now)
+                    .or_else(|| s.buy_hold_progress(now))
+                    .unwrap_or(0.0),
                 _ => 0.0,
             };
             let controller = input.mode == crate::ui::input::InputMode::Controller;
             let enabled = input.hold_to_sell_rumble_enabled;
             self.sync_shop_sell_hold_rumble(shell, hold, controller, enabled, progress);
+        }
+        // Gameplay hold-to-cash-in rumble. Only driven while actively charging:
+        // we never call sync with `hold = false` here, so the motors expire on
+        // their own and we don't clobber scoring-cascade pulses the frame the
+        // cash-in completes.
+        let gameplay_cash_in_hold = matches!(&self.scene, Scene::Gameplay(g) if g.cash_in_hold_in_progress())
+            && self.overlay_stack.is_empty()
+            && !self.scene.has_blocking_overlay();
+        if gameplay_cash_in_hold && let Some(input) = self.input.as_ref() {
+            let progress = match &self.scene {
+                Scene::Gameplay(g) => g.cash_in_hold_progress(now).unwrap_or(0.0),
+                _ => 0.0,
+            };
+            let controller = input.mode == crate::ui::input::InputMode::Controller;
+            let enabled = input.hold_to_sell_rumble_enabled;
+            self.sync_shop_sell_hold_rumble(shell, true, controller, enabled, progress);
         }
         if let Some(next_scene) = update_result {
             if matches!(&next_scene, Scene::Shop(_)) {
@@ -1268,9 +1290,9 @@ impl App {
             }
         }
 
-        // If we deferred a round-end event so the player could watch
-        // the scoring cascade play out, fire it now that the gameplay
-        // scene has gone idle.
+        // If we deferred a round-end event so the player could watch the
+        // scoring cascade, reel, and popups finish, fire it once that
+        // presentation is done (not every unrelated gameplay tween).
         if self.deferred_round_end.is_some() {
             let cascade_lab = self
                 .overlay_stack
@@ -1279,11 +1301,11 @@ impl App {
             if self.run.suppress_chamber_resolution || cascade_lab {
                 self.deferred_round_end = None;
             } else {
-                let cascade_done = match &self.scene {
-                    Scene::Gameplay(g) => !g.is_animating(),
+                let scoring_done = match &self.scene {
+                    Scene::Gameplay(g) => g.ready_for_round_end(now),
                     _ => true,
                 };
-                if cascade_done && let Some(ev) = self.deferred_round_end.take() {
+                if scoring_done && let Some(ev) = self.deferred_round_end.take() {
                     self.handle_round_end_event(ev);
                 }
             }

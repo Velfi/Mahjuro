@@ -108,6 +108,8 @@ pub struct ShopScene {
     last_inspect_cam: std::cell::Cell<Option<CameraParams>>,
     /// West-face hold-to-sell (gamepad West / **Q**): press time when a hold is in progress.
     west_sell_hold_started: Option<std::time::Instant>,
+    /// Confirm-face hold-to-buy (gamepad South / **Enter**): press time when a hold is in progress.
+    buy_hold_started: Option<std::time::Instant>,
     /// LMB-drag turntable on the storeroom camera (radians, applied around [`CameraParams::target`]).
     storeroom_orbit_yaw: f32,
     storeroom_orbit_pitch: f32,
@@ -127,6 +129,8 @@ const SHOP_HELP_BADGE_ID: u32 = 0x9100;
 pub const SHOP_3D_HIT_ID: u32 = 0x9200;
 /// Hold-to-sell duration (gamepad West / keyboard **Q**). Drives HUD ring + sell gate.
 pub(crate) const SHOP_SELL_HOLD_SECONDS: f32 = 1.0;
+/// Hold-to-buy duration (gamepad South / keyboard **Enter**). Drives HUD ring + buy gate.
+pub(crate) const SHOP_BUY_HOLD_SECONDS: f32 = 1.0;
 /// Click id for the Leave / advance 2D button (kept for focus-nav compat).
 const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
 /// Click id for the Restock 2D button (kept for focus-nav compat).
@@ -163,6 +167,22 @@ impl ShopScene {
     pub(crate) fn sell_hold_progress(&self, now: std::time::Instant) -> Option<f32> {
         self.west_sell_hold_started.map(|started| {
             (now.saturating_duration_since(started).as_secs_f32() / SHOP_SELL_HOLD_SECONDS)
+                .clamp(0.0, 1.0)
+        })
+    }
+
+    #[inline]
+    #[cfg(feature = "game")]
+    pub(crate) fn buy_hold_in_progress(&self) -> bool {
+        self.buy_hold_started.is_some()
+    }
+
+    /// Normalized buy-hold progress for rumble / HUD ring (0..=1).
+    #[inline]
+    #[cfg(feature = "game")]
+    pub(crate) fn buy_hold_progress(&self, now: std::time::Instant) -> Option<f32> {
+        self.buy_hold_started.map(|started| {
+            (now.saturating_duration_since(started).as_secs_f32() / SHOP_BUY_HOLD_SECONDS)
                 .clamp(0.0, 1.0)
         })
     }

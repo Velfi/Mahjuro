@@ -181,10 +181,8 @@ impl WgpuRenderer {
     /// Linear HDR gain for embedded room env passes (matches `write_gltf_room_env_uniforms`).
     pub(super) fn room_env_linear_hdr_gain(
         frame: &UiFrame,
-        shop_env_linear_exposure: f32,
+        env_tune: &crate::room_glb::RoomEnvFrameTune,
     ) -> Option<f32> {
-        use crate::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
-
         let has_room_env = frame.cmds.iter().any(|cmd| {
             matches!(
                 cmd,
@@ -200,43 +198,13 @@ impl WgpuRenderer {
             return None;
         }
 
-        let hallway = frame
-            .cmds
-            .iter()
-            .any(|cmd| matches!(cmd, DrawCmd::HallwayEnvironment));
-        let staircase = frame
-            .cmds
-            .iter()
-            .any(|cmd| matches!(cmd, DrawCmd::StaircaseEnvironment));
-        let archive = frame
-            .cmds
-            .iter()
-            .any(|cmd| matches!(cmd, DrawCmd::ArchiveEnvironment));
-        let main_menu = frame
-            .cmds
-            .iter()
-            .any(|cmd| matches!(cmd, DrawCmd::MainMenuEnvironment));
-
-        let mut gain = shop_env_linear_exposure * ROOM_GLB_LINEAR_EXPOSURE_BASE;
-        if hallway {
-            gain *= crate::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
-        }
-        if staircase {
-            gain *= crate::staircase_glb::STAIRCASE_ENV_LINEAR_EXPOSURE_MUL;
-        }
-        if archive {
-            gain *= crate::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
-        }
-        if main_menu {
-            gain *= crate::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
-        }
-        Some(gain)
+        Some(env_tune.room_glb_linear_hdr_gain())
     }
 
     /// `(threshold, composite_strength, extract_scale)` for the bloom passes.
     pub(super) fn bloom_render_tuning(
         frame: &UiFrame,
-        shop_env_linear_exposure: f32,
+        env_tune: &crate::room_glb::RoomEnvFrameTune,
     ) -> (f32, f32, f32) {
         if !Self::bloom_is_active(frame) {
             return (9999.0, 0.0, 0.0);
@@ -247,7 +215,7 @@ impl WgpuRenderer {
         const STRENGTH_NON_ROOM: f32 = 0.28;
 
         let strength =
-            if let Some(gain) = Self::room_env_linear_hdr_gain(frame, shop_env_linear_exposure) {
+            if let Some(gain) = Self::room_env_linear_hdr_gain(frame, env_tune) {
                 // glTF emissive is absolute HDR; lit surfaces use `tile_seed` exposure
                 // (often ≪ 1). Scale bloom down in crushed rooms so candle halos stay
                 // tight instead of fogging the frame.

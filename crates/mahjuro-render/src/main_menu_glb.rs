@@ -22,12 +22,6 @@ use crate::room_glb::{
 use crate::wgpu_renderer::{PointLight, SpotLight};
 use crate::world_space::surface_anchor_from_world_xyz;
 
-/// Linear HDR exposure multiplier when embedded punctual lights are active.
-pub const MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL: f32 = 1.0;
-
-/// Hemispheric fill in `room_glb.wgsl` (`decal_atlas_uv.x`). Windowless interior — no sky ambient.
-pub const MAIN_MENU_ENV_AMBIENT_SCALE_MIN: f32 = 0.0;
-
 /// Doc→world height scale for [`main_menu.glb`](../../../assets/3d/main_menu.glb) vs [`crate::room_glb::SHOP_ENV_HEIGHT_SCALE`].
 ///
 /// The hub waterfront is authored ~5× larger in glTF units than [`shop.glb`](../../../assets/3d/shop.glb)

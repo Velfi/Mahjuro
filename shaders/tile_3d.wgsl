@@ -12,7 +12,7 @@ struct CameraUniform {
     /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient (albedo * 0.08);
     /// w = inverse document scale for embedded glTF punctual attenuation.
     hdr_tonemap: vec4<f32>,
-    /// x = embedded glTF inverse-square intensity scale (see `TILE_GLTF_PUNCTUAL_SCALE`).
+    /// x = embedded glTF inverse-square intensity scale (`RoomEnvLightingTune::tile_gltf_punctual_scale`).
     punctual_tuning: vec4<f32>,
 };
 

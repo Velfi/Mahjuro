@@ -213,43 +213,8 @@ impl WgpuRenderer {
             || (k == Some("showcase") && h.collection_tonemap_context);
         let shop_scene = k == Some(scene_keys::SHOP)
             || (k == Some("showcase") && h.shop_tonemap_and_lit_mesh_context);
-        let gameplay_glb_room = matches!(k, Some(scene_keys::GAMEPLAY) | Some("tutorial"))
-            && frame.scene_lighting.embedded_gltf_punctual
-            && frame
-                .cmds
-                .iter()
-                .any(|c| matches!(c, DrawCmd::GameplayEnvironment));
-        // `gameplay.glb` uses the embedded-room tile path (`ROOM_GLB_LINEAR_EXPOSURE_BASE` × room mul).
-        let shop_env_tonemap = shop_scene;
         let tile_pack_celebration = k == Some("tile_pack_celebration")
             || (k == Some("showcase") && h.tile_pack_celebration_tonemap);
-        // Synthetic lab geometry is kilo-unit world space; smooth punctual + readable ambient.
-        if k == Some(scene_keys::SHADOW_AO_LAB) || frame.shadow_ao_lab_layout.is_some() {
-            return [
-                1.0,
-                self.active_frame_env().linear_exposure * 1.35,
-                self.active_frame_env()
-                    .ambient_scale
-                    .max(crate::room_glb::GAMEPLAY_TABLE_AMBIENT_MIN)
-                    .max(0.62),
-                0.0,
-            ];
-        }
-        if tile_pack_celebration {
-            let ambient = (self.active_frame_env().ambient_scale * 0.45)
-                .max(crate::room_glb::TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN);
-            let hdr = [
-                1.0,
-                self.active_frame_env().linear_exposure
-                    * crate::room_glb::TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE,
-                ambient,
-                0.0,
-            ];
-            return hdr;
-        }
-        // Shop applies a heavy linear HDR divisor so bright `shop.glb` fills land in
-        // range. Showcase tiles alone (e.g. headless pack-celebration isolation)
-        // use ordinary tile shading — same /512 crush makes them vanish.
         let shop_showcase_without_env = shop_scene
             && frame
                 .cmds
@@ -266,63 +231,22 @@ impl WgpuRenderer {
                         | DrawCmd::GameplayEnvironment
                 )
             });
-        if shop_showcase_without_env {
-            let linear_hdr = self.active_frame_env().linear_exposure;
-            return [1.0, linear_hdr, self.active_frame_env().ambient_scale, 0.0];
-        }
-        if !(shop_env_tonemap || table_like) {
+        let hdr_active = k == Some(scene_keys::SHADOW_AO_LAB)
+            || frame.shadow_ao_lab_layout.is_some()
+            || tile_pack_celebration
+            || shop_showcase_without_env
+            || shop_scene
+            || table_like;
+        if !hdr_active {
             return [0.0; 4];
         }
-        let (mut linear_hdr, mut ambient) = if shop_env_tonemap {
-            (
-                self.active_frame_env().linear_exposure
-                    * crate::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE,
-                self.active_frame_env()
-                    .ambient_scale
-                    .max(crate::room_glb::SHOP_ENV_DIELECTRIC_AMBIENT_MIN),
-            )
+        let tune = self.active_frame_env();
+        let linear_base = if frame.scene_lighting.embedded_gltf_punctual {
+            tune.linear_exposure_base
         } else {
-            // Non-shop table-like scenes without a room GLB (collection, pick chamber, …).
-            (
-                self.active_frame_env().linear_exposure
-                    * crate::room_glb::GAMEPLAY_TABLE_HDR_LINEAR_MUL,
-                self.active_frame_env()
-                    .ambient_scale
-                    .max(crate::room_glb::GAMEPLAY_TABLE_AMBIENT_MIN),
-            )
+            1.0
         };
-
-        // Embedded `KHR_lights_punctual` rooms tune exposure in `write_gltf_room_env_uniforms`.
-        // Match that here so showcase tiles and `lit_mesh` props share the same ACES linear gain
-        // as the room mesh (hallway, archive, gameplay.glb, …).
-        if frame.scene_lighting.embedded_gltf_punctual && !shop_env_tonemap {
-            let mut e = self.active_frame_env().linear_exposure
-                * crate::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
-            let mut a = self.active_frame_env().ambient_scale;
-            match k {
-                Some(scene_keys::HALLWAY) | Some("pick_chamber") => {
-                    e *= crate::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
-                    a = a.max(crate::hallway_glb::HALLWAY_ENV_AMBIENT_SCALE_MIN);
-                }
-                Some(scene_keys::MAIN_MENU) | Some("main_menu_exterior") => {
-                    e *= crate::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
-                    a = a.max(crate::main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
-                }
-                Some(scene_keys::ARCHIVE) | Some("collection") | Some("showcase")
-                    if h.collection_tonemap_context =>
-                {
-                    e *= crate::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
-                    a = a.max(crate::archive_glb::ARCHIVE_ENV_AMBIENT_SCALE_MIN);
-                }
-                Some(scene_keys::GAMEPLAY) | Some("tutorial") if gameplay_glb_room => {
-                    e *= crate::gameplay_glb::GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL;
-                }
-                _ => {}
-            }
-            linear_hdr = e;
-            ambient = a;
-        }
-        [1.0, linear_hdr, ambient, 0.0]
+        [1.0, tune.linear_exposure * linear_base, tune.ambient_scale, 0.0]
     }
 
     fn lit_mesh_ssr_globals(
@@ -358,14 +282,6 @@ impl WgpuRenderer {
         } else {
             (0.0, 0.0)
         };
-        let table_proc_punctual_mul =
-            if matches!(self.active_scene_key, Some(scene_keys::GAMEPLAY) | Some("tutorial"))
-                && frame.scene_lighting.embedded_gltf_punctual
-            {
-                crate::room_glb::GAMEPLAY_TABLE_PROCEDURAL_PUNCTUAL_MUL
-            } else {
-                1.0
-            };
         let ssr_max_distance = cam.h * 2.0;
         let ssr_stride = cam.h * 0.04;
         let ssr_max_steps = 24.0;
@@ -384,7 +300,7 @@ impl WgpuRenderer {
                 shop_punctual_inv_doc,
                 shop_punctual_display_case,
                 shop_cat_amb,
-                table_proc_punctual_mul,
+                1.0,
             ],
         }
     }

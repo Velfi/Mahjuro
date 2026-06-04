@@ -132,11 +132,12 @@ pub struct GameplayScene {
     /// against the inputs that affect its output. `draw_frame` takes `&self`
     /// so we use a `RefCell` to update the cache from the read path.
     suggest_hint_cache: std::cell::RefCell<SuggestHintCache>,
-    /// When set, the hand has been discarded-from but not yet refilled. The
-    /// auto-draw fires once the discard animation completes; timing uses
+    /// When set, a discard removed tiles but [`RunState::refill_hand`] has not
+    /// run yet — the UI waits for the river animation first. See
+    /// [`RunState::discard_refill_pending`]. Timing uses
     /// [`discard_animation::DiscardAnimationBatch::total_duration`] with a
     /// ceiling from [`CascadeTuning::discard_refill_cap_ms`].
-    pending_refill: Option<Instant>,
+    pending_discard_refill: Option<Instant>,
     /// In-flight tiles animating from hand into the discard river.
     active_discard_anim: Option<discard_animation::DiscardAnimationBatch>,
     /// Tiles resting in the river until the next discard replaces them.
@@ -212,6 +213,11 @@ pub struct GameplayScene {
     /// navigation moves the focused drop target and releasing A commits the
     /// swap if focus is on another relic.
     held_relic_drag: Option<usize>,
+    /// Hold-to-cash-in: press time while the player is charging a cash-in
+    /// (gamepad trigger / keyboard **T** / Confirm on the Cash In button).
+    /// Mirrors the shop's hold-to-sell — completes at
+    /// [`CASH_IN_HOLD_SECONDS`], cancelled on the matching release.
+    cash_in_hold_started: Option<Instant>,
     /// Hand-strip marquee multi-select. `Some` while Confirm is held over a
     /// hand tile (LMB / Space / Enter / gamepad A). Each focus or pointer
     /// movement updates `current_slot` and re-applies the marquee against
@@ -261,6 +267,10 @@ const LIGHT_RAMP_DURATION_SECS: f32 = 0.8;
 /// How long a relic glow lingers after activation.
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
 
+/// Hold-to-cash-in duration (gamepad trigger / keyboard **T** / Confirm on the
+/// Cash In button). Drives the HUD progress ring + cash-in gate.
+pub(crate) const CASH_IN_HOLD_SECONDS: f32 = 1.0;
+
 /// Peak flare intensity when a single hand exceeds the entire blind.
 const CANDLE_FLARE_PEAK: f32 = 1.5;
 /// Exponential decay rate for the candle flare (per second). Higher = faster fade.
@@ -275,6 +285,8 @@ const INVALID_MELD_FLASH_SECS: f32 = 0.55;
 const INVALID_BOSS_FLASH_SECS: f32 = 0.55;
 /// How long the lessons tutorial panel wiggles after a blocked action.
 const TUTORIAL_PANEL_WIGGLE_SECS: f32 = 0.55;
+/// Fullscreen gold tint on the cascade's final beat (see `gold_flash_at`).
+const GOLD_FLASH_SECS: f32 = 0.4;
 
 /// Click-id base for the Zodiac inventory bar. `ZODIAC_USE_BASE + slot_idx`
 /// is the click id for using the Zodiac in slot `slot_idx`.
@@ -388,18 +400,39 @@ impl GameplayScene {
         log::info!("[Debug] Spawned demo score cascade");
     }
 
+    /// Cascade reveal, score popups flying to the reel, odometer rolls, and the
+    /// final-beat gold flash.
+    pub(super) fn scoring_presentation_active(&self, now: Instant) -> bool {
+        !self.cascade_queue.is_empty()
+            || self.score_reel.is_animating(now)
+            || self.score_popups.is_active()
+            || self.gold_flash_active(now)
+    }
+
+    /// Scoring presentation finished and celebration particles settled — safe to
+    /// fire a deferred `RoundComplete` / `GameOver`.
+    pub fn ready_for_round_end(&self, now: Instant) -> bool {
+        !self.scoring_presentation_active(now) && !self.particles.is_active()
+    }
+
+    fn gold_flash_active(&self, now: Instant) -> bool {
+        self.gold_flash_at.is_some_and(|t0| {
+            now.saturating_duration_since(t0).as_secs_f32() < GOLD_FLASH_SECS
+        })
+    }
+
     /// Whether the cascade is actively animating (for redraw requests).
     pub fn is_animating(&self) -> bool {
-        !self.cascade_queue.is_empty()
+        let now = Instant::now();
+        self.scoring_presentation_active(now)
             || self.particles.is_active()
             || self.flying_coins.is_active()
-            || self.score_reel.is_animating(Instant::now())
-            || self.pending_refill.is_some()
+            || self.pending_discard_refill.is_some()
             || discard_animation::discard_animation_active(self)
             || !self.relic_glow_starts.is_empty()
             || self.final_tiles_fov_pop_active()
-            || self.boss_rule_feedback_active(Instant::now())
-            || self.tutorial_panel_wiggle_active(Instant::now())
+            || self.boss_rule_feedback_active(now)
+            || self.tutorial_panel_wiggle_active(now)
     }
 
     fn final_tiles_fov_pop_active(&self) -> bool {
@@ -556,7 +589,7 @@ impl GameplayScene {
             focus: None,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
             suggest_hint_cache: std::cell::RefCell::new(SuggestHintCache::default()),
-            pending_refill: None,
+            pending_discard_refill: None,
             active_discard_anim: None,
             river_settled_tiles: Vec::new(),
             river_sink_batch: None,
@@ -580,6 +613,7 @@ impl GameplayScene {
             lab_mode: false,
             candle_flare: 0.0,
             held_relic_drag: None,
+            cash_in_hold_started: None,
             marquee: None,
             final_tiles_fov_pop_at: None,
             hand_tile_uids: Vec::new(),
@@ -891,6 +925,20 @@ impl GameplayScene {
 
     pub(crate) fn lab_cascade_active(&self) -> bool {
         !self.cascade_queue.is_empty()
+    }
+
+    #[inline]
+    pub(crate) fn cash_in_hold_in_progress(&self) -> bool {
+        self.cash_in_hold_started.is_some()
+    }
+
+    /// Normalized hold-to-cash-in progress for the HUD ring + rumble (0..=1).
+    #[inline]
+    pub(crate) fn cash_in_hold_progress(&self, now: Instant) -> Option<f32> {
+        self.cash_in_hold_started.map(|started| {
+            (now.saturating_duration_since(started).as_secs_f32() / CASH_IN_HOLD_SECONDS)
+                .clamp(0.0, 1.0)
+        })
     }
 
     pub(crate) fn enter_lab_mode(&mut self) {
