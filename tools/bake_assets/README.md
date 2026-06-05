@@ -38,7 +38,7 @@ When **`gltf-transform`** is on `PATH` (`npm i -g @gltf-transform/cli`), the bak
 
 `gltf-transform resize <input.glb> <output> --width 1024 --height 1024`
 
-for those room files before they go into `mahjuro-pack-gameplay.zip`. Without the tool, GLBs are copied as-is and a warning is printed for files over 32 MB.
+for those room files before they go into `mahjuro-pack-rooms.zip`. Without the tool, GLBs are copied as-is and a warning is printed for files over 32 MB.
 
 Authoring tip: export room textures at ≤1024 in Blender so decode + pack size stay small even without `gltf-transform`.
 
