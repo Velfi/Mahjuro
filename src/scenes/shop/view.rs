@@ -909,13 +909,6 @@ pub(crate) fn render_shop_frame(
         )
     };
 
-    if !shop.pause_menu.paused && inspect.is_none() {
-        let wall_count = crate::game::wall_ledger::shop_wall_hud_count(ctx.run);
-        let wall_layout =
-            crate::render::wall_display::push_wall_remaining_hud(&mut frame, w, h, wall_count);
-        let _ = wall_layout;
-    }
-
     // Shelf focus ring uses shelf-slot screen rects.
     if !shop.pause_menu.paused && inspect.is_none() {
         let _g = crate::render::cpu_profiler::scope("draw_frame.shop_focus_ring_and_badges");
@@ -1130,34 +1123,37 @@ pub(crate) fn render_shop_frame(
         let icon_slots = push_screen_footer_hint(&mut frame, &ctx, hint_row, hint_style);
         let hint_band_top = screen_footer_top(h, hint_style);
 
-        let push_hold_ring =
-            |frame: &mut crate::render::draw_cmd::UiFrame, icon_rect: &[f32; 4], progress: f32| {
-                let [ix, iy, icon_px, _] = *icon_rect;
-                let cx = ix + icon_px * 0.5;
-                let cy = iy + icon_px * 0.5;
-                let r = icon_px * 0.58;
-                let thickness = (icon_px * 0.12).max(3.5);
-                frame.arc_ring_quads([crate::ui::prompt_hold_ring::hold_prompt_ring(
-                    cx, cy, r, thickness, progress,
-                )]);
-            };
+        if inspect.is_none() {
+            let wall_count = crate::game::wall_ledger::shop_wall_hud_count(ctx.run);
+            crate::render::wall_display::push_wall_remaining_hud(&mut frame, w, h, wall_count);
+        }
 
+        let push_hold_ring = |frame: &mut crate::render::draw_cmd::UiFrame,
+                              icon_rect: &[f32; 4],
+                              progress: f32,
+                              invalid: bool| {
+            let [ix, iy, icon_px, _] = *icon_rect;
+            let cx = ix + icon_px * 0.5;
+            let cy = iy + icon_px * 0.5;
+            let r = icon_px * 0.58;
+            let thickness = (icon_px * 0.12).max(3.5);
+            frame.arc_ring_quads([crate::ui::prompt_hold_ring::hold_prompt_ring(
+                cx, cy, r, thickness, progress, invalid,
+            )]);
+        };
+
+        let now = Instant::now();
         if !inspect_active
             && (shop.west_sell_hold_started.is_some() || hover_sellable)
             && let Some(InlineHintIconSlot { icon_rect, .. }) =
                 icon_slots.iter().find(|s| is_hold_sell_hint_key(s.key))
         {
+            let sell_invalid =
+                shop.west_sell_hold_started.is_some() && !shop.sell_hold_valid_for(&shop_rm);
             let progress = shop
-                .west_sell_hold_started
-                .map(|started| {
-                    (Instant::now()
-                        .saturating_duration_since(started)
-                        .as_secs_f32()
-                        / super::SHOP_SELL_HOLD_SECONDS)
-                        .clamp(0.0, 1.0)
-                })
+                .sell_hold_progress(now, &shop_rm)
                 .unwrap_or(0.0);
-            push_hold_ring(&mut frame, icon_rect, progress);
+            push_hold_ring(&mut frame, icon_rect, progress, sell_invalid);
         }
 
         if !inspect_active
@@ -1165,17 +1161,12 @@ pub(crate) fn render_shop_frame(
             && let Some(InlineHintIconSlot { icon_rect, .. }) =
                 icon_slots.iter().find(|s| is_hold_buy_hint_key(s.key))
         {
+            let buy_invalid =
+                shop.buy_hold_started.is_some() && !shop.buy_hold_valid_for(ctx.run, &shop_rm);
             let progress = shop
-                .buy_hold_started
-                .map(|started| {
-                    (Instant::now()
-                        .saturating_duration_since(started)
-                        .as_secs_f32()
-                        / super::SHOP_BUY_HOLD_SECONDS)
-                        .clamp(0.0, 1.0)
-                })
+                .buy_hold_progress(now, ctx.run, &shop_rm)
                 .unwrap_or(0.0);
-            push_hold_ring(&mut frame, icon_rect, progress);
+            push_hold_ring(&mut frame, icon_rect, progress, buy_invalid);
         }
 
         if inspect_active && let Some(ShopFocus::Relic(i)) = shop.focus {
@@ -1801,7 +1792,7 @@ fn sell_hold_wobble_euler_rad(scene: &ShopScene, slot_focus: ShopFocus) -> [f32;
     let progress = (Instant::now()
         .saturating_duration_since(started)
         .as_secs_f32()
-        / super::SHOP_SELL_HOLD_SECONDS)
+        / crate::ui::prompt_hold_ring::hold_act_seconds())
         .clamp(0.0, 1.0);
     if progress <= 0.0 {
         return [0.0; 3];

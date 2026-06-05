@@ -315,20 +315,20 @@ impl WgpuRenderer {
         self.queue.write_buffer(
             &inst.uniform_buffer,
             0,
-            bytemuck::bytes_of(&super::super::CameraUniform {
+            bytemuck::bytes_of(&super::super::TileUniform {
                 view_proj: camera.view_proj_arr,
                 model: model.to_cols_array(),
-                base_color_factor: [
+                tile_visual_params: [
                     obj.color[0],
                     obj.color[1],
                     obj.color[2],
                     GLTF_PROP_BODY_KIND,
                 ],
                 cam_pos: camera.cam_pos.to_array(),
-                tile_seed: 0.0,
-                decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
-                hdr_tonemap,
-                punctual_tuning,
+                tile_material_seed: 0.0,
+                tile_decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+                tile_post_params: hdr_tonemap,
+                tile_punctual_params: punctual_tuning,
             }),
         );
 

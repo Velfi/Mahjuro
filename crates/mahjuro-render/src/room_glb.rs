@@ -80,10 +80,9 @@
 //!
 //! **Tonemap pipeline:** the room-env fragment shader (`room_glb.wgsl`) writes **linear HDR**
 //! into `scene_color` (`Rgba16Float`). The single ACES (fitted) tonemap is applied by
-//! `tonemap_composite.wgsl` after bloom composite. The in-shader ACES branch is preserved as
-//! the `hdr_tonemap.w < 0.5` path but is no longer reached by the renderer — see
-//! [`crate::wgpu_renderer::runtime::shop_environment`] which forces `hdr_tonemap.w = 1.0`
-//! for both the main pass and the bloom MRT pre-pass.
+//! `tonemap_composite.wgsl` after bloom composite. Room passes now use explicit
+//! `RoomEnvUniform` fields (including `room_post_params`) instead of tile-path
+//! `hdr_tonemap` overloading.
 //!
 //! Shared glTF room decode (meshes, lights, cameras, collision) lives in [`crate::room_env_gltf`].
 
@@ -243,7 +242,7 @@ pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 1.0;
 /// [`RoomEnvLightingTune::linear_exposure`] before tonemap in `room_glb.wgsl` / matching `lit_mesh` paths.
 pub const ROOM_GLB_LINEAR_EXPOSURE_BASE: f32 = 1.0 / 512.0; // 2^-9
 
-/// Extra multiplier on room glTF emissive (`CameraUniform.decal_atlas_uv.z`), after
+/// Extra multiplier on room glTF emissive (`RoomEnvUniform.room_env_params.z`), after
 /// `KHR_materials_emissive_strength` and `emissiveFactor × emissiveTexture`. Keep near `1` when
 /// assets use emissive strength; raise only if authors omit the extension.
 pub const SHOP_GLTF_EMISSIVE_SCALE: f32 = 1.0;
@@ -346,7 +345,7 @@ pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
 pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 2.0;
 
 /// Inverse-square intensity scale for hand/structure tiles (`tile_3d.wgsl` via
-/// `CameraUniform.punctual_tuning.x`). Tiles share the same candle pools as `lit_mesh`.
+/// `TileUniform.tile_punctual_params.x`). Tiles share the same candle pools as `lit_mesh`.
 pub const TILE_GLTF_PUNCTUAL_SCALE: f32 = 1.0;
 
 /// glTF **node** name prefix for punctual lights that should read as warm candles
@@ -955,7 +954,7 @@ pub fn marker_translation(cpu: &RoomGlbCpu, name: &str) -> Option<Vec3> {
 
 #[cfg(test)]
 mod tests {
-    /// Keep in sync with `gold_sign_body` in `shaders/room_glb.wgsl` `shop_shade`.
+    /// Keep in sync with `gold_sign_body` / `gold_sign_hdr` in `shaders/room_glb.wgsl` `shop_shade`.
     fn gold_sign_body_fill_lum(albedo: [f32; 3], metallic: f32, ndotv: f32) -> f32 {
         let smoothstep = |e0: f32, e1: f32, x: f32| {
             let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
@@ -1080,6 +1079,21 @@ mod tests {
     }
 
     #[test]
+    fn gold_sign_hdr_tracks_room_linear_exposure_base() {
+        let albedo = [0.88_f32, 0.72, 0.32];
+        let body = gold_sign_body_fill_lum(albedo, 1.0, 1.0);
+        let base_default = super::ROOM_GLB_LINEAR_EXPOSURE_BASE;
+        let base_dark = 1e-4_f32;
+        let hdr_default = body * base_default / base_default;
+        let hdr_dark = body * base_dark / base_default;
+        assert!((hdr_default - body).abs() < 1e-6);
+        assert!(
+            hdr_dark < body * 0.1,
+            "crushed exposure base should dim gold fill, got {hdr_dark} vs body {body}"
+        );
+    }
+
+    #[test]
     fn room_glb_wgsl_uses_smooth_gold_ramps_not_hard_cliffs() {
         assert!(
             !ROOM_GLB_WGSL.contains("albedo_lum < 0.07"),
@@ -1098,8 +1112,32 @@ mod tests {
             "shop gold signage body fill missing from room_glb.wgsl"
         );
         assert!(
+            ROOM_GLB_WGSL.contains("gold_sign_hdr"),
+            "shop gold signage exposure-scaled fill missing from room_glb.wgsl"
+        );
+        assert!(
             ROOM_GLB_WGSL.contains("warm_gold_sign"),
             "warm gold signage detection missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE"),
+            "main-menu moon feature flag missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL"),
+            "archive decal feature flag missing from room_glb.wgsl"
+        );
+        assert!(
+            !ROOM_GLB_WGSL.contains("pbr.emissive_factor.w >"),
+            "room_glb.wgsl should not overload emissive_factor.w as a feature tag"
+        );
+        assert!(
+            !ROOM_GLB_WGSL.contains("abs(in.v_color.a - 2.0)"),
+            "room_glb.wgsl should not treat COLOR_0.a as an archive decal feature tag"
+        );
+        assert!(
+            !ROOM_GLB_WGSL.contains("abs(in.v_color.a - 4.0)"),
+            "room_glb.wgsl should not treat COLOR_0.a as a hallway tint feature tag"
         );
     }
 }

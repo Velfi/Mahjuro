@@ -117,6 +117,8 @@ pub struct GamepadPollCtx {
     pub face_bindings: FaceButtonBindings,
     /// Showcase **orbit** overlay ([`crate::scenes::Scene::Showcase`] inspect presenters) — right stick + arrows for orbit, left stick + WASD for focus cycling, LMB drag + triggers/wheel for orbit zoom.
     pub item_inspect_overlay: bool,
+    /// Shop storeroom browse (no inspect overlay) — right stick orbits the room camera.
+    pub shop_storeroom_orbit: bool,
 }
 
 /// What kind of draggable inventory item is currently being rearranged.
@@ -220,6 +222,8 @@ pub struct InputState {
     item_inspect_mouse_orbit_px: (f32, f32),
     /// LMB-drag turntable on the shop storeroom camera (consumed in [`crate::main::frame_tick`]).
     shop_storeroom_mouse_orbit_px: (f32, f32),
+    /// Right stick (−1..1) while browsing the shop storeroom (not item inspect).
+    pub shop_storeroom_orbit_stick: (f32, f32),
     /// Trigger analog zoom for item inspect: `RightTrigger2 − LeftTrigger2`, plus bumpers (see [`Self::sample_item_inspect_analog`]).
     pub item_inspect_zoom_triggers: f32,
     /// Right stick vertical axis used for list/pane scroll scenes (`-1..1`).
@@ -271,6 +275,7 @@ impl InputState {
             item_inspect_orbit_stick: (0.0, 0.0),
             item_inspect_mouse_orbit_px: (0.0, 0.0),
             shop_storeroom_mouse_orbit_px: (0.0, 0.0),
+            shop_storeroom_orbit_stick: (0.0, 0.0),
             item_inspect_zoom_triggers: 0.0,
             right_stick_scroll_axis: 0.0,
             left_stick_scroll_axis: 0.0,

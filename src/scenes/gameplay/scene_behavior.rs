@@ -602,31 +602,6 @@ impl SceneBehavior for GameplayScene {
             });
         }
 
-        // Hint: compute tile indices that would complete a meld with current selection.
-        // `suggest_completions` runs full backtracking validation per unselected
-        // tile, so memoize against the inputs that affect its result (hand uids
-        // + selection bitmask). Same hand+selection across frames → reuse.
-        let hint_indices = if interaction.hints_enabled
-            && !interaction.selected_indices.is_empty()
-            && self.cascade_queue.is_empty()
-        {
-            let selection_mask: u32 = interaction
-                .selected_indices
-                .iter()
-                .fold(0u32, |acc, &i| acc | (1u32 << i.min(31)));
-            let mut cache = self.suggest_hint_cache.borrow_mut();
-            if !cache.matches(&interaction.hand, selection_mask) {
-                cache.hand_uids.clear();
-                cache
-                    .hand_uids
-                    .extend(interaction.hand.iter().map(|t| t.id));
-                cache.selection_mask = selection_mask;
-                cache.hints = suggest_completions(&interaction.hand, &interaction.selected_indices);
-            }
-            cache.hints.clone()
-        } else {
-            vec![]
-        };
         // Phase 8: the `?` glossary badge has been removed from the gameplay
         // HUD. Open the Guide book on the table, or press Select / View / −
         // (`Help`) for the full reference.
@@ -844,8 +819,7 @@ impl SceneBehavior for GameplayScene {
             )
         };
         if !vis.hide_wall_hud {
-            let wall_layout = crate::render::wall_display::push_wall_remaining_hud(
-                &mut frame,
+            let wall_layout = crate::render::wall_display::wall_hud_layout(
                 layout.window_w,
                 layout.window_h,
                 gameplay.tiles_left,
@@ -877,7 +851,6 @@ impl SceneBehavior for GameplayScene {
                 let tile = Self::display_tile(tile, run);
                 let is_selected = interaction.selected.get(i).copied().unwrap_or(false);
                 let is_focused = focus == i;
-                let is_hinted = hint_indices.contains(&i);
                 let is_invalid_flash =
                     invalid_flash > 0.0 && self.invalid_meld_flash_slots.contains(&i);
                 // Pop-in: slide_y 0→1, offset pixels downward (large py = nearer player).
@@ -913,7 +886,7 @@ impl SceneBehavior for GameplayScene {
                     selected: is_selected && !is_invalid_flash,
                     hovered: is_focused && !is_invalid_flash,
                     outline: (is_selected || is_focused) && !is_invalid_flash,
-                    glow: is_hinted || is_invalid_flash || is_selected,
+                    glow: is_invalid_flash || is_selected,
                     glow_color: if is_invalid_flash {
                         Some([1.00, 0.14, 0.08, 0.72 + 0.28 * invalid_flash])
                     } else {
@@ -1887,12 +1860,11 @@ impl SceneBehavior for GameplayScene {
             onboarding_hints::push_finale_intro_banner(&mut frame, &ctx, ctx.run);
         }
 
-        let settings = crate::persistence::load_settings();
-        if settings.hints_enabled
-            && !self.pause_menu.paused
+        if !self.pause_menu.paused
             && !ctx.modal_active
             && self.cascade_queue.is_empty()
         {
+            let settings = crate::persistence::load_settings();
             // Single combined footer: available table actions (discard / play /
             // cash in) plus the guide hint, so the controls never collide with
             // or hide each other.
@@ -1908,7 +1880,8 @@ impl SceneBehavior for GameplayScene {
                 self.focus,
                 play_enabled,
             );
-            let show_cash_in = gameplay.trigger_enabled;
+            let show_cash_in =
+                gameplay.trigger_enabled || self.cash_in_hold_in_progress();
             let icon_slots = push_screen_footer_hint(
                 &mut frame,
                 &ctx,
@@ -1916,24 +1889,39 @@ impl SceneBehavior for GameplayScene {
                 HintStyle::standard(layout.window_h),
             );
 
-            // Hold-to-cash-in progress ring around the cash-in glyph (mirrors the
-            // shop's hold-to-sell ring).
-            let cash_in_focused =
-                matches!(self.focus, Some(FocusTarget::Button(GameplayButton::Trigger)));
+            // Hold-to-cash-in progress ring around the footer cash-in glyph (mirrors
+            // the shop's hold-to-sell / hold-to-buy rings).
             if show_cash_in
-                && (self.cash_in_hold_in_progress() || cash_in_focused)
                 && let Some(InlineHintIconSlot { icon_rect, .. }) =
                     icon_slots.iter().find(|s| is_cash_in_hint_key(s.key))
             {
-                let progress = self.cash_in_hold_progress(now).unwrap_or(0.0);
+                let cash_in_invalid =
+                    self.cash_in_hold_started.is_some() && !gameplay.trigger_enabled;
+                let progress = self
+                    .cash_in_hold_progress(now, gameplay.trigger_enabled)
+                    .unwrap_or(0.0);
                 let [ix, iy, icon_px, _] = *icon_rect;
                 let cx = ix + icon_px * 0.5;
                 let cy = iy + icon_px * 0.5;
                 let r = icon_px * 0.58;
                 let thickness = (icon_px * 0.12).max(3.5);
                 frame.arc_ring_quads([crate::ui::prompt_hold_ring::hold_prompt_ring(
-                    cx, cy, r, thickness, progress,
+                    cx,
+                    cy,
+                    r,
+                    thickness,
+                    progress,
+                    cash_in_invalid,
                 )]);
+            }
+
+            if !vis.hide_wall_hud {
+                crate::render::wall_display::push_wall_remaining_hud(
+                    &mut frame,
+                    layout.window_w,
+                    layout.window_h,
+                    gameplay.tiles_left,
+                );
             }
         }
 

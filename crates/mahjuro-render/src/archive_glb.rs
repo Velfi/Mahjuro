@@ -6,7 +6,7 @@
 //!   draws one mesh (see `archive_env_skip_description_prim`) based on cursor so the active board
 //!   is away from the pointer; browse copy is CPU-rasterized into a shared decal atlas.
 //! - `inspect_plaque` — inspect-mode description board beside the turntable; same decal atlas
-//!   path (`COLOR_0.a = 2` in `decode_env_primitive`); hidden outside item inspect.
+//!   path (explicit room-env PBR feature flags from `room_gpu_load.rs`); hidden outside item inspect.
 //! - `plaque_backing` — ornate frame behind [`INSPECT_PLAQUE`]; hidden outside item inspect.
 //! - `archive_spawn_item.001` … `archive_spawn_item.021` — 21 item anchors (3×7 window into the tab catalogue).
 //! - `btn_relics_tab`, `btn_zodiacs_tab`, `btn_bosses_tab`, `btn_talismans_tab`, `btn_chronicle_tab` —

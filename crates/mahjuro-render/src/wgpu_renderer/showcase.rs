@@ -34,15 +34,15 @@ pub(super) fn make_showcase_tile_gpu(
     let identity = Mat4::IDENTITY;
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("showcase-tile-cam"),
-        contents: bytemuck::bytes_of(&CameraUniform {
+        contents: bytemuck::bytes_of(&TileUniform {
             view_proj: identity.to_cols_array(),
             model: identity.to_cols_array(),
-            base_color_factor,
+            tile_visual_params: base_color_factor,
             cam_pos: [0.0; 3],
-            tile_seed: 0.0,
-            decal_atlas_uv,
-            hdr_tonemap: [0.0; 4],
-            punctual_tuning: [0.0; 4],
+            tile_material_seed: 0.0,
+            tile_decal_atlas_uv: decal_atlas_uv,
+            tile_post_params: [0.0; 4],
+            tile_punctual_params: [0.0; 4],
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });

@@ -8,11 +8,11 @@ use crate::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
 use crate::lit_mesh::ShadowCasterUniform;
 use crate::tile_glb::{LoadedPrimitive, LoadedTile, Vertex3dTex};
 use crate::wgpu_renderer::{
-    CameraUniform, GltfPropGpu, TileGlbPipelineKey, TileMeshGpuSet, TilePrimitiveGpu,
+    GltfPropGpu, TileGlbPipelineKey, TileMeshGpuSet, TilePrimitiveGpu, TileUniform,
     resources::{TextureUploadParams, upload_rgba_texture_with_mips, white_albedo},
 };
 
-/// `CameraUniform.base_color_factor.w` — selects the imported glTF PBR branch
+/// `TileUniform.tile_visual_params.w` — selects the imported glTF PBR branch
 /// in `tile_3d.wgsl` (albedo + normal + metallic-roughness, no mahjong decal).
 pub const GLTF_PROP_BODY_KIND: f32 = 4.0;
 
@@ -205,15 +205,15 @@ pub(crate) fn make_gltf_prop_gpu(
     let identity = Mat4::IDENTITY;
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("gltf-prop-uniform"),
-        contents: bytemuck::bytes_of(&CameraUniform {
+        contents: bytemuck::bytes_of(&TileUniform {
             view_proj: identity.to_cols_array(),
             model: identity.to_cols_array(),
-            base_color_factor: [1.0, 1.0, 1.0, GLTF_PROP_BODY_KIND],
+            tile_visual_params: [1.0, 1.0, 1.0, GLTF_PROP_BODY_KIND],
             cam_pos: [0.0; 3],
-            tile_seed: 0.0,
-            decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
-            hdr_tonemap: [0.0; 4],
-            punctual_tuning: [0.0; 4],
+            tile_material_seed: 0.0,
+            tile_decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+            tile_post_params: [0.0; 4],
+            tile_punctual_params: [0.0; 4],
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });

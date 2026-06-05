@@ -476,12 +476,12 @@ impl WgpuRenderer {
         } else {
             0.0
         };
-        let mut hdr_tonemap = self.tile_hdr_tonemap(frame);
+        let mut room_post_params = self.tile_hdr_tonemap(frame);
         // `bloom_linear_hdr_output` is informational only — the emissive pre-pass
-        // uses the same uniforms. Main-menu pride rainbow reuses `hdr_tonemap.w`
-        // as scene time for moon/star swirl meshes tagged in their PBR uniform.
+        // uses the same uniforms. Main-menu pride rainbow reuses `room_post_params.w`
+        // as scene time for moon/star swirl meshes flagged via room-env PBR bits.
         let _ = bloom_linear_hdr_output;
-        hdr_tonemap[3] = if main_menu_env
+        room_post_params[3] = if main_menu_env
             && crate::main_menu_glb::main_menu_pride_rainbow_active(
                 self.main_menu_pride_rainbow_debug,
             ) {
@@ -497,22 +497,22 @@ impl WgpuRenderer {
         } else {
             (0.0, 0.0)
         };
-        let uniform = CameraUniform {
+        let uniform = RoomEnvUniform {
             view_proj: camera.view_proj_arr,
             model: model.to_cols_array(),
-            base_color_factor: [
+            room_debug_params: [
                 1.0,
                 if frame.shop_env_unlit_debug { 1.0 } else { 0.0 },
                 0.0,
                 crate::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
             ],
             cam_pos: camera.cam_pos.to_array(),
-            tile_seed: if frame.shop_env_unlit_debug {
+            room_linear_exposure: if frame.shop_env_unlit_debug {
                 1.0
             } else {
                 exposure
             },
-            decal_atlas_uv: [
+            room_env_params: [
                 if frame.shop_env_unlit_debug {
                     1.0
                 } else {
@@ -526,8 +526,8 @@ impl WgpuRenderer {
                     1.0
                 },
             ],
-            hdr_tonemap,
-            punctual_tuning: [0.0; 4],
+            room_post_params,
+            _unused_punctual_tuning: [0.0; 4],
         };
         for (pi, buf) in gpu.uniform_buffers.iter().enumerate() {
             let prim_model = if let Some(delta) = prim_deltas.get(&pi) {

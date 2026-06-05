@@ -104,10 +104,6 @@ fn default_auto_cash_in_on_full_structure() -> bool {
     true
 }
 
-fn default_hints_enabled() -> bool {
-    false
-}
-
 fn default_available_relics() -> Vec<RelicId> {
     crate::core::relic::all_relic_defs()
         .iter()
@@ -270,8 +266,6 @@ pub struct RunState {
     /// an empty hand must not count as "no actions remaining."
     #[serde(skip)]
     pub discard_refill_pending: bool,
-    #[serde(default = "default_hints_enabled")]
-    pub hints_enabled: bool,
     // ── Boss blind state ─────────────────────────────────────────────────
     #[serde(flatten)]
     pub ordeal: OrdealState,
@@ -829,7 +823,6 @@ impl RunState {
             suppress_chamber_resolution: false,
             round_end_queued: false,
             discard_refill_pending: false,
-            hints_enabled: false,
             ordeal: OrdealState {
                 pool_remaining: ordeal_pool_remaining,
                 upcoming: upcoming_ordeal,
@@ -905,10 +898,6 @@ impl RunState {
 
     pub fn set_auto_cash_in_on_full_structure(&mut self, enabled: bool) {
         self.auto_cash_in_on_full_structure = enabled;
-    }
-
-    pub fn set_hints_enabled(&mut self, enabled: bool) {
-        self.hints_enabled = enabled;
     }
 
     pub fn apply_progression(&mut self, progress: &crate::core::progression::PlayerProgress) {

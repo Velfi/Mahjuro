@@ -631,17 +631,17 @@ pub fn create_room_env_camera_uniform_buffers(
     label: &str,
 ) -> Vec<wgpu::Buffer> {
     use crate::tile_body;
-    use crate::wgpu_renderer::CameraUniform;
+    use crate::wgpu_renderer::RoomEnvUniform;
     let identity = glam::Mat4::IDENTITY.to_cols_array();
-    let initial = CameraUniform {
+    let initial = RoomEnvUniform {
         view_proj: identity,
         model: identity,
-        base_color_factor: [1.0, 0.0, 0.0, tile_body::TEXTURED_BASE_MAP_BODY_KIND],
+        room_debug_params: [1.0, 0.0, 0.0, tile_body::TEXTURED_BASE_MAP_BODY_KIND],
         cam_pos: [0.0; 3],
-        tile_seed: 0.0,
-        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
-        hdr_tonemap: [0.0; 4],
-        punctual_tuning: [0.0; 4],
+        room_linear_exposure: 0.0,
+        room_env_params: [0.0, 0.0, 1.0, 1.0],
+        room_post_params: [0.0; 4],
+        _unused_punctual_tuning: [0.0; 4],
     };
     (0..count)
         .map(|i| {
@@ -958,7 +958,7 @@ pub struct SsrGlobals {
     /// x = enabled (0/1), y = max_distance (world units), z = stride
     /// (world units per step), w = max_steps
     pub params: [f32; 4],
-    /// Matches [`crate::wgpu_renderer::uniforms::CameraUniform::hdr_tonemap`]:
+    /// Matches [`crate::wgpu_renderer::uniforms::TileUniform::tile_post_params`]:
     /// x = ACES HDR path when **1**; y = linear exposure before ACES;
     /// z = hemispheric ambient scale; w = reserved.
     pub hdr_tonemap: [f32; 4],

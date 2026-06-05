@@ -9,16 +9,16 @@
 
 use mahjuro_gfx_types::TileMaterial;
 
-/// `base_color_factor.w` for [`crate::room_glb`] — sample bound base color, **no**
+/// `tile_visual_params.w` for [`crate::room_glb`] — sample bound base color, **no**
 /// projected tile decal (shop geometry shares the tile pipeline).
 pub const TEXTURED_BASE_MAP_BODY_KIND: f32 = 4.0;
 
-/// `base_color_factor.w` for sampling each GLB primitive's albedo while still projecting the
+/// `tile_visual_params.w` for sampling each GLB primitive's albedo while still projecting the
 /// mahjong face decal (`tile_3d.wgsl` kind 5). Gameplay uses procedural kinds 0–2 from
 /// [`TileMaterial`] instead; kept as the named value for that shader branch.
 pub const TEXTURED_TILE_GAMEPLAY_BODY_KIND: f32 = 5.0;
 
-/// Values passed to the GPU as `base_color_factor.w` (float equals discriminant).
+/// Values passed to the GPU as `tile_visual_params.w` (float equals discriminant).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TileBodyShaderKind {

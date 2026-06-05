@@ -63,7 +63,6 @@ mod cases {
             last_breakdown: None,
             mode: mode.clone(),
             auto_cash_in_on_full_structure: true,
-            hints_enabled: false,
             played_yaku_this_round: vec![],
             tile_debuffs: vec![],
             honors_scored_this_round: false,

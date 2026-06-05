@@ -25,7 +25,7 @@ scripts/rebake-offline.sh room
 
 ### Archive (exception)
 
-Archive **does not** sample offline `archive.msh` today — the room GLB uses punctual lights only (`COLOR_0.a = 3` on shell meshes). Offline cubby-only bakes mis-darken receivers as the asset grows (30+ prims). See [`docs/todo/archive-offline-baked-shadows.md`](../todo/archive-offline-baked-shadows.md).
+Archive **does not** sample offline `archive.msh` today — the room GLB uses punctual lights only. Offline cubby-only bakes mis-darken receivers as the asset grows (30+ prims). See [`docs/todo/archive-offline-baked-shadows.md`](../todo/archive-offline-baked-shadows.md).
 
 The live map is still used on archive for **inspect orbit only**: only [`SHOP_INSPECT_SUBJECT_ANIM_ID`](../../crates/mahjuro-render/src/draw_cmd.rs) casts dynamic shadows (grid featured close-up and cubbies do not, so the pedestal and description signs stay clean). Inspect sets `UiFrame::shop_inspect_shadow_target` for a tight frustum + subject-only cast.
 

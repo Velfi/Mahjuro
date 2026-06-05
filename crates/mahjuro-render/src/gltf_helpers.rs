@@ -12,8 +12,15 @@ pub struct GltfPbrUniform {
     pub _pad0: f32,
     pub emissive_factor: [f32; 4],
     pub alpha_mode: u32,
-    pub _pad1: [u32; 3],
+    /// Explicit room-env feature flags consumed by `room_glb.wgsl`.
+    pub flags: u32,
+    pub _pad1: [u32; 2],
 }
+
+pub const GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT: u32 = 1 << 0;
+pub const GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL: u32 = 1 << 1;
+pub const GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE: u32 = 1 << 2;
+pub const GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW: u32 = 1 << 3;
 
 impl GltfPbrUniform {
     pub fn from_loaded(
@@ -35,8 +42,14 @@ impl GltfPbrUniform {
                 0.0,
             ],
             alpha_mode: alpha_mode as u32,
-            _pad1: [0; 3],
+            flags: 0,
+            _pad1: [0; 2],
         }
+    }
+
+    #[inline]
+    pub fn add_flags(&mut self, flags: u32) {
+        self.flags |= flags;
     }
 }
 

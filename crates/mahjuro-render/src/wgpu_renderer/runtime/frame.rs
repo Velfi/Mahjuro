@@ -73,7 +73,7 @@ impl WgpuRenderer {
     ) {
         // Showcase decal atlas is loaded lazily in `run_showcase_tiles_placement` when
         // the frame actually draws `ShowcaseTileBatch`.
-        // `tile_3d.wgsl` reads `base_color_factor.w`: procedural kinds 0–2 for the legacy
+        // `tile_3d.wgsl` reads `tile_visual_params.w`: procedural kinds 0–2 for the legacy
         // procedural mesh; 4 = shop env (base map only); 5 = `tile.glb` + projected decal.
         // Imported tile meshes must use kind 5 — procedural 0–2 assumes authored local frame
         // (front-face + ivory band) and reads nearly black on GLB geometry (e.g. pack reveal).
@@ -216,7 +216,7 @@ impl WgpuRenderer {
 
         let strength =
             if let Some(gain) = Self::room_env_linear_hdr_gain(frame, env_tune) {
-                // glTF emissive is absolute HDR; lit surfaces use `tile_seed` exposure
+                // glTF emissive is absolute HDR; lit surfaces use tile linear exposure
                 // (often ≪ 1). Scale bloom down in crushed rooms so candle halos stay
                 // tight instead of fogging the frame.
                 let ev = gain.max(1e-8).log2();

@@ -61,12 +61,8 @@ fn capped_image_at(capped: &[Option<CappedGltfImage>], index: usize) -> Option<&
     capped.get(index).and_then(|o| o.as_ref())
 }
 
-/// `COLOR_0.a` tag: archive sign description samples [`decal_tex`](../../shaders/room_glb.wgsl) at `uv`.
-pub const ROOM_ENV_COLOR_A_ARCHIVE_DECAL: f32 = 2.0;
-/// `COLOR_0.a` tag: skip directional shadow receive (`room_glb.wgsl`) — chrome / pedestal shell.
-pub const ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW: f32 = 3.0;
-/// `COLOR_0.a` tag: pick-blind hallway `walls` mesh — per-run wall tint in `room_glb.wgsl`.
-pub const ROOM_ENV_COLOR_A_HALLWAY_WALL_TINT: f32 = 4.0;
+// Room-env special cases are now explicit per-primitive flags in `GltfPbrUniform`
+// (`room_gpu_load.rs`) instead of overloading `COLOR_0.a` vertex alpha tags.
 
 /// Shop [`shop.glb`](../../../assets/3d/shop.glb) glazed ceramic on relic/talisman trays.
 pub const SHOP_PORCELAIN_MATERIAL_NAME: &str = "Porcelain";
@@ -1000,7 +996,7 @@ pub fn decode_env_primitive(
         (None, 1.0)
     };
 
-    let mut vertices: Vec<Vertex3dTex> = (0..positions_local.len())
+    let vertices: Vec<Vertex3dTex> = (0..positions_local.len())
         .map(|i| {
             let p = node_world.transform_point3(Vec3::from(positions_local[i]));
             let n = normal_xform
@@ -1032,18 +1028,6 @@ pub fn decode_env_primitive(
             }
         })
         .collect();
-    // `room_glb.wgsl` composites `@binding(3)` decal_tex when `COLOR_0.a` matches tags below.
-    if is_archive_sign {
-        for v in &mut vertices {
-            v.color[3] = ROOM_ENV_COLOR_A_ARCHIVE_DECAL;
-        }
-    } else if log_asset_label == "archive.glb" {
-        // Every archive shell mesh except description boards (tag 2 above): no directional
-        // shadows — punctual lights only. Avoids per-node lists missing new `btn_*` / `text_*`.
-        for v in &mut vertices {
-            v.color[3] = ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW;
-        }
-    }
     let factor = pbr.base_color_factor();
 
     let albedo_src = pbr.base_color_texture().and_then(|tex_info| {

@@ -1,25 +1,25 @@
-struct CameraUniform {
+struct TileUniform {
     view_proj: mat4x4<f32>,
     model: mat4x4<f32>,
-    base_color_factor: vec4<f32>,
+    tile_visual_params: vec4<f32>,
     cam_pos: vec3<f32>,
     // Per-tile seed written by the renderer (slot index as f32). Used to
     // offset procedural noise so each tile's pattern is unique — currently
     // only sampled by the tortoise-shell branch in `tortoise_albedo`.
-    tile_seed: f32,
+    tile_material_seed: f32,
     // Showcase decal atlas: xy = origin in normalized atlas coords, zw = scale per axis.
-    decal_atlas_uv: vec4<f32>,
+    tile_decal_atlas_uv: vec4<f32>,
     /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient (albedo * 0.08);
     /// w = inverse document scale for embedded glTF punctual attenuation.
-    hdr_tonemap: vec4<f32>,
+    tile_post_params: vec4<f32>,
     /// x = embedded glTF inverse-square intensity scale (`RoomEnvLightingTune::tile_gltf_punctual_scale`).
-    punctual_tuning: vec4<f32>,
+    tile_punctual_params: vec4<f32>,
 };
 
 // ACES tonemapping is applied once in `tonemap_composite.wgsl`. This shader
 // writes linear HDR to `scene_color` (`Rgba16Float`).
 
-@group(0) @binding(0) var<uniform> cam: CameraUniform;
+@group(0) @binding(0) var<uniform> cam: TileUniform;
 @group(0) @binding(1) var base_color: texture_2d<f32>;
 @group(0) @binding(2) var base_sampler: sampler;
 @group(0) @binding(3) var decal_tex: texture_2d<f32>;
@@ -33,9 +33,9 @@ struct GltfPbrUniform {
     _pad0: f32,
     emissive_factor: vec4<f32>,
     alpha_mode: u32,
+    flags: u32,
     _pad1_0: u32,
     _pad1_1: u32,
-    _pad1_2: u32,
 }
 
 @group(0) @binding(5) var<uniform> pbr: GltfPbrUniform;
@@ -57,7 +57,7 @@ struct PointLight {
 struct PointLights {
     // count.x = number of active lights; rest is std140 padding.
     count: vec4<u32>,
-    // extras.x = display gamma; extras.w = lit_mesh inverse-square scale (tiles use `punctual_tuning.x`).
+    // extras.x = display gamma; extras.w = lit_mesh inverse-square scale (tiles use `tile_punctual_params.x`).
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
@@ -316,11 +316,11 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         && in.local_n.y >= abs(in.local_n.x)
         && in.local_n.y >= abs(in.local_n.z);
 
-    // cam.base_color_factor.w — see `tile_body.rs`:
+    // cam.tile_visual_params.w — see `tile_body.rs`:
     //   0–2 = procedural tile body (`TileBodyShaderKind`),
     //   4 = sample bound base-color texture, no decal projection (shop room),
     //   5 = sample bound base-color per primitive + mahjong decal on **Face** material only.
-    let body_kind = cam.base_color_factor.w;
+    let body_kind = cam.tile_visual_params.w;
     let use_textured_env = body_kind > 3.5 && body_kind < 4.5;
     let use_textured_tile_glb = body_kind > 4.5 && body_kind < 5.5;
     let use_textured_albedo = use_textured_env || use_textured_tile_glb;
@@ -385,7 +385,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let plastic_rgb = select(plastic_side, plastic_face, is_front);
 
         // ── Tortoise shell (mat 2) ──────────────────────────────────────
-        let tortoise_body = tortoise_albedo(in.local_pos, cam.tile_seed, normalize(in.local_n));
+        let tortoise_body =
+            tortoise_albedo(in.local_pos, cam.tile_material_seed, normalize(in.local_n));
         let honey_mean = vec3<f32>(0.72, 0.48, 0.18);
         // Keep most of the shell mottle on the face — heavy flattening made every tile read identical.
         let tortoise_face = mix(tortoise_body, honey_mean, 0.06);
@@ -417,7 +418,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let raw_v = in.local_pos.x + 0.5;
         let proj_uv = vec2<f32>(1.0 - raw_u, raw_v);
         let decal_uv_face = proj_uv;
-        let decal_uv = decal_uv_face * cam.decal_atlas_uv.zw + cam.decal_atlas_uv.xy;
+        let decal_uv =
+            decal_uv_face * cam.tile_decal_atlas_uv.zw + cam.tile_decal_atlas_uv.xy;
         let decal = textureSample(decal_tex, base_sampler, decal_uv);
         let in_uv = decal_uv_face.x >= 0.0 && decal_uv_face.x <= 1.0 && decal_uv_face.y >= 0.0 && decal_uv_face.y <= 1.0;
         // Imported tile meshes: decal only on the authored **Face** material (`v_color.a`).
@@ -483,9 +485,9 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         }
     }
 
-    // Enhancement kind from base_color_factor.z:
+    // Enhancement kind from tile_visual_params.z:
     //   0 = none, 1 = pearl, 2 = gilded, 3 = polychrome.
-    let enh = cam.base_color_factor.z;
+    let enh = cam.tile_visual_params.z;
     let has_enh = enh > 0.5;
 
     // View direction from the actual camera position passed via uniform.
@@ -506,12 +508,13 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let radius = lights.lights[i].pos.w;
         let kind = lights.lights[i].params.x;
         let lc = lights.lights[i].color.rgb * punc_rgb_mul;
-        let intensity = lights.lights[i].color.a * select(1.0, cam.punctual_tuning.x, kind > 0.5);
+        let intensity =
+            lights.lights[i].color.a * select(1.0, cam.tile_punctual_params.x, kind > 0.5);
         let to_light = lp - in.world_pos;
         let dist = length(to_light);
-        // `hdr_tonemap.w` carries inverse document scale on tile draws (see
-        // `showcase_tiles.rs`); `decal_atlas_uv.y` is decal-atlas V — not inv_doc.
-        let inv_doc = cam.hdr_tonemap.w;
+        // `tile_post_params.w` carries inverse document scale on tile draws (see
+        // `showcase_tiles.rs`); `tile_decal_atlas_uv.y` is decal-atlas V — not inv_doc.
+        let inv_doc = cam.tile_post_params.w;
         let atten = select(
             scene_smooth_point_atten(dist, radius),
             punctual_attenuation_with_inv_doc_scale(dist, radius, inv_doc),
@@ -631,7 +634,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
     // Per-light `punctual_shadow_vis` in the loop above — do not min all caster
     // frustums here (misaligns for multi-light maps and crushes celebration /
-    // procedural scenes where `hdr_tonemap.w` is zero).
+    // procedural scenes where `tile_post_params.w` is zero).
     var lit_rgb = rgb * point_contrib + sheen_acc;
 
     // Tortoise shell: warm amber Fresnel rim at grazing angles.
@@ -645,14 +648,14 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     }
 
     // glTF metallic–roughness + emissive (linear), sampled on `uv_emr`.
-    // `decal_atlas_uv.z` carries room emissive scale for imported shop/hallway only;
+    // `tile_decal_atlas_uv.z` carries room emissive scale for imported shop/hallway only;
     // showcase `tile.glb` uses zw as decal atlas scale — keep multiplier at 1 there.
     var gltf_emissive_hdr = vec3<f32>(0.0);
     if (use_textured_albedo) {
         let mr_s = textureSample(metallic_roughness_tex, base_sampler, in.uv_emr);
         let metallic = clamp(mr_s.b * pbr.metallic_factor, 0.0, 1.0);
         let emissive_base = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb * pbr.emissive_factor.rgb;
-        let emissive_scale = select(1.0, cam.decal_atlas_uv.z, use_textured_env);
+        let emissive_scale = select(1.0, cam.tile_decal_atlas_uv.z, use_textured_env);
         let emissive = emissive_base * emissive_scale;
         gltf_emissive_hdr = emissive;
         lit_rgb = lit_rgb * (1.0 - metallic * 0.78);
@@ -660,20 +663,20 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     }
 
     // ── Blocked-tile dimming (solitaire) ───────────────────────────
-    // base_color_factor.x: 1.0 = free/playable, <1.0 = blocked.
+    // tile_visual_params.x: 1.0 = free/playable, <1.0 = blocked.
     // Desaturate toward luminance then scale down so blocked tiles
     // read as inert stone without becoming illegible.
-    let brightness = cam.base_color_factor.x;
+    let brightness = cam.tile_visual_params.x;
     if (brightness < 0.99) {
         let lum = dot(lit_rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
         lit_rgb = mix(lit_rgb, vec3<f32>(lum), 0.35) * brightness;
     }
 
     // ── Hover / selection fresnel ───────────────────────────────────
-    // base_color_factor.y: 0.0 = none, 0.5 = hovered, 1.0 = selected.
+    // tile_visual_params.y: 0.0 = none, 0.5 = hovered, 1.0 = selected.
     // Hover: saturated electric-blue rim (thin, tight).
     // Selected: warm champagne-gold rim (wider, brighter).
-    let sel = cam.base_color_factor.y;
+    let sel = cam.tile_visual_params.y;
     if (sel > 0.25) {
         let edge = 1.0 - ndv_global;
         if (sel < 0.75) {
@@ -691,19 +694,19 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     var out_rgb: vec3<f32>;
-    if (cam.hdr_tonemap.x > 0.5) {
+    if (cam.tile_post_params.x > 0.5) {
         // Table / room linear HDR path: write the un-tonemapped HDR into
         // `scene_color`. `tonemap_composite.wgsl` applies the single ACES
         // pass + sRGB encode; the per-shader `lights.extras.x` gamma slider
         // is intentionally a no-op here.
         //
-        // `hdr_tonemap.y` crushes punctual-lit albedo (gameplay feel).
+        // `tile_post_params.y` crushes punctual-lit albedo (gameplay feel).
         // glTF emissive is authored as outgoing radiance — if it goes through the same multiplier,
         // bright point lights on the same mesh (e.g. hallway lamp bulbs) swamp it and changing
         // emissive scale is invisible. Keep emissive out of that multiply (same idea as
-        // `room_glb.wgsl`: emissive is not scaled by `tile_seed`).
-        let hem = cam.hdr_tonemap.z * rgb * vec3<f32>(0.08);
-        var hdr = (lit_rgb - gltf_emissive_hdr + hem) * cam.hdr_tonemap.y;
+        // `room_glb.wgsl`: emissive is not scaled by room linear exposure).
+        let hem = cam.tile_post_params.z * rgb * vec3<f32>(0.08);
+        var hdr = (lit_rgb - gltf_emissive_hdr + hem) * cam.tile_post_params.y;
         hdr = hdr + gltf_emissive_hdr;
         out_rgb = hdr;
     } else {

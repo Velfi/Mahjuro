@@ -1,36 +1,41 @@
 // shop.glb environment — glTF-style punctual lights + metallic–roughness + ACES (fitted).
 // Separate from `tile_3d.wgsl` (candle pools + artistic lambert floor).
 //
-// Uniform hacks (same `CameraUniform` layout as tiles; shop writer only):
-// - `base_color_factor.y` = animation-lab unlit debug (`1` = flat N·L).
-// - `tile_seed`     = linear HDR exposure multiplier before tonemap
-// - `decal_atlas_uv.x` = ambient scale (0 = punctual-only interior)
-// - `decal_atlas_uv.y` = 1/world_scale — inverse-square uses document-space distance (glTF units)
-// - `decal_atlas_uv.z` = glTF emissive strength multiplier (see `SHOP_GLTF_EMISSIVE_SCALE`)
-// - `decal_atlas_uv.w` = main-menu hub moon synodic phase (`0..1`; unused elsewhere)
+// Room-env uniform (`RoomEnvUniform` in Rust) keeps tile-layout parity while
+// naming room semantics explicitly:
+// - `room_debug_params.y` = animation-lab unlit debug (`1` = flat N·L).
+// - `room_linear_exposure` = linear HDR exposure multiplier before tonemap.
+// - `room_env_params.x` = ambient scale (0 = punctual-only interior)
+// - `room_env_params.y` = 1/world_scale — inverse-square uses document-space distance (glTF units)
+// - `room_env_params.z` = glTF emissive strength multiplier (see `SHOP_GLTF_EMISSIVE_SCALE`)
+// - `room_env_params.w` = main-menu hub moon synodic phase (`0..1`; unused elsewhere)
+// - `room_post_params.w` = main-menu pride rainbow scene time (`0` = off)
 //
 // Point / spot `pos.w` = max light distance in **world units** (`KHR_lights_punctual` range),
 // or `0` for infinite range (pure inverse-square with a minimum distance clamp).
 
 const PI: f32 = 3.14159265358979323846;
+const GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT: u32 = 1u << 0u;
+const GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL: u32 = 1u << 1u;
+const GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE: u32 = 1u << 2u;
+const GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW: u32 = 1u << 3u;
+/// Default `RoomEnvLightingTune::linear_exposure_base` (`2^-9`); gold signage fill is
+/// normalized against this so Scene Look exposure tracks punctual lights, not emissive.
+const ROOM_LINEAR_EXPOSURE_BASE_DEFAULT: f32 = 1.0 / 512.0;
 // Hallway vertex warp: `hallway_vertex_warp.wgsl` prepended in `embedded_wgsl::SHOP_GLB`.
 
-struct CameraUniform {
+struct RoomEnvUniform {
     view_proj: mat4x4<f32>,
     model: mat4x4<f32>,
-    base_color_factor: vec4<f32>,
+    room_debug_params: vec4<f32>,
     cam_pos: vec3<f32>,
-    tile_seed: f32,
-    decal_atlas_uv: vec4<f32>,
-    /// Must match `wgpu_renderer::CameraUniform::hdr_tonemap` (layout parity with `lit_mesh`).
-    /// `w` = main-menu pride rainbow scene time when active (`0` = off); moon/star
-    /// meshes tagged via `pbr.emissive_factor.w`.
-    hdr_tonemap: vec4<f32>,
-    /// Layout parity with `tile_3d.wgsl` (`punctual_tuning` unused in this shader).
-    punctual_tuning: vec4<f32>,
+    room_linear_exposure: f32,
+    room_env_params: vec4<f32>,
+    room_post_params: vec4<f32>,
+    _unused_punctual_tuning: vec4<f32>,
 };
 
-@group(0) @binding(0) var<uniform> cam: CameraUniform;
+@group(0) @binding(0) var<uniform> cam: RoomEnvUniform;
 @group(0) @binding(1) var base_color: texture_2d<f32>;
 @group(0) @binding(2) var base_sampler: sampler;
 @group(0) @binding(3) var decal_tex: texture_2d<f32>;
@@ -43,9 +48,9 @@ struct GltfPbrUniform {
     _pad0: f32,
     emissive_factor: vec4<f32>,
     alpha_mode: u32,
+    flags: u32,
     _pad1_0: u32,
     _pad1_1: u32,
-    _pad1_2: u32,
 }
 
 @group(0) @binding(5) var<uniform> pbr: GltfPbrUniform;
@@ -229,7 +234,7 @@ struct ShopShaded {
 
 fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let base_s = textureSample(base_color, base_sampler, in.uv);
-    let is_hallway_wall_tint = abs(in.v_color.a - 4.0) < 0.01;
+    let is_hallway_wall_tint = (pbr.flags & GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT) != 0u;
     let vtx_alpha = select(in.v_color.a, 1.0, is_hallway_wall_tint);
     let tex_a = base_s.a * vtx_alpha;
     if (pbr.alpha_mode == 1u) {
@@ -256,15 +261,14 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     if (is_hallway_wall_tint && hd.flags.x > 0.5) {
         albedo = albedo * hd.bow.rgb;
     }
-    // Archive decal boards tag `COLOR_0.a = 2` in `room_env_gltf` (see `decode_env_primitive`).
-    let is_archive_decal = abs(in.v_color.a - 2.0) < 0.01;
+    let is_archive_decal = (pbr.flags & GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL) != 0u;
     if (is_archive_decal) {
         let dec = textureSample(decal_tex, base_sampler, in.uv);
         albedo = mix(albedo, dec.rgb, dec.a);
     }
 
     // Animation-lab false shading: albedo × simple N·L (skips punctual PBR / shadows).
-    if (cam.base_color_factor.y > 0.5) {
+    if (cam.room_debug_params.y > 0.5) {
         var n_geom = normalize(in.wn);
         if (!front_facing) {
             n_geom = -n_geom;
@@ -292,19 +296,19 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
 
     var emissive = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb
         * pbr.emissive_factor.rgb
-        * cam.decal_atlas_uv.z;
-    // Main-menu `MoonObject` (`emissive_factor.w` ≈ 2): phase terminator always;
-    // pride rainbow tints the lit hemisphere when `hdr_tonemap.w` > 0.
-    if (pbr.emissive_factor.w > 1.5) {
+        * cam.room_env_params.z;
+    // Main-menu moon mesh: phase terminator always; pride rainbow tints the lit
+    // hemisphere when `room_post_params.w` > 0.
+    if ((pbr.flags & GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE) != 0u) {
         let V = normalize(cam.cam_pos - in.world_pos);
         let phase_col =
-            moon_hub_phase_emissive(albedo, n_world, V, cam.decal_atlas_uv.w);
-        if (cam.hdr_tonemap.w > 0.0) {
-            let lit_mask = moon_phase_lit_mask(n_world, V, cam.decal_atlas_uv.w);
+            moon_hub_phase_emissive(albedo, n_world, V, cam.room_env_params.w);
+        if (cam.room_post_params.w > 0.0) {
+            let lit_mask = moon_phase_lit_mask(n_world, V, cam.room_env_params.w);
             let mask = max(emissive.r, max(emissive.g, emissive.b));
             let swirl_uv = in.uv_emr * 0.65
                 + vec2<f32>(in.world_pos.x, in.world_pos.y) * 0.004;
-            let rainbow = rainbow_swirl_rgb(swirl_uv, cam.hdr_tonemap.w);
+            let rainbow = rainbow_swirl_rgb(swirl_uv, cam.room_post_params.w);
             let rb = rainbow * mask;
             let phase_lum = dot(phase_col, vec3<f32>(0.299, 0.587, 0.114));
             let rb_lum = max(dot(rb, vec3<f32>(0.299, 0.587, 0.114)), 1e-4);
@@ -315,12 +319,12 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         }
         return ShopShaded(emissive, emissive, out_alpha);
     }
-    // `star*` (`emissive_factor.w` ≈ 1): smooth pride fade only (no phase shading).
-    if (pbr.emissive_factor.w > 0.5 && pbr.emissive_factor.w <= 1.5 && cam.hdr_tonemap.w > 0.0) {
+    // Main-menu star meshes: smooth pride fade only (no phase shading).
+    if ((pbr.flags & GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW) != 0u && cam.room_post_params.w > 0.0) {
         let mask = max(emissive.r, max(emissive.g, emissive.b));
         let swirl_uv = in.uv_emr * 0.65
             + vec2<f32>(in.world_pos.x, in.world_pos.y) * 0.004;
-        emissive = rainbow_swirl_smooth_rgb(swirl_uv, cam.hdr_tonemap.w) * mask;
+        emissive = rainbow_swirl_smooth_rgb(swirl_uv, cam.room_post_params.w) * mask;
     }
 
     let V = normalize(cam.cam_pos - in.world_pos);
@@ -357,7 +361,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let kind = pl.params.x;
         let atten = select(
             scene_smooth_point_atten(dist, range_w),
-            punctual_attenuation_with_inv_doc_scale(dist, range_w, cam.decal_atlas_uv.y),
+            punctual_attenuation_with_inv_doc_scale(dist, range_w, cam.room_env_params.y),
             kind > 0.5,
         );
         let radiance = pl.color.rgb * boss_light_rgb_mul * pl.color.a * atten;
@@ -395,7 +399,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let to_frag = in.world_pos - s.pos.xyz;
         let dist = length(to_frag);
         let range_spot = s.pos.w;
-        let atten_spot = punctual_attenuation_with_inv_doc_scale(dist, range_spot, cam.decal_atlas_uv.y);
+        let atten_spot = punctual_attenuation_with_inv_doc_scale(dist, range_spot, cam.room_env_params.y);
         if (atten_spot <= 0.0) {
             continue;
         }
@@ -437,7 +441,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         Lo = Lo + diffuse + specular;
     }
 
-    let ambient_scale = cam.decal_atlas_uv.x;
+    let ambient_scale = cam.room_env_params.x;
     let amb_dielectric = room_world_hemisphere_ambient(n_world, albedo, metallic, ambient_scale);
     let metal_amb_tint = mix(
         vec3<f32>(0.58, 0.50, 0.40),
@@ -469,13 +473,18 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let gold_sign_ramp = smoothstep(0.45, 0.85, metallic)
         * select(0.0, 1.0, warm_gold_sign);
     let gold_sign_body = gold_sign_ramp * albedo * (0.22 + 0.40 * pow(NdotV, 0.7));
+    // Scale with `room_linear_exposure` but keep default authored brightness (fill was tuned at
+    // `linear_exposure_base == ROOM_LINEAR_EXPOSURE_BASE_DEFAULT`). Unscaled add looked
+    // emissive when crushing room exposure in Scene Look.
+    let gold_sign_hdr = gold_sign_body
+        * cam.room_linear_exposure
+        / max(ROOM_LINEAR_EXPOSURE_BASE_DEFAULT, 1e-6);
 
-    // `tile_seed` is scene exposure for punctual PBR (often ≪ 1 to tame imported
+    // `room_linear_exposure` is scene exposure for punctual PBR (often ≪ 1 to tame imported
     // glTF light energy). Keep the runtime hemisphere fill in scene-linear units
     // so the Scene Look "Room ambient" slider remains visible.
-    var lit_hdr = Lo * cam.tile_seed + ambient + metal_hemi;
+    var lit_hdr = Lo * cam.room_linear_exposure + gold_sign_hdr + ambient + metal_hemi;
     lit_hdr = lit_hdr * sample_contact_ao(in.world_pos);
-    lit_hdr = lit_hdr + gold_sign_body;
     // Per-light projected shadows are applied in the punctual / spot loops above.
     let emissive_out = emissive * boss_light_rgb_mul;
     let hdr = lit_hdr + emissive_out;

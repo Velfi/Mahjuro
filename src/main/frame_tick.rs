@@ -349,6 +349,7 @@ impl App {
         let gp_ctx = crate::ui::input::GamepadPollCtx {
             face_bindings: self.active_face_bindings(),
             item_inspect_overlay: showcase_orbit_overlay,
+            shop_storeroom_orbit: self.shop_storeroom_face_active(),
         };
         actions.append(&mut self.mouse_actions);
         if self.mouse_right_clicked {
@@ -974,6 +975,11 @@ impl App {
                     .map(|i| i.item_inspect_zoom_triggers)
                     .unwrap_or(0.0),
                 shop_storeroom_orbit_drag_px,
+                shop_storeroom_orbit_stick: self
+                    .input
+                    .as_ref()
+                    .map(|i| i.shop_storeroom_orbit_stick)
+                    .unwrap_or((0.0, 0.0)),
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
                 suspended_collection: None,
@@ -1067,6 +1073,7 @@ impl App {
                         .map(|i| i.item_inspect_zoom_triggers)
                         .unwrap_or(0.0),
                     shop_storeroom_orbit_drag_px,
+                    shop_storeroom_orbit_stick: (0.0, 0.0),
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
                     suspended_collection,
@@ -1162,10 +1169,12 @@ impl App {
                 Scene::Shop(s) if s.sell_hold_in_progress() || s.buy_hold_in_progress()
             );
             let progress = match &self.scene {
-                Scene::Shop(s) if hold => s
-                    .sell_hold_progress(now)
-                    .or_else(|| s.buy_hold_progress(now))
-                    .unwrap_or(0.0),
+                Scene::Shop(s) if hold => {
+                    let shop = crate::game::engine::GameEngine::read_shop(&self.run);
+                    s.sell_hold_progress(now, &shop)
+                        .or_else(|| s.buy_hold_progress(now, &self.run, &shop))
+                        .unwrap_or(0.0)
+                }
                 _ => 0.0,
             };
             let controller = input.mode == crate::ui::input::InputMode::Controller;
@@ -1181,7 +1190,12 @@ impl App {
             && !self.scene.has_blocking_overlay();
         if gameplay_cash_in_hold && let Some(input) = self.input.as_ref() {
             let progress = match &self.scene {
-                Scene::Gameplay(g) => g.cash_in_hold_progress(now).unwrap_or(0.0),
+                Scene::Gameplay(g) => {
+                    let trigger_enabled =
+                        crate::game::engine::GameEngine::read(&self.run).trigger_enabled;
+                    g.cash_in_hold_progress(now, trigger_enabled)
+                        .unwrap_or(0.0)
+                }
                 _ => 0.0,
             };
             let controller = input.mode == crate::ui::input::InputMode::Controller;
@@ -1243,7 +1257,6 @@ impl App {
             }
             self.run
                 .set_auto_cash_in_on_full_structure(opts.auto_cash_in_on_full_structure);
-            self.run.set_hints_enabled(opts.hints_enabled);
             if let Some(ref mut input) = self.input {
                 input.swap_ab = opts.swap_ab;
                 input.swap_xy = opts.swap_xy;

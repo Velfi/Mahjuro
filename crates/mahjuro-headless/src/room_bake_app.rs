@@ -171,6 +171,7 @@ impl RoomBakeApp {
             item_inspect_orbit_stick: (0.0, 0.0),
             item_inspect_zoom_triggers: 0.0,
             shop_storeroom_orbit_drag_px: (0.0, 0.0),
+            shop_storeroom_orbit_stick: (0.0, 0.0),
             rumble_lab_ops: &mut scratch.rumble_lab_ops,
             suspended_shop: None,
             suspended_collection: None,

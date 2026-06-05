@@ -410,7 +410,9 @@ impl ShopScene {
         let Some(start) = self.west_sell_hold_started else {
             return;
         };
-        if now.saturating_duration_since(start).as_secs_f32() < super::SHOP_SELL_HOLD_SECONDS {
+        if now.saturating_duration_since(start).as_secs_f32()
+            < crate::ui::prompt_hold_ring::hold_act_seconds()
+        {
             return;
         }
         let Some(action) = super::shared::focused_sell_action(
@@ -441,7 +443,9 @@ impl ShopScene {
         let Some(start) = self.buy_hold_started else {
             return;
         };
-        if now.saturating_duration_since(start).as_secs_f32() < super::SHOP_BUY_HOLD_SECONDS {
+        if now.saturating_duration_since(start).as_secs_f32()
+            < crate::ui::prompt_hold_ring::hold_act_seconds()
+        {
             return;
         }
         let Some(action) = self.focus.and_then(|f| f.to_hit()).and_then(|hit| {
@@ -456,6 +460,16 @@ impl ShopScene {
             self.buy_hold_started = None;
             return;
         };
+        if !super::shared::shop_buy_action_valid(
+            action,
+            run,
+            &self.items,
+            &self.zodiac_items,
+            &self.talisman_items,
+            &self.pack_items,
+        ) {
+            return;
+        }
         self.apply_buy_action(action, run, bus, cursor_pos, overlay_request, window_wh);
     }
 

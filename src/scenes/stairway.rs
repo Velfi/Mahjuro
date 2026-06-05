@@ -14,7 +14,7 @@ use crate::ui::controller_hints::{
     HintStyle, confirm_continue_footer_row, hint_style_with_alpha, push_inline_hint_rows,
 };
 use crate::ui::input::UiAction;
-use crate::ui::inspect_plaque::estimated_flavor_line_count;
+use crate::ui::inspect_plaque::{estimated_flavor_line_count, flavor_spans_layout_width};
 
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
@@ -42,19 +42,12 @@ fn push_flavor_text(frame: &mut UiFrame, w: f32, h: f32, flavor: &'static [Relic
     }
     let margin_x = w * 0.045;
     let margin_y = h * 0.11;
-    let max_inner_w = (w * 0.42).min(560.0);
+    let max_inner_w = (w * 0.44).min(560.0).max(w - 2.0 * margin_x);
     let body_px = typography::size(typography::H32, h);
     let line_step = colored_keywords::colored_row_line_step(body_px);
-    let char_w = body_px * 0.52;
-    let char_count: usize = flavor.iter().map(|s| s.text.chars().count()).sum();
-    let chars_per_line = (max_inner_w / char_w).max(18.0) as usize;
-    let content_lines = estimated_flavor_line_count(flavor, max_inner_w, body_px, 8);
-    let content_h = line_step * content_lines as f32;
-    let content_w = if content_lines <= 1 && char_count <= chars_per_line {
-        (char_count as f32 * char_w).max(body_px * 4.0)
-    } else {
-        max_inner_w
-    };
+    let content_w = flavor_spans_layout_width(flavor, body_px, max_inner_w);
+    let content_lines = estimated_flavor_line_count(flavor, content_w, body_px, 16);
+    let content_h = line_step * content_lines as f32 + body_px * 0.35;
     let left = w - margin_x - content_w;
     let top = margin_y;
 

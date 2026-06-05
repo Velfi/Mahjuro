@@ -5,6 +5,7 @@
 //   rect, fill_color, track_color, params
 // params.x = inner radius in normalized UV (outer edge is |uv| = 1)
 // params.y = fill progress in [0, 1]
+// params.z = 1 when the hold action is invalid (pulsing red ring, no progress)
 
 struct Globals {
     screen: vec2<f32>,
@@ -70,9 +71,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         rel += 1.0;
     }
 
+    let invalid = in.params.z > 0.5;
     let edge = max(fwidth(rel) * 2.0, 0.004);
-    let fill_w = 1.0 - smoothstep(progress - edge, progress + edge, rel);
-    let col = mix(in.track_color, in.fill_color, fill_w);
+    var fill_w = 1.0 - smoothstep(progress - edge, progress + edge, rel);
+    var col = mix(in.track_color, in.fill_color, fill_w);
+    if invalid {
+        let pulse = 0.52 + 0.48 * sin(globals.time * 12.0);
+        col = mix(in.track_color, in.fill_color, pulse * band);
+    }
 
     let inv_g = 1.0 / max(globals.gamma, 0.01);
     let rgb = pow(col.rgb, vec3<f32>(inv_g));

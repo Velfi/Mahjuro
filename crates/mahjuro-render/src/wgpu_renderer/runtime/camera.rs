@@ -196,7 +196,7 @@ impl WgpuRenderer {
         1.0 / s.max(1e-6)
     }
 
-    /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline` (`CameraUniform.hdr_tonemap`)
+    /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline` (`TileUniform.tile_post_params`)
     /// and `lit_mesh` (`SsrGlobals.hdr_tonemap`). Same `RoomEnvLightingTune` as the room.
     pub(super) fn tile_hdr_tonemap(&self, frame: &crate::draw_cmd::UiFrame) -> [f32; 4] {
         use crate::draw_cmd::DrawCmd;

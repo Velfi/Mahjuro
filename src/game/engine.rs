@@ -289,7 +289,6 @@ pub struct GameplayInteractionReadModel {
     pub consumable_capacity: usize,
     pub consumable_count: usize,
     pub relic_count: usize,
-    pub hints_enabled: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -364,7 +363,6 @@ impl<'a> GameEngine<'a> {
     ) {
         run.apply_progression(progress);
         run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-        run.set_hints_enabled(settings.hints_enabled);
     }
 
     pub fn reset_to_demo(run: &mut RunState, progress: &PlayerProgress, settings: &AppSettings) {
@@ -606,7 +604,6 @@ impl<'a> GameEngine<'a> {
             consumable_capacity: core.consumables.capacity,
             consumable_count: core.consumables.items.len(),
             relic_count: run.relics.len(),
-            hints_enabled: run.hints_enabled,
         }
     }
 
@@ -921,13 +918,26 @@ impl<'a> GameEngine<'a> {
         self.finish_outcome(command, before, queue_start, data, rejection)
     }
 
+    fn reject_shop(
+        &mut self,
+        command: ShopCommand,
+        before: EngineSnapshot,
+        rejection: ShopCommandRejection,
+    ) -> ShopCommandOutcome {
+        if rejection == ShopCommandRejection::InsufficientGold {
+            self.bus
+                .push(GameEvent::UiSound(crate::sfx_id::SfxId::UiCancel));
+        }
+        ShopCommandOutcome::rejected(command, before, rejection)
+    }
+
     pub fn dispatch_shop(&mut self, command: ShopCommand) -> ShopCommandOutcome {
         let before = self.snapshot();
         let queue_start = self.bus.queue.len();
         let data = match command {
             ShopCommand::BuyRelic { relic, price } => {
                 if self.run.yen < price as i32 {
-                    return ShopCommandOutcome::rejected(
+                    return self.reject_shop(
                         command,
                         before,
                         ShopCommandRejection::InsufficientGold,
@@ -1009,7 +1019,7 @@ impl<'a> GameEngine<'a> {
             }
             ShopCommand::BuyZodiac { zodiac, price } => {
                 if self.run.yen < price as i32 {
-                    return ShopCommandOutcome::rejected(
+                    return self.reject_shop(
                         command,
                         before,
                         ShopCommandRejection::InsufficientGold,
@@ -1029,7 +1039,7 @@ impl<'a> GameEngine<'a> {
             }
             ShopCommand::BuyTalisman { kind, price } => {
                 if self.run.yen < price as i32 {
-                    return ShopCommandOutcome::rejected(
+                    return self.reject_shop(
                         command,
                         before,
                         ShopCommandRejection::InsufficientGold,
@@ -1095,7 +1105,7 @@ impl<'a> GameEngine<'a> {
             }
             ShopCommand::BuyPack { kind, price } => {
                 if self.run.yen < price as i32 {
-                    return ShopCommandOutcome::rejected(
+                    return self.reject_shop(
                         command,
                         before,
                         ShopCommandRejection::InsufficientGold,
@@ -1143,7 +1153,7 @@ impl<'a> GameEngine<'a> {
                     skip_cost_escalation = true;
                 }
                 if self.run.yen < yen_cost as i32 {
-                    return ShopCommandOutcome::rejected(
+                    return self.reject_shop(
                         command,
                         before,
                         ShopCommandRejection::InsufficientGold,

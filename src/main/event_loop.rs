@@ -359,6 +359,7 @@ impl App {
         crate::ui::input::GamepadPollCtx {
             face_bindings: self.active_face_bindings(),
             item_inspect_overlay: showcase_orbit_overlay,
+            shop_storeroom_orbit: self.shop_storeroom_face_active(),
         }
     }
 

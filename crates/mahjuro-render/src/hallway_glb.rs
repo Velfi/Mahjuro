@@ -28,12 +28,6 @@ pub const BTN_SKIP_ROUND: &str = "btn_skip_round";
 /// glTF mesh node for pick-blind hallway wall panels (tinted per run via [`HallwayDistortion::bow`]).
 pub const HALLWAY_WALLS_NODE: &str = "walls";
 
-/// `COLOR_0.a` on [`HALLWAY_WALLS_NODE`] — `room_glb.wgsl` multiplies albedo by `bow.rgb` (alpha treated as 1).
-/// Must differ from [`crate::room_env_gltf::ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW`]
-/// so hallway walls still receive punctual shadows.
-pub const HALLWAY_WALL_TINT_COLOR_TAG: f32 =
-    crate::room_env_gltf::ROOM_ENV_COLOR_A_HALLWAY_WALL_TINT;
-
 /// Linear RGB tints (blue, yellow, green, red, purple, orange, pink, brown).
 const HALLWAY_WALL_TINTS: [[f32; 3]; 8] = [
     [0.35, 0.55, 0.95],
@@ -162,7 +156,7 @@ fn hallway_depth_axis_doc() -> Vec3 {
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct HallwayDistortion {
     /// Pick-blind wall tint (linear RGB). `w` = wall barrel-bow strength (× |side_c| at wall verts).
-    /// Only meshes tagged with [`HALLWAY_WALL_TINT_COLOR_TAG`] multiply albedo by `bow.rgb`.
+    /// Only hallway `walls` primitives use `bow.rgb` tint in `room_glb.wgsl`.
     pub bow: [f32; 4],
     /// x = breathe amplitude, y = angular frequency, z = phase (rad), w = side falloff power.
     pub breathe: [f32; 4],
@@ -261,16 +255,6 @@ pub fn hallway_wing_intensity_scale(wing: u32) -> f32 {
     let t = ((wing - 1) as f32 / (HALLWAY_WING_FINAL - 1) as f32).clamp(0.0, 1.0);
     HALLWAY_WING_INTENSITY_AT_FIRST
         + t * (HALLWAY_WING_INTENSITY_AT_FINAL - HALLWAY_WING_INTENSITY_AT_FIRST)
-}
-
-fn tag_hallway_walls_for_runtime_tint(cpu: &mut RoomGlbCpu) {
-    for ep in &mut cpu.environment_primitives {
-        if ep.gltf_node_name.as_deref() == Some(HALLWAY_WALLS_NODE) {
-            for v in &mut ep.mesh.vertices {
-                v.color[3] = HALLWAY_WALL_TINT_COLOR_TAG;
-            }
-        }
-    }
 }
 
 impl HallwayDistortion {
@@ -661,7 +645,6 @@ pub fn load_hallway_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
         &HallwayRoomWalkHooks,
     )?;
     cpu.collision_meshes.clear();
-    tag_hallway_walls_for_runtime_tint(&mut cpu);
     Ok(cpu)
 }
 
@@ -859,22 +842,6 @@ mod tests {
     }
 
     #[test]
-    fn hallway_wall_tint_tag_does_not_disable_directional_shadows() {
-        use crate::room_env_gltf::{
-            ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW, ROOM_ENV_COLOR_A_HALLWAY_WALL_TINT,
-        };
-        assert!(
-            (super::HALLWAY_WALL_TINT_COLOR_TAG - ROOM_ENV_COLOR_A_HALLWAY_WALL_TINT).abs() < 1e-6
-        );
-        assert!(
-            (super::HALLWAY_WALL_TINT_COLOR_TAG - ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW)
-                .abs()
-                > 0.5,
-            "hallway wall tint must not reuse archive no-shadow tag"
-        );
-    }
-
-    #[test]
     fn hallway_walls_vertices_have_ripple_wall_weight() {
         let Some(file) = mahjuro_assets::asset_path::get("3d/hallway.glb") else {
             eprintln!("skip: no hallway.glb");
@@ -1041,13 +1008,8 @@ mod tests {
             super::HALLWAY_WALLS_NODE
         );
         assert!(
-            walls
-                .unwrap()
-                .mesh
-                .vertices
-                .iter()
-                .all(|v| (v.color[3] - super::HALLWAY_WALL_TINT_COLOR_TAG).abs() < 1e-4),
-            "walls vertices must carry the hallway wall tint tag"
+            !walls.unwrap().mesh.vertices.is_empty(),
+            "hallway walls primitive must contain vertices"
         );
     }
 

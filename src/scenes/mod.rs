@@ -179,6 +179,8 @@ pub struct UpdateCtx<'a> {
     pub item_inspect_zoom_triggers: f32,
     /// LMB-drag pixel delta for shop storeroom turntable (consumed each frame by [`ShopScene`]).
     pub shop_storeroom_orbit_drag_px: (f32, f32),
+    /// Gamepad right stick while browsing the shop storeroom (−1..1 each axis).
+    pub shop_storeroom_orbit_stick: (f32, f32),
     /// Queued by the rumble lab scene; drained into input state after `update()`.
     pub rumble_lab_ops: &'a mut Vec<RumbleLabOp>,
     /// [`ShopScene`] under shop showcase **inspect** presenter: orbit sync + focus cycling.

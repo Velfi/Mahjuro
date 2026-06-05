@@ -9,6 +9,22 @@ use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign,
 use crate::ui::colored_keywords;
 use crate::ui::tooltip::push_tooltip_frame_quads;
 
+/// Width that fits the longest `\n`-delimited hard line without wrapping.
+pub fn flavor_spans_layout_width(
+    spans: &[RelicFlavorSpan],
+    body_px: f32,
+    max_width_px: f32,
+) -> f32 {
+    let char_w = body_px * 0.52;
+    let longest_chars = spans
+        .iter()
+        .flat_map(|s| s.text.split('\n'))
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    (longest_chars as f32 * char_w + body_px * 1.5).clamp(body_px * 4.0, max_width_px)
+}
+
 /// Rough line count for relic / staircase flavor layout (matches bottom-aligned raster band).
 pub fn estimated_flavor_line_count(
     spans: &[RelicFlavorSpan],
@@ -16,11 +32,20 @@ pub fn estimated_flavor_line_count(
     body_px: f32,
     max_lines: usize,
 ) -> usize {
-    let char_count: usize = spans.iter().map(|s| s.text.chars().count()).sum();
-    let explicit_lines: usize = spans.iter().map(|s| s.text.matches('\n').count() + 1).sum();
-    let chars_per_line = (band_w / (body_px * 0.52)).max(18.0) as usize;
-    let wrapped_lines = char_count.div_ceil(chars_per_line).max(1);
-    explicit_lines.max(wrapped_lines).clamp(1, max_lines)
+    let char_w = body_px * 0.52;
+    let chars_per_line = (band_w / char_w).floor().max(1.0) as usize;
+    let mut lines = 0usize;
+    for span in spans {
+        for segment in span.text.split('\n') {
+            let chars = segment.chars().count();
+            lines += if chars == 0 {
+                1
+            } else {
+                chars.div_ceil(chars_per_line).max(1)
+            };
+        }
+    }
+    lines.clamp(1, max_lines)
 }
 
 /// Focus inspect: title, optional accent line (price/tier/CTA), and description in a screen-space
@@ -444,4 +469,30 @@ pub fn truncate_inspect_text(s: &str, max_chars: usize) -> String {
     }
     let take = max_chars.saturating_sub(1);
     t.chars().take(take).collect::<String>() + "…"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::relic::RelicFlavorSpan;
+
+    #[test]
+    fn flavor_line_count_wraps_each_hard_line_at_narrow_width() {
+        let spans = &[RelicFlavorSpan {
+            text: "The storeroom remembers\nits losers\ndisplayed and priced.\nYou browse\nyour predecessors.",
+            bold: false,
+            italic: false,
+        }];
+        let body_px = 32.0;
+        let narrow_w = 168.0;
+        let lines = estimated_flavor_line_count(spans, narrow_w, body_px, 16);
+        assert!(
+            lines >= 7,
+            "narrow band should wrap long hard lines, got {lines}"
+        );
+
+        let wide_w = flavor_spans_layout_width(spans, body_px, 560.0);
+        let wide_lines = estimated_flavor_line_count(spans, wide_w, body_px, 16);
+        assert_eq!(wide_lines, 5, "wide band should honor explicit newlines only");
+    }
 }

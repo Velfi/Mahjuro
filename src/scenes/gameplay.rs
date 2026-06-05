@@ -28,7 +28,6 @@ use std::time::Instant;
 use super::journal_transition::JournalTransition;
 use super::pause_menu::PauseMenu;
 use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
-use crate::core::hand::suggest_completions;
 use crate::core::scoring::StepKind;
 use crate::game::cascade::{CascadeTuning, ScoringCascade};
 use crate::game::engine::{CommandData, GameCommand, GameEngine};
@@ -48,35 +47,6 @@ use focus::{FocusTarget, PegKind, focus_kind};
 use hand_layout::hand_slots_for_count;
 
 use crate::ui::focus_nav::push_focus_ring;
-
-/// Memoized inputs + result for `suggest_completions`. The lookup key is a
-/// cheap fingerprint of the hand identities and the selection bitmask so we
-/// can decide whether to reuse the cached `hints`.
-#[derive(Default)]
-struct SuggestHintCache {
-    /// Hand tile uids (`Tile.id`) at the time the cache was last filled.
-    /// Cheaper to compare than copying full `Tile` values.
-    hand_uids: Vec<u32>,
-    /// Bitmask of selected hand indices. Hands max out at 16 tiles, so a
-    /// `u32` is plenty of headroom.
-    selection_mask: u32,
-    hints: Vec<usize>,
-}
-
-impl SuggestHintCache {
-    fn matches(&self, hand: &[crate::core::tile::Tile], selection_mask: u32) -> bool {
-        if self.selection_mask != selection_mask {
-            return false;
-        }
-        if self.hand_uids.len() != hand.len() {
-            return false;
-        }
-        self.hand_uids
-            .iter()
-            .zip(hand.iter())
-            .all(|(uid, tile)| *uid == tile.id)
-    }
-}
 
 pub struct GameplayScene {
     /// Queue of scoring cascade animations. The front entry is the active
@@ -126,12 +96,6 @@ pub struct GameplayScene {
     /// a `RefCell` because `draw_frame` takes `&self` but needs to update
     /// this stash.
     last_focus_rects: std::cell::RefCell<Vec<(FocusTarget, [f32; 4])>>,
-    /// Memoized result of [`crate::core::hand::suggest_completions`]. The
-    /// hint computation runs `validate_selection` for every unselected tile
-    /// (each call performs full backtracking validation), so we cache it
-    /// against the inputs that affect its output. `draw_frame` takes `&self`
-    /// so we use a `RefCell` to update the cache from the read path.
-    suggest_hint_cache: std::cell::RefCell<SuggestHintCache>,
     /// When set, a discard removed tiles but [`RunState::refill_hand`] has not
     /// run yet — the UI waits for the river animation first. See
     /// [`RunState::discard_refill_pending`]. Timing uses
@@ -216,7 +180,7 @@ pub struct GameplayScene {
     /// Hold-to-cash-in: press time while the player is charging a cash-in
     /// (gamepad trigger / keyboard **T** / Confirm on the Cash In button).
     /// Mirrors the shop's hold-to-sell — completes at
-    /// [`CASH_IN_HOLD_SECONDS`], cancelled on the matching release.
+    /// [`cash_in_hold_seconds()`], cancelled on the matching release.
     cash_in_hold_started: Option<Instant>,
     /// Hand-strip marquee multi-select. `Some` while Confirm is held over a
     /// hand tile (LMB / Space / Enter / gamepad A). Each focus or pointer
@@ -269,7 +233,10 @@ const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_milli
 
 /// Hold-to-cash-in duration (gamepad trigger / keyboard **T** / Confirm on the
 /// Cash In button). Drives the HUD progress ring + cash-in gate.
-pub(crate) const CASH_IN_HOLD_SECONDS: f32 = 1.0;
+#[inline]
+pub(crate) fn cash_in_hold_seconds() -> f32 {
+    crate::ui::prompt_hold_ring::hold_act_seconds()
+}
 
 /// Peak flare intensity when a single hand exceeds the entire blind.
 const CANDLE_FLARE_PEAK: f32 = 1.5;
@@ -588,7 +555,6 @@ impl GameplayScene {
             pause_menu: PauseMenu::new(),
             focus: None,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
-            suggest_hint_cache: std::cell::RefCell::new(SuggestHintCache::default()),
             pending_discard_refill: None,
             active_discard_anim: None,
             river_settled_tiles: Vec::new(),
@@ -933,12 +899,33 @@ impl GameplayScene {
     }
 
     /// Normalized hold-to-cash-in progress for the HUD ring + rumble (0..=1).
+    /// Stays at 0 while cash-in is not allowed.
     #[inline]
-    pub(crate) fn cash_in_hold_progress(&self, now: Instant) -> Option<f32> {
-        self.cash_in_hold_started.map(|started| {
-            (now.saturating_duration_since(started).as_secs_f32() / CASH_IN_HOLD_SECONDS)
-                .clamp(0.0, 1.0)
-        })
+    pub(crate) fn cash_in_hold_progress(
+        &self,
+        now: Instant,
+        trigger_enabled: bool,
+    ) -> Option<f32> {
+        let started = self.cash_in_hold_started?;
+        if !trigger_enabled {
+            return Some(0.0);
+        }
+        Some(
+            (now.saturating_duration_since(started).as_secs_f32() / cash_in_hold_seconds())
+                .clamp(0.0, 1.0),
+        )
+    }
+
+    /// Freeze the cash-in hold clock while the action cannot succeed.
+    #[inline]
+    pub(crate) fn tick_cash_in_hold_anchor(&mut self, now: Instant, trigger_enabled: bool) {
+        if let Some(start) = self.cash_in_hold_started {
+            self.cash_in_hold_started = Some(crate::ui::prompt_hold_ring::freeze_hold_anchor(
+                start,
+                now,
+                trigger_enabled,
+            ));
+        }
     }
 
     pub(crate) fn enter_lab_mode(&mut self) {
