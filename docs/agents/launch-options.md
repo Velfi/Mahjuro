@@ -27,6 +27,9 @@ Headless tools (`mahjuro-bake`, `mahjuro-screenshot`) and bot/sweep always skip 
 | `RUST_LOG` | Standard `env_logger` filter (e.g. `mahjuro=debug`). |
 | `MAHJURO_STARTUP_PROFILE` | Startup timing tables + room GLB CPU/GPU upload metrics. |
 | `MAHJURO_GPU_MEM_PROFILE` | Log adapter hint + wgpu allocator totals (also on when `MAHJURO_STARTUP_PROFILE=1`). |
+| `MAHJURO_GPU_MEM_CONSTRAINED_MIB` | Override allocator MiB threshold for `pressure=constrained` (startup + runtime profiling). |
+| `MAHJURO_GPU_MEM_CRITICAL_MIB` | Override allocator MiB threshold for `pressure=critical` / eviction preflight. |
+| `MAHJURO_VALIDATE_OFFLINE_BAKES` | Opt in to runtime validation of committed offline bakes (GI/shadow/decal/relic). |
 | `MAHJURO_ASSET_CACHE_MB` | Byte-weighted LRU cap for pack/loose asset reads (default 128). |
 | `MAHJURO_LOADER_THREADS` | Background loader pool worker count (default 3, max 4). |
 | `MAHJURO_GRAPHICS_MODE` | Force preset at startup: `performance`, `low_memory`, or `visuals`. |

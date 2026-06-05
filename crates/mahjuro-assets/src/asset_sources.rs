@@ -127,14 +127,6 @@ fn read_loose(root: &Path, path: &str) -> Option<Vec<u8>> {
     std::fs::read(root.join(normalize_key(path))).ok()
 }
 
-fn read_through_cache(key: &str, load: impl FnOnce() -> Option<Vec<u8>>) -> Option<Arc<[u8]>> {
-    if let Some(hit) = byte_cache().get(key) {
-        return Some(hit);
-    }
-    let data = load()?;
-    Some(byte_cache().insert(key.to_string(), data))
-}
-
 pub(crate) fn normalize_key(path: &str) -> String {
     path.trim_start_matches("./")
         .replace('\\', "/")
@@ -382,11 +374,6 @@ impl PacksState {
             index_archive(a, pack_idx, &mut idx);
         }
         Ok(())
-    }
-
-    fn get(&self, path: &str) -> Option<Vec<u8>> {
-        let lk = normalize_lookup_key(path);
-        read_through_cache(&lk, || self.read_uncached(path)).map(|b| b.to_vec())
     }
 
     fn read_uncached(&self, path: &str) -> Option<Vec<u8>> {

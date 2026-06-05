@@ -10,10 +10,20 @@ use std::time::Instant;
 use crate::room_gi_bake::RoomGiRoom;
 use crate::room_shadow_bake;
 
+/// Opt-in runtime validation of committed offline bakes (GI/shadow/decal/relic).
+pub const VALIDATE_OFFLINE_BAKES_ENV: &str = "MAHJURO_VALIDATE_OFFLINE_BAKES";
+
+fn runtime_offline_bake_validation_enabled() -> bool {
+    mahjuro_bake_stamp::skip_env_set(VALIDATE_OFFLINE_BAKES_ENV)
+}
+
 /// Game runtime must load valid committed offline bakes. Offline bakers skip this so stale
 /// placeholders do not block capturing fresh bakes.
 pub fn committed_offline_bakes_required() -> bool {
     if cfg!(feature = "bake") {
+        return false;
+    }
+    if !runtime_offline_bake_validation_enabled() {
         return false;
     }
     !mahjuro_bake_stamp::skip_committed_bake_checks()

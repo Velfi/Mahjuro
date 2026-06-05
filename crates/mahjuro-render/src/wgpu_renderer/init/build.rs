@@ -261,6 +261,16 @@ fn init_render_scale_and_depth_resources(
     } else {
         mahjuro_gfx_types::GraphicsMode::suggest_for_adapter(adapter_name, integrated_gpu)
     };
+    if !mahjuro_gfx_types::GraphicsMode::adapter_meets_minimum_support(
+        adapter_name,
+        integrated_gpu,
+    ) {
+        log::warn!(
+            "adapter '{}' appears below minimum supported graphics memory ({} MiB); runtime behavior is unsupported",
+            adapter_name,
+            mahjuro_gfx_types::MIN_SUPPORTED_GPU_MEMORY_MIB
+        );
+    }
     let render_scale = suggested_graphics_mode.render_scale();
     let render_size = super::super::constants::scaled_render_size(size, render_scale);
     // `early_gpu_and_depth` allocates scene depth at window size; recreate when scaled down.

@@ -38,8 +38,11 @@ const GAMEPLAY_EAGER_UPLOAD_BUDGET_MS: f32 = 32.0;
 const ROOM_ENV_GPU_UPLOAD_BUDGET_MS: f32 = 4.0;
 /// Eager warm-up budget for standard room env uploads while idle on non-low-memory presets.
 const ROOM_ENV_EAGER_UPLOAD_BUDGET_MS: f32 = 24.0;
-/// Unlimited per-frame upload budget while a transition is held at full black.
-const TRANSITION_BLACK_ROOM_GPU_UPLOAD_BUDGET_MS: f32 = 1.0e6;
+/// Per-frame upload budget while a transition is held at full black.
+///
+/// Keeping this bounded prevents single-frame stalls when destination rooms still need
+/// heavy uploads (notably gameplay) at scene-swap time.
+const TRANSITION_BLACK_ROOM_GPU_UPLOAD_BUDGET_MS: f32 = 12.0;
 
 fn gameplay_eager_upload_budget_ms(mode: mahjuro_gfx_types::GraphicsMode) -> f32 {
     match mode {
@@ -2922,7 +2925,7 @@ impl WgpuRenderer {
                     self.drive_shop_room_gpu_upload(budget);
                 }
                 self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Hallway);
-                self.ensure_hallway_room_gpu();
+                self.drive_hallway_room_gpu_upload(budget);
             }
             scene_keys::STAIRWAY => {
                 self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Staircase);
@@ -2951,7 +2954,7 @@ impl WgpuRenderer {
                         self.drive_shop_room_gpu_upload(budget);
                     }
                     self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Hallway);
-                    self.ensure_hallway_room_gpu();
+                    self.drive_hallway_room_gpu_upload(budget);
                 }
                 "collection" => {
                     self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Archive);
@@ -2970,14 +2973,32 @@ impl WgpuRenderer {
         }
     }
 
-    /// Join any in-flight worker decode, then synchronously decode on the main thread if needed.
-    /// Used while a transition is held at full black so prefetch gating cannot stall the swap.
+    /// Ensure destination-room CPU data is available during a pending transition.
+    ///
+    /// Low-memory mode may block to force progress; Performance/Visuals stay non-blocking so
+    /// transition animation remains smooth even when the effect is not a full-black mask.
     fn ensure_room_cpu_resident_for_transition(&self, id: RoomGpuResidentId) {
         let desc = id.desc();
         if (desc.cpu_decoded)() {
             return;
         }
         (desc.start_cpu_prefetch)();
+        // Transitions are not guaranteed to be fully black-screen; in Performance/Visuals,
+        // avoid blocking CPU decode fallback so we don't stall a visible transition frame.
+        //
+        // Gameplay remains blocking here: `room_preload` CPU-resident caps can starve gameplay
+        // prefetch at the start menu (shop/archive caches occupy the cap), and a non-blocking
+        // path can deadlock `Continue` waiting forever on `scene_room_gpu_ready`.
+        if self.graphics_mode != mahjuro_gfx_types::GraphicsMode::LowMemory
+            && id != RoomGpuResidentId::Gameplay
+        {
+            // Staircase prefetch is kicked from the eager chain, not per-room start hook.
+            if id == RoomGpuResidentId::Staircase {
+                crate::room_preload::kick_eager_all_room_cpu_prefetches();
+            }
+            crate::room_preload::try_drain_room_cpu_prefetch_threads();
+            return;
+        }
         match id {
             RoomGpuResidentId::MainMenu => {
                 crate::room_preload::join_main_menu_cpu_prefetch_blocking();

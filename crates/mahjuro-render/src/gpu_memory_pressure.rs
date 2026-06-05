@@ -3,7 +3,10 @@
 //! Uses wgpu allocator totals when available (Vulkan/DX12); falls back to resident
 //! count vs the active [`mahjuro_gfx_types::GraphicsMode`] cap on Metal/GLES.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{
+    OnceLock,
+    atomic::{AtomicU8, Ordering},
+};
 
 /// Pressure tier for eager (non-scene-critical) room GPU warm-up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -36,12 +39,20 @@ impl GpuMemoryPressure {
     }
 }
 
-/// Allocator `total_allocated_bytes` at/above which optional eager warm-up pauses.
-const CONSTRAINED_ALLOC_MIB: u64 = 2200;
-/// Allocator `total_allocated_bytes` at/above which eager work stops and eviction runs.
-const CRITICAL_ALLOC_MIB: u64 = 2800;
+/// Allocator pressure defaults used when the room resident cap is 2 (Low memory mode).
+const LOW_MEMORY_CONSTRAINED_ALLOC_MIB: u64 = 2200;
+const LOW_MEMORY_CRITICAL_ALLOC_MIB: u64 = 2800;
+/// Allocator pressure defaults used when the room resident cap is 6 (Performance/Visuals).
+///
+/// High-VRAM adapters should not enter "constrained"/"critical" at ~2-3 GiB usage.
+const HIGH_CAP_CONSTRAINED_ALLOC_MIB: u64 = 6144;
+const HIGH_CAP_CRITICAL_ALLOC_MIB: u64 = 8192;
+const CONSTRAINED_ALLOC_ENV: &str = "MAHJURO_GPU_MEM_CONSTRAINED_MIB";
+const CRITICAL_ALLOC_ENV: &str = "MAHJURO_GPU_MEM_CRITICAL_MIB";
 
 static LAST_LOGGED: AtomicU8 = AtomicU8::new(0);
+static CONSTRAINED_ALLOC_OVERRIDE_MIB: OnceLock<Option<u64>> = OnceLock::new();
+static CRITICAL_ALLOC_OVERRIDE_MIB: OnceLock<Option<u64>> = OnceLock::new();
 
 pub struct PressureSnapshot {
     pub pressure: GpuMemoryPressure,
@@ -77,11 +88,13 @@ pub fn classify(
     let allocated_bytes = report.as_ref().map(|r| r.total_allocated_bytes);
     let reserved_bytes = report.as_ref().map(|r| r.total_reserved_bytes);
 
+    let (constrained_alloc_mib, critical_alloc_mib) =
+        allocator_pressure_thresholds_mib(max_room_gpu_residents);
     let pressure = if let Some(allocated) = allocated_bytes {
         let mib = allocated / (1024 * 1024);
-        if mib >= CRITICAL_ALLOC_MIB {
+        if mib >= critical_alloc_mib {
             GpuMemoryPressure::Critical
-        } else if mib >= CONSTRAINED_ALLOC_MIB {
+        } else if mib >= constrained_alloc_mib {
             GpuMemoryPressure::Constrained
         } else {
             resident_fallback(room_gpu_residents, max_room_gpu_residents)
@@ -97,6 +110,44 @@ pub fn classify(
         room_gpu_residents,
         max_room_gpu_residents,
     }
+}
+
+fn allocator_pressure_thresholds_mib(max_room_gpu_residents: usize) -> (u64, u64) {
+    let (mut constrained, mut critical) =
+        default_allocator_pressure_thresholds_mib(max_room_gpu_residents);
+    if let Some(v) = *CONSTRAINED_ALLOC_OVERRIDE_MIB.get_or_init(|| env_override_mib(CONSTRAINED_ALLOC_ENV)) {
+        constrained = v;
+    }
+    if let Some(v) = *CRITICAL_ALLOC_OVERRIDE_MIB.get_or_init(|| env_override_mib(CRITICAL_ALLOC_ENV)) {
+        critical = v;
+    }
+    ordered_allocator_thresholds_mib(constrained, critical)
+}
+
+fn default_allocator_pressure_thresholds_mib(max_room_gpu_residents: usize) -> (u64, u64) {
+    // Low-memory preset currently caps room residents at 2.
+    if max_room_gpu_residents <= 2 {
+        (LOW_MEMORY_CONSTRAINED_ALLOC_MIB, LOW_MEMORY_CRITICAL_ALLOC_MIB)
+    } else {
+        (HIGH_CAP_CONSTRAINED_ALLOC_MIB, HIGH_CAP_CRITICAL_ALLOC_MIB)
+    }
+}
+
+fn ordered_allocator_thresholds_mib(constrained: u64, critical: u64) -> (u64, u64) {
+    if critical <= constrained {
+        (constrained, constrained.saturating_add(1))
+    } else {
+        (constrained, critical)
+    }
+}
+
+fn env_override_mib(name: &str) -> Option<u64> {
+    let raw = std::env::var(name).ok()?;
+    let parsed = raw.trim().parse::<u64>().ok()?;
+    if parsed == 0 {
+        return None;
+    }
+    Some(parsed)
 }
 
 fn resident_fallback(residents: usize, cap: usize) -> GpuMemoryPressure {
@@ -192,5 +243,23 @@ mod tests {
     fn pressure_labels() {
         assert_eq!(GpuMemoryPressure::Normal.label(), "normal");
         assert_eq!(GpuMemoryPressure::from_u8(2), GpuMemoryPressure::Critical);
+    }
+
+    #[test]
+    fn default_allocator_thresholds_follow_resident_cap() {
+        assert_eq!(
+            default_allocator_pressure_thresholds_mib(2),
+            (LOW_MEMORY_CONSTRAINED_ALLOC_MIB, LOW_MEMORY_CRITICAL_ALLOC_MIB)
+        );
+        assert_eq!(
+            default_allocator_pressure_thresholds_mib(6),
+            (HIGH_CAP_CONSTRAINED_ALLOC_MIB, HIGH_CAP_CRITICAL_ALLOC_MIB)
+        );
+    }
+
+    #[test]
+    fn allocator_thresholds_keep_critical_above_constrained() {
+        assert_eq!(ordered_allocator_thresholds_mib(2200, 2800), (2200, 2800));
+        assert_eq!(ordered_allocator_thresholds_mib(3000, 2000), (3000, 3001));
     }
 }

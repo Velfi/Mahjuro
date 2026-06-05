@@ -11,6 +11,7 @@ pub mod tuning;
 pub use effects::EffectsQuality;
 pub use graphics_mode::{
     GraphicsMode, LOW_MEMORY_RENDER_SCALE, MIN_RENDER_HEIGHT, MIN_RENDER_WIDTH,
+    MIN_SUPPORTED_GPU_MEMORY_MIB,
 };
 pub use shadow::ShadowQuality;
 pub use tile::{TileMaterial, TilePreset};
