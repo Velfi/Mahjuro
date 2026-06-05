@@ -20,16 +20,19 @@ pub fn log_adapter_startup(adapter: &wgpu::Adapter, device: &wgpu::Device) {
     }
     let info = adapter.get_info();
     let integrated = info.device_type == wgpu::DeviceType::IntegratedGpu;
+    let memory_model =
+        mahjuro_gfx_types::GraphicsMemoryModel::classify_adapter(&info.name, integrated);
     let suggested = mahjuro_gfx_types::GraphicsMode::suggest_for_adapter(&info.name, integrated);
     let meets_minimum =
         mahjuro_gfx_types::GraphicsMode::adapter_meets_minimum_support(&info.name, integrated);
     log::info!(
         "gpu mem profile: adapter='{}' backend={:?} device_type={:?} vendor=0x{:04x} \
-         suggested_graphics_mode={:?} minimum_supported_4gib={}",
+         memory_model={:?} suggested_graphics_mode={:?} minimum_supported_4gib={}",
         info.name,
         info.backend,
         info.device_type,
         info.vendor,
+        memory_model,
         suggested,
         meets_minimum,
     );

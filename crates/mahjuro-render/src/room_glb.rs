@@ -562,6 +562,10 @@ pub fn room_camera_with_room_clip_planes(
 
 /// Decoded room GLB (shop, hallway, …): shared layout for [`room_glb.wgsl`] and punctual uploads.
 pub struct RoomGlbCpu {
+    /// Compressed `.glb` bytes read from asset packs / loose files.
+    pub packed_asset_bytes_read: u64,
+    /// Decoded CPU payload bytes before room-environment mesh release.
+    pub decoded_cpu_payload_bytes: u64,
     pub markers: FxHashMap<String, Mat4>,
     pub environment_primitives: Vec<RoomEnvPrimitiveCpu>,
     /// Set by [`release_room_environment_primitives_cpu`]. Keeps collision / rain /
@@ -834,7 +838,11 @@ pub fn load_room_glb_from_bytes(
             embedded_spot_lights.len(),
         );
     }
+    let decoded_cpu_payload_bytes =
+        crate::room_gpu_profile::count_cpu_payload(&environment_primitives).total_bytes();
     Ok(RoomGlbCpu {
+        packed_asset_bytes_read: data.len() as u64,
+        decoded_cpu_payload_bytes,
         markers,
         environment_primitives,
         environment_primitives_released: false,

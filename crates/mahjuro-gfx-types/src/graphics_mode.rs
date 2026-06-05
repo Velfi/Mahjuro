@@ -22,6 +22,53 @@ pub const MIN_RENDER_HEIGHT: u32 = 720;
 /// Product support floor for graphics memory budgeting.
 pub const MIN_SUPPORTED_GPU_MEMORY_MIB: u64 = 4096;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BandwidthClass {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphicsMemoryModel {
+    DedicatedVram {
+        dedicated_vram_mb: Option<u64>,
+    },
+    UnifiedMemory {
+        system_memory_mb: Option<u64>,
+        bandwidth_class: Option<BandwidthClass>,
+    },
+    Unknown,
+}
+
+impl GraphicsMemoryModel {
+    pub fn classify_adapter(name: &str, integrated_gpu: bool) -> Self {
+        if integrated_gpu
+            || adapter_name_suggests_apple_silicon(name)
+            || adapter_name_suggests_steam_deck(name)
+        {
+            let bandwidth_class = if adapter_name_suggests_apple_silicon(name)
+                || adapter_name_suggests_steam_deck(name)
+            {
+                Some(BandwidthClass::High)
+            } else if adapter_name_suggests_sub_4gb_vram(name) {
+                Some(BandwidthClass::Low)
+            } else {
+                Some(BandwidthClass::Medium)
+            };
+            return Self::UnifiedMemory {
+                system_memory_mb: None,
+                bandwidth_class,
+            };
+        }
+        Self::DedicatedVram {
+            dedicated_vram_mb: None,
+        }
+    }
+}
+
 impl GraphicsMode {
     pub fn next(self) -> Self {
         match self {
@@ -116,9 +163,18 @@ impl GraphicsMode {
         if adapter_name_suggests_low_vram(name) {
             return Self::LowMemory;
         }
-        // Apple Silicon reports IntegratedGpu but has ample unified memory — not a 4 GB target.
-        if integrated_gpu && !adapter_name_suggests_apple_silicon(name) {
-            return Self::LowMemory;
+        let model = GraphicsMemoryModel::classify_adapter(name, integrated_gpu);
+        if matches!(
+            model,
+            GraphicsMemoryModel::UnifiedMemory { .. }
+        ) {
+            if adapter_name_suggests_sub_4gb_vram(name)
+                && !adapter_name_suggests_apple_silicon(name)
+                && !adapter_name_suggests_steam_deck(name)
+            {
+                return Self::LowMemory;
+            }
+            return Self::Visuals;
         }
         Self::Visuals
     }
@@ -127,13 +183,21 @@ impl GraphicsMode {
     ///
     /// Returns `false` when the adapter is likely below the 4 GiB support target.
     pub fn adapter_meets_minimum_support(name: &str, integrated_gpu: bool) -> bool {
-        if adapter_name_suggests_apple_silicon(name) {
-            return true;
+        let model = GraphicsMemoryModel::classify_adapter(name, integrated_gpu);
+        match model {
+            GraphicsMemoryModel::UnifiedMemory { .. } => {
+                if adapter_name_suggests_apple_silicon(name)
+                    || adapter_name_suggests_steam_deck(name)
+                {
+                    return true;
+                }
+                !adapter_name_suggests_sub_4gb_vram(name)
+            }
+            GraphicsMemoryModel::DedicatedVram { .. } => {
+                !adapter_name_suggests_sub_4gb_vram(name)
+            }
+            GraphicsMemoryModel::Unknown => false,
         }
-        if integrated_gpu {
-            return false;
-        }
-        !adapter_name_suggests_sub_4gb_vram(name)
     }
 
     /// Infer a preset from legacy per-field settings (pre-unification saves).
@@ -196,6 +260,15 @@ fn adapter_name_suggests_sub_4gb_vram(name: &str) -> bool {
 fn adapter_name_suggests_apple_silicon(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     n.contains("apple m") || n.contains("apple a") || n.contains("apple gpu")
+}
+
+/// Steam Deck (Van Gogh / custom AMD APU) adapters on Vulkan/Proton stacks.
+fn adapter_name_suggests_steam_deck(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.contains("vangogh")
+        || n.contains("steam deck")
+        || n.contains("amd custom gpu 0405")
+        || n.contains("custom gpu 0405")
 }
 
 #[cfg(test)]
@@ -270,6 +343,34 @@ mod tests {
         assert!(GraphicsMode::adapter_meets_minimum_support(
             "AMD Radeon RX 7900 XT",
             false
+        ));
+        assert!(GraphicsMode::adapter_meets_minimum_support(
+            "AMD Custom GPU 0405 (RADV VANGOGH)",
+            true
+        ));
+    }
+
+    #[test]
+    fn steam_deck_defaults_to_visuals_not_low_memory() {
+        assert_eq!(
+            GraphicsMode::suggest_for_adapter("AMD Custom GPU 0405 (RADV VANGOGH)", true),
+            GraphicsMode::Visuals
+        );
+    }
+
+    #[test]
+    fn memory_model_classifies_unified_platforms() {
+        assert!(matches!(
+            GraphicsMemoryModel::classify_adapter("AMD Custom GPU 0405 (RADV VANGOGH)", true),
+            GraphicsMemoryModel::UnifiedMemory { .. }
+        ));
+        assert!(matches!(
+            GraphicsMemoryModel::classify_adapter("Apple M4 Max", true),
+            GraphicsMemoryModel::UnifiedMemory { .. }
+        ));
+        assert!(matches!(
+            GraphicsMemoryModel::classify_adapter("NVIDIA GeForce RTX 4070", false),
+            GraphicsMemoryModel::DedicatedVram { .. }
         ));
     }
 }

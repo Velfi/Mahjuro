@@ -78,6 +78,49 @@ fn push_main_menu_rain(
     );
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HubMenuLoading {
+    pub continue_loading: bool,
+    pub new_game_loading: bool,
+    pub archive_loading: bool,
+}
+
+impl HubMenuLoading {
+    fn for_item(self, item: HubFocus) -> bool {
+        match item {
+            HubFocus::Continue => self.continue_loading,
+            HubFocus::NewGame => self.new_game_loading,
+            HubFocus::Archive => self.archive_loading,
+            _ => false,
+        }
+    }
+}
+
+/// Three pulsing dots at the right edge of a hub menu row.
+fn push_hub_loading_dots(
+    quads: &mut Vec<GpuInstance>,
+    row_rect: [f32; 4],
+    t_secs: f32,
+    scale: f32,
+) {
+    let dot_r = (row_rect[3] * 0.07).max(2.5 * scale).min(6.0 * scale);
+    let gap = dot_r * 1.6;
+    let trio_w = dot_r * 6.0 + gap * 2.0;
+    let cx0 = row_rect[0] + row_rect[2] - trio_w;
+    let cy = row_rect[1] + row_rect[3] * 0.5;
+    let rgb = color::PARCHMENT;
+    for i in 0..3 {
+        let phase = ((t_secs * 3.0 - i as f32 * 0.45).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+        let alpha = 0.2 + 0.8 * phase;
+        let cx = cx0 + i as f32 * (dot_r * 2.0 + gap) + dot_r;
+        quads.push(GpuInstance {
+            rect: [cx - dot_r, cy - dot_r, dot_r * 2.0, dot_r * 2.0],
+            color: [rgb[0], rgb[1], rgb[2], alpha],
+            user: 0,
+        });
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HubFocus {
     Continue,
@@ -544,15 +587,10 @@ impl SceneBehavior for MainMenuScene {
         }
 
         if activated {
-            // Avoid entering 3D-heavy scenes until async relic/backdrop uploads
-            // finish (`WgpuRenderer::is_loading`). Tile pick flows first — those
-            // gates live in `TileSelectScene::update`.
-            let needs_gpu_ready = match self.focus {
-                Some(HubFocus::Continue) => true,
-                Some(HubFocus::NewGame) => !ctx.tutorial_eligible && !ctx.multiple_materials,
-                _ => false,
-            };
-            if needs_gpu_ready && !ctx.loading_done {
+            if self
+                .focus
+                .is_some_and(|item| ctx.hub_loading.for_item(item))
+            {
                 ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
                 return None;
             }
@@ -677,11 +715,19 @@ impl SceneBehavior for MainMenuScene {
             let menu_font = typography::size(typography::H36, h);
             let label_color = color::PARCHMENT;
             for &(item, rect) in &focus_rects {
+                let loading = ctx.hub_loading.for_item(item);
+                let mut label_alpha = 1.0;
+                if loading {
+                    label_alpha = 0.55;
+                    push_hub_loading_dots(&mut quads, rect, self.age_secs, scale);
+                }
+                let mut color = label_color;
+                color[3] *= label_alpha;
                 text_labels.push(TextLabel {
                     rect,
                     text: label_for(item, in_progress, ctx.archive_has_new),
                     font_px: Some(menu_font),
-                    color: label_color,
+                    color,
                     align: TextAlign::Left,
                     ..Default::default()
                 });

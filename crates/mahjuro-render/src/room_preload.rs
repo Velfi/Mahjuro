@@ -19,6 +19,16 @@ pub enum RoomSceneChain {
     Gameplay,
 }
 
+/// Run-chain rooms to GPU-warm on the main menu before the player confirms Continue.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ContinueRoomWarmup {
+    #[default]
+    None,
+    Shop,
+    Hallway,
+    Gameplay,
+}
+
 const PREFETCH_IDLE: u8 = 0;
 const PREFETCH_IN_FLIGHT: u8 = 1;
 const PREFETCH_DONE: u8 = 2;
@@ -263,10 +273,29 @@ pub fn kick_eager_all_room_cpu_prefetches() {
         return;
     }
     start_shop_cpu_prefetch();
-    start_archive_cpu_prefetch();
+    // Run-chain rooms before archive/staircase so Continue and shop entry are not
+    // blocked on collection-room decode (Steam Deck SD / low-memory decode cap).
     start_hallway_cpu_prefetch();
     start_gameplay_cpu_prefetch();
+    start_archive_cpu_prefetch();
     kick_staircase_cpu_prefetch();
+}
+
+/// When Continue will land in an in-progress run, queue run-chain CPU decodes first.
+pub fn kick_continue_run_cpu_prefetches(warmup: ContinueRoomWarmup) {
+    if warmup == ContinueRoomWarmup::None {
+        return;
+    }
+    start_shop_cpu_prefetch();
+    match warmup {
+        ContinueRoomWarmup::Shop => {}
+        ContinueRoomWarmup::Hallway => start_hallway_cpu_prefetch(),
+        ContinueRoomWarmup::Gameplay => {
+            start_hallway_cpu_prefetch();
+            start_gameplay_cpu_prefetch();
+        }
+        ContinueRoomWarmup::None => {}
+    }
 }
 
 fn kick_staircase_cpu_prefetch() {

@@ -20,6 +20,60 @@ use crate::tile_glb::{
     gltf_image_to_rgba8_capped, multiply_rgba8_by_factor, solid_albedo_rgba8,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RoomTextureUsageClass {
+    BaseColorSrgb,
+    NormalLinear,
+    MetallicRoughnessLinear,
+    EmissiveSrgb,
+}
+
+impl RoomTextureUsageClass {
+    #[inline]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::BaseColorSrgb => "base_color",
+            Self::NormalLinear => "normal",
+            Self::MetallicRoughnessLinear => "metallic_roughness",
+            Self::EmissiveSrgb => "emissive",
+        }
+    }
+
+    #[inline]
+    pub fn gpu_format(self) -> wgpu::TextureFormat {
+        match self {
+            Self::BaseColorSrgb | Self::EmissiveSrgb => wgpu::TextureFormat::Rgba8UnormSrgb,
+            Self::NormalLinear | Self::MetallicRoughnessLinear => wgpu::TextureFormat::Rgba8Unorm,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RoomTextureSourceMeta {
+    pub image_index: Option<usize>,
+    pub source_identity: String,
+    pub source_format: Option<&'static str>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RoomPrimitiveTextureSources {
+    pub base_color: Option<RoomTextureSourceMeta>,
+    pub normal: Option<RoomTextureSourceMeta>,
+    pub metallic_roughness: Option<RoomTextureSourceMeta>,
+    pub emissive: Option<RoomTextureSourceMeta>,
+}
+
+impl RoomPrimitiveTextureSources {
+    pub fn for_usage(&self, usage: RoomTextureUsageClass) -> Option<&RoomTextureSourceMeta> {
+        match usage {
+            RoomTextureUsageClass::BaseColorSrgb => self.base_color.as_ref(),
+            RoomTextureUsageClass::NormalLinear => self.normal.as_ref(),
+            RoomTextureUsageClass::MetallicRoughnessLinear => self.metallic_roughness.as_ref(),
+            RoomTextureUsageClass::EmissiveSrgb => self.emissive.as_ref(),
+        }
+    }
+}
+
 /// Longest edge for shop / hallway / archive / main-menu room glTF textures (tiles stay 256).
 pub const ROOM_ENV_TEXTURE_MAX_DIMENSION: u32 = 1024;
 
@@ -33,6 +87,7 @@ pub struct CappedGltfImage {
     pub base: (Vec<u8>, u32, u32),
     /// Level 0 = [`Self::base`]; includes all mips down to 1×1.
     pub mip_chain: Arc<Vec<(Vec<u8>, u32, u32)>>,
+    pub source_format: &'static str,
 }
 
 /// Decode every embedded image once (cap + mips). Room env walks index into this table.
@@ -45,10 +100,27 @@ pub fn cap_room_gltf_images(images: &[gltf::image::Data]) -> Vec<Option<CappedGl
                 CappedGltfImage {
                     base: (rgba, w, h),
                     mip_chain,
+                    source_format: gltf_image_format_label(img.format),
                 }
             })
         })
         .collect()
+}
+
+fn gltf_image_format_label(format: gltf::image::Format) -> &'static str {
+    use gltf::image::Format as F;
+    match format {
+        F::R8 => "R8",
+        F::R8G8 => "R8G8",
+        F::R8G8B8 => "R8G8B8",
+        F::R8G8B8A8 => "R8G8B8A8",
+        F::R16 => "R16",
+        F::R16G16 => "R16G16",
+        F::R16G16B16 => "R16G16B16",
+        F::R16G16B16A16 => "R16G16B16A16",
+        F::R32G32B32FLOAT => "R32G32B32FLOAT",
+        F::R32G32B32A32FLOAT => "R32G32B32A32FLOAT",
+    }
 }
 
 #[inline]
@@ -80,6 +152,9 @@ pub fn is_shop_porcelain_material(material_name: Option<&str>) -> bool {
 pub struct RoomEnvPrimitiveCpu {
     /// glTF node name for this primitive (per-node mesh), when known.
     pub gltf_node_name: Option<String>,
+    pub material_name: Option<String>,
+    pub material_index: Option<usize>,
+    pub texture_sources: RoomPrimitiveTextureSources,
     pub mesh: LoadedPrimitive,
     /// Archive decal atlas width÷height from authored UV (1.0 when not a description board).
     pub archive_decal_face_aspect: f32,
@@ -844,6 +919,33 @@ fn apply_normal_scale_rgba8(pixels: &mut [u8], scale: f32) {
     }
 }
 
+fn gltf_texture_source_identity(texture: gltf::Texture<'_>) -> String {
+    let source = texture.source();
+    let idx = source.index();
+    match source.source() {
+        gltf::image::Source::View { view, mime_type } => {
+            format!("image#{idx}:view#{}:{mime_type}", view.index())
+        }
+        gltf::image::Source::Uri { uri, mime_type } => {
+            let mime = mime_type.unwrap_or("unknown");
+            format!("image#{idx}:uri:{uri}:{mime}")
+        }
+    }
+}
+
+fn texture_source_meta(
+    texture: gltf::Texture<'_>,
+    capped_images: &[Option<CappedGltfImage>],
+) -> RoomTextureSourceMeta {
+    let image_index = texture.source().index();
+    let source_format = capped_image_at(capped_images, image_index).map(|c| c.source_format);
+    RoomTextureSourceMeta {
+        image_index: Some(image_index),
+        source_identity: gltf_texture_source_identity(texture),
+        source_format,
+    }
+}
+
 pub fn decode_env_primitive(
     primitive: gltf::Primitive<'_>,
     node_world: Mat4,
@@ -1030,6 +1132,20 @@ pub fn decode_env_primitive(
         .collect();
     let factor = pbr.base_color_factor();
 
+    let mut texture_sources = RoomPrimitiveTextureSources::default();
+    texture_sources.base_color = pbr
+        .base_color_texture()
+        .map(|tex_info| texture_source_meta(tex_info.texture(), capped_images));
+    texture_sources.normal = material
+        .normal_texture()
+        .map(|nt| texture_source_meta(nt.texture(), capped_images));
+    texture_sources.metallic_roughness = pbr
+        .metallic_roughness_texture()
+        .map(|tex_info| texture_source_meta(tex_info.texture(), capped_images));
+    texture_sources.emissive = material
+        .emissive_texture()
+        .map(|tex_info| texture_source_meta(tex_info.texture(), capped_images));
+
     let albedo_src = pbr.base_color_texture().and_then(|tex_info| {
         let img_index = tex_info.texture().source().index();
         capped_image_at(capped_images, img_index)
@@ -1090,6 +1206,7 @@ pub fn decode_env_primitive(
     if is_porcelain {
         metallic_roughness_rgba = None;
         metallic_roughness_mip_chain = None;
+        texture_sources.metallic_roughness = None;
     }
 
     let emissive_src = material.emissive_texture().and_then(|tex_info| {
@@ -1114,6 +1231,9 @@ pub fn decode_env_primitive(
         } else {
             Some(gltf_node_name.to_string())
         },
+        material_name: material_name.map(ToOwned::to_owned),
+        material_index: material.index(),
+        texture_sources,
         mesh: LoadedPrimitive {
             vertices,
             indices,

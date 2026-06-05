@@ -245,6 +245,8 @@ pub(crate) struct App {
     /// [`crate::main::event_loop`] are intentionally not cached — they
     /// run with a freshly-moved cursor and only test hand tiles.
     frame_picks: FramePicks,
+    /// Hub menu loading gates; refreshed each `frame_tick` for draw + update.
+    hub_loading: crate::scenes::main_menu::HubMenuLoading,
     /// One-shot watchdog that logs a single warning when frame pacing has
     /// collapsed to <20 FPS for >3 s of steady-state rendering. See
     /// [`main_perf_watchdog`] for the rationale.

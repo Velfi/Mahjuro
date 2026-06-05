@@ -25,6 +25,14 @@ fn load_startup_tile_meshes(
     use crate::tile_glb::{load_glb_tile_from_bytes, normalize_mesh, tile_glb_asset_path, tile_material_index};
     use mahjuro_gfx_types::TileMaterial;
 
+    fn tile_mesh_material_scope(material: TileMaterial) -> &'static str {
+        match material {
+            TileMaterial::Bamboo => "wgpu.tile_mesh.bamboo",
+            TileMaterial::Plastic => "wgpu.tile_mesh.plastic",
+            TileMaterial::TortoiseShell => "wgpu.tile_mesh.tortoise_shell",
+        }
+    }
+
     let tile_glb_defaults = crate::gltf_prop::GltfTileGpuDefaults {
         device,
         queue,
@@ -39,6 +47,7 @@ fn load_startup_tile_meshes(
         TileMaterial::Plastic,
         TileMaterial::TortoiseShell,
     ] {
+        let _material_scope = crate::startup_profile::scope(tile_mesh_material_scope(material));
         let path = tile_glb_asset_path(material);
         let label = format!("tile-{material:?}");
         let empty = crate::tile_glb::LoadedTile {
@@ -261,15 +270,21 @@ fn init_render_scale_and_depth_resources(
     } else {
         mahjuro_gfx_types::GraphicsMode::suggest_for_adapter(adapter_name, integrated_gpu)
     };
+    let memory_model =
+        mahjuro_gfx_types::GraphicsMemoryModel::classify_adapter(adapter_name, integrated_gpu);
     if !mahjuro_gfx_types::GraphicsMode::adapter_meets_minimum_support(
         adapter_name,
         integrated_gpu,
     ) {
-        log::warn!(
-            "adapter '{}' appears below minimum supported graphics memory ({} MiB); runtime behavior is unsupported",
-            adapter_name,
-            mahjuro_gfx_types::MIN_SUPPORTED_GPU_MEMORY_MIB
-        );
+        match memory_model {
+            mahjuro_gfx_types::GraphicsMemoryModel::UnifiedMemory { .. } => log::warn!(
+                "adapter '{adapter_name}' reports unified memory and a constrained bandwidth/memory class; startup/upload budgets may need tuning"
+            ),
+            _ => log::warn!(
+                "adapter '{adapter_name}' appears below minimum supported graphics memory ({} MiB dedicated target); runtime behavior is unsupported",
+                mahjuro_gfx_types::MIN_SUPPORTED_GPU_MEMORY_MIB
+            ),
+        }
     }
     let render_scale = suggested_graphics_mode.render_scale();
     let render_size = super::super::constants::scaled_render_size(size, render_scale);
@@ -398,16 +413,19 @@ pub(super) fn build_renderer_new(
         super::super::init_phases::early_gpu_and_depth(target_init)?
     };
     #[cfg(feature = "windowed")]
-    let mut boot_splash: Option<super::super::boot_splash::BootSplash<'_>> = if present_boot_frame {
-        Some(super::super::boot_splash::BootSplash::new(
-            &device,
-            &queue,
-            format,
-            size.width,
-            size.height,
-        )?)
-    } else {
-        None
+    let mut boot_splash: Option<super::super::boot_splash::BootSplash<'_>> = {
+        let _phase = crate::startup_profile::scope("wgpu.renderer_new.boot_splash_init");
+        if present_boot_frame {
+            Some(super::super::boot_splash::BootSplash::new(
+                &device,
+                &queue,
+                format,
+                size.width,
+                size.height,
+            )?)
+        } else {
+            None
+        }
     };
     #[cfg(feature = "windowed")]
     let mut boot_poll_slot = boot_input_poll;
@@ -426,22 +444,26 @@ pub(super) fn build_renderer_new(
         overlay_depth_texture,
         overlay_depth_view,
         depth_copy_staging_buffer,
-    } = init_render_scale_and_depth_resources(
-        &device,
-        &target,
-        &adapter_name,
-        integrated_gpu,
-        size,
-        depth_texture,
-        depth_view,
-        ssr_prev_depth_texture,
-        ssr_prev_depth_view,
-        depth_r32_snapshot_texture,
-        depth_r32_snapshot_view,
-    );
+    } = {
+        let _phase = crate::startup_profile::scope("wgpu.renderer_new.render_scale_depth");
+        init_render_scale_and_depth_resources(
+            &device,
+            &target,
+            &adapter_name,
+            integrated_gpu,
+            size,
+            depth_texture,
+            depth_view,
+            ssr_prev_depth_texture,
+            ssr_prev_depth_view,
+            depth_r32_snapshot_texture,
+            depth_r32_snapshot_view,
+        )
+    };
 
     {
-        let _bakes = crate::startup_profile::scope("wgpu.offline_bakes");
+        let _bakes = crate::startup_profile::scope("wgpu.renderer_new.offline_bakes");
+        let _legacy_bakes = crate::startup_profile::scope("wgpu.offline_bakes");
         crate::offline_bakes::require_all_at_startup()?;
     }
     #[cfg(feature = "windowed")]
@@ -588,22 +610,28 @@ pub(super) fn build_renderer_new(
         tonemap_pipeline_layout,
         tonemap_rgba16f_pipeline,
         tonemap_shader_module,
-    } = super::shaders_and_pipelines::init_shaders_and_pipelines(
-        super::shaders_and_pipelines::ShadersAndPipelinesParams {
-            device: &device,
-            queue: &queue,
-            size,
-            render_size,
-            format,
-            ssr_prev_depth_view: &ssr_prev_depth_view,
-            depth_r32_snapshot_view: &depth_r32_snapshot_view,
-        },
-    );
+    } = {
+        let _phase = crate::startup_profile::scope("wgpu.renderer_new.shaders_and_pipelines");
+        super::shaders_and_pipelines::init_shaders_and_pipelines(
+            super::shaders_and_pipelines::ShadersAndPipelinesParams {
+                device: &device,
+                queue: &queue,
+                size,
+                render_size,
+                format,
+                ssr_prev_depth_view: &ssr_prev_depth_view,
+                depth_r32_snapshot_view: &depth_r32_snapshot_view,
+            },
+        )
+    };
 
     #[cfg(feature = "windowed")]
     present_boot_progress(&mut boot_splash, &target, &config, 0.48, &mut boot_poll_slot);
 
-    let (ui_font, ui_font_italic, mono_font, emoji_font) = load_startup_fonts_with_profile();
+    let (ui_font, ui_font_italic, mono_font, emoji_font) = {
+        let _phase = crate::startup_profile::scope("wgpu.renderer_new.fonts");
+        load_startup_fonts_with_profile()
+    };
     #[cfg(feature = "windowed")]
     present_boot_progress(&mut boot_splash, &target, &config, 0.55, &mut boot_poll_slot);
 
@@ -630,6 +658,7 @@ pub(super) fn build_renderer_new(
     let tile_env_emissive_view = tile_glb_default_emissive_view.clone();
 
     let tile_meshes = {
+        let _renderer_phase = crate::startup_profile::scope("wgpu.renderer_new.tile_mesh");
         let _tile = crate::startup_profile::scope("wgpu.tile_mesh");
         load_startup_tile_meshes(
             &device,
@@ -694,6 +723,7 @@ pub(super) fn build_renderer_new(
     let (_lit_mesh_relief_default_tex, lit_mesh_relief_default_view) =
         flat_relief_height(&device, &queue);
     let pack_textures_map = {
+        let _renderer_phase = crate::startup_profile::scope("wgpu.renderer_new.pack_textures");
         let _pack = crate::startup_profile::scope("wgpu.pack_textures");
         load_pack_textures(&device, &queue, &lit_mesh_relief_default_view)
     };
@@ -709,6 +739,7 @@ pub(super) fn build_renderer_new(
     // ---- Lit-mesh procedural geometry (candles) ----
     let t_lit_meshes = Instant::now();
     let t_lit_mesh_geometry = Instant::now();
+    let _renderer_lit_meshes_scope = crate::startup_profile::scope("wgpu.renderer_new.lit_meshes");
     let relic_box_cpu = build_relic_mesh();
     let relic_box_tris: Vec<[glam::Vec3; 3]> = relic_box_cpu
         .indices
@@ -730,21 +761,25 @@ pub(super) fn build_renderer_new(
     let bug_body_mesh = LitMeshGpu::new(&device, &build_bug_body_mesh(), "bug-body");
     let bug_wing_mesh = LitMeshGpu::new(&device, &build_bug_wing_mesh(), "bug-wing");
     let bug_wing_blur_mesh = LitMeshGpu::new(&device, &build_bug_wing_blur_mesh(), "bug-wing-blur");
-    let coin_glb_file = mahjuro_assets::asset_path::get("3d/coin.glb")
-        .expect("3d/coin.glb not embedded (packs or assets/)");
-    let mut coin_tile = crate::tile_glb::load_glb_tile_from_node_name(
-        &coin_glb_file.data,
-        Some(crate::coin_glb::COIN_GLB_NODE),
-    )
-    .expect("coin.glb node decode");
-    crate::tile_glb::reorient_mesh_to_engine_axes(&mut coin_tile);
-    crate::tile_glb::center_mesh_at_origin(&mut coin_tile);
-    let coin_half = crate::tile_glb::mesh_local_half_extents(&coin_tile);
-    crate::coin_glb::init_coin_glb_half_extents(coin_half);
-    log::info!(
-        "Loaded coin.glb: {} material slot(s), half_extents={coin_half:?}",
-        coin_tile.primitives.len()
-    );
+    let coin_tile = {
+        let _scope = crate::startup_profile::scope("wgpu.lit_meshes.coin_glb_decode");
+        let coin_glb_file = mahjuro_assets::asset_path::get("3d/coin.glb")
+            .expect("3d/coin.glb not embedded (packs or assets/)");
+        let mut coin_tile = crate::tile_glb::load_glb_tile_from_node_name(
+            &coin_glb_file.data,
+            Some(crate::coin_glb::COIN_GLB_NODE),
+        )
+        .expect("coin.glb node decode");
+        crate::tile_glb::reorient_mesh_to_engine_axes(&mut coin_tile);
+        crate::tile_glb::center_mesh_at_origin(&mut coin_tile);
+        let coin_half = crate::tile_glb::mesh_local_half_extents(&coin_tile);
+        crate::coin_glb::init_coin_glb_half_extents(coin_half);
+        log::info!(
+            "Loaded coin.glb: {} material slot(s), half_extents={coin_half:?}",
+            coin_tile.primitives.len()
+        );
+        coin_tile
+    };
     // Phase-1 primitive registry: parallel GPU copies of meshes
     // the generic `Object3dKind::Primitive` dispatch can reach by
     // `MeshId`. Legacy named fields above still own their own
@@ -773,17 +808,20 @@ pub(super) fn build_renderer_new(
         LitMeshGpu::new(&device, &build_tally_stick_tip_mesh(), "tally-stick-tip");
     // Shared 1×1 white texture for procedural meshes that don't sample.
     let (_lit_mesh_white_tex, lit_mesh_white_view) = white_albedo(&device, &queue);
-    let coin_glb_primitives = crate::gltf_prop::upload_gltf_tile_primitives(
-        &crate::gltf_prop::GltfTileGpuDefaults {
-            device: &device,
-            queue: &queue,
-            default_normal_view: &tile_default_normal_view,
-            default_mr_view: &tile_glb_default_mr_view,
-            default_emissive_view: &tile_glb_default_emissive_view,
-        },
-        "coin-glb",
-        &coin_tile.primitives,
-    );
+    let coin_glb_primitives = {
+        let _scope = crate::startup_profile::scope("wgpu.lit_meshes.coin_glb_upload");
+        crate::gltf_prop::upload_gltf_tile_primitives(
+            &crate::gltf_prop::GltfTileGpuDefaults {
+                device: &device,
+                queue: &queue,
+                default_normal_view: &tile_default_normal_view,
+                default_mr_view: &tile_glb_default_mr_view,
+                default_emissive_view: &tile_glb_default_emissive_view,
+            },
+            "coin-glb",
+            &coin_tile.primitives,
+        )
+    };
     let (main_menu_rain_hit_debug_mesh, main_menu_rain_hit_debug_instance) =
         super::super::resources::init_main_menu_rain_hit_debug(
             &device,
@@ -798,28 +836,37 @@ pub(super) fn build_renderer_new(
     let t_lit_mesh_instance_pools = Instant::now();
     let relic_instances: Vec<LitMeshInstance> = Vec::new();
     let ordeal_icon_instances: Vec<LitMeshInstance> = Vec::new();
-    let mut pack_instances: Vec<LitMeshInstance> = Vec::with_capacity(4);
-    for _ in 0..4 {
-        pack_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
+    let mut pack_instances: Vec<LitMeshInstance> = {
+        let _scope = crate::startup_profile::scope("wgpu.lit_meshes.instance_pools.pack");
+        Vec::with_capacity(4)
+    };
+    {
+        let _scope = crate::startup_profile::scope("wgpu.lit_meshes.instance_pools.pack_init");
+        for _ in 0..4 {
+            pack_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_white_view,
+                &lit_mesh_relief_default_view,
+                &tile_sampler,
+            ));
+        }
     }
     let ribbon_zodiac_tex = load_zodiac_ribbon_textures(&device, &queue);
     let mut ribbon_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_RIBBON_SLOTS);
-    for _ in 0..MAX_RIBBON_SLOTS {
-        ribbon_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
+    {
+        let _scope = crate::startup_profile::scope("wgpu.lit_meshes.instance_pools.ribbon");
+        for _ in 0..MAX_RIBBON_SLOTS {
+            ribbon_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_white_view,
+                &lit_mesh_relief_default_view,
+                &tile_sampler,
+            ));
+        }
     }
     let ribbon_slot_zodiac: Vec<Option<u8>> = vec![None; MAX_RIBBON_SLOTS];
     let mut bug_body_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
@@ -827,47 +874,50 @@ pub(super) fn build_renderer_new(
     let mut bug_wing_r_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
     let mut bug_wing_blur_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
     let mut bug_wing_blur_r_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
-    for _ in 0..MAX_BUG_SLOTS {
-        bug_body_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
-        bug_wing_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
-        bug_wing_r_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
-        bug_wing_blur_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
-        bug_wing_blur_r_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
+    {
+        let _scope = crate::startup_profile::scope("wgpu.lit_meshes.instance_pools.bug");
+        for _ in 0..MAX_BUG_SLOTS {
+            bug_body_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_white_view,
+                &lit_mesh_relief_default_view,
+                &tile_sampler,
+            ));
+            bug_wing_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_white_view,
+                &lit_mesh_relief_default_view,
+                &tile_sampler,
+            ));
+            bug_wing_r_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_white_view,
+                &lit_mesh_relief_default_view,
+                &tile_sampler,
+            ));
+            bug_wing_blur_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_white_view,
+                &lit_mesh_relief_default_view,
+                &tile_sampler,
+            ));
+            bug_wing_blur_r_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_white_view,
+                &lit_mesh_relief_default_view,
+                &tile_sampler,
+            ));
+        }
     }
     let orb_mesh = LitMeshGpu::new(&device, &build_orb_mesh(), "material-orb");
     let orb_instances: Vec<LitMeshInstance> = Vec::new();
@@ -877,15 +927,18 @@ pub(super) fn build_renderer_new(
     let memorial_talisman_mask_views: Vec<wgpu::TextureView> = Vec::new();
     let talisman_slot_kind: Vec<Option<u8>> = vec![None; MAX_TALISMAN_SLOTS];
     let mut talisman_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_TALISMAN_SLOTS);
-    for _ in 0..MAX_TALISMAN_SLOTS {
-        talisman_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
+    {
+        let _scope = crate::startup_profile::scope("wgpu.lit_meshes.instance_pools.talisman");
+        for _ in 0..MAX_TALISMAN_SLOTS {
+            talisman_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_white_view,
+                &lit_mesh_relief_default_view,
+                &tile_sampler,
+            ));
+        }
     }
     // Shop journal books are cheap; gameplay HUD instance pools are deferred
     // until first gameplay draw (`ensure_gameplay_hud_pools`).
@@ -903,8 +956,14 @@ pub(super) fn build_renderer_new(
             })
             .collect()
     };
-    let book_instances = make_pool(MAX_BOOK_SLOTS);
-    let book_cover_instances = make_pool(MAX_BOOK_SLOTS);
+    let book_instances = {
+        let _scope = crate::startup_profile::scope("wgpu.lit_meshes.instance_pools.book");
+        make_pool(MAX_BOOK_SLOTS)
+    };
+    let book_cover_instances = {
+        let _scope = crate::startup_profile::scope("wgpu.lit_meshes.instance_pools.book_cover");
+        make_pool(MAX_BOOK_SLOTS)
+    };
     let yaku_tablet_instances: Vec<LitMeshInstance> = Vec::new();
     let wood_tablet_instances: Vec<LitMeshInstance> = Vec::new();
     let bowl_instances: Vec<LitMeshInstance> = Vec::new();
@@ -912,7 +971,10 @@ pub(super) fn build_renderer_new(
     let tally_stick_instances: Vec<LitMeshInstance> = Vec::new();
     let wall_tile_instances: Vec<LitMeshInstance> = Vec::new();
     let extruded_glyph_instances: Vec<LitMeshInstance> = Vec::new();
-    let debug_axes_instances = make_pool(3);
+    let debug_axes_instances = {
+        let _scope = crate::startup_profile::scope("wgpu.lit_meshes.instance_pools.debug_axes");
+        make_pool(3)
+    };
     crate::startup_profile::record(
         "wgpu.lit_meshes.instance_pools",
         t_lit_mesh_instance_pools.elapsed(),
