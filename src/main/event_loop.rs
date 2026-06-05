@@ -68,26 +68,33 @@ impl App {
     }
 
     pub fn run_sdl_main(mut self, shell: &mut SdlShell) -> anyhow::Result<()> {
-        // macOS: hide during renderer init to avoid Shown-without-focus races. Elsewhere
-        // (Steam Deck / gamescope) keep the window visible and present a boot clear frame
-        // as soon as the swapchain exists so launch is not a blank screen for ~10s+.
-        #[cfg(target_os = "macos")]
-        shell.window.hide();
-        #[cfg(not(target_os = "macos"))]
-        shell.window.show();
+        // Explicit pre-wgpu startup scope so wall-time gaps are attributable in
+        // startup_profile output (window policy + CPU prefetch kickoff + init config).
+        let (window, hdr_enabled, show_window_during_init) = {
+            let _pre_wgpu = crate::startup_profile::scope("startup.pre_wgpu");
+            // macOS: hide during renderer init to avoid Shown-without-focus races. Elsewhere
+            // (Steam Deck / gamescope) keep the window visible and present a boot clear frame
+            // as soon as the swapchain exists so launch is not a blank screen for ~10s+.
+            #[cfg(target_os = "macos")]
+            shell.window.hide();
+            #[cfg(not(target_os = "macos"))]
+            shell.window.show();
 
-        crate::render::room_preload::start_main_menu_cpu_prefetch();
-        mahjuro_assets::asset_path::prefetch_rooms_pack_once();
+            mahjuro_assets::asset_path::prefetch_rooms_pack_once();
+            crate::render::room_preload::start_main_menu_cpu_prefetch();
 
-        // Match [`draw::App::draw`]: HDR swapchain is only used when both the
-        // options toggle and `EffectLayers::hdr` allow it. Baseline builds keep
-        // `hdr` off, so seeding the surface from `gfx.hdr_enabled` alone forced
-        // an HDR swapchain at init then an immediate SDR reconfigure on frame
-        // 1 — a redundant Metal surface transition linked to intermittent black
-        // startup frames on macOS.
-        let window = shell.window.clone();
-        let hdr_enabled = self.effect_layers.hdr_enabled(&self.gfx);
-        let show_window_during_init = !cfg!(target_os = "macos");
+            // Match [`draw::App::draw`]: HDR swapchain is only used when both the
+            // options toggle and `EffectLayers::hdr` allow it. Baseline builds keep
+            // `hdr` off, so seeding the surface from `gfx.hdr_enabled` alone forced
+            // an HDR swapchain at init then an immediate SDR reconfigure on frame
+            // 1 — a redundant Metal surface transition linked to intermittent black
+            // startup frames on macOS.
+            (
+                shell.window.clone(),
+                self.effect_layers.hdr_enabled(&self.gfx),
+                !cfg!(target_os = "macos"),
+            )
+        };
         let renderer = {
             let _wgpu = crate::startup_profile::scope("wgpu.renderer_new");
             let mut poll_boot = || poll_loading_during_init(shell, &mut self.audio);
@@ -216,6 +223,9 @@ impl App {
                             self.pending_scene
                                 .as_ref()
                                 .and_then(crate::scenes::active_scene_key),
+                            self.pending_scene.is_some()
+                                && self.transition_alpha <= 0.0
+                                && !self.modals.is_active(),
                         );
                         did_loader_work = true;
                     }

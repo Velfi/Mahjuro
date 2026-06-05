@@ -53,6 +53,67 @@ pub fn all_relic_bakes_available() -> bool {
     all_relic_defs().iter().all(|d| baked_relic_available(d.id))
 }
 
+/// Validate the structure of a baked relic blob without materializing pixel/mesh Vecs.
+/// Used by startup bake checks so renderer init can fail fast without paying full decode cost.
+pub fn validate_baked_relic(id: RelicId) -> anyhow::Result<()> {
+    let path = baked_relic_asset_path(id);
+    let file = mahjuro_assets::asset_path::get(&path)
+        .with_context(|| format!("missing baked relic at {path}"))?;
+    validate_baked_relic_bytes(id, &file.data)
+}
+
+fn validate_baked_relic_bytes(expected_id: RelicId, bytes: &[u8]) -> anyhow::Result<()> {
+    let header_size = std::mem::size_of::<RelicBakeHeaderV1>();
+    anyhow::ensure!(bytes.len() >= header_size, "relic bake: file too small");
+    let header: &RelicBakeHeaderV1 = bytemuck::try_from_bytes(&bytes[..header_size])
+        .map_err(|e| anyhow::anyhow!("relic bake header: {e}"))?;
+    anyhow::ensure!(header.magic == *MAGIC, "relic bake: bad magic");
+    anyhow::ensure!(
+        header.version == VERSION,
+        "relic bake: unsupported version {}",
+        header.version
+    );
+
+    let slug = read_slug(&header.slug)?;
+    let slug_id =
+        relic_id_from_slug(slug).with_context(|| format!("relic bake: unknown slug {slug:?}"))?;
+    anyhow::ensure!(
+        slug_id == expected_id,
+        "relic bake: slug/id mismatch (expected {:?}, got {:?})",
+        expected_id,
+        slug_id
+    );
+
+    let albedo_end = header_size
+        .checked_add(header.albedo_len as usize)
+        .context("relic bake: albedo length overflow")?;
+    let relief_end = albedo_end
+        .checked_add(header.relief_len as usize)
+        .context("relic bake: relief length overflow")?;
+    anyhow::ensure!(
+        bytes.len() >= relief_end,
+        "relic bake: truncated albedo/relief"
+    );
+
+    if header.flags & FLAG_HAS_MESH != 0 {
+        let vert_size = (header.vertex_count as usize)
+            .checked_mul(std::mem::size_of::<Vertex3dTex>())
+            .context("relic bake: vertex length overflow")?;
+        let idx_size = (header.index_count as usize)
+            .checked_mul(std::mem::size_of::<u32>())
+            .context("relic bake: index length overflow")?;
+        let vert_end = relief_end
+            .checked_add(vert_size)
+            .context("relic bake: mesh vertex section overflow")?;
+        let idx_end = vert_end
+            .checked_add(idx_size)
+            .context("relic bake: mesh index section overflow")?;
+        anyhow::ensure!(bytes.len() >= idx_end, "relic bake: truncated mesh");
+    }
+
+    Ok(())
+}
+
 /// Encode one baked relic (same bytes the runtime loader consumes).
 pub fn encode_baked_relic(msg: &DecodedRelicImage) -> anyhow::Result<Vec<u8>> {
     let slug = relic_slug(msg.id);

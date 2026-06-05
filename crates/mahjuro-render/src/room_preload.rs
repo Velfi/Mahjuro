@@ -183,6 +183,23 @@ fn cpu_prefetch_may_start() -> bool {
         < max_concurrent_cpu_room_decodes(prefetch_graphics_mode())
 }
 
+/// Hub/run chain decodes must not compete with boot-critical `main_menu.glb` CPU work.
+/// After boot, main-menu CPU RAM may be cleared on GPU eviction; do not block the run chain on
+/// `main_menu_cpu_decoded()` staying true.
+fn hub_chain_cpu_prefetch_ready() -> bool {
+    if MAIN_MENU_PREFETCH.state.load(Ordering::Acquire) == PREFETCH_IN_FLIGHT {
+        return false;
+    }
+    if crate::main_menu_glb::main_menu_cpu_decoded() {
+        return true;
+    }
+    if MAIN_MENU_PREFETCH.state.load(Ordering::Acquire) == PREFETCH_DONE {
+        return true;
+    }
+    // Run flow without visiting main menu (e.g. tile select → shop) — shop decode implies boot passed.
+    crate::room_glb::shop_cpu_decoded()
+}
+
 pub(super) fn reset_room_prefetch_slot(slot_id: u8) {
     let slot = match slot_id {
         SLOT_MAIN_MENU => &MAIN_MENU_PREFETCH,
@@ -205,6 +222,9 @@ pub fn start_main_menu_cpu_prefetch() {
 }
 
 pub fn start_shop_cpu_prefetch() {
+    if !hub_chain_cpu_prefetch_ready() {
+        return;
+    }
     SHOP_PREFETCH.try_start(
         "shop.glb",
         crate::room_glb::shop_cpu_decoded(),
@@ -214,6 +234,9 @@ pub fn start_shop_cpu_prefetch() {
 }
 
 pub fn start_archive_cpu_prefetch() {
+    if !hub_chain_cpu_prefetch_ready() {
+        return;
+    }
     ARCHIVE_PREFETCH.try_start(
         "archive.glb",
         crate::archive_glb::archive_cpu_decoded(),
@@ -232,8 +255,13 @@ pub fn advance_hub_cpu_prefetch_chain(_on_main_menu: bool) {
 /// Queue CPU decode for every hub/run room whose mesh cache is not ready yet.
 ///
 /// Respects [`max_concurrent_cpu_room_decodes`]; call each frame so work continues
-/// as in-flight decodes finish.
+/// as in-flight decodes finish. Hub boot keeps `main_menu.glb` ahead of shop/archive/
+/// staircase chain work so loader threads are not starved by eager secondary rooms.
 pub fn kick_eager_all_room_cpu_prefetches() {
+    start_main_menu_cpu_prefetch();
+    if !hub_chain_cpu_prefetch_ready() {
+        return;
+    }
     start_shop_cpu_prefetch();
     start_archive_cpu_prefetch();
     start_hallway_cpu_prefetch();
@@ -242,6 +270,9 @@ pub fn kick_eager_all_room_cpu_prefetches() {
 }
 
 fn kick_staircase_cpu_prefetch() {
+    if !hub_chain_cpu_prefetch_ready() {
+        return;
+    }
     if crate::staircase_glb::staircase_glb_loaded()
         || crate::staircase_glb::staircase_cpu_ready_for_gpu_upload()
     {
@@ -262,6 +293,9 @@ fn kick_staircase_cpu_prefetch() {
 }
 
 pub fn start_hallway_cpu_prefetch() {
+    if !hub_chain_cpu_prefetch_ready() {
+        return;
+    }
     HALLWAY_PREFETCH.try_start(
         "hallway.glb",
         crate::hallway_glb::hallway_cpu_decoded(),
@@ -271,6 +305,9 @@ pub fn start_hallway_cpu_prefetch() {
 }
 
 pub fn start_gameplay_cpu_prefetch() {
+    if !hub_chain_cpu_prefetch_ready() {
+        return;
+    }
     GAMEPLAY_PREFETCH.try_start(
         "gameplay.glb",
         crate::gameplay_glb::gameplay_cpu_decoded(),

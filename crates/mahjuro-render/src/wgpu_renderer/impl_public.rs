@@ -1,4 +1,8 @@
 use super::*;
+use crate::room_gpu_resident::{
+    ROOM_ARCHIVE, ROOM_GAMEPLAY, ROOM_HALLWAY, ROOM_MAIN_MENU, ROOM_SHOP, ROOM_STAIRCASE,
+};
+use crate::scene_keys;
 use std::sync::OnceLock;
 
 impl WgpuRenderer {
@@ -24,6 +28,42 @@ impl WgpuRenderer {
 
     pub fn set_active_scene(&mut self, key: Option<&'static str>) {
         self.active_scene_key = key;
+    }
+
+    /// Returns true when all room environments required by `key` are already on the GPU.
+    ///
+    /// Used by scene transitions to avoid swapping into a destination scene before its
+    /// environment upload has completed.
+    pub fn scene_room_gpu_ready(&self, key: &str) -> bool {
+        let key = crate::scene_keys::normalize_scene_key(key);
+        let loaded = |bit: u8| self.rooms_gpu_loaded & bit != 0;
+        match key {
+            scene_keys::MAIN_MENU => loaded(ROOM_MAIN_MENU),
+            scene_keys::SHOP => loaded(ROOM_SHOP),
+            scene_keys::HALLWAY => loaded(ROOM_SHOP) && loaded(ROOM_HALLWAY),
+            scene_keys::STAIRWAY => loaded(ROOM_STAIRCASE),
+            scene_keys::ARCHIVE => loaded(ROOM_ARCHIVE),
+            scene_keys::GAMEPLAY | scene_keys::VICTORY | scene_keys::DEFEAT => {
+                loaded(ROOM_GAMEPLAY)
+            }
+            _ => true,
+        }
+    }
+
+    /// Kick background CPU decode for a hub/run room before a scene transition finishes.
+    pub fn start_room_cpu_prefetch_for_scene_key(&self, key: &str) {
+        let key = scene_keys::normalize_scene_key(key);
+        match key {
+            scene_keys::MAIN_MENU => crate::room_preload::start_main_menu_cpu_prefetch(),
+            scene_keys::SHOP => crate::room_preload::start_shop_cpu_prefetch(),
+            scene_keys::HALLWAY => crate::room_preload::start_hallway_cpu_prefetch(),
+            scene_keys::ARCHIVE => crate::room_preload::start_archive_cpu_prefetch(),
+            scene_keys::GAMEPLAY | scene_keys::VICTORY | scene_keys::DEFEAT => {
+                crate::room_preload::start_gameplay_cpu_prefetch();
+            }
+            scene_keys::STAIRWAY => {}
+            _ => {}
+        }
     }
 
     /// Graphics preset suggested from the active adapter at renderer init.

@@ -45,6 +45,20 @@ impl App {
         })
     }
 
+    /// Keep fade-out transitions on black until destination room GPU data is ready.
+    fn pending_scene_room_gpu_ready(&self) -> bool {
+        let Some(next) = self.pending_scene.as_ref() else {
+            return true;
+        };
+        let Some(renderer) = self.renderer.as_ref() else {
+            return true;
+        };
+        let Some(scene_key) = crate::scenes::active_scene_key(next) else {
+            return true;
+        };
+        renderer.scene_room_gpu_ready(scene_key)
+    }
+
     /// Fire a one-shot rumble pulse on connected SDL gamepads.
     fn fire_rumble_pulse(
         &mut self,
@@ -834,6 +848,9 @@ impl App {
             .pending_scene
             .as_ref()
             .and_then(crate::scenes::active_scene_key);
+        let pending_transition_at_black = self.pending_scene.is_some()
+            && self.transition_alpha <= 0.0
+            && !self.modals.is_active();
         if pending_scene_key.is_some_and(|k| {
             matches!(
                 k,
@@ -848,6 +865,7 @@ impl App {
                 self.last_frame_dt * 1000.0,
                 warm_gameplay_for_resume,
                 pending_scene_key,
+                pending_transition_at_black,
             );
             r.ensure_rooms_for_scene_key(scene_key);
             FramePicks {
@@ -1220,6 +1238,15 @@ impl App {
             self.transition_timer = 0.0;
             // Start fade-out transition.
             self.pending_scene = Some(next_scene);
+            if let Some(renderer) = self.renderer.as_mut() {
+                if let Some(key) = self
+                    .pending_scene
+                    .as_ref()
+                    .and_then(crate::scenes::active_scene_key)
+                {
+                    renderer.start_room_cpu_prefetch_for_scene_key(key);
+                }
+            }
             self.pending_scene_destination = if updated_overlay {
                 PendingSceneDestination::OverlayTop
             } else {
@@ -1340,7 +1367,10 @@ impl App {
             self.transition_timer = (1.0 - self.transition_alpha.max(0.0)).clamp(0.0, 1.0) * 0.5;
             if self.transition_alpha <= 0.0 {
                 self.transition_alpha = 0.0;
-                if let Some(next) = self.pending_scene.take() {
+                if !self.pending_scene_room_gpu_ready() {
+                    // Hold at full black until pending scene room uploads complete.
+                    self.transition_timer = 0.5;
+                } else if let Some(next) = self.pending_scene.take() {
                     if matches!(&next, Scene::Shop(_)) {
                         self.run.grant_pending_memorial(&mut self.progress);
                         self.mark_profile_dirty();

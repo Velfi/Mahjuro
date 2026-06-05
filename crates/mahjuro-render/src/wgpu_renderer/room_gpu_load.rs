@@ -34,11 +34,24 @@ use crate::score_roller_layout::{self, GAMEPLAY_SCORE_ROLLER_SLOT_COUNT};
 const GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS: f32 = 6.0;
 /// Larger slice while idle on Performance/Visuals so gameplay finishes before scene entry.
 const GAMEPLAY_EAGER_UPLOAD_BUDGET_MS: f32 = 32.0;
+/// Slice budget for standard room env uploads (shop/hallway) during active scene / fades.
+const ROOM_ENV_GPU_UPLOAD_BUDGET_MS: f32 = 4.0;
+/// Eager warm-up budget for standard room env uploads while idle on non-low-memory presets.
+const ROOM_ENV_EAGER_UPLOAD_BUDGET_MS: f32 = 24.0;
+/// Unlimited per-frame upload budget while a transition is held at full black.
+const TRANSITION_BLACK_ROOM_GPU_UPLOAD_BUDGET_MS: f32 = 1.0e6;
 
 fn gameplay_eager_upload_budget_ms(mode: mahjuro_gfx_types::GraphicsMode) -> f32 {
     match mode {
         mahjuro_gfx_types::GraphicsMode::LowMemory => GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS,
         _ => GAMEPLAY_EAGER_UPLOAD_BUDGET_MS,
+    }
+}
+
+fn room_env_eager_upload_budget_ms(mode: mahjuro_gfx_types::GraphicsMode) -> f32 {
+    match mode {
+        mahjuro_gfx_types::GraphicsMode::LowMemory => ROOM_ENV_GPU_UPLOAD_BUDGET_MS,
+        _ => ROOM_ENV_EAGER_UPLOAD_BUDGET_MS,
     }
 }
 
@@ -128,6 +141,70 @@ pub(super) struct GameplayRoomGpuUpload {
     score_roller_pivots_doc: Vec<[f32; 3]>,
     score_roller_axes_doc: Vec<[f32; 3]>,
     score_roller_found: [bool; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT],
+    started_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IncrementalRoomEnvKind {
+    Shop,
+    Hallway,
+}
+
+impl IncrementalRoomEnvKind {
+    fn scene_key(self) -> &'static str {
+        match self {
+            Self::Shop => scene_keys::SHOP,
+            Self::Hallway => scene_keys::HALLWAY,
+        }
+    }
+
+    fn label_prefix(self) -> &'static str {
+        match self {
+            Self::Shop => "shop",
+            Self::Hallway => "hallway",
+        }
+    }
+
+    fn bind_group_label(self) -> &'static str {
+        match self {
+            Self::Shop => "shop-env-bg",
+            Self::Hallway => "hallway-env-bg",
+        }
+    }
+
+    fn shadow_label(self) -> &'static str {
+        match self {
+            Self::Shop => "shop-env-shadow",
+            Self::Hallway => "hallway-env-shadow",
+        }
+    }
+
+    fn shadow_warp_label(self) -> &'static str {
+        match self {
+            Self::Shop => "shop-env-shadow-warp",
+            Self::Hallway => "hallway-env-shadow-warp",
+        }
+    }
+
+    fn uniform_label(self) -> &'static str {
+        match self {
+            Self::Shop => "shop-env-uniform",
+            Self::Hallway => "hallway-env-uniform",
+        }
+    }
+}
+
+pub(super) struct IncrementalRoomEnvGpuUpload {
+    kind: IncrementalRoomEnvKind,
+    prim_count: usize,
+    next_prim: usize,
+    prims: Vec<TilePrimitiveGpu>,
+    room_tex_cache: RoomEnvTextureCache,
+    _white_albedo_tex: wgpu::Texture,
+    white_albedo_view: wgpu::TextureView,
+    _decal_tex: wgpu::Texture,
+    decal_view: wgpu::TextureView,
+    shop_eyeball_prim_indices: Vec<usize>,
     started_at: Instant,
 }
 
@@ -1291,6 +1368,234 @@ fn load_archive_room_gpu(
     })
 }
 
+fn begin_incremental_room_env_gpu_upload(
+    kind: IncrementalRoomEnvKind,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> Option<IncrementalRoomEnvGpuUpload> {
+    let prim_count = match kind {
+        IncrementalRoomEnvKind::Shop => crate::room_glb::with_shop_glb_cpu(|cpu_opt| {
+            cpu_opt
+                .map(|cpu| cpu.environment_primitives.len())
+                .filter(|&n| n > 0)
+        })?,
+        IncrementalRoomEnvKind::Hallway => {
+            crate::hallway_glb::with_hallway_glb_cpu(|cpu_opt| {
+                cpu_opt
+                    .map(|cpu| cpu.environment_primitives.len())
+                    .filter(|&n| n > 0)
+            })?
+        }
+    };
+    let (white_tex, white_view) = white_albedo(device, queue);
+    let (decal_tex, decal_view) = white_albedo(device, queue);
+    Some(IncrementalRoomEnvGpuUpload {
+        kind,
+        prim_count,
+        next_prim: 0,
+        prims: Vec::with_capacity(prim_count),
+        room_tex_cache: RoomEnvTextureCache::new(),
+        _white_albedo_tex: white_tex,
+        white_albedo_view: white_view,
+        _decal_tex: decal_tex,
+        decal_view,
+        shop_eyeball_prim_indices: Vec::new(),
+        started_at: Instant::now(),
+    })
+}
+
+fn upload_incremental_room_env_prim_gpu(
+    kind: IncrementalRoomEnvKind,
+    i: usize,
+    env_prim: &RoomEnvPrimitiveCpu,
+    ctx: &RoomGpuUploadCtx<'_>,
+    white_albedo_view: &wgpu::TextureView,
+    room_tex_cache: &mut RoomEnvTextureCache,
+) -> TilePrimitiveGpu {
+    let prim = &env_prim.mesh;
+    let label_prefix = kind.label_prefix();
+    let vb = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{label_prefix}-env-verts-{i}")),
+            contents: bytemuck::cast_slice(&prim.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+    let ib = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{label_prefix}-env-idx-{i}")),
+            contents: bytemuck::cast_slice(&prim.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+    let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
+    let albedo_view = room_tex_cache.upload_slot(
+        ctx.device,
+        ctx.queue,
+        format!("{label_prefix}-env-albedo-{i}"),
+        prim.albedo_rgba.as_ref(),
+        prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        mips,
+        white_albedo_view,
+    );
+    let normal_view = room_tex_cache.upload_slot(
+        ctx.device,
+        ctx.queue,
+        format!("{label_prefix}-env-normal-{i}"),
+        prim.normal_rgba.as_ref(),
+        prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
+        wgpu::TextureFormat::Rgba8Unorm,
+        mips,
+        ctx.tile_default_normal_view,
+    );
+    let metallic_roughness_view = room_tex_cache.upload_slot(
+        ctx.device,
+        ctx.queue,
+        format!("{label_prefix}-env-mr-{i}"),
+        prim.metallic_roughness_rgba.as_ref(),
+        prim.metallic_roughness_mip_chain
+            .as_deref()
+            .map(|c| c.as_slice()),
+        wgpu::TextureFormat::Rgba8Unorm,
+        mips,
+        ctx.tile_glb_default_mr_view,
+    );
+    let emissive_view = room_tex_cache.upload_slot(
+        ctx.device,
+        ctx.queue,
+        format!("{label_prefix}-env-emissive-{i}"),
+        prim.emissive_rgba.as_ref(),
+        prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        mips,
+        ctx.tile_glb_default_emissive_view,
+    );
+    let pbr_uniform =
+        room_env_pbr_uniform(prim, kind.scene_key(), env_prim.gltf_node_name.as_deref());
+    let pbr_uniform_buffer = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{label_prefix}-pbr-{i}")),
+            contents: bytemuck::bytes_of(&pbr_uniform),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+    let sampler = ctx
+        .device
+        .create_sampler(&build_sampler_descriptor(prim.sampler, None));
+    TilePrimitiveGpu {
+        vertex_buffer: vb,
+        index_buffer: ib,
+        index_count: prim.indices.len() as u32,
+        albedo_view,
+        normal_view,
+        metallic_roughness_view,
+        emissive_view,
+        pbr_uniform_buffer,
+        sampler,
+        pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+    }
+}
+
+fn finalize_incremental_room_env_gpu_upload(
+    upload: IncrementalRoomEnvGpuUpload,
+    ctx: RoomGpuUploadCtx<'_>,
+) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>) {
+    let IncrementalRoomEnvGpuUpload {
+        kind,
+        prim_count,
+        prims,
+        decal_view,
+        ..
+    } = upload;
+    debug_assert_eq!(prims.len(), prim_count);
+    let label_prefix = kind.label_prefix();
+    let distortion_buffer = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{label_prefix}-env-distortion")),
+            contents: bytemuck::bytes_of(&crate::hallway_glb::HallwayDistortion::default()),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+    let uniform_buffers =
+        create_room_env_camera_uniform_buffers(ctx.device, prim_count, kind.uniform_label());
+    let bind_groups: Vec<wgpu::BindGroup> = prims
+        .iter()
+        .enumerate()
+        .map(|(pi, p)| {
+            ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(kind.bind_group_label()),
+                layout: ctx.tile_material_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffers[pi].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&p.albedo_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&p.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&decal_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(&p.normal_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: p.pbr_uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(&p.metallic_roughness_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::TextureView(&p.emissive_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: distortion_buffer.as_entire_binding(),
+                    },
+                ],
+            })
+        })
+        .collect();
+    let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
+        ctx.device,
+        ctx.shadow_caster_layout,
+        prim_count,
+        kind.shadow_label(),
+    );
+    let shadow_warp_bind_group = create_shadow_warp_bind_group(
+        ctx.device,
+        ctx.shadow_warp_layout,
+        &distortion_buffer,
+        kind.shadow_warp_label(),
+    );
+    (
+        prims,
+        Some(ShopEnvironmentGpu {
+            uniform_buffers,
+            distortion_buffer,
+            shadow_uniform_buffers,
+            shadow_bind_groups,
+            shadow_warp_bind_group,
+            bind_groups,
+            archive_sign_decal_texture: None,
+            archive_sign_decal_size: None,
+            archive_inspect_plaque_decal_texture: None,
+            archive_inspect_plaque_decal_size: None,
+        }),
+    )
+}
+
 fn record_gameplay_env_prim_metadata(
     upload: &mut GameplayRoomGpuUpload,
     i: usize,
@@ -1571,6 +1876,302 @@ fn finalize_gameplay_room_gpu_upload(
 }
 
 impl WgpuRenderer {
+    fn cancel_shop_room_gpu_upload(&mut self) {
+        self.shop_room_gpu_upload = None;
+    }
+
+    fn cancel_hallway_room_gpu_upload(&mut self) {
+        self.hallway_room_gpu_upload = None;
+    }
+
+    fn tick_shop_room_gpu_upload(&mut self, budget_ms: f32) -> bool {
+        if self.rooms_gpu_loaded & ROOM_SHOP != 0 {
+            self.cancel_shop_room_gpu_upload();
+            return true;
+        }
+        if !room_cpu_env_ready(crate::room_glb::shop_cpu_ready_for_gpu_upload) {
+            return false;
+        }
+        if self.shop_room_gpu_upload.is_none() {
+            let ctx = self.room_gpu_upload_ctx();
+            self.shop_room_gpu_upload = begin_incremental_room_env_gpu_upload(
+                IncrementalRoomEnvKind::Shop,
+                ctx.device,
+                ctx.queue,
+            );
+        }
+        let Some(mut upload) = self.shop_room_gpu_upload.take() else {
+            log::error!("shop.glb GPU upload skipped: CPU environment not resident; will retry");
+            RoomGpuResidentDesc::restart_cpu_after_gpu_miss(ROOM_SHOP);
+            return false;
+        };
+        let unlimited = budget_ms >= 1.0e6;
+        let deadline = if unlimited {
+            None
+        } else {
+            Some(Instant::now() + Duration::from_secs_f32((budget_ms / 1000.0).max(0.0)))
+        };
+        while upload.next_prim < upload.prim_count {
+            if let Some(dl) = deadline
+                && Instant::now() >= dl
+            {
+                break;
+            }
+            let i = upload.next_prim;
+            let ctx = self.room_gpu_upload_ctx();
+            let prim_gpu = crate::room_glb::with_shop_glb_cpu(|cpu_opt| {
+                let cpu = cpu_opt?;
+                let env_prim = cpu.environment_primitives.get(i)?;
+                if env_prim.gltf_node_name.as_deref() == Some("Eyeball") {
+                    upload.shop_eyeball_prim_indices.push(i);
+                }
+                Some(upload_incremental_room_env_prim_gpu(
+                    IncrementalRoomEnvKind::Shop,
+                    i,
+                    env_prim,
+                    &ctx,
+                    &upload.white_albedo_view,
+                    &mut upload.room_tex_cache,
+                ))
+            });
+            let Some(prim_gpu) = prim_gpu else {
+                log::error!(
+                    "shop.glb GPU upload aborted: CPU cache evicted mid-upload; will retry"
+                );
+                RoomGpuResidentDesc::restart_cpu_after_gpu_miss(ROOM_SHOP);
+                self.cancel_shop_room_gpu_upload();
+                return false;
+            };
+            upload.prims.push(prim_gpu);
+            upload.next_prim += 1;
+        }
+        if upload.next_prim < upload.prim_count {
+            self.shop_room_gpu_upload = Some(upload);
+            return false;
+        }
+
+        let started_at = upload.started_at;
+        let mut shop_eyeball_prim_indices = upload.shop_eyeball_prim_indices.clone();
+        let payload = crate::room_glb::with_shop_glb_cpu(|o| {
+            o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+                .unwrap_or_default()
+        });
+        let frame_dt_ms = self.room_profile_frame_dt_ms;
+        let _cpu = crate::cpu_profiler::scope("wgpu.room.shop");
+        let _startup = crate::startup_profile::scope("wgpu.room.shop");
+        let finalize_t0 = Instant::now();
+        let (prims, gpu_wrap) = {
+            let ctx = self.room_gpu_upload_ctx();
+            finalize_incremental_room_env_gpu_upload(upload, ctx)
+        };
+        let Some((prims, gpu_wrap)) =
+            try_commit_room_environment_gpu_upload(ROOM_SHOP, "shop.glb", prims, gpu_wrap)
+        else {
+            self.cancel_shop_room_gpu_upload();
+            return false;
+        };
+        self.shop_env_primitives = prims;
+        self.shop_environment = Some(gpu_wrap);
+        let mut shop_gltf_anim = crate::room_gltf_anim::RoomGltfAnimGpu::default();
+        crate::room_glb::with_shop_glb_cpu(|cpu_opt| {
+            let Some(cpu) = cpu_opt else {
+                return;
+            };
+            shop_gltf_anim = crate::room_gltf_anim::RoomGltfAnimGpu::from_room_cpu(
+                &cpu.gltf_anim_library,
+                &cpu.environment_primitives,
+                "shop.glb",
+            );
+            if shop_eyeball_prim_indices.is_empty()
+                && let Some(bindings) = shop_gltf_anim.clip_prim_bindings.get("eyeball_travel")
+            {
+                shop_eyeball_prim_indices = bindings.iter().map(|(pi, _)| *pi).collect();
+                if !shop_eyeball_prim_indices.is_empty() {
+                    log::info!(
+                        "shop.glb GPU: Eyeball prims from eyeball_travel bindings {:?}",
+                        shop_eyeball_prim_indices
+                    );
+                }
+            }
+        });
+        self.shop_gltf_anim = shop_gltf_anim;
+        self.shop_eyeball_prim_indices = shop_eyeball_prim_indices;
+        if !self.shop_eyeball_prim_indices.is_empty() {
+            log::info!(
+                "shop.glb GPU: Eyeball primitive indices {:?}",
+                self.shop_eyeball_prim_indices
+            );
+        }
+        self.shop_env_collision_meshes = crate::room_glb::with_shop_glb_cpu(|o| {
+            o.map(|c| c.collision_meshes.clone()).unwrap_or_default()
+        });
+        crate::room_glb::release_shop_environment_cpu_sources_after_gpu_upload();
+        self.rooms_gpu_loaded |= ROOM_SHOP;
+        self.note_room_gpu_resident(ROOM_SHOP);
+        crate::room_preload::start_hallway_cpu_prefetch();
+        log::info!("shop.glb GPU: {} primitive draw(s)", self.shop_env_primitives.len());
+        if crate::room_gpu_profile::enabled() {
+            let finalize_ms = finalize_t0.elapsed().as_secs_f64() * 1000.0;
+            let total_ms = started_at.elapsed().as_secs_f64() * 1000.0;
+            let mb = payload.total_bytes() as f64 / (1024.0 * 1024.0);
+            let hitch = if frame_dt_ms >= 33.0 {
+                "HITCH"
+            } else if frame_dt_ms >= 20.0 {
+                "slow"
+            } else {
+                "ok"
+            };
+            log::info!(
+                "room gpu profile: shop.glb GPU upload — finalize {finalize_ms:.1} ms | \
+                 {total_ms:.1} ms total wall | {prims} prims | {total_mb:.2} MiB CPU payload | \
+                 prev frame dt {frame_dt_ms:.1} ms ({hitch})",
+                prims = payload.primitives,
+                total_mb = mb,
+            );
+        }
+        crate::startup_profile::log_sample("wgpu.room.shop", "first shop GPU upload");
+        true
+    }
+
+    fn drive_shop_room_gpu_upload(&mut self, budget_ms: f32) {
+        if self.rooms_gpu_loaded & ROOM_SHOP != 0 {
+            self.cancel_shop_room_gpu_upload();
+            return;
+        }
+        if budget_ms >= 1.0e6 {
+            while !self.tick_shop_room_gpu_upload(budget_ms) {}
+        } else {
+            let _ = self.tick_shop_room_gpu_upload(budget_ms);
+        }
+    }
+
+    fn tick_hallway_room_gpu_upload(&mut self, budget_ms: f32) -> bool {
+        if self.rooms_gpu_loaded & ROOM_HALLWAY != 0 {
+            self.cancel_hallway_room_gpu_upload();
+            return true;
+        }
+        if !room_cpu_env_ready(crate::hallway_glb::hallway_cpu_ready_for_gpu_upload) {
+            return false;
+        }
+        if self.hallway_room_gpu_upload.is_none() {
+            let ctx = self.room_gpu_upload_ctx();
+            self.hallway_room_gpu_upload = begin_incremental_room_env_gpu_upload(
+                IncrementalRoomEnvKind::Hallway,
+                ctx.device,
+                ctx.queue,
+            );
+        }
+        let Some(mut upload) = self.hallway_room_gpu_upload.take() else {
+            log::error!("hallway.glb GPU upload skipped: CPU environment not resident; will retry");
+            RoomGpuResidentDesc::restart_cpu_after_gpu_miss(ROOM_HALLWAY);
+            return false;
+        };
+        let unlimited = budget_ms >= 1.0e6;
+        let deadline = if unlimited {
+            None
+        } else {
+            Some(Instant::now() + Duration::from_secs_f32((budget_ms / 1000.0).max(0.0)))
+        };
+        while upload.next_prim < upload.prim_count {
+            if let Some(dl) = deadline
+                && Instant::now() >= dl
+            {
+                break;
+            }
+            let i = upload.next_prim;
+            let ctx = self.room_gpu_upload_ctx();
+            let prim_gpu = crate::hallway_glb::with_hallway_glb_cpu(|cpu_opt| {
+                let cpu = cpu_opt?;
+                let env_prim = cpu.environment_primitives.get(i)?;
+                Some(upload_incremental_room_env_prim_gpu(
+                    IncrementalRoomEnvKind::Hallway,
+                    i,
+                    env_prim,
+                    &ctx,
+                    &upload.white_albedo_view,
+                    &mut upload.room_tex_cache,
+                ))
+            });
+            let Some(prim_gpu) = prim_gpu else {
+                log::error!(
+                    "hallway.glb GPU upload aborted: CPU cache evicted mid-upload; will retry"
+                );
+                RoomGpuResidentDesc::restart_cpu_after_gpu_miss(ROOM_HALLWAY);
+                self.cancel_hallway_room_gpu_upload();
+                return false;
+            };
+            upload.prims.push(prim_gpu);
+            upload.next_prim += 1;
+        }
+        if upload.next_prim < upload.prim_count {
+            self.hallway_room_gpu_upload = Some(upload);
+            return false;
+        }
+
+        let started_at = upload.started_at;
+        let payload = crate::hallway_glb::with_hallway_glb_cpu(|o| {
+            o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+                .unwrap_or_default()
+        });
+        let frame_dt_ms = self.room_profile_frame_dt_ms;
+        let _cpu = crate::cpu_profiler::scope("wgpu.room.hallway");
+        let _startup = crate::startup_profile::scope("wgpu.room.hallway");
+        let finalize_t0 = Instant::now();
+        let (prims, gpu_wrap) = {
+            let ctx = self.room_gpu_upload_ctx();
+            finalize_incremental_room_env_gpu_upload(upload, ctx)
+        };
+        let Some((prims, gpu_wrap)) =
+            try_commit_room_environment_gpu_upload(ROOM_HALLWAY, "hallway.glb", prims, gpu_wrap)
+        else {
+            self.cancel_hallway_room_gpu_upload();
+            return false;
+        };
+        self.hallway_env_primitives = prims;
+        self.hallway_environment = Some(gpu_wrap);
+        crate::hallway_glb::release_hallway_environment_cpu_sources_after_gpu_upload();
+        self.rooms_gpu_loaded |= ROOM_HALLWAY;
+        self.note_room_gpu_resident(ROOM_HALLWAY);
+        crate::room_preload::start_gameplay_cpu_prefetch();
+        log::info!(
+            "hallway.glb GPU: {} primitive draw(s)",
+            self.hallway_env_primitives.len()
+        );
+        if crate::room_gpu_profile::enabled() {
+            let finalize_ms = finalize_t0.elapsed().as_secs_f64() * 1000.0;
+            let total_ms = started_at.elapsed().as_secs_f64() * 1000.0;
+            let mb = payload.total_bytes() as f64 / (1024.0 * 1024.0);
+            let hitch = if frame_dt_ms >= 33.0 {
+                "HITCH"
+            } else if frame_dt_ms >= 20.0 {
+                "slow"
+            } else {
+                "ok"
+            };
+            log::info!(
+                "room gpu profile: hallway.glb GPU upload — finalize {finalize_ms:.1} ms | \
+                 {total_ms:.1} ms total wall | {prims} prims | {total_mb:.2} MiB CPU payload | \
+                 prev frame dt {frame_dt_ms:.1} ms ({hitch})",
+                prims = payload.primitives,
+                total_mb = mb,
+            );
+        }
+        crate::startup_profile::log_sample("wgpu.room.hallway", "first hallway GPU upload");
+        true
+    }
+
+    fn drive_hallway_room_gpu_upload(&mut self, budget_ms: f32) {
+        if self.rooms_gpu_loaded & ROOM_HALLWAY != 0 {
+            self.cancel_hallway_room_gpu_upload();
+            return;
+        }
+        if budget_ms >= 1.0e6 {
+            while !self.tick_hallway_room_gpu_upload(budget_ms) {}
+        } else {
+            let _ = self.tick_hallway_room_gpu_upload(budget_ms);
+        }
+    }
+
     fn cancel_gameplay_room_gpu_upload(&mut self) {
         self.gameplay_room_gpu_upload = None;
     }
@@ -1796,12 +2397,16 @@ impl WgpuRenderer {
     ///
     /// `pending_scene_key` — scene we are fading into (`App::pending_scene`), if any;
     /// uploads the destination room during fade-out so the black-frame swap does not stall.
+    ///
+    /// `pending_transition_at_black` — transition alpha has reached zero; finish destination
+    /// room uploads as fast as possible while the screen stays black.
     pub fn poll_room_prefetch_gpu_uploads(
         &mut self,
         scene_key: Option<&str>,
         frame_dt_ms: f32,
         warm_gameplay_for_resume: bool,
         pending_scene_key: Option<&str>,
+        pending_transition_at_black: bool,
     ) {
         self.room_profile_frame_dt_ms = frame_dt_ms;
         self.poll_pinned_room_gpu_bit = scene_key.and_then(Self::room_gpu_bit_for_scene_key);
@@ -1882,52 +2487,65 @@ impl WgpuRenderer {
         }
 
         if let Some(pending) = pending_scene_key {
-            match pending {
-                scene_keys::GAMEPLAY
-                | scene_keys::VICTORY
-                | scene_keys::DEFEAT
-                | "game_over"
-                | "tutorial" => {
-                    crate::room_preload::start_gameplay_cpu_prefetch();
-                    upload_gameplay(self);
-                }
-                scene_keys::HALLWAY | "pick_chamber" => {
-                    crate::room_preload::start_hallway_cpu_prefetch();
-                    self.maybe_upload_one_room_env(
-                        &mut room_env_upload_done,
-                        ROOM_HALLWAY,
-                        crate::hallway_glb::hallway_cpu_ready_for_gpu_upload(),
-                        |r| r.ensure_hallway_room_gpu(),
-                    );
-                }
-                scene_keys::SHOP | "showcase" => {
-                    crate::room_preload::start_shop_cpu_prefetch();
-                    self.maybe_upload_one_room_env(
-                        &mut room_env_upload_done,
-                        ROOM_SHOP,
-                        crate::room_glb::shop_cpu_ready_for_gpu_upload(),
-                        |r| r.ensure_shop_room_gpu(),
-                    );
-                }
-                scene_keys::ARCHIVE | "collection" => {
-                    crate::room_preload::start_archive_cpu_prefetch();
-                    self.maybe_upload_one_room_env(
-                        &mut room_env_upload_done,
-                        ROOM_ARCHIVE,
-                        crate::archive_glb::archive_cpu_ready_for_gpu_upload(),
-                        |r| r.ensure_archive_room_gpu(),
-                    );
-                }
-                scene_keys::STAIRWAY | "staircase" => {
-                    if !room_env_upload_done && self.rooms_gpu_loaded & ROOM_STAIRCASE == 0 {
-                        let before = self.rooms_gpu_loaded;
-                        self.ensure_staircase_room_gpu();
-                        if self.rooms_gpu_loaded != before {
-                            room_env_upload_done = true;
+            if pending_transition_at_black {
+                self.drive_pending_scene_room_gpu_at_black(pending);
+            } else {
+                match pending {
+                    scene_keys::MAIN_MENU | "main_menu_exterior" => {
+                        crate::room_preload::start_main_menu_cpu_prefetch();
+                        self.maybe_upload_one_room_env(
+                            &mut room_env_upload_done,
+                            ROOM_MAIN_MENU,
+                            crate::main_menu_glb::main_menu_cpu_ready_for_gpu_upload(),
+                            |r| r.ensure_main_menu_room_gpu(),
+                        );
+                    }
+                    scene_keys::GAMEPLAY
+                    | scene_keys::VICTORY
+                    | scene_keys::DEFEAT
+                    | "game_over"
+                    | "tutorial" => {
+                        crate::room_preload::start_gameplay_cpu_prefetch();
+                        upload_gameplay(self);
+                    }
+                    scene_keys::HALLWAY | "pick_chamber" => {
+                        crate::room_preload::start_hallway_cpu_prefetch();
+                        self.maybe_upload_one_room_env(
+                            &mut room_env_upload_done,
+                            ROOM_HALLWAY,
+                            crate::hallway_glb::hallway_cpu_ready_for_gpu_upload(),
+                            |r| r.ensure_hallway_room_gpu(),
+                        );
+                    }
+                    scene_keys::SHOP | "showcase" => {
+                        crate::room_preload::start_shop_cpu_prefetch();
+                        self.maybe_upload_one_room_env(
+                            &mut room_env_upload_done,
+                            ROOM_SHOP,
+                            crate::room_glb::shop_cpu_ready_for_gpu_upload(),
+                            |r| r.ensure_shop_room_gpu(),
+                        );
+                    }
+                    scene_keys::ARCHIVE | "collection" => {
+                        crate::room_preload::start_archive_cpu_prefetch();
+                        self.maybe_upload_one_room_env(
+                            &mut room_env_upload_done,
+                            ROOM_ARCHIVE,
+                            crate::archive_glb::archive_cpu_ready_for_gpu_upload(),
+                            |r| r.ensure_archive_room_gpu(),
+                        );
+                    }
+                    scene_keys::STAIRWAY | "staircase" => {
+                        if !room_env_upload_done && self.rooms_gpu_loaded & ROOM_STAIRCASE == 0 {
+                            let before = self.rooms_gpu_loaded;
+                            self.ensure_staircase_room_gpu();
+                            if self.rooms_gpu_loaded != before {
+                                room_env_upload_done = true;
+                            }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
 
@@ -1989,6 +2607,7 @@ impl WgpuRenderer {
                 self.main_menu_env_collision_meshes.clear();
             }
             RoomGpuResidentId::Shop => {
+                self.shop_room_gpu_upload = None;
                 self.shop_env_primitives.clear();
                 self.shop_environment = None;
                 self.shop_gltf_anim = crate::room_gltf_anim::RoomGltfAnimGpu::default();
@@ -1996,6 +2615,7 @@ impl WgpuRenderer {
                 self.shop_env_collision_meshes.clear();
             }
             RoomGpuResidentId::Hallway => {
+                self.hallway_room_gpu_upload = None;
                 self.hallway_env_primitives.clear();
                 self.hallway_environment = None;
             }
@@ -2054,6 +2674,10 @@ impl WgpuRenderer {
         if self.rooms_gpu_loaded & desc.bit() != 0 {
             return;
         }
+        if self.shop_room_gpu_upload.is_some() {
+            self.drive_shop_room_gpu_upload(f32::MAX);
+            return;
+        }
         if !room_cpu_env_ready(desc.cpu_ready_for_gpu_upload) {
             return;
         }
@@ -2085,6 +2709,10 @@ impl WgpuRenderer {
     }
 
     pub(super) fn ensure_hallway_room_gpu(&mut self) {
+        if self.hallway_room_gpu_upload.is_some() {
+            self.drive_hallway_room_gpu_upload(f32::MAX);
+            return;
+        }
         self.ensure_standard_room_env_gpu(
             RoomGpuResidentId::Hallway,
             || {
@@ -2275,6 +2903,108 @@ impl WgpuRenderer {
         }
     }
 
+    /// Finish destination room GPU uploads while a scene transition is held at full black.
+    fn drive_pending_scene_room_gpu_at_black(&mut self, pending: &str) {
+        let budget = TRANSITION_BLACK_ROOM_GPU_UPLOAD_BUDGET_MS;
+        let key = scene_keys::normalize_scene_key(pending);
+        match key {
+            scene_keys::MAIN_MENU => {
+                self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::MainMenu);
+                self.ensure_main_menu_room_gpu();
+            }
+            scene_keys::SHOP => {
+                self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Shop);
+                self.drive_shop_room_gpu_upload(budget);
+            }
+            scene_keys::HALLWAY => {
+                if self.rooms_gpu_loaded & ROOM_SHOP == 0 {
+                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Shop);
+                    self.drive_shop_room_gpu_upload(budget);
+                }
+                self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Hallway);
+                self.ensure_hallway_room_gpu();
+            }
+            scene_keys::STAIRWAY => {
+                self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Staircase);
+                self.ensure_staircase_room_gpu();
+            }
+            scene_keys::ARCHIVE => {
+                self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Archive);
+                self.ensure_archive_room_gpu();
+            }
+            scene_keys::GAMEPLAY | scene_keys::VICTORY | scene_keys::DEFEAT => {
+                self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Gameplay);
+                self.drive_gameplay_room_gpu_upload(budget);
+            }
+            _ => match pending {
+                "main_menu_exterior" => {
+                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::MainMenu);
+                    self.ensure_main_menu_room_gpu();
+                }
+                "showcase" => {
+                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Shop);
+                    self.drive_shop_room_gpu_upload(budget);
+                }
+                "pick_chamber" => {
+                    if self.rooms_gpu_loaded & ROOM_SHOP == 0 {
+                        self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Shop);
+                        self.drive_shop_room_gpu_upload(budget);
+                    }
+                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Hallway);
+                    self.ensure_hallway_room_gpu();
+                }
+                "collection" => {
+                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Archive);
+                    self.ensure_archive_room_gpu();
+                }
+                "staircase" => {
+                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Staircase);
+                    self.ensure_staircase_room_gpu();
+                }
+                "game_over" | "tutorial" => {
+                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Gameplay);
+                    self.drive_gameplay_room_gpu_upload(budget);
+                }
+                _ => {}
+            },
+        }
+    }
+
+    /// Join any in-flight worker decode, then synchronously decode on the main thread if needed.
+    /// Used while a transition is held at full black so prefetch gating cannot stall the swap.
+    fn ensure_room_cpu_resident_for_transition(&self, id: RoomGpuResidentId) {
+        let desc = id.desc();
+        if (desc.cpu_decoded)() {
+            return;
+        }
+        (desc.start_cpu_prefetch)();
+        match id {
+            RoomGpuResidentId::MainMenu => {
+                crate::room_preload::join_main_menu_cpu_prefetch_blocking();
+                let _ = crate::main_menu_glb::with_main_menu_glb_cpu(|_| ());
+            }
+            RoomGpuResidentId::Shop => {
+                crate::room_preload::join_shop_cpu_prefetch_blocking();
+                let _ = crate::room_glb::with_shop_glb_cpu(|_| ());
+            }
+            RoomGpuResidentId::Hallway => {
+                crate::room_preload::join_hallway_cpu_prefetch_blocking();
+                let _ = crate::hallway_glb::with_hallway_glb_cpu(|_| ());
+            }
+            RoomGpuResidentId::Archive => {
+                crate::room_preload::join_archive_cpu_prefetch_blocking();
+                let _ = crate::archive_glb::with_archive_glb_cpu(|_| ());
+            }
+            RoomGpuResidentId::Gameplay => {
+                crate::room_preload::join_gameplay_cpu_prefetch_blocking();
+                let _ = crate::gameplay_glb::with_gameplay_glb_cpu(|_| ());
+            }
+            RoomGpuResidentId::Staircase => {
+                let _ = crate::staircase_glb::with_staircase_glb_cpu(|_| ());
+            }
+        }
+    }
+
     /// Run at most one full room GLB GPU upload per [`poll_room_prefetch_gpu_uploads`] call.
     fn maybe_upload_one_room_env(
         &mut self,
@@ -2287,6 +3017,22 @@ impl WgpuRenderer {
             return;
         }
         if !self.preflight_room_gpu_headroom_for_upload(true) {
+            return;
+        }
+        if bit == ROOM_SHOP {
+            let before = self.rooms_gpu_loaded;
+            self.drive_shop_room_gpu_upload(ROOM_ENV_GPU_UPLOAD_BUDGET_MS);
+            if self.rooms_gpu_loaded != before || self.shop_room_gpu_upload.is_some() {
+                *done = true;
+            }
+            return;
+        }
+        if bit == ROOM_HALLWAY {
+            let before = self.rooms_gpu_loaded;
+            self.drive_hallway_room_gpu_upload(ROOM_ENV_GPU_UPLOAD_BUDGET_MS);
+            if self.rooms_gpu_loaded != before || self.hallway_room_gpu_upload.is_some() {
+                *done = true;
+            }
             return;
         }
         let before = self.rooms_gpu_loaded;
@@ -2314,6 +3060,36 @@ impl WgpuRenderer {
                 crate::room_gpu_resident::RoomGpuResidentId::log_label(bit),
                 pressure,
             );
+            return;
+        }
+        if bit == ROOM_SHOP {
+            let before = self.rooms_gpu_loaded;
+            self.drive_shop_room_gpu_upload(room_env_eager_upload_budget_ms(self.graphics_mode));
+            if self.rooms_gpu_loaded != before {
+                *done = true;
+                crate::gpu_memory_pressure::log_eager_preload(
+                    "uploaded",
+                    crate::room_gpu_resident::RoomGpuResidentId::log_label(bit),
+                    pressure,
+                );
+            } else if self.shop_room_gpu_upload.is_some() {
+                *done = true;
+            }
+            return;
+        }
+        if bit == ROOM_HALLWAY {
+            let before = self.rooms_gpu_loaded;
+            self.drive_hallway_room_gpu_upload(room_env_eager_upload_budget_ms(self.graphics_mode));
+            if self.rooms_gpu_loaded != before {
+                *done = true;
+                crate::gpu_memory_pressure::log_eager_preload(
+                    "uploaded",
+                    crate::room_gpu_resident::RoomGpuResidentId::log_label(bit),
+                    pressure,
+                );
+            } else if self.hallway_room_gpu_upload.is_some() {
+                *done = true;
+            }
             return;
         }
         let before = self.rooms_gpu_loaded;

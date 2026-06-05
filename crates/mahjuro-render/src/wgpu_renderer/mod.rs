@@ -226,6 +226,8 @@ pub struct WgpuRenderer {
     shop_gltf_anim_missing_clip_warned: std::cell::Cell<bool>,
     /// GPU primitive indices for the `Eyeball` node in [`Self::shop_env_primitives`].
     shop_eyeball_prim_indices: Vec<usize>,
+    /// In-progress time-sliced upload for [`shop.glb`](../../assets/3d/shop.glb).
+    shop_room_gpu_upload: Option<room_gpu_load::IncrementalRoomEnvGpuUpload>,
     /// Bitset: which deferred room environments finished GPU upload (see `room_gpu_load.rs`).
     rooms_gpu_loaded: u8,
     /// Room not evicted while over the GPU cap during [`WgpuRenderer::poll_room_prefetch_gpu_uploads`].
@@ -241,6 +243,8 @@ pub struct WgpuRenderer {
     /// [`hallway.glb`](../../assets/3d/hallway.glb) pick-blind room.
     hallway_env_primitives: Vec<TilePrimitiveGpu>,
     hallway_environment: Option<ShopEnvironmentGpu>,
+    /// In-progress time-sliced upload for [`hallway.glb`](../../assets/3d/hallway.glb).
+    hallway_room_gpu_upload: Option<room_gpu_load::IncrementalRoomEnvGpuUpload>,
     /// [`staircase.glb`](../../assets/3d/staircase.glb) post-ordeal interstitial.
     staircase_env_primitives: Vec<TilePrimitiveGpu>,
     staircase_environment: Option<ShopEnvironmentGpu>,
