@@ -3400,6 +3400,8 @@ pub(super) fn build_renderer_new(
         shop_gltf_anim_missing_clip_warned: std::cell::Cell::new(false),
         shop_eyeball_prim_indices,
         rooms_gpu_loaded: 0,
+        poll_pinned_room_gpu_bit: None,
+        gpu_memory_pressure: crate::gpu_memory_pressure::GpuMemoryPressure::Normal,
         room_profile_frame_dt_ms: 1000.0 / 60.0,
         shadow_warp_layout,
         tile_env_normal_view,

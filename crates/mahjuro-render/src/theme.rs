@@ -106,6 +106,19 @@ pub mod color {
         pub const FILL: [f32; 4] = [0.722, 0.627, 0.471, 1.0];
     }
 
+    /// 3D play / discard tally-stick fans on the gameplay table. Higher chroma
+    /// than `JADE` / `AMBER` so the two fans read at a glance under candlelight.
+    pub mod tally_stick {
+        /// Play counter body — clear green.
+        pub const PLAY: [f32; 4] = [0.32, 0.70, 0.52, 1.0];
+        /// Play counter tip cap — polychrome sheen tint (green).
+        pub const PLAY_TIP: [f32; 4] = super::keyword::PLAY;
+        /// Discard counter body — warm orange.
+        pub const DISCARD: [f32; 4] = [0.82, 0.44, 0.12, 1.0];
+        /// Discard counter tip cap — polychrome sheen tint (gold-orange).
+        pub const DISCARD_TIP: [f32; 4] = super::keyword::TRIGGER;
+    }
+
     // ── Glossary keyword tints (`vocabulary_colors`, styled text). Full
     //    chroma so suit names and score jargon pop in tutorial copy; the
     //    muted `JADE` / `RUBY` / `LAPIS` ladder above is for chrome elsewhere.

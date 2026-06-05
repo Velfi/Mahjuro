@@ -109,6 +109,8 @@ impl App {
             use crate::render::room_preload::RoomSceneChain;
             // Begin hub GLB GPU upload as soon as the renderer exists (splash plate).
             renderer.tick_splash_hub_boot();
+            // Eager CPU decode for all hub/run rooms (respects concurrent decode cap).
+            crate::render::room_preload::kick_eager_all_room_cpu_prefetches();
             // Shop is always first in the hub chain; start CPU decode early.
             renderer.prefetch_room_chain_next(RoomSceneChain::Shop);
             if self.run.is_in_progress() {

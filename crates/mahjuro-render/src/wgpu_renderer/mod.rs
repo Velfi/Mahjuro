@@ -228,6 +228,10 @@ pub struct WgpuRenderer {
     shop_eyeball_prim_indices: Vec<usize>,
     /// Bitset: which deferred room environments finished GPU upload (see `room_gpu_load.rs`).
     rooms_gpu_loaded: u8,
+    /// Room not evicted while over the GPU cap during [`WgpuRenderer::poll_room_prefetch_gpu_uploads`].
+    poll_pinned_room_gpu_bit: Option<u8>,
+    /// Last classified GPU memory pressure tier (eager warm-up gating).
+    gpu_memory_pressure: crate::gpu_memory_pressure::GpuMemoryPressure,
     /// Previous frame wall time (ms) for [`room_gpu_profile`] hitch logging.
     room_profile_frame_dt_ms: f32,
     shadow_warp_layout: wgpu::BindGroupLayout,
