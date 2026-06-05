@@ -22,7 +22,8 @@ const PACK_OUTPUTS: &[&str] = &[
     "pack_manifest.json",
     "mahjuro-pack-music.zip",
     "mahjuro-pack-shared.zip",
-    "mahjuro-pack-gameplay.zip",
+    "mahjuro-pack-rooms.zip",
+    "mahjuro-pack-gameplay-bulk.zip",
 ];
 
 pub fn emit_rerun_if_changed(_repo: &Path, profile_dir: &Path) {

@@ -163,7 +163,8 @@ jobs:
 
           cp baked-packs/pack_manifest.json "$APP/Contents/Resources/"
           cp baked-packs/mahjuro-pack-shared.zip "$APP/Contents/Resources/"
-          cp baked-packs/mahjuro-pack-gameplay.zip "$APP/Contents/Resources/"
+          cp baked-packs/mahjuro-pack-rooms.zip "$APP/Contents/Resources/"
+          cp baked-packs/mahjuro-pack-gameplay-bulk.zip "$APP/Contents/Resources/"
           cp baked-packs/mahjuro-pack-music.zip "$APP/Contents/Resources/"
 
       - name: Sign .app bundle (macOS)

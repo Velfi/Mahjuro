@@ -194,7 +194,8 @@ jobs:
           Copy-Item "target\x86_64-pc-windows-msvc\release\steam_api64.dll" "$stage\"
           Copy-Item "baked-packs\pack_manifest.json" "$stage\"
           Copy-Item "baked-packs\mahjuro-pack-shared.zip" "$stage\"
-          Copy-Item "baked-packs\mahjuro-pack-gameplay.zip" "$stage\"
+          Copy-Item "baked-packs\mahjuro-pack-rooms.zip" "$stage\"
+          Copy-Item "baked-packs\mahjuro-pack-gameplay-bulk.zip" "$stage\"
           Copy-Item "baked-packs\mahjuro-pack-music.zip" "$stage\"
           # Generate multi-resolution icon.ico from icon.png. ImageMagick is
           # preinstalled on GitHub Windows runners as `magick`.
@@ -248,7 +249,8 @@ jobs:
           7z a "$ROOT/${ARCHIVE}" mahjuro.exe steam_api64.dll \
             "$ROOT/baked-packs/pack_manifest.json" \
             "$ROOT/baked-packs/mahjuro-pack-shared.zip" \
-            "$ROOT/baked-packs/mahjuro-pack-gameplay.zip" \
+            "$ROOT/baked-packs/mahjuro-pack-rooms.zip" \
+            "$ROOT/baked-packs/mahjuro-pack-gameplay-bulk.zip" \
             "$ROOT/baked-packs/mahjuro-pack-music.zip"
           cd ../../..
           echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
