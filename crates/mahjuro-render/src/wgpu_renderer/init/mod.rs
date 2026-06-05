@@ -2,6 +2,7 @@ use super::*;
 
 pub mod bloom;
 mod build;
+mod shaders_and_pipelines;
 
 impl WgpuRenderer {
     pub fn new(target_init: TargetInit) -> anyhow::Result<Self> {

@@ -76,13 +76,10 @@ fn room_evict_label(bit: u8) -> &'static str {
     crate::room_gpu_resident::RoomGpuResidentId::log_label(bit)
 }
 
-/// Log a room GPU eviction with a rough resident label (Phase 0 validation aid).
+/// Log a room GPU eviction (visible at `debug`; allocator follow-up still needs profiling env).
 pub fn log_room_evict(bit: u8) {
-    if !enabled() {
-        return;
-    }
-    log::info!(
-        "gpu mem profile: evict room {} (bit 0x{:02x})",
+    log::debug!(
+        "room gpu evict: {} (bit 0x{:02x})",
         room_evict_label(bit),
         bit
     );

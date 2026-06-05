@@ -44,6 +44,7 @@ enum MainMenuGlbCache {
 static MAIN_MENU_GLB_CPU: RwLock<MainMenuGlbCache> = RwLock::new(MainMenuGlbCache::Uninit);
 
 fn ensure_main_menu_glb_loaded() {
+    crate::room_preload::join_main_menu_cpu_prefetch_blocking();
     let mut w = MAIN_MENU_GLB_CPU.write();
     match &*w {
         MainMenuGlbCache::Uninit => {}
@@ -54,6 +55,23 @@ fn ensure_main_menu_glb_loaded() {
             *w = MainMenuGlbCache::Uninit;
         }
         _ => return,
+    }
+    drop(w);
+    decode_main_menu_glb_into_cache();
+}
+
+/// Decode `main_menu.glb` into the process-wide CPU cache (main or prefetch thread).
+/// Callers on the main thread should use [`with_main_menu_glb_cpu`] / `ensure` paths that
+/// join an in-flight prefetch first — do not call this directly while prefetch is running.
+pub fn decode_main_menu_glb_into_cache() {
+    let mut w = MAIN_MENU_GLB_CPU.write();
+    if matches!(
+        &*w,
+        MainMenuGlbCache::Ready(Some(cpu))
+            if !room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
+                && !room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu)
+    ) {
+        return;
     }
     let ready = if let Some(file) = mahjuro_assets::asset_path::get("3d/main_menu.glb") {
         match load_main_menu_glb_from_bytes(&file.data) {
@@ -217,21 +235,6 @@ pub fn with_main_menu_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R 
 /// True once `main_menu.glb` CPU decode finished (worker or main thread).
 pub fn main_menu_cpu_decoded() -> bool {
     matches!(*MAIN_MENU_GLB_CPU.read(), MainMenuGlbCache::Ready(Some(_)))
-}
-
-/// Idempotent CPU decode for background prefetch (see [`crate::room_preload`]).
-pub fn decode_main_menu_glb_into_cache() {
-    let w = MAIN_MENU_GLB_CPU.write();
-    if matches!(
-        &*w,
-        MainMenuGlbCache::Ready(Some(cpu))
-            if !room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
-                && !room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu)
-    ) {
-        return;
-    }
-    drop(w);
-    ensure_main_menu_glb_loaded();
 }
 
 /// True while environment mesh buffers are still on the CPU (ready for GPU upload).
