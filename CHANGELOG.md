@@ -7,6 +7,15 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.6-9 — 2026-06-05
+
+### Added
+- Four new relics reward simple-tile play: **Plain Dealing** and **Even Keel** add chips for simple ranks and middle tiles; **Chow Line** bonuses hands with three or more sequences; **Open Gate** rewards structures built entirely from simple tiles.
+- Steam achievements now have custom icons drawn from in-game art — relics, ordeal bosses, season stakes, zodiac tiles, and more — with colorful unlocked and grayscale locked variants ready for upload to Steamworks.
+
+### Changed
+- **Tanyao** now scores **+2.0 mult** and **+75 chips** (was +1.5 / +60), making simple-tile hands a bit more rewarding.
+
 ## 0.5.6-8 — 2026-06-05
 
 - maintenance, development, and bugfixes.
