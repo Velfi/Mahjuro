@@ -167,16 +167,20 @@ fn write_room_shadow_bake(
     output_dir: &PathBuf,
     bake: mahjuro::render::room_shadow_bake::RoomShadowBake,
 ) -> anyhow::Result<()> {
-    let out_name = room.offline_bake_filename("msh");
+    let raw = bake.encode();
+    let out_name = room.offline_bake_filename("msh.zst");
     let out_path = output_dir.join(out_name);
     ensure_parent_dir(&out_path)?;
-    std::fs::write(&out_path, bake.encode())?;
+    let compressed = zstd::encode_all(raw.as_slice(), 3)?;
+    let nbytes = compressed.len();
+    std::fs::write(&out_path, compressed)?;
     log::info!(
-        "room shadow bake {:?} → {} ({}×{})",
+        "room shadow bake {:?} → {} ({}×{}, {} bytes zstd)",
         room,
         out_path.display(),
         bake.width,
-        bake.height
+        bake.height,
+        nbytes
     );
     Ok(())
 }
@@ -186,17 +190,21 @@ fn write_room_gi_bake(
     output_dir: &PathBuf,
     bake: mahjuro::render::room_gi_bake::RoomGiBake,
 ) -> anyhow::Result<()> {
-    let out_name = room.offline_bake_filename("mgi");
+    let raw = bake.encode();
+    let out_name = room.offline_bake_filename("mgi.zst");
     let out_path = output_dir.join(out_name);
     ensure_parent_dir(&out_path)?;
-    std::fs::write(&out_path, bake.encode())?;
+    let compressed = zstd::encode_all(raw.as_slice(), 3)?;
+    let nbytes = compressed.len();
+    std::fs::write(&out_path, compressed)?;
     log::info!(
-        "room GI bake {:?} → {} ({} probes, {}×{})",
+        "room GI bake {:?} → {} ({} probes, {}×{}, {} bytes zstd)",
         room,
         out_path.display(),
         bake.probe_count,
         bake.bake_width,
-        bake.bake_height
+        bake.bake_height,
+        nbytes
     );
     Ok(())
 }

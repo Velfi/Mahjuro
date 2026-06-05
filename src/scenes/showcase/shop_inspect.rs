@@ -136,6 +136,12 @@ impl ShopInspectPresenter {
                 }
                 continue;
             }
+            if crate::scenes::object3d_inspect::item_inspect_overlay_play_sound(*a) {
+                if let Some(shop) = ctx.suspended_shop.as_deref() {
+                    shop.push_inspect_artifact_sound_if_present(ctx.run, ctx.bus);
+                }
+                continue;
+            }
             if crate::scenes::object3d_inspect::item_inspect_overlay_exit(*a) {
                 *ctx.overlay_request = Some(OverlayRequest::Pop);
                 return None;

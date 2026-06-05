@@ -14,12 +14,12 @@ python3 tools/bake_assets/bake_assets.py --out path/to/out
 scripts/bake-assets.sh --out path/to/out
 ```
 
-Outputs `pack_manifest.json`, `mahjuro-pack-shared.zip`, `mahjuro-pack-gameplay.zip`, `mahjuro-pack-scene-main_menu.zip`, `mahjuro-pack-music.zip`. Partition rules live in `pack_rules.json` (see top-level `_comment` for pack / prefix precedence).
+Outputs `pack_manifest.json`, `mahjuro-pack-shared.zip`, `mahjuro-pack-rooms.zip`, `mahjuro-pack-gameplay-bulk.zip`, `mahjuro-pack-music.zip`. Partition rules live in `pack_rules.json` (see top-level `_comment` for pack / prefix precedence).
 
 - **`music` (lazy):** background music + win/loss jingles under `audio/music/` (decoded on first play, not at `AudioManager::new`). Listed first so the `audio/music/` prefix wins over the `shared` pack's broader `audio/` prefix.
-- **`scene_main_menu` (lazy):** `textures/scenes/main_menu/` — hub façade art and future menu-only models. Listed before `shared`/`gameplay` so this prefix wins over the broader `textures/`.
 - **`shared` (eager):** `fonts/`, `textures/tile_sets/` (tile atlases), and the rest of `audio/` (sound effects) — needed across scenes.
-- **`gameplay` (eager):** `data/` (including pre-baked relic RLC1 under `data/relic_baked/`), the rest of `textures/` except source relic PNGs (`textures/relics/` — bake-time only), `steam_assets/`, and `3d/` (.glb models) shipped with the game.
+- **`rooms` (lazy, splash-mounted):** `3d/` GLBs and offline `data/room_shadow/` + `data/room_gi/` bakes.
+- **`gameplay_bulk` (lazy, chain-mounted):** remaining `data/` (relic RLC1, JSON, …), `textures/` (non-tileset), and `steam_assets/`.
 
 ### Bake options
 
@@ -46,7 +46,7 @@ Loose `baseColor_*` / `normal_*` files sometimes land in `assets/3d/` after `glt
 
 ## Boot loading (runtime)
 
-At startup, **`shared`** and **`gameplay`** mount **eagerly**. **`scenes/main_menu/`** and **`music/`** use **lazy** zips (menu art on first draw of the façade; BGM when a track first starts). The splash screen does not wait on those decodes — the hub may briefly show a solid fallback until the façade texture uploads.
+At startup, only **`shared`** mounts **eagerly**. **`rooms`** mounts at splash (before hub GLB decode). **`gameplay_bulk`** mounts when entering the shop or resuming a run. **`music/`** uses a **lazy** zip (BGM when a track first starts). The splash screen does not wait on music or bulk texture decodes — the hub may briefly show a solid fallback until the façade texture uploads.
 
 The manifest includes **`game_version`** (from the root crate `[package].version` in `Cargo.toml`). At init, the game logs a warning if it does not match `CARGO_PKG_VERSION`. Set **`MAHJURO_STRICT_PACK_VERSION`** to any value to **panic** on mismatch instead (useful when debugging mismatched installs).
 

@@ -71,3 +71,34 @@ pub fn measure_upload<T>(label: &'static str, f: impl FnOnce() -> T) -> T {
     );
     out
 }
+
+const ROOM_BIT_SHOP: u8 = 1 << 0;
+const ROOM_BIT_HALLWAY: u8 = 1 << 1;
+const ROOM_BIT_STAIRCASE: u8 = 1 << 2;
+const ROOM_BIT_ARCHIVE: u8 = 1 << 3;
+const ROOM_BIT_GAMEPLAY: u8 = 1 << 4;
+const ROOM_BIT_MAIN_MENU: u8 = 1 << 5;
+
+fn room_evict_label(bit: u8) -> &'static str {
+    match bit {
+        ROOM_BIT_MAIN_MENU => "main_menu",
+        ROOM_BIT_SHOP => "shop",
+        ROOM_BIT_HALLWAY => "hallway",
+        ROOM_BIT_STAIRCASE => "staircase",
+        ROOM_BIT_ARCHIVE => "archive",
+        ROOM_BIT_GAMEPLAY => "gameplay",
+        _ => "unknown",
+    }
+}
+
+/// Log a room GPU eviction with a rough resident label (Phase 0 validation aid).
+pub fn log_room_evict(bit: u8) {
+    if !enabled() {
+        return;
+    }
+    log::info!(
+        "gpu mem profile: evict room {} (bit 0x{:02x})",
+        room_evict_label(bit),
+        bit
+    );
+}

@@ -225,7 +225,11 @@ pub fn decode_main_menu_glb_into_cache() {
 
 /// True while environment mesh buffers are still on the CPU (ready for GPU upload).
 pub fn main_menu_cpu_ready_for_gpu_upload() -> bool {
-    with_main_menu_glb_cpu(|opt| opt.is_some_and(|c| !c.environment_primitives.is_empty()))
+    with_main_menu_glb_cpu(|opt| {
+        opt.is_some_and(|c| {
+            !c.environment_primitives.is_empty() && !c.environment_primitives_released
+        })
+    })
 }
 
 pub fn release_main_menu_environment_cpu_sources_after_gpu_upload() {
@@ -233,6 +237,10 @@ pub fn release_main_menu_environment_cpu_sources_after_gpu_upload() {
     if let MainMenuGlbCache::Ready(Some(cpu)) = &mut *g {
         room_glb::release_room_environment_primitives_cpu(cpu);
     }
+}
+
+pub fn clear_main_menu_glb_cpu_cache() {
+    *MAIN_MENU_GLB_CPU.write() = MainMenuGlbCache::Uninit;
 }
 
 /// Meshes that block embedded doorway / porch punctuals in `room_glb.wgsl` (analytic AABB rays).

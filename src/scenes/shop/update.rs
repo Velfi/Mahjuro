@@ -75,7 +75,7 @@ impl ShopScene {
                 && self.mode == ShopMode::Standard
                 && ctx.run.can_afford_shop_restock(self.restock_cost)
             {
-                self.restock(ctx.run);
+                self.restock(ctx.run, ctx.bus);
             }
             return None;
         }
@@ -166,6 +166,37 @@ impl ShopScene {
             return true;
         }
         false
+    }
+
+    /// Play the focused stock item's bespoke audio (Confirm / A), when a relic stinger exists.
+    pub(crate) fn push_inspect_artifact_sound_if_present(
+        &self,
+        run: &crate::game::run::RunState,
+        bus: &mut crate::game::event_bus::EventBus,
+    ) {
+        let Some(focus) = self.focus else {
+            return;
+        };
+        let ShopFocus::Relic(idx) = focus else {
+            return;
+        };
+        let shop = GameEngine::read_shop(run);
+        let n_sale = self.items.len();
+        let rid = if idx < n_sale {
+            self.items.get(idx).map(|it| it.relic)
+        } else {
+            shop.owned_relics
+                .get(idx.saturating_sub(n_sale))
+                .copied()
+        };
+        let Some(rid) = rid else {
+            return;
+        };
+        let slug = rid.asset_filename().trim_end_matches(".png");
+        let path = format!("audio/relics/{slug}.ogg");
+        if crate::asset_path::get(&path).is_some() {
+            bus.push(crate::game::event_bus::GameEvent::PlayRelicStinger(rid));
+        }
     }
 
     pub(super) fn update_impl(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
@@ -389,7 +420,7 @@ impl ShopScene {
                 .is_some()
                     && self.west_sell_hold_started.is_none()
                 {
-                    self.buy_hold_started = None;
+                    self.cancel_buy_hold(ctx.bus);
                     self.west_sell_hold_started = Some(crate::ui::prompt_hold_ring::begin_hold(
                         now,
                         ctx.bus,
@@ -399,11 +430,11 @@ impl ShopScene {
                 continue;
             }
             if matches!(a, UiAction::WestFaceRelease) {
-                self.west_sell_hold_started = None;
+                self.cancel_west_sell_hold(ctx.bus);
                 continue;
             }
             if matches!(a, UiAction::ConfirmRelease) {
-                self.buy_hold_started = None;
+                self.cancel_buy_hold(ctx.bus);
                 continue;
             }
 
@@ -416,8 +447,7 @@ impl ShopScene {
             };
             if let Some(dir) = dir {
                 // Moving focus abandons any in-progress hold-to-buy/sell.
-                self.buy_hold_started = None;
-                self.west_sell_hold_started = None;
+                self.cancel_all_hold_prompts(ctx.bus);
                 if self.focus.is_none() {
                     let seed = focus_rects
                         .iter()
@@ -480,7 +510,7 @@ impl ShopScene {
                         && self.mode == ShopMode::Standard
                         && ctx.run.can_afford_shop_restock(self.restock_cost)
                     {
-                        self.restock(ctx.run);
+                        self.restock(ctx.run, ctx.bus);
                         continue;
                     }
                     if matches!(focus, ShopFocus::WallHud) {
@@ -503,7 +533,7 @@ impl ShopScene {
                             // purchase (see `try_complete_buy_hold`); a quick
                             // tap-and-release is cancelled by `ConfirmRelease`.
                             if self.buy_hold_started.is_none() {
-                                self.west_sell_hold_started = None;
+                                self.cancel_west_sell_hold(ctx.bus);
                                 self.buy_hold_started = Some(
                                     crate::ui::prompt_hold_ring::begin_hold(
                                         now,
@@ -524,8 +554,7 @@ impl ShopScene {
             }
 
             if matches!(a, UiAction::Cancel) {
-                self.west_sell_hold_started = None;
-                self.buy_hold_started = None;
+                self.cancel_all_hold_prompts(ctx.bus);
                 self.focus = Some(ShopFocus::NextRound);
                 continue;
             }
@@ -569,7 +598,7 @@ impl ShopScene {
                 && self.mode == ShopMode::Standard
                 && ctx.run.can_afford_shop_restock(self.restock_cost)
             {
-                self.restock(ctx.run);
+                self.restock(ctx.run, ctx.bus);
                 return None;
             }
         }

@@ -1,5 +1,5 @@
 {
-  "_comment": "assign_pack precedence: see bake_assets.py. Order matters: earlier packs win for path_prefixes. music (lazy) is listed before shared so audio/music/ files route there even though they share the audio/ prefix. shared (eager) = cross-scene: fonts/, textures/tile_sets/ (atlases), all other audio/ SFX. gameplay (eager) = bulk 3D/UI: data/, the rest of textures/, steam_assets/, and 3d/ models.",
+  "_comment": "assign_pack precedence: see bake_assets.py. Order matters: earlier packs win for path_prefixes. music (lazy) is listed before shared so audio/music/ files route there even though they share the audio/ prefix. shared (eager) = cross-scene: fonts/, textures/tile_sets/ (atlases), all other audio/ SFX. rooms (lazy, splash-mounted) = 3d/*.glb + offline room bakes. gameplay_bulk (lazy, chain-mounted) = remaining textures/, data/, steam_assets/.",
   "packs": [
     {
       "id": "music",
@@ -19,14 +19,24 @@
       "root_files": []
     },
     {
-      "id": "gameplay",
-      "file": "mahjuro-pack-gameplay.zip",
-      "load_tier": "eager",
+      "id": "rooms",
+      "file": "mahjuro-pack-rooms.zip",
+      "load_tier": "lazy",
+      "path_prefixes": [
+        "3d/",
+        "data/room_shadow/",
+        "data/room_gi/"
+      ],
+      "root_globs": []
+    },
+    {
+      "id": "gameplay_bulk",
+      "file": "mahjuro-pack-gameplay-bulk.zip",
+      "load_tier": "lazy",
       "path_prefixes": [
         "data/",
         "textures/",
-        "steam_assets/",
-        "3d/"
+        "steam_assets/"
       ],
       "root_globs": []
     }

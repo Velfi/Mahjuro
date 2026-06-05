@@ -11,6 +11,7 @@ Short pointers to deeper context. Read the linked file before working in the are
 - [Chart guidelines](docs/agents/chart-guidelines.md) — Duke top-ten rules for Chronicle/dashboard charts.
 - [Launch options](docs/agents/launch-options.md) — CLI flags and `MAHJURO_*` env vars (runtime + build).
 - [GPU memory / 4 GB preset](docs/agents/gpu-memory.md) — Low memory graphics mode, profiling soak, residency caps.
+- [Memory / loading budgets](docs/agents/memory-loading-budgets.md) — Phase 0 baseline capture (`scripts/memory-loading-baseline.sh`), soak metrics, targets.
 - [Room shadows & baking](docs/agents/room-shadows-and-baking.md) — offline `.msh` / `.mgi`, live prop shadows, rebake commands, headless tools, relic RLC1.
 - [macOS dylibs / app bundle](docs/agents/macos-dylibs.md) — `libsteam_api.dylib`, static SDL3, `@loader_path` / `@rpath`, CI vs `package-macos.sh`.
 - [Scoring](docs/agents/scoring.md) — play / cash-in loop, melds, chips, multipliers.

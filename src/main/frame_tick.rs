@@ -225,6 +225,12 @@ impl App {
                 GameEvent::UiSound(id) => {
                     self.audio.play_sfx(id);
                 }
+                GameEvent::HoldWindupStart => {
+                    self.audio.play_hold_windup();
+                }
+                GameEvent::HoldWindupStop => {
+                    self.audio.stop_hold_windup();
+                }
                 GameEvent::PlayRelicStinger(rid) => {
                     self.audio.play_relic_trigger(rid);
                 }

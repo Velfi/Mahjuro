@@ -50,3 +50,7 @@ resvg.workspace = true
 rayon.workspace = true
 chrono.workspace = true
 sdl3 = { workspace = true, optional = true }
+crossbeam-channel.workspace = true
+bumpalo.workspace = true
+memmap2.workspace = true
+zstd.workspace = true

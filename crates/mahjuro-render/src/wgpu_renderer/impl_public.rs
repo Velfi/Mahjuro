@@ -37,6 +37,7 @@ impl WgpuRenderer {
         let scale_changed = (self.render_scale - new_scale).abs() > f32::EPSILON;
         let mode_changed = self.graphics_mode != mode;
         self.graphics_mode = mode;
+        crate::room_preload::set_prefetch_graphics_mode(mode);
         self.render_scale = new_scale;
         if scale_changed && self.size.width > 0 && self.size.height > 0 {
             self.resize(self.size);
@@ -127,6 +128,17 @@ impl WgpuRenderer {
             self.probe_gi_gpu_room = None;
             self.probe_gi_had_room = false;
         }
+        if self.graphics_mode == mahjuro_gfx_types::GraphicsMode::LowMemory {
+            match bit {
+                super::room_gpu_load::ROOM_MAIN_MENU => crate::main_menu_glb::clear_main_menu_glb_cpu_cache(),
+                super::room_gpu_load::ROOM_SHOP => crate::room_glb::clear_shop_glb_cpu_cache(),
+                super::room_gpu_load::ROOM_HALLWAY => crate::hallway_glb::clear_hallway_glb_cpu_cache(),
+                super::room_gpu_load::ROOM_ARCHIVE => crate::archive_glb::clear_archive_glb_cpu_cache(),
+                super::room_gpu_load::ROOM_GAMEPLAY => crate::gameplay_glb::clear_gameplay_glb_cpu_cache(),
+                _ => {}
+            }
+        }
+        crate::gpu_memory_profile::log_room_evict(bit);
         crate::gpu_memory_profile::log_device_allocator(&self.device, "room_evict");
     }
 
@@ -173,7 +185,7 @@ impl WgpuRenderer {
     pub fn tick_splash_hub_boot(&mut self) {
         crate::room_preload::try_drain_room_cpu_prefetch_threads();
         self.ensure_main_menu_room_gpu();
-        crate::room_preload::advance_hub_cpu_prefetch_chain();
+        crate::room_preload::advance_hub_cpu_prefetch_chain(false);
     }
 
     /// Upload the hub room while the splash loading screen is still up.

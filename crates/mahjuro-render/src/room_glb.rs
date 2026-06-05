@@ -228,6 +228,11 @@ pub fn release_shop_environment_cpu_sources_after_gpu_upload() {
     }
 }
 
+/// Drop the entire shop CPU cache (low-memory GPU eviction path).
+pub fn clear_shop_glb_cpu_cache() {
+    *ROOM_GLB_CPU.write() = RoomGlbCache::Uninit;
+}
+
 /// Default height multiplier for [`room_env_world_scale`] when no debug override is active.
 pub const SHOP_ENV_HEIGHT_SCALE: f32 = 1.0;
 
@@ -767,6 +772,12 @@ pub fn load_room_glb_from_bytes(
     scene_err_ctx: &'static str,
     hooks: &impl RoomEnvWalkHooks,
 ) -> anyhow::Result<RoomGlbCpu> {
+    thread_local! {
+        static GLB_DECODE_BUMP: std::cell::RefCell<bumpalo::Bump> =
+            std::cell::RefCell::new(bumpalo::Bump::new());
+    }
+    GLB_DECODE_BUMP.with(|b| b.borrow_mut().reset());
+
     let (document, buffers_vec, images) = gltf::import_slice(data).context(import_err_ctx)?;
 
     let scene = document

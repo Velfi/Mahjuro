@@ -31,12 +31,18 @@ pub fn set_hold_act_seconds(seconds: f32) {
 /// (`can_ping`) when the action cannot succeed yet.
 #[inline]
 pub fn begin_hold(now: Instant, bus: &mut EventBus, valid: bool) -> Instant {
-    bus.push(GameEvent::UiSound(if valid {
-        SfxId::HoldWindup
+    bus.push(if valid {
+        GameEvent::HoldWindupStart
     } else {
-        SfxId::UiCancel
-    }));
+        GameEvent::UiSound(SfxId::UiCancel)
+    });
     now
+}
+
+/// Stop the hold windup bed when the player releases early or abandons the hold.
+#[inline]
+pub fn end_hold(bus: &mut EventBus) {
+    bus.push(GameEvent::HoldWindupStop);
 }
 
 /// While the hold action is invalid, the anchor does not advance (progress stays at 0).

@@ -259,6 +259,35 @@ impl ShopScene {
         }
     }
 
+    /// Cancel an in-progress west-face sell hold and stop its windup when no buy hold remains.
+    pub(crate) fn cancel_west_sell_hold(&mut self, bus: &mut crate::game::event_bus::EventBus) {
+        self.west_sell_hold_started = None;
+        if !self.buy_hold_in_progress() {
+            crate::ui::prompt_hold_ring::end_hold(bus);
+        }
+    }
+
+    /// Cancel an in-progress buy hold and stop its windup when no sell hold remains.
+    pub(crate) fn cancel_buy_hold(&mut self, bus: &mut crate::game::event_bus::EventBus) {
+        self.buy_hold_started = None;
+        if !self.sell_hold_in_progress() {
+            crate::ui::prompt_hold_ring::end_hold(bus);
+        }
+    }
+
+    /// Abandon all hold prompts (focus change, cancel, scene exit).
+    pub(crate) fn cancel_all_hold_prompts(
+        &mut self,
+        bus: &mut crate::game::event_bus::EventBus,
+    ) {
+        let had = self.west_sell_hold_started.is_some() || self.buy_hold_started.is_some();
+        self.west_sell_hold_started = None;
+        self.buy_hold_started = None;
+        if had {
+            crate::ui::prompt_hold_ring::end_hold(bus);
+        }
+    }
+
     /// Set focus from a stable slug — used by the screenshot CLI's
     /// `--shop-focus` flag so headless captures can preview hover-only
     /// chrome (focus rings, plaques, spotlights).

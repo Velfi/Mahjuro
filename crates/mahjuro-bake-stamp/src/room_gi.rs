@@ -26,7 +26,7 @@ impl BakeKind for RoomGi {
         "cargo build -p mahjuro-headless --bin mahjuro-bake --features bake";
     const REBAKE_CMD: &'static str = "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds gi";
     const COMMIT_PATHS: &'static str =
-        "assets/data/room_gi/*.mgi assets/data/room_gi/.inputs_stamp";
+        "assets/data/room_gi/*.mgi.zst assets/data/room_gi/.inputs_stamp";
 
     fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
         rerun_if_changed_paths()
@@ -44,7 +44,8 @@ impl BakeKind for RoomGi {
     }
 
     fn outputs_ok(repo: &Path) -> bool {
-        outputs_present(&repo.join(Self::OUT_DIR), ROOMS, "mgi")
+        let dir = repo.join(Self::OUT_DIR);
+        outputs_present(&dir, ROOMS, "mgi.zst") || outputs_present(&dir, ROOMS, "mgi")
     }
 }
 

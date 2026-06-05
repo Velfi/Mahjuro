@@ -253,6 +253,10 @@ pub fn release_gameplay_environment_cpu_sources_after_gpu_upload() {
     }
 }
 
+pub fn clear_gameplay_glb_cpu_cache() {
+    *GAMEPLAY_GLB_CPU.write() = GameplayGlbCache::Uninit;
+}
+
 #[inline]
 fn is_gameplay_spawn_marker(name: &str) -> bool {
     matches!(

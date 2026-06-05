@@ -928,6 +928,13 @@ impl GameplayScene {
         }
     }
 
+    /// Cancel an in-progress hold-to-cash-in and stop its windup sound.
+    pub(crate) fn clear_cash_in_hold(&mut self, bus: &mut crate::game::event_bus::EventBus) {
+        if self.cash_in_hold_started.take().is_some() {
+            crate::ui::prompt_hold_ring::end_hold(bus);
+        }
+    }
+
     pub(crate) fn enter_lab_mode(&mut self) {
         self.lab_mode = true;
         self.focus = None;

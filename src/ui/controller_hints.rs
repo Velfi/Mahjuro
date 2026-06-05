@@ -485,6 +485,34 @@ fn hold_buy_bind(input_mode: InputMode) -> HintBind {
     )
 }
 
+fn gameplay_select_bind(input_mode: InputMode) -> HintBind {
+    match input_mode {
+        InputMode::Cursor => HintBind::alternatives(
+            "select",
+            vec![HintKey::Keyboard("mouse_left")],
+        ),
+        InputMode::Controller => HintBind::alternatives(
+            "select",
+            vec![HintKey::Action(UiAction::Confirm)],
+        ),
+        InputMode::Keyboard => HintBind::alternatives(
+            "select",
+            vec![HintKey::Keyboard("keyboard_space")],
+        ),
+    }
+}
+
+fn gameplay_deselect_bind(input_mode: InputMode) -> HintBind {
+    HintBind::alternatives(
+        "deselect",
+        vec![HintKey::for_input(
+            input_mode,
+            UiAction::Cancel,
+            "keyboard_backspace",
+        )],
+    )
+}
+
 fn gameplay_discard_bind(input_mode: InputMode) -> HintBind {
     HintBind::alternatives(
         "discard",
@@ -536,38 +564,30 @@ pub fn shop_storeroom_footer_row(
     row.push(inspect_bind(input_mode).into()).into_segments()
 }
 
-/// Gameplay HUD footer: available table actions (discard / play / cash in)
-/// plus the guide hint, all on one centred row so they never overlap.
+/// Gameplay HUD footer: hand selection, available table actions (discard /
+/// play / cash in), plus the guide hint — one centred row so they never overlap.
 pub fn gameplay_footer_row(
     input_mode: InputMode,
     show_discard: bool,
     show_play: bool,
     show_cash_in: bool,
 ) -> Vec<HintSegment> {
-    let mut row = HintRow::new();
-    let mut any = false;
+    let mut row = HintRow::new()
+        .push(gameplay_select_bind(input_mode).into())
+        .sep()
+        .push(gameplay_deselect_bind(input_mode).into());
     if show_discard {
-        row = row.push(gameplay_discard_bind(input_mode).into());
-        any = true;
+        row = row.sep().push(gameplay_discard_bind(input_mode).into());
     }
     if show_play {
-        if any {
-            row = row.sep();
-        }
-        row = row.push(gameplay_play_bind(input_mode).into());
-        any = true;
+        row = row.sep().push(gameplay_play_bind(input_mode).into());
     }
     if show_cash_in {
-        if any {
-            row = row.sep();
-        }
-        row = row.push(gameplay_cash_in_bind(input_mode).into());
-        any = true;
+        row = row.sep().push(gameplay_cash_in_bind(input_mode).into());
     }
-    if any {
-        row = row.sep();
-    }
-    row.push(help_bind(input_mode).into()).into_segments()
+    row.sep()
+        .push(help_bind(input_mode).into())
+        .into_segments()
 }
 
 /// Hub / modal menus: move focus, then confirm the highlighted row.
