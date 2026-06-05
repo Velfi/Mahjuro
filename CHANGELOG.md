@@ -7,6 +7,14 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.6-5 — 2026-06-04
+
+### Changed
+- Hold-to-act actions (cash in, shop buy, shop sell) now play a rising windup sound while charging; invalid holds play a soft rejection ping instead.
+
+### Fixed
+- Pressing LT or RT during a scoring cascade no longer skips the reveal animation.
+
 ## 0.5.6-4 — 2026-06-04
 
 ### Fixed
