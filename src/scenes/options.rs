@@ -99,7 +99,6 @@ enum Row {
     XyQuickAction,
     HoldToSellRumble,
     AutoCashInOnFullStructure,
-    Hints,
     GlyphPrompts,
     ExportPlayStats,
     Credits,
@@ -138,7 +137,6 @@ const ROWS: &[Row] = &[
     Row::HoldToSellRumble,
     Row::AutoCashInOnFullStructure,
     Row::UndoDiscard,
-    Row::Hints,
     Row::GlyphPrompts,
     Row::ExportPlayStats,
     Row::Credits,
@@ -174,7 +172,6 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::AutoCashInOnFullStructure),
     ContentSlot::Header(Section::Accessibility),
     ContentSlot::Row(Row::UndoDiscard),
-    ContentSlot::Row(Row::Hints),
     ContentSlot::Row(Row::GlyphPrompts),
     ContentSlot::Header(Section::Data),
     ContentSlot::Row(Row::ExportPlayStats),
@@ -363,7 +360,6 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
         Row::AutoCashInOnFullStructure => {
             ("Auto cash-in", on_off(scene.auto_cash_in_on_full_structure))
         }
-        Row::Hints => ("Hints", on_off(scene.hints_enabled)),
         Row::GlyphPrompts => ("Button glyphs", scene.glyph_prompt.label().into()),
         Row::UndoDiscard => ("Discard undo", on_off(scene.discard_undo_enabled)),
         Row::ExportPlayStats => ("Export play stats", String::new()),
@@ -524,7 +520,6 @@ pub struct OptionsScene {
     pub xy_quick_action: bool,
     pub hold_to_sell_rumble: bool,
     pub auto_cash_in_on_full_structure: bool,
-    pub hints_enabled: bool,
     pub discard_undo_enabled: bool,
     pub glyph_prompt: crate::persistence::GlyphPromptSetting,
     /// Last cursor position (updated each [`Self::update_input`] for arrow hover).
@@ -584,7 +579,6 @@ impl OptionsScene {
             xy_quick_action: settings.xy_quick_action,
             hold_to_sell_rumble: settings.hold_to_sell_rumble,
             auto_cash_in_on_full_structure: settings.auto_cash_in_on_full_structure,
-            hints_enabled: settings.hints_enabled,
             discard_undo_enabled: settings.discard_undo_enabled,
             glyph_prompt: settings.glyph_prompt,
             cursor_pos: (0.0, 0.0),
@@ -630,7 +624,6 @@ impl OptionsScene {
         settings.xy_quick_action = self.xy_quick_action;
         settings.hold_to_sell_rumble = self.hold_to_sell_rumble;
         settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
-        settings.hints_enabled = self.hints_enabled;
         settings.discard_undo_enabled = self.discard_undo_enabled;
         settings.glyph_prompt = self.glyph_prompt;
         let _ = crate::persistence::save_settings(&settings);
@@ -828,7 +821,6 @@ impl OptionsScene {
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
-            Row::Hints => self.hints_enabled = !self.hints_enabled,
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.next(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             Row::ExportPlayStats | Row::Credits => return,
@@ -868,7 +860,6 @@ impl OptionsScene {
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
-            Row::Hints => self.hints_enabled = !self.hints_enabled,
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.prev(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             Row::ExportPlayStats | Row::Credits => return,
@@ -943,10 +934,6 @@ impl OptionsScene {
             }
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure;
-                self.save_settings();
-            }
-            Row::Hints => {
-                self.hints_enabled = !self.hints_enabled;
                 self.save_settings();
             }
             Row::GlyphPrompts => {

@@ -33,26 +33,28 @@ pub fn push_wall_remaining_hud(
     let icon_h = icon_w * 1.28;
     let pad = typography::size(typography::H20, window_h) * 0.22;
 
-    frame.quad(GpuInstance {
-        rect: [
-            block_left - 4.0,
-            block_top - 3.0,
-            block_w + 8.0,
-            block_h + 7.0,
-        ],
-        color: color::alpha(color::WALNUT_INK, 0.42),
-        user: 0,
-    });
-    frame.quad(GpuInstance {
-        rect: [block_left, block_top, block_w, block_h],
-        color: [
-            color::WALNUT_DEEP[0],
-            color::WALNUT_DEEP[1],
-            color::WALNUT_DEEP[2],
-            0.88,
-        ],
-        user: 0,
-    });
+    frame.overlay_quads([
+        GpuInstance {
+            rect: [
+                block_left - 4.0,
+                block_top - 3.0,
+                block_w + 8.0,
+                block_h + 7.0,
+            ],
+            color: color::alpha(color::WALNUT_INK, 0.42),
+            user: 0,
+        },
+        GpuInstance {
+            rect: [block_left, block_top, block_w, block_h],
+            color: [
+                color::WALNUT_DEEP[0],
+                color::WALNUT_DEEP[1],
+                color::WALNUT_DEEP[2],
+                0.88,
+            ],
+            user: 0,
+        },
+    ]);
 
     let icon_left = block_left + pad;
     let icon_top = block_top + (block_h - icon_h) * 0.5;
@@ -118,24 +120,26 @@ fn wall_hud_block_metrics(window_w: f32, window_h: f32, tiles_left: usize) -> (f
 fn push_wall_tile_icon(frame: &mut UiFrame, left: f32, top: f32, tile_w: f32, tile_h: f32) {
     let back = [0.86, 0.81, 0.69, 1.0];
     let offset = tile_w * 0.14;
-    frame.quad(GpuInstance {
-        rect: [left + offset * 0.5, top - offset * 0.35, tile_w, tile_h],
-        color: color::alpha(color::WALNUT_INK, 0.35),
-        user: 0,
-    });
-    frame.quad(GpuInstance {
-        rect: [left + offset, top - offset, tile_w, tile_h],
-        color: color::alpha(back, 0.92),
-        user: 0,
-    });
-    frame.quad(GpuInstance {
-        rect: [left, top, tile_w, tile_h],
-        color: back,
-        user: 0,
-    });
-    frame.quad(GpuInstance {
-        rect: [left, top, tile_w, tile_h * 0.08],
-        color: color::alpha(color::CHAMPAGNE, 0.22),
-        user: 0,
-    });
+    frame.overlay_quads([
+        GpuInstance {
+            rect: [left + offset * 0.5, top - offset * 0.35, tile_w, tile_h],
+            color: color::alpha(color::WALNUT_INK, 0.35),
+            user: 0,
+        },
+        GpuInstance {
+            rect: [left + offset, top - offset, tile_w, tile_h],
+            color: color::alpha(back, 0.92),
+            user: 0,
+        },
+        GpuInstance {
+            rect: [left, top, tile_w, tile_h],
+            color: back,
+            user: 0,
+        },
+        GpuInstance {
+            rect: [left, top, tile_w, tile_h * 0.08],
+            color: color::alpha(color::CHAMPAGNE, 0.22),
+            user: 0,
+        },
+    ]);
 }

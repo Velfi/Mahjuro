@@ -21,6 +21,10 @@ pub struct SdlShell {
     pub(crate) rt_prev: FxHashMap<JoystickId, f32>,
     /// Joystick IDs we already logged as non-gamepad (avoid spam each frame).
     non_gamepad_logged: FxHashSet<JoystickId>,
+    /// Pads that report no rumble or where `set_rumble` failed — skip further attempts.
+    rumble_unavailable: FxHashSet<JoystickId>,
+    /// Subset of `rumble_unavailable` we already logged a runtime failure for.
+    rumble_fail_logged: FxHashSet<JoystickId>,
 }
 
 impl SdlShell {
@@ -99,6 +103,8 @@ impl SdlShell {
             lt_prev: FxHashMap::default(),
             rt_prev: FxHashMap::default(),
             non_gamepad_logged: FxHashSet::default(),
+            rumble_unavailable: FxHashSet::default(),
+            rumble_fail_logged: FxHashSet::default(),
         };
         shell.refresh_gamepads();
 
@@ -146,6 +152,52 @@ impl SdlShell {
         self.joystick.update();
     }
 
+    /// Apply dual-motor rumble to connected pads that support it.
+    /// Returns true when at least one pad accepted the effect.
+    pub(crate) fn set_gamepad_rumble(&mut self, low: u16, high: u16, duration_ms: u32) -> bool {
+        if low == 0 && high == 0 {
+            return false;
+        }
+        let mut any = false;
+        for (&id, gp) in self.pads.iter_mut() {
+            if self.rumble_unavailable.contains(&id) {
+                continue;
+            }
+            if !unsafe { gp.has_rumble() } {
+                self.rumble_unavailable.insert(id);
+                continue;
+            }
+            match gp.set_rumble(low, high, duration_ms) {
+                Ok(()) => any = true,
+                Err(e) => {
+                    self.rumble_unavailable.insert(id);
+                    if self.rumble_fail_logged.insert(id) {
+                        log::debug!("gamepad rumble unavailable (id={}): {e}", id.0);
+                    }
+                }
+            }
+        }
+        if any {
+            self.sync_gamepad_rumble_output();
+        }
+        any
+    }
+
+    pub(crate) fn stop_gamepad_rumble(&mut self) {
+        let mut any = false;
+        for (&id, gp) in self.pads.iter_mut() {
+            if self.rumble_unavailable.contains(&id) {
+                continue;
+            }
+            if gp.set_rumble(0, 0, 1).is_ok() {
+                any = true;
+            }
+        }
+        if any {
+            self.sync_gamepad_rumble_output();
+        }
+    }
+
     pub fn refresh_gamepads(&mut self) {
         let Ok(ids) = self.gamepad.gamepads() else {
             return;
@@ -154,6 +206,8 @@ impl SdlShell {
         self.lt_prev.retain(|id, _| ids.contains(id));
         self.rt_prev.retain(|id, _| ids.contains(id));
         self.non_gamepad_logged.retain(|id| ids.contains(id));
+        self.rumble_unavailable.retain(|id| ids.contains(id));
+        self.rumble_fail_logged.retain(|id| ids.contains(id));
         for &id in &ids {
             if self.pads.contains_key(&id) {
                 continue;
@@ -173,6 +227,7 @@ impl SdlShell {
                         id.0
                     );
                     if !rumble {
+                        self.rumble_unavailable.insert(id);
                         log::warn!(
                             "This gamepad reports no rumble to SDL — force feedback will not run (driver/SDL limits; see SDL joystick hints)."
                         );

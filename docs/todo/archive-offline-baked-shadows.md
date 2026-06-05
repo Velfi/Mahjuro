@@ -1,7 +1,7 @@
 # Archive offline baked directional shadows
 
 ## Status
-Archive currently **does not** sample `assets/data/room_shadow/archive.msh`. A workaround landed: all archive shell verts get `COLOR_0.a = 3` (skip directional receive), no room GLB casters, punctual lights only. Shop / hallway / main menu still use the shared baked + live pipeline.
+Archive currently **does not** sample `assets/data/room_shadow/archive.msh`. A workaround landed: archive uses no room-GLB directional shadow receive/cast path (punctual lights only). Shop / hallway / main menu still use the shared baked + live pipeline.
 
 ## Why
 The archive room grew from ~9 to 30+ GLB primitives (`btn_*`, `text_*`, `plaque_*`, lowercase shell names). Offline cubby-only bakes still project shelf-wide dark fields onto `main_fixture`, page chrome, and the back wall when receivers sample the `.msh`. Per-node Rust allowlists cannot keep pace with asset edits and do not separate casters from receivers cleanly enough.

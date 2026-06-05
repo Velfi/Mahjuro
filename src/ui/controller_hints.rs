@@ -667,6 +667,36 @@ pub fn options_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
 }
 
 const SCREEN_FOOTER_BOTTOM_FRAC: f32 = 0.018;
+const SCREEN_FOOTER_FADE_FRAC: f32 = 0.10;
+
+/// Darkens the bottom of the screen so footer hint labels stay readable over busy 3D scenes.
+pub fn push_screen_footer_fade(frame: &mut UiFrame, window_w: f32, window_h: f32) {
+    let band = window_h * SCREEN_FOOTER_FADE_FRAC;
+    if band < 2.0 {
+        return;
+    }
+    let y0 = window_h - band;
+    const STRIPS: usize = 32;
+    let strip_h = band / STRIPS as f32;
+    let mut quads = Vec::with_capacity(STRIPS);
+    for i in 0..STRIPS {
+        let t0 = i as f32 / STRIPS as f32;
+        let t1 = (i + 1) as f32 / STRIPS as f32;
+        let t_mid = (t0 + t1) * 0.5;
+        let alpha = t_mid;
+        if alpha <= 0.001 {
+            continue;
+        }
+        quads.push(GpuInstance {
+            rect: [0.0, y0 + strip_h * i as f32, window_w, strip_h + 0.5],
+            color: [0.0, 0.0, 0.0, alpha],
+            user: 0,
+        });
+    }
+    if !quads.is_empty() {
+        frame.overlay_quads(quads);
+    }
+}
 
 /// Vertical space to leave clear at the bottom when using [`push_screen_footer_hint`].
 pub fn screen_footer_reserve(h: f32) -> f32 {
@@ -701,6 +731,7 @@ pub fn push_screen_footer_hint_for(
     row: Vec<HintSegment>,
     style: HintStyle,
 ) -> Vec<InlineHintIconSlot> {
+    push_screen_footer_fade(frame, window_w, window_h);
     let line_h = style.line_h;
     let y = window_h - line_h - window_h * SCREEN_FOOTER_BOTTOM_FRAC;
     push_inline_hint_rows_for(
@@ -899,20 +930,22 @@ fn emit_inline_row(
         match *seg {
             InlineSegmentRef::Sep => {
                 let w = measure_text(style.font_px, INLINE_SEP);
-                texts.push(inline_text_label(
+                push_outlined_inline_text_label(
+                    texts,
                     [x, text_y, w, line_h],
                     INLINE_SEP,
                     style,
-                ));
+                );
                 x += w;
             }
             InlineSegmentRef::PlainText(text) => {
                 let w = measure_text(style.font_px, text);
-                texts.push(inline_text_label(
+                push_outlined_inline_text_label(
+                    texts,
                     [x, text_y, w.max(1.0), line_h],
                     text,
                     style,
-                ));
+                );
                 x += w.max(1.0);
             }
             InlineSegmentRef::Bind(bind) => {
@@ -920,20 +953,22 @@ fn emit_inline_row(
                 for_each_inline_bind_part(bind, |part| match part {
                     InlineBindPart::GroupSep => {
                         let w = measure_text(style.font_px, INLINE_SLASH);
-                        texts.push(inline_text_label(
+                        push_outlined_inline_text_label(
+                            texts,
                             [x, text_y, w, line_h],
                             INLINE_SLASH,
                             style,
-                        ));
+                        );
                         x += w;
                     }
                     InlineBindPart::WithinSep => {
                         let w = measure_text(style.font_px, within_text);
-                        texts.push(inline_text_label(
+                        push_outlined_inline_text_label(
+                            texts,
                             [x, text_y, w, line_h],
                             within_text,
                             style,
-                        ));
+                        );
                         x += w;
                     }
                     InlineBindPart::Key(key, last_icon) => {
@@ -957,11 +992,12 @@ fn emit_inline_row(
                 });
                 let suffix = bind_suffix(&bind.label);
                 let w = measure_text(style.font_px, &suffix);
-                texts.push(inline_text_label(
+                push_outlined_inline_text_label(
+                    texts,
                     [x, text_y, w.max(1.0), line_h],
                     &suffix,
                     style,
-                ));
+                );
                 x += w.max(1.0);
             }
         }
@@ -1058,6 +1094,20 @@ pub fn push_inline_hint_rows_for(
     slots
 }
 
+fn hint_text_outline_offsets(font_px: f32) -> [(f32, f32); 8] {
+    let d = (font_px * 0.055).clamp(1.0, 2.5);
+    [
+        (-d, 0.0),
+        (d, 0.0),
+        (0.0, -d),
+        (0.0, d),
+        (-d, -d),
+        (d, -d),
+        (-d, d),
+        (d, d),
+    ]
+}
+
 fn inline_text_label(rect: [f32; 4], text: &str, style: HintStyle) -> TextLabel {
     TextLabel {
         rect,
@@ -1067,4 +1117,17 @@ fn inline_text_label(rect: [f32; 4], text: &str, style: HintStyle) -> TextLabel 
         align: TextAlign::Left,
         ..Default::default()
     }
+}
+
+fn push_outlined_inline_text_label(texts: &mut Vec<TextLabel>, rect: [f32; 4], text: &str, style: HintStyle) {
+    let label = inline_text_label(rect, text, style);
+    let outline = [0.0, 0.0, 0.0, style.text_color[3].min(0.95)];
+    for (dx, dy) in hint_text_outline_offsets(style.font_px) {
+        let mut stroke = label.clone();
+        stroke.rect[0] += dx;
+        stroke.rect[1] += dy;
+        stroke.color = outline;
+        texts.push(stroke);
+    }
+    texts.push(label);
 }

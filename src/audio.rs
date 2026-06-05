@@ -305,8 +305,8 @@ impl crate::sfx_id::SfxId {
             SfxId::BrownoutFlicker => "freesound_community-flickeringlight-90411.mp3",
             SfxId::RoomCreak => "sfx/creak1.ogg",
             SfxId::StarShimmer => "sfx/sfx9.ogg",
-            SfxId::Purchase => "coindrop.ogg",
-            SfxId::Sell => "sfx/sfx6.ogg",
+            SfxId::Purchase => "sfx/sfx31.ogg",
+            SfxId::Sell => "sfx/sfx32.ogg",
             SfxId::Pause => "sfx/sfx11.ogg",
             SfxId::Unpause => "sfx/sfx12.ogg",
             SfxId::DoraScored => "sfx/sfx10.ogg",
@@ -347,6 +347,7 @@ impl crate::sfx_id::SfxId {
             SfxId::TalismanPurchased => "talisman_purchased.ogg",
             SfxId::TalismanUsed => "talisman_used.ogg",
             SfxId::RollersSpin => "sfx/bike_spin.ogg",
+            SfxId::HoldWindup => "sfx/reel_up.ogg",
         }
     }
 
@@ -397,8 +398,6 @@ impl crate::sfx_id::SfxId {
             ]),
             SfxId::CashIn => Some(&[
                 "sfx/sfx30.ogg",
-                "sfx/sfx31.ogg",
-                "sfx/sfx32.ogg",
                 "sfx/sfx33.ogg",
                 "sfx/sfx34.ogg",
                 "sfx/sfx35.ogg",
@@ -537,6 +536,12 @@ impl AudioManager {
                 sfx_variant_data.len(),
             );
         }
+
+        let hold_secs = sfx_data
+            .get(&SfxId::HoldWindup)
+            .map(|clip| clip_duration_at_speed(clip, 1.0).as_secs_f32())
+            .unwrap_or(crate::ui::prompt_hold_ring::HOLD_ACT_FALLBACK_SECONDS);
+        crate::ui::prompt_hold_ring::set_hold_act_seconds(hold_secs);
 
         let music_data = FxHashMap::default();
 

@@ -413,13 +413,22 @@ pub(super) fn process_focus_and_actions(
                     Some(FocusTarget::Button(GameplayButton::Trigger)) => {
                         // Cash in is hold-to-confirm (see `cash_in_hold_started`):
                         // charging the timer commits; releasing early cancels.
-                        if GameEngine::read(ctx.run).trigger_enabled {
+                        let gameplay = GameEngine::read(ctx.run);
+                        if gameplay.trigger_enabled
+                            || gameplay.cash_in_blocked_until_discards_spent
+                        {
                             if scene.cash_in_hold_started.is_none() {
-                                scene.cash_in_hold_started = Some(now);
+                                scene.cash_in_hold_started = Some(
+                                    crate::ui::prompt_hold_ring::begin_hold(
+                                        now,
+                                        ctx.bus,
+                                        gameplay.trigger_enabled,
+                                    ),
+                                );
                             }
                         } else {
-                            // Blocked (e.g. discards must be spent first): fire
-                            // immediately so the rejection feedback still plays.
+                            // Nothing to cash in: fire immediately so the
+                            // rejection feedback still plays.
                             actions_for_scene.push(UiAction::TriggerStructure);
                         }
                     }
@@ -591,9 +600,16 @@ pub(super) fn process_focus_and_actions(
             // Cash in is hold-to-confirm for keyboard (T) and gamepad triggers.
             // The instant mouse path lives in the 3D-pick dispatcher below.
             UiAction::TriggerStructure => {
-                if GameEngine::read(ctx.run).trigger_enabled {
+                let gameplay = GameEngine::read(ctx.run);
+                if gameplay.trigger_enabled || gameplay.cash_in_blocked_until_discards_spent {
                     if scene.cash_in_hold_started.is_none() {
-                        scene.cash_in_hold_started = Some(now);
+                        scene.cash_in_hold_started = Some(
+                            crate::ui::prompt_hold_ring::begin_hold(
+                                now,
+                                ctx.bus,
+                                gameplay.trigger_enabled,
+                            ),
+                        );
                     }
                 } else {
                     // Nothing to cash in: fire immediately so the rejection
@@ -889,12 +905,12 @@ pub(super) fn process_focus_and_actions(
     // Complete (or invalidate) an in-progress hold-to-cash-in. Mirrors the
     // shop's hold-to-sell: the action fires once the timer crosses the
     // threshold without waiting for release; an early release cancels it
-    // (handled above), and losing cash-in eligibility drops the charge.
+    // (handled above). Progress freezes while cash-in is blocked.
+    let trigger_enabled = GameEngine::read(ctx.run).trigger_enabled;
+    scene.tick_cash_in_hold_anchor(now, trigger_enabled);
     if let Some(start) = scene.cash_in_hold_started {
-        if !GameEngine::read(ctx.run).trigger_enabled {
-            scene.cash_in_hold_started = None;
-        } else if now.saturating_duration_since(start).as_secs_f32()
-            >= super::CASH_IN_HOLD_SECONDS
+        if trigger_enabled
+            && now.saturating_duration_since(start).as_secs_f32() >= super::cash_in_hold_seconds()
         {
             scene.cash_in_hold_started = None;
             execute_cash_in(scene, ctx);

@@ -149,7 +149,6 @@ impl crate::App {
             .map(|saved| saved.run)
             .unwrap_or_else(RunState::new_demo);
         run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-        run.set_hints_enabled(settings.hints_enabled);
         run.apply_progression(&progress);
         steam.sync_profile_stats(&progress);
         let mut audio = crate::audio::AudioManager::new();
@@ -340,7 +339,6 @@ impl crate::App {
         let mut settings = crate::persistence::load_settings();
         self.run
             .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-        self.run.set_hints_enabled(settings.hints_enabled);
         self.run.apply_progression(&self.progress);
         self.steam.sync_profile_stats(&self.progress);
         // Persist the active profile choice.

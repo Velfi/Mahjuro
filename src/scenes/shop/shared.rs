@@ -1,5 +1,7 @@
 use super::*;
+use crate::core::relic::RelicId;
 use crate::core::tile_pack::TilePackKind;
+use crate::game::run::RunState;
 use crate::scenes::guide;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -138,6 +140,74 @@ pub(super) fn shop_action_for_hit(
         ShopHit::Dish(id) => tile_pack_index_from_pick(id).map(ShopAction::BuyPack),
         ShopHit::TilePack(id) => tile_pack_index_from_pick(id).map(ShopAction::BuyPack),
         ShopHit::EnvSpawnSlot(_) | ShopHit::EnvInvSlot(_) | ShopHit::EnvConsumableOrd(_) => None,
+    }
+}
+
+/// Whether a shop buy/use hold would succeed (mirrors [`GameEngine::dispatch_shop`] gates).
+pub(super) fn shop_buy_action_valid(
+    action: ShopAction,
+    run: &RunState,
+    items: &[ShopItem],
+    zodiac_items: &[ConsumableShopItem],
+    talisman_items: &[ConsumableShopItem],
+    pack_items: &[TilePackShopItem],
+) -> bool {
+    let mode = &run.mode;
+    let relics = &run.relics;
+    match action {
+        ShopAction::BuyCard(idx) => {
+            let Some(item) = items.get(idx) else {
+                return false;
+            };
+            if item.sold {
+                return false;
+            }
+            if run.yen < item.price as i32 {
+                return false;
+            }
+            !(run.relics.is_full() && item.relic != RelicId::BrocadePouch)
+        }
+        ShopAction::BuyZodiac(idx) => {
+            let Some(item) = zodiac_items.get(idx) else {
+                return false;
+            };
+            if item.sold {
+                return false;
+            }
+            let price = item.price(mode, relics);
+            run.yen >= price as i32
+        }
+        ShopAction::BuyTalisman(idx) => {
+            let Some(item) = talisman_items.get(idx) else {
+                return false;
+            };
+            if item.sold {
+                return false;
+            }
+            if run.consumables.is_full() {
+                return false;
+            }
+            let price = item.price(mode, relics);
+            run.yen >= price as i32
+        }
+        ShopAction::BuyPack(pack_idx) => {
+            let Some(pack) = pack_items.get(pack_idx) else {
+                return false;
+            };
+            if pack.sold {
+                return false;
+            }
+            let price = mode.scale_shop_price(super::apply_merchants_eye_discount(
+                pack.kind.shop_price(),
+                relics,
+            ));
+            run.yen >= price as i32
+        }
+        ShopAction::UseConsumable(idx) => idx < run.consumables.items.len(),
+        ShopAction::SellRelic(_)
+        | ShopAction::SellConsumable(_)
+        | ShopAction::MoveRelicLeft(_)
+        | ShopAction::MoveRelicRight(_) => false,
     }
 }
 

@@ -183,6 +183,8 @@ pub enum SfxId {
     TalismanUsed,
     /// Looping mechanical whir while gameplay score odometer rollers spin.
     RollersSpin,
+    /// Rising windup when a hold-to-act timer starts (cash-in, shop buy/sell).
+    HoldWindup,
 }
 
 /// All SFX variants in display order. Single source of truth shared by the
@@ -269,6 +271,7 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::TalismanPurchased,
         SfxId::TalismanUsed,
         SfxId::RollersSpin,
+        SfxId::HoldWindup,
     ]
 }
 

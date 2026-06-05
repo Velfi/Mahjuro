@@ -6,7 +6,11 @@ use crate::scene_keys;
 
 use std::time::{Duration, Instant};
 
-use crate::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
+use crate::gltf_helpers::{
+    GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE, GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW,
+    GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL, GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT, GltfPbrUniform,
+    build_sampler_descriptor,
+};
 use crate::room_env_gltf::RoomEnvPrimitiveCpu;
 use crate::wgpu_renderer::resources::RoomEnvTextureCache;
 use wgpu::util::DeviceExt;
@@ -22,6 +26,72 @@ use crate::score_roller_layout::{self, GAMEPLAY_SCORE_ROLLER_SLOT_COUNT};
 
 /// Max main-thread wall time for one gameplay env upload slice during prefetch / fade.
 const GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS: f32 = 6.0;
+
+#[inline]
+fn hallway_env_shader_flags(node_name: Option<&str>) -> u32 {
+    if node_name == Some(crate::hallway_glb::HALLWAY_WALLS_NODE) {
+        GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT
+    } else {
+        0
+    }
+}
+
+#[inline]
+fn archive_env_shader_flags(node_name: Option<&str>) -> u32 {
+    if matches!(
+        node_name,
+        Some(
+            crate::archive_glb::SIGN_DESCRIPTION_LEFT
+                | crate::archive_glb::SIGN_DESCRIPTION_RIGHT
+                | crate::archive_glb::INSPECT_PLAQUE
+        )
+    ) {
+        GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL
+    } else {
+        0
+    }
+}
+
+#[inline]
+fn main_menu_env_shader_flags(node_name: Option<&str>) -> u32 {
+    let Some(name) = node_name else {
+        return 0;
+    };
+    if crate::main_menu_glb::is_main_menu_moon_env_node(name) {
+        GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE
+    } else if crate::main_menu_glb::is_main_menu_star_env_node(name) {
+        GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW
+    } else {
+        0
+    }
+}
+
+#[inline]
+fn room_env_shader_flags(scene_key: &str, node_name: Option<&str>) -> u32 {
+    match scene_key {
+        scene_keys::HALLWAY => hallway_env_shader_flags(node_name),
+        scene_keys::ARCHIVE => archive_env_shader_flags(node_name),
+        scene_keys::MAIN_MENU => main_menu_env_shader_flags(node_name),
+        _ => 0,
+    }
+}
+
+#[inline]
+fn room_env_pbr_uniform(
+    prim: &crate::tile_glb::LoadedPrimitive,
+    scene_key: &str,
+    node_name: Option<&str>,
+) -> GltfPbrUniform {
+    let mut pbr_uniform = GltfPbrUniform::from_loaded(
+        prim.metallic_factor,
+        prim.roughness_factor,
+        prim.emissive_factor,
+        prim.alpha_mode,
+        prim.alpha_cutoff,
+    );
+    pbr_uniform.add_flags(room_env_shader_flags(scene_key, node_name));
+    pbr_uniform
+}
 
 pub(super) struct GameplayRoomGpuUpload {
     prim_count: usize,
@@ -147,17 +217,13 @@ fn load_shop_room_gpu(
                     mips,
                     ctx.tile_glb_default_emissive_view,
                 );
+                let pbr_uniform =
+                    room_env_pbr_uniform(prim, scene_keys::SHOP, env_prim.gltf_node_name.as_deref());
                 let pbr_uniform_buffer =
                     ctx.device
                         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("shop-pbr-{i}")),
-                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
-                                prim.metallic_factor,
-                                prim.roughness_factor,
-                                prim.emissive_factor,
-                                prim.alpha_mode,
-                                prim.alpha_cutoff,
-                            )),
+                            contents: bytemuck::bytes_of(&pbr_uniform),
                             usage: wgpu::BufferUsages::UNIFORM,
                         });
                 let sampler = ctx
@@ -353,17 +419,16 @@ fn load_hallway_room_gpu(
                     mips,
                     ctx.tile_glb_default_emissive_view,
                 );
+                let pbr_uniform = room_env_pbr_uniform(
+                    prim,
+                    scene_keys::HALLWAY,
+                    env_prim.gltf_node_name.as_deref(),
+                );
                 let pbr_uniform_buffer =
                     ctx.device
                         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("hallway-pbr-{i}")),
-                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
-                                prim.metallic_factor,
-                                prim.roughness_factor,
-                                prim.emissive_factor,
-                                prim.alpha_mode,
-                                prim.alpha_cutoff,
-                            )),
+                            contents: bytemuck::bytes_of(&pbr_uniform),
                             usage: wgpu::BufferUsages::UNIFORM,
                         });
                 let sampler = ctx
@@ -548,28 +613,11 @@ fn load_main_menu_room_gpu(
                     mips,
                     ctx.tile_glb_default_emissive_view,
                 );
-                let mut pbr_uniform = GltfPbrUniform::from_loaded(
-                    prim.metallic_factor,
-                    prim.roughness_factor,
-                    prim.emissive_factor,
-                    prim.alpha_mode,
-                    prim.alpha_cutoff,
+                let pbr_uniform = room_env_pbr_uniform(
+                    prim,
+                    scene_keys::MAIN_MENU,
+                    env_prim.gltf_node_name.as_deref(),
                 );
-                if env_prim
-                    .gltf_node_name
-                    .as_deref()
-                    .is_some_and(crate::main_menu_glb::is_main_menu_moon_env_node)
-                {
-                    // `2.0` = hub moon phase shading + optional pride rainbow.
-                    pbr_uniform.emissive_factor[3] = 2.0;
-                } else if env_prim
-                    .gltf_node_name
-                    .as_deref()
-                    .is_some_and(crate::main_menu_glb::is_main_menu_star_env_node)
-                {
-                    // `1.0` = pride rainbow only (`room_glb.wgsl`).
-                    pbr_uniform.emissive_factor[3] = 1.0;
-                }
                 let pbr_uniform_buffer =
                     ctx.device
                         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -759,17 +807,16 @@ fn load_staircase_room_gpu(
                     mips,
                     ctx.tile_glb_default_emissive_view,
                 );
+                let pbr_uniform = room_env_pbr_uniform(
+                    prim,
+                    scene_keys::STAIRWAY,
+                    env_prim.gltf_node_name.as_deref(),
+                );
                 let pbr_uniform_buffer =
                     ctx.device
                         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("staircase-pbr-{i}")),
-                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
-                                prim.metallic_factor,
-                                prim.roughness_factor,
-                                prim.emissive_factor,
-                                prim.alpha_mode,
-                                prim.alpha_cutoff,
-                            )),
+                            contents: bytemuck::bytes_of(&pbr_uniform),
                             usage: wgpu::BufferUsages::UNIFORM,
                         });
                 let sampler = ctx
@@ -1038,17 +1085,16 @@ fn load_archive_room_gpu(
                     mips,
                     ctx.tile_glb_default_emissive_view,
                 );
+                let pbr_uniform = room_env_pbr_uniform(
+                    prim,
+                    scene_keys::ARCHIVE,
+                    env_prim.gltf_node_name.as_deref(),
+                );
                 let pbr_uniform_buffer =
                     ctx.device
                         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("archive-pbr-{i}")),
-                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
-                                prim.metallic_factor,
-                                prim.roughness_factor,
-                                prim.emissive_factor,
-                                prim.alpha_mode,
-                                prim.alpha_cutoff,
-                            )),
+                            contents: bytemuck::bytes_of(&pbr_uniform),
                             usage: wgpu::BufferUsages::UNIFORM,
                         });
                 let sampler = ctx
@@ -1302,17 +1348,13 @@ fn upload_gameplay_env_prim_gpu(
         mips,
         ctx.tile_glb_default_emissive_view,
     );
+    let pbr_uniform =
+        room_env_pbr_uniform(prim, scene_keys::GAMEPLAY, env_prim.gltf_node_name.as_deref());
     let pbr_uniform_buffer = ctx
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("gameplay-pbr-{i}")),
-            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
-                prim.metallic_factor,
-                prim.roughness_factor,
-                prim.emissive_factor,
-                prim.alpha_mode,
-                prim.alpha_cutoff,
-            )),
+            contents: bytemuck::bytes_of(&pbr_uniform),
             usage: wgpu::BufferUsages::UNIFORM,
         });
     let sampler = ctx
@@ -2006,5 +2048,88 @@ impl WgpuRenderer {
 
     pub(super) fn ensure_gameplay_room_gpu(&mut self) {
         self.drive_gameplay_room_gpu_upload(f32::MAX);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn room_env_shader_flags_hallway_walls_only() {
+        assert_eq!(
+            room_env_shader_flags(
+                scene_keys::HALLWAY,
+                Some(crate::hallway_glb::HALLWAY_WALLS_NODE)
+            ),
+            GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT
+        );
+        assert_eq!(
+            room_env_shader_flags(scene_keys::HALLWAY, Some("ceiling")),
+            0
+        );
+    }
+
+    #[test]
+    fn room_env_shader_flags_archive_decal_hosts() {
+        assert_eq!(
+            room_env_shader_flags(
+                scene_keys::ARCHIVE,
+                Some(crate::archive_glb::SIGN_DESCRIPTION_LEFT)
+            ),
+            GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL
+        );
+        assert_eq!(
+            room_env_shader_flags(
+                scene_keys::ARCHIVE,
+                Some(crate::archive_glb::SIGN_DESCRIPTION_RIGHT)
+            ),
+            GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL
+        );
+        assert_eq!(
+            room_env_shader_flags(
+                scene_keys::ARCHIVE,
+                Some(crate::archive_glb::INSPECT_PLAQUE)
+            ),
+            GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL
+        );
+        assert_eq!(
+            room_env_shader_flags(
+                scene_keys::ARCHIVE,
+                Some(crate::archive_glb::PLAQUE_BACKING)
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn room_env_shader_flags_main_menu_moon_and_star() {
+        assert_eq!(
+            room_env_shader_flags(
+                scene_keys::MAIN_MENU,
+                Some(crate::main_menu_glb::MAIN_MENU_MOON_MESH_NODE)
+            ),
+            GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE
+        );
+        assert_eq!(
+            room_env_shader_flags(scene_keys::MAIN_MENU, Some("star.001")),
+            GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW
+        );
+        assert_eq!(room_env_shader_flags(scene_keys::MAIN_MENU, Some("dock")), 0);
+    }
+
+    #[test]
+    fn room_env_shader_flags_scene_scoped() {
+        assert_eq!(
+            room_env_shader_flags(
+                scene_keys::SHOP,
+                Some(crate::hallway_glb::HALLWAY_WALLS_NODE)
+            ),
+            0
+        );
+        assert_eq!(
+            room_env_shader_flags("unknown_scene", Some("star.001")),
+            0
+        );
     }
 }

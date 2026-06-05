@@ -48,7 +48,7 @@ pub struct GradientQuadInstance {
 }
 
 /// Instance for the `arc_ring_quad_pipeline` — square bbox plus fill/track
-/// colours and ring params (`inner_r_norm`, `progress`, …). See
+/// colours and ring params (`inner_r_norm`, `progress`, `invalid_flag`, …). See
 /// `shaders/arc_ring_quad.wgsl`.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]

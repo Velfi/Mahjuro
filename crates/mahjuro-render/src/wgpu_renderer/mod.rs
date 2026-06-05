@@ -886,8 +886,8 @@ pub(crate) use screenshot::ScreenshotStaging;
 pub(crate) use targets::RenderTarget;
 pub(crate) use tile_pipeline::{TileGlbPipelineKey, TileMeshGpuSet, TilePrimitiveGpu};
 pub(crate) use uniforms::{
-    BloomParams, CameraUniform, FlameViewUniform, Globals, ProbeGiFrameUniform,
-    TileOutlineFrameUniform, TileOutlineInstance, TonemapParams,
+    BloomParams, FlameViewUniform, Globals, ProbeGiFrameUniform, RoomEnvUniform,
+    TileOutlineFrameUniform, TileOutlineInstance, TileUniform, TonemapParams,
 };
 
 pub(super) use constants::{

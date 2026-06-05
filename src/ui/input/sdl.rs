@@ -69,19 +69,11 @@ impl InputState {
             );
             return;
         }
-        for gp in shell.pads.values_mut() {
-            if let Err(e) = gp.set_rumble(low, high, duration_ms) {
-                log::warn!("sdl gamepad rumble failed: {e}");
-            }
-        }
-        shell.sync_gamepad_rumble_output();
+        shell.set_gamepad_rumble(low, high, duration_ms);
     }
 
     fn stop_sdl_rumble(shell: &mut SdlShell) {
-        for gp in shell.pads.values_mut() {
-            let _ = gp.set_rumble(0, 0, 1);
-        }
-        shell.sync_gamepad_rumble_output();
+        shell.stop_gamepad_rumble();
     }
 
     /// Drain rumble patterns queued by the rumble lab debug scene.
@@ -207,12 +199,7 @@ impl InputState {
             Self::shop_sell_hold_rumble_params(hold_progress);
         let low = ((strong as f32) * gain).min(65535.0) as u16;
         let high = ((weak as f32) * gain).min(65535.0) as u16;
-        for gp in shell.pads.values_mut() {
-            if let Err(e) = gp.set_rumble(low, high, hold_refresh_ms) {
-                log::debug!("shop sell hold rumble: {e}");
-            }
-        }
-        shell.sync_gamepad_rumble_output();
+        shell.set_gamepad_rumble(low, high, hold_refresh_ms);
     }
     /// Handle one SDL controller event from the shared [`SdlShell`] pump.
     /// Returns true when focus mode switches to [`InputMode::Controller`].
@@ -435,6 +422,7 @@ impl InputState {
     ) -> bool {
         self.item_inspect_orbit_stick = (0.0, 0.0);
         self.item_inspect_zoom_triggers = 0.0;
+        self.shop_storeroom_orbit_stick = (0.0, 0.0);
         self.right_stick_scroll_axis = 0.0;
         self.left_stick_scroll_axis = 0.0;
 
@@ -502,6 +490,8 @@ impl InputState {
                 (self.item_inspect_orbit_stick.0 + kx).clamp(-1.0, 1.0);
             self.item_inspect_orbit_stick.1 =
                 (self.item_inspect_orbit_stick.1 + ky).clamp(-1.0, 1.0);
+        } else if poll_ctx.shop_storeroom_orbit {
+            self.shop_storeroom_orbit_stick = Self::sample_right_stick_xy(shell);
         }
         self.right_stick_scroll_axis = Self::sample_stick_scroll_axis(shell, GpAxis::RightY);
         self.left_stick_scroll_axis = Self::sample_stick_scroll_axis(shell, GpAxis::LeftY);
@@ -571,14 +561,10 @@ impl InputState {
         let _ = crate::persistence::save_settings(&settings);
     }
 
-    fn sample_item_inspect_analog(
-        shell: &SdlShell,
-        out_stick: &mut (f32, f32),
-        out_zoom: &mut f32,
-    ) {
+    fn sample_right_stick_xy(shell: &SdlShell) -> (f32, f32) {
         const STICK_DZ: f32 = 0.15;
         let Ok(ids) = shell.gamepad.gamepads() else {
-            return;
+            return (0.0, 0.0);
         };
         for id in ids {
             let Some(gp) = shell.pads.get(&id) else {
@@ -589,10 +575,30 @@ impl InputState {
             }
             let x = axis_norm(gp.axis(GpAxis::RightX));
             let y = axis_norm(gp.axis(GpAxis::RightY));
-            *out_stick = (
+            return (
                 if x.abs() < STICK_DZ { 0.0 } else { x },
                 if y.abs() < STICK_DZ { 0.0 } else { y },
             );
+        }
+        (0.0, 0.0)
+    }
+
+    fn sample_item_inspect_analog(
+        shell: &SdlShell,
+        out_stick: &mut (f32, f32),
+        out_zoom: &mut f32,
+    ) {
+        *out_stick = Self::sample_right_stick_xy(shell);
+        let Ok(ids) = shell.gamepad.gamepads() else {
+            return;
+        };
+        for id in ids {
+            let Some(gp) = shell.pads.get(&id) else {
+                continue;
+            };
+            if !gp.connected() {
+                continue;
+            }
             let lt = trigger_norm(gp.axis(GpAxis::TriggerLeft));
             let rt = trigger_norm(gp.axis(GpAxis::TriggerRight));
             let mut z = rt - lt;

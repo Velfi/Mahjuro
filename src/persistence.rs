@@ -196,8 +196,6 @@ pub struct AppSettings {
     pub hold_to_sell_rumble: bool,
     #[serde(default = "default_true")]
     pub auto_cash_in_on_full_structure: bool,
-    #[serde(default)]
-    pub hints_enabled: bool,
     /// Show the post-discard Undo control and allow undoing the last discard.
     /// The snapshot is always recorded; this only gates UI and the undo action.
     #[serde(default)]
@@ -268,7 +266,6 @@ impl Default for AppSettings {
             xy_quick_action: true,
             hold_to_sell_rumble: true,
             auto_cash_in_on_full_structure: true,
-            hints_enabled: false,
             discard_undo_enabled: false,
             archive_last_seen_run_len: [0, 0, 0],
         }

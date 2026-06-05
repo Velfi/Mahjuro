@@ -175,15 +175,23 @@ impl ShopScene {
         self.last_frame = now;
         self.age_secs += dt;
         self.tick_departing_stock(now, ctx.layout.window_h);
-        if ctx.mouse_left_down {
+        let (stick_x, stick_y) = ctx.shop_storeroom_orbit_stick;
+        let orbit_active = ctx.mouse_left_down
+            || stick_x.abs() > 1e-4
+            || stick_y.abs() > 1e-4;
+        if orbit_active {
             // Subtle pre-inspect peek — much slower and tighter than item-inspect orbit.
             const ORBIT: f32 = 0.55;
             const SENS: f32 = 0.010;
             const YAW_LIM: f32 = 0.12;
             const PITCH_LIM: f32 = 0.06;
             let (mx, my) = ctx.shop_storeroom_orbit_drag_px;
-            let sx = (mx * SENS).clamp(-1.0, 1.0);
-            let sy = (-my * SENS).clamp(-1.0, 1.0);
+            let mut sx = -stick_x;
+            let mut sy = -stick_y;
+            if ctx.mouse_left_down {
+                sx += (mx * SENS).clamp(-1.0, 1.0);
+                sy += (-my * SENS).clamp(-1.0, 1.0);
+            }
             self.storeroom_orbit_yaw =
                 (self.storeroom_orbit_yaw + sx * ORBIT * dt).clamp(-YAW_LIM, YAW_LIM);
             self.storeroom_orbit_pitch =
@@ -342,6 +350,8 @@ impl ShopScene {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
 
+        self.tick_hold_anchors(now, ctx.run, &shop);
+
         self.try_complete_west_sell_hold(
             now,
             &shop,
@@ -380,7 +390,11 @@ impl ShopScene {
                     && self.west_sell_hold_started.is_none()
                 {
                     self.buy_hold_started = None;
-                    self.west_sell_hold_started = Some(now);
+                    self.west_sell_hold_started = Some(crate::ui::prompt_hold_ring::begin_hold(
+                        now,
+                        ctx.bus,
+                        self.sell_hold_valid_for(&shop),
+                    ));
                 }
                 continue;
             }
@@ -490,7 +504,13 @@ impl ShopScene {
                             // tap-and-release is cancelled by `ConfirmRelease`.
                             if self.buy_hold_started.is_none() {
                                 self.west_sell_hold_started = None;
-                                self.buy_hold_started = Some(now);
+                                self.buy_hold_started = Some(
+                                    crate::ui::prompt_hold_ring::begin_hold(
+                                        now,
+                                        ctx.bus,
+                                        self.buy_hold_valid_for(ctx.run, &shop),
+                                    ),
+                                );
                             }
                         } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
                             *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(

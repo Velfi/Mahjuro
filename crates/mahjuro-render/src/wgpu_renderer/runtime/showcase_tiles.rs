@@ -266,15 +266,15 @@ impl WgpuRenderer {
                     self.queue.write_buffer(
                         &stg.uniform_buffer,
                         0,
-                        bytemuck::bytes_of(&CameraUniform {
+                        bytemuck::bytes_of(&TileUniform {
                             view_proj: view_proj_arr,
                             model: model.to_cols_array(),
-                            base_color_factor: sc_bcf,
+                            tile_visual_params: sc_bcf,
                             cam_pos: cam_pos.to_array(),
-                            tile_seed,
-                            decal_atlas_uv: stg.decal_atlas_uv,
-                            hdr_tonemap,
-                            punctual_tuning,
+                            tile_material_seed: tile_seed,
+                            tile_decal_atlas_uv: stg.decal_atlas_uv,
+                            tile_post_params: hdr_tonemap,
+                            tile_punctual_params: punctual_tuning,
                         }),
                     );
                     if p.outline {

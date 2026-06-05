@@ -71,25 +71,47 @@ pub(crate) struct ProbeGiFrameUniform {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct CameraUniform {
+pub(crate) struct TileUniform {
     pub view_proj: [f32; 16],
     pub model: [f32; 16],
-    pub base_color_factor: [f32; 4],
+    pub tile_visual_params: [f32; 4],
     /// World-space camera position, used for fresnel/view-dependent effects in tile_3d.wgsl.
     pub cam_pos: [f32; 3],
     /// Per-tile instance seed — any finite float. Read by `tile_3d.wgsl` to
     /// offset procedural noise so every tile's tortoise-shell pattern (and
     /// future material variations) is unique. Not all materials sample it.
-    pub tile_seed: f32,
+    pub tile_material_seed: f32,
     /// xy = atlas origin, zw = scale — maps face UV 0..1 into the showcase decal atlas.
-    pub decal_atlas_uv: [f32; 4],
+    pub tile_decal_atlas_uv: [f32; 4],
     /// x = use shop-style ACES HDR path (`1`/`0`); y = linear exposure; z = hemispheric ambient scale;
     /// w = tile shader inverse document scale for embedded glTF punctual attenuation.
     /// Matches `SsrGlobals.hdr_tonemap.xyz` on `lit_mesh` for the same frame; `w` differs.
-    pub hdr_tonemap: [f32; 4],
+    pub tile_post_params: [f32; 4],
     /// x = embedded glTF inverse-square intensity scale for tiles (`tile_3d` only; `lit_mesh` uses
     /// point-light `extras.w`). yzw reserved.
-    pub punctual_tuning: [f32; 4],
+    pub tile_punctual_params: [f32; 4],
+}
+
+/// Room-environment variant of [`TileUniform`] for `room_glb.wgsl`.
+///
+/// Field names are room-specific to avoid mixing tile semantics when writing shop/hallway/archive/main-menu
+/// glTF environment uniforms. Layout intentionally matches WGSL `RoomEnvUniform`.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct RoomEnvUniform {
+    pub view_proj: [f32; 16],
+    pub model: [f32; 16],
+    /// x/y/w preserved for layout parity with tile path; y = room unlit debug.
+    pub room_debug_params: [f32; 4],
+    pub cam_pos: [f32; 3],
+    /// Shared room linear HDR exposure gain before tonemap (`room_glb.wgsl`).
+    pub room_linear_exposure: f32,
+    /// x = ambient scale; y = inverse doc scale; z = emissive scale; w = moon phase.
+    pub room_env_params: [f32; 4],
+    /// Room post/tone params (`hdr_tonemap` parity); w = main-menu rainbow scene time.
+    pub room_post_params: [f32; 4],
+    /// Unused in room env shader; retained for bind layout parity with tile path.
+    pub _unused_punctual_tuning: [f32; 4],
 }
 
 /// Per-frame data for `tile_outline.wgsl` group 0 binding 0.

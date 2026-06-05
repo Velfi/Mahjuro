@@ -127,10 +127,6 @@ const SHOP_HELP_BADGE_ID: u32 = 0x9100;
 /// Click id for the catch-all 3D-hit dispatcher. When clicked, the shop's
 /// update() routes the click based on `UpdateCtx::picked_shop_object`.
 pub const SHOP_3D_HIT_ID: u32 = 0x9200;
-/// Hold-to-sell duration (gamepad West / keyboard **Q**). Drives HUD ring + sell gate.
-pub(crate) const SHOP_SELL_HOLD_SECONDS: f32 = 1.0;
-/// Hold-to-buy duration (gamepad South / keyboard **Enter**). Drives HUD ring + buy gate.
-pub(crate) const SHOP_BUY_HOLD_SECONDS: f32 = 1.0;
 /// Click id for the Leave / advance 2D button (kept for focus-nav compat).
 const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
 /// Click id for the Restock 2D button (kept for focus-nav compat).
@@ -156,35 +152,111 @@ const SHOP_RELIC_LEAN_INVENTORY: f32 = 138.0;
 
 impl ShopScene {
     #[inline]
-    #[cfg(feature = "game")]
     pub(crate) fn sell_hold_in_progress(&self) -> bool {
         self.west_sell_hold_started.is_some()
     }
 
-    /// Normalized hold progress for rumble / HUD ring (0..=1).
+    /// Normalized hold progress for rumble / HUD ring (0..=1). Stays at 0 while invalid.
     #[inline]
-    #[cfg(feature = "game")]
-    pub(crate) fn sell_hold_progress(&self, now: std::time::Instant) -> Option<f32> {
-        self.west_sell_hold_started.map(|started| {
-            (now.saturating_duration_since(started).as_secs_f32() / SHOP_SELL_HOLD_SECONDS)
-                .clamp(0.0, 1.0)
-        })
+    pub(crate) fn sell_hold_progress(
+        &self,
+        now: std::time::Instant,
+        shop: &crate::game::engine::ShopReadModel,
+    ) -> Option<f32> {
+        let started = self.west_sell_hold_started?;
+        if !self.sell_hold_valid_for(shop) {
+            return Some(0.0);
+        }
+        Some(
+            (now.saturating_duration_since(started).as_secs_f32()
+                / crate::ui::prompt_hold_ring::hold_act_seconds())
+                .clamp(0.0, 1.0),
+        )
+    }
+
+    pub(crate) fn sell_hold_valid_for(
+        &self,
+        shop: &crate::game::engine::ShopReadModel,
+    ) -> bool {
+        shared::focused_sell_action(
+            self.focus,
+            self.items.len(),
+            &self.zodiac_items,
+            &self.talisman_items,
+            shop,
+        )
+        .is_some()
     }
 
     #[inline]
-    #[cfg(feature = "game")]
     pub(crate) fn buy_hold_in_progress(&self) -> bool {
         self.buy_hold_started.is_some()
     }
 
-    /// Normalized buy-hold progress for rumble / HUD ring (0..=1).
+    /// Normalized buy-hold progress for rumble / HUD ring (0..=1). Stays at 0 while invalid.
     #[inline]
-    #[cfg(feature = "game")]
-    pub(crate) fn buy_hold_progress(&self, now: std::time::Instant) -> Option<f32> {
-        self.buy_hold_started.map(|started| {
-            (now.saturating_duration_since(started).as_secs_f32() / SHOP_BUY_HOLD_SECONDS)
-                .clamp(0.0, 1.0)
-        })
+    pub(crate) fn buy_hold_progress(
+        &self,
+        now: std::time::Instant,
+        run: &crate::game::run::RunState,
+        shop: &crate::game::engine::ShopReadModel,
+    ) -> Option<f32> {
+        let started = self.buy_hold_started?;
+        if !self.buy_hold_valid_for(run, shop) {
+            return Some(0.0);
+        }
+        Some(
+            (now.saturating_duration_since(started).as_secs_f32()
+                / crate::ui::prompt_hold_ring::hold_act_seconds())
+                .clamp(0.0, 1.0),
+        )
+    }
+
+    pub(crate) fn buy_hold_valid_for(
+        &self,
+        run: &crate::game::run::RunState,
+        shop: &crate::game::engine::ShopReadModel,
+    ) -> bool {
+        let Some(action) = self.focus.and_then(|f| f.to_hit()).and_then(|hit| {
+            shared::shop_action_for_hit(
+                hit,
+                &self.items,
+                &self.zodiac_items,
+                &self.talisman_items,
+                shop,
+            )
+        }) else {
+            return false;
+        };
+        shared::shop_buy_action_valid(
+            action,
+            run,
+            &self.items,
+            &self.zodiac_items,
+            &self.talisman_items,
+            &self.pack_items,
+        )
+    }
+
+    /// Freeze hold timers while the targeted action cannot succeed.
+    pub(crate) fn tick_hold_anchors(
+        &mut self,
+        now: std::time::Instant,
+        run: &crate::game::run::RunState,
+        shop: &crate::game::engine::ShopReadModel,
+    ) {
+        if let Some(start) = self.buy_hold_started {
+            let valid = self.buy_hold_valid_for(run, shop);
+            self.buy_hold_started = Some(crate::ui::prompt_hold_ring::freeze_hold_anchor(
+                start, now, valid,
+            ));
+        }
+        if let Some(start) = self.west_sell_hold_started {
+            let valid = self.sell_hold_valid_for(shop);
+            self.west_sell_hold_started = Some(crate::ui::prompt_hold_ring::freeze_hold_anchor(
+                start, now, valid,
+            ));
+        }
     }
 
     /// Set focus from a stable slug — used by the screenshot CLI's
