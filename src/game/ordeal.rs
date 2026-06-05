@@ -189,6 +189,9 @@ fn mirror_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
         match r {
             RelicId::PairPower => pair += 2,
             RelicId::SequenceSurge => seq += 2,
+            RelicId::ChowLine | RelicId::EvenKeel | RelicId::PlainDealing | RelicId::OpenGate => {
+                seq += 2
+            }
             RelicId::TripletBoost => trip += 2,
             // Honor / kong / overflow lean weakly toward triplet builds.
             RelicId::HonorFury | RelicId::KanDrum | RelicId::KongsBlessing => trip += 1,
@@ -311,6 +314,7 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
     let mut pinzu = 0u32;
     let mut honors = 0u32;
     let mut terminals = 0u32;
+    let mut simples = 0u32;
     let mut flowers = 0u32;
 
     for &relic in &run.relics.active {
@@ -320,12 +324,16 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
             RelicId::LapisSerpent => pinzu += 3,
             RelicId::HonorFury
             | RelicId::DragonRage
-            | RelicId::GreenLuck
             | RelicId::WhiteDragonsHush
             | RelicId::WildWinds
             | RelicId::DragonEcho
             | RelicId::WindReader => honors += 2,
             RelicId::EdgeRunner | RelicId::ClosedGate => terminals += 2,
+            RelicId::PlainDealing
+            | RelicId::EvenKeel
+            | RelicId::OpenGate
+            | RelicId::ChowLine
+            | RelicId::GreenLuck => simples += 2,
             RelicId::GardenKeeper | RelicId::Ikebana | RelicId::Hanami => flowers += 2,
             _ => {}
         }
@@ -371,6 +379,7 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
         (TileDebuff::Suit(crate::core::tile::Suit::Pinzu), pinzu),
         (TileDebuff::Class(TileDebuffClass::Honors), honors),
         (TileDebuff::Class(TileDebuffClass::Terminals), terminals),
+        (TileDebuff::Class(TileDebuffClass::Simples), simples),
         (TileDebuff::Suit(crate::core::tile::Suit::Flower), flowers),
     ]
     .into_iter()

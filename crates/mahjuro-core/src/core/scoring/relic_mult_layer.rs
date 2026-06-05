@@ -76,7 +76,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 *chips,
                 mult,
                 "Sequence Surge",
-                1.0 * seq_count as f64,
+                1.25 * seq_count as f64,
             );
         }
     }
@@ -225,6 +225,28 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             });
         if all_terminal_or_honor {
             push_mult(steps, *chips, mult, "Closed Gate", 6.0);
+        }
+    }
+
+    if has(RelicId::OpenGate) {
+        let all_simple = sets
+            .iter()
+            .flat_map(|s| &s.tile_ids)
+            .filter_map(|id| tile_by_id(tiles, *id))
+            .filter(|t| !t.is_flower())
+            .all(|t| {
+                matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu)
+                    && (2..=8).contains(&t.rank)
+            });
+        if all_simple {
+            push_mult(steps, *chips, mult, "Open Gate", 6.0);
+        }
+    }
+
+    if has(RelicId::ChowLine) {
+        let seq_count = sets.iter().filter(|s| s.kind == MeldKind::Sequence).count();
+        if seq_count >= 3 {
+            push_mult(steps, *chips, mult, "Chow Line", 4.0);
         }
     }
 

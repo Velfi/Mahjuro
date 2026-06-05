@@ -682,6 +682,7 @@ impl RunState {
             self.round_end_queued = true;
             if self.chamber == ChamberKind::Ordeal
                 && let Some(bk) = self.ordeal.upcoming
+                && !self.onboarding_active()
             {
                 bus.push(GameEvent::OrdealDefeated(bk));
             }

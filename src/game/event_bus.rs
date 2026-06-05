@@ -74,11 +74,12 @@ pub enum GameEvent {
     /// Play a relic's stinger without counting it as an activation
     /// (e.g. when a relic is purchased from the shop).
     PlayRelicStinger(crate::core::relic::RelicId),
-    /// Player started a Boss blind against this boss — App layer bumps
+    /// Player committed to an ordeal chamber — App layer bumps
     /// `PlayerProgress::ordeal_times_encountered` and saves.
     OrdealEncountered(crate::core::ordeal::OrdealKind),
-    /// Boss blind cleared with target reached — App layer bumps
-    /// `PlayerProgress::ordeal_times_defeated` and saves.
+    /// Ordeal chamber cleared with target reached — App layer bumps
+    /// `PlayerProgress::ordeal_times_defeated` and saves. Not emitted
+    /// during the tutorial finale.
     OrdealDefeated(crate::core::ordeal::OrdealKind),
     /// Player just bought a talisman from the shop — App layer bumps
     /// `PlayerProgress::talisman_times_purchased` and saves.

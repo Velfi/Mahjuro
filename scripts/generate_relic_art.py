@@ -295,6 +295,17 @@ RELICS = [
         "Ivory tile face, jade-green peacock mark, warm gold coins, soft amber rim light.",
     ),
     (
+        "plain_dealing",
+        "Plain Dealing",
+        "A soft-enamel pin of seven upright mahjong tiles in a neat row on "
+        "emerald felt — every face a middle simple rank only (2 through 8): "
+        "no winds, no dragons, no terminals 1 or 9. The tiles read as honest "
+        "number-suit faces with crisp pips and character strokes, evenly "
+        "spaced like a dealer's straight layout. Subtle warm copper rim light; "
+        "Crisp pin, everything sharp and in focus.",
+        "Ivory tile faces, jade and cobalt pip enamel, black character ink, warm copper rim light, deep emerald felt shadow.",
+    ),
+    (
         "white_dragons_hush",
         "White Dragon's Hush",
         "A soft-enamel pin of a giant eastern serpent asleep in a loose "
@@ -546,6 +557,18 @@ RELICS = [
         "Dark hull, grey water, white stake tips, small radar dome, short antenna, pale sky, grey flat light.",
     ),
     (
+        "even_keel",
+        "Even Keel",
+        "Landscape-oriented wide horizontal pin badge — companion to Low "
+        "and High Tide: the same squat coastal survey boat in profile on "
+        "calm mid-tide water, perfectly level on the surface with no list "
+        "or roll. Measuring stakes half-submerged in a neat row; the waterline "
+        "sits evenly between mud and crest. Three small ivory mahjong tiles "
+        "with middle ranks (4, 5, 6 pips) float as tiny buoys along the "
+        "wake. Flat grey estuary light, crisp pin, everything sharp.",
+        "Dark hull, grey-green calm water, half-submerged white stakes, ivory tile buoys with blue dot pips, pale sky, grey flat light.",
+    ),
+    (
         "merchants_eye",
         "Merchant's Eye",
         "A Victorian pawn-shop curio: a glossy blown-glass prosthetic eye "
@@ -630,6 +653,19 @@ RELICS = [
         "pin's crest-shaped silhouette; worn smooth at the edges from "
         "countless late-night rounds.",
         "Ivory tile faces, deep blue dot and wind glyphs, crimson dragon enamel, muted bamboo-green 1-bam, antique gold gate filigree, soft amber rim light.",
+    ),
+    (
+        "open_gate",
+        "Open Gate",
+        "A soft-enamel pin paired with Closed Gate: four upright mahjong "
+        "tiles in a tight row — 4, 5, and 6 of dots plus one more middle "
+        "simple rank — each tile its own recessed enamel well bounded by "
+        "raised metal lines. Behind the row rises the same heavy ornamental "
+        "Chinese gate with curved roof and lattice panels, but both doors "
+        "stand fully open with a clear passage through the center, welcoming "
+        "simple tiles through. Warm light spills from the opening onto the "
+        "felt. Crest-shaped silhouette, worn smooth at the edges.",
+        "Ivory tile faces, deep blue dot pips only (no honors), antique gold gate filigree, warm amber light from the open passage, soft rim highlights.",
     ),
     (
         "golden_engine",
@@ -1074,6 +1110,20 @@ RELICS = [
         "plain ivory tile wells, dull rejected gold tile aside, cool iron rim.",
     ),
     (
+        "chow_line",
+        "Chow Line",
+        "A soft-enamel pin: ornate three-tier bronze display stand with "
+        "scalloped copper frame, red enamel recesses, and fan motifs at the "
+        "base. Twelve cream mahjong tiles on three curved shelves — each tile "
+        "shows a sequence chow as sushi icons (1, 2, then 3 pieces): top row "
+        "salmon nigiri; middle row cucumber slices and shrimp nigiri; bottom "
+        "row ikura gunkan. Glowing orange paper lanterns with red tassels "
+        "flank the middle tier. Warm lantern light on dark background.",
+        "Aged bronze and copper frame, deep red enamel wells, cream ivory "
+        "tile faces, orange salmon and shrimp, green cucumber, red-orange roe, "
+        "warm lantern glow, soft amber rim light.",
+    ),
+    (
         "charity",
         "Charity",
         "A Northern Renaissance allegory pin after Hans Sebald Beham's Caritas "
@@ -1410,6 +1460,31 @@ RELICS = [
         "Royal crimson and deep indigo enamel wells, ivory tile motifs, luminous amber-gold highlights, cool jade accent inlays.",
     ),
 ]
+
+
+def _relic_rs_asset_slugs() -> set[str]:
+    text = RELIC_RS_PATH.read_text()
+    return {
+        m.group(1)
+        for m in re.finditer(r'RelicId::\w+\s*=>\s*"([a-z0-9_]+)\.png"', text)
+    }
+
+
+def _validate_relics_list() -> None:
+    expected = _relic_rs_asset_slugs()
+    listed = {slug for slug, *_ in RELICS}
+    missing = sorted(expected - listed)
+    extra = sorted(listed - expected)
+    if missing or extra:
+        msg = ["RELICS list drift vs crates/mahjuro-core/src/core/relic.rs asset_filename():"]
+        if missing:
+            msg.append(f"  missing: {', '.join(missing)}")
+        if extra:
+            msg.append(f"  extra: {', '.join(extra)}")
+        raise SystemExit("\n".join(msg))
+
+
+_validate_relics_list()
 
 
 def build_object_prompt(

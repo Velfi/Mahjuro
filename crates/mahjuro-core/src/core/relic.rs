@@ -26,6 +26,7 @@ pub enum RelicId {
     ChainReaction,
     Charity,
     Chastity,
+    ChowLine,
     Chrysalis,
     ClosedGate,
     Cosmopolitan,
@@ -40,6 +41,7 @@ pub enum RelicId {
     EdgeRunner,
     EightTreasures,
     EulersNumber,
+    EvenKeel,
     FortunesFavor,
     GardenKeeper,
     Geese,
@@ -80,10 +82,12 @@ pub enum RelicId {
     NestEgg,
     NoHonorButWealth,
     Obsession,
+    OpenGate,
     PairPower,
     PaperLantern,
     Patience,
     PiConstant,
+    PlainDealing,
     QuickDraw,
     Rakuware,
     RiverRunner,
@@ -237,6 +241,7 @@ impl RelicId {
             RelicId::Kindness => "kindness.png",
             RelicId::Temperance => "temperance.png",
             RelicId::Chastity => "chastity.png",
+            RelicId::ChowLine => "chow_line.png",
             RelicId::Charity => "charity.png",
             RelicId::Diligence => "diligence.png",
             RelicId::WayOfPairs => "way_of_pairs.png",
@@ -261,7 +266,10 @@ impl RelicId {
             RelicId::AntTrail => "ant_trail.png",
             RelicId::BrocadePouch => "brocade_pouch.png",
             RelicId::EulersNumber => "eulers_number.png",
+            RelicId::EvenKeel => "even_keel.png",
+            RelicId::OpenGate => "open_gate.png",
             RelicId::PiConstant => "pi_constant.png",
+            RelicId::PlainDealing => "plain_dealing.png",
             RelicId::BigHands => "big_hands.png",
             RelicId::TinyHands => "tiny_hands.png",
             RelicId::Chrysalis => "chrysalis.png",
@@ -1364,8 +1372,12 @@ mod tests {
                     | RelicId::Kindness
                     | RelicId::Temperance
                     | RelicId::Chastity
+                    | RelicId::ChowLine
                     | RelicId::Charity
                     | RelicId::Diligence
+                    | RelicId::EvenKeel
+                    | RelicId::OpenGate
+                    | RelicId::PlainDealing
                     | RelicId::WayOfPairs
                     | RelicId::WayOfTriplets
                     | RelicId::WayOfSequences
@@ -1469,8 +1481,12 @@ mod tests {
                 RelicId::Kindness,
                 RelicId::Temperance,
                 RelicId::Chastity,
+                RelicId::ChowLine,
                 RelicId::Charity,
                 RelicId::Diligence,
+                RelicId::EvenKeel,
+                RelicId::OpenGate,
+                RelicId::PlainDealing,
                 RelicId::WayOfPairs,
                 RelicId::WayOfTriplets,
                 RelicId::WayOfSequences,

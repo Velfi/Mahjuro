@@ -86,6 +86,15 @@ impl App {
         self.resolved_scene_look_for(self.active_scene_key_for_renderer())
     }
 
+    /// Steam achievements keyed off [`PlayerProgress::runs_completed`].
+    /// Called after incrementing the counter on run victory or defeat.
+    fn sync_runs_completed_achievements(&mut self) {
+        if self.progress.runs_completed >= 10 {
+            self.steam
+                .unlock_achievement(crate::steam::Achievement::TenRunsPlayed);
+        }
+    }
+
     /// Process a `RoundComplete` or `GameOver` event that was held while the
     /// scoring cascade was still playing. Pushes celebration modals, plays the
     /// appropriate sting, and queues the next scene.
@@ -176,7 +185,7 @@ impl App {
                     self.transition_alpha = 1.0;
                     return;
                 }
-                // First non-tutorial round cleared. Fires every round, but
+                // First non-tutorial chamber cleared. Fires every round, but
                 // Steam's set-achievement is idempotent so the toast only
                 // shows the first time.
                 self.steam
@@ -231,10 +240,7 @@ impl App {
                     let level_up = self.progress.check_level_up();
                     self.steam
                         .unlock_achievement(crate::steam::Achievement::FirstRunCompleted);
-                    if self.progress.runs_completed >= 10 {
-                        self.steam
-                            .unlock_achievement(crate::steam::Achievement::TenRunsPlayed);
-                    }
+                    self.sync_runs_completed_achievements();
                     // Season ladder: crediting a full victory on this
                     // (material, season) pair unlocks the next tier for that
                     // material. Idempotent — repeat wins are no-ops. Returns
@@ -242,9 +248,12 @@ impl App {
                     let newly_unlocked_season = self
                         .progress
                         .record_season_victory(self.run.mode.tile_material, self.run.mode.season);
-                    if let Some(crate::core::season::Season::Summer) = newly_unlocked_season {
-                        self.steam
-                            .unlock_achievement(crate::steam::Achievement::Season2Unlocked);
+                    if let Some(season) = newly_unlocked_season {
+                        if let Some(ach) =
+                            crate::steam::Achievement::for_newly_unlocked_season(season)
+                        {
+                            self.steam.unlock_achievement(ach);
+                        }
                     }
                     self.progress.run_history.push(
                         crate::game::progression_run::run_record_from_run(
@@ -314,6 +323,7 @@ impl App {
                     return;
                 }
                 self.progress.runs_completed += 1;
+                self.sync_runs_completed_achievements();
                 self.progress.award_level_points_for_outcome(
                     crate::core::progression::RunOutcome::Defeat { reason },
                 );
