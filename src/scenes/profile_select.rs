@@ -12,7 +12,7 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use crate::render::draw_cmd::UiFrame;
 
 use super::{
-    DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx, archive_career, scene_archive,
+    DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx, archive_career,
 };
 
 const PROFILE_COUNT: usize = 3;
@@ -218,10 +218,6 @@ impl ProfileSelectScene {
         }
     }
 
-    fn pop_return_scene(&self) -> Scene {
-        scene_archive()
-    }
-
     fn cursor(&self) -> usize {
         self.tree
             .focused()
@@ -309,7 +305,7 @@ impl SceneBehavior for ProfileSelectScene {
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel | UiAction::Pause) {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                return Some(self.pop_return_scene());
+                return Some(SceneIntent::Archive);
             }
             if matches!(a, UiAction::Delete) {
                 let idx = self.cursor();
@@ -324,7 +320,7 @@ impl SceneBehavior for ProfileSelectScene {
         if let Some(PickProfile(idx)) = action {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             *ctx.switch_profile = Some(idx);
-            return Some(self.pop_return_scene());
+            return Some(SceneIntent::Archive);
         }
         None
     }

@@ -211,7 +211,9 @@ impl App {
             // Also keep ticking while a scene fade is in flight. Without this, a launch that
             // starts unfocused can swap Splash -> MainMenu at `transition_alpha == 0` and then
             // stop ticking, leaving the menu covered by a frozen black fade until refocus.
-            let transition_in_flight = self.pending_scene.is_some() || self.transition_alpha < 1.0;
+            let transition_in_flight = self.pending_scene_intent.is_some()
+                || self.pending_scene.is_some()
+                || self.transition_alpha < 1.0;
             let window_foreground = shell.window_is_foreground();
             if window_foreground || matches!(self.scene, Scene::Splash(_)) || transition_in_flight {
                 self.frame_tick(shell);
@@ -241,16 +243,25 @@ impl App {
                         self.scene,
                         Scene::MainMenu(_) | Scene::Shop(_) | Scene::Hallway(_)
                     ) {
+                        let pending_scene_key = self
+                            .pending_scene
+                            .as_ref()
+                            .and_then(crate::scenes::active_scene_key)
+                            .or_else(|| {
+                                self.pending_scene_intent
+                                    .as_ref()
+                                    .and_then(|intent| intent.scene_key())
+                            });
+                        let pending_transition_at_black = (self.pending_scene_intent.is_some()
+                            || self.pending_scene.is_some())
+                            && self.transition_alpha <= 0.0
+                            && !self.modals.is_active();
                         renderer.poll_room_prefetch_gpu_uploads(
                             crate::scenes::active_scene_key(&self.scene),
                             self.last_frame_dt * 1000.0,
                             continue_warmup,
-                            self.pending_scene
-                                .as_ref()
-                                .and_then(crate::scenes::active_scene_key),
-                            self.pending_scene.is_some()
-                                && self.transition_alpha <= 0.0
-                                && !self.modals.is_active(),
+                            pending_scene_key,
+                            pending_transition_at_black,
                         );
                         did_loader_work = true;
                     }

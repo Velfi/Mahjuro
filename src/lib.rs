@@ -130,15 +130,11 @@ use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 #[cfg(feature = "game")]
 use crate::scenes::animation_lab::AnimationLabScene;
 #[cfg(feature = "game")]
-use crate::scenes::gameplay::GameplayScene;
-#[cfg(feature = "game")]
 use crate::scenes::material_viewer::MaterialViewerScene;
 #[cfg(feature = "game")]
 use crate::scenes::rumble_lab::RumbleLabScene;
 #[cfg(feature = "game")]
 use crate::scenes::transition_playground::TransitionPlaygroundScene;
-#[cfg(feature = "game")]
-use crate::scenes::tutorial_summary::TutorialSummaryScene;
 #[cfg(feature = "game")]
 use crate::scenes::{ButtonAction, DrawCtx, UpdateCtx};
 #[cfg(feature = "game")]
@@ -181,6 +177,8 @@ pub(crate) struct App {
     transition_timer: f32,
     transition_kind: TransitionKind,
     pending_scene: Option<Scene>,
+    /// Destination built at full black from [`pending_scene_intent`].
+    pending_scene_intent: Option<crate::scenes::SceneIntent>,
     /// Captured when `pending_scene` was set: where the next scene is
     /// written when the fade completes. Decoupled from live stack depth so
     /// overlays pushed mid-transition are not clobbered.

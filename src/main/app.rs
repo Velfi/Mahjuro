@@ -26,46 +26,21 @@ impl crate::App {
         }
     }
 
-    /// True when the saved Continue destination's room GLBs are already on the GPU.
-    pub(crate) fn continue_destination_room_gpu_ready(&self) -> bool {
-        if !self.run.is_in_progress() {
-            return true;
-        }
-        let Some(renderer) = self.renderer.as_ref() else {
-            return true;
-        };
-        let key = match self.resume_scene {
-            crate::persistence::ResumeScene::Shop => crate::render::scene_keys::SHOP,
-            crate::persistence::ResumeScene::Hallway => crate::render::scene_keys::HALLWAY,
-            crate::persistence::ResumeScene::Gameplay => crate::render::scene_keys::GAMEPLAY,
-        };
-        renderer.scene_room_gpu_ready(key)
-    }
-
     pub(crate) fn hub_menu_loading(
         &self,
         loading_done: bool,
         tutorial_eligible: bool,
         multiple_materials: bool,
     ) -> crate::scenes::main_menu::HubMenuLoading {
-        let Some(renderer) = self.renderer.as_ref() else {
-            return crate::scenes::main_menu::HubMenuLoading {
-                continue_loading: true,
-                new_game_loading: true,
-                archive_loading: true,
-            };
-        };
+        let _ = (tutorial_eligible, multiple_materials);
+        // Hub row loading indicators are UI affordances for startup/boot work.
+        // Do not keep rows in "loading" just because room residency prewarm isn't
+        // currently complete; scene transitions already wait at black until ready.
+        let boot_loading = !loading_done || self.renderer.is_none();
         crate::scenes::main_menu::HubMenuLoading {
-            continue_loading: self.run.is_in_progress()
-                && (!loading_done || !self.continue_destination_room_gpu_ready()),
-            new_game_loading: if tutorial_eligible || multiple_materials {
-                !loading_done
-            } else {
-                !loading_done
-                    || !renderer.scene_room_gpu_ready(crate::render::scene_keys::SHOP)
-            },
-            archive_loading: !renderer
-                .scene_room_gpu_ready(crate::render::scene_keys::ARCHIVE),
+            continue_loading: self.run.is_in_progress() && boot_loading,
+            new_game_loading: boot_loading,
+            archive_loading: boot_loading,
         }
     }
 
@@ -261,6 +236,7 @@ impl crate::App {
             transition_timer: 0.0,
             transition_kind: crate::scene_transition::TransitionKind::Quick,
             pending_scene: None,
+            pending_scene_intent: None,
             pending_scene_destination: crate::scene_transition::PendingSceneDestination::default(),
             overlay_stack: Vec::new(),
             prev_controller_present: false,

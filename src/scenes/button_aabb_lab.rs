@@ -20,8 +20,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer_hint};
 use crate::ui::input::UiAction;
 
-use super::main_menu::MainMenuScene;
-use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 const CLICK_BACK: u32 = 0xE020;
 const CLICK_PROBE_BASE: u32 = 0xE100;
@@ -163,7 +162,7 @@ impl ButtonAabbLabScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenu(MainMenuScene::new()))
+            Some(SceneIntent::MainMenu)
         }
     }
 }

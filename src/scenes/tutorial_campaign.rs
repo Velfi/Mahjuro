@@ -3,7 +3,6 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::core::tile::{Suit, Tile};
-use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::persistence::TilePreset;
 use crate::render::draw_cmd::{
@@ -29,7 +28,7 @@ use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::tiles_intro_copy;
-use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{BackgroundId, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 const TUTORIAL_TILE_ROTATION: [f32; 3] = [0.0, 0.0, std::f32::consts::PI];
 
@@ -1570,13 +1569,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     None
                 } else {
                     ctx.bus.push(GameEvent::UiSound(SfxId::RelicPickup));
-                    GameEngine::begin_onboarding_lessons(ctx.run);
-                    Some(Scene::Gameplay(Box::new(
-                        super::gameplay::GameplayScene::enter_pending_chamber(
-                            ctx.run,
-                            crate::core::rules::ChamberKind::Small,
-                        ),
-                    )))
+                    Some(SceneIntent::GameplayLessonsFirstChamber)
                 }
             }
             Some(TutorialNav::TryPlay) => {

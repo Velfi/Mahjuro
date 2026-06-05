@@ -1113,12 +1113,19 @@ pub(crate) fn render_shop_frame(
             inspect.is_none() && (shop.west_sell_hold_started.is_some() || hover_sellable);
         let show_hold_buy_hint =
             inspect.is_none() && (shop.buy_hold_started.is_some() || hover_buyable);
+        let show_inspect_hint =
+            inspect.is_none() && shop.focus.is_some_and(shop_focus_inspectable);
 
         let hint_style = HintStyle::standard(h);
         let hint_row = if inspect_active {
             inspect_camera_hint_row(ctx.input_mode)
         } else {
-            shop_storeroom_footer_row(ctx.input_mode, show_hold_buy_hint, show_hold_sell_hint)
+            shop_storeroom_footer_row(
+                ctx.input_mode,
+                show_hold_buy_hint,
+                show_hold_sell_hint,
+                show_inspect_hint,
+            )
         };
         let icon_slots = push_screen_footer_hint(&mut frame, &ctx, hint_row, hint_style);
         let hint_band_top = screen_footer_top(h, hint_style);

@@ -3,10 +3,11 @@ use super::*;
 use crate::core::tile_pack::TilePackKind;
 use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay};
 use crate::game::engine::GameEngine;
+use crate::scene_transition::SceneTag;
 use crate::scenes::shop::PackCelebration;
 use crate::scenes::{
-    ButtonAabbLabScene, CascadeLabScene, DefeatScene, RollerLabScene, ShadowAoLabScene,
-    ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter, VictoryScene,
+    ButtonAabbLabScene, CascadeLabScene, RollerLabScene, ShadowAoLabScene,
+    ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter,
 };
 use crate::trailer_mode::TrailerMode;
 use rand::RngExt;
@@ -387,8 +388,11 @@ impl App {
             }
             DebugAction::ShowVictoryScreen => {
                 while self.modals.dismiss() {}
-                self.pending_scene = Some(Scene::Victory(VictoryScene::new(&self.run)));
-                self.transition_alpha = 1.0;
+                self.begin_scene_replace(
+                    crate::scenes::SceneIntent::Victory,
+                    SceneTag::from(&self.scene),
+                    crate::scene_transition::PendingSceneDestination::default(),
+                );
                 log::debug!("Showing victory screen");
             }
             DebugAction::ShowDefeatScreen => {
@@ -401,8 +405,11 @@ impl App {
                 );
                 self.run.defeat_memorial_kind =
                     Some(crate::core::memorial_talisman::select_memorial(&snap));
-                self.pending_scene = Some(Scene::Defeat(DefeatScene::new(&self.run, reason)));
-                self.transition_alpha = 1.0;
+                self.begin_scene_replace(
+                    crate::scenes::SceneIntent::Defeat(reason),
+                    SceneTag::from(&self.scene),
+                    crate::scene_transition::PendingSceneDestination::default(),
+                );
                 log::debug!("Showing defeat screen");
             }
             DebugAction::TriggerTrailerMode => {

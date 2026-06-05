@@ -3,7 +3,7 @@ use crate::scenes::{ShowcasePresenter, ShowcaseScene, TilePackPresenter, ZodiacP
 
 use super::view::{default_shop_focus_for_stock, snap_focus_after_shop_purchase};
 use super::*;
-use crate::scenes::{GameplayScene, OverlayRequest};
+use crate::scenes::OverlayRequest;
 
 /// Generate randomized shop stock (relics + consumables) from the player's
 /// unowned-relic pool. Shared between initial shop creation and restocks.
@@ -337,15 +337,11 @@ impl ShopScene {
         }
     }
 
-    pub(super) fn continue_scene(&self, run: &mut crate::game::run::RunState) -> Scene {
+    pub(super) fn continue_intent(&self) -> crate::scenes::SceneIntent {
         if self.mode == ShopMode::Tutorial {
-            GameEngine::transition_to_onboarding_finale(run);
-            Scene::Gameplay(Box::new(GameplayScene::enter_pending_chamber(
-                run,
-                crate::core::rules::ChamberKind::Ordeal,
-            )))
+            SceneIntent::GameplayOrdealFromShopTutorial
         } else {
-            Scene::Hallway(HallwayScene::new())
+            SceneIntent::Hallway
         }
     }
 

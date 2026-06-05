@@ -4,7 +4,6 @@
 
 use crate::core::season::Season;
 use crate::core::tile::{Suit, Tile};
-use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::TileMaterial;
@@ -17,12 +16,10 @@ use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::FocusId;
 
-use super::main_menu::MainMenuScene;
-use super::shop::ShopScene;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::world_space::{LayoutAnchorPx, layout_px_py_from_norm};
 
-use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ModalAction {
@@ -445,18 +442,11 @@ impl TileSelectScene {
                 }
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 *ctx.complete_onboarding = true;
-                let settings = crate::persistence::load_settings();
-                GameEngine::start_run_with_material(
-                    ctx.run,
-                    TileMaterial::default(),
-                    ctx.progress,
-                    &settings,
-                );
-                Some(Scene::Shop(ShopScene::new(ctx.run, ctx.progress)))
+                Some(SceneIntent::SkipTutorialStartRunAndShop)
             }
             ModalAction::Back => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                Some(Scene::MainMenu(MainMenuScene::new()))
+                Some(SceneIntent::MainMenu)
             }
             ModalAction::SeasonSelect(season) => {
                 if ctx.progress.season_unlocked_for(self.material, season) {
@@ -586,21 +576,13 @@ impl TileSelectScene {
         run: &mut RunState,
         progress: &crate::core::progression::PlayerProgress,
     ) -> SceneTransition {
-        let settings = crate::persistence::load_settings();
         if self.tutorial_mode {
-            GameEngine::start_onboarding_run(run, progress, &settings);
-            Some(Scene::TutorialCampaign(
-                super::tutorial_campaign::TutorialCampaignScene::new(),
-            ))
+            Some(SceneIntent::StartOnboardingRunAndTutorialCampaign)
         } else {
-            GameEngine::start_run_with_material_and_season(
-                run,
-                self.material,
-                self.season,
-                progress,
-                &settings,
-            );
-            Some(Scene::Shop(ShopScene::new(run, progress)))
+            Some(SceneIntent::StartRun {
+                material: self.material,
+                season: self.season,
+            })
         }
     }
 
@@ -705,7 +687,7 @@ impl SceneBehavior for TileSelectScene {
         for &a in ctx.actions {
             if matches!(a, UiAction::Cancel | UiAction::Pause) {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                return Some(Scene::MainMenu(MainMenuScene::new()));
+                return Some(SceneIntent::MainMenu);
             }
         }
 

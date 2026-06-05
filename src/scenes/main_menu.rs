@@ -8,7 +8,7 @@ use crate::core::progression::PlayerProgress;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
-use crate::persistence::{self, ResumeScene, TileMaterial};
+use crate::persistence::ResumeScene;
 use crate::render::draw_cmd::{
     CameraParams, ImageQuad, ImageQuadSource, ScenePunctualLight, UiFrame,
 };
@@ -30,12 +30,9 @@ use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::UiAction;
 use crate::ui::tooltip;
 
-use super::archive::ArchiveScene;
 use super::lamp_moths::{self, BUG_COUNT};
-use super::options::OptionsScene;
 use super::shop::ShopScene;
-use super::start_game_modal::TileSelectScene;
-use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 const MAIN_MENU_LOGO_ASSET: &str = "textures/main_menu_logo.png";
 
@@ -587,13 +584,8 @@ impl SceneBehavior for MainMenuScene {
         }
 
         if activated {
-            if self
-                .focus
-                .is_some_and(|item| ctx.hub_loading.for_item(item))
-            {
-                ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
-                return None;
-            }
+            // Allow activation even while a row still shows loading dots.
+            // Scene transition holds at full black until destination room GPU data is ready.
             let confirm_sfx = match self.focus {
                 Some(HubFocus::NewGame) => SfxId::NewGameStinger,
                 _ => SfxId::UiConfirm,
@@ -601,29 +593,22 @@ impl SceneBehavior for MainMenuScene {
             ctx.bus.push(GameEvent::UiSound(confirm_sfx));
             match self.focus {
                 Some(HubFocus::Continue) => {
-                    return Some(scene_from_resume(ctx.resume_scene, ctx.run, ctx.progress));
+                    return Some(SceneIntent::Continue(ctx.resume_scene));
                 }
                 Some(HubFocus::NewGame) => {
                     if ctx.tutorial_eligible {
-                        return Some(Scene::TileSelect(TileSelectScene::new_tutorial()));
+                        return Some(SceneIntent::TileSelect { tutorial: true });
                     }
                     if ctx.multiple_materials {
-                        return Some(Scene::TileSelect(TileSelectScene::new()));
+                        return Some(SceneIntent::TileSelect { tutorial: false });
                     }
-                    let settings = persistence::load_settings();
-                    GameEngine::start_run_with_material(
-                        ctx.run,
-                        TileMaterial::default(),
-                        ctx.progress,
-                        &settings,
-                    );
-                    return Some(Scene::Shop(ShopScene::new(ctx.run, ctx.progress)));
+                    return Some(SceneIntent::StartRunDefaultMaterialAndShop);
                 }
                 Some(HubFocus::Archive) => {
-                    return Some(Scene::Archive(ArchiveScene::new()));
+                    return Some(SceneIntent::Archive);
                 }
                 Some(HubFocus::Options) => {
-                    return Some(Scene::Options(OptionsScene::new()));
+                    return Some(SceneIntent::Options);
                 }
                 Some(HubFocus::Quit) => {
                     *ctx.quit_requested = true;

@@ -14,8 +14,7 @@ use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use mahjuro_gfx_types::ShadowQuality;
 
-use super::main_menu::MainMenuScene;
-use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{BackgroundId, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LabAction {
@@ -63,7 +62,7 @@ impl ShadowAoLabScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenu(MainMenuScene::new()))
+            Some(SceneIntent::MainMenu)
         }
     }
 

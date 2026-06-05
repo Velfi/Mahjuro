@@ -9,10 +9,8 @@ use crate::sfx_id::SfxId;
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState};
 
-use super::main_menu::MainMenuScene;
 use super::options::OptionsScene;
-use super::shop::ShopScene;
-use super::{ButtonDef, Scene, SceneTransition, UpdateCtx};
+use super::{ButtonDef, SceneIntent, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PauseAction {
@@ -335,7 +333,7 @@ impl PauseMenu {
             }
             Some(PauseAction::MainMenu) => {
                 bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                PauseUpdate::Transition(Box::new(Some(Scene::MainMenu(MainMenuScene::new()))))
+                PauseUpdate::Transition(Box::new(Some(SceneIntent::MainMenu)))
             }
             Some(PauseAction::Exit) => {
                 bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -352,7 +350,7 @@ impl PauseMenu {
     ) -> PauseUpdate {
         let settings = crate::persistence::load_settings();
         GameEngine::reset_to_demo(run, progress, &settings);
-        PauseUpdate::Transition(Box::new(Some(Scene::Shop(ShopScene::new(run, progress)))))
+        PauseUpdate::Transition(Box::new(Some(SceneIntent::ShopFromRun)))
     }
 
     /// Append pause-overlay draw elements to the given vectors.

@@ -19,12 +19,11 @@ use crate::sfx_id::SfxId;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::archive_career::format_score;
-use super::main_menu::MainMenuScene;
 use super::run_summary_panel::{
     RunSummaryPanelContent, RunSummaryPanelLayout, RunSummaryPanelLevel, RunSummaryPanelScroll,
     RunSummaryPanelTheme, RunSummaryStats, push_run_summary_panel,
 };
-use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct DismissAction;
@@ -307,7 +306,7 @@ impl SceneBehavior for RunSummaryScene {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             let settings = persistence::load_settings();
             GameEngine::reset_to_demo(ctx.run, ctx.progress, &settings);
-            return Some(Scene::MainMenu(MainMenuScene::new()));
+            return Some(SceneIntent::MainMenu);
         }
         None
     }

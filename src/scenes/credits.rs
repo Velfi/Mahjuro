@@ -14,8 +14,7 @@ use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::widget::{self, TextStyle};
 
-use super::options::OptionsScene;
-use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 const BACK_ID: u32 = 0xF310;
 
@@ -176,7 +175,7 @@ impl CreditsScene {
 
     fn go_back(&self, overlay_request: &mut Option<super::OverlayRequest>) -> SceneTransition {
         match self.return_to {
-            CreditsReturn::Options => Some(Scene::Options(OptionsScene::new())),
+            CreditsReturn::Options => Some(SceneIntent::Options),
             CreditsReturn::Overlay => {
                 *overlay_request = Some(super::OverlayRequest::Pop);
                 None

@@ -9,8 +9,7 @@ use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer
 use crate::ui::input::{InputState, RumbleLabOp, UiAction};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::main_menu::MainMenuScene;
-use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{BackgroundId, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LabAction {
@@ -135,7 +134,7 @@ impl RumbleLabScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenu(MainMenuScene::new()))
+            Some(SceneIntent::MainMenu)
         }
     }
 

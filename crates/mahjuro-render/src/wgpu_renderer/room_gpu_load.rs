@@ -3295,31 +3295,19 @@ impl WgpuRenderer {
         }
     }
 
-    /// Ensure destination-room CPU data is available during a pending transition.
+    /// Ensure destination-room CPU data is available while transition is held at full black.
     ///
-    /// Low-memory mode may block to force progress; Performance/Visuals stay non-blocking so
-    /// transition animation remains smooth even when the effect is not a full-black mask.
+    /// This helper is only called from `drive_pending_scene_room_gpu_at_black`, so blocking is
+    /// always safe and guarantees forward progress when CPU decode residency caps are saturated.
     fn ensure_room_cpu_resident_for_transition(&self, id: RoomGpuResidentId) {
         let desc = id.desc();
         if (desc.cpu_decoded)() {
             return;
         }
         (desc.start_cpu_prefetch)();
-        // Transitions are not guaranteed to be fully black-screen; in Performance/Visuals,
-        // avoid blocking CPU decode fallback so we don't stall a visible transition frame.
-        //
-        // Gameplay remains blocking here: `room_preload` CPU-resident caps can starve gameplay
-        // prefetch at the start menu (shop/archive caches occupy the cap), and a non-blocking
-        // path can deadlock `Continue` waiting forever on `scene_room_gpu_ready`.
-        if self.graphics_mode != mahjuro_gfx_types::GraphicsMode::LowMemory
-            && id != RoomGpuResidentId::Gameplay
-        {
-            // Staircase prefetch is kicked from the eager chain, not per-room start hook.
-            if id == RoomGpuResidentId::Staircase {
-                crate::room_preload::kick_eager_all_room_cpu_prefetches();
-            }
-            crate::room_preload::try_drain_room_cpu_prefetch_threads();
-            return;
+        // Staircase prefetch is kicked from the eager chain, not per-room start hook.
+        if id == RoomGpuResidentId::Staircase {
+            crate::room_preload::kick_eager_all_room_cpu_prefetches();
         }
         match id {
             RoomGpuResidentId::MainMenu => {

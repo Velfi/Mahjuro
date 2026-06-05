@@ -28,6 +28,7 @@ pub mod roller_lab;
 pub mod rumble_lab;
 pub mod run_summary;
 mod run_summary_panel;
+pub mod scene_intent;
 pub(crate) mod scoring_intro_copy;
 pub mod shadow_ao_lab;
 pub mod shop;
@@ -370,8 +371,7 @@ impl<'a> DrawCtx<'a> {
 
 pub use mahjuro_types::{ButtonAction, ButtonDef};
 
-/// `None` = stay in current scene; `Some(scene)` = transition.
-pub type SceneTransition = Option<Scene>;
+pub use scene_intent::{SceneIntent, SceneResolveCtx, SceneTransition};
 
 /// Behavior shared by every scene variant.
 ///

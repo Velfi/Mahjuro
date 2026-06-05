@@ -14,8 +14,7 @@ use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use glam::Vec3;
 
-use super::main_menu::MainMenuScene;
-use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{BackgroundId, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 const CLIP_NAME: &str = "eyeball_travel";
 
@@ -74,7 +73,7 @@ impl AnimationLabScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenu(MainMenuScene::new()))
+            Some(SceneIntent::MainMenu)
         }
     }
 

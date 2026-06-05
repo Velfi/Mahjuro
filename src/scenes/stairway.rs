@@ -8,7 +8,6 @@ use crate::render::staircase_glb;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::PointLight;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
-use crate::scenes::shop::ShopScene;
 use crate::ui::colored_keywords;
 use crate::ui::controller_hints::{
     HintStyle, confirm_continue_footer_row, hint_style_with_alpha, push_inline_hint_rows,
@@ -16,7 +15,7 @@ use crate::ui::controller_hints::{
 use crate::ui::input::UiAction;
 use crate::ui::inspect_plaque::{estimated_flavor_line_count, flavor_spans_layout_width};
 
-use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 pub struct StairwayScene {
     flavor: &'static [RelicFlavorSpan],
@@ -69,7 +68,7 @@ impl SceneBehavior for StairwayScene {
             .iter()
             .any(|a| matches!(a, UiAction::Confirm | UiAction::Cancel))
         {
-            return Some(Scene::Shop(ShopScene::new(ctx.run, ctx.progress)));
+            return Some(SceneIntent::ShopFromRun);
         }
         None
     }

@@ -68,7 +68,7 @@ impl ShopScene {
             &shop,
         )?;
         if matches!(hit, ShopHit::Dish(id) if id == PICK_LEAVE_PROP) {
-            return Some(self.continue_scene(ctx.run));
+            return Some(self.continue_intent());
         }
         if matches!(hit, ShopHit::Dish(id) if id == PICK_RESTOCK_PROP) {
             if !self.restock_exit_active()
@@ -503,7 +503,7 @@ impl ShopScene {
             if matches!(a, UiAction::Confirm) {
                 if let Some(focus) = self.focus {
                     if matches!(focus, ShopFocus::NextRound) {
-                        return Some(self.continue_scene(ctx.run));
+                        return Some(self.continue_intent());
                     }
                     if matches!(focus, ShopFocus::Restock)
                         && !self.restock_exit_active()
@@ -562,7 +562,7 @@ impl ShopScene {
 
         for a in ctx.actions {
             if matches!(a, UiAction::CommitDiscard) {
-                return Some(self.continue_scene(ctx.run));
+                return Some(self.continue_intent());
             }
         }
         for &cid in ctx.button_clicks {
@@ -591,7 +591,7 @@ impl ShopScene {
                 return None;
             }
             if cid == SHOP_NEXT_ROUND_ID {
-                return Some(self.continue_scene(ctx.run));
+                return Some(self.continue_intent());
             }
             if cid == SHOP_RESTOCK_ID
                 && !self.restock_exit_active()

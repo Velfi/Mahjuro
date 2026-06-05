@@ -46,17 +46,64 @@ impl App {
     }
 
     /// Keep fade-out transitions on black until destination room GPU data is ready.
+    fn pending_destination_scene_key(&self) -> Option<&'static str> {
+        if let Some(next) = self.pending_scene.as_ref() {
+            return crate::scenes::active_scene_key(next);
+        }
+        self.pending_scene_intent
+            .as_ref()
+            .and_then(|intent| intent.scene_key())
+    }
+
     fn pending_scene_room_gpu_ready(&self) -> bool {
-        let Some(next) = self.pending_scene.as_ref() else {
+        let Some(scene_key) = self.pending_destination_scene_key() else {
             return true;
         };
         let Some(renderer) = self.renderer.as_ref() else {
             return true;
         };
-        let Some(scene_key) = crate::scenes::active_scene_key(next) else {
-            return true;
-        };
         renderer.scene_room_gpu_ready(scene_key)
+    }
+
+    fn scene_replace_in_flight(&self) -> bool {
+        self.pending_scene_intent.is_some() || self.pending_scene.is_some()
+    }
+
+    pub(super) fn begin_scene_replace(
+        &mut self,
+        intent: crate::scenes::SceneIntent,
+        from_tag: SceneTag,
+        destination: PendingSceneDestination,
+    ) {
+        if intent.grants_memorial_on_start() {
+            self.run.grant_pending_memorial(&mut self.progress);
+            self.mark_profile_dirty();
+        }
+        let spec = transition_spec_for_edge(from_tag, intent.scene_tag());
+        self.transition_kind = spec.kind;
+        self.transition_speed = spec.speed;
+        self.transition_timer = 0.0;
+        self.pending_scene = None;
+        let prefetch_key = intent.scene_key();
+        self.pending_scene_intent = Some(intent);
+        if let Some(key) = prefetch_key {
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.start_room_cpu_prefetch_for_scene_key(key);
+            }
+        }
+        self.pending_scene_destination = destination;
+        self.transition_alpha = 1.0;
+    }
+
+    fn resolve_pending_scene_intent_at_black(&mut self) {
+        let Some(intent) = self.pending_scene_intent.take() else {
+            return;
+        };
+        let next = intent.resolve(crate::scenes::SceneResolveCtx {
+            run: &mut self.run,
+            progress: &self.progress,
+        });
+        self.pending_scene = Some(next);
     }
 
     /// Fire a one-shot rumble pulse on connected SDL gamepads.
@@ -111,7 +158,7 @@ impl App {
         // Pause the watchdog during scene fades (`transition_alpha < 1.0` /
         // `pending_scene` set): those frames legitimately stall on shader /
         // texture loads and would otherwise false-fire on first launch.
-        let transitioning = self.pending_scene.is_some() || self.transition_alpha < 1.0;
+        let transitioning = self.scene_replace_in_flight() || self.transition_alpha < 1.0;
         self.perf_watchdog
             .tick(self.last_frame_dt * 1000.0, transitioning, now);
         self.anim.update(now);
@@ -791,6 +838,12 @@ impl App {
             self.modals.cancel_released();
         }
 
+        // Block scene input while a replace transition is fading or held at black.
+        if self.scene_replace_in_flight() {
+            actions.clear();
+            button_clicks.clear();
+        }
+
         // Splash: LMB dismisses the production logo (same as Confirm/Cancel).
         if matches!(self.scene, Scene::Splash(_))
             && self.mouse_clicked
@@ -853,11 +906,8 @@ impl App {
             Scene::Splash(_) => Some(scene_keys::MAIN_MENU),
             _ => crate::scenes::active_scene_key(&self.scene),
         };
-        let pending_scene_key = self
-            .pending_scene
-            .as_ref()
-            .and_then(crate::scenes::active_scene_key);
-        let pending_transition_at_black = self.pending_scene.is_some()
+        let pending_scene_key = self.pending_destination_scene_key();
+        let pending_transition_at_black = self.scene_replace_in_flight()
             && self.transition_alpha <= 0.0
             && !self.modals.is_active();
         if pending_scene_key.is_some_and(|k| {
@@ -961,6 +1011,7 @@ impl App {
         if let Some(scenes::Scene::CascadeLab(lab)) = self.overlay_stack.last_mut() {
             self.cascade_tuning = lab.tuning.clone();
         }
+        let scene_transitioning = self.scene_replace_in_flight();
         let update_result = if self.overlay_stack.is_empty() {
             self.scene.update(UpdateCtx {
                 actions: &actions,
@@ -994,7 +1045,7 @@ impl App {
                     && !self.progress.tutorial_completed,
                 multiple_materials: self.progress.plastic_unlocked(),
                 resume_scene: self.resume_scene,
-                transitioning: self.pending_scene.is_some(),
+                transitioning: scene_transitioning,
                 overlay_request: &mut overlay_request,
                 headless: false,
                 effect_layers: self.effect_layers,
@@ -1093,7 +1144,7 @@ impl App {
                         && !self.progress.tutorial_completed,
                     multiple_materials: self.progress.plastic_unlocked(),
                     resume_scene: self.resume_scene,
-                    transitioning: self.pending_scene.is_some(),
+                    transitioning: scene_transitioning,
                     overlay_request: &mut overlay_request,
                     headless: false,
                     effect_layers: self.effect_layers,
@@ -1237,33 +1288,16 @@ impl App {
             let enabled = input.hold_to_sell_rumble_enabled;
             self.sync_shop_sell_hold_rumble(shell, true, controller, enabled, progress);
         }
-        if let Some(next_scene) = update_result {
-            if matches!(&next_scene, Scene::Shop(_)) {
-                self.run.grant_pending_memorial(&mut self.progress);
-                self.mark_profile_dirty();
-            }
-            let spec =
-                transition_spec_for_edge(SceneTag::from(&self.scene), SceneTag::from(&next_scene));
-            self.transition_kind = spec.kind;
-            self.transition_speed = spec.speed;
-            self.transition_timer = 0.0;
-            // Start fade-out transition.
-            self.pending_scene = Some(next_scene);
-            if let Some(renderer) = self.renderer.as_mut() {
-                if let Some(key) = self
-                    .pending_scene
-                    .as_ref()
-                    .and_then(crate::scenes::active_scene_key)
-                {
-                    renderer.start_room_cpu_prefetch_for_scene_key(key);
-                }
-            }
-            self.pending_scene_destination = if updated_overlay {
-                PendingSceneDestination::OverlayTop
-            } else {
-                PendingSceneDestination::Base
-            };
-            self.transition_alpha = 1.0;
+        if let Some(intent) = update_result {
+            self.begin_scene_replace(
+                intent,
+                SceneTag::from(&self.scene),
+                if updated_overlay {
+                    PendingSceneDestination::OverlayTop
+                } else {
+                    PendingSceneDestination::Base
+                },
+            );
         }
 
         if complete_onboarding {
@@ -1374,12 +1408,15 @@ impl App {
         // Pause the transition while a modal is active so the player
         // must dismiss milestone / celebration modals before the scene
         // change proceeds (e.g. "First Pair!" before the recap screen).
-        if self.pending_scene.is_some() && !self.modals.is_active() {
+        if self.scene_replace_in_flight() && !self.modals.is_active() {
             self.transition_alpha -= self.transition_speed;
             // Map alpha 1→0 onto timer 0→0.5 (first half of transition).
             self.transition_timer = (1.0 - self.transition_alpha.max(0.0)).clamp(0.0, 1.0) * 0.5;
             if self.transition_alpha <= 0.0 {
                 self.transition_alpha = 0.0;
+                if self.pending_scene.is_none() {
+                    self.resolve_pending_scene_intent_at_black();
+                }
                 if !self.pending_scene_room_gpu_ready() {
                     // Hold at full black until pending scene room uploads complete.
                     self.transition_timer = 0.5;
