@@ -7,14 +7,66 @@ use crate::scenes::{Scene, SceneBehavior};
 use sdl3::keyboard::{Mod, Scancode};
 
 impl crate::App {
-    /// Prefetch / upload `gameplay.glb` during the hub only when Continue will
-    /// land in an in-progress run saved mid-gameplay (~600 MiB VRAM).
-    pub(crate) fn warm_gameplay_gpu_for_resume(&self) -> bool {
-        self.run.is_in_progress()
-            && matches!(
-                self.resume_scene,
-                crate::persistence::ResumeScene::Gameplay
-            )
+    /// Run-chain rooms to warm on the main menu while an in-progress save waits
+    /// on Continue (shop / hallway / gameplay depending on the saved scene marker).
+    pub(crate) fn continue_room_warmup(&self) -> crate::render::room_preload::ContinueRoomWarmup {
+        if !self.run.is_in_progress() {
+            return crate::render::room_preload::ContinueRoomWarmup::None;
+        }
+        match self.resume_scene {
+            crate::persistence::ResumeScene::Shop => {
+                crate::render::room_preload::ContinueRoomWarmup::Shop
+            }
+            crate::persistence::ResumeScene::Hallway => {
+                crate::render::room_preload::ContinueRoomWarmup::Hallway
+            }
+            crate::persistence::ResumeScene::Gameplay => {
+                crate::render::room_preload::ContinueRoomWarmup::Gameplay
+            }
+        }
+    }
+
+    /// True when the saved Continue destination's room GLBs are already on the GPU.
+    pub(crate) fn continue_destination_room_gpu_ready(&self) -> bool {
+        if !self.run.is_in_progress() {
+            return true;
+        }
+        let Some(renderer) = self.renderer.as_ref() else {
+            return true;
+        };
+        let key = match self.resume_scene {
+            crate::persistence::ResumeScene::Shop => crate::render::scene_keys::SHOP,
+            crate::persistence::ResumeScene::Hallway => crate::render::scene_keys::HALLWAY,
+            crate::persistence::ResumeScene::Gameplay => crate::render::scene_keys::GAMEPLAY,
+        };
+        renderer.scene_room_gpu_ready(key)
+    }
+
+    pub(crate) fn hub_menu_loading(
+        &self,
+        loading_done: bool,
+        tutorial_eligible: bool,
+        multiple_materials: bool,
+    ) -> crate::scenes::main_menu::HubMenuLoading {
+        let Some(renderer) = self.renderer.as_ref() else {
+            return crate::scenes::main_menu::HubMenuLoading {
+                continue_loading: true,
+                new_game_loading: true,
+                archive_loading: true,
+            };
+        };
+        crate::scenes::main_menu::HubMenuLoading {
+            continue_loading: self.run.is_in_progress()
+                && (!loading_done || !self.continue_destination_room_gpu_ready()),
+            new_game_loading: if tutorial_eligible || multiple_materials {
+                !loading_done
+            } else {
+                !loading_done
+                    || !renderer.scene_room_gpu_ready(crate::render::scene_keys::SHOP)
+            },
+            archive_loading: !renderer
+                .scene_room_gpu_ready(crate::render::scene_keys::ARCHIVE),
+        }
     }
 
     pub(crate) fn saved_resume_scene_for(scene: &Scene) -> Option<crate::persistence::ResumeScene> {
@@ -134,31 +186,52 @@ impl crate::App {
     }
 
     pub(crate) fn new(steam: crate::steam::SteamClient) -> Self {
-        let settings = crate::persistence::load_settings();
+        let settings = {
+            let _scope = crate::startup_profile::scope("app.new.settings");
+            crate::persistence::load_settings()
+        };
         let active_profile = settings.active_profile;
-        let progress = crate::persistence::load_profile(active_profile);
+        let progress = {
+            let _scope = crate::startup_profile::scope("app.new.profile");
+            crate::persistence::load_profile(active_profile)
+        };
         // Prefer a saved-on-quit run for this profile (resume). If none
         // exists or it was written by a previous build version, fall back
         // to a fresh demo run. `load_run` deletes stale/corrupt saves.
-        let loaded_run = crate::persistence::load_run(active_profile);
+        let loaded_run = {
+            let _scope = crate::startup_profile::scope("app.new.run_state_load");
+            crate::persistence::load_run(active_profile)
+        };
         let resume_scene = loaded_run
             .as_ref()
             .map(|saved| saved.scene)
             .unwrap_or(crate::persistence::ResumeScene::Gameplay);
-        let mut run = loaded_run
-            .map(|saved| saved.run)
-            .unwrap_or_else(RunState::new_demo);
+        let mut run = {
+            let _scope = crate::startup_profile::scope("app.new.run_state_build");
+            loaded_run
+                .map(|saved| saved.run)
+                .unwrap_or_else(RunState::new_demo)
+        };
         run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
         run.apply_progression(&progress);
-        steam.sync_profile_stats(&progress);
-        let mut audio = crate::audio::AudioManager::new();
+        {
+            let _scope = crate::startup_profile::scope("app.new.steam_sync");
+            steam.sync_profile_stats(&progress);
+        }
+        let mut audio = {
+            let _scope = crate::startup_profile::scope("app.new.audio_new");
+            crate::audio::AudioManager::new()
+        };
         audio.set_master_volume(settings.master_volume);
         audio.set_sfx_volume(settings.sfx_volume);
         audio.set_music_volume(settings.music_volume);
         if !settings.sfx_enabled {
             audio.set_enabled(false);
         }
-        let scene_look = SceneLookTuningSet::load();
+        let scene_look = {
+            let _scope = crate::startup_profile::scope("app.new.scene_look");
+            SceneLookTuningSet::load()
+        };
         Self {
             last_drawable_px: crate::physical_size::PhysicalSize::new(1920, 1080),
             renderer: None,
@@ -221,6 +294,7 @@ impl crate::App {
             last_window_title: String::new(),
             room_gltf_brownout: crate::main_room_gltf_brownout::RoomGltfBrownout::new(),
             frame_picks: crate::FramePicks::default(),
+            hub_loading: crate::scenes::main_menu::HubMenuLoading::default(),
             perf_watchdog: crate::main_perf_watchdog::FramePerfWatchdog::new(),
         }
     }

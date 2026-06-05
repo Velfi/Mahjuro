@@ -379,6 +379,15 @@ struct RoomEnvTextureCacheKey {
     height: u32,
     format_tag: u8,
     mips: bool,
+    dedupe_hint_hash: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(super) struct RoomEnvTextureDedupeHint {
+    pub source_identity: Option<String>,
+    pub usage_class: u8,
+    pub sampler_class_hash: u64,
+    pub mip_policy_tag: u8,
 }
 
 fn room_env_texture_cache_key(
@@ -387,13 +396,15 @@ fn room_env_texture_cache_key(
     height: u32,
     format: wgpu::TextureFormat,
     mips: bool,
+    dedupe_hint: Option<&RoomEnvTextureDedupeHint>,
 ) -> RoomEnvTextureCacheKey {
     use std::hash::{Hash, Hasher};
     let mut hasher = rustc_hash::FxHasher::default();
     width.hash(&mut hasher);
     height.hash(&mut hasher);
-    let step = (rgba.len() / 8192).max(4);
-    for (i, b) in rgba.iter().enumerate().step_by(step) {
+    rgba.len().hash(&mut hasher);
+    let stride = (rgba.len() / 4096).max(1);
+    for (i, b) in rgba.iter().enumerate().step_by(stride) {
         i.hash(&mut hasher);
         b.hash(&mut hasher);
     }
@@ -402,12 +413,20 @@ fn room_env_texture_cache_key(
         wgpu::TextureFormat::Rgba8Unorm => 1,
         _ => 2,
     };
+    let dedupe_hint_hash = if let Some(hint) = dedupe_hint {
+        let mut hh = rustc_hash::FxHasher::default();
+        hint.hash(&mut hh);
+        hh.finish()
+    } else {
+        0
+    };
     RoomEnvTextureCacheKey {
         content_hash: hasher.finish(),
         width,
         height,
         format_tag,
         mips,
+        dedupe_hint_hash,
     }
 }
 
@@ -436,8 +455,9 @@ impl RoomEnvTextureCache {
         format: wgpu::TextureFormat,
         mips: bool,
         mip_chain: Option<&[(Vec<u8>, u32, u32)]>,
+        dedupe_hint: Option<&RoomEnvTextureDedupeHint>,
     ) -> wgpu::TextureView {
-        let key = room_env_texture_cache_key(rgba, width, height, format, mips);
+        let key = room_env_texture_cache_key(rgba, width, height, format, mips, dedupe_hint);
         if let Some(view) = self.views.get(&key) {
             return view.clone();
         }
@@ -459,7 +479,7 @@ impl RoomEnvTextureCache {
         view
     }
 
-    pub fn upload_slot(
+    pub fn upload_slot_with_hint(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -469,10 +489,22 @@ impl RoomEnvTextureCache {
         format: wgpu::TextureFormat,
         mips: bool,
         fallback: &wgpu::TextureView,
+        dedupe_hint: Option<&RoomEnvTextureDedupeHint>,
     ) -> wgpu::TextureView {
         match rgba {
             Some((rgba, w, h)) => {
-                self.upload(device, queue, label, rgba, *w, *h, format, mips, mip_chain)
+                self.upload(
+                    device,
+                    queue,
+                    label,
+                    rgba,
+                    *w,
+                    *h,
+                    format,
+                    mips,
+                    mip_chain,
+                    dedupe_hint,
+                )
             }
             None => fallback.clone(),
         }

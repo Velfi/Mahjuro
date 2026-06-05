@@ -818,7 +818,7 @@ impl App {
             .as_ref()
             .map(|i| i.last_cursor)
             .unwrap_or((0.0, 0.0));
-        let warm_gameplay_for_resume = self.warm_gameplay_gpu_for_resume();
+        let continue_warmup = self.continue_room_warmup();
         if matches!(&self.scene, Scene::Splash(_)) {
             if let Some(r) = self.renderer.as_mut() {
                 r.tick_splash_hub_boot();
@@ -836,6 +836,14 @@ impl App {
                 .is_some_and(|r| r.splash_hub_boot_ready()),
             _ => self.renderer.as_ref().is_none_or(|r| !r.is_loading()),
         };
+        let tutorial_eligible =
+            self.progress.runs_completed == 0 && !self.progress.tutorial_completed;
+        let hub_loading = self.hub_menu_loading(
+            loading_done,
+            tutorial_eligible,
+            self.progress.plastic_unlocked(),
+        );
+        self.hub_loading = hub_loading;
         // Compute every scene pick once per frame. The same four results
         // are consumed below for `update` and again later by `draw` (via
         // `App::frame_picks`). Without this caching, each gameplay frame
@@ -864,7 +872,7 @@ impl App {
             r.poll_room_prefetch_gpu_uploads(
                 scene_key,
                 self.last_frame_dt * 1000.0,
-                warm_gameplay_for_resume,
+                continue_warmup,
                 pending_scene_key,
                 pending_transition_at_black,
             );
@@ -971,6 +979,7 @@ impl App {
                 cursor_pos,
                 mouse_left_down: self.mouse_left_down,
                 loading_done,
+                hub_loading,
                 cascade_tuning: &self.cascade_tuning,
                 picked_shop_object,
                 picked_gameplay_object,
@@ -1069,6 +1078,7 @@ impl App {
                     cursor_pos,
                     mouse_left_down: self.mouse_left_down,
                     loading_done,
+                    hub_loading,
                     cascade_tuning: &self.cascade_tuning,
                     picked_shop_object,
                     picked_gameplay_object,

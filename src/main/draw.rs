@@ -539,6 +539,7 @@ impl App {
                 .as_ref()
                 .and_then(|tm| tm.main_menu_camera_at(self.last_frame, size.height as f32)),
             loading_hub_progress,
+            self.hub_loading,
             renderer.main_menu_effects,
             renderer.flame_tuning,
         );

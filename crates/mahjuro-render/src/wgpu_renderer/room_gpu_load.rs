@@ -19,8 +19,8 @@ use crate::gltf_helpers::{
     GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL, GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT, GltfPbrUniform,
     build_sampler_descriptor,
 };
-use crate::room_env_gltf::RoomEnvPrimitiveCpu;
-use crate::wgpu_renderer::resources::RoomEnvTextureCache;
+use crate::room_env_gltf::{RoomEnvPrimitiveCpu, RoomTextureUsageClass};
+use crate::wgpu_renderer::resources::{RoomEnvTextureCache, RoomEnvTextureDedupeHint};
 use wgpu::util::DeviceExt;
 
 pub(super) use crate::room_gpu_resident::{
@@ -29,6 +29,14 @@ pub(super) use crate::room_gpu_resident::{
 };
 
 use crate::score_roller_layout::{self, GAMEPLAY_SCORE_ROLLER_SLOT_COUNT};
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RoomUploadAuditMetrics {
+    payload: crate::room_gpu_profile::RoomCpuUploadPayload,
+    packed_asset_bytes_read: u64,
+    decoded_cpu_payload_bytes: u64,
+    gpu_resident_estimate_bytes: u64,
+}
 
 /// Max main-thread wall time for one gameplay env upload slice during prefetch / fade.
 const GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS: f32 = 6.0;
@@ -62,6 +70,39 @@ fn room_env_eager_upload_budget_ms(mode: mahjuro_gfx_types::GraphicsMode) -> f32
 fn room_cpu_env_ready(ready: impl Fn() -> bool) -> bool {
     crate::room_preload::try_drain_room_cpu_prefetch_threads();
     ready()
+}
+
+fn room_upload_runtime_phase(scene_key: Option<&str>) -> crate::room_gpu_profile::RuntimePhase {
+    use crate::room_gpu_profile::RuntimePhase;
+    match scene_key {
+        None => RuntimePhase::StartupBlocking,
+        Some(
+            scene_keys::GAMEPLAY | scene_keys::VICTORY | scene_keys::DEFEAT | "game_over"
+            | "tutorial",
+        ) => RuntimePhase::GameplayInteractive,
+        Some(_) => RuntimePhase::MenuInteractive,
+    }
+}
+
+fn collect_room_upload_audit_metrics(
+    room: &'static str,
+    cpu: &crate::room_glb::RoomGlbCpu,
+) -> RoomUploadAuditMetrics {
+    let payload = crate::room_gpu_profile::count_cpu_payload(&cpu.environment_primitives);
+    let texture_summary = crate::room_gpu_profile::log_room_texture_audit(room, &cpu.environment_primitives);
+    let geometry_gpu_bytes = payload.vertex_bytes.saturating_add(payload.index_bytes);
+    RoomUploadAuditMetrics {
+        payload,
+        packed_asset_bytes_read: cpu.packed_asset_bytes_read,
+        decoded_cpu_payload_bytes: cpu.decoded_cpu_payload_bytes,
+        gpu_resident_estimate_bytes: texture_summary
+            .total_gpu_bytes_estimate_bytes
+            .saturating_add(geometry_gpu_bytes),
+    }
+}
+
+fn retained_room_cpu_payload_bytes(cpu: &crate::room_glb::RoomGlbCpu) -> u64 {
+    crate::room_gpu_profile::count_cpu_payload(&cpu.environment_primitives).total_bytes()
 }
 
 #[inline]
@@ -128,6 +169,84 @@ fn room_env_pbr_uniform(
     );
     pbr_uniform.add_flags(room_env_shader_flags(scene_key, node_name));
     pbr_uniform
+}
+
+fn sampler_class_hash(sampler: crate::gltf_helpers::GltfSamplerCpu) -> u64 {
+    use std::hash::{Hash, Hasher};
+    fn wrap_tag(wrap: gltf::texture::WrappingMode) -> u8 {
+        match wrap {
+            gltf::texture::WrappingMode::ClampToEdge => 0,
+            gltf::texture::WrappingMode::MirroredRepeat => 1,
+            gltf::texture::WrappingMode::Repeat => 2,
+        }
+    }
+    fn mag_tag(mag: Option<gltf::texture::MagFilter>) -> u8 {
+        match mag {
+            Some(gltf::texture::MagFilter::Nearest) => 1,
+            Some(gltf::texture::MagFilter::Linear) => 2,
+            None => 0,
+        }
+    }
+    fn min_tag(min: Option<gltf::texture::MinFilter>) -> u8 {
+        match min {
+            Some(gltf::texture::MinFilter::Nearest) => 1,
+            Some(gltf::texture::MinFilter::Linear) => 2,
+            Some(gltf::texture::MinFilter::NearestMipmapNearest) => 3,
+            Some(gltf::texture::MinFilter::LinearMipmapNearest) => 4,
+            Some(gltf::texture::MinFilter::NearestMipmapLinear) => 5,
+            Some(gltf::texture::MinFilter::LinearMipmapLinear) => 6,
+            None => 0,
+        }
+    }
+    let mut hasher = rustc_hash::FxHasher::default();
+    wrap_tag(sampler.wrap_s).hash(&mut hasher);
+    wrap_tag(sampler.wrap_t).hash(&mut hasher);
+    mag_tag(sampler.mag_filter).hash(&mut hasher);
+    min_tag(sampler.min_filter).hash(&mut hasher);
+    hasher.finish()
+}
+
+fn room_texture_dedupe_hint(
+    env_prim: &RoomEnvPrimitiveCpu,
+    usage: RoomTextureUsageClass,
+    mips: bool,
+) -> RoomEnvTextureDedupeHint {
+    let source_identity = env_prim
+        .texture_sources
+        .for_usage(usage)
+        .map(|src| src.source_identity.clone());
+    RoomEnvTextureDedupeHint {
+        source_identity,
+        usage_class: usage as u8,
+        sampler_class_hash: sampler_class_hash(env_prim.mesh.sampler),
+        mip_policy_tag: if mips { 1 } else { 0 },
+    }
+}
+
+fn upload_room_texture_slot(
+    room_tex_cache: &mut RoomEnvTextureCache,
+    ctx: &RoomGpuUploadCtx<'_>,
+    label: String,
+    env_prim: &RoomEnvPrimitiveCpu,
+    usage: RoomTextureUsageClass,
+    rgba: Option<&(Vec<u8>, u32, u32)>,
+    mip_chain: Option<&[(Vec<u8>, u32, u32)]>,
+    format: wgpu::TextureFormat,
+    mips: bool,
+    fallback: &wgpu::TextureView,
+) -> wgpu::TextureView {
+    let hint = room_texture_dedupe_hint(env_prim, usage, mips);
+    room_tex_cache.upload_slot_with_hint(
+        ctx.device,
+        ctx.queue,
+        label,
+        rgba,
+        mip_chain,
+        format,
+        mips,
+        fallback,
+        Some(&hint),
+    )
 }
 
 pub(super) struct GameplayRoomGpuUpload {
@@ -294,30 +413,36 @@ fn load_shop_room_gpu(
                         usage: wgpu::BufferUsages::INDEX,
                     });
                 let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                let albedo_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let albedo_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("shop-env-albedo-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::BaseColorSrgb,
                     prim.albedo_rgba.as_ref(),
                     prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8UnormSrgb,
                     mips,
                     &white_albedo_view,
                 );
-                let normal_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let normal_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("shop-env-normal-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::NormalLinear,
                     prim.normal_rgba.as_ref(),
                     prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8Unorm,
                     mips,
                     ctx.tile_default_normal_view,
                 );
-                let metallic_roughness_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let metallic_roughness_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("shop-env-mr-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::MetallicRoughnessLinear,
                     prim.metallic_roughness_rgba.as_ref(),
                     prim.metallic_roughness_mip_chain
                         .as_deref()
@@ -326,10 +451,12 @@ fn load_shop_room_gpu(
                     mips,
                     ctx.tile_glb_default_mr_view,
                 );
-                let emissive_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let emissive_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("shop-env-emissive-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::EmissiveSrgb,
                     prim.emissive_rgba.as_ref(),
                     prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -496,30 +623,36 @@ fn load_hallway_room_gpu(
                         usage: wgpu::BufferUsages::INDEX,
                     });
                 let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                let albedo_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let albedo_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("hallway-env-albedo-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::BaseColorSrgb,
                     prim.albedo_rgba.as_ref(),
                     prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8UnormSrgb,
                     mips,
                     &white_albedo_view,
                 );
-                let normal_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let normal_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("hallway-env-normal-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::NormalLinear,
                     prim.normal_rgba.as_ref(),
                     prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8Unorm,
                     mips,
                     ctx.tile_default_normal_view,
                 );
-                let metallic_roughness_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let metallic_roughness_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("hallway-env-mr-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::MetallicRoughnessLinear,
                     prim.metallic_roughness_rgba.as_ref(),
                     prim.metallic_roughness_mip_chain
                         .as_deref()
@@ -528,10 +661,12 @@ fn load_hallway_room_gpu(
                     mips,
                     ctx.tile_glb_default_mr_view,
                 );
-                let emissive_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let emissive_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("hallway-env-emissive-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::EmissiveSrgb,
                     prim.emissive_rgba.as_ref(),
                     prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -690,30 +825,36 @@ fn load_main_menu_room_gpu(
                         usage: wgpu::BufferUsages::INDEX,
                     });
                 let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                let albedo_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let albedo_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("main_menu-env-albedo-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::BaseColorSrgb,
                     prim.albedo_rgba.as_ref(),
                     prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8UnormSrgb,
                     mips,
                     &white_albedo_view,
                 );
-                let normal_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let normal_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("main_menu-env-normal-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::NormalLinear,
                     prim.normal_rgba.as_ref(),
                     prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8Unorm,
                     mips,
                     ctx.tile_default_normal_view,
                 );
-                let metallic_roughness_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let metallic_roughness_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("main_menu-env-mr-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::MetallicRoughnessLinear,
                     prim.metallic_roughness_rgba.as_ref(),
                     prim.metallic_roughness_mip_chain
                         .as_deref()
@@ -722,10 +863,12 @@ fn load_main_menu_room_gpu(
                     mips,
                     ctx.tile_glb_default_mr_view,
                 );
-                let emissive_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let emissive_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("main_menu-env-emissive-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::EmissiveSrgb,
                     prim.emissive_rgba.as_ref(),
                     prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -884,30 +1027,36 @@ fn load_staircase_room_gpu(
                         usage: wgpu::BufferUsages::INDEX,
                     });
                 let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                let albedo_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let albedo_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("staircase-env-albedo-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::BaseColorSrgb,
                     prim.albedo_rgba.as_ref(),
                     prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8UnormSrgb,
                     mips,
                     &white_albedo_view,
                 );
-                let normal_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let normal_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("staircase-env-normal-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::NormalLinear,
                     prim.normal_rgba.as_ref(),
                     prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8Unorm,
                     mips,
                     ctx.tile_default_normal_view,
                 );
-                let metallic_roughness_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let metallic_roughness_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("staircase-env-mr-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::MetallicRoughnessLinear,
                     prim.metallic_roughness_rgba.as_ref(),
                     prim.metallic_roughness_mip_chain
                         .as_deref()
@@ -916,10 +1065,12 @@ fn load_staircase_room_gpu(
                     mips,
                     ctx.tile_glb_default_mr_view,
                 );
-                let emissive_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let emissive_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("staircase-env-emissive-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::EmissiveSrgb,
                     prim.emissive_rgba.as_ref(),
                     prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -1162,30 +1313,36 @@ fn load_archive_room_gpu(
                         usage: wgpu::BufferUsages::INDEX,
                     });
                 let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                let albedo_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let albedo_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("archive-env-albedo-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::BaseColorSrgb,
                     prim.albedo_rgba.as_ref(),
                     prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8UnormSrgb,
                     mips,
                     &white_albedo_view,
                 );
-                let normal_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let normal_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("archive-env-normal-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::NormalLinear,
                     prim.normal_rgba.as_ref(),
                     prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8Unorm,
                     mips,
                     ctx.tile_default_normal_view,
                 );
-                let metallic_roughness_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let metallic_roughness_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("archive-env-mr-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::MetallicRoughnessLinear,
                     prim.metallic_roughness_rgba.as_ref(),
                     prim.metallic_roughness_mip_chain
                         .as_deref()
@@ -1194,10 +1351,12 @@ fn load_archive_room_gpu(
                     mips,
                     ctx.tile_glb_default_mr_view,
                 );
-                let emissive_view = room_tex_cache.upload_slot(
-                    ctx.device,
-                    ctx.queue,
+                let emissive_view = upload_room_texture_slot(
+                    &mut room_tex_cache,
+                    &ctx,
                     format!("archive-env-emissive-{i}"),
+                    env_prim,
+                    RoomTextureUsageClass::EmissiveSrgb,
                     prim.emissive_rgba.as_ref(),
                     prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
                     wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -1432,30 +1591,36 @@ fn upload_incremental_room_env_prim_gpu(
             usage: wgpu::BufferUsages::INDEX,
         });
     let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-    let albedo_view = room_tex_cache.upload_slot(
-        ctx.device,
-        ctx.queue,
+    let albedo_view = upload_room_texture_slot(
+        room_tex_cache,
+        ctx,
         format!("{label_prefix}-env-albedo-{i}"),
+        env_prim,
+        RoomTextureUsageClass::BaseColorSrgb,
         prim.albedo_rgba.as_ref(),
         prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
         wgpu::TextureFormat::Rgba8UnormSrgb,
         mips,
         white_albedo_view,
     );
-    let normal_view = room_tex_cache.upload_slot(
-        ctx.device,
-        ctx.queue,
+    let normal_view = upload_room_texture_slot(
+        room_tex_cache,
+        ctx,
         format!("{label_prefix}-env-normal-{i}"),
+        env_prim,
+        RoomTextureUsageClass::NormalLinear,
         prim.normal_rgba.as_ref(),
         prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
         wgpu::TextureFormat::Rgba8Unorm,
         mips,
         ctx.tile_default_normal_view,
     );
-    let metallic_roughness_view = room_tex_cache.upload_slot(
-        ctx.device,
-        ctx.queue,
+    let metallic_roughness_view = upload_room_texture_slot(
+        room_tex_cache,
+        ctx,
         format!("{label_prefix}-env-mr-{i}"),
+        env_prim,
+        RoomTextureUsageClass::MetallicRoughnessLinear,
         prim.metallic_roughness_rgba.as_ref(),
         prim.metallic_roughness_mip_chain
             .as_deref()
@@ -1464,10 +1629,12 @@ fn upload_incremental_room_env_prim_gpu(
         mips,
         ctx.tile_glb_default_mr_view,
     );
-    let emissive_view = room_tex_cache.upload_slot(
-        ctx.device,
-        ctx.queue,
+    let emissive_view = upload_room_texture_slot(
+        room_tex_cache,
+        ctx,
         format!("{label_prefix}-env-emissive-{i}"),
+        env_prim,
+        RoomTextureUsageClass::EmissiveSrgb,
         prim.emissive_rgba.as_ref(),
         prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
         wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -1653,30 +1820,36 @@ fn upload_gameplay_env_prim_gpu(
             usage: wgpu::BufferUsages::INDEX,
         });
     let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-    let albedo_view = room_tex_cache.upload_slot(
-        ctx.device,
-        ctx.queue,
+    let albedo_view = upload_room_texture_slot(
+        room_tex_cache,
+        ctx,
         format!("gameplay-env-albedo-{i}"),
+        env_prim,
+        RoomTextureUsageClass::BaseColorSrgb,
         prim.albedo_rgba.as_ref(),
         prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
         wgpu::TextureFormat::Rgba8UnormSrgb,
         mips,
         white_albedo_view,
     );
-    let normal_view = room_tex_cache.upload_slot(
-        ctx.device,
-        ctx.queue,
+    let normal_view = upload_room_texture_slot(
+        room_tex_cache,
+        ctx,
         format!("gameplay-env-normal-{i}"),
+        env_prim,
+        RoomTextureUsageClass::NormalLinear,
         prim.normal_rgba.as_ref(),
         prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
         wgpu::TextureFormat::Rgba8Unorm,
         mips,
         ctx.tile_default_normal_view,
     );
-    let metallic_roughness_view = room_tex_cache.upload_slot(
-        ctx.device,
-        ctx.queue,
+    let metallic_roughness_view = upload_room_texture_slot(
+        room_tex_cache,
+        ctx,
         format!("gameplay-env-mr-{i}"),
+        env_prim,
+        RoomTextureUsageClass::MetallicRoughnessLinear,
         prim.metallic_roughness_rgba.as_ref(),
         prim.metallic_roughness_mip_chain
             .as_deref()
@@ -1685,10 +1858,12 @@ fn upload_gameplay_env_prim_gpu(
         mips,
         ctx.tile_glb_default_mr_view,
     );
-    let emissive_view = room_tex_cache.upload_slot(
-        ctx.device,
-        ctx.queue,
+    let emissive_view = upload_room_texture_slot(
+        room_tex_cache,
+        ctx,
         format!("gameplay-env-emissive-{i}"),
+        env_prim,
+        RoomTextureUsageClass::EmissiveSrgb,
         prim.emissive_rgba.as_ref(),
         prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
         wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -1955,11 +2130,12 @@ impl WgpuRenderer {
 
         let started_at = upload.started_at;
         let mut shop_eyeball_prim_indices = upload.shop_eyeball_prim_indices.clone();
-        let payload = crate::room_glb::with_shop_glb_cpu(|o| {
-            o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+        let metrics = crate::room_glb::with_shop_glb_cpu(|o| {
+            o.map(|c| collect_room_upload_audit_metrics("shop.glb", c))
                 .unwrap_or_default()
         });
         let frame_dt_ms = self.room_profile_frame_dt_ms;
+        let phase = room_upload_runtime_phase(self.active_scene_key.map(|k| k as &str));
         let _cpu = crate::cpu_profiler::scope("wgpu.room.shop");
         let _startup = crate::startup_profile::scope("wgpu.room.shop");
         let finalize_t0 = Instant::now();
@@ -2011,25 +2187,35 @@ impl WgpuRenderer {
         crate::room_glb::release_shop_environment_cpu_sources_after_gpu_upload();
         self.rooms_gpu_loaded |= ROOM_SHOP;
         self.note_room_gpu_resident(ROOM_SHOP);
+        let retained_cpu = crate::room_glb::with_shop_glb_cpu(|o| {
+            o.map(retained_room_cpu_payload_bytes).unwrap_or_default()
+        });
+        crate::room_gpu_profile::log_room_residency_after_upload(
+            "shop.glb",
+            phase,
+            metrics.packed_asset_bytes_read,
+            metrics.decoded_cpu_payload_bytes,
+            metrics.payload.total_bytes(),
+            metrics.gpu_resident_estimate_bytes,
+            retained_cpu,
+            0,
+            0,
+            &self.device,
+        );
         crate::room_preload::start_hallway_cpu_prefetch();
         log::info!("shop.glb GPU: {} primitive draw(s)", self.shop_env_primitives.len());
         if crate::room_gpu_profile::enabled() {
             let finalize_ms = finalize_t0.elapsed().as_secs_f64() * 1000.0;
             let total_ms = started_at.elapsed().as_secs_f64() * 1000.0;
-            let mb = payload.total_bytes() as f64 / (1024.0 * 1024.0);
-            let hitch = if frame_dt_ms >= 33.0 {
-                "HITCH"
-            } else if frame_dt_ms >= 20.0 {
-                "slow"
-            } else {
-                "ok"
-            };
+            let mb = metrics.payload.total_bytes() as f64 / (1024.0 * 1024.0);
+            let hitch = crate::room_gpu_profile::frame_timing_tag(frame_dt_ms, phase);
             log::info!(
                 "room gpu profile: shop.glb GPU upload — finalize {finalize_ms:.1} ms | \
                  {total_ms:.1} ms total wall | {prims} prims | {total_mb:.2} MiB CPU payload | \
-                 prev frame dt {frame_dt_ms:.1} ms ({hitch})",
-                prims = payload.primitives,
+                 prev frame dt {frame_dt_ms:.1} ms ({hitch}, phase={phase})",
+                prims = metrics.payload.primitives,
                 total_mb = mb,
+                phase = phase.label(),
             );
         }
         crate::startup_profile::log_sample("wgpu.room.shop", "first shop GPU upload");
@@ -2112,11 +2298,12 @@ impl WgpuRenderer {
         }
 
         let started_at = upload.started_at;
-        let payload = crate::hallway_glb::with_hallway_glb_cpu(|o| {
-            o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+        let metrics = crate::hallway_glb::with_hallway_glb_cpu(|o| {
+            o.map(|c| collect_room_upload_audit_metrics("hallway.glb", c))
                 .unwrap_or_default()
         });
         let frame_dt_ms = self.room_profile_frame_dt_ms;
+        let phase = room_upload_runtime_phase(self.active_scene_key.map(|k| k as &str));
         let _cpu = crate::cpu_profiler::scope("wgpu.room.hallway");
         let _startup = crate::startup_profile::scope("wgpu.room.hallway");
         let finalize_t0 = Instant::now();
@@ -2135,6 +2322,21 @@ impl WgpuRenderer {
         crate::hallway_glb::release_hallway_environment_cpu_sources_after_gpu_upload();
         self.rooms_gpu_loaded |= ROOM_HALLWAY;
         self.note_room_gpu_resident(ROOM_HALLWAY);
+        let retained_cpu = crate::hallway_glb::with_hallway_glb_cpu(|o| {
+            o.map(retained_room_cpu_payload_bytes).unwrap_or_default()
+        });
+        crate::room_gpu_profile::log_room_residency_after_upload(
+            "hallway.glb",
+            phase,
+            metrics.packed_asset_bytes_read,
+            metrics.decoded_cpu_payload_bytes,
+            metrics.payload.total_bytes(),
+            metrics.gpu_resident_estimate_bytes,
+            retained_cpu,
+            0,
+            0,
+            &self.device,
+        );
         crate::room_preload::start_gameplay_cpu_prefetch();
         log::info!(
             "hallway.glb GPU: {} primitive draw(s)",
@@ -2143,20 +2345,15 @@ impl WgpuRenderer {
         if crate::room_gpu_profile::enabled() {
             let finalize_ms = finalize_t0.elapsed().as_secs_f64() * 1000.0;
             let total_ms = started_at.elapsed().as_secs_f64() * 1000.0;
-            let mb = payload.total_bytes() as f64 / (1024.0 * 1024.0);
-            let hitch = if frame_dt_ms >= 33.0 {
-                "HITCH"
-            } else if frame_dt_ms >= 20.0 {
-                "slow"
-            } else {
-                "ok"
-            };
+            let mb = metrics.payload.total_bytes() as f64 / (1024.0 * 1024.0);
+            let hitch = crate::room_gpu_profile::frame_timing_tag(frame_dt_ms, phase);
             log::info!(
                 "room gpu profile: hallway.glb GPU upload — finalize {finalize_ms:.1} ms | \
                  {total_ms:.1} ms total wall | {prims} prims | {total_mb:.2} MiB CPU payload | \
-                 prev frame dt {frame_dt_ms:.1} ms ({hitch})",
-                prims = payload.primitives,
+                 prev frame dt {frame_dt_ms:.1} ms ({hitch}, phase={phase})",
+                prims = metrics.payload.primitives,
                 total_mb = mb,
+                phase = phase.label(),
             );
         }
         crate::startup_profile::log_sample("wgpu.room.hallway", "first hallway GPU upload");
@@ -2252,11 +2449,12 @@ impl WgpuRenderer {
 
         let started_at = upload.started_at;
         self.ensure_gameplay_hud_pools();
-        let payload = crate::gameplay_glb::with_gameplay_glb_cpu(|o| {
-            o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+        let metrics = crate::gameplay_glb::with_gameplay_glb_cpu(|o| {
+            o.map(|c| collect_room_upload_audit_metrics("gameplay.glb", c))
                 .unwrap_or_default()
         });
         let frame_dt_ms = self.room_profile_frame_dt_ms;
+        let phase = room_upload_runtime_phase(self.active_scene_key.map(|k| k as &str));
         let _cpu = crate::cpu_profiler::scope("wgpu.room.gameplay");
         let _startup = crate::startup_profile::scope("wgpu.room.gameplay");
         let finalize_t0 = Instant::now();
@@ -2284,23 +2482,33 @@ impl WgpuRenderer {
         crate::gameplay_glb::release_gameplay_environment_cpu_sources_after_gpu_upload();
         self.rooms_gpu_loaded |= ROOM_GAMEPLAY;
         self.note_room_gpu_resident(ROOM_GAMEPLAY);
+        let retained_cpu = crate::gameplay_glb::with_gameplay_glb_cpu(|o| {
+            o.map(retained_room_cpu_payload_bytes).unwrap_or_default()
+        });
+        crate::room_gpu_profile::log_room_residency_after_upload(
+            "gameplay.glb",
+            phase,
+            metrics.packed_asset_bytes_read,
+            metrics.decoded_cpu_payload_bytes,
+            metrics.payload.total_bytes(),
+            metrics.gpu_resident_estimate_bytes,
+            retained_cpu,
+            0,
+            0,
+            &self.device,
+        );
         if crate::room_gpu_profile::enabled() {
             let finalize_ms = finalize_t0.elapsed().as_secs_f64() * 1000.0;
             let total_ms = started_at.elapsed().as_secs_f64() * 1000.0;
-            let mb = payload.total_bytes() as f64 / (1024.0 * 1024.0);
-            let hitch = if frame_dt_ms >= 33.0 {
-                "HITCH"
-            } else if frame_dt_ms >= 20.0 {
-                "slow"
-            } else {
-                "ok"
-            };
+            let mb = metrics.payload.total_bytes() as f64 / (1024.0 * 1024.0);
+            let hitch = crate::room_gpu_profile::frame_timing_tag(frame_dt_ms, phase);
             log::info!(
                 "room gpu profile: gameplay.glb GPU upload — finalize {finalize_ms:.1} ms | \
                  {total_ms:.1} ms total wall | {prims} prims | {total_mb:.2} MiB CPU payload | \
-                 prev frame dt {frame_dt_ms:.1} ms ({hitch})",
-                prims = payload.primitives,
+                 prev frame dt {frame_dt_ms:.1} ms ({hitch}, phase={phase})",
+                prims = metrics.payload.primitives,
                 total_mb = mb,
+                phase = phase.label(),
             );
         }
         crate::startup_profile::log_sample("wgpu.room.gameplay", "first gameplay GPU upload");
@@ -2395,8 +2603,8 @@ impl WgpuRenderer {
     ///
     /// `frame_dt_ms` is the previous frame wall time; logged as a hitch proxy when
     /// [`crate::room_gpu_profile`] is enabled.
-    /// `warm_gameplay_for_resume` — when true (Continue → gameplay), also upload
-    /// `gameplay.glb` on the main menu once its CPU prefetch finishes.
+    /// `continue_warmup` — when set (Continue into an in-progress run), also upload
+    /// the saved destination room chain on the main menu once CPU prefetch finishes.
     ///
     /// `pending_scene_key` — scene we are fading into (`App::pending_scene`), if any;
     /// uploads the destination room during fade-out so the black-frame swap does not stall.
@@ -2407,7 +2615,7 @@ impl WgpuRenderer {
         &mut self,
         scene_key: Option<&str>,
         frame_dt_ms: f32,
-        warm_gameplay_for_resume: bool,
+        continue_warmup: crate::room_preload::ContinueRoomWarmup,
         pending_scene_key: Option<&str>,
         pending_transition_at_black: bool,
     ) {
@@ -2416,17 +2624,20 @@ impl WgpuRenderer {
         self.refresh_gpu_memory_pressure();
         crate::room_preload::try_drain_room_cpu_prefetch_threads();
         crate::room_preload::kick_eager_all_room_cpu_prefetches();
+        if continue_warmup != crate::room_preload::ContinueRoomWarmup::None {
+            crate::room_preload::kick_continue_run_cpu_prefetches(continue_warmup);
+        }
 
         let mut room_env_upload_done = false;
 
-        let upload_gameplay = |this: &mut Self| {
+        let upload_gameplay = |this: &mut Self, budget_ms: f32| {
             if this.rooms_gpu_loaded & ROOM_GAMEPLAY != 0 {
                 return;
             }
             if !crate::gameplay_glb::gameplay_cpu_ready_for_gpu_upload() {
                 return;
             }
-            this.drive_gameplay_room_gpu_upload(GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
+            this.drive_gameplay_room_gpu_upload(budget_ms);
         };
 
         match scene_key {
@@ -2442,8 +2653,36 @@ impl WgpuRenderer {
                 if !room_env_upload_done {
                     self.ensure_talisman_textures();
                 }
-                if warm_gameplay_for_resume {
-                    upload_gameplay(self);
+                match continue_warmup {
+                    crate::room_preload::ContinueRoomWarmup::Shop => {
+                        self.maybe_upload_one_room_env(
+                            &mut room_env_upload_done,
+                            ROOM_SHOP,
+                            crate::room_glb::shop_cpu_ready_for_gpu_upload(),
+                            |r| r.ensure_shop_room_gpu(),
+                        );
+                    }
+                    crate::room_preload::ContinueRoomWarmup::Hallway => {
+                        self.maybe_upload_one_room_env(
+                            &mut room_env_upload_done,
+                            ROOM_SHOP,
+                            crate::room_glb::shop_cpu_ready_for_gpu_upload(),
+                            |r| r.ensure_shop_room_gpu(),
+                        );
+                        self.maybe_upload_one_room_env(
+                            &mut room_env_upload_done,
+                            ROOM_HALLWAY,
+                            crate::hallway_glb::hallway_cpu_ready_for_gpu_upload(),
+                            |r| r.ensure_hallway_room_gpu(),
+                        );
+                    }
+                    crate::room_preload::ContinueRoomWarmup::Gameplay => {
+                        upload_gameplay(
+                            self,
+                            gameplay_eager_upload_budget_ms(self.graphics_mode),
+                        );
+                    }
+                    crate::room_preload::ContinueRoomWarmup::None => {}
                 }
             }
             Some(scene_keys::SHOP)
@@ -2468,9 +2707,9 @@ impl WgpuRenderer {
                     crate::room_preload::start_gameplay_cpu_prefetch();
                 }
                 if matches!(scene_key, Some(scene_keys::HALLWAY) | Some("pick_chamber")) {
-                    upload_gameplay(self);
+                    upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
                 } else if matches!(scene_key, Some(scene_keys::SHOP) | Some("showcase")) {
-                    upload_gameplay(self);
+                    upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
                 }
             }
             Some(scene_keys::ARCHIVE) | Some("collection") => {
@@ -2485,7 +2724,7 @@ impl WgpuRenderer {
             | Some(scene_keys::VICTORY)
             | Some(scene_keys::DEFEAT)
             | Some("game_over")
-            | Some("tutorial") => upload_gameplay(self),
+            | Some("tutorial") => upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS),
             _ => {}
         }
 
@@ -2509,7 +2748,7 @@ impl WgpuRenderer {
                     | "game_over"
                     | "tutorial" => {
                         crate::room_preload::start_gameplay_cpu_prefetch();
-                        upload_gameplay(self);
+                        upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
                     }
                     scene_keys::HALLWAY | "pick_chamber" => {
                         crate::room_preload::start_hallway_cpu_prefetch();
@@ -2572,9 +2811,10 @@ impl WgpuRenderer {
     fn ensure_standard_room_env_gpu(
         &mut self,
         id: RoomGpuResidentId,
-        count_payload: impl FnOnce() -> crate::room_gpu_profile::RoomCpuUploadPayload,
+        collect_metrics: impl FnOnce() -> RoomUploadAuditMetrics,
         load: impl FnOnce(RoomGpuUploadCtx<'_>) -> (Vec<TilePrimitiveGpu>, Option<ShopEnvironmentGpu>),
         install: impl FnOnce(&mut Self, Vec<TilePrimitiveGpu>, ShopEnvironmentGpu),
+        collect_retained_cpu_bytes: impl FnOnce() -> u64,
         after_installed: impl FnOnce(&mut Self),
     ) {
         let desc = id.desc();
@@ -2585,9 +2825,16 @@ impl WgpuRenderer {
         if !room_cpu_env_ready(desc.cpu_ready_for_gpu_upload) {
             return;
         }
-        let payload = count_payload();
+        let metrics = collect_metrics();
         let frame_dt_ms = self.room_profile_frame_dt_ms;
-        crate::room_gpu_profile::measure_gpu_upload(desc.glb, desc.startup_scope, payload, frame_dt_ms, || {
+        let phase = room_upload_runtime_phase(self.active_scene_key.map(|k| k as &str));
+        crate::room_gpu_profile::measure_gpu_upload(
+            desc.glb,
+            desc.startup_scope,
+            metrics.payload,
+            frame_dt_ms,
+            phase,
+            || {
             let ctx = self.room_gpu_upload_ctx();
             let (prims, gpu_wrap) = load(ctx);
             let Some((prims, gpu_wrap)) =
@@ -2598,8 +2845,22 @@ impl WgpuRenderer {
             install(self, prims, gpu_wrap);
             self.rooms_gpu_loaded |= bit;
             self.note_room_gpu_resident(bit);
+            let retained_cpu = collect_retained_cpu_bytes();
+            crate::room_gpu_profile::log_room_residency_after_upload(
+                desc.glb,
+                phase,
+                metrics.packed_asset_bytes_read,
+                metrics.decoded_cpu_payload_bytes,
+                metrics.payload.total_bytes(),
+                metrics.gpu_resident_estimate_bytes,
+                retained_cpu,
+                0,
+                0,
+                &self.device,
+            );
             after_installed(self);
-        });
+        },
+        );
     }
 
     pub(super) fn clear_room_gpu_resident_fields(&mut self, id: RoomGpuResidentId) {
@@ -2654,7 +2915,7 @@ impl WgpuRenderer {
             RoomGpuResidentId::MainMenu,
             || {
                 crate::main_menu_glb::with_main_menu_glb_cpu(|o| {
-                    o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+                    o.map(|c| collect_room_upload_audit_metrics("main_menu.glb", c))
                         .unwrap_or_default()
                 })
             },
@@ -2667,6 +2928,11 @@ impl WgpuRenderer {
                         o.map(|c| c.collision_meshes.clone()).unwrap_or_default()
                     });
                 crate::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
+            },
+            || {
+                crate::main_menu_glb::with_main_menu_glb_cpu(|o| {
+                    o.map(retained_room_cpu_payload_bytes).unwrap_or_default()
+                })
             },
             |_| {},
         );
@@ -2684,12 +2950,19 @@ impl WgpuRenderer {
         if !room_cpu_env_ready(desc.cpu_ready_for_gpu_upload) {
             return;
         }
-        let payload = crate::room_glb::with_shop_glb_cpu(|o| {
-            o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+        let metrics = crate::room_glb::with_shop_glb_cpu(|o| {
+            o.map(|c| collect_room_upload_audit_metrics("shop.glb", c))
                 .unwrap_or_default()
         });
         let frame_dt_ms = self.room_profile_frame_dt_ms;
-        crate::room_gpu_profile::measure_gpu_upload(desc.glb, desc.startup_scope, payload, frame_dt_ms, || {
+        let phase = room_upload_runtime_phase(self.active_scene_key.map(|k| k as &str));
+        crate::room_gpu_profile::measure_gpu_upload(
+            desc.glb,
+            desc.startup_scope,
+            metrics.payload,
+            frame_dt_ms,
+            phase,
+            || {
             let ctx = self.room_gpu_upload_ctx();
             let (prims, gpu_wrap, anim, eyeball) = load_shop_room_gpu(ctx);
             let Some((prims, gpu_wrap)) =
@@ -2707,8 +2980,24 @@ impl WgpuRenderer {
             crate::room_glb::release_shop_environment_cpu_sources_after_gpu_upload();
             self.rooms_gpu_loaded |= desc.bit();
             self.note_room_gpu_resident(desc.bit());
+            let retained_cpu = crate::room_glb::with_shop_glb_cpu(|o| {
+                o.map(retained_room_cpu_payload_bytes).unwrap_or_default()
+            });
+            crate::room_gpu_profile::log_room_residency_after_upload(
+                desc.glb,
+                phase,
+                metrics.packed_asset_bytes_read,
+                metrics.decoded_cpu_payload_bytes,
+                metrics.payload.total_bytes(),
+                metrics.gpu_resident_estimate_bytes,
+                retained_cpu,
+                0,
+                0,
+                &self.device,
+            );
             crate::room_preload::start_hallway_cpu_prefetch();
-        });
+        },
+        );
     }
 
     pub(super) fn ensure_hallway_room_gpu(&mut self) {
@@ -2720,7 +3009,7 @@ impl WgpuRenderer {
             RoomGpuResidentId::Hallway,
             || {
                 crate::hallway_glb::with_hallway_glb_cpu(|o| {
-                    o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+                    o.map(|c| collect_room_upload_audit_metrics("hallway.glb", c))
                         .unwrap_or_default()
                 })
             },
@@ -2729,6 +3018,11 @@ impl WgpuRenderer {
                 this.hallway_env_primitives = prims;
                 this.hallway_environment = Some(gpu_wrap);
                 crate::hallway_glb::release_hallway_environment_cpu_sources_after_gpu_upload();
+            },
+            || {
+                crate::hallway_glb::with_hallway_glb_cpu(|o| {
+                    o.map(retained_room_cpu_payload_bytes).unwrap_or_default()
+                })
             },
             |_| {
                 crate::room_preload::start_gameplay_cpu_prefetch();
@@ -2741,7 +3035,7 @@ impl WgpuRenderer {
             RoomGpuResidentId::Staircase,
             || {
                 crate::staircase_glb::with_staircase_glb_cpu(|o| {
-                    o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+                    o.map(|c| collect_room_upload_audit_metrics("staircase.glb", c))
                         .unwrap_or_default()
                 })
             },
@@ -2750,6 +3044,11 @@ impl WgpuRenderer {
                 this.staircase_env_primitives = prims;
                 this.staircase_environment = Some(gpu_wrap);
                 crate::staircase_glb::release_staircase_environment_cpu_sources_after_gpu_upload();
+            },
+            || {
+                crate::staircase_glb::with_staircase_glb_cpu(|o| {
+                    o.map(retained_room_cpu_payload_bytes).unwrap_or_default()
+                })
             },
             |_| {},
         );
@@ -2763,12 +3062,19 @@ impl WgpuRenderer {
         if !room_cpu_env_ready(desc.cpu_ready_for_gpu_upload) {
             return;
         }
-        let payload = crate::archive_glb::with_archive_glb_cpu(|o| {
-            o.map(|c| crate::room_gpu_profile::count_cpu_payload(&c.environment_primitives))
+        let metrics = crate::archive_glb::with_archive_glb_cpu(|o| {
+            o.map(|c| collect_room_upload_audit_metrics("archive.glb", c))
                 .unwrap_or_default()
         });
         let frame_dt_ms = self.room_profile_frame_dt_ms;
-        crate::room_gpu_profile::measure_gpu_upload(desc.glb, desc.startup_scope, payload, frame_dt_ms, || {
+        let phase = room_upload_runtime_phase(self.active_scene_key.map(|k| k as &str));
+        crate::room_gpu_profile::measure_gpu_upload(
+            desc.glb,
+            desc.startup_scope,
+            metrics.payload,
+            frame_dt_ms,
+            phase,
+            || {
             let ctx = self.room_gpu_upload_ctx();
             let (
                 prims,
@@ -2796,7 +3102,23 @@ impl WgpuRenderer {
             crate::archive_glb::release_archive_environment_cpu_sources_after_gpu_upload();
             self.rooms_gpu_loaded |= desc.bit();
             self.note_room_gpu_resident(desc.bit());
-        });
+            let retained_cpu = crate::archive_glb::with_archive_glb_cpu(|o| {
+                o.map(retained_room_cpu_payload_bytes).unwrap_or_default()
+            });
+            crate::room_gpu_profile::log_room_residency_after_upload(
+                desc.glb,
+                phase,
+                metrics.packed_asset_bytes_read,
+                metrics.decoded_cpu_payload_bytes,
+                metrics.payload.total_bytes(),
+                metrics.gpu_resident_estimate_bytes,
+                retained_cpu,
+                0,
+                0,
+                &self.device,
+            );
+        },
+        );
     }
 
     pub(super) fn ensure_gameplay_room_gpu(&mut self) {

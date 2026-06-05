@@ -76,16 +76,28 @@ impl App {
             // (Steam Deck / gamescope) keep the window visible and present a boot clear frame
             // as soon as the swapchain exists so launch is not a blank screen for ~10s+.
             #[cfg(target_os = "macos")]
-            shell.window.hide();
+            {
+                let _scope = crate::startup_profile::scope("startup.pre_wgpu.window_visibility");
+                shell.window.hide();
+            }
             #[cfg(not(target_os = "macos"))]
-            shell.window.show();
+            {
+                let _scope = crate::startup_profile::scope("startup.pre_wgpu.window_visibility");
+                shell.window.show();
+            }
 
             // Mount the `rooms` pack off-thread so pre-wgpu boot can overlap
             // this I/O/index work with renderer init.
-            crate::render::loader_pool::submit_pack_mount(|| {
-                mahjuro_assets::asset_path::prefetch_rooms_pack_once();
-            });
-            crate::render::room_preload::start_main_menu_cpu_prefetch();
+            {
+                let _scope = crate::startup_profile::scope("startup.pre_wgpu.submit_pack_mount");
+                crate::render::loader_pool::submit_pack_mount(|| {
+                    mahjuro_assets::asset_path::prefetch_rooms_pack_once();
+                });
+            }
+            {
+                let _scope = crate::startup_profile::scope("startup.pre_wgpu.main_menu_prefetch");
+                crate::render::room_preload::start_main_menu_cpu_prefetch();
+            }
 
             // Match [`draw::App::draw`]: HDR swapchain is only used when both the
             // options toggle and `EffectLayers::hdr` allow it. Baseline builds keep
@@ -93,11 +105,14 @@ impl App {
             // an HDR swapchain at init then an immediate SDR reconfigure on frame
             // 1 — a redundant Metal surface transition linked to intermittent black
             // startup frames on macOS.
-            (
-                shell.window.clone(),
-                self.effect_layers.hdr_enabled(&self.gfx),
-                !cfg!(target_os = "macos"),
-            )
+            {
+                let _scope = crate::startup_profile::scope("startup.pre_wgpu.window_clone_and_hdr");
+                (
+                    shell.window.clone(),
+                    self.effect_layers.hdr_enabled(&self.gfx),
+                    !cfg!(target_os = "macos"),
+                )
+            }
         };
         let renderer = {
             let _wgpu = crate::startup_profile::scope("wgpu.renderer_new");
@@ -110,6 +125,9 @@ impl App {
             )?
         };
         self.renderer = Some(renderer);
+        let continue_warmup = self.continue_room_warmup();
+        let run_in_progress = self.run.is_in_progress();
+        let resume_scene = self.resume_scene;
         if let Some(renderer) = self.renderer.as_mut() {
             let settings = crate::persistence::load_settings();
             if !settings.graphics_mode_user_set {
@@ -124,9 +142,10 @@ impl App {
             crate::render::room_preload::kick_eager_all_room_cpu_prefetches();
             // Shop is always first in the hub chain; start CPU decode early.
             renderer.prefetch_room_chain_next(RoomSceneChain::Shop);
-            if self.run.is_in_progress() {
+            if run_in_progress {
                 mahjuro_assets::asset_path::prefetch_gameplay_bulk_pack_once();
-                match self.resume_scene {
+                crate::render::room_preload::kick_continue_run_cpu_prefetches(continue_warmup);
+                match resume_scene {
                     ResumeScene::Gameplay => {
                         renderer.prefetch_room_chain_next(RoomSceneChain::Hallway);
                         renderer.prefetch_room_chain_next(RoomSceneChain::Gameplay);
@@ -135,7 +154,9 @@ impl App {
                         renderer.prefetch_room_chain_next(RoomSceneChain::Hallway);
                         renderer.prefetch_room_chain_next(RoomSceneChain::Gameplay);
                     }
-                    ResumeScene::Shop => {}
+                    ResumeScene::Shop => {
+                        renderer.prefetch_room_chain_next(RoomSceneChain::Shop);
+                    }
                 }
             }
         }
@@ -199,7 +220,7 @@ impl App {
                 // Still drain async relic/background uploads and run the splash decal
                 // atlas pre-bake so boot loading does not stall until the window refocuses.
                 let mut did_loader_work = false;
-                let warm_gameplay_for_resume = self.warm_gameplay_gpu_for_resume();
+                let continue_warmup = self.continue_room_warmup();
                 if let Some(renderer) = self.renderer.as_mut() {
                     if renderer.is_loading() {
                         renderer.poll_pending_texture_uploads();
@@ -223,7 +244,7 @@ impl App {
                         renderer.poll_room_prefetch_gpu_uploads(
                             crate::scenes::active_scene_key(&self.scene),
                             self.last_frame_dt * 1000.0,
-                            warm_gameplay_for_resume,
+                            continue_warmup,
                             self.pending_scene
                                 .as_ref()
                                 .and_then(crate::scenes::active_scene_key),

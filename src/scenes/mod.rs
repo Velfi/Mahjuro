@@ -126,6 +126,8 @@ pub struct UpdateCtx<'a> {
     /// decoding façade art / relics in parallel). Other scenes: `true` when boot async
     /// loaders have finished GPU upload (see [`crate::render::wgpu_renderer::WgpuRenderer::is_loading`]).
     pub loading_done: bool,
+    /// Per-item hub menu loading gates (Continue / New Game / Archive).
+    pub hub_loading: crate::scenes::main_menu::HubMenuLoading,
     /// Cascade animation timing parameters.
     pub cascade_tuning: &'a CascadeTuning,
     /// Result of `pick_shop_object` for the cursor this frame, when the
@@ -278,6 +280,7 @@ pub struct DrawCtx<'a> {
     pub main_menu_trailer_camera: Option<crate::render::draw_cmd::CameraParams>,
     /// Splash hub decode progress in `[0, 1]` (main-menu room, shadow, atlases).
     pub loading_hub_progress: f32,
+    pub hub_loading: crate::scenes::main_menu::HubMenuLoading,
     pub main_menu_effects: crate::render::main_menu_effects_tuning::MainMenuEffectsTuning,
     pub flame_tuning: crate::render::flame_tuning::FlameTuning,
 }
@@ -316,6 +319,7 @@ impl<'a> DrawCtx<'a> {
         >,
         main_menu_trailer_camera: Option<crate::render::draw_cmd::CameraParams>,
         loading_hub_progress: f32,
+        hub_loading: crate::scenes::main_menu::HubMenuLoading,
         main_menu_effects: crate::render::main_menu_effects_tuning::MainMenuEffectsTuning,
         flame_tuning: crate::render::flame_tuning::FlameTuning,
     ) -> Self {
@@ -346,6 +350,7 @@ impl<'a> DrawCtx<'a> {
             hallway_distortion_debug,
             main_menu_trailer_camera,
             loading_hub_progress,
+            hub_loading,
             main_menu_effects,
             flame_tuning,
         }
