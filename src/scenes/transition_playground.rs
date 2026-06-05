@@ -11,8 +11,7 @@ use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::main_menu::MainMenuScene;
-use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 const MIN_DURATION_SECS: f32 = 0.25;
 const MAX_DURATION_SECS: f32 = 3.0;
@@ -141,7 +140,7 @@ impl TransitionPlaygroundScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenu(MainMenuScene::new()))
+            Some(SceneIntent::MainMenu)
         }
     }
 

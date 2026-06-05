@@ -13,8 +13,7 @@ use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel
 use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer_hint};
 use crate::ui::input::UiAction;
 
-use super::main_menu::MainMenuScene;
-use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 const CLICK_BACK: u32 = 0xE010;
 const TILE_ROTATION: [f32; 3] = [0.0, 0.0, std::f32::consts::PI];
@@ -149,7 +148,7 @@ impl TileAnchorLabScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::MainMenu(MainMenuScene::new()))
+            Some(SceneIntent::MainMenu)
         }
     }
 }

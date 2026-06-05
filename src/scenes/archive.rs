@@ -33,15 +33,14 @@ use crate::ui::controller_hints::{
     HintSegment, HintStyle, archive_browse_footer_row, inspect_camera_hint_row,
     push_inline_hint_rows,
 };
+use crate::ui::inspect_plaque::push_floating_relic_flavor_labels;
 use crate::ui::focus_nav::{FocusDir, pick_neighbor, push_focus_ring};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use glam::{Mat4, Quat, Vec3};
 
 use super::archive_career;
-use super::main_menu::MainMenuScene;
-use super::profile_select::ProfileSelectScene;
-use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 use crate::scenes::object3d_inspect::{
     InspectDolly, InspectRig, ItemInspectOrbitState, inspect_orbit_camera, lerp_camera,
     prepend_inspect_orbit_subject_rotation, tick_inspect_dolly,
@@ -902,30 +901,20 @@ impl ArchiveScene {
                 }
             }
 
-            let body = if boss.unlocked
-                && inspect.is_some()
-                && let ArtifactKind::Relic(rid) = &boss.kind
-            {
-                all_relic_defs()
-                    .iter()
-                    .find(|d| d.id == *rid)
-                    .map(|d| d.flavor.iter().fold(String::new(), |acc, s| acc + s.text))
-                    .unwrap_or_default()
-            } else {
-                description_for(boss, ctx.run, ctx.progress)
-            };
+            let body = description_for(boss, ctx.run, ctx.progress);
             let card_text = if body.is_empty() {
                 boss.name.clone()
             } else {
                 format!("{}\n\n{}", boss.name, body)
             };
+            // Relic inspect: name on the room plaque; flavor floats below (shop parity).
             let sign_text = if inspect.is_some()
                 && boss.unlocked
                 && let ArtifactKind::Relic(rid) = &boss.kind
                 && let Some(def) = all_relic_defs().iter().find(|d| d.id == *rid)
                 && !def.flavor.is_empty()
             {
-                def.flavor.iter().fold(String::new(), |acc, s| acc + s.text)
+                boss.name.clone()
             } else {
                 card_text
             };
@@ -1205,6 +1194,34 @@ impl ArchiveScene {
                 hint_style,
             );
         }
+
+        if inspect_open
+            && let Some(row) = self.focused_row
+            && let Some(boss) = all_artifacts.get(row)
+            && boss.unlocked
+            && let ArtifactKind::Relic(rid) = &boss.kind
+            && let Some(def) = all_relic_defs().iter().find(|d| d.id == *rid)
+            && !def.flavor.is_empty()
+        {
+            let extra_bottom_reserve = if hint_line_count > 0 {
+                h - hint_y
+            } else {
+                0.0
+            };
+            let mut flavor_gradients = Vec::new();
+            let mut flavor_texts = Vec::new();
+            push_floating_relic_flavor_labels(
+                &mut flavor_gradients,
+                &mut flavor_texts,
+                w,
+                h,
+                def.flavor,
+                extra_bottom_reserve,
+            );
+            frame.gradient_quads(flavor_gradients);
+            frame.texts(flavor_texts);
+        }
+
         frame
     }
 }
@@ -1347,7 +1364,7 @@ impl SceneBehavior for ArchiveScene {
                         ctx.progress,
                         ctx.bump_archive_chronicle_seen,
                     );
-                    return Some(Scene::MainMenu(MainMenuScene::new()));
+                    return Some(SceneIntent::MainMenu);
                 }
                 UiAction::TabNext => {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -1623,13 +1640,11 @@ impl SceneBehavior for ArchiveScene {
                                     ctx.progress,
                                     ctx.bump_archive_chronicle_seen,
                                 );
-                                return Some(Scene::MainMenu(MainMenuScene::new()));
+                                return Some(SceneIntent::MainMenu);
                             }
                             CollectionAction::SwitchSave => {
                                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                                return Some(Scene::ProfileSelect(
-                                    ProfileSelectScene::from_archive_switch_save(),
-                                ));
+                                return Some(SceneIntent::ProfileSelectFromArchive);
                             }
                             CollectionAction::PrevPage => {
                                 let from = archive_focus_row_col_in_page(self.focused_row);
@@ -1711,13 +1726,11 @@ impl SceneBehavior for ArchiveScene {
             Some(CollectionAction::Back) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                 maybe_bump_chronicle_on_exit(self, ctx.progress, ctx.bump_archive_chronicle_seen);
-                return Some(Scene::MainMenu(MainMenuScene::new()));
+                return Some(SceneIntent::MainMenu);
             }
             Some(CollectionAction::SwitchSave) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                return Some(Scene::ProfileSelect(
-                    ProfileSelectScene::from_archive_switch_save(),
-                ));
+                return Some(SceneIntent::ProfileSelectFromArchive);
             }
             Some(CollectionAction::PrevPage) => {
                 let from = archive_focus_row_col_in_page(self.focused_row);

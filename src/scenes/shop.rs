@@ -56,9 +56,8 @@ use crate::render::wgpu_renderer::{GpuInstance, ShopHit, TextAlign, TextLabel};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
 use crate::ui::input::{InputMode, UiAction};
 
-use super::hallway::HallwayScene;
 use super::pause_menu::PauseMenu;
-pub(crate) use super::{Scene, SceneTransition, UpdateCtx};
+pub(crate) use super::{Scene, SceneIntent, SceneTransition, UpdateCtx};
 
 pub struct ShopScene {
     mode: ShopMode,

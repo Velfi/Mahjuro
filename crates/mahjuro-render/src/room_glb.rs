@@ -174,7 +174,10 @@ fn ensure_shop_glb_loaded() {
     let mut w = ROOM_GLB_CPU.write();
     match &*w {
         RoomGlbCache::Uninit => {}
-        RoomGlbCache::Ready(Some(cpu)) if room_glb_cpu_needs_environment_mesh_reload(cpu) => {
+        RoomGlbCache::Ready(Some(cpu))
+            if room_glb_cpu_needs_environment_mesh_reload(cpu)
+                || room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
+        {
             *w = RoomGlbCache::Uninit;
         }
         _ => return,

@@ -4,10 +4,10 @@ use super::*;
 #[cfg(feature = "game")]
 use crate::game::engine::GameEngine;
 #[cfg(feature = "game")]
-use crate::scene_transition::overlay_kind_for_transition;
+use crate::scene_transition::{PendingSceneDestination, SceneTag, overlay_kind_for_transition};
 #[cfg(feature = "game")]
-use crate::scenes::{DefeatScene, VictoryScene};
-
+use crate::scenes::SceneIntent;
+#[cfg(feature = "game")]
 use crate::core;
 use crate::render;
 use crate::ui::modal::{Modal, ModalTheme, UnlockPage};
@@ -139,10 +139,11 @@ impl App {
                             GameEngine::set_onboarding_shop_phase(&mut self.run);
                             self.run.grant_pending_memorial(&mut self.progress);
                             self.mark_profile_dirty();
-                            self.pending_scene = Some(Scene::Shop(
-                                crate::scenes::ShopScene::new_tutorial(&mut self.run),
-                            ));
-                            self.transition_alpha = 1.0;
+                            self.begin_scene_replace(
+                                SceneIntent::ShopTutorial,
+                                SceneTag::from(&self.scene),
+                                PendingSceneDestination::default(),
+                            );
                             return;
                         }
                         Some(crate::game::onboarding::OnboardingPhase::Finale) => {
@@ -153,9 +154,11 @@ impl App {
                             self.steam.sync_profile_stats(&self.progress);
                             self.steam
                                 .unlock_achievement(crate::steam::Achievement::TutorialComplete);
-                            self.pending_scene =
-                                Some(Scene::TutorialSummary(TutorialSummaryScene::new(true)));
-                            self.transition_alpha = 1.0;
+                            self.begin_scene_replace(
+                                SceneIntent::TutorialSummary { won: true },
+                                SceneTag::from(&self.scene),
+                                PendingSceneDestination::default(),
+                            );
                             return;
                         }
                         _ => {}
@@ -178,11 +181,11 @@ impl App {
                     self.modals.push(modal);
                     self.run.grant_pending_memorial(&mut self.progress);
                     self.mark_profile_dirty();
-                    self.pending_scene = Some(Scene::Shop(crate::scenes::ShopScene::new(
-                        &mut self.run,
-                        &self.progress,
-                    )));
-                    self.transition_alpha = 1.0;
+                    self.begin_scene_replace(
+                        SceneIntent::ShopFromRun,
+                        SceneTag::from(&self.scene),
+                        PendingSceneDestination::default(),
+                    );
                     return;
                 }
                 // First non-tutorial chamber cleared. Fires every round, but
@@ -226,7 +229,7 @@ impl App {
                 if self.run.is_run_complete() {
                     self.audio.play_sfx(audio::SfxId::RoundWin);
                 }
-                self.pending_scene = Some(if self.run.is_run_complete() {
+                let next_intent = if self.run.is_run_complete() {
                     // Victory — save progress (mirrors the GameOver loss path).
                     self.progress.has_won = true;
                     if self.run.mode.tile_material == crate::persistence::TileMaterial::Plastic {
@@ -275,17 +278,21 @@ impl App {
                         self.pending_post_game_over_level_up = Some(modal);
                     }
 
-                    Scene::Victory(VictoryScene::new(&self.run))
+                    SceneIntent::Victory
                 } else if cleared_ordeal && crate::render::staircase_glb::staircase_glb_loaded() {
                     self.run.grant_pending_memorial(&mut self.progress);
                     self.mark_profile_dirty();
-                    Scene::Stairway(crate::scenes::StairwayScene::new())
+                    SceneIntent::Stairway
                 } else {
                     self.run.grant_pending_memorial(&mut self.progress);
                     self.mark_profile_dirty();
-                    Scene::Shop(crate::scenes::ShopScene::new(&mut self.run, &self.progress))
-                });
-                self.transition_alpha = 1.0;
+                    SceneIntent::ShopFromRun
+                };
+                self.begin_scene_replace(
+                    next_intent,
+                    SceneTag::from(&self.scene),
+                    PendingSceneDestination::default(),
+                );
             }
             GameEvent::GameOver { reason } => {
                 if self.run.onboarding_active() {
@@ -316,10 +323,11 @@ impl App {
                     self.audio.play_sfx(audio::SfxId::GameOver);
                     let modal = Modal::new("Try Again!", &feedback, ModalTheme::Info);
                     self.modals.push(modal);
-                    self.pending_scene = Some(Scene::Gameplay(Box::new(
-                        GameplayScene::enter_pending_chamber(&mut self.run, retry_blind),
-                    )));
-                    self.transition_alpha = 1.0;
+                    self.begin_scene_replace(
+                        SceneIntent::GameplayRetryOnboarding(retry_blind),
+                        SceneTag::from(&self.scene),
+                        PendingSceneDestination::default(),
+                    );
                     return;
                 }
                 self.progress.runs_completed += 1;
@@ -371,8 +379,11 @@ impl App {
                     audio::MusicId::ChamberLoss
                 };
                 self.audio.play_music_jingle(loss_jingle);
-                self.pending_scene = Some(Scene::Defeat(DefeatScene::new(&self.run, reason)));
-                self.transition_alpha = 1.0;
+                self.begin_scene_replace(
+                    SceneIntent::Defeat(reason),
+                    SceneTag::from(&self.scene),
+                    PendingSceneDestination::default(),
+                );
             }
             _ => {}
         }
@@ -822,6 +833,19 @@ impl App {
                 )),
                 ..Default::default()
             });
+        }
+
+        // Final scene-transition blackout pass. `apply_alpha` fades 2D draw
+        // commands, but environment/room draw cmds are opaque and do not
+        // participate in that alpha scaling.
+        let blackout_alpha = (1.0 - self.transition_alpha).clamp(0.0, 1.0);
+        if blackout_alpha > 0.0 {
+            self.active_buttons.clear();
+            frame.overlay_quads([GpuInstance {
+                rect: [0.0, 0.0, size.width as f32, size.height as f32],
+                color: [0.0, 0.0, 0.0, blackout_alpha],
+                user: 0,
+            }]);
         }
 
         // Convert settle ms to exponential decay speed (inversely proportional).

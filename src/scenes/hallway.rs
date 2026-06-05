@@ -29,9 +29,8 @@ use crate::ui::skip_tag_icons::skip_tag_icon_source;
 use crate::ui::widget::wrap_text;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::gameplay::GameplayScene;
 use super::pause_menu::PauseMenu;
-use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ChamberAction {
@@ -323,7 +322,7 @@ impl SceneBehavior for HallwayScene {
         match action {
             Some(ChamberAction::SkipChamber) if can_skip => {
                 GameEngine::skip_upcoming_chamber(ctx.run, ctx.bus);
-                Some(Scene::Hallway(HallwayScene::new()))
+                Some(SceneIntent::Hallway)
             }
             Some(ChamberAction::PlayChamber) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::RoundStart));
@@ -332,9 +331,7 @@ impl SceneBehavior for HallwayScene {
                 {
                     ctx.bus.push(GameEvent::OrdealEncountered(bk));
                 }
-                Some(Scene::Gameplay(Box::new(
-                    GameplayScene::enter_pending_chamber(ctx.run, upcoming),
-                )))
+                Some(SceneIntent::GameplayHallwayPlay)
             }
             Some(ChamberAction::SkipChamber) => None,
             None => None,

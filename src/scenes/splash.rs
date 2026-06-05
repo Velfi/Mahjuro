@@ -7,8 +7,7 @@ use crate::render::wgpu_renderer::loading_screen::{
 use crate::render::draw_cmd::UiFrame;
 use crate::ui::input::UiAction;
 
-use super::main_menu::MainMenuScene;
-use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 pub struct SplashScene {
     /// Set once we've requested the transition so we don't repeat it.
@@ -57,7 +56,7 @@ impl SceneBehavior for SplashScene {
         if ctx.loading_done && self.visible && splash_logo_sequence_complete() {
             self.done = true;
             log::info!("splash: transitioning to start screen");
-            return Some(Scene::MainMenu(MainMenuScene::new()));
+            return Some(SceneIntent::MainMenu);
         }
 
         None

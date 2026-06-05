@@ -546,22 +546,30 @@ fn gameplay_cash_in_bind(input_mode: InputMode) -> HintBind {
     )
 }
 
-/// Storeroom browse: optional hold-to-buy / hold-to-sell, then inspect.
+/// Storeroom browse: optional hold-to-buy / hold-to-sell, then inspect when focused.
 pub fn shop_storeroom_footer_row(
     input_mode: InputMode,
     show_hold_buy: bool,
     show_hold_sell: bool,
+    show_inspect: bool,
 ) -> Vec<HintSegment> {
     let mut row = HintRow::new();
     if show_hold_buy {
         row = row.push(hold_buy_bind(input_mode).into());
-        row = row.sep();
+        if show_hold_sell || show_inspect {
+            row = row.sep();
+        }
     }
     if show_hold_sell {
         row = row.push(hold_sell_bind(input_mode).into());
-        row = row.sep();
+        if show_inspect {
+            row = row.sep();
+        }
     }
-    row.push(inspect_bind(input_mode).into()).into_segments()
+    if show_inspect {
+        row = row.push(inspect_bind(input_mode).into());
+    }
+    row.into_segments()
 }
 
 /// Gameplay HUD footer: hand selection, available table actions (discard /
