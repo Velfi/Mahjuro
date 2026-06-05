@@ -277,13 +277,23 @@ impl SceneBehavior for RunSummaryScene {
         self.panel_scroll.sync(&layout);
         self.panel_scroll
             .handle_wheel(ctx.scroll_lines, ctx.cursor_pos, &layout, ctx.input_mode);
+        let block_dismiss = self.panel_scroll.handle_mouse(
+            ctx.cursor_pos,
+            ctx.mouse_left_down,
+            &layout,
+        );
 
         let items = self.flat_items(w, h);
+        let button_clicks = if block_dismiss {
+            &[][..]
+        } else {
+            ctx.button_clicks
+        };
         let action = self.tree.update_flat(
             &items,
             TreeInput {
                 actions: ctx.actions,
-                button_clicks: ctx.button_clicks,
+                button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
                 input_mode: ctx.input_mode,

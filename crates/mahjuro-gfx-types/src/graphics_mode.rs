@@ -19,6 +19,8 @@ pub enum GraphicsMode {
 pub const LOW_MEMORY_RENDER_SCALE: f32 = 0.75;
 pub const MIN_RENDER_WIDTH: u32 = 1280;
 pub const MIN_RENDER_HEIGHT: u32 = 720;
+/// Product support floor for graphics memory budgeting.
+pub const MIN_SUPPORTED_GPU_MEMORY_MIB: u64 = 4096;
 
 impl GraphicsMode {
     pub fn next(self) -> Self {
@@ -121,6 +123,19 @@ impl GraphicsMode {
         Self::Visuals
     }
 
+    /// Best-effort adapter heuristic for the minimum supported graphics-memory floor.
+    ///
+    /// Returns `false` when the adapter is likely below the 4 GiB support target.
+    pub fn adapter_meets_minimum_support(name: &str, integrated_gpu: bool) -> bool {
+        if adapter_name_suggests_apple_silicon(name) {
+            return true;
+        }
+        if integrated_gpu {
+            return false;
+        }
+        !adapter_name_suggests_sub_4gb_vram(name)
+    }
+
     /// Infer a preset from legacy per-field settings (pre-unification saves).
     pub fn from_legacy(shadow_quality: ShadowQuality, ssr_enabled: bool) -> Self {
         if shadow_quality.active() || ssr_enabled {
@@ -152,6 +167,27 @@ fn adapter_name_suggests_low_vram(name: &str) -> bool {
         "radeon 560",
         "quadro p620",
         "quadro p1000",
+    ];
+    NEEDLES.iter().any(|needle| n.contains(needle))
+}
+
+/// Substrings that commonly map to <4 GB parts (or unknown-low mobile bins).
+fn adapter_name_suggests_sub_4gb_vram(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    const NEEDLES: &[&str] = &[
+        "mx150",
+        "mx250",
+        "mx330",
+        "mx350",
+        "quadro p620",
+        "intel hd",
+        "intel uhd",
+        "intel iris",
+        "radeon vega 3",
+        "radeon vega 5",
+        "radeon vega 6",
+        "radeon vega 7",
+        "radeon vega 8",
     ];
     NEEDLES.iter().any(|needle| n.contains(needle))
 }
@@ -220,5 +256,20 @@ mod tests {
             GraphicsMode::suggest_for_adapter("Apple M4 Max", true),
             GraphicsMode::Visuals,
         );
+    }
+
+    #[test]
+    fn minimum_support_heuristic() {
+        assert_eq!(MIN_SUPPORTED_GPU_MEMORY_MIB, 4096);
+        assert!(!GraphicsMode::adapter_meets_minimum_support(
+            "NVIDIA GeForce MX250",
+            false
+        ));
+        assert!(!GraphicsMode::adapter_meets_minimum_support("Intel Iris Xe", true));
+        assert!(GraphicsMode::adapter_meets_minimum_support("Apple M4 Max", true));
+        assert!(GraphicsMode::adapter_meets_minimum_support(
+            "AMD Radeon RX 7900 XT",
+            false
+        ));
     }
 }

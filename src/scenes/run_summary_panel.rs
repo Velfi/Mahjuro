@@ -109,6 +109,9 @@ pub struct RunSummaryPanelLayout {
 /// Smooth scroll state for an overflowing run-summary panel.
 pub struct RunSummaryPanelScroll {
     scroll: SmoothScroll,
+    dragging_scrollbar: bool,
+    scroll_drag_grab_y: f32,
+    prev_mouse_down: bool,
 }
 
 impl Default for RunSummaryPanelScroll {
@@ -121,6 +124,9 @@ impl RunSummaryPanelScroll {
     pub fn new() -> Self {
         Self {
             scroll: SmoothScroll::new(),
+            dragging_scrollbar: false,
+            scroll_drag_grab_y: 0.0,
+            prev_mouse_down: false,
         }
     }
 
@@ -148,6 +154,106 @@ impl RunSummaryPanelScroll {
     pub fn offset_px(&self) -> f32 {
         self.scroll.tick()
     }
+
+    /// Handle scrollbar thumb/track clicks and drags. Returns `true` when the
+    /// pointer gesture should not dismiss the screen (full-screen click target).
+    pub fn handle_mouse(
+        &mut self,
+        cursor: (f32, f32),
+        mouse_left_down: bool,
+        layout: &RunSummaryPanelLayout,
+    ) -> bool {
+        let mouse_click = mouse_left_down && !self.prev_mouse_down;
+        let mut block_dismiss = false;
+
+        let Some(track) = layout.scrollbar_track else {
+            if !mouse_left_down {
+                self.dragging_scrollbar = false;
+            }
+            self.prev_mouse_down = mouse_left_down;
+            return false;
+        };
+
+        let scroll_offset = self.scroll.target();
+        let thumb = scrollbar_thumb(
+            track,
+            layout.scroll_content_h,
+            layout.scroll_viewport_h,
+            scroll_offset,
+            layout.max_scroll_px,
+            layout.row_font_px,
+        );
+        let hit_track = scrollbar_hit_track(track, layout.row_font_px);
+        let (mx, my) = cursor;
+
+        if self.dragging_scrollbar && mouse_left_down {
+            let px = scroll_px_from_cursor(my, self.scroll_drag_grab_y, track, thumb[3], layout.max_scroll_px);
+            self.scroll.set_target(px);
+            block_dismiss = true;
+        } else if mouse_click {
+            if point_in_rect(mx, my, thumb) {
+                self.dragging_scrollbar = true;
+                self.scroll_drag_grab_y = my - thumb[1];
+                let px = scroll_px_from_cursor(
+                    my,
+                    self.scroll_drag_grab_y,
+                    track,
+                    thumb[3],
+                    layout.max_scroll_px,
+                );
+                self.scroll.set_target(px);
+                block_dismiss = true;
+            } else if point_in_rect(mx, my, hit_track) {
+                self.dragging_scrollbar = true;
+                self.scroll_drag_grab_y = thumb[3] * 0.5;
+                let px = scroll_px_from_cursor(
+                    my,
+                    self.scroll_drag_grab_y,
+                    track,
+                    thumb[3],
+                    layout.max_scroll_px,
+                );
+                self.scroll.set_target(px);
+                block_dismiss = true;
+            }
+        }
+
+        if !mouse_left_down {
+            self.dragging_scrollbar = false;
+        }
+        self.prev_mouse_down = mouse_left_down;
+        block_dismiss
+    }
+}
+
+#[inline]
+fn point_in_rect(mx: f32, my: f32, r: [f32; 4]) -> bool {
+    mx >= r[0] && mx <= r[0] + r[2] && my >= r[1] && my <= r[1] + r[3]
+}
+
+fn scrollbar_hit_track(track: [f32; 4], row_font_px: f32) -> [f32; 4] {
+    let hit_pad_x = (row_font_px * 0.36).max(6.0);
+    [
+        track[0] - hit_pad_x,
+        track[1],
+        track[2] + hit_pad_x * 2.0,
+        track[3],
+    ]
+}
+
+fn scroll_px_from_cursor(
+    my: f32,
+    grab_y: f32,
+    track: [f32; 4],
+    thumb_h: f32,
+    max_scroll_px: f32,
+) -> f32 {
+    let thumb_travel = (track[3] - thumb_h).max(0.0);
+    if thumb_travel <= 0.0 {
+        return 0.0;
+    }
+    let thumb_top = (my - grab_y - track[1]).clamp(0.0, thumb_travel);
+    (thumb_top / thumb_travel) * max_scroll_px
 }
 
 fn shift_y(rect: [f32; 4], dy: f32) -> [f32; 4] {

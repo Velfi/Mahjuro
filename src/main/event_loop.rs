@@ -80,7 +80,11 @@ impl App {
             #[cfg(not(target_os = "macos"))]
             shell.window.show();
 
-            mahjuro_assets::asset_path::prefetch_rooms_pack_once();
+            // Mount the `rooms` pack off-thread so pre-wgpu boot can overlap
+            // this I/O/index work with renderer init.
+            crate::render::loader_pool::submit_pack_mount(|| {
+                mahjuro_assets::asset_path::prefetch_rooms_pack_once();
+            });
             crate::render::room_preload::start_main_menu_cpu_prefetch();
 
             // Match [`draw::App::draw`]: HDR swapchain is only used when both the

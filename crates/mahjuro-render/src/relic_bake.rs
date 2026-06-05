@@ -15,38 +15,44 @@ pub const SLUG_BYTES: usize = 64;
 
 const FLAG_HAS_MESH: u32 = 1;
 
+struct RelicSlugTables {
+    by_id: rustc_hash::FxHashMap<RelicId, &'static str>,
+    by_slug: rustc_hash::FxHashMap<&'static str, RelicId>,
+}
+
+fn slug_tables() -> &'static RelicSlugTables {
+    static TABLES: std::sync::OnceLock<RelicSlugTables> = std::sync::OnceLock::new();
+    TABLES.get_or_init(|| {
+        let mut by_id = rustc_hash::FxHashMap::default();
+        let mut by_slug = rustc_hash::FxHashMap::default();
+        for def in all_relic_defs() {
+            let stem = def.id.asset_filename().trim_end_matches(".png");
+            let slug = Box::leak(stem.to_string().into_boxed_str()) as &'static str;
+            by_id.insert(def.id, slug);
+            by_slug.insert(slug, def.id);
+        }
+        RelicSlugTables { by_id, by_slug }
+    })
+}
+
 /// `assets/data/relic_baked/<slug>.rlc` where `<slug>` is the relic PNG stem.
 pub fn baked_relic_asset_path(id: RelicId) -> String {
     format!("data/relic_baked/{}.rlc", relic_slug(id))
 }
 
 pub fn relic_slug(id: RelicId) -> &'static str {
-    static SLUGS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
-    SLUGS.get_or_init(|| {
-        all_relic_defs()
-            .iter()
-            .map(|d| {
-                let stem = d.id.asset_filename().trim_end_matches(".png");
-                Box::leak(stem.to_string().into_boxed_str()) as &str
-            })
-            .collect()
-    });
-    let idx = all_relic_defs()
-        .iter()
-        .position(|d| d.id == id)
-        .expect("relic slug table out of sync with all_relic_defs");
-    SLUGS.get().expect("SLUGS init")[idx]
+    *slug_tables()
+        .by_id
+        .get(&id)
+        .expect("relic slug table out of sync with all_relic_defs")
 }
 
 pub fn relic_id_from_slug(slug: &str) -> Option<RelicId> {
-    all_relic_defs()
-        .iter()
-        .find(|d| relic_slug(d.id) == slug)
-        .map(|d| d.id)
+    slug_tables().by_slug.get(slug).copied()
 }
 
 pub fn baked_relic_available(id: RelicId) -> bool {
-    mahjuro_assets::asset_path::get(&baked_relic_asset_path(id)).is_some()
+    mahjuro_assets::asset_path::get_shared(&baked_relic_asset_path(id)).is_some()
 }
 
 pub fn all_relic_bakes_available() -> bool {
@@ -57,9 +63,9 @@ pub fn all_relic_bakes_available() -> bool {
 /// Used by startup bake checks so renderer init can fail fast without paying full decode cost.
 pub fn validate_baked_relic(id: RelicId) -> anyhow::Result<()> {
     let path = baked_relic_asset_path(id);
-    let file = mahjuro_assets::asset_path::get(&path)
+    let data = mahjuro_assets::asset_path::get_shared(&path)
         .with_context(|| format!("missing baked relic at {path}"))?;
-    validate_baked_relic_bytes(id, &file.data)
+    validate_baked_relic_bytes(id, data.as_ref())
 }
 
 fn validate_baked_relic_bytes(expected_id: RelicId, bytes: &[u8]) -> anyhow::Result<()> {
@@ -253,9 +259,9 @@ pub fn decode_baked_relic(bytes: &[u8]) -> anyhow::Result<DecodedRelicImage> {
 
 pub fn load_baked_relic(id: RelicId) -> anyhow::Result<DecodedRelicImage> {
     let path = baked_relic_asset_path(id);
-    let file = mahjuro_assets::asset_path::get(&path)
+    let data = mahjuro_assets::asset_path::get_shared(&path)
         .with_context(|| format!("missing baked relic at {path}"))?;
-    decode_baked_relic(&file.data)
+    decode_baked_relic(data.as_ref())
 }
 
 #[repr(C)]

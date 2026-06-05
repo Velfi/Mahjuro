@@ -1,5 +1,9 @@
 # GPU memory (4 GB / 1080p)
 
+Mahjuro's minimum supported graphics-memory budget is **4 GiB**. Adapters that look below this
+floor (typically integrated GPUs outside Apple Silicon and known sub-4 GiB mobile SKUs) run in
+best-effort mode and are not part of the supported matrix.
+
 ## Presets
 
 | Options → Graphics | Shadows / SSR | Internal resolution | Room GPU cap | Decal atlas cache |
@@ -26,14 +30,17 @@ gates **optional** eager warm-up only — active-scene uploads always proceed af
 
 | Pressure | Trigger (allocator when available) | Eager behavior |
 | --- | --- | --- |
-| **Normal** | below ~2200 MiB allocated | warm shop → archive → hallway → gameplay → staircase |
-| **Constrained** | ~2200–2800 MiB or at resident cap | hub only (shop + archive) |
-| **Critical** | ≥ ~2800 MiB or over cap | evict unpinned LRU; pause all eager warm-up |
+| **Normal** | below threshold (Low memory: `<2200 MiB`; Performance/Visuals: `<6144 MiB`) | warm shop → archive → hallway → gameplay → staircase |
+| **Constrained** | between constrained/critical thresholds (Low memory: `2200–2799`; Performance/Visuals: `6144–8191`) or at resident cap | hub only (shop + archive) |
+| **Critical** | at/above critical threshold (Low memory: `>=2800`; Performance/Visuals: `>=8192`) or over cap | evict unpinned LRU; pause all eager warm-up |
 
 On Metal (no allocator report), pressure falls back to resident count vs
 [`GraphicsMode::max_room_gpu_residents`](../../crates/mahjuro-gfx-types/src/graphics_mode.rs).
 
 Watch for `gpu mem profile: pressure=` and `gpu mem profile: eager preload` lines when profiling.
+
+Thresholds can be overridden with `MAHJURO_GPU_MEM_CONSTRAINED_MIB` and
+`MAHJURO_GPU_MEM_CRITICAL_MIB` (see [launch options](launch-options.md)).
 
 ## Profiling soak (GTX 1050 / RX 550 class)
 
