@@ -236,34 +236,31 @@ pub(crate) fn spawn_relic_loader() -> mpsc::Receiver<DecodedRelicImage> {
 
 fn spawn_relic_bake_loader() -> mpsc::Receiver<DecodedRelicImage> {
     let (tx, rx) = mpsc::channel();
-    std::thread::Builder::new()
-        .name("relic-loader".into())
-        .spawn(move || {
-            let t_thread = Instant::now();
-            let mut decoded = 0usize;
-            for d in all_relic_defs() {
-                let path = crate::relic_bake::baked_relic_asset_path(d.id);
-                match crate::relic_bake::load_baked_relic(d.id) {
-                    Ok(msg) => {
-                        decoded += 1;
-                        if tx.send(msg).is_err() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        if crate::offline_bakes::committed_offline_bakes_required() {
-                            panic!("baked relic {path}: {e:#}");
-                        }
-                        log::error!("baked relic {path}: {e:#}");
+    crate::loader_pool::submit_relic_batch(move || {
+        let t_thread = Instant::now();
+        let mut decoded = 0usize;
+        for d in all_relic_defs() {
+            let path = crate::relic_bake::baked_relic_asset_path(d.id);
+            match crate::relic_bake::load_baked_relic(d.id) {
+                Ok(msg) => {
+                    decoded += 1;
+                    if tx.send(msg).is_err() {
+                        break;
                     }
                 }
+                Err(e) => {
+                    if crate::offline_bakes::committed_offline_bakes_required() {
+                        panic!("baked relic {path}: {e:#}");
+                    }
+                    log::error!("baked relic {path}: {e:#}");
+                }
             }
-            let thread_total = t_thread.elapsed();
-            crate::startup_profile::record("relic.decode_thread", thread_total);
-            crate::startup_profile::record("relic.decode_cpu", thread_total);
-            crate::startup_profile::record("relic.mesh_build_thread", std::time::Duration::ZERO);
-            log::debug!("relic-loader (RLC1): loaded {decoded} baked relics in {thread_total:?}",);
-        })
-        .expect("failed to spawn relic-loader thread");
+        }
+        let thread_total = t_thread.elapsed();
+        crate::startup_profile::record("relic.decode_thread", thread_total);
+        crate::startup_profile::record("relic.decode_cpu", thread_total);
+        crate::startup_profile::record("relic.mesh_build_thread", std::time::Duration::ZERO);
+        log::debug!("relic-loader (RLC1): loaded {decoded} baked relics in {thread_total:?}",);
+    });
     rx
 }

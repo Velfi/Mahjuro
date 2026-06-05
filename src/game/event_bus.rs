@@ -67,6 +67,10 @@ pub enum GameEvent {
     InvalidAction,
     /// Play a one-shot UI / tutorial sound (no gameplay side effects).
     UiSound(SfxId),
+    /// Start the hold-to-act windup bed (`reel_up`) on a dedicated sink.
+    HoldWindupStart,
+    /// Stop an in-progress hold windup (early release / focus change).
+    HoldWindupStop,
     /// Play a relic's stinger without counting it as an activation
     /// (e.g. when a relic is purchased from the shop).
     PlayRelicStinger(crate::core::relic::RelicId),

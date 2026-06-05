@@ -67,6 +67,11 @@ thiserror = "2.0.18"
 ttf-parser = "0.25"
 wgpu = { version = "29.0.1" }
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
+lru = "0.12"
+memmap2 = "0.9"
+bumpalo = "3"
+crossbeam-channel = "0.5"
+zstd = "0.13"
 
 [package]
 name = "mahjuro"

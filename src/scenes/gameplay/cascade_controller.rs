@@ -234,7 +234,7 @@ pub(super) fn tick_active_cascade(
     None
 }
 
-/// Focus moves from left stick / d-pad / arrow keys; must not fast-forward the reveal.
+/// Focus moves and cash-in holds (LT/RT, keyboard T) must not fast-forward the reveal.
 fn action_skips_cascade(a: UiAction) -> bool {
     !matches!(
         a,
@@ -243,6 +243,8 @@ fn action_skips_cascade(a: UiAction) -> bool {
             | UiAction::FocusPrev
             | UiAction::FocusUp
             | UiAction::FocusDown
+            | UiAction::TriggerStructure
+            | UiAction::TriggerStructureRelease
     )
 }
 

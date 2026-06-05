@@ -361,8 +361,7 @@ impl ShopScene {
         overlay_request: &mut Option<OverlayRequest>,
         window_wh: (f32, f32),
     ) {
-        self.west_sell_hold_started = None;
-        self.buy_hold_started = None;
+        self.cancel_all_hold_prompts(bus);
         let prev_focus = self.focus;
         let before = (
             self.items.len(),
@@ -422,7 +421,7 @@ impl ShopScene {
             &self.talisman_items,
             shop,
         ) else {
-            self.west_sell_hold_started = None;
+            self.cancel_west_sell_hold(bus);
             return;
         };
         self.apply_sell_action(action, run, bus, cursor_pos, overlay_request, window_wh);
@@ -457,7 +456,7 @@ impl ShopScene {
                 shop,
             )
         }) else {
-            self.buy_hold_started = None;
+            self.cancel_buy_hold(bus);
             return;
         };
         if !super::shared::shop_buy_action_valid(
@@ -468,6 +467,7 @@ impl ShopScene {
             &self.talisman_items,
             &self.pack_items,
         ) {
+            self.cancel_buy_hold(bus);
             return;
         }
         self.apply_buy_action(action, run, bus, cursor_pos, overlay_request, window_wh);
@@ -484,8 +484,7 @@ impl ShopScene {
         overlay_request: &mut Option<OverlayRequest>,
         window_wh: (f32, f32),
     ) {
-        self.west_sell_hold_started = None;
-        self.buy_hold_started = None;
+        self.cancel_all_hold_prompts(bus);
         let prev_focus = self.focus;
         let shop_before = GameEngine::read_shop(run);
         let before_owned = (
@@ -551,20 +550,23 @@ impl ShopScene {
     }
 
     /// Replace all unsold stock with fresh random items and bump the cost.
-    pub(super) fn restock(&mut self, run: &mut crate::game::run::RunState) {
+    pub(super) fn restock(
+        &mut self,
+        run: &mut crate::game::run::RunState,
+        bus: &mut crate::game::event_bus::EventBus,
+    ) {
         if self.mode == ShopMode::Tutorial || self.restock_exit_active() {
             return;
         }
-        let mut bus = crate::game::event_bus::EventBus::default();
-        let outcome = GameEngine::new(run, &mut bus).dispatch_shop(ShopCommand::RestockShop {
+        let mut engine_bus = crate::game::event_bus::EventBus::default();
+        let outcome = GameEngine::new(run, &mut engine_bus).dispatch_shop(ShopCommand::RestockShop {
             cost: self.restock_cost,
         });
         if outcome.rejection.is_some() {
             return;
         }
         run.chronicle.note_restock();
-        self.west_sell_hold_started = None;
-        self.buy_hold_started = None;
+        self.cancel_all_hold_prompts(bus);
         match outcome.data {
             ShopCommandData::Restocked {
                 skip_cost_escalation: true,

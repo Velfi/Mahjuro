@@ -485,6 +485,8 @@ pub struct AudioManager {
     sfx_loop_sink: Option<Sink>,
     sfx_loop_active: Option<SfxId>,
     sfx_loop_speed: f32,
+    /// Hold-to-act windup (`reel_up`); stopped on early release.
+    hold_windup_sink: Option<Sink>,
 }
 
 impl AudioManager {
@@ -571,6 +573,41 @@ impl AudioManager {
             sfx_loop_sink: None,
             sfx_loop_active: None,
             sfx_loop_speed: 1.0,
+            hold_windup_sink: None,
+        }
+    }
+
+    /// Play the hold-to-act windup on a dedicated sink (restarts if already playing).
+    pub fn play_hold_windup(&mut self) {
+        if !self.sfx_enabled {
+            self.stop_hold_windup();
+            return;
+        }
+        let Some(clip) = self.sfx_data.get(&SfxId::HoldWindup).cloned() else {
+            log::debug!("play_hold_windup: no data");
+            return;
+        };
+        let Some(handle) = &self.handle else {
+            return;
+        };
+        if let Some(sink) = self.hold_windup_sink.take() {
+            sink.stop();
+        }
+        let Ok(sink) = Sink::try_new(handle) else {
+            log::warn!("play_hold_windup: sink creation failed");
+            return;
+        };
+        let effective_vol = self.master_volume * self.sfx_volume;
+        let source = SharedPcmSource::new(clip);
+        sink.set_volume(effective_vol);
+        sink.append(source);
+        self.hold_windup_sink = Some(sink);
+    }
+
+    /// Halt the hold windup when the player releases before the action completes.
+    pub fn stop_hold_windup(&mut self) {
+        if let Some(sink) = self.hold_windup_sink.take() {
+            sink.stop();
         }
     }
 
@@ -763,6 +800,7 @@ impl AudioManager {
         self.refresh_music_sink_volume();
         self.refresh_all_ambient_sink_volumes();
         self.refresh_sfx_loop_sink_volume();
+        self.refresh_hold_windup_sink_volume();
     }
 
     /// Set the sound effects volume. Also updates one-shots on `music_sink`
@@ -771,6 +809,7 @@ impl AudioManager {
         self.sfx_volume = crate::persistence::clamp_volume(vol);
         self.refresh_all_ambient_sink_volumes();
         self.refresh_sfx_loop_sink_volume();
+        self.refresh_hold_windup_sink_volume();
         self.refresh_music_sink_volume();
     }
 
@@ -795,6 +834,7 @@ impl AudioManager {
         } else {
             self.stop_all_ambient_sinks();
             self.stop_sfx_loop_sink();
+            self.stop_hold_windup();
         }
         self.refresh_music_sink_volume();
     }
@@ -1121,6 +1161,18 @@ impl AudioManager {
             return;
         };
         sink.set_volume(self.sfx_loop_effective_volume());
+    }
+
+    fn refresh_hold_windup_sink_volume(&mut self) {
+        let Some(sink) = self.hold_windup_sink.as_ref() else {
+            return;
+        };
+        let vol = if self.sfx_enabled {
+            self.master_volume * self.sfx_volume
+        } else {
+            0.0
+        };
+        sink.set_volume(vol);
     }
 
     fn stop_sfx_loop_sink(&mut self) {

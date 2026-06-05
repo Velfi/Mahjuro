@@ -337,11 +337,25 @@ fn load_room_shadow_bake(room: RoomGiRoom) -> Option<Arc<RoomShadowBake>> {
     if committed_room_shadows_required() {
         return Some(require_effective_room_shadow_bake(room).unwrap_or_else(|e| panic!("{e:#}")));
     }
-    let file = asset_path::get(room.shadow_asset_path())?;
-    RoomShadowBake::decode_for_room(&file.data, room)
+    let path = room.shadow_asset_path();
+    decode_room_shadow_bytes(room, path)
+}
+
+fn decode_room_shadow_bytes(room: RoomGiRoom, path: &str) -> Option<Arc<RoomShadowBake>> {
+    if let Some(mmap) = asset_path::get_mmap(path) {
+        return RoomShadowBake::decode_for_room(&mmap, room)
+            .map(Arc::new)
+            .map_err(|e| {
+                log::warn!("{path}: {e:#}");
+                e
+            })
+            .ok();
+    }
+    let file = asset_path::load_asset_bytes(path)?;
+    RoomShadowBake::decode_for_room(&file, room)
         .map(Arc::new)
         .map_err(|e| {
-            log::warn!("{}: {e:#}", room.shadow_asset_path());
+            log::warn!("{path}: {e:#}");
             e
         })
         .ok()
@@ -364,13 +378,13 @@ pub fn cached_room_shadow_bake(room: RoomGiRoom) -> Option<Arc<RoomShadowBake>> 
 /// Required offline room shadow bake (`.msh`).
 pub fn require_room_shadow_bake(room: RoomGiRoom) -> anyhow::Result<Arc<RoomShadowBake>> {
     let path = room.shadow_asset_path();
-    let file = asset_path::get(path).ok_or_else(|| {
+    let file = asset_path::load_asset_bytes(path).ok_or_else(|| {
         anyhow::anyhow!(
             "missing room shadow bake at {path}; run `cargo build` \
              (needs mahjuro-bake --features bake in target/<profile>/)"
         )
     })?;
-    RoomShadowBake::decode_for_room(&file.data, room)
+    RoomShadowBake::decode_for_room(&file, room)
         .map(Arc::new)
         .map_err(|e| anyhow::anyhow!("{path}: {e:#}"))
 }

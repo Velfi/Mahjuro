@@ -250,7 +250,7 @@ pub(super) fn process_focus_and_actions(
         };
         if let Some(dir) = dir {
             // Moving focus abandons any in-progress hold-to-cash-in.
-            scene.cash_in_hold_started = None;
+            scene.clear_cash_in_hold(ctx.bus);
             // Seed focus on first directional press from None: prefer
             // the cursor's last hit, else the first hand tile in the
             // graph, else any first entry.
@@ -533,7 +533,7 @@ pub(super) fn process_focus_and_actions(
                 continue;
             }
             UiAction::ConfirmRelease => {
-                scene.cash_in_hold_started = None;
+                scene.clear_cash_in_hold(ctx.bus);
                 if let Some(from_idx) = scene.held_relic_drag.take()
                     && let Some(FocusTarget::Relic(to_idx)) = scene.focus
                 {
@@ -550,7 +550,7 @@ pub(super) fn process_focus_and_actions(
             UiAction::Cancel => {
                 scene.held_relic_drag = None;
                 scene.marquee = None;
-                scene.cash_in_hold_started = None;
+                scene.clear_cash_in_hold(ctx.bus);
                 scene.focus = default_hand_tile_focus(interaction.hand_len, &focus_rects);
                 actions_for_scene.push(a);
                 continue;
@@ -619,7 +619,7 @@ pub(super) fn process_focus_and_actions(
                 continue;
             }
             UiAction::TriggerStructureRelease => {
-                scene.cash_in_hold_started = None;
+                scene.clear_cash_in_hold(ctx.bus);
                 continue;
             }
             _ => {}
@@ -912,7 +912,7 @@ pub(super) fn process_focus_and_actions(
         if trigger_enabled
             && now.saturating_duration_since(start).as_secs_f32() >= super::cash_in_hold_seconds()
         {
-            scene.cash_in_hold_started = None;
+            scene.clear_cash_in_hold(ctx.bus);
             execute_cash_in(scene, ctx);
         }
     }

@@ -77,6 +77,7 @@ impl App {
         shell.window.show();
 
         crate::render::room_preload::start_main_menu_cpu_prefetch();
+        mahjuro_assets::asset_path::prefetch_rooms_pack_once();
 
         // Match [`draw::App::draw`]: HDR swapchain is only used when both the
         // options toggle and `EffectLayers::hdr` allow it. Baseline builds keep
@@ -111,6 +112,7 @@ impl App {
             // Shop is always first in the hub chain; start CPU decode early.
             renderer.prefetch_room_chain_next(RoomSceneChain::Shop);
             if self.run.is_in_progress() {
+                mahjuro_assets::asset_path::prefetch_gameplay_bulk_pack_once();
                 match self.resume_scene {
                     ResumeScene::Gameplay => {
                         renderer.prefetch_room_chain_next(RoomSceneChain::Hallway);

@@ -31,6 +31,7 @@ pub mod hallway_glb;
 pub mod kenney_atlas;
 pub mod kenney_svg;
 pub mod lit_mesh;
+pub mod loader_pool;
 #[cfg(feature = "windowed")]
 pub mod main_menu_effects_debug_overlay;
 pub mod main_menu_effects_tuning;

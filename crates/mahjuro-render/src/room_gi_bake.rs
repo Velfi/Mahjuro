@@ -268,11 +268,21 @@ fn load_room_gi_bake(room: RoomGiRoom) -> Option<Arc<RoomGiBake>> {
     if crate::offline_bakes::committed_offline_bakes_required() {
         return Some(require_room_gi_bake(room).unwrap_or_else(|e| panic!("{e:#}")));
     }
-    let file = asset_path::get(room.asset_path())?;
-    RoomGiBake::decode_for_room(&file.data, room)
+    let path = room.asset_path();
+    if let Some(mmap) = asset_path::get_mmap(path) {
+        return RoomGiBake::decode_for_room(&mmap, room)
+            .map(Arc::new)
+            .map_err(|e| {
+                log::warn!("{path}: {e:#}");
+                e
+            })
+            .ok();
+    }
+    let file = asset_path::load_asset_bytes(path)?;
+    RoomGiBake::decode_for_room(&file, room)
         .map(Arc::new)
         .map_err(|e| {
-            log::warn!("{}: {e:#}", room.asset_path());
+            log::warn!("{path}: {e:#}");
             e
         })
         .ok()
@@ -295,13 +305,13 @@ pub fn cached_room_gi_bake(room: RoomGiRoom) -> Option<Arc<RoomGiBake>> {
 /// Required offline room GI bake (`.mgi`).
 pub fn require_room_gi_bake(room: RoomGiRoom) -> anyhow::Result<Arc<RoomGiBake>> {
     let path = room.asset_path();
-    let file = asset_path::get(path).ok_or_else(|| {
+    let file = asset_path::load_asset_bytes(path).ok_or_else(|| {
         anyhow::anyhow!(
             "missing room GI bake at {path}; run `cargo build` \
              (needs mahjuro-bake --features bake in target/<profile>/)"
         )
     })?;
-    RoomGiBake::decode_for_room(&file.data, room)
+    RoomGiBake::decode_for_room(&file, room)
         .map(Arc::new)
         .map_err(|e| anyhow::anyhow!("{path}: {e:#}"))
 }

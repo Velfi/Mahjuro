@@ -250,6 +250,10 @@ pub fn release_archive_environment_cpu_sources_after_gpu_upload() {
     }
 }
 
+pub fn clear_archive_glb_cpu_cache() {
+    *ARCHIVE_GLB_CPU.write() = ArchiveGlbCache::Uninit;
+}
+
 #[inline]
 fn is_archive_spawn_item_name(name: &str) -> bool {
     name.starts_with("archive_spawn_item.")

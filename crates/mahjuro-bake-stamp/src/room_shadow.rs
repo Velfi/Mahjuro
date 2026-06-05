@@ -22,7 +22,7 @@ impl BakeKind for RoomShadow {
         "cargo build -p mahjuro-headless --bin mahjuro-bake --features bake";
     const REBAKE_CMD: &'static str = "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds shadow";
     const COMMIT_PATHS: &'static str =
-        "assets/data/room_shadow/*.msh assets/data/room_shadow/.inputs_stamp";
+        "assets/data/room_shadow/*.msh.zst assets/data/room_shadow/.inputs_stamp";
 
     fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
         rerun_if_changed_paths()
@@ -39,7 +39,8 @@ impl BakeKind for RoomShadow {
     }
 
     fn outputs_ok(repo: &Path) -> bool {
-        outputs_present(&repo.join(Self::OUT_DIR), ROOMS, "msh")
+        let dir = repo.join(Self::OUT_DIR);
+        outputs_present(&dir, ROOMS, "msh.zst") || outputs_present(&dir, ROOMS, "msh")
     }
 }
 

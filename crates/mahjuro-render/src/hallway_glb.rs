@@ -615,6 +615,10 @@ pub fn release_hallway_environment_cpu_sources_after_gpu_upload() {
     }
 }
 
+pub fn clear_hallway_glb_cpu_cache() {
+    *HALLWAY_GLB_CPU.write() = HallwayGlbCache::Uninit;
+}
+
 #[inline]
 fn is_hallway_marker_name(name: &str) -> bool {
     matches!(name, BTN_PLAY_ROUND | BTN_PLAY_BOSS | BTN_SKIP_ROUND)

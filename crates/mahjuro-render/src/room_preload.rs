@@ -4,9 +4,10 @@
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::thread::JoinHandle;
 
-use parking_lot::Mutex;
+use mahjuro_gfx_types::GraphicsMode;
+
+use crate::loader_pool;
 
 /// Next room in the run flow to decode on a worker thread.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -22,36 +23,54 @@ const PREFETCH_IDLE: u8 = 0;
 const PREFETCH_IN_FLIGHT: u8 = 1;
 const PREFETCH_DONE: u8 = 2;
 
+static PREFETCH_GRAPHICS_MODE: AtomicU8 = AtomicU8::new(0);
+
+const SLOT_MAIN_MENU: u8 = 0;
+const SLOT_SHOP: u8 = 1;
+const SLOT_ARCHIVE: u8 = 2;
+const SLOT_HALLWAY: u8 = 3;
+const SLOT_GAMEPLAY: u8 = 4;
+
+fn mark_prefetch_done(slot_id: u8) {
+    let slot = match slot_id {
+        SLOT_MAIN_MENU => &MAIN_MENU_PREFETCH,
+        SLOT_SHOP => &SHOP_PREFETCH,
+        SLOT_ARCHIVE => &ARCHIVE_PREFETCH,
+        SLOT_HALLWAY => &HALLWAY_PREFETCH,
+        SLOT_GAMEPLAY => &GAMEPLAY_PREFETCH,
+        _ => return,
+    };
+    slot.state.store(PREFETCH_DONE, Ordering::Release);
+}
+
 struct PrefetchSlot {
     state: AtomicU8,
-    thread: Mutex<Option<JoinHandle<()>>>,
-    /// Set while a worker is in flight so `join_blocking` can skip self-join (macOS EDEADLK).
-    worker_tid: Mutex<Option<std::thread::ThreadId>>,
+    id: u8,
 }
 
 impl PrefetchSlot {
-    const fn new() -> Self {
+    const fn new(id: u8) -> Self {
         Self {
             state: AtomicU8::new(PREFETCH_IDLE),
-            thread: Mutex::new(None),
-            worker_tid: Mutex::new(None),
+            id,
         }
     }
 
     fn try_start<F>(
         &self,
-        thread_name: &'static str,
         profile_room: &'static str,
         already_ready: bool,
+        priority_chain: bool,
         decode: F,
     ) where
         F: FnOnce() + Send + 'static,
     {
         if already_ready {
-            // Decode may have finished on a worker while state is still IN_FLIGHT — join it
-            // before marking DONE so we never orphan a live thread handle.
             self.try_drain();
             self.state.store(PREFETCH_DONE, Ordering::Release);
+            return;
+        }
+        if !cpu_prefetch_may_start() {
             return;
         }
         if self.state.load(Ordering::Acquire) != PREFETCH_IDLE {
@@ -69,124 +88,172 @@ impl PrefetchSlot {
         {
             return;
         }
-        let handle = std::thread::Builder::new()
-            .name(thread_name.into())
-            .spawn(move || {
-                let t0 = std::time::Instant::now();
-                decode();
-                if crate::room_gpu_profile::enabled() {
-                    crate::room_gpu_profile::record_cpu_decode(profile_room, t0.elapsed());
-                }
-                // Slot state is set to DONE after join in `try_drain`.
-            })
-            .unwrap_or_else(|e| panic!("failed to spawn {thread_name} prefetch thread: {e}"));
-        *self.worker_tid.lock() = Some(handle.thread().id());
-        *self.thread.lock() = Some(handle);
-        log::debug!("room preload: started {profile_room} CPU decode");
+        let slot_id = self.id;
+        let job = move || {
+            let t0 = std::time::Instant::now();
+            decode();
+            if crate::room_gpu_profile::enabled() {
+                crate::room_gpu_profile::record_cpu_decode(profile_room, t0.elapsed());
+            }
+            mark_prefetch_done(slot_id);
+        };
+        if priority_chain {
+            loader_pool::submit_chain_prefetch(job);
+        } else {
+            loader_pool::submit_room_decode(job);
+        }
+        log::debug!("room preload: queued {profile_room} CPU decode");
     }
 
     fn try_drain(&self) {
-        let mut guard = self.thread.lock();
-        let Some(handle) = guard.as_ref() else {
-            return;
-        };
-        if !handle.is_finished() {
-            return;
-        }
-        let handle = guard.take().expect("prefetch handle");
-        drop(guard);
-        if let Err(e) = handle.join() {
-            log::error!("room preload thread panicked: {e:?}");
-        }
-        *self.worker_tid.lock() = None;
-        self.state.store(PREFETCH_DONE, Ordering::Release);
+        let _ = self.state.load(Ordering::Acquire);
     }
 
     fn join_blocking(&self) {
-        if self
-            .worker_tid
-            .lock()
-            .is_some_and(|tid| tid == std::thread::current().id())
-        {
-            return;
-        }
-        self.try_drain();
-        if self.state.load(Ordering::Acquire) == PREFETCH_IN_FLIGHT {
-            let handle = self.thread.lock().take();
-            if let Some(handle) = handle
-                && let Err(e) = handle.join()
-            {
-                log::error!("room preload thread panicked: {e:?}");
-            }
-            *self.worker_tid.lock() = None;
-            self.state.store(PREFETCH_DONE, Ordering::Release);
+        while self.state.load(Ordering::Acquire) == PREFETCH_IN_FLIGHT {
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
 }
 
-static MAIN_MENU_PREFETCH: PrefetchSlot = PrefetchSlot::new();
-static SHOP_PREFETCH: PrefetchSlot = PrefetchSlot::new();
-static ARCHIVE_PREFETCH: PrefetchSlot = PrefetchSlot::new();
-static HALLWAY_PREFETCH: PrefetchSlot = PrefetchSlot::new();
-static GAMEPLAY_PREFETCH: PrefetchSlot = PrefetchSlot::new();
+static MAIN_MENU_PREFETCH: PrefetchSlot = PrefetchSlot::new(SLOT_MAIN_MENU);
+static SHOP_PREFETCH: PrefetchSlot = PrefetchSlot::new(SLOT_SHOP);
+static ARCHIVE_PREFETCH: PrefetchSlot = PrefetchSlot::new(SLOT_ARCHIVE);
+static HALLWAY_PREFETCH: PrefetchSlot = PrefetchSlot::new(SLOT_HALLWAY);
+static GAMEPLAY_PREFETCH: PrefetchSlot = PrefetchSlot::new(SLOT_GAMEPLAY);
 
 static GAMEPLAY_PREFETCH_LOGGED: OnceLock<()> = OnceLock::new();
 
-/// Start decoding `main_menu.glb` on a worker thread (idempotent).
+pub fn set_prefetch_graphics_mode(mode: GraphicsMode) {
+    let tag = match mode {
+        GraphicsMode::Performance => 1,
+        GraphicsMode::LowMemory => 2,
+        GraphicsMode::Visuals => 3,
+    };
+    PREFETCH_GRAPHICS_MODE.store(tag, Ordering::Relaxed);
+}
+
+fn prefetch_graphics_mode() -> GraphicsMode {
+    match PREFETCH_GRAPHICS_MODE.load(Ordering::Relaxed) {
+        1 => GraphicsMode::Performance,
+        2 => GraphicsMode::LowMemory,
+        _ => GraphicsMode::Visuals,
+    }
+}
+
+pub fn max_concurrent_cpu_room_decodes(mode: GraphicsMode) -> usize {
+    match mode {
+        GraphicsMode::LowMemory => 1,
+        GraphicsMode::Performance | GraphicsMode::Visuals => 2,
+    }
+}
+
+fn room_holds_unreleased_cpu_meshes(decoded: bool, ready_for_gpu: bool) -> bool {
+    decoded && ready_for_gpu
+}
+
+fn active_cpu_room_ram_residents() -> usize {
+    let mut n = 0usize;
+    if room_holds_unreleased_cpu_meshes(
+        crate::main_menu_glb::main_menu_cpu_decoded(),
+        crate::main_menu_glb::main_menu_cpu_ready_for_gpu_upload(),
+    ) {
+        n += 1;
+    }
+    if room_holds_unreleased_cpu_meshes(
+        crate::room_glb::shop_cpu_decoded(),
+        crate::room_glb::shop_cpu_ready_for_gpu_upload(),
+    ) {
+        n += 1;
+    }
+    if room_holds_unreleased_cpu_meshes(
+        crate::archive_glb::archive_cpu_decoded(),
+        crate::archive_glb::archive_cpu_ready_for_gpu_upload(),
+    ) {
+        n += 1;
+    }
+    if room_holds_unreleased_cpu_meshes(
+        crate::hallway_glb::hallway_cpu_decoded(),
+        crate::hallway_glb::hallway_cpu_ready_for_gpu_upload(),
+    ) {
+        n += 1;
+    }
+    if room_holds_unreleased_cpu_meshes(
+        crate::gameplay_glb::gameplay_cpu_decoded(),
+        crate::gameplay_glb::gameplay_cpu_ready_for_gpu_upload(),
+    ) {
+        n += 1;
+    }
+    for slot in [
+        &MAIN_MENU_PREFETCH,
+        &SHOP_PREFETCH,
+        &ARCHIVE_PREFETCH,
+        &HALLWAY_PREFETCH,
+        &GAMEPLAY_PREFETCH,
+    ] {
+        if slot.state.load(Ordering::Acquire) == PREFETCH_IN_FLIGHT {
+            n += 1;
+        }
+    }
+    n
+}
+
+fn cpu_prefetch_may_start() -> bool {
+    active_cpu_room_ram_residents()
+        < max_concurrent_cpu_room_decodes(prefetch_graphics_mode())
+}
+
 pub fn start_main_menu_cpu_prefetch() {
     MAIN_MENU_PREFETCH.try_start(
-        "mahjuro-main-menu-glb",
         "main_menu.glb",
         crate::main_menu_glb::main_menu_cpu_decoded(),
+        false,
         crate::main_menu_glb::decode_main_menu_glb_into_cache,
     );
 }
 
-/// Start decoding `shop.glb` on a worker thread (idempotent).
 pub fn start_shop_cpu_prefetch() {
     SHOP_PREFETCH.try_start(
-        "mahjuro-shop-glb",
         "shop.glb",
         crate::room_glb::shop_cpu_decoded(),
+        true,
         crate::room_glb::decode_shop_glb_into_cache,
     );
 }
 
-/// Start decoding `archive.glb` on a worker thread (idempotent).
 pub fn start_archive_cpu_prefetch() {
     ARCHIVE_PREFETCH.try_start(
-        "mahjuro-archive-glb",
         "archive.glb",
         crate::archive_glb::archive_cpu_decoded(),
+        true,
         crate::archive_glb::decode_archive_glb_into_cache,
     );
 }
 
-/// Hub chain: once `shop.glb` CPU decode is in cache, start `archive.glb` on a worker.
-/// GPU uploads stay in [`crate::wgpu_renderer::room_gpu_load`] per scene.
-pub fn advance_hub_cpu_prefetch_chain() {
+pub fn advance_hub_cpu_prefetch_chain(on_main_menu: bool) {
+    if on_main_menu && prefetch_graphics_mode() == GraphicsMode::LowMemory {
+        return;
+    }
     if !crate::room_glb::shop_cpu_decoded() {
         return;
     }
     start_archive_cpu_prefetch();
 }
 
-/// Start decoding `hallway.glb` on a worker thread (idempotent).
 pub fn start_hallway_cpu_prefetch() {
     HALLWAY_PREFETCH.try_start(
-        "mahjuro-hallway-glb",
         "hallway.glb",
         crate::hallway_glb::hallway_cpu_decoded(),
+        true,
         crate::hallway_glb::decode_hallway_glb_into_cache,
     );
 }
 
-/// Start decoding `gameplay.glb` on a worker thread (idempotent).
 pub fn start_gameplay_cpu_prefetch() {
     GAMEPLAY_PREFETCH.try_start(
-        "mahjuro-gameplay-glb",
         "gameplay.glb",
         crate::gameplay_glb::gameplay_cpu_decoded(),
+        true,
         || {
             crate::gameplay_glb::decode_gameplay_glb_into_cache();
             let state = crate::gameplay_glb::peek_gameplay_glb_load_state();
@@ -208,7 +275,6 @@ pub fn start_room_cpu_prefetch(scene: RoomSceneChain) {
     }
 }
 
-/// Join any finished prefetch workers without blocking on in-flight work.
 pub fn try_drain_room_cpu_prefetch_threads() {
     MAIN_MENU_PREFETCH.try_drain();
     SHOP_PREFETCH.try_drain();

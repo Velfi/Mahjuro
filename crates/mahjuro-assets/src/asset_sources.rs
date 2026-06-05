@@ -1,17 +1,19 @@
 //! Runtime asset loading: multi-pack ZIP (manifest), or a loose tree if `MAHJURO_ASSETS` is set.
 //!
-//! **Boot loading:** **`shared`** (`fonts/`, `textures/tile_sets/`, all `audio/` SFX) and
-//! **`gameplay`** packs are **eager** — opened and indexed during `PacksState::new` (before
-//! `WgpuRenderer::new` pulls the tree). **`audio/music/`** is **lazy** — that zip stays closed
-//! until first BGM play, or until [`prefetch_lazy_packs`] /
-//! [`prefetch_lazy_packs_after_menu_once`].
+//! **Boot loading:** **`shared`** is **eager**. **`rooms`** mounts at splash (3D GLBs + offline
+//! room bakes). **`gameplay_bulk`** mounts when entering shop / Continue-with-gameplay.
+//! **`audio/music/`** is **lazy** until first BGM play or [`prefetch_lazy_packs`].
 
+use lru::LruCache;
+use memmap2::Mmap;
 use serde::Deserialize;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::io::Read;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, Once, OnceLock, RwLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, Once, OnceLock, RwLock};
 
 const MANIFEST_NAME: &str = "pack_manifest.json";
 
@@ -69,6 +71,69 @@ enum AssetsState {
 }
 
 static STATE: OnceLock<AssetsState> = OnceLock::new();
+
+/// Byte-weighted LRU cache for pack / loose reads (`MAHJURO_ASSET_CACHE_MB`, default 128).
+struct AssetByteCache {
+    entries: Mutex<LruCache<String, Arc<[u8]>>>,
+    bytes: AtomicUsize,
+    cap_bytes: usize,
+}
+
+impl AssetByteCache {
+    fn new() -> Self {
+        let cap_mb = std::env::var("MAHJURO_ASSET_CACHE_MB")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(128);
+        Self {
+            entries: Mutex::new(LruCache::new(NonZeroUsize::new(4096).unwrap())),
+            bytes: AtomicUsize::new(0),
+            cap_bytes: cap_mb.saturating_mul(1024 * 1024),
+        }
+    }
+
+    fn get(&self, key: &str) -> Option<Arc<[u8]>> {
+        self.entries.lock().ok()?.get(key).cloned()
+    }
+
+    fn insert(&self, key: String, data: Vec<u8>) -> Arc<[u8]> {
+        let arc: Arc<[u8]> = Arc::from(data.into_boxed_slice());
+        let Some(mut map) = self.entries.lock().ok() else {
+            return arc;
+        };
+        let mut total = self.bytes.load(Ordering::Relaxed);
+        if let Some(prev) = map.put(key.clone(), arc.clone()) {
+            total = total.saturating_sub(prev.len());
+        }
+        total += arc.len();
+        while total > self.cap_bytes {
+            let Some((_, evicted)) = map.pop_lru() else {
+                break;
+            };
+            total = total.saturating_sub(evicted.len());
+        }
+        self.bytes.store(total, Ordering::Relaxed);
+        arc
+    }
+}
+
+static BYTE_CACHE: OnceLock<AssetByteCache> = OnceLock::new();
+
+fn byte_cache() -> &'static AssetByteCache {
+    BYTE_CACHE.get_or_init(AssetByteCache::new)
+}
+
+fn read_loose(root: &Path, path: &str) -> Option<Vec<u8>> {
+    std::fs::read(root.join(normalize_key(path))).ok()
+}
+
+fn read_through_cache(key: &str, load: impl FnOnce() -> Option<Vec<u8>>) -> Option<Arc<[u8]>> {
+    if let Some(hit) = byte_cache().get(key) {
+        return Some(hit);
+    }
+    let data = load()?;
+    Some(byte_cache().insert(key.to_string(), data))
+}
 
 pub(crate) fn normalize_key(path: &str) -> String {
     path.trim_start_matches("./")
@@ -321,6 +386,11 @@ impl PacksState {
 
     fn get(&self, path: &str) -> Option<Vec<u8>> {
         let lk = normalize_lookup_key(path);
+        read_through_cache(&lk, || self.read_uncached(path)).map(|b| b.to_vec())
+    }
+
+    fn read_uncached(&self, path: &str) -> Option<Vec<u8>> {
+        let lk = normalize_lookup_key(path);
         let resolved = {
             let idx = self.index.read().ok()?;
             idx.get(&lk).cloned()
@@ -339,6 +409,15 @@ impl PacksState {
         let mut guard = slot.archive.lock().ok()?;
         let arc = guard.as_mut()?;
         read_exact(arc, &entry_name)
+    }
+
+    fn mount_pack_id(&self, pack_id: &str) -> Result<(), String> {
+        let idx = self
+            .slots
+            .iter()
+            .position(|s| s.spec.id == pack_id)
+            .ok_or_else(|| format!("unknown pack id `{pack_id}`"))?;
+        self.ensure_mounted(idx)
     }
 
     fn index_len(&self) -> usize {
@@ -478,6 +557,41 @@ pub fn prefetch_lazy_packs() {
 }
 
 static PREFETCH_AFTER_MENU: Once = Once::new();
+static PREFETCH_ROOMS: Once = Once::new();
+static PREFETCH_GAMEPLAY_BULK: Once = Once::new();
+
+fn mount_pack_id(pack_id: &'static str) {
+    init();
+    let Some(state) = STATE.get() else {
+        return;
+    };
+    if let AssetsState::Packs(p) = state {
+        if let Err(e) = p.mount_pack_id(pack_id) {
+            log::warn!("asset pack mount `{pack_id}` failed: {e}");
+        } else {
+            log::info!("asset pack mounted: {pack_id}");
+        }
+    }
+}
+
+/// Mount the lazy **rooms** pack once (splash / early boot).
+pub fn prefetch_rooms_pack_once() {
+    PREFETCH_ROOMS.call_once(|| mount_pack_id("rooms"));
+}
+
+/// Mount the lazy **gameplay_bulk** pack once (shop enter / gameplay resume).
+pub fn prefetch_gameplay_bulk_pack_once() {
+    PREFETCH_GAMEPLAY_BULK.call_once(|| mount_pack_id("gameplay_bulk"));
+}
+
+/// Mount a named lazy pack once (used by the loader pool).
+pub fn mount_pack_once(pack_id: &'static str) {
+    match pack_id {
+        "rooms" => prefetch_rooms_pack_once(),
+        "gameplay_bulk" => prefetch_gameplay_bulk_pack_once(),
+        other => mount_pack_id(other),
+    }
+}
 
 /// Spawn a one-time background thread to mount lazy packs after the hub is reachable.
 pub fn prefetch_lazy_packs_after_menu_once() {
@@ -490,14 +604,35 @@ pub fn prefetch_lazy_packs_after_menu_once() {
     });
 }
 
-pub fn get(path: &str) -> Option<AssetFile> {
+/// Cached read — returns shared bytes (clone is cheap).
+pub fn get_cached(path: &str) -> Option<Arc<[u8]>> {
     init();
     let state = STATE.get()?;
+    let lk = normalize_lookup_key(path);
+    if let Some(hit) = byte_cache().get(&lk) {
+        return Some(hit);
+    }
     let data = match state {
-        AssetsState::Loose(root) => std::fs::read(root.join(normalize_key(path))).ok()?,
-        AssetsState::Packs(p) => p.get(path)?,
+        AssetsState::Loose(root) => read_loose(root, path)?,
+        AssetsState::Packs(p) => p.read_uncached(path)?,
     };
-    Some(AssetFile { data })
+    Some(byte_cache().insert(lk, data))
+}
+
+/// Memory-map a file from the loose asset tree only.
+pub fn get_mmap_loose(path: &str) -> Option<Mmap> {
+    init();
+    let AssetsState::Loose(root) = STATE.get()? else {
+        return None;
+    };
+    let file = File::open(root.join(normalize_key(path))).ok()?;
+    unsafe { Mmap::map(&file).ok() }
+}
+
+pub fn get(path: &str) -> Option<AssetFile> {
+    get_cached(path).map(|data| AssetFile {
+        data: data.to_vec(),
+    })
 }
 
 pub fn log_all_assets() {
