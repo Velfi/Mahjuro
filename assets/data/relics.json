@@ -15,7 +15,7 @@
   {
     "id": "sequence_surge",
     "name": "Sequence Surge",
-    "description": "Sequences score an additional +40 chips and +1.0 mult",
+    "description": "Sequences score an additional +50 chips and +1.25 mult",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -437,6 +437,32 @@
     ]
   },
   {
+    "id": "even_keel",
+    "name": "Even Keel",
+    "description": "Tiles ranked 4-6 score an additional +12 chips",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "Between the mud and the crest, the calm middle pays steady.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "plain_dealing",
+    "name": "Plain Dealing",
+    "description": "Simple tiles (rank 2-8) in melds score an additional +18 chips",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "No dragons, no winds, no fuss — just honest tiles and honest score.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
     "id": "merchants_eye",
     "name": "Merchant's Eye",
     "description": "25% discount on shop prices",
@@ -547,6 +573,32 @@
         "text": "The Tanuki",
         "bold": false,
         "italic": true
+      }
+    ]
+  },
+  {
+    "id": "open_gate",
+    "name": "Open Gate",
+    "description": "Structure is exclusively simple tiles (rank 2-8): +6 mult",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "The gate stands open to walkers whose tiles never stray from the middle road.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "chow_line",
+    "name": "Chow Line",
+    "description": "Cashing in a structure with 3+ sequences: +4 mult",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Three chows in a row — the table learns your rhythm and pays it back.",
+        "bold": false,
+        "italic": false
       }
     ]
   },

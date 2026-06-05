@@ -1,0 +1,23 @@
+Mahjuro Steam achievement icons
+
+Steamworks: 256×256 JPG recommended; unlocked = colorful, locked = grayscale.
+Upload {API_NAME}_256_unlocked.jpg and {API_NAME}_256_locked.jpg per achievement.
+Regenerate: python3 scripts/prepare_steam_achievement_icons.py
+
+API Name | Display name | Steam JPG (unlocked) | source
+-------- | ------------ | -------------------- | ------
+TUTORIAL_COMPLETE | Tutorial Graduate | TUTORIAL_COMPLETE_256_unlocked.jpg | assets/textures/relics/diligence_object.png
+FIRST_STRUCTURE | First Structure | FIRST_STRUCTURE_256_unlocked.jpg | assets/textures/relics/crown_of_patterns_object.png
+FIRST_BLIND_CLEARED | First Chamber | FIRST_BLIND_CLEARED_256_unlocked.jpg | assets/textures/skip_tags/processed/tag_treasure_chest.png
+FIRST_BOSS_DEFEATED | Ordeal Down | FIRST_BOSS_DEFEATED_256_unlocked.jpg | assets/textures/ordeal_icons/processed/ordeal_hermit.png
+FIRST_RUN_COMPLETED | Run Won | FIRST_RUN_COMPLETED_256_unlocked.jpg | assets/textures/relics/gold_idol_object.png
+TEN_RUNS_PLAYED | Dedicated | TEN_RUNS_PLAYED_256_unlocked.jpg | assets/textures/relics/curio_cabinet_object.png
+STAKE_2_UNLOCKED | Summer Unlocked | STAKE_2_UNLOCKED_256_unlocked.jpg | assets/textures/tile_sets/original/source_art/sunflower.png
+STAKE_3_UNLOCKED | Autumn Unlocked | STAKE_3_UNLOCKED_256_unlocked.jpg | assets/textures/tile_sets/original/source_art/autumn.png
+STAKE_4_UNLOCKED | Winter Unlocked | STAKE_4_UNLOCKED_256_unlocked.jpg | assets/textures/tile_sets/original/source_art/winter.png
+ALL_BOSSES_SEEN | Full Roster | ALL_BOSSES_SEEN_256_unlocked.jpg | assets/textures/ordeal_icons/atlas.png
+SILK_MOTH_EMERGED | Silk Moth | SILK_MOTH_EMERGED_256_unlocked.jpg | assets/textures/relics/silk_moth_object.png
+TAOTIE_AWAKENED | Taotie | TAOTIE_AWAKENED_256_unlocked.jpg | assets/textures/relics/taotie_object.png
+GEESE_TAKE_FLIGHT | Geese | GEESE_TAKE_FLIGHT_256_unlocked.jpg | assets/textures/relics/geese_object.png
+THIRTEEN_ORPHANS | Thirteen Orphans | THIRTEEN_ORPHANS_256_unlocked.jpg | assets/textures/zodiacs/zodiac_qilin.png
+HOUSE_DEFEATED | Beat the House | HOUSE_DEFEATED_256_unlocked.jpg | assets/textures/ordeal_icons/processed/ordeal_house.png

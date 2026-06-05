@@ -100,8 +100,8 @@ fn sequence_surge_adds_chips_to_sequence() {
     }];
     let r = relics(vec![RelicId::SequenceSurge]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 46);
-    assert_eq!(breakdown.final_mult, 2.0);
+    assert_eq!(breakdown.final_chips, 56);
+    assert_eq!(breakdown.final_mult, 2.25);
 }
 
 #[test]
@@ -289,6 +289,93 @@ fn honor_fury_adds_chips_per_honor_tile() {
     let r = relics(vec![RelicId::HonorFury]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
     assert_eq!(breakdown.final_chips, 171);
+}
+
+#[test]
+fn plain_dealing_adds_chips_per_simple_tile() {
+    let hand = vec![
+        Tile::new(Suit::Pinzu, 5, 0),
+        Tile::new(Suit::Pinzu, 5, 1),
+        Tile::new(Suit::Pinzu, 5, 2),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let r = relics(vec![RelicId::PlainDealing]);
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+    assert_eq!(breakdown.final_chips, 69);
+    assert!(breakdown.steps.iter().any(|s| s.source == "Plain Dealing"));
+}
+
+#[test]
+fn even_keel_adds_chips_for_middle_ranks() {
+    let hand = vec![
+        Tile::new(Suit::Souzu, 5, 0),
+        Tile::new(Suit::Souzu, 5, 1),
+        Tile::new(Suit::Souzu, 5, 2),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let r = relics(vec![RelicId::EvenKeel]);
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+    assert_eq!(breakdown.final_chips, 51);
+    assert!(breakdown.steps.iter().any(|s| s.source == "Even Keel"));
+}
+
+#[test]
+fn chow_line_mults_three_sequences() {
+    let hand = vec![
+        Tile::new(Suit::Manzu, 1, 0),
+        Tile::new(Suit::Manzu, 2, 1),
+        Tile::new(Suit::Manzu, 3, 2),
+        Tile::new(Suit::Souzu, 3, 3),
+        Tile::new(Suit::Souzu, 4, 4),
+        Tile::new(Suit::Souzu, 5, 5),
+        Tile::new(Suit::Pinzu, 6, 6),
+        Tile::new(Suit::Pinzu, 7, 7),
+        Tile::new(Suit::Pinzu, 8, 8),
+    ];
+    let sets = vec![
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
+            tile_ids: vec![0, 1, 2],
+        },
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
+            tile_ids: vec![3, 4, 5],
+        },
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
+            tile_ids: vec![6, 7, 8],
+        },
+    ];
+    let r = relics(vec![RelicId::ChowLine]);
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+    assert_eq!(breakdown.final_mult, 5.0);
+    assert!(breakdown.steps.iter().any(|s| s.source == "Chow Line"));
+}
+
+#[test]
+fn open_gate_mults_all_simple_structure() {
+    let hand = vec![
+        Tile::new(Suit::Manzu, 2, 0),
+        Tile::new(Suit::Manzu, 3, 1),
+        Tile::new(Suit::Manzu, 4, 2),
+        Tile::new(Suit::Souzu, 5, 3),
+        Tile::new(Suit::Souzu, 5, 4),
+    ];
+    let sets = vec![
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
+            tile_ids: vec![0, 1, 2],
+        },
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Pair,
+            tile_ids: vec![3, 4],
+        },
+    ];
+    let r = relics(vec![RelicId::OpenGate]);
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+    assert_eq!(breakdown.final_mult, 9.0);
+    assert!(breakdown.steps.iter().any(|s| s.source == "Open Gate"));
+    assert!(breakdown.steps.iter().any(|s| s.source == "Tanyao"));
 }
 
 #[test]

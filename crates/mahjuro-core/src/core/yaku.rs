@@ -142,7 +142,7 @@ impl YakuKind {
 
     fn base_mult_bonus(self) -> f64 {
         match self {
-            YakuKind::Tanyao => 1.5,
+            YakuKind::Tanyao => 2.0,
             YakuKind::Yakuhai => 2.0,
             YakuKind::Toitoi => 2.5,
             YakuKind::Chanta => 3.5,
@@ -158,7 +158,7 @@ impl YakuKind {
 
     fn base_chip_bonus(self) -> i32 {
         match self {
-            YakuKind::Tanyao => 60,
+            YakuKind::Tanyao => 75,
             YakuKind::Yakuhai => 75,
             YakuKind::Toitoi => 75,
             YakuKind::Pinfu => 85,
@@ -1550,7 +1550,7 @@ mod tests {
     #[test]
     fn mult_bonus_values() {
         assert_eq!(YakuKind::Toitoi.mult_bonus(), 2.5);
-        assert_eq!(YakuKind::Tanyao.mult_bonus(), 1.5);
+        assert_eq!(YakuKind::Tanyao.mult_bonus(), 2.0);
         assert_eq!(YakuKind::FullHand.mult_bonus(), 5.0);
         assert_eq!(YakuKind::Chinitsu.mult_bonus(), 5.5);
     }

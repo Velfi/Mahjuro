@@ -1,5 +1,5 @@
 [
-  { "id": "tanyao",          "name": "Tanyao",       "mult_bonus": 1.5, "chip_bonus": 60 },
+  { "id": "tanyao",          "name": "Tanyao",       "mult_bonus": 2.0, "chip_bonus": 75 },
   { "id": "toitoi",          "name": "Toitoi",       "mult_bonus": 2.5, "chip_bonus": 75 },
   { "id": "full_hand",       "name": "Full Hand",    "mult_bonus": 5.0, "chip_bonus": 90 },
   { "id": "yakuhai",         "name": "Yakuhai",      "mult_bonus": 2.0, "chip_bonus": 75 },

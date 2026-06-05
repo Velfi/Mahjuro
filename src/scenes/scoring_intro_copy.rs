@@ -14,7 +14,7 @@ pub const SECTION_YAKU: &str = "YAKU";
 pub const YAKU_INTRO: &str = "Yaku are bonus patterns made from melds. When you Cash In, each yaku your structure matches adds chips and mult.";
 pub const YAKU_TABLE_HEADER: (&str, &str, &str) = ("Yaku", "+Mult", "+Chips");
 pub const YAKU_TABLE_ROWS: &[(&str, &str, &str)] = &[
-    ("Tanyao", "2.0", "30"),
+    ("Tanyao", "2.0", "75"),
     ("Toitoi", "3.0", "42"),
     ("Yakuhai", "3.0", "40"),
 ];

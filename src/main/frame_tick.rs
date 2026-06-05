@@ -265,10 +265,9 @@ impl App {
                         .entry(bk)
                         .or_insert(0) += 1;
                     self.mark_profile_dirty();
-                    // "All bosses seen" — the regular (non-final)
-                    // pool is the breadth-of-content signal we want.
-                    // Beating Dragon is implied by `FirstRunCompleted`,
-                    // so we don't gate this on it.
+                    // Full Roster — non-final ordeals only. Final-tier
+                    // Dragon/House are excluded; beating either is covered
+                    // by `FirstRunCompleted` / `HouseDefeated`.
                     let pool = crate::core::ordeal::regular_pool();
                     if pool
                         .iter()
@@ -279,14 +278,16 @@ impl App {
                     }
                 }
                 GameEvent::OrdealDefeated(bk) => {
-                    self.audio.play_sfx(audio::SfxId::OrdealDefeated);
-                    *self.progress.ordeal_times_defeated.entry(bk).or_insert(0) += 1;
-                    self.mark_profile_dirty();
-                    self.steam
-                        .unlock_achievement(crate::steam::Achievement::FirstOrdealDefeated);
-                    if bk == crate::core::ordeal::OrdealKind::House {
+                    if !self.run.onboarding_active() {
+                        self.audio.play_sfx(audio::SfxId::OrdealDefeated);
+                        *self.progress.ordeal_times_defeated.entry(bk).or_insert(0) += 1;
+                        self.mark_profile_dirty();
                         self.steam
-                            .unlock_achievement(crate::steam::Achievement::HouseDefeated);
+                            .unlock_achievement(crate::steam::Achievement::FirstOrdealDefeated);
+                        if bk == crate::core::ordeal::OrdealKind::House {
+                            self.steam
+                                .unlock_achievement(crate::steam::Achievement::HouseDefeated);
+                        }
                     }
                 }
                 GameEvent::TalismanPurchased(tk) => {
@@ -1258,6 +1259,8 @@ impl App {
         if complete_onboarding {
             self.progress.tutorial_completed = true;
             self.mark_profile_dirty();
+            self.steam
+                .unlock_achievement(crate::steam::Achievement::TutorialComplete);
         }
 
         // Sync live audio/graphics settings whenever the player has

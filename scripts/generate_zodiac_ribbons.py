@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-Generate single-image silk ribbon textures for the 16 zodiac consumable
-cards in Mahjuro using Google's Nano Banana 2 (`gemini-3.1-flash-image-
-preview`) API (Mouse + the 12 standard animals + Qilin, Phoenix, Crane).
+Generate single-image washi-paper ribbon textures for the 16 zodiac
+consumable cards in Mahjuro using Google's Nano Banana 2
+(`gemini-3.1-flash-image-preview`) API (the 12 standard animals
++ Mouse, Qilin, Phoenix, Crane).
 
-Each zodiac is one tall portrait image rather than a 3-piece tile set.
 The 3D ribbon mesh maps the texture full-bleed across its length, so the
 visible finial and animal proportions are baked into the image itself.
 
     zodiac_<slug>.png        — full ribbon portrait, default 1:4@2K
 
 Nano Banana 2 supports a 1:4 aspect ratio (the closest to the original
-1:3 layout); the prompt describes a finial band plus embroidered animal
-on plain silk, mapped full-bleed.
+1:3 layout); the prompt describes a finial band plus hair-embroidered
+animal on plain colored washi, mapped full-bleed.
 
-Style direction: full-bleed game texture of a silk ribbon — only the
-ribbon surface appears in frame, with realistic traditional Chinese
-court embroidery (Suzhou satin stitch, couched gold thread).
+Style direction: full-bleed game texture of a plain colored washi-paper
+ribbon — only the ribbon surface appears in frame, with fine traditional
+Chinese hair embroidery (发绣 faxiu).
 
 Usage:
     pip install google-genai pillow
@@ -52,37 +52,38 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent / "assets" / "textures" / "z
 # Shared layout and embroidery craft for every zodiac. The renderer maps
 # this full-bleed onto a tall ribbon mesh as a game texture.
 STYLE_BASE = (
-    "Video-game texture map for a tall portrait silk ribbon (~1:3). The "
-    "entire image is the ribbon surface alone — every pixel is dyed silk "
-    "or embroidery on silk, mapped full-bleed edge to edge. The banner is "
-    "a solid silk rectangle with straight cut edges; all decoration is "
-    "flat stitchwork on that surface.\n\n"
-    "Embroidery: realistic traditional Chinese court needlework in the "
-    "Suzhou tradition — hand-stitched on silk with visible thread "
-    "strands and slight relief. Padded satin stitch raises the figures; "
-    "long-and-short stitch follows anatomy and feather or fur direction; "
-    "split-stitch outlines define edges; couched Japanese gold thread "
-    "supplies metallic highlights; dense stitch areas gently pucker the "
-    "silk ground. Straight-on surface detail with soft raking daylight "
-    "from upper-left so gold reads as metal and individual stitches "
-    "throw fine shadows.\n\n"
-    "Layout (top → bottom):\n"
-    "Top ~15%: goldwork rosette finial stitched flat into the silk, "
-    "starting at the top cut edge of the banner.\n"
-    "Below: broad dyed silk ground with one embroidered animal as the "
-    "centerpiece, plain silk continuing to the bottom cut edge.\n\n"
-    "Purely pictorial decoration on silk."
+    "UV texture map for a tall portrait washi-paper ribbon (~1:4) — not a "
+    "photograph of a ribbon on a background. The image IS the flat ribbon "
+    "surface: colored washi paper must fill every pixel from edge to edge. "
+    "No white border, no margin, no empty canvas, no deckled-edge halo, no "
+    "centered ribbon inset on a larger field. The left, right, top, and "
+    "bottom image borders are the ribbon's straight cut sides.\n\n"
+    "Plain dyed washi with visible fiber texture; traditional Chinese hair "
+    "embroidery (发绣 faxiu) in glossy human-hair thread — hand-stitched "
+    "needlework on washi, NOT a photograph, NOT digital painting, NOT "
+    "photorealistic fur or feathers. Visible parallel hair-thread rows with "
+    "slight relief; long-and-short stitch follows fur or feather direction; "
+    "split-stitch outlines edges; flat color regions filled by dense thread "
+    "(no airbrush gradients, no depth-of-field, no glossy wet eyes). Soft "
+    "raking daylight from upper-left so individual stitches throw fine "
+    "shadows.\n\n"
+    "Layout: small embroidered rosette finial at the top cut edge; one "
+    "embroidered animal below on plain washi to the bottom cut edge."
 )
 
 
-# ---------------------------------------------------------------------------
-# Zodiac definitions
-# ---------------------------------------------------------------------------
+STYLE_REF_SUFFIX = (
+    "\n\nStyle reference: match the visible hair-thread stitch craft, "
+    "relief, and folk-art pictorial quality of the attached reference "
+    "ribbon — NOT the reference animal subject."
+)
 
-# Each tuple: (slug, display_name, animal_visual, silk_palette).
+
+
+# Each tuple: (slug, display_name, animal_visual, ribbon_color, hair_threads).
 # Order MUST match ZodiacKind::all() in src/core/zodiac.rs (calendar order:
-# Mouse … Pig, then Qilin, Phoenix, Crane — 16 total). Silk colors are
-# creature-appropriate.
+# Mouse … Pig, then Qilin, Phoenix, Crane — 16 total). Every zodiac gets a
+# unique washi ribbon color and a distinct hair-thread palette.
 ZODIACS = [
     (
         "mouse",
@@ -90,8 +91,9 @@ ZODIACS = [
         "Small field mouse in three-quarter view, seated on haunches with "
         "forepaws together, oversized rounded ears, slim curved tail, "
         "delicate miniature scale occupying the middle third of the panel "
-        "with open silk above and below.",
-        "Warm dusty-grey silk (#b0a89e) with gold embroidery.",
+        "with open washi above and below.",
+        "Warm dusty-grey washi paper (#b0a89e).",
+        "Mouse embroidered in soft grey-brown and charcoal human hair.",
     ),
     (
         "rat",
@@ -99,28 +101,33 @@ ZODIACS = [
         "Heavy stocky rat in strict profile on all fours, arched back, "
         "blunt muzzle, long thick rope-like tail, dominant figure filling "
         "most of the panel width.",
-        "Dark charcoal silk (#4a4a50) with gold embroidery.",
+        "Dark charcoal washi paper (#4a4a50).",
+        "Rat embroidered in glossy black and deep brown human hair.",
     ),
     (
         "ox",
         "Ox",
         "Broad-shouldered ox in formal three-quarter pose, head lowered, "
         "thick curved horns, heavy dewlap, patterned yoke across the neck.",
-        "Deep earthen-brown silk (#7a5c3a) with gold embroidery.",
+        "Deep earthen-brown washi paper (#7a5c3a).",
+        "Ox embroidered in dark umber and warm chestnut human hair.",
     ),
     (
         "tiger",
         "Tiger",
         "Tiger in a crouched stalking pose, body low and elongated, head "
-        "forward, long tail curving up behind, bold gold stripes.",
-        "Burnt-orange silk (#d4792a) with gold embroidery.",
+        "forward, long tail curving up behind, bold dark stripes over a "
+        "lighter tawny coat.",
+        "Burnt-orange washi paper (#d4792a).",
+        "Tiger embroidered in black-stripe and golden-tawny human hair.",
     ),
     (
         "rabbit",
         "Rabbit",
         "Rabbit seated upright in profile, long erect ears, forepaws tucked "
-        "at the chest, small couched-gold crescent moon above the head.",
-        "Soft white silk (#f0ece4) with gold embroidery.",
+        "at the chest, small pale crescent moon above the head.",
+        "Soft ivory washi paper (#f0ece4).",
+        "Rabbit embroidered in warm brown and soft grey human hair.",
     ),
     (
         "dragon",
@@ -128,8 +135,10 @@ ZODIACS = [
         "Four-clawed Chinese dragon in a vertical S-curve, head turned "
         "three-quarter forward, open mouth with forked tongue, swept-back "
         "horns, mane along the spine, auspicious cloud curl at the tail, "
-        "elaborate individual scales in goldwork.",
-        "Imperial crimson silk (#b5262e) with gold embroidery.",
+        "elaborate individual scales in fine hair stitch.",
+        "Imperial crimson washi paper (#b5262e).",
+        "Dragon embroidered in jet black, deep auburn, and bronze-brown "
+        "human hair.",
     ),
     (
         "snake",
@@ -137,58 +146,84 @@ ZODIACS = [
         "Snake coiled twice into a tall vertical spiral, head rising at "
         "the top with tongue flicked out, diamond-scale lattice along the "
         "body.",
-        "Deep jade-green silk (#2e7d4f) with gold embroidery.",
+        "Deep jade-green washi paper (#2e7d4f).",
+        "Snake embroidered in black, olive-brown, and pale grey-green "
+        "human hair.",
     ),
     (
         "horse",
         "Horse",
-        "Horse in mid-gallop, strict profile, all four legs lifted in the "
-        "traditional flying-gallop pose, mane and tail streaming behind, "
-        "couched-gold harness and bridle.",
-        "Rich chestnut silk (#8b4513) with gold embroidery.",
+        "Horse rearing rampant in strict profile for a tall vertical ribbon — "
+        "front legs lifted high, hind legs planted, neck arched upward, mane "
+        "and tail streaming vertically; simple hair-stitched harness and "
+        "bridle. Dominant figure spanning most of the panel height from just "
+        "below the finial to the lower washi edge, filling the narrow width.",
+        "Rich chestnut washi paper (#8b4513).",
+        "Horse embroidered in black mane, dark brown body, and warm "
+        "mahogany human hair.",
     ),
     (
         "goat",
         "Goat",
-        "Long-haired ram standing in profile, heavy spiral-curled horns, "
-        "tufted beard, small ling-zhi sprig beside the body.",
-        "Creamy wool-white silk (#ede5d0) with gold embroidery.",
+        "Mountain goat climbing a steep rocky ledge in strict profile — "
+        "compact stocky body, short pale coat, backward-curving black horns, "
+        "small beard, sure-footed on jagged stone; natural caprine proportions "
+        "(not llama-like). Enlarged dominant figure spanning most of the panel "
+        "height from just below the finial to the lower washi edge.",
+        "Creamy wool-white washi paper (#ede5d0).",
+        "Mountain goat embroidered in pale cream fleece, black horns and "
+        "hooves, and warm grey-brown rock human hair.",
     ),
     (
         "monkey",
         "Monkey",
         "Monkey crouched seated, one hand raised holding a small round "
         "peach, long tail curving behind the body.",
-        "Warm tawny-gold silk (#c8a04a) with gold embroidery.",
+        "Warm tawny-gold washi paper (#c8a04a).",
+        "Monkey embroidered in chocolate brown, russet, and black human "
+        "hair.",
     ),
     (
         "rooster",
         "Rooster",
         "Standing rooster in profile, chest forward, tall serrated comb "
         "and wattle, long arching tail of layered sickle feathers.",
-        "Scarlet-red silk (#c23028) with gold embroidery.",
+        "Scarlet-red washi paper (#c23028).",
+        "Rooster embroidered in glossy black tail, warm brown body, and "
+        "deep red-brown comb human hair.",
     ),
     (
         "dog",
         "Dog",
-        "Dog seated upright in three-quarter view, one ear erect and one "
-        "folded, thin collar with a small spherical bell at the throat.",
-        "Warm sandy-tan silk (#c4a672) with gold embroidery.",
+        "Folk-art dog seated upright in three-quarter view, one ear "
+        "erect and one folded, thin cord collar with a small bell — stylized "
+        "silhouette built from visible faxiu hair-thread rows and "
+        "split-stitch outlines, long-and-short stitch bands for the coat "
+        "(no photographic fur, no breed-portrait realism, no wet-nose shine, "
+        "matte split-stitch eyes). Modest figure occupying the lower half of "
+        "the panel with open washi above.",
+        "Warm sandy-tan washi paper (#c4a672).",
+        "Dog embroidered in dark brown, black, and warm tan human hair only.",
     ),
     (
         "pig",
         "Pig",
         "Pig in strict profile, rounded broad body, short legs, upturned "
         "snout, floppy ears, curled tail.",
-        "Rosy pink silk (#e8a0b4) with gold embroidery.",
+        "Rosy pink washi paper (#e8a0b4).",
+        "Pig embroidered in deep brown outline and warm pink-brown human "
+        "hair.",
     ),
     (
         "qilin",
         "Qilin",
         "Qilin in formal three-quarter pose: cloven deer legs, dragon-scaled "
         "flanks, flowing leonine mane and tufted tail, paired antlers, "
-        "small auspicious cloud curls around the body, elaborate goldwork.",
-        "Deep twilight-violet silk (#3a2f55) with gold embroidery.",
+        "small auspicious cloud curls around the body, fine hair-stitched "
+        "scale detail.",
+        "Deep twilight-violet washi paper (#3a2f55).",
+        "Qilin embroidered in silver-grey, black, and pale lavender human "
+        "hair.",
     ),
     (
         "phoenix",
@@ -196,14 +231,18 @@ ZODIACS = [
         "Fenghuang in a rising pose, elongated crest and neck, wings "
         "half-spread, long tail feathers fanning downward in layered arcs, "
         "small flaming pearl motif near the breast.",
-        "Crimson-gold silk (#c45a2a) with gold embroidery.",
+        "Crimson-gold washi paper (#c45a2a).",
+        "Phoenix embroidered in black, vermilion-red, and golden-brown "
+        "human hair.",
     ),
     (
         "crane",
         "Crane",
         "Red-crowned crane standing on one leg in profile, neck curved "
-        "in an S, wings folded, red crown patch, gold legs and beak.",
-        "Pale sky-blue silk (#a8c8e0) with gold embroidery.",
+        "in an S, wings folded, red crown patch, dark legs and beak.",
+        "Pale sky-blue washi paper (#a8c8e0).",
+        "Crane embroidered in white body, black wing tips, and vermilion "
+        "crown human hair.",
     ),
 ]
 
@@ -212,12 +251,13 @@ ZODIACS = [
 # Prompt building
 # ---------------------------------------------------------------------------
 
-def build_prompt(visual: str, palette: str) -> str:
+def build_prompt(visual: str, ribbon_color: str, hair_threads: str) -> str:
     return "\n\n".join(
         [
             STYLE_BASE,
+            f"Ribbon color (plain washi ground, edge to edge): {ribbon_color}",
+            f"Hair embroidery threads: {hair_threads}",
             f"Embroidered subject: {visual}",
-            f"Silk ground: {palette}",
         ]
     )
 
@@ -227,16 +267,27 @@ def build_prompt(visual: str, palette: str) -> str:
 # ---------------------------------------------------------------------------
 
 def generate_image(
-    client, prompt: str, output_path: Path, model: str, size: str
+    client,
+    prompt: str,
+    output_path: Path,
+    model: str,
+    size: str,
+    style_ref: Path | None = None,
 ) -> None:
     """Call Gemini Nano Banana 2 and save the resulting PNG."""
     aspect_ratio, image_size = parse_size(size)
+    refs: list[Path] = []
+    full_prompt = prompt
+    if style_ref is not None:
+        refs = [style_ref]
+        full_prompt = prompt + STYLE_REF_SUFFIX
     img_bytes = generate_image_bytes(
         client,
-        prompt,
+        full_prompt,
         model=model,
         aspect_ratio=aspect_ratio,
         image_size=image_size,
+        refs=refs,
     )
     output_path.write_bytes(img_bytes)
     print(f"  Saved: {output_path}")
@@ -297,6 +348,12 @@ def main() -> None:
         help=f"Output directory (default: {OUTPUT_DIR}).",
     )
     parser.add_argument(
+        "--style-ref",
+        type=str,
+        default=None,
+        help="Optional reference ribbon PNG whose embroidery craft to match.",
+    )
+    parser.add_argument(
         "--delay",
         type=float,
         default=2.0,
@@ -305,12 +362,16 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.list:
-        for i, (slug, name, _, _) in enumerate(ZODIACS, 1):
-            print(f"  {i:2d}. {name:<10s}  zodiac_{slug}.png")
+        for i, (slug, name, _, ribbon_color, _) in enumerate(ZODIACS, 1):
+            print(f"  {i:2d}. {name:<10s}  zodiac_{slug}.png  {ribbon_color}")
         return
 
     out_dir = Path(args.output_dir) if args.output_dir else OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
+    style_ref = Path(args.style_ref) if args.style_ref else None
+    if style_ref is not None and not style_ref.is_file():
+        print(f"Error: style reference not found: {style_ref}")
+        sys.exit(1)
 
     if args.zodiac is not None and args.name is not None:
         print("Error: pass --zodiac OR --name, not both.")
@@ -341,9 +402,11 @@ def main() -> None:
     failed = 0
     total_jobs = len(targets)
 
-    for job, (_idx, (slug, name, visual, palette)) in enumerate(targets, 1):
+    for job, (_idx, (slug, name, visual, ribbon_color, hair_threads)) in enumerate(
+        targets, 1
+    ):
         output_path = out_dir / f"zodiac_{slug}.png"
-        prompt = build_prompt(visual, palette)
+        prompt = build_prompt(visual, ribbon_color, hair_threads)
 
         print(f"\n[{job}/{total_jobs}] {name}")
 
@@ -362,7 +425,9 @@ def main() -> None:
 
         try:
             assert client is not None
-            generate_image(client, prompt, output_path, args.model, args.size)
+            generate_image(
+                client, prompt, output_path, args.model, args.size, style_ref
+            )
             generated += 1
         except Exception as e:
             print(f"  Error generating {name}: {e}")

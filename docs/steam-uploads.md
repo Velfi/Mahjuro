@@ -169,21 +169,32 @@ Current set (designed as a funnel — completion rates double as a
 retention dashboard). Enter **API Name**, **Display Name**, and
 **Description** in Steamworks; icons are separate (locked / unlocked).
 
+**Icons:** Steamworks recommends **256×256 JPG** (64×64 minimum). Unlocked
+icons should be colorful; locked icons grayscale. Pre-built files live in
+[`assets/steam_assets/achievements/`](../assets/steam_assets/achievements/)
+(`{API_NAME}_256_unlocked.jpg` / `{API_NAME}_256_locked.jpg`). Regenerate
+from in-game art with `python3 scripts/prepare_steam_achievement_icons.py`.
+
+After configuring achievements, enable **Achievements** under Supported
+Features on the store page (release checklist).
+
 | API Name | Display name | Description | Game trigger (not shown in Steam) |
 | -------- | ------------ | ----------- | ----------------------------------- |
-| `TUTORIAL_COMPLETE` | Tutorial Graduate | Complete the tutorial. | Tutorial finished |
-| `FIRST_STRUCTURE` | First Structure | Score your first structure. | First scoring structure resolved |
-| `FIRST_BLIND_CLEARED` | First Blind | Clear your first blind. | First non-tutorial round cleared |
-| `FIRST_BOSS_DEFEATED` | Boss Down | Defeat your first boss blind. | First boss blind beaten |
+| `TUTORIAL_COMPLETE` | Tutorial Graduate | Complete or skip the tutorial. | Tutorial finale cleared or Skip Tutorial |
+| `FIRST_STRUCTURE` | First Structure | Score your first structure. | First scoring cascade finishes |
+| `FIRST_BLIND_CLEARED` | First Chamber | Clear your first chamber. | First non-tutorial chamber cleared |
+| `FIRST_BOSS_DEFEATED` | Ordeal Down | Defeat your first ordeal. | First ordeal chamber beaten (not tutorial) |
 | `FIRST_RUN_COMPLETED` | Run Won | Win a full run. | First full-run victory |
-| `TEN_RUNS_PLAYED` | Dedicated | Complete 10 runs. | `runs_completed` reaches 10 |
-| `STAKE_2_UNLOCKED` | Summer Unlocked | Unlock the Summer season. | Summer season unlocked |
-| `ALL_BOSSES_SEEN` | Full Roster | Encounter every non-final boss blind at least once. | All non-final bosses seen |
-| `SILK_MOTH_EMERGED` | Silk Moth | Carry Silk Thread through to Silk Moth. | Silk Thread → Silk Moth |
-| `TAOTIE_AWAKENED` | Taotie | Carry Melting Ice through to Taotie. | Melting Ice → Taotie |
-| `GEESE_TAKE_FLIGHT` | Geese | Carry XXXL Egg through to Geese. | XXXL Egg → Geese |
-| `THIRTEEN_ORPHANS` | Thirteen Orphans | Score Kokushi Musō (thirteen orphans). | Kokushi Musō scored |
-| `HOUSE_DEFEATED` | Beat the House | Defeat The House on the final boss blind. | Final boss **The House** cleared |
+| `TEN_RUNS_PLAYED` | Dedicated | Finish 10 runs. | `runs_completed` reaches 10 (win or loss) |
+| `STAKE_2_UNLOCKED` | Summer Unlocked | Unlock the Summer season. | Summer unlocked on a tile material (legacy API name — keep as-is) |
+| `STAKE_3_UNLOCKED` | Autumn Unlocked | Unlock the Autumn season. | Autumn unlocked on a tile material |
+| `STAKE_4_UNLOCKED` | Winter Unlocked | Unlock the Winter season. | Winter unlocked on a tile material |
+| `ALL_BOSSES_SEEN` | Full Roster | Face every non-final ordeal at least once. | Play (not Skip) into all 22 regular ordeals |
+| `SILK_MOTH_EMERGED` | Silk Moth | Carry Silk Thread through to Silk Moth. | Silk Thread burns into Silk Moth |
+| `TAOTIE_AWAKENED` | Taotie | Carry Melting Ice through to Taotie. | Melting Ice burns into Taotie |
+| `GEESE_TAKE_FLIGHT` | Geese | Carry XXXL Egg through to Geese. | XXXL Egg burns into Geese |
+| `THIRTEEN_ORPHANS` | Thirteen Orphans | Score Kokushi Musō. | Kokushi Musō scored on a cash-in |
+| `HOUSE_DEFEATED` | Beat the House | Defeat The House. | The House cleared on the final wing |
 
 When adding an achievement, add the variant + API Name in code, configure
 the matching achievement in the partner backend, and wire the trigger

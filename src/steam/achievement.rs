@@ -11,22 +11,26 @@
 /// the Steam achievement page act as a free retention dashboard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Achievement {
-    /// Finished the tutorial. Confirms onboarding actually completes.
+    /// Finished or skipped the tutorial. Confirms onboarding is done.
     TutorialComplete,
     /// Scored their first structure. The earliest signal that the core
     /// scoring loop "clicked" for the player.
     FirstStructure,
-    /// Beat round 1. Confirms one full round of the loop.
+    /// Cleared their first chamber after the tutorial.
     FirstBlindCleared,
-    /// Beat their first boss blind. First real difficulty checkpoint.
+    /// Defeated their first ordeal. First real difficulty checkpoint.
     FirstOrdealDefeated,
     /// Won a full run for the first time.
     FirstRunCompleted,
-    /// Started 10 distinct runs. Retention signal.
+    /// Finished 10 runs (victory or defeat). Retention signal.
     TenRunsPlayed,
-    /// Unlocked the Summer season (first step up from baseline).
+    /// Unlocked Summer — the first season above Spring on a material.
     Season2Unlocked,
-    /// Encountered every boss blind at least once.
+    /// Unlocked Autumn on a material.
+    Season3Unlocked,
+    /// Unlocked Winter on a material.
+    Season4Unlocked,
+    /// Played into every non-final ordeal at least once (hallway Play, not Skip).
     AllBossesSeen,
     /// Silk Thread metamorphosed into Silk Moth — the player babied a
     /// fragile relic all the way to its terminal state instead of selling
@@ -39,7 +43,7 @@ pub enum Achievement {
     GeeseTakeFlight,
     /// Scored Kokushi Musō (thirteen orphans) — the alternate full-hand pattern.
     ThirteenOrphans,
-    /// Beat **The House** on the final boss blind.
+    /// Beat **The House** on the final wing.
     HouseDefeated,
 }
 
@@ -54,12 +58,24 @@ impl Achievement {
             Self::FirstRunCompleted => "FIRST_RUN_COMPLETED",
             Self::TenRunsPlayed => "TEN_RUNS_PLAYED",
             Self::Season2Unlocked => "STAKE_2_UNLOCKED",
+            Self::Season3Unlocked => "STAKE_3_UNLOCKED",
+            Self::Season4Unlocked => "STAKE_4_UNLOCKED",
             Self::AllBossesSeen => "ALL_BOSSES_SEEN",
             Self::SilkMothEmerged => "SILK_MOTH_EMERGED",
             Self::TaotieAwakened => "TAOTIE_AWAKENED",
             Self::GeeseTakeFlight => "GEESE_TAKE_FLIGHT",
             Self::ThirteenOrphans => "THIRTEEN_ORPHANS",
             Self::HouseDefeated => "HOUSE_DEFEATED",
+        }
+    }
+
+    /// Steam achievement fired when a run victory unlocks the next season tier.
+    pub fn for_newly_unlocked_season(season: crate::core::season::Season) -> Option<Self> {
+        match season {
+            crate::core::season::Season::Spring => None,
+            crate::core::season::Season::Summer => Some(Self::Season2Unlocked),
+            crate::core::season::Season::Autumn => Some(Self::Season3Unlocked),
+            crate::core::season::Season::Winter => Some(Self::Season4Unlocked),
         }
     }
 }

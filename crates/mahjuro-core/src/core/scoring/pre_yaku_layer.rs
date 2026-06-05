@@ -30,6 +30,16 @@ fn meld_base_chips(s: &DetectedMeld, tiles: &[Tile], ctx: &ScoreContext<'_>) -> 
         .sum()
 }
 
+#[inline]
+fn tile_is_simple_number(t: &Tile) -> bool {
+    matches!(t.suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu) && (2..=8).contains(&t.rank)
+}
+
+#[inline]
+fn tile_is_even_keel_rank(t: &Tile) -> bool {
+    matches!(t.suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu) && (4..=6).contains(&t.rank)
+}
+
 fn meld_all_number_ranks(s: &DetectedMeld, tiles: &[Tile], pred: impl Fn(u8) -> bool) -> bool {
     !s.tile_ids.is_empty()
         && s.tile_ids.iter().all(|&tid| {
@@ -59,6 +69,8 @@ pub(crate) fn apply_pre_yaku_scoring(
     let has_sequence_surge = eff.has(ctx.relic.roster, RelicId::SequenceSurge);
     let has_pair_power = eff.has(ctx.relic.roster, RelicId::PairPower);
     let has_honor_fury = eff.has(ctx.relic.roster, RelicId::HonorFury);
+    let has_plain_dealing = eff.has(ctx.relic.roster, RelicId::PlainDealing);
+    let has_even_keel = eff.has(ctx.relic.roster, RelicId::EvenKeel);
 
     if eff.has(ctx.relic.roster, RelicId::Snowball) {
         let stacks = ctx
@@ -79,7 +91,7 @@ pub(crate) fn apply_pre_yaku_scoring(
                 push_chips(steps, chips, *mult, "Triplet Boost", 50);
             }
             MeldKind::Sequence if has_sequence_surge => {
-                push_chips(steps, chips, *mult, "Sequence Surge", 40);
+                push_chips(steps, chips, *mult, "Sequence Surge", 50);
             }
             MeldKind::Pair if has_pair_power => {
                 push_chips(steps, chips, *mult, "Pair Power", 45);
@@ -100,6 +112,30 @@ pub(crate) fn apply_pre_yaku_scoring(
                 .count() as i32;
             if honor_count > 0 {
                 push_chips(steps, chips, *mult, "Honor Fury", 42 * honor_count);
+            }
+        }
+        if has_plain_dealing {
+            let simple_count = s
+                .tile_ids
+                .iter()
+                .filter_map(|id| tile_by_id(tiles, *id))
+                .filter(|t| !tile_is_debuffed(t, ctx.tiles.debuffs))
+                .filter(|t| tile_is_simple_number(t))
+                .count() as i32;
+            if simple_count > 0 {
+                push_chips(steps, chips, *mult, "Plain Dealing", 18 * simple_count);
+            }
+        }
+        if has_even_keel {
+            let mid_count = s
+                .tile_ids
+                .iter()
+                .filter_map(|id| tile_by_id(tiles, *id))
+                .filter(|t| !tile_is_debuffed(t, ctx.tiles.debuffs))
+                .filter(|t| tile_is_even_keel_rank(t))
+                .count() as i32;
+            if mid_count > 0 {
+                push_chips(steps, chips, *mult, "Even Keel", 12 * mid_count);
             }
         }
     }
