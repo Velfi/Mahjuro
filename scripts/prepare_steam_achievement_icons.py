@@ -62,6 +62,78 @@ def square_crop(img: Image.Image) -> Image.Image:
     return img.crop((left, top, left + side, top + side))
 
 
+def _luminance(r: int, g: int, b: int) -> float:
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def largest_bright_region_bbox(
+    img: Image.Image,
+    *,
+    lum_threshold: int = 100,
+    row_threshold: int = 50,
+) -> tuple[int, int, int, int]:
+    """Bounding box of the tallest band of bright pixels (e.g. ribbon animal art)."""
+    w, h = img.size
+    pixels = img.load()
+    row_counts = [
+        sum(
+            1
+            for x in range(w)
+            if _luminance(pixels[x, y][0], pixels[x, y][1], pixels[x, y][2]) > lum_threshold
+        )
+        for y in range(h)
+    ]
+
+    regions: list[tuple[int, int]] = []
+    in_content = False
+    start = 0
+    for y, count in enumerate(row_counts):
+        if count > row_threshold:
+            if not in_content:
+                start = y
+                in_content = True
+        elif in_content:
+            regions.append((start, y))
+            in_content = False
+    if in_content:
+        regions.append((start, h))
+    if not regions:
+        return (0, 0, w, h)
+
+    y0, y1 = max(regions, key=lambda span: span[1] - span[0])
+    min_x, min_y, max_x, max_y = w, h, 0, 0
+    for y in range(y0, y1):
+        for x in range(w):
+            r, g, b, _a = pixels[x, y]
+            if _luminance(r, g, b) > lum_threshold:
+                min_x = min(min_x, x)
+                min_y = min(min_y, y)
+                max_x = max(max_x, x)
+                max_y = max(max_y, y)
+    return (min_x, min_y, max_x + 1, max_y + 1)
+
+
+def subject_square_crop(img: Image.Image, *, padding: float = 0.08) -> Image.Image:
+    """Square crop centered on the main embroidered subject in a tall ribbon."""
+    w, h = img.size
+    x0, y0, x1, y1 = largest_bright_region_bbox(img)
+    cx = (x0 + x1) // 2
+    cy = (y0 + y1) // 2
+    side = max(x1 - x0, y1 - y0)
+    side = int(side * (1 + 2 * padding))
+    side = min(side, w, h)
+    left = max(0, min(cx - side // 2, w - side))
+    top = max(0, min(cy - side // 2, h - side))
+    return img.crop((left, top, left + side, top + side))
+
+
+def achievement_square_crop(img: Image.Image) -> Image.Image:
+    w, h = img.size
+    if min(w, h) / max(w, h) < 0.5:
+        return subject_square_crop(img)
+    return square_crop(img)
+
+
 def flatten_rgb(img: Image.Image) -> Image.Image:
     base = Image.new("RGB", img.size, FLATTEN_BG)
     base.paste(img, mask=img.split()[3])
@@ -112,7 +184,7 @@ def main() -> None:
 
         with Image.open(src) as im:
             im = im.convert("RGBA")
-            square = square_crop(im)
+            square = achievement_square_crop(im)
             resized = square.resize((STEAM_SIZE, STEAM_SIZE), Image.Resampling.LANCZOS)
 
             square.save(OUT / f"{api_name}_source.png")
