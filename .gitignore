@@ -2,7 +2,7 @@
 /.claude
 /.cursor
 /.pycache
-*/__pycache__
+**/__pycache__
 /.venv
 /vendor/*
 !/vendor/wgpu-hal/
