@@ -111,7 +111,11 @@ impl GraphicsMode {
         if std::env::var_os("MAHJURO_AUTO_LOW_MEMORY").is_some() {
             return Self::LowMemory;
         }
-        if adapter_name_suggests_low_vram(name) || integrated_gpu {
+        if adapter_name_suggests_low_vram(name) {
+            return Self::LowMemory;
+        }
+        // Apple Silicon reports IntegratedGpu but has ample unified memory — not a 4 GB target.
+        if integrated_gpu && !adapter_name_suggests_apple_silicon(name) {
             return Self::LowMemory;
         }
         Self::Visuals
@@ -150,6 +154,12 @@ fn adapter_name_suggests_low_vram(name: &str) -> bool {
         "quadro p1000",
     ];
     NEEDLES.iter().any(|needle| n.contains(needle))
+}
+
+/// Apple M-series / SoC GPUs — unified memory, not low-VRAM discrete targets.
+fn adapter_name_suggests_apple_silicon(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.contains("apple m") || n.contains("apple a") || n.contains("apple gpu")
 }
 
 #[cfg(test)]
@@ -201,5 +211,14 @@ mod tests {
     fn adapter_name_heuristic() {
         assert!(adapter_name_suggests_low_vram("NVIDIA GeForce GTX 1050 Ti"));
         assert!(!adapter_name_suggests_low_vram("NVIDIA GeForce RTX 4070"));
+    }
+
+    #[test]
+    fn apple_silicon_not_low_vram() {
+        assert!(adapter_name_suggests_apple_silicon("Apple M4 Max"));
+        assert_eq!(
+            GraphicsMode::suggest_for_adapter("Apple M4 Max", true),
+            GraphicsMode::Visuals,
+        );
     }
 }

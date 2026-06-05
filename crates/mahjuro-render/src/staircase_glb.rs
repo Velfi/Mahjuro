@@ -24,7 +24,8 @@ fn ensure_staircase_glb_loaded() {
     match &*w {
         StaircaseGlbCache::Uninit => {}
         StaircaseGlbCache::Ready(Some(cpu))
-            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) =>
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
+                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
         {
             *w = StaircaseGlbCache::Uninit;
         }
@@ -52,6 +53,11 @@ pub fn staircase_glb_loaded() -> bool {
     with_staircase_glb_cpu(|o| o.is_some())
 }
 
+/// Background-thread entry for eager CPU decode (same path as sync load).
+pub fn decode_staircase_glb_into_cache() {
+    ensure_staircase_glb_loaded();
+}
+
 pub fn with_staircase_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     ensure_staircase_glb_loaded();
     let g = STAIRCASE_GLB_CPU.read();
@@ -67,6 +73,21 @@ pub fn release_staircase_environment_cpu_sources_after_gpu_upload() {
     if let StaircaseGlbCache::Ready(Some(cpu)) = &mut *g {
         room_glb::release_room_environment_primitives_cpu(cpu);
     }
+}
+
+/// True while environment mesh buffers are still on the CPU (ready for GPU upload).
+pub fn staircase_cpu_ready_for_gpu_upload() -> bool {
+    let g = STAIRCASE_GLB_CPU.read();
+    match &*g {
+        StaircaseGlbCache::Ready(Some(cpu)) => {
+            !cpu.environment_primitives.is_empty() && !cpu.environment_primitives_released
+        }
+        _ => false,
+    }
+}
+
+pub fn clear_staircase_glb_cpu_cache() {
+    *STAIRCASE_GLB_CPU.write() = StaircaseGlbCache::Uninit;
 }
 
 #[derive(Copy, Clone)]

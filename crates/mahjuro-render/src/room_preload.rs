@@ -3,7 +3,7 @@
 //! Chain: main menu → shop → archive (hub); shop → hallway → gameplay (run).
 
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use mahjuro_gfx_types::GraphicsMode;
 
@@ -25,11 +25,11 @@ const PREFETCH_DONE: u8 = 2;
 
 static PREFETCH_GRAPHICS_MODE: AtomicU8 = AtomicU8::new(0);
 
-const SLOT_MAIN_MENU: u8 = 0;
-const SLOT_SHOP: u8 = 1;
-const SLOT_ARCHIVE: u8 = 2;
-const SLOT_HALLWAY: u8 = 3;
-const SLOT_GAMEPLAY: u8 = 4;
+pub(super) const SLOT_MAIN_MENU: u8 = 0;
+pub(super) const SLOT_SHOP: u8 = 1;
+pub(super) const SLOT_ARCHIVE: u8 = 2;
+pub(super) const SLOT_HALLWAY: u8 = 3;
+pub(super) const SLOT_GAMEPLAY: u8 = 4;
 
 fn mark_prefetch_done(slot_id: u8) {
     let slot = match slot_id {
@@ -123,6 +123,7 @@ static HALLWAY_PREFETCH: PrefetchSlot = PrefetchSlot::new(SLOT_HALLWAY);
 static GAMEPLAY_PREFETCH: PrefetchSlot = PrefetchSlot::new(SLOT_GAMEPLAY);
 
 static GAMEPLAY_PREFETCH_LOGGED: OnceLock<()> = OnceLock::new();
+static STAIRCASE_EAGER_CPU_QUEUED: AtomicBool = AtomicBool::new(false);
 
 pub fn set_prefetch_graphics_mode(mode: GraphicsMode) {
     let tag = match mode {
@@ -154,35 +155,11 @@ fn room_holds_unreleased_cpu_meshes(decoded: bool, ready_for_gpu: bool) -> bool 
 
 fn active_cpu_room_ram_residents() -> usize {
     let mut n = 0usize;
-    if room_holds_unreleased_cpu_meshes(
-        crate::main_menu_glb::main_menu_cpu_decoded(),
-        crate::main_menu_glb::main_menu_cpu_ready_for_gpu_upload(),
-    ) {
-        n += 1;
-    }
-    if room_holds_unreleased_cpu_meshes(
-        crate::room_glb::shop_cpu_decoded(),
-        crate::room_glb::shop_cpu_ready_for_gpu_upload(),
-    ) {
-        n += 1;
-    }
-    if room_holds_unreleased_cpu_meshes(
-        crate::archive_glb::archive_cpu_decoded(),
-        crate::archive_glb::archive_cpu_ready_for_gpu_upload(),
-    ) {
-        n += 1;
-    }
-    if room_holds_unreleased_cpu_meshes(
-        crate::hallway_glb::hallway_cpu_decoded(),
-        crate::hallway_glb::hallway_cpu_ready_for_gpu_upload(),
-    ) {
-        n += 1;
-    }
-    if room_holds_unreleased_cpu_meshes(
-        crate::gameplay_glb::gameplay_cpu_decoded(),
-        crate::gameplay_glb::gameplay_cpu_ready_for_gpu_upload(),
-    ) {
-        n += 1;
+    for desc in crate::room_gpu_resident::RoomGpuResidentDesc::ALL {
+        if room_holds_unreleased_cpu_meshes((desc.cpu_decoded)(), (desc.cpu_ready_for_gpu_upload)())
+        {
+            n += 1;
+        }
     }
     for slot in [
         &MAIN_MENU_PREFETCH,
@@ -195,12 +172,27 @@ fn active_cpu_room_ram_residents() -> usize {
             n += 1;
         }
     }
+    if STAIRCASE_EAGER_CPU_QUEUED.load(Ordering::Acquire) {
+        n += 1;
+    }
     n
 }
 
 fn cpu_prefetch_may_start() -> bool {
     active_cpu_room_ram_residents()
         < max_concurrent_cpu_room_decodes(prefetch_graphics_mode())
+}
+
+pub(super) fn reset_room_prefetch_slot(slot_id: u8) {
+    let slot = match slot_id {
+        SLOT_MAIN_MENU => &MAIN_MENU_PREFETCH,
+        SLOT_SHOP => &SHOP_PREFETCH,
+        SLOT_ARCHIVE => &ARCHIVE_PREFETCH,
+        SLOT_HALLWAY => &HALLWAY_PREFETCH,
+        SLOT_GAMEPLAY => &GAMEPLAY_PREFETCH,
+        _ => return,
+    };
+    slot.state.store(PREFETCH_IDLE, Ordering::Release);
 }
 
 pub fn start_main_menu_cpu_prefetch() {
@@ -230,14 +222,43 @@ pub fn start_archive_cpu_prefetch() {
     );
 }
 
-pub fn advance_hub_cpu_prefetch_chain(on_main_menu: bool) {
-    if on_main_menu && prefetch_graphics_mode() == GraphicsMode::LowMemory {
-        return;
-    }
+pub fn advance_hub_cpu_prefetch_chain(_on_main_menu: bool) {
     if !crate::room_glb::shop_cpu_decoded() {
         return;
     }
     start_archive_cpu_prefetch();
+}
+
+/// Queue CPU decode for every hub/run room whose mesh cache is not ready yet.
+///
+/// Respects [`max_concurrent_cpu_room_decodes`]; call each frame so work continues
+/// as in-flight decodes finish.
+pub fn kick_eager_all_room_cpu_prefetches() {
+    start_shop_cpu_prefetch();
+    start_archive_cpu_prefetch();
+    start_hallway_cpu_prefetch();
+    start_gameplay_cpu_prefetch();
+    kick_staircase_cpu_prefetch();
+}
+
+fn kick_staircase_cpu_prefetch() {
+    if crate::staircase_glb::staircase_glb_loaded()
+        || crate::staircase_glb::staircase_cpu_ready_for_gpu_upload()
+    {
+        STAIRCASE_EAGER_CPU_QUEUED.store(false, Ordering::Release);
+        return;
+    }
+    if !cpu_prefetch_may_start() {
+        return;
+    }
+    if STAIRCASE_EAGER_CPU_QUEUED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    loader_pool::submit_chain_prefetch(|| {
+        crate::staircase_glb::decode_staircase_glb_into_cache();
+        STAIRCASE_EAGER_CPU_QUEUED.store(false, Ordering::Release);
+    });
+    log::debug!("room preload: queued staircase.glb CPU decode");
 }
 
 pub fn start_hallway_cpu_prefetch() {

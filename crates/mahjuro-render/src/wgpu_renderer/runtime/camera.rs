@@ -282,6 +282,16 @@ impl WgpuRenderer {
         } else {
             (0.0, 0.0)
         };
+        // Decimate embedded punctual on gameplay-table marker spawns (tally sticks,
+        // books, river, wood tablets). See `gameplay_marker_spawn_punctual_mul`
+        // in `lit_mesh.wgsl`.
+        let gameplay_marker_punctual_mul = match self.active_scene_key {
+            Some(scene_keys::GAMEPLAY)
+            | Some(scene_keys::VICTORY)
+            | Some(scene_keys::DEFEAT)
+            | Some("tutorial") => 0.1,
+            _ => 1.0,
+        };
         let ssr_max_distance = cam.h * 2.0;
         let ssr_stride = cam.h * 0.04;
         let ssr_max_steps = 24.0;
@@ -300,7 +310,7 @@ impl WgpuRenderer {
                 shop_punctual_inv_doc,
                 shop_punctual_display_case,
                 shop_cat_amb,
-                1.0,
+                gameplay_marker_punctual_mul,
             ],
         }
     }

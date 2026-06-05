@@ -930,10 +930,10 @@ impl SceneBehavior for GameplayScene {
         // objects inward on screen, so a naive "some pixels left of
         // score_panel.x" anchor can still drift back over the wood plaque
         // and obscure the plaque text.
-        // Counter fans — upright bone-stick tallies standing in front of
-        // the action objects. Draws fan (jade tips) stands in front of the
-        // bronze mirror; discards fan (amber tips) stands in front of the
-        // discard river. Each stick = one remaining action; the fan thins
+        // Counter fans — upright tally sticks standing in front of the action
+        // objects. Play fan (green) stands in front of the bronze mirror;
+        // discard fan (orange) stands in front of the discard river. Each
+        // stick = one remaining action; the fan thins
         // from the outermost stick inward as the count drops, so the
         // upright core stays intact and the consumption reads as a spent
         // stick rather than a re-deal.
@@ -960,7 +960,8 @@ impl SceneBehavior for GameplayScene {
                         count: gameplay.plays_remaining,
                         max_count: gameplay.plays_max,
                         spread_deg,
-                        tip_color: crate::render::theme::color::JADE,
+                        base_color: crate::render::theme::color::tally_stick::PLAY,
+                        tip_color: crate::render::theme::color::tally_stick::PLAY_TIP,
                         rotation_y_deg: play_rot[1],
                         placement_rot_deg: play_rot,
                         kind: crate::render::draw_cmd::TallyFanKind::Draws,
@@ -984,7 +985,8 @@ impl SceneBehavior for GameplayScene {
                         count: gameplay.discards_remaining,
                         max_count: gameplay.discards_max,
                         spread_deg,
-                        tip_color: crate::render::theme::color::AMBER,
+                        base_color: crate::render::theme::color::tally_stick::DISCARD,
+                        tip_color: crate::render::theme::color::tally_stick::DISCARD_TIP,
                         rotation_y_deg: discard_rot[1],
                         placement_rot_deg: discard_rot,
                         kind: crate::render::draw_cmd::TallyFanKind::Discards,

@@ -1,12 +1,12 @@
 //! Procedural meshes for tally sticks — the draws/discards counter fans that
 //! stand in front of the Play (mirror) and Discard (river) actions.
 //!
-//! Each stick is split into two sibling meshes so the tip cap can render with
-//! a distinct color:
-//!   - [`build_tally_stick_base_mesh`]: the lower bone segment (from the
-//!     narrow base up to `1 - TIP_FRAC` along the stick).
-//!   - [`build_tally_stick_tip_mesh`]: the upper tinted cap (from
-//!     `1 - TIP_FRAC` up to the wide tip).
+//! Each stick is split into two sibling meshes so the body and tip cap can
+//! render with distinct per-instance colors:
+//!   - [`build_tally_stick_base_mesh`]: the lower segment (from the narrow
+//!     base up to `1 - TIP_FRAC` along the stick).
+//!   - [`build_tally_stick_tip_mesh`]: the upper cap (from `1 - TIP_FRAC` up
+//!     to the wide tip).
 //!
 //! Local space: pivot at the narrow base, stick extends along `+Y` from
 //! `y=0` to `y=1`. Cross-section is rectangular with thickness along `Z`;
@@ -29,9 +29,9 @@ pub const STICK_WIDE_HALF: f32 = 0.5;
 /// as world-space thickness.
 pub const STICK_THICKNESS_HALF: f32 = 0.5;
 
-/// Fraction of stick length covered by the tinted tip cap, measured from the
-/// wide end. A value of `0.20` means the top 20% of each stick is painted.
-pub const TIP_FRAC: f32 = 0.20;
+/// Fraction of stick length covered by the polychrome tip cap, measured from the
+/// wide end. A value of `0.35` means the top 35% of each stick is painted.
+pub const TIP_FRAC: f32 = 0.35;
 
 /// Linear interpolation of the half-width at local `y ∈ [0, 1]`.
 fn half_width_at(y: f32) -> f32 {
@@ -129,15 +129,15 @@ fn build_segment_mesh(y0: f32, y1: f32, base_color: [f32; 4]) -> MeshCpu {
     }
 }
 
-/// Lower bone segment of a tally stick: from the narrow base up to the line
-/// where the tinted tip begins. Ivory base color; tint per-instance if desired.
+/// Lower body segment of a tally stick: from the narrow base up to the line
+/// where the tip cap begins. White mesh albedo; per-instance body tint applied
+/// at draw time.
 pub fn build_tally_stick_base_mesh() -> MeshCpu {
-    build_segment_mesh(0.0, 1.0 - TIP_FRAC, [0.93, 0.89, 0.78, 1.0])
+    build_segment_mesh(0.0, 1.0 - TIP_FRAC, [1.0, 1.0, 1.0, 1.0])
 }
 
 /// Upper tip cap of a tally stick: from the tint line up to the wide tip.
-/// White base color so a per-instance tint (jade for draws, amber for
-/// discards) shows through unmuted.
+/// White mesh albedo; per-instance polychrome tint applied at draw time.
 pub fn build_tally_stick_tip_mesh() -> MeshCpu {
     build_segment_mesh(1.0 - TIP_FRAC, 1.0, [1.0, 1.0, 1.0, 1.0])
 }

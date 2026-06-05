@@ -638,7 +638,9 @@ pub enum Object3dKind {
         max_count: u32,
         /// Total arc the fan spreads across (degrees, symmetric about vertical).
         spread_deg: f32,
-        /// RGBA tint for the tip cap.
+        /// RGBA tint for the stick body (lower ~80% of each stick).
+        base_color: [f32; 4],
+        /// RGBA tint for the tip cap (upper ~20%).
         tip_color: [f32; 4],
         /// Yaw of the fan plane about world up (degrees).
         rotation_y_deg: f32,

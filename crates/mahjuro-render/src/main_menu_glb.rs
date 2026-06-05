@@ -48,7 +48,8 @@ fn ensure_main_menu_glb_loaded() {
     match &*w {
         MainMenuGlbCache::Uninit => {}
         MainMenuGlbCache::Ready(Some(cpu))
-            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) =>
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
+                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
         {
             *w = MainMenuGlbCache::Uninit;
         }
@@ -220,6 +221,16 @@ pub fn main_menu_cpu_decoded() -> bool {
 
 /// Idempotent CPU decode for background prefetch (see [`crate::room_preload`]).
 pub fn decode_main_menu_glb_into_cache() {
+    let w = MAIN_MENU_GLB_CPU.write();
+    if matches!(
+        &*w,
+        MainMenuGlbCache::Ready(Some(cpu))
+            if !room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
+                && !room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu)
+    ) {
+        return;
+    }
+    drop(w);
     ensure_main_menu_glb_loaded();
 }
 

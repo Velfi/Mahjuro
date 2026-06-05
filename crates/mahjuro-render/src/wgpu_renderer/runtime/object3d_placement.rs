@@ -1393,6 +1393,7 @@ impl WgpuRenderer {
                             count,
                             max_count,
                             spread_deg,
+                            base_color,
                             tip_color,
                             rotation_y_deg,
                             placement_rot_deg,
@@ -1420,12 +1421,19 @@ impl WgpuRenderer {
                             let fan_yaw = Mat4::from_rotation_z(rotation_y_deg.to_radians());
                             let base_scale =
                                 glam::Vec3::new(*stick_wide, *stick_len, *stick_thickness);
-                            let base_material = self.tally_stick_base_mesh.default_material;
-                            let tip_material = MaterialParams {
+                            let base_material = MaterialParams {
                                 kind: MaterialKind::Plain,
+                                base_color: *base_color,
+                                specular_strength: 0.30,
+                                specular_power: 32.0,
+                            };
+                            let tip_material = MaterialParams {
+                                kind: MaterialKind::Polychrome,
                                 base_color: *tip_color,
-                                specular_strength: 0.40,
-                                specular_power: 42.0,
+                                specular_strength: 0.85,
+                                // Talisman profile (~32): scene-lit rainbow, no score-glyph
+                                // emissive floor that blows out under table candles.
+                                specular_power: 32.0,
                             };
                             let missing = (max_c as usize).saturating_sub(count_usize);
                             let mut visible_slots: Vec<u32> = (0..max_c).collect();
