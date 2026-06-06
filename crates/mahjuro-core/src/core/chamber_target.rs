@@ -5,6 +5,15 @@
 
 use crate::core::rules::ChamberKind;
 
+/// Defeating the Boss of this ante completes the run (Balatro-style).
+pub const FINAL_WING: u32 = 7;
+
+/// Number of chambers per wing (Small + Big + Ordeal).
+pub const CHAMBERS_PER_WING: u32 = 3;
+
+/// Total chambers in a full run.
+pub const TOTAL_CHAMBERS: u32 = FINAL_WING * CHAMBERS_PER_WING;
+
 /// Spring-season chip base for wing 1 Small Chamber (`base_target` before season mult).
 pub const DEFAULT_BASE_TARGET: u32 = 1000;
 

@@ -573,8 +573,8 @@ impl TileSelectScene {
 
     fn start_game(
         &self,
-        run: &mut RunState,
-        progress: &crate::core::progression::PlayerProgress,
+        _run: &mut RunState,
+        _progress: &crate::core::progression::PlayerProgress,
     ) -> SceneTransition {
         if self.tutorial_mode {
             Some(SceneIntent::StartOnboardingRunAndTutorialCampaign)

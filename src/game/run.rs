@@ -97,8 +97,7 @@ pub enum ConsumableUseResult {
     },
 }
 
-/// Defeating the Boss of this ante completes the run (Balatro-style).
-pub const FINAL_WING: u32 = 7;
+pub use crate::core::chamber_target::FINAL_WING;
 
 fn default_auto_cash_in_on_full_structure() -> bool {
     true

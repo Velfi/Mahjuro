@@ -944,12 +944,12 @@ impl App {
 /// Build the paginated celebration modal for a level-up. Returns `None`
 /// when the level grants no new relics (rule unlocks are silent mechanics).
 pub fn build_level_up_modal(
-    result: &core::progression::LevelUpResult,
+    result: &crate::core::progression::LevelUpResult,
     window_w: f32,
     window_h: f32,
 ) -> Option<Modal> {
     let mut pages = Vec::new();
-    let relic_defs = core::relic::all_relic_defs();
+    let relic_defs = crate::core::relic::all_relic_defs();
     for rid in &result.relics {
         if let Some(def) = relic_defs.iter().find(|d| d.id == *rid) {
             let accent = render::theme::color::rarity(def.rarity.tier());
@@ -969,7 +969,7 @@ pub fn build_level_up_modal(
         Modal::new(
             format!(
                 "Deeper — Depth {}",
-                core::progression::meta_depth_roman(result.new_level)
+                crate::core::progression::meta_depth_roman(result.new_level)
             ),
             "",
             ModalTheme::Success,
