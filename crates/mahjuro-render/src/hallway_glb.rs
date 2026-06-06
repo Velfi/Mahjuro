@@ -113,8 +113,8 @@ pub const HALLWAY_RIPPLE_WAVES: f32 = 5.0;
 pub const HALLWAY_RIPPLE_SPEED: f32 = 1.2;
 /// `mix(standing, traveling, w)` — higher = more travel down the hall.
 pub const HALLWAY_RIPPLE_TRAVEL_MIX: f32 = 0.7;
-/// Last wing index for hallway intensity ramp (keep in sync with `run::FINAL_WING`).
-pub const HALLWAY_WING_FINAL: u32 = 7;
+/// Last wing index for hallway intensity ramp; shares the canonical run constant.
+pub const HALLWAY_WING_FINAL: u32 = mahjuro_core::core::chamber_target::FINAL_WING;
 /// Pick-blind warp scale at wing 1 vs [`HALLWAY_WING_FINAL`].
 pub const HALLWAY_WING_INTENSITY_AT_FIRST: f32 = 0.82;
 pub const HALLWAY_WING_INTENSITY_AT_FINAL: f32 = 1.28;

@@ -343,8 +343,7 @@ impl SceneBehavior for GameplayScene {
         };
 
         let current_chamber = gameplay.run_number;
-        // TODO there should be a const for this
-        let total_chambers = 21;
+        let total_chambers = crate::core::chamber_target::TOTAL_CHAMBERS;
         let chamber_name = gameplay.chamber.name();
 
         // The window title is recomputed unconditionally so the OS chrome
