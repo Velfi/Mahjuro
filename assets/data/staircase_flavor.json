@@ -3,7 +3,7 @@
     "id": "testing",
     "flavor_spans": [
       {
-        "text": "It's quiet. Your footsteps are soft on the carpet. How can a staircase in The House be so long?",
+        "text": "It's quiet. Your footsteps are soft on the carpet. How can a staircase be so long?",
         "bold": false,
         "italic": true
       }
@@ -74,16 +74,6 @@
     "flavor_spans": [
       {
         "text": "Someone scratched a tally into the bannister — seven marks, then eight, then the numbers stop and start again lower down, as if the wall moved overnight.",
-        "bold": false,
-        "italic": false
-      }
-    ]
-  },
-  {
-    "id": "issued_yen",
-    "flavor_spans": [
-      {
-        "text": "The House pays in yen\nyou cannot spend\noutside these walls.\nYou count them anyway.",
         "bold": false,
         "italic": false
       }

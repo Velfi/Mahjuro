@@ -1045,7 +1045,7 @@ impl ArchiveScene {
                     ctx.archive_chronicle_last_seen_run_len,
                 )
                 .for_tab(tab_to_archive_tab(TABS[ti]));
-                if tab_new > 0 && !chronicle_open {
+                if tab_new > 0 && !chronicle_open && inspect.is_none() {
                     crate::ui::corner_badge::push_corner_badge(
                         &mut quads,
                         &mut text_labels,

@@ -93,7 +93,7 @@ impl ArchiveInspectPresenter {
         const ORBIT: f32 = 2.4;
         const P_LIM: f32 = 0.52;
         const ZMIN: f32 = 0.42;
-        const ZMAX: f32 = 2.35;
+        const ZMAX: f32 = 1.0;
         const ZSPD: f32 = 1.25;
         let (sx, sy) = ctx.item_inspect_orbit_stick;
         self.orbit.yaw += sx * ORBIT * dt;
