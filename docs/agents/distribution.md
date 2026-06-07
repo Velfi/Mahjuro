@@ -73,16 +73,22 @@ Game Center v1: achievements wired; leaderboard stat sync is logged pending App 
 
 ## macOS App Store
 
-- **Bundle ID:** `com.mahjuro.Mahjuro.store` (`packaging/Info.mas.plist`)
-- **Entitlements:** `Entitlements.mas.plist` (sandbox, JIT, Game Center, user-selected export)
-- **Signing:** Mac App Distribution identity (`APPLE_MAS_SIGNING_IDENTITY`), not Developer ID
+See **[macos-app-store.md](macos-app-store.md)** for the full Connect / Transporter checklist.
+
+- **Bundle ID:** `com.zelda-built-this.Mahjuro.store` (override with `MAS_BUNDLE_ID`)
+- **Entitlements:** `Entitlements.mas.plist` (sandbox, network client, JIT, Game Center, user-selected export)
+- **Signing:** `APPLE_MAS_APP_SIGNING_IDENTITY` + `APPLE_MAS_INSTALLER_SIGNING_IDENTITY`
+- **Scripts:** `scripts/package-macos-store.sh`, `scripts/validate-macos-store.sh`
 - **CI:** `.github/workflows/release-macos-store.yml`
 
 ## Microsoft Store
 
+See **[windows-app-store.md](windows-app-store.md)** for the full Partner Center checklist.
+
 - **Manifest:** `packaging/msix/AppxManifest.xml` — update `Publisher` CN before submission
 - **Xbox shim:** `crates/mahjuro-distribution/cpp/xbox_shim/` — replace stubs with GDK `XGameRuntime` calls
-- **CI:** `.github/workflows/release-windows-store.yml`
+- **Scripts:** `scripts/package-windows-store.ps1`, `scripts/validate-windows-store.ps1`
+- **CI:** `.github/workflows/build-windows-store.yml`, `.github/workflows/release-windows-store.yml`
 
 ## Per-SKU QA checklist
 

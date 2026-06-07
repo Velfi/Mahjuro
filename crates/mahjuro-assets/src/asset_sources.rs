@@ -185,10 +185,7 @@ fn resolve_pack_dir() -> Option<PathBuf> {
 
 /// Loose tree only when explicitly requested (no implicit repo `assets/` path).
 fn try_loose_root() -> Option<PathBuf> {
-    #[cfg(feature = "store-bundle-only")]
-    {
-        return None;
-    }
+    #[cfg(not(feature = "store-bundle-only"))]
     if let Ok(p) = std::env::var("MAHJURO_ASSETS") {
         let pb = PathBuf::from(p);
         if pb.is_dir() {

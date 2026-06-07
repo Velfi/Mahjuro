@@ -100,7 +100,6 @@ pub struct LoadedRun {
 
 const MAX_PROFILES: usize = 3;
 const SETTINGS_NAME: &str = "settings.json";
-const APP_DIR: &str = "Mahjuro";
 
 /// Returns the directory where save data lives, creating it if needed.
 /// Falls back to the current directory if the platform config dir is
@@ -114,7 +113,7 @@ fn data_dir() -> PathBuf {
         #[cfg(not(any(feature = "game", feature = "headless-screenshot")))]
         {
             dirs::config_dir()
-                .map(|base| base.join(APP_DIR))
+                .map(|base| base.join("Mahjuro"))
                 .unwrap_or_else(|| PathBuf::from("."))
         }
     };
