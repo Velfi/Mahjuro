@@ -169,14 +169,16 @@ impl MarqueeSelect {
         if prev != next && hand_len > 0 {
             if let Some(fwd) = infer_adjacent_step_forward(prev, next, hand_len) {
                 self.sweep_forward = Some(fwd);
-            } else if self.sweep_forward.is_none() {
-                // Cursor jump or first frame skip: prefer the shorter arc.
-                let fwd_steps = (next + hand_len - prev) % hand_len;
-                let bwd_steps = (prev + hand_len - next) % hand_len;
-                self.sweep_forward = Some(fwd_steps <= bwd_steps);
             }
+            // Non-adjacent cursor jumps leave `sweep_forward` unset so
+            // `swept_slots` uses the linear index span. Wrap-around arcs are
+            // established only by adjacent keyboard/gamepad steps.
         }
         self.current_slot = next;
+    }
+
+    pub fn set_current_slot(&mut self, slot: usize) {
+        self.current_slot = slot;
     }
 
     fn swept_slots(&self, hand_len: usize) -> Vec<usize> {
@@ -222,8 +224,16 @@ impl MarqueeSelect {
     /// Like [`Self::apply`], but newly selected slots stop once `max_selected`
     /// would be exceeded. Deselections inside the sweep still apply.
     pub fn apply_capped(&self, selected: &mut [bool], max_selected: usize) -> (u32, u32) {
-        let hand_len = selected.len();
-        let swept = self.swept_slots(hand_len);
+        self.apply_capped_swept(selected, max_selected, &self.swept_slots(selected.len()))
+    }
+
+    /// [`Self::apply_capped`] with an explicit swept-slot list (e.g. 2D grid pickers).
+    pub fn apply_capped_swept(
+        &self,
+        selected: &mut [bool],
+        max_selected: usize,
+        swept: &[usize],
+    ) -> (u32, u32) {
         let swept_set: std::collections::HashSet<usize> = swept.iter().copied().collect();
         let mut desired: Vec<bool> = selected
             .iter()
@@ -240,7 +250,7 @@ impl MarqueeSelect {
 
         let mut sel_count = desired.iter().filter(|&&s| s).count();
         if sel_count > max_selected {
-            let mut trim_order = swept;
+            let mut trim_order = swept.to_vec();
             trim_order.reverse();
             for i in trim_order {
                 let snap = self.snapshot.get(i).copied().unwrap_or(false);
@@ -656,7 +666,7 @@ mod tests {
         m
     }
 
-    fn marquee_wrap(start: usize, current: usize, snapshot: Vec<bool>) -> MarqueeSelect {
+    fn marquee_wrap_adjacent(start: usize, current: usize, snapshot: Vec<bool>) -> MarqueeSelect {
         let hand_len = snapshot.len();
         let mut m = MarqueeSelect::new(start, snapshot);
         m.advance_to(current, hand_len);
@@ -706,7 +716,7 @@ mod tests {
     #[test]
     fn marquee_wrap_left_from_start_selects_only_endpoints() {
         let mut sel = vec![false; 16];
-        marquee_wrap(0, 15, vec![false; 16]).apply(&mut sel);
+        marquee_wrap_adjacent(0, 15, vec![false; 16]).apply(&mut sel);
         assert_eq!(sel.iter().filter(|&&s| s).count(), 2);
         assert!(sel[0] && sel[15]);
         assert!(!sel[1] && !sel[14]);
@@ -715,20 +725,23 @@ mod tests {
     #[test]
     fn marquee_wrap_right_from_end_selects_only_endpoints() {
         let mut sel = vec![false; 16];
-        marquee_wrap(15, 0, vec![false; 16]).apply(&mut sel);
+        marquee_wrap_adjacent(15, 0, vec![false; 16]).apply(&mut sel);
         assert_eq!(sel.iter().filter(|&&s| s).count(), 2);
         assert!(sel[0] && sel[15]);
     }
 
     #[test]
-    fn marquee_wrap_forward_arc_skips_linear_middle() {
+    fn marquee_cursor_jump_uses_linear_span_not_wrap_arc() {
         let mut sel = vec![false; 16];
-        marquee_wrap(14, 2, vec![false; 16]).apply(&mut sel);
+        let hand_len = sel.len();
+        let mut m = MarqueeSelect::new(14, vec![false; 16]);
+        m.advance_to(2, hand_len);
+        m.apply(&mut sel);
         assert_eq!(
             sel,
             vec![
-                true, true, true, false, false, false, false, false, false, false, false, false,
-                false, false, true, true
+                false, false, true, true, true, true, true, true, true, true, true, true, true,
+                true, true, false
             ]
         );
     }
