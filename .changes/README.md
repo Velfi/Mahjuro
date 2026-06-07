@@ -1,8 +1,13 @@
 # Changelog fragments
 
 Each file in this directory is a single **unreleased** changelog entry.
-At release time, `scripts/release.sh` compiles any fragments into a new section
-at the top of `CHANGELOG.md` and deletes those fragment files.
+At **stable** release time, `scripts/release.sh` compiles any fragments into
+a new section at the top of `CHANGELOG.md` and deletes those fragment files.
+
+Pre-releases (`0.6.0-0`, `0.6.0-1`, …) only bump the version in `Cargo.toml`.
+Fragments stay here and accumulate until the stable cut (`0.6.0`). GitHub
+pre-release pages link to the commit range since the previous tag instead of
+using `CHANGELOG.md`.
 
 ## Adding an entry
 
@@ -43,23 +48,28 @@ touching any files.
 
 ## Releases with no player-facing work
 
-If everything since the last tag is internal (CI, refactors, docs, etc.), you
-do not need to add a fragment. `scripts/release.sh` will still append a version
-section to `CHANGELOG.md` with a short placeholder line so the release workflow
-has a body to publish.
+If everything since the last stable tag is internal (CI, refactors, docs, etc.),
+you do not need to add a fragment. A **stable** `scripts/release.sh` will still
+append a version section to `CHANGELOG.md` with a short placeholder line so the
+release workflow has a body to publish.
+
+Pre-releases never touch `CHANGELOG.md`.
 
 ## What happens at release
 
 `scripts/release.sh <version>` will:
 
-1. Compile `.changes/*.md` into a new `## <version> — YYYY-MM-DD` section
-   at the top of `CHANGELOG.md` (or add a short placeholder line if there are
-   no fragments).
-2. Remove any fragment files that were compiled.
-3. Bump `Cargo.toml`, commit, tag, and push.
+1. **Stable only:** compile `.changes/*.md` into a new `## <version> — YYYY-MM-DD`
+   section at the top of `CHANGELOG.md` (or add a short placeholder line if there
+   are no fragments), then remove the compiled fragment files.
+2. Bump `Cargo.toml`, commit, tag, and push.
 
-The GitHub Actions release workflow then extracts the section for this
-version and uses it as the release body.
+The GitHub Actions release workflow then:
+
+- **Pre-releases:** builds release notes from the commit range since the previous
+  tag (`scripts/prerelease_notes.py`).
+- **Stable releases:** extracts compiled changelog sections since the last stable
+  version (`scripts/aggregate_release_notes.py`).
 
 ## Tips
 
@@ -67,4 +77,4 @@ version and uses it as the release body.
   "Added hanami relic" > "Added HanamiEffect struct in relics.rs".
 - One fragment per logical change. It's fine to have many small ones.
 - If you realize a fragment was wrong, just edit or delete the file —
-  nothing is compiled until release time.
+  nothing is compiled until a stable release.
