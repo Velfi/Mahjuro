@@ -7,6 +7,23 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.6.0-0 — 2026-06-06
+
+### Added
+- Two new ordeal bosses: **Dead Air** permanently destroys wind tiles when they score, and **St. George** does the same for dragons. Both appear from wing 4 onward.
+- After each cleared ordeal, the stairway offers optional **Decimation**: choose five wall tiles to remove permanently, then the House claims five more at random before you descend to the shop. Picker UI uses accordion suit drawers, brass seal affordance, and walnut panel styling.
+
+### Changed
+- The Blight now debuffs your opening hand's most common rank across **Manzu, Souzu, and Pinzu** (for example, every **6** in all three suits) instead of flowers, which no longer carry chip value on their own.
+- Main-menu rain is lighter on the CPU, holding a steadier frame rate during heavy downpours.
+- Victory and defeat summary screens have been updated with a refreshed layout and presentation.
+
+### Fixed
+- The depth well on victory and defeat summary screens no longer draws over the subtitle text above the stats panel.
+
+### Removed
+- The Tribute ordeal boss has been removed from the pool for now; its icon slot was dropped from the ordeal atlas.
+
 ## 0.5.6-10 — 2026-06-05
 
 - maintenance, development, and bugfixes.
