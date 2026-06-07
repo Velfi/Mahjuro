@@ -140,29 +140,75 @@ pub struct DragState {
 ///
 /// While the player holds Confirm (LMB / Space / Enter / gamepad A), the
 /// `selected` array on the run is rewritten each time `current_slot` changes:
-/// every index in `[min(start, current), max(start, current)]` is forced to
-/// `!snapshot[i]`, and every index outside that range is forced back to
-/// `snapshot[i]`. This gives standard marquee semantics — drag forward to
-/// flip more tiles, drag back to revert ones you swept past.
+/// every index along the swept arc from `start_slot` to `current_slot` is
+/// forced to `!snapshot[i]`, and every index outside that arc is forced back
+/// to `snapshot[i]`. Linear drags use the contiguous index span; wrap-around
+/// drags (off either end of the hand) follow the shorter circular path.
 #[derive(Clone, Debug)]
 pub struct MarqueeSelect {
     pub start_slot: usize,
     pub current_slot: usize,
     pub snapshot: Vec<bool>,
+    /// `Some(true)` / `Some(false)` once sweep direction is known; `None` at press.
+    sweep_forward: Option<bool>,
 }
 
 impl MarqueeSelect {
+    pub fn new(start_slot: usize, snapshot: Vec<bool>) -> Self {
+        Self {
+            start_slot,
+            current_slot: start_slot,
+            snapshot,
+            sweep_forward: None,
+        }
+    }
+
+    /// Steps `current_slot` toward `next` and records sweep direction from the move.
+    pub fn advance_to(&mut self, next: usize, hand_len: usize) {
+        let prev = self.current_slot;
+        if prev != next && hand_len > 0 {
+            if let Some(fwd) = infer_adjacent_step_forward(prev, next, hand_len) {
+                self.sweep_forward = Some(fwd);
+            } else if self.sweep_forward.is_none() {
+                // Cursor jump or first frame skip: prefer the shorter arc.
+                let fwd_steps = (next + hand_len - prev) % hand_len;
+                let bwd_steps = (prev + hand_len - next) % hand_len;
+                self.sweep_forward = Some(fwd_steps <= bwd_steps);
+            }
+        }
+        self.current_slot = next;
+    }
+
+    fn swept_slots(&self, hand_len: usize) -> Vec<usize> {
+        let start = self.start_slot;
+        let current = self.current_slot;
+        if hand_len == 0 {
+            return Vec::new();
+        }
+        if start == current {
+            return vec![start.min(hand_len - 1)];
+        }
+        match self.sweep_forward {
+            Some(forward) => arc_indices(start, current, forward, hand_len),
+            None => {
+                let lo = start.min(current);
+                let hi = start.max(current);
+                (lo..=hi.min(hand_len - 1)).collect()
+            }
+        }
+    }
+
     /// Applies the marquee to `selected` and reports how many slots
     /// transitioned on (`added`) vs off (`removed`) relative to the prior
     /// state. Callers use this to play distinct tick/untick SFX.
     pub fn apply(&self, selected: &mut [bool]) -> (u32, u32) {
-        let lo = self.start_slot.min(self.current_slot);
-        let hi = self.start_slot.max(self.current_slot);
+        let swept: std::collections::HashSet<usize> =
+            self.swept_slots(selected.len()).into_iter().collect();
         let mut added = 0u32;
         let mut removed = 0u32;
         for (i, slot) in selected.iter_mut().enumerate() {
             let snap = self.snapshot.get(i).copied().unwrap_or(false);
-            let next = if i >= lo && i <= hi { !snap } else { snap };
+            let next = if swept.contains(&i) { !snap } else { snap };
             if next && !*slot {
                 added += 1;
             } else if !next && *slot {
@@ -176,14 +222,15 @@ impl MarqueeSelect {
     /// Like [`Self::apply`], but newly selected slots stop once `max_selected`
     /// would be exceeded. Deselections inside the sweep still apply.
     pub fn apply_capped(&self, selected: &mut [bool], max_selected: usize) -> (u32, u32) {
-        let lo = self.start_slot.min(self.current_slot);
-        let hi = self.start_slot.max(self.current_slot);
+        let hand_len = selected.len();
+        let swept = self.swept_slots(hand_len);
+        let swept_set: std::collections::HashSet<usize> = swept.iter().copied().collect();
         let mut desired: Vec<bool> = selected
             .iter()
             .enumerate()
             .map(|(i, _)| {
                 let snap = self.snapshot.get(i).copied().unwrap_or(false);
-                if i >= lo && i <= hi {
+                if swept_set.contains(&i) {
                     !snap
                 } else {
                     snap
@@ -193,11 +240,8 @@ impl MarqueeSelect {
 
         let mut sel_count = desired.iter().filter(|&&s| s).count();
         if sel_count > max_selected {
-            let trim_order: Vec<usize> = if self.current_slot >= self.start_slot {
-                (lo..=hi).rev().collect()
-            } else {
-                (lo..=hi).collect()
-            };
+            let mut trim_order = swept;
+            trim_order.reverse();
             for i in trim_order {
                 let snap = self.snapshot.get(i).copied().unwrap_or(false);
                 if !snap && desired[i] && sel_count > max_selected {
@@ -220,6 +264,37 @@ impl MarqueeSelect {
         }
         (added, removed)
     }
+}
+
+fn infer_adjacent_step_forward(prev: usize, next: usize, len: usize) -> Option<bool> {
+    if prev == next || len == 0 {
+        return None;
+    }
+    let fwd = (next + len - prev) % len;
+    let bwd = (prev + len - next) % len;
+    if fwd == 1 {
+        Some(true)
+    } else if bwd == 1 {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn arc_indices(start: usize, end: usize, forward: bool, len: usize) -> Vec<usize> {
+    let mut out = vec![start];
+    let mut pos = start;
+    while pos != end {
+        pos = if forward {
+            (pos + 1) % len
+        } else if pos == 0 {
+            len - 1
+        } else {
+            pos - 1
+        };
+        out.push(pos);
+    }
+    out
 }
 
 pub struct InputState {
@@ -567,11 +642,25 @@ mod tests {
     use super::{InputState, MarqueeSelect, UiAction};
 
     fn marquee(start: usize, current: usize, snapshot: Vec<bool>) -> MarqueeSelect {
-        MarqueeSelect {
-            start_slot: start,
-            current_slot: current,
-            snapshot,
+        let hand_len = snapshot.len();
+        let mut m = MarqueeSelect::new(start, snapshot);
+        if start < current {
+            for i in (start + 1)..=current {
+                m.advance_to(i, hand_len);
+            }
+        } else if start > current {
+            for i in (current..start).rev() {
+                m.advance_to(i, hand_len);
+            }
         }
+        m
+    }
+
+    fn marquee_wrap(start: usize, current: usize, snapshot: Vec<bool>) -> MarqueeSelect {
+        let hand_len = snapshot.len();
+        let mut m = MarqueeSelect::new(start, snapshot);
+        m.advance_to(current, hand_len);
+        m
     }
 
     #[test]
@@ -612,6 +701,36 @@ mod tests {
         let mut sel = vec![false; 5];
         marquee(4, 1, vec![false; 5]).apply(&mut sel);
         assert_eq!(sel, vec![false, true, true, true, true]);
+    }
+
+    #[test]
+    fn marquee_wrap_left_from_start_selects_only_endpoints() {
+        let mut sel = vec![false; 16];
+        marquee_wrap(0, 15, vec![false; 16]).apply(&mut sel);
+        assert_eq!(sel.iter().filter(|&&s| s).count(), 2);
+        assert!(sel[0] && sel[15]);
+        assert!(!sel[1] && !sel[14]);
+    }
+
+    #[test]
+    fn marquee_wrap_right_from_end_selects_only_endpoints() {
+        let mut sel = vec![false; 16];
+        marquee_wrap(15, 0, vec![false; 16]).apply(&mut sel);
+        assert_eq!(sel.iter().filter(|&&s| s).count(), 2);
+        assert!(sel[0] && sel[15]);
+    }
+
+    #[test]
+    fn marquee_wrap_forward_arc_skips_linear_middle() {
+        let mut sel = vec![false; 16];
+        marquee_wrap(14, 2, vec![false; 16]).apply(&mut sel);
+        assert_eq!(
+            sel,
+            vec![
+                true, true, true, false, false, false, false, false, false, false, false, false,
+                false, false, true, true
+            ]
+        );
     }
 
     #[test]
