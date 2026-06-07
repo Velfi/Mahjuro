@@ -17,6 +17,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use rustc_hash::FxHashMap;
 use glam::{Mat4, Vec2, Vec3};
 use gltf::image::Format;
 use mahjuro_gfx_types::TileMaterial;
@@ -56,22 +57,150 @@ impl Vertex3dTex {
     }
 }
 
+/// Shared CPU RGBA8 texture payload (cap + optional factor bake); refcounted across primitives.
+pub type RgbaTextureCpu = Arc<(Vec<u8>, u32, u32)>;
+
+/// One glTF image decoded to a capped RGBA8 base + precomputed mip chain.
+pub struct CappedGltfImage {
+    pub base: RgbaTextureCpu,
+    /// Level 0 = [`Self::base`]; includes all mips down to 1×1.
+    pub mip_chain: Arc<Vec<(Vec<u8>, u32, u32)>>,
+    pub source_format: &'static str,
+}
+
+/// Memoizes per-image factor/normal bakes and 1×1 solid albedo during one GLB decode.
+#[derive(Default)]
+pub struct TextureBakeCache {
+    albedo_factored: FxHashMap<(usize, [u32; 4]), RgbaTextureCpu>,
+    normal_scaled: FxHashMap<(usize, u32), RgbaTextureCpu>,
+    solid_albedo: FxHashMap<[u32; 4], RgbaTextureCpu>,
+}
+
+impl TextureBakeCache {
+    pub fn shared_texture(capped: &CappedGltfImage) -> RgbaTextureCpu {
+        Arc::clone(&capped.base)
+    }
+
+    pub fn albedo_from_capped(
+        &mut self,
+        image_index: usize,
+        capped: &CappedGltfImage,
+        factor: &[f32; 4],
+    ) -> RgbaTextureCpu {
+        if *factor == [1.0, 1.0, 1.0, 1.0] {
+            return Self::shared_texture(capped);
+        }
+        let key = (image_index, factor_key(factor));
+        self.albedo_factored
+            .entry(key)
+            .or_insert_with(|| {
+                let mut pixels = capped.base.0.clone();
+                multiply_rgba8_by_factor(&mut pixels, factor);
+                Arc::new((pixels, capped.base.1, capped.base.2))
+            })
+            .clone()
+    }
+
+    pub fn normal_from_capped(
+        &mut self,
+        image_index: usize,
+        capped: &CappedGltfImage,
+        scale: f32,
+    ) -> RgbaTextureCpu {
+        if (scale - 1.0).abs() <= 1e-6 {
+            return Self::shared_texture(capped);
+        }
+        let key = (image_index, scale.to_bits());
+        self.normal_scaled
+            .entry(key)
+            .or_insert_with(|| {
+                let mut pixels = capped.base.0.clone();
+                apply_normal_scale_rgba8(&mut pixels, scale);
+                Arc::new((pixels, capped.base.1, capped.base.2))
+            })
+            .clone()
+    }
+
+    pub fn solid_albedo(&mut self, factor: &[f32; 4]) -> RgbaTextureCpu {
+        let key = factor_key(factor);
+        self.solid_albedo
+            .entry(key)
+            .or_insert_with(|| Arc::new(solid_albedo_rgba8_unshared(factor)))
+            .clone()
+    }
+}
+
+#[inline]
+fn factor_key(factor: &[f32; 4]) -> [u32; 4] {
+    [
+        factor[0].to_bits(),
+        factor[1].to_bits(),
+        factor[2].to_bits(),
+        factor[3].to_bits(),
+    ]
+}
+
+#[inline]
+pub(crate) fn capped_image_at(
+    capped: &[Option<CappedGltfImage>],
+    index: usize,
+) -> Option<&CappedGltfImage> {
+    capped.get(index).and_then(|o| o.as_ref())
+}
+
+/// Decode every embedded image once (cap + mips). Scene walks index into this table.
+pub fn cap_gltf_images(
+    images: &[gltf::image::Data],
+    max_dimension: u32,
+) -> Vec<Option<CappedGltfImage>> {
+    images
+        .iter()
+        .map(|img| {
+            gltf_image_to_rgba8_capped(img, max_dimension).map(|(rgba, w, h)| {
+                let base = Arc::new((rgba.clone(), w, h));
+                let mip_chain = Arc::new(crate::gltf_helpers::cpu_mip_chain_rgba8(rgba, w, h));
+                CappedGltfImage {
+                    base,
+                    mip_chain,
+                    source_format: gltf_image_format_label(img.format),
+                }
+            })
+        })
+        .collect()
+}
+
+fn gltf_image_format_label(format: gltf::image::Format) -> &'static str {
+    use gltf::image::Format as F;
+    match format {
+        F::R8 => "R8",
+        F::R8G8 => "R8G8",
+        F::R8G8B8 => "R8G8B8",
+        F::R8G8B8A8 => "R8G8B8A8",
+        F::R16 => "R16",
+        F::R16G16 => "R16G16",
+        F::R16G16B16 => "R16G16B16",
+        F::R16G16B16A16 => "R16G16B16A16",
+        F::R32G32B32FLOAT => "R32G32B32FLOAT",
+        F::R32G32B32A32FLOAT => "R32G32B32A32FLOAT",
+    }
+}
+
 /// One material-slot from the GLB (maps to one glTF primitive).
 pub struct LoadedPrimitive {
     pub vertices: Vec<Vertex3dTex>,
     pub indices: Vec<u32>,
-    /// Decoded RGBA8, row-major.
-    pub albedo_rgba: Option<(Vec<u8>, u32, u32)>,
+    /// Decoded RGBA8, row-major (shared across primitives via [`RgbaTextureCpu`]).
+    pub albedo_rgba: Option<RgbaTextureCpu>,
     /// Precomputed mips for [`Self::albedo_rgba`] when sourced from a shared glTF image.
     pub albedo_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     /// Optional tangent-space normal map (linear RGBA8, +X +Y +Z in tangent frame).
-    pub normal_rgba: Option<(Vec<u8>, u32, u32)>,
+    pub normal_rgba: Option<RgbaTextureCpu>,
     pub normal_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     /// Metallic (B) + roughness (G) in linear RGBA8.
-    pub metallic_roughness_rgba: Option<(Vec<u8>, u32, u32)>,
+    pub metallic_roughness_rgba: Option<RgbaTextureCpu>,
     pub metallic_roughness_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     /// sRGB emissive texture (matches base-color encoding for candle-lit output).
-    pub emissive_rgba: Option<(Vec<u8>, u32, u32)>,
+    pub emissive_rgba: Option<RgbaTextureCpu>,
     pub emissive_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     pub metallic_factor: f32,
     pub roughness_factor: f32,
@@ -366,7 +495,7 @@ pub(crate) fn multiply_rgba8_by_factor(pixels: &mut [u8], factor: &[f32; 4]) {
 }
 
 #[inline]
-pub(crate) fn solid_albedo_rgba8(factor: &[f32; 4]) -> (Vec<u8>, u32, u32) {
+fn solid_albedo_rgba8_unshared(factor: &[f32; 4]) -> (Vec<u8>, u32, u32) {
     let mut px = [0u8; 4];
     for i in 0..4 {
         px[i] = (factor[i].clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -625,7 +754,8 @@ fn decode_tile_primitive(
     primitive: gltf::Primitive<'_>,
     node_world: Mat4,
     buffers: &[gltf::buffer::Data],
-    images: &[gltf::image::Data],
+    capped_images: &[Option<CappedGltfImage>],
+    bake_cache: &mut TextureBakeCache,
 ) -> anyhow::Result<LoadedPrimitive> {
     let normal_xform = node_world.inverse().transpose();
     let material = primitive.material();
@@ -760,10 +890,20 @@ fn decode_tile_primitive(
 
     let factor = pbr.base_color_factor();
 
-    let mut albedo_rgba = pbr.base_color_texture().and_then(|tex_info| {
+    let albedo_src = pbr.base_color_texture().and_then(|tex_info| {
         let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(gltf_image_to_rgba8)
+        capped_image_at(capped_images, img_index)
     });
+    let mut albedo_rgba = albedo_src.map(|img| {
+        let img_index = pbr
+            .base_color_texture()
+            .expect("albedo_src implies texture")
+            .texture()
+            .source()
+            .index();
+        bake_cache.albedo_from_capped(img_index, img, &factor)
+    });
+    let albedo_mip_chain = albedo_src.map(|c| Arc::clone(&c.mip_chain));
 
     if albedo_rgba.is_none() && pbr.base_color_texture().is_some() {
         log::warn!(
@@ -772,38 +912,47 @@ fn decode_tile_primitive(
         );
     }
 
-    match &mut albedo_rgba {
-        Some((pix, _, _)) => multiply_rgba8_by_factor(pix, &factor),
-        None => {
-            let want_fallback_tex =
-                factor != [1.0, 1.0, 1.0, 1.0] || pbr.base_color_texture().is_some();
-            if want_fallback_tex {
-                albedo_rgba = Some(solid_albedo_rgba8(&factor));
-            }
+    if albedo_rgba.is_none() {
+        let want_fallback_tex =
+            factor != [1.0, 1.0, 1.0, 1.0] || pbr.base_color_texture().is_some();
+        if want_fallback_tex {
+            albedo_rgba = Some(bake_cache.solid_albedo(&factor));
         }
     }
 
-    let metallic_roughness_rgba = pbr.metallic_roughness_texture().and_then(|tex_info| {
+    let mr_src = pbr.metallic_roughness_texture().and_then(|tex_info| {
         let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(gltf_image_to_rgba8)
+        capped_image_at(capped_images, img_index)
     });
+    let metallic_roughness_rgba = mr_src.map(TextureBakeCache::shared_texture);
+    let metallic_roughness_mip_chain = mr_src.map(|c| Arc::clone(&c.mip_chain));
 
-    let emissive_rgba = material.emissive_texture().and_then(|tex_info| {
+    let emissive_src = material.emissive_texture().and_then(|tex_info| {
         let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(gltf_image_to_rgba8)
+        capped_image_at(capped_images, img_index)
     });
+    let emissive_rgba = emissive_src.map(TextureBakeCache::shared_texture);
+    let emissive_mip_chain = emissive_src.map(|c| Arc::clone(&c.mip_chain));
 
-    let normal_rgba = material.normal_texture().and_then(|nt| {
+    let normal_src = material.normal_texture().and_then(|nt| {
         let img_index = nt.texture().source().index();
-        images
-            .get(img_index)
-            .and_then(gltf_image_to_rgba8)
-            .map(|mut tex| {
-                if (nt.scale() - 1.0).abs() > 1e-6 {
-                    apply_normal_scale_rgba8(&mut tex.0, nt.scale());
-                }
-                tex
-            })
+        capped_image_at(capped_images, img_index)
+    });
+    let normal_scale = material
+        .normal_texture()
+        .map(|nt| nt.scale())
+        .unwrap_or(1.0);
+    let normal_rgba = normal_src.map(|img| {
+        let img_index = material
+            .normal_texture()
+            .expect("normal_src implies texture")
+            .texture()
+            .source()
+            .index();
+        bake_cache.normal_from_capped(img_index, img, normal_scale)
+    });
+    let normal_mip_chain = normal_src.and_then(|c| {
+        (normal_scale == 1.0).then(|| Arc::clone(&c.mip_chain))
     });
 
     if normal_rgba.is_none() && material.normal_texture().is_some() {
@@ -820,13 +969,13 @@ fn decode_tile_primitive(
         vertices,
         indices,
         albedo_rgba,
-        albedo_mip_chain: None,
+        albedo_mip_chain,
         normal_rgba,
-        normal_mip_chain: None,
+        normal_mip_chain,
         metallic_roughness_rgba,
-        metallic_roughness_mip_chain: None,
+        metallic_roughness_mip_chain,
         emissive_rgba,
-        emissive_mip_chain: None,
+        emissive_mip_chain,
         metallic_factor: pbr.metallic_factor(),
         roughness_factor: pbr.roughness_factor(),
         emissive_factor: crate::gltf_helpers::effective_gltf_emissive_rgb(&material),
@@ -843,18 +992,33 @@ fn walk_tile_scene_nodes_filtered(
     node_name: Option<&str>,
     out: &mut Vec<LoadedPrimitive>,
     buffers: &[gltf::buffer::Data],
-    images: &[gltf::image::Data],
+    capped_images: &[Option<CappedGltfImage>],
+    bake_cache: &mut TextureBakeCache,
 ) -> anyhow::Result<()> {
     let local = Mat4::from_cols_array_2d(&node.transform().matrix());
     let world = parent * local;
     let include_mesh = node_name.is_none_or(|name| node.name() == Some(name));
     if include_mesh && let Some(mesh) = node.mesh() {
         for prim in mesh.primitives() {
-            out.push(decode_tile_primitive(prim, world, buffers, images)?);
+            out.push(decode_tile_primitive(
+                prim,
+                world,
+                buffers,
+                capped_images,
+                bake_cache,
+            )?);
         }
     }
     for child in node.children() {
-        walk_tile_scene_nodes_filtered(child, world, node_name, out, buffers, images)?;
+        walk_tile_scene_nodes_filtered(
+            child,
+            world,
+            node_name,
+            out,
+            buffers,
+            capped_images,
+            bake_cache,
+        )?;
     }
     Ok(())
 }
@@ -877,6 +1041,8 @@ pub fn load_glb_tile_from_node_name(
         .or_else(|| document.scenes().next())
         .context("GLB has no scenes")?;
 
+    let capped_images = cap_gltf_images(&images, GLTF_TEXTURE_MAX_DIMENSION);
+    let mut bake_cache = TextureBakeCache::default();
     let mut primitives = Vec::new();
     for node in scene.nodes() {
         walk_tile_scene_nodes_filtered(
@@ -885,7 +1051,8 @@ pub fn load_glb_tile_from_node_name(
             node_name,
             &mut primitives,
             &buffers,
-            &images,
+            &capped_images,
+            &mut bake_cache,
         )?;
     }
 

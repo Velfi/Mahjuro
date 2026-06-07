@@ -806,6 +806,7 @@ pub fn load_room_glb_from_bytes(
     let mut rain_surface_meshes = Vec::new();
 
     let mut node_bind_poses = FxHashMap::default();
+    let mut texture_bake_cache = crate::tile_glb::TextureBakeCache::default();
     let mut walk_state = RoomEnvWalkState {
         candle_node_prefix: SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX,
         lantern_node_prefix: SHOP_GLTF_LANTERN_LIGHT_NODE_PREFIX,
@@ -820,6 +821,7 @@ pub fn load_room_glb_from_bytes(
         embedded_spot_lights: &mut embedded_spot_lights,
         buffers: &buffers,
         capped_images: &capped_images,
+        texture_bake_cache: &mut texture_bake_cache,
     };
     for node in scene.nodes() {
         walk_room_env_node(node, Mat4::IDENTITY, false, hooks, &mut walk_state)?;
@@ -1058,7 +1060,7 @@ mod tests {
             let (pix, w, h) = ep
                 .mesh
                 .albedo_rgba
-                .as_ref()
+                .as_deref()
                 .expect("Gold text should have base color texture");
             let sample = |u: f32, v: f32| -> [f32; 3] {
                 let wf = *w as f32;
