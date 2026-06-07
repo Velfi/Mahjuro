@@ -106,11 +106,7 @@ impl GameplayCoreState {
         if self.selected.len() < self.hand.len() {
             self.selected.resize(self.hand.len(), false);
         }
-        let marquee = MarqueeSelect {
-            start_slot: idx,
-            current_slot: idx,
-            snapshot: self.selected.clone(),
-        };
+        let marquee = MarqueeSelect::new(idx, self.selected.clone());
         let delta = marquee.apply(&mut self.selected);
         Some((marquee, delta))
     }
@@ -127,7 +123,7 @@ impl GameplayCoreState {
         if idx == marquee.current_slot {
             return Some((0, 0));
         }
-        marquee.current_slot = idx;
+        marquee.advance_to(idx, self.hand.len());
         if self.selected.len() < self.hand.len() {
             self.selected.resize(self.hand.len(), false);
         }
@@ -254,6 +250,7 @@ mod tests {
         let mut core = GameplayCoreState::from_run(&run);
 
         let (mut marquee, _) = core.begin_marquee_selection(0).unwrap();
+        let _ = core.apply_marquee_selection(&mut marquee, 1).unwrap();
         let _ = core.apply_marquee_selection(&mut marquee, 2).unwrap();
 
         assert_eq!(core.selected, vec![true, true, true]);

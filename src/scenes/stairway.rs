@@ -514,7 +514,7 @@ impl StairwayScene {
         if slot == marquee.current_slot {
             return;
         }
-        marquee.current_slot = slot;
+        marquee.advance_to(slot, pick_tile_ids.len());
         let mut mask = pick_selection_mask(selected, pick_tile_ids);
         let (added, removed) = marquee.apply_capped(&mut mask, PLAYER_PICKS);
         apply_pick_selection_mask(selected, pick_tile_ids, &mask);
@@ -532,11 +532,7 @@ impl StairwayScene {
         bus: &mut crate::game::event_bus::EventBus,
     ) -> MarqueeSelect {
         let snapshot = pick_selection_mask(selected, pick_tile_ids);
-        let m = MarqueeSelect {
-            start_slot: slot,
-            current_slot: slot,
-            snapshot: snapshot.clone(),
-        };
+        let m = MarqueeSelect::new(slot, snapshot.clone());
         let mut mask = snapshot;
         let (added, removed) = m.apply_capped(&mut mask, PLAYER_PICKS);
         apply_pick_selection_mask(selected, pick_tile_ids, &mask);
