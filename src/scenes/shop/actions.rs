@@ -569,7 +569,7 @@ impl ShopScene {
                 skip_cost_escalation: true,
                 ..
             } => {
-                // Free restock (skip tag or I Got A Guy): spend one queued waiver.
+                // Free restock (temptation or I Got A Guy): spend one queued waiver.
                 if self.remaining_free_restocks > 0 {
                     self.remaining_free_restocks -= 1;
                 }

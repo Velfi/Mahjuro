@@ -26,7 +26,7 @@ use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
 use crate::ui::score_format::format_score;
 use crate::ui::ordeal_icons::ordeal_icon_source;
-use crate::ui::skip_tag_icons::skip_tag_icon_source;
+use crate::ui::temptation_icons::temptation_icon_source;
 use crate::ui::widget::wrap_text;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -361,7 +361,7 @@ impl SceneBehavior for HallwayScene {
         let upcoming = pick.upcoming_chamber;
         let upcoming_ordeal = upcoming == ChamberKind::Ordeal;
         let can_skip = Self::can_skip(upcoming);
-        let skip_tag = pick.skip_tag;
+        let temptation = pick.temptation;
 
         let mut frame = UiFrame::new();
         // Pure black temple background via the synthetic 1×1 black
@@ -512,7 +512,7 @@ impl SceneBehavior for HallwayScene {
         }
 
         // ── Minimal 2D HUD ────────────────────────────────────────────
-        // Outer edge columns: blind details (left), skip tag (right).
+        // Outer edge columns: blind details (left), temptation (right).
         let mut quads: Vec<GpuInstance> = Vec::new();
         let mut texts: Vec<TextLabel> = Vec::new();
         let mut icon_cmds: Vec<ImageQuad> = Vec::new();
@@ -735,7 +735,7 @@ impl SceneBehavior for HallwayScene {
                     let skip_col_w = (w - edge_margin - lx_skip).max(min_col_w);
                     let skip_icon_px = (h * 0.072).clamp(48.0, 80.0);
                     let skip_icon_gap = 10.0;
-                    let skip_stack_h = if let Some(tag) = skip_tag {
+                    let skip_stack_h = if let Some(tag) = temptation {
                         let text_col_w = (skip_col_w - skip_icon_px - skip_icon_gap).max(80.0);
                         let text_block_h =
                             wrapped_text_height(tag.name(), text_col_w, px_blind, h_blind)
@@ -766,7 +766,7 @@ impl SceneBehavior for HallwayScene {
                     } else {
                         color::STONE
                     };
-                    if let Some(tag) = skip_tag {
+                    if let Some(tag) = temptation {
                         let text_col_w = (skip_col_w - skip_icon_px - skip_icon_gap).max(80.0);
                         let name_h = wrapped_text_height(tag.name(), text_col_w, px_blind, h_blind);
                         let desc_h =
@@ -782,7 +782,7 @@ impl SceneBehavior for HallwayScene {
                                 color: color::alpha(skip_color, 0.98),
                                 user: 0,
                             },
-                            source: skip_tag_icon_source(tag),
+                            source: temptation_icon_source(tag),
                             clip_rect: None,
                         });
                         push_wrapped_column_line(WrappedColumnLine {

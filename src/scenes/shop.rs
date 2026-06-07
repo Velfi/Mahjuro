@@ -70,7 +70,7 @@ pub struct ShopScene {
     /// Current restock cost — starts at `RESTOCK_BASE_COST` and increases by
     /// `RESTOCK_COST_INCREMENT` each time the player restocks this shop visit.
     restock_cost: u32,
-    /// Skip-tag free restocks still owed this visit (consumed one at a time).
+    /// Temptation free restocks still owed this visit (consumed one at a time).
     remaining_free_restocks: u32,
     pause_menu: PauseMenu,
     /// Currently focused shop element. Starts on the first for-sale shelf item

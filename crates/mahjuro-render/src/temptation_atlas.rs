@@ -1,4 +1,4 @@
-//! Row-major sprite atlas for skip-tag icons (`textures/skip_tags/atlas.toml`).
+//! Row-major sprite atlas for temptation icons (`textures/temptations/atlas.toml`).
 //!
 //! Same fixed schema as tile-set atlases (see `scripts/pack_atlas.py` and
 //! `src/render/decal.rs`). Used by [`crate::draw_cmd::ImageQuadSource::PackedAtlas`].
@@ -33,7 +33,7 @@ pub fn extract_sprite_rgba(sheet_png: &str, sprite_name: &str) -> Option<(Vec<u8
     let Some((x, y)) = atlas.origins.get(sprite_name).copied() else {
         warn_once(format!("{sheet_png}|{sprite_name}|missing-cell"), || {
             format!(
-                "skip_tag_atlas: '{sprite_name}' not in '{sheet_png}' \
+                "temptation_atlas: '{sprite_name}' not in '{sheet_png}' \
                      ({} cells indexed)",
                 atlas.origins.len()
             )
@@ -47,7 +47,7 @@ pub fn extract_sprite_rgba(sheet_png: &str, sprite_name: &str) -> Option<(Vec<u8
 fn load_atlas(sheet_png: &str) -> Option<DecodedAtlas> {
     let Some(png) = mahjuro_assets::asset_path::get(sheet_png) else {
         warn_once(format!("{sheet_png}|png-missing"), || {
-            format!("skip_tag_atlas: PNG '{sheet_png}' not found")
+            format!("temptation_atlas: PNG '{sheet_png}' not found")
         });
         return None;
     };
@@ -55,7 +55,7 @@ fn load_atlas(sheet_png: &str) -> Option<DecodedAtlas> {
         Ok(img) => img.to_rgba8(),
         Err(e) => {
             warn_once(format!("{sheet_png}|png-decode"), || {
-                format!("skip_tag_atlas: PNG '{sheet_png}' decode failed: {e}")
+                format!("temptation_atlas: PNG '{sheet_png}' decode failed: {e}")
             });
             return None;
         }
@@ -65,7 +65,7 @@ fn load_atlas(sheet_png: &str) -> Option<DecodedAtlas> {
     let toml_asset = atlas_toml_path(sheet_png)?;
     let Some(toml) = mahjuro_assets::asset_path::get(&toml_asset) else {
         warn_once(format!("{toml_asset}|toml-missing"), || {
-            format!("skip_tag_atlas: TOML '{toml_asset}' not found")
+            format!("temptation_atlas: TOML '{toml_asset}' not found")
         });
         return None;
     };
@@ -182,10 +182,10 @@ mod tests {
     use super::*;
     use mahjuro_core::core::tag::TagKind;
 
-    const ATLAS_TOML: &str = include_str!("../../../assets/textures/skip_tags/atlas.toml");
+    const ATLAS_TOML: &str = include_str!("../../../assets/textures/temptations/atlas.toml");
 
     #[test]
-    fn parser_reads_skip_tag_layout() {
+    fn parser_reads_temptation_layout() {
         let (tw, th, cols, layout) = parse_atlas_toml(ATLAS_TOML).expect("parse");
         assert_eq!(tw, 128);
         assert_eq!(th, 128);
@@ -207,9 +207,9 @@ mod tests {
     }
 
     #[test]
-    fn every_tag_kind_loads_skip_icon_sprite() {
+    fn every_tag_kind_loads_temptation_icon_sprite() {
         for tag in TagKind::all() {
-            let got = extract_sprite_rgba("textures/skip_tags/atlas.png", tag.atlas_slug());
+            let got = extract_sprite_rgba("textures/temptations/atlas.png", tag.atlas_slug());
             assert!(
                 got.is_some(),
                 "skip icon crop failed for {:?} ({})",

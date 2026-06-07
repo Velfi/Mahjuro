@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Generate skip-tag icons for Mahjuro and pack them into a sprite sheet.
+Generate temptation icons for Mahjuro and pack them into a sprite sheet.
 
-Each skip tag (`TagKind` in `crates/mahjuro-core/src/core/tag.rs`) gets a distinct faceted low-poly
+Each temptation (`TagKind` in `crates/mahjuro-core/src/core/tag.rs`) gets a distinct faceted low-poly
 inventory icon in the game's Walnut, Brass & Felt palette. The script calls
 Google's Nano Banana 2 (`gemini-3.1-flash-image-preview`) for per-tag source
 art, runs a light post-process (background strip, contrast boost, content fit,
 smooth downscale), then packs a row-major atlas. Post-process + pack are shared
 via `_icon_atlas_postprocess.py` (same helpers as `generate_boss_icons.py`).
 
-**Writes (under `assets/textures/skip_tags/` by default)**
+**Writes (under `assets/textures/temptations/` by default)**
 
   • `source/tag_{slug}.png` — raw API output (RGBA)
   • `processed/tag_{slug}.png` — cleaned icon, square `CELL_SIZE`
@@ -25,13 +25,13 @@ thin outline stroke) readable at ~64 px on screen.
 Usage:
     pip install google-genai pillow
     export GEMINI_API_KEY="..."
-    python3 scripts/generate_skip_tag_icons.py                  # missing only
-    python3 scripts/generate_skip_tag_icons.py --force          # regenerate all
-    python3 scripts/generate_skip_tag_icons.py --name gold_ingot
-    python3 scripts/generate_skip_tag_icons.py --tag 3          # 1-indexed
-    python3 scripts/generate_skip_tag_icons.py --list
-    python3 scripts/generate_skip_tag_icons.py --dry-run        # prompts only
-    python3 scripts/generate_skip_tag_icons.py --pack-only      # repack atlas
+    python3 scripts/generate_temptation_icons.py                  # missing only
+    python3 scripts/generate_temptation_icons.py --force          # regenerate all
+    python3 scripts/generate_temptation_icons.py --name gold_ingot
+    python3 scripts/generate_temptation_icons.py --tag 3          # 1-indexed
+    python3 scripts/generate_temptation_icons.py --list
+    python3 scripts/generate_temptation_icons.py --dry-run        # prompts only
+    python3 scripts/generate_temptation_icons.py --pack-only      # repack atlas
 """
 
 from __future__ import annotations
@@ -74,11 +74,11 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TAG_JSON_PATH = REPO_ROOT / "assets" / "data" / "tags.json"
 TAG_RS_PATH = REPO_ROOT / "crates" / "mahjuro-core" / "src" / "core" / "tag.rs"
-OUTPUT_DIR = REPO_ROOT / "assets" / "textures" / "skip_tags"
+OUTPUT_DIR = REPO_ROOT / "assets" / "textures" / "temptations"
 SOURCE_DIR = OUTPUT_DIR / "source"
 PROCESSED_DIR = OUTPUT_DIR / "processed"
 
-# Atlas grid: 3 columns × 3 rows for the nine skip tags.
+# Atlas grid: 3 columns × 3 rows for the nine temptations.
 COLUMNS = 3
 CELL_SIZE = 128
 # Fraction of the atlas cell the subject should fill after auto-crop.
@@ -331,7 +331,7 @@ def process_source(source_path: Path, processed_path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate skip-tag icons and pack a sprite atlas"
+        description="Generate temptation icons and pack a sprite atlas"
     )
     parser.add_argument(
         "--tag",
@@ -348,7 +348,7 @@ def main() -> None:
     parser.add_argument(
         "--list",
         action="store_true",
-        help="List all skip tags and exit.",
+        help="List all temptations and exit.",
     )
     parser.add_argument(
         "--dry-run",

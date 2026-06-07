@@ -24,7 +24,7 @@ pub fn flavor_spans_layout_width(
     body_px: f32,
     max_width_px: f32,
 ) -> f32 {
-    let char_w = body_px * 0.52;
+    let char_w = body_px * 0.58;
     let longest_chars = spans
         .iter()
         .flat_map(|s| s.text.split('\n'))
@@ -60,7 +60,7 @@ pub fn estimated_flavor_line_count(
     body_px: f32,
     max_lines: usize,
 ) -> usize {
-    let char_w = body_px * 0.52;
+    let char_w = body_px * 0.58;
     let chars_per_line = (band_w / char_w).floor().max(1.0) as usize;
     let mut lines = 0usize;
     for chars in flavor_hard_line_char_counts(spans) {
@@ -275,10 +275,9 @@ pub fn push_relic_flavor_inspect_panel(
     let rim = crate::render::theme::metrics::tooltip_border_px(window_w, window_h);
     let body_px = typography::size(typography::H32, window_h);
     let min_font_px = typography::readable_floor_px(window_h);
-    let max_inner_w = (window_w * 0.38).clamp(320.0, 520.0);
-    let min_inner_w = (window_w * 0.32).clamp(280.0, max_inner_w);
+    let max_inner_w = (window_w * 0.46).clamp(440.0, 720.0);
     let inner_w = flavor_spans_layout_width(flavor, body_px, max_inner_w)
-        .clamp(min_inner_w, max_inner_w);
+        .clamp(400.0, max_inner_w);
     let inner_w_u = inner_w.max(1.0) as u32;
     let top_margin = window_h * 0.10;
     let bottom_margin = extra_bottom_reserve.max(0.0) + window_h * 0.02;

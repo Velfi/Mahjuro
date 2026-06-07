@@ -20,7 +20,7 @@ FLATTEN_BG = (18, 15, 13)
 ACHIEVEMENTS: list[tuple[str, str]] = [
     ("TUTORIAL_COMPLETE", "assets/textures/relics/diligence_object.png"),
     ("FIRST_STRUCTURE", "assets/textures/relics/crown_of_patterns_object.png"),
-    ("FIRST_BLIND_CLEARED", "assets/textures/skip_tags/processed/tag_treasure_chest.png"),
+    ("FIRST_BLIND_CLEARED", "assets/textures/temptations/processed/tag_treasure_chest.png"),
     ("FIRST_BOSS_DEFEATED", "assets/textures/ordeal_icons/processed/ordeal_hermit.png"),
     ("FIRST_RUN_COMPLETED", "assets/textures/relics/gold_idol_object.png"),
     ("TEN_RUNS_PLAYED", "assets/textures/relics/curio_cabinet_object.png"),

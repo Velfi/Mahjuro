@@ -2165,6 +2165,117 @@ fn flavor_line_advance(fonts: &DecalFonts<'_>, line: &[FlavorCell], font_px: f32
         .sum()
 }
 
+fn collect_flavor_line_glyphs(
+    fonts: &DecalFonts<'_>,
+    line: &[FlavorCell],
+    font_px: f32,
+) -> Vec<GlyphData> {
+    let italic = flavor_italic_face(fonts);
+    line.iter()
+        .map(|c| {
+            let face = pick_face_for_flavor(fonts.regular, italic, fonts.emoji, c.ch, c.italic);
+            let (metrics, bitmap) = face.rasterize(c.ch, font_px);
+            GlyphData { metrics, bitmap }
+        })
+        .collect()
+}
+
+fn glyph_run_vertical_extents(glyphs: &[GlyphData]) -> (f32, f32) {
+    let ascender_px: f32 = glyphs
+        .iter()
+        .map(|g| g.metrics.height as f32 + g.metrics.ymin as f32)
+        .fold(0.0_f32, f32::max);
+    let descender_px: f32 = glyphs
+        .iter()
+        .map(|g| (-g.metrics.ymin as f32).max(0.0))
+        .fold(0.0_f32, f32::max);
+    (ascender_px, descender_px)
+}
+
+/// Ascender + descender below baseline for one wrapped flavor line, using the
+/// same faces as rasterization (italic metrics can exceed regular line metrics).
+fn flavor_line_vertical_extents(
+    fonts: &DecalFonts<'_>,
+    line: &[FlavorCell],
+    font_px: f32,
+) -> (f32, f32) {
+    if line.is_empty() {
+        let lm = fonts.regular.horizontal_line_metrics(font_px);
+        let ascent = lm.map(|m| m.ascent).unwrap_or(font_px * 0.8);
+        let line_h = lm.map(|m| m.new_line_size).unwrap_or(font_px * 1.2);
+        return (ascent, line_h - ascent);
+    }
+    glyph_run_vertical_extents(&collect_flavor_line_glyphs(fonts, line, font_px))
+}
+
+fn flavor_soft_lines_glyph_block_h(
+    fonts: &DecalFonts<'_>,
+    soft_lines: &[Vec<FlavorCell>],
+    font_px: f32,
+) -> f32 {
+    if soft_lines.is_empty() {
+        return font_px * 1.2;
+    }
+    if soft_lines.len() == 1 {
+        let (asc, desc) = flavor_line_vertical_extents(fonts, &soft_lines[0], font_px);
+        return asc + desc;
+    }
+    flavor_soft_lines_block_h(fonts, soft_lines, font_px)
+}
+
+fn raster_spans_fit_band(
+    fonts: &DecalFonts<'_>,
+    spans: &[RasterStyleSpan<'_>],
+    width: u32,
+    height: u32,
+    font_px: f32,
+) -> bool {
+    let soft_lines = build_flavor_soft_lines(fonts, spans, width, font_px);
+    if flavor_soft_lines_glyph_block_h(fonts, &soft_lines, font_px) > height as f32 {
+        return false;
+    }
+    soft_lines
+        .iter()
+        .all(|line| flavor_line_advance(fonts, line, font_px) <= width as f32)
+}
+
+/// Resolve a pinned or auto font size for bold/italic/underline labels before
+/// rasterization. Uses the same wrapped layout and glyph extents as
+/// [`rasterize_label_raster_spans`], not regular-face line metrics alone.
+pub fn resolve_raster_spans_font_px(
+    fonts: &DecalFonts<'_>,
+    spans: &[RasterStyleSpan<'_>],
+    width: u32,
+    height: u32,
+    font_px: Option<f32>,
+    min_px: f32,
+) -> f32 {
+    let char_count = spans
+        .iter()
+        .map(|s| s.text.chars().count())
+        .sum::<usize>()
+        .max(1) as f32;
+    let min_px = min_px.max(8.0);
+    let auto_px = (height as f32 * 0.55)
+        .min(width as f32 * 1.5 / char_count)
+        .max(min_px);
+    let target = font_px.unwrap_or(auto_px).max(min_px);
+    if spans.is_empty() || raster_spans_fit_band(fonts, spans, width, height, target) {
+        return target;
+    }
+    let mut lo = min_px;
+    let mut hi = target.max(min_px);
+    for _ in 0..10 {
+        let mid = (lo + hi) * 0.5;
+        if raster_spans_fit_band(fonts, spans, width, height, mid) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
 fn tokenize_flavor_cells(cells: &[FlavorCell]) -> Vec<&[FlavorCell]> {
     if cells.is_empty() {
         return Vec::new();
@@ -2550,7 +2661,17 @@ pub fn rasterize_label_raster_spans(
         if line.is_empty() {
             continue;
         }
-        let baseline_y = block_top + i as f32 * line_h + ascender_px;
+        let baseline_y = if soft_lines.len() == 1 {
+            // Match pinned [`rasterize_label_styled`]: centre from measured glyph
+            // extents so italic ascenders are not clipped in short rects.
+            let (ascender, descender) = flavor_line_vertical_extents(fonts, line, font_px);
+            let text_block_h = ascender + descender;
+            (height as f32 - text_block_h) * 0.5 + ascender
+        } else {
+            let (line_ascender, _) = flavor_line_vertical_extents(fonts, line, font_px);
+            let line_ascender = line_ascender.max(ascender_px);
+            block_top + i as f32 * line_h + line_ascender
+        };
         let adv = flavor_line_advance(fonts, line, font_px);
         let start_x = match align {
             LabelAlign::Left => 0.0,
@@ -2722,6 +2843,71 @@ mod flavor_layout_tests {
             italic: load_ui_font_italic(),
             emoji: None,
         })
+    }
+
+    #[test]
+    fn italic_single_line_keeps_capital_ascenders_inside_band() {
+        let Some(fonts) = test_fonts() else {
+            return;
+        };
+        let font_px = 18.0;
+        let height = (font_px * 1.08_f32).round() as u32;
+        let width = 220u32;
+        let spans = &[RasterStyleSpan {
+            text: "Opens after a clear.",
+            bold: false,
+            italic: true,
+            underline: false,
+        }];
+        let resolved = resolve_raster_spans_font_px(&fonts, spans, width, height, Some(font_px), 8.0);
+        let soft = build_flavor_soft_lines(&fonts, spans, width, resolved);
+        let (asc, desc) = flavor_line_vertical_extents(&fonts, &soft[0], resolved);
+        let text_block_h = asc + desc;
+        let baseline_y = (height as f32 - text_block_h) * 0.5 + asc;
+        let italic = fonts.italic.unwrap();
+        for c in &soft[0] {
+            if !c.italic {
+                continue;
+            }
+            let m = italic.metrics(c.ch, resolved);
+            let glyph_top = baseline_y - (m.ymin as f32 + m.height as f32);
+            assert!(
+                glyph_top >= 0.0,
+                "'{}' glyph_top={glyph_top:.2} baseline={baseline_y:.2} band_h={height} font={resolved:.2}",
+                c.ch
+            );
+        }
+        let rgba = rasterize_label_raster_spans(
+            &fonts,
+            spans,
+            &LabelRasterParams {
+                width,
+                height,
+                font_px: resolved,
+                align: LabelAlign::Left,
+                vertical_align: LabelVerticalAlign::Bottom,
+            },
+        );
+        let mut min_y = height;
+        let mut max_y = 0u32;
+        for row in 0..height {
+            let base = (row * width * 4) as usize;
+            if rgba[base..base + (width * 4) as usize]
+                .chunks(4)
+                .any(|px| px[3] > 0)
+            {
+                min_y = min_y.min(row);
+                max_y = row;
+            }
+        }
+        assert!(
+            max_y >= min_y,
+            "expected visible italic ink inside {height}px band"
+        );
+        assert!(
+            min_y + (max_y - min_y) + 1 <= height,
+            "ink rows {min_y}..={max_y} exceed band height {height}"
+        );
     }
 
     #[test]

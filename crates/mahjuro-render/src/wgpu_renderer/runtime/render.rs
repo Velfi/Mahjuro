@@ -391,13 +391,6 @@ impl WgpuRenderer {
             };
 
             let rasterize = || -> Vec<u8> {
-                let sizing_text = if lbl.text.is_empty() {
-                    flavor
-                        .map(mahjuro_core::core::relic::flavor_spans_plain_text)
-                        .unwrap_or_default()
-                } else {
-                    lbl.text.clone()
-                };
                 if let Some(spans) = flavor {
                     let floor = crate::theme::typography::readable_floor_px(window_h);
                     let target = lbl.font_px.unwrap_or(floor).max(floor);
@@ -430,21 +423,24 @@ impl WgpuRenderer {
                     )
                 } else if lbl.bold || lbl.italic || lbl.underline {
                     let floor = crate::theme::typography::readable_floor_px(window_h);
-                    let px = crate::decal::resolve_label_font_px(
-                        face_font,
-                        emoji_fallback,
-                        &sizing_text,
-                        tw,
-                        th,
-                        lbl.font_px,
-                        floor,
-                    );
                     let syn = [crate::decal::RasterStyleSpan {
                         text: lbl.text.as_str(),
                         bold: lbl.bold,
                         italic: lbl.italic,
                         underline: lbl.underline,
                     }];
+                    let px = crate::decal::resolve_raster_spans_font_px(
+                        &crate::decal::DecalFonts {
+                            regular: face_font,
+                            italic: Some(face_italic),
+                            emoji: emoji_fallback,
+                        },
+                        &syn,
+                        tw,
+                        th,
+                        lbl.font_px,
+                        floor,
+                    );
                     crate::decal::rasterize_label_raster_spans(
                         &crate::decal::DecalFonts {
                             regular: face_font,

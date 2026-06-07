@@ -56,7 +56,7 @@ pub struct BotConfig {
     pub starting_yen: Option<u32>,
     pub relic_weight: Option<f32>,
     /// When true, bot never acquires relics from shop offers (including
-    /// skip-tag free relics such as PatronGift).
+    /// temptation free relics such as PatronGift).
     pub no_relic_acquisition: Option<bool>,
     pub zodiac_weight: Option<f32>,
     pub talisman_weight: Option<f32>,

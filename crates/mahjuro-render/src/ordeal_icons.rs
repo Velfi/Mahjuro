@@ -22,7 +22,7 @@ pub fn ordeal_icon_rgba(kind: OrdealKind) -> Option<(Vec<u8>, u32, u32)> {
             return Some((rgba.into_raw(), w, h));
         }
     }
-    crate::skip_tag_atlas::extract_sprite_rgba(ORDEAL_ICON_ATLAS_PNG, slug)
+    crate::temptation_atlas::extract_sprite_rgba(ORDEAL_ICON_ATLAS_PNG, slug)
 }
 
 /// Icon source for 2D HUD quads (pick-chamber, etc.).

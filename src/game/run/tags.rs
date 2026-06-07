@@ -20,7 +20,7 @@ impl RunState {
         }
     }
 
-    /// Apply a skip-reward tag's effect. Returns a short description for UI feedback.
+    /// Apply a temptation's effect. Returns a short description for UI feedback.
     pub fn apply_tag(
         &mut self,
         tag: crate::core::tag::TagKind,
@@ -89,7 +89,7 @@ impl RunState {
         }
     }
 
-    /// Clear transient skip-tag bonuses that only apply to the very next blind.
+    /// Clear transient temptation bonuses that only apply to the very next blind.
     pub(super) fn clear_next_chamber_tag_modifiers(&mut self) {
         self.tag_bonus_plays = 0;
         self.tag_bonus_discards = 0;

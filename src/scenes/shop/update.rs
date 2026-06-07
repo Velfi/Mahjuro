@@ -331,7 +331,7 @@ impl ShopScene {
         }
         if open_guide {
             *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Guide(
-                GuideScene::new(),
+                GuideScene::with_page(GuideScene::ECONOMY_PAGE),
             ))));
             return None;
         }

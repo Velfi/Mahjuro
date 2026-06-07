@@ -11,7 +11,7 @@
 
 # Google Gemini SDK — every generate_*.py / gen_*.py uses Nano Banana 2
 # (`gemini-3.1-flash-image-preview`) via scripts/_image_gen.py
-# (skip tags, boss icons, relic art, …).
+# (temptations, boss icons, relic art, …).
 google-genai
 
 # Pillow — image load/save/resize in most generator scripts.

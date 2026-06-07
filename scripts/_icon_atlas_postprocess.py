@@ -1,6 +1,6 @@
 """Shared icon post-process + packed atlas helpers for Mahjuro asset scripts.
 
-Used by `generate_skip_tag_icons.py` and `generate_boss_icons.py`: background
+Used by `generate_temptation_icons.py` and `generate_boss_icons.py`: background
 strip, contrast boost, content fit, downscale, then grid pack + `atlas.toml`.
 """
 

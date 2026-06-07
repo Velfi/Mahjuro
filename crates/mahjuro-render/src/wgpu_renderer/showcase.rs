@@ -90,7 +90,7 @@ pub(super) fn make_image_quad_overlay_gpu(
             crate::kenney_atlas::extract_sprite_rgba(sheet, name)?
         }
         crate::draw_cmd::ImageQuadSource::PackedAtlas { sheet, name } => {
-            crate::skip_tag_atlas::extract_sprite_rgba(sheet, name)?
+            crate::temptation_atlas::extract_sprite_rgba(sheet, name)?
         }
         crate::draw_cmd::ImageQuadSource::Asset { path } => {
             let file = mahjuro_assets::asset_path::get(path)?;
