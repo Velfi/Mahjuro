@@ -26,3 +26,17 @@ fn vs_main(@location(0) pos: vec3<f32>) -> @builtin(position) vec4<f32> {
     let world = select(world_h, apply_hallway_distortion(world_h, hd), hd.flags.x > 0.5);
     return caster.light_view_proj * vec4<f32>(world, 1.0);
 }
+
+@vertex
+fn vs_instanced(
+    @location(0) pos: vec3<f32>,
+    @location(1) inst_m0: vec4<f32>,
+    @location(2) inst_m1: vec4<f32>,
+    @location(3) inst_m2: vec4<f32>,
+    @location(4) inst_m3: vec4<f32>,
+) -> @builtin(position) vec4<f32> {
+    let model = mat4x4<f32>(inst_m0, inst_m1, inst_m2, inst_m3);
+    let world_h = (model * vec4<f32>(pos, 1.0)).xyz;
+    let world = select(world_h, apply_hallway_distortion(world_h, hd), hd.flags.x > 0.5);
+    return caster.light_view_proj * vec4<f32>(world, 1.0);
+}

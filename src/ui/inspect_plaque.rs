@@ -4,9 +4,14 @@ use crate::core::consumable::Consumable;
 use crate::core::debuff::TileDebuff;
 use crate::core::relic::RelicFlavorSpan;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
+use crate::render::decal::{DecalFonts, load_ui_font, load_ui_font_italic};
+use crate::render::text_shadow_lab::{
+    FloatingFlavorShadowTuning, layout_floating_flavor_caption_for_spans,
+};
 use crate::render::theme::{color, typography};
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
-use crate::ui::colored_keywords;
+use crate::ui::styled_text;
 use crate::ui::tooltip::push_tooltip_frame_quads;
 
 /// Width that fits the longest `\n`-delimited hard line without wrapping.
@@ -25,6 +30,25 @@ pub fn flavor_spans_layout_width(
     (longest_chars as f32 * char_w + body_px * 1.5).clamp(body_px * 4.0, max_width_px)
 }
 
+/// Hard lines after span concat + `\n` breaks (matches flavor raster layout).
+fn flavor_hard_line_char_counts(spans: &[RelicFlavorSpan]) -> Vec<usize> {
+    if spans.is_empty() {
+        return Vec::new();
+    }
+    let mut lines: Vec<String> = vec![String::new()];
+    for span in spans {
+        let mut first = true;
+        for segment in span.text.split('\n') {
+            if !first {
+                lines.push(String::new());
+            }
+            first = false;
+            lines.last_mut().expect("hard line").push_str(segment);
+        }
+    }
+    lines.into_iter().map(|s| s.chars().count()).collect()
+}
+
 /// Rough line count for relic / staircase flavor layout (matches bottom-aligned raster band).
 pub fn estimated_flavor_line_count(
     spans: &[RelicFlavorSpan],
@@ -35,15 +59,12 @@ pub fn estimated_flavor_line_count(
     let char_w = body_px * 0.52;
     let chars_per_line = (band_w / char_w).floor().max(1.0) as usize;
     let mut lines = 0usize;
-    for span in spans {
-        for segment in span.text.split('\n') {
-            let chars = segment.chars().count();
-            lines += if chars == 0 {
-                1
-            } else {
-                chars.div_ceil(chars_per_line).max(1)
-            };
-        }
+    for chars in flavor_hard_line_char_counts(spans) {
+        lines += if chars == 0 {
+            1
+        } else {
+            chars.div_ceil(chars_per_line).max(1)
+        };
     }
     lines.clamp(1, max_lines)
 }
@@ -130,10 +151,11 @@ pub fn push_focus_tooltip_panel_2d(
             Tier::Heading => heading_px,
             Tier::Body => body_px,
         };
-        inner_w = inner_w.max(colored_keywords::colored_paragraph_preferred_width(
+        inner_w = inner_w.max(styled_text::colored_paragraph_preferred_width(
             text,
             line_h,
             max_inner_w,
+            GlossaryMode::Prose,
         ));
     }
     inner_w = inner_w.clamp(min_inner_w, max_inner_w);
@@ -144,7 +166,7 @@ pub fn push_focus_tooltip_panel_2d(
             Tier::Heading => heading_px,
             Tier::Body => body_px,
         };
-        colored_keywords::colored_multiline_text_height(text, inner_w, line_h, col)
+        styled_text::colored_multiline_text_height(text, inner_w, line_h, col, GlossaryMode::Prose)
     };
 
     let mut total_h = pad * 2.0 + FILL_INSET_PX * 2.0;
@@ -199,10 +221,17 @@ pub fn push_focus_tooltip_panel_2d(
             Tier::Body => body_px,
         };
         let h_block = block_height(text, *col, *tier);
-        let lines = colored_keywords::wrap_colored_text_multiline(text, inner_w, line_h, *col, false);
-        colored_keywords::push_colored_rows_left(
+        let lines = styled_text::wrap_colored_text_multiline(
+            text,
+            inner_w,
+            line_h,
+            *col,
+            false,
+            GlossaryMode::Prose,
+        );
+        styled_text::push_colored_rows_left(
             texts,
-            colored_keywords::ColoredRowsLayout {
+            styled_text::ColoredRowsLayout {
                 text_left,
                 top_y: y,
                 inner_w,
@@ -210,6 +239,7 @@ pub fn push_focus_tooltip_panel_2d(
                 fallback_plain: text,
                 fallback_color: *col,
                 italic: false,
+                glossary: GlossaryMode::Prose,
             },
             &lines,
         );
@@ -235,36 +265,47 @@ pub fn push_floating_relic_flavor_labels(
     if flavor.is_empty() {
         return;
     }
-    let margin_x = window_w * 0.035;
-    let band_w = (window_w - 2.0 * margin_x).min(1040.0);
-    let left = (window_w - band_w) * 0.5;
+    let tuning = FloatingFlavorShadowTuning::DEFAULT;
     let body_px = typography::size(typography::H32, window_h);
-    let line_step = colored_keywords::colored_row_line_step(body_px);
-    let max_lines = 5usize;
-    let band_h = (line_step * max_lines as f32 + body_px * 0.5)
-        .min(window_h * 0.25)
-        .max(body_px * 2.0);
-    let bottom_margin = window_h * 0.055 + extra_bottom_reserve.max(0.0);
-    let top = window_h - bottom_margin - band_h;
+    let min_font_px = crate::render::theme::typography::readable_floor_px(window_h);
+    let layout = if let Some(font) = load_ui_font() {
+        let fonts = DecalFonts {
+            regular: font,
+            italic: load_ui_font_italic(),
+            emoji: None,
+        };
+        layout_floating_flavor_caption_for_spans(
+            window_w,
+            window_h,
+            &fonts,
+            flavor,
+            body_px,
+            min_font_px,
+            extra_bottom_reserve,
+            &tuning,
+        )
+    } else {
+        let line_step = styled_text::colored_row_line_step(body_px);
+        let max_lines = 8usize;
+        let margin_x = window_w * tuning.margin_x_frac;
+        let band_w = (window_w - 2.0 * margin_x).min(tuning.band_max_w);
+        let content_lines = estimated_flavor_line_count(flavor, band_w, body_px, max_lines);
+        crate::render::text_shadow_lab::layout_floating_flavor_caption(
+            window_w,
+            window_h,
+            body_px,
+            line_step,
+            content_lines,
+            extra_bottom_reserve,
+            &tuning,
+        )
+    };
+    gradient_quads.push(layout.gradient_quad(&tuning));
 
-    // Flavor rasterizes bottom-aligned in `band_h`; size the shadow to the copy,
-    // not the full band, so diffuse ink does not float above short quotes.
-    let content_lines = estimated_flavor_line_count(flavor, band_w, body_px, max_lines);
-    let content_h = line_step * content_lines as f32 + body_px * 0.2;
-    let pad_x = band_w * 0.10;
-    let pad_top = body_px * 0.45;
-    let pad_bottom = band_h * 0.22;
-    let shadow_h = content_h + pad_top + pad_bottom;
-    let shadow_bottom = top + band_h + pad_bottom * 0.25 + line_step;
-    let shadow_top = shadow_bottom - shadow_h;
-    gradient_quads.push(GradientQuadInstance {
-        rect: [left - pad_x, shadow_top, band_w + 2.0 * pad_x, shadow_h],
-        color: color::alpha(color::WALNUT_INK, 0.82),
-        feather: [0.48, 0.12, 0.0, 0.0],
-    });
-
+    // Always rasterize via flavor_spans so copy bottom-aligns in `band_h` and
+    // sits on the gradient shadow (the plain-text row path anchored at `top`).
     texts.push(TextLabel {
-        rect: [left, top, band_w, band_h],
+        rect: layout.text_rect(),
         text: String::new(),
         color: color::CHAMPAGNE,
         font_px: Some(body_px),
@@ -278,6 +319,7 @@ pub fn push_floating_relic_flavor_labels(
         rotation_quarters: 0,
         baseline_shift_px: 0.0,
         clip_rect: None,
+        block_vertical_align: Default::default(),
         mono: false,
     });
 }
@@ -475,6 +517,31 @@ pub fn truncate_inspect_text(s: &str, max_chars: usize) -> String {
 mod tests {
     use super::*;
     use crate::core::relic::RelicFlavorSpan;
+
+    #[test]
+    fn flavor_line_count_honors_explicit_newlines() {
+        let spans = &[
+            RelicFlavorSpan {
+                text: "First line",
+                bold: false,
+                italic: false,
+            },
+            RelicFlavorSpan {
+                text: "\n",
+                bold: false,
+                italic: false,
+            },
+            RelicFlavorSpan {
+                text: "Second line",
+                bold: false,
+                italic: false,
+            },
+        ];
+        let body_px = 32.0;
+        let wide_w = 640.0;
+        let lines = estimated_flavor_line_count(spans, wide_w, body_px, 8);
+        assert_eq!(lines, 2, "newline separator span should break lines");
+    }
 
     #[test]
     fn flavor_line_count_wraps_each_hard_line_at_narrow_width() {

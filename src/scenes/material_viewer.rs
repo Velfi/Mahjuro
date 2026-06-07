@@ -180,7 +180,7 @@ impl SceneBehavior for MaterialViewerScene {
             &mut frame,
             &ctx,
             back_footer_row(ctx.input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
         frame.window_title = "Mahjuro \u{2014} Material Viewer".into();
         frame

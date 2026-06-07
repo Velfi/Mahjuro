@@ -80,7 +80,7 @@ pub enum SfxId {
     CandleFlareWhoosh,
     /// Heavy impact sting layered on top of the whoosh.
     CandleFlareImpact,
-    /// Melds locked into the structure bank (distinct from [`Self::TilePlace`]).
+    /// Melds locked into structure (distinct from [`Self::TilePlace`]).
     StructureCommit,
     /// Focus moved to a hand tile.
     FocusHandTile,

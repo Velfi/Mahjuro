@@ -573,7 +573,7 @@ impl ShopScene {
 /// Storeroom draw for the normal shop face. Pass `inspect: Some` from [`crate::scenes::ShopInspectPresenter`] to ease the camera into orbit while keeping the room.
 pub(crate) fn render_shop_frame(
     shop: &ShopScene,
-    ctx: DrawCtx<'_>,
+    mut ctx: DrawCtx<'_>,
     inspect: Option<&ItemInspectOrbitState>,
 ) -> UiFrame {
     let w = ctx.layout.window_w;
@@ -1116,7 +1116,7 @@ pub(crate) fn render_shop_frame(
         let show_inspect_hint =
             inspect.is_none() && shop.focus.is_some_and(shop_focus_inspectable);
 
-        let hint_style = HintStyle::standard(h);
+        let hint_style = HintStyle::standard(w, h);
         let hint_row = if inspect_active {
             inspect_camera_hint_row(ctx.input_mode)
         } else {
@@ -1205,6 +1205,19 @@ pub(crate) fn render_shop_frame(
                 frame.texts(flavor_texts);
             }
         }
+    }
+
+    if shop.pause_menu.paused {
+        shop.pause_menu.stash_focus_nav_debug(&mut ctx, w, h);
+    } else {
+        let focus_rects = shop.last_focus_rects.borrow().clone();
+        ctx.stash_focus_nav_graph(
+            &focus_rects,
+            &[],
+            shop.focus,
+            shop.focus_nav.memory(),
+            |f| format!("{f:?}"),
+        );
     }
 
     frame
@@ -2701,6 +2714,19 @@ pub(in crate::scenes::shop) fn snap_focus_after_shop_purchase(
         scene.focus = Some(ShopFocus::NextRound);
     }
     scene.stash_focus_rects(w, h, run);
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(in crate::scenes::shop) fn projected_shop_focus_rects(
+    scene: &ShopScene,
+    w: f32,
+    h: f32,
+    run: &RunState,
+) -> Vec<(ShopFocus, [f32; 4])> {
+    let shop = GameEngine::read_shop(run);
+    let env_h = scene.drawn_room_gltf_height_scale.get();
+    let cam = shop_camera_params(w, h, env_h);
+    build_focus_rects(scene, w, h, &cam, &shop, run)
 }
 
 fn build_focus_rects(

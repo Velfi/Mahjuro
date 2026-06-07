@@ -263,7 +263,7 @@ commit history.
 - New relic **I Got A Guy**: three times per run you can restock the shop without paying gold.
 
 ### Changed
-- Ghost Hand now adds chips equal to the **point value** of hand tiles that are not part of what you scored (your full remaining hand when you cash in the structure bank). The relic shows a live chip preview on the tray and in tooltips.
+- Ghost Hand now adds chips equal to the **point value** of hand tiles that are not part of what you scored (your full remaining hand when you cash in structure). The relic shows a live chip preview on the tray and in tooltips.
 - Glass Cannon now gives a huge one-time ×4 mult on your next scored hand, then breaks. It no longer costs you a play each round, and it shows up as a cheap common relic in the shop.
 - Second Wind no longer gives an extra play each round. The first time you would lose a blind, it destroys itself instead: you forfeit that blind with no coin payout, but the run continues and your other relics can still react as the round ends.
 - **Tea Ceremony** now gives a different principle bonus on each of the next four scored hands, then becomes **Rakuware** in the same relic slot. **Rakuware** now grants every one of those principle bonuses on each score when you meet their conditions (instead of scaling with other relics being destroyed).

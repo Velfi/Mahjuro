@@ -58,7 +58,7 @@ pub struct RunTimeoutSnapshot {
 /// One scoring step toward [`PeakChamberSnapshot::total_score`] (a committed play or structure cash-in).
 ///
 /// `tiles`: meld-grouped labels (same as cascade HUD, e.g. `Kong  9p 9p 9p 9p · Triplet  3m 3m 3m`) —
-/// full structure bank on cash-in; partial commits show only the melds just played.
+/// full structure on cash-in; partial commits show only the melds just played.
 fn bool_is_false(v: &bool) -> bool {
     !*v
 }

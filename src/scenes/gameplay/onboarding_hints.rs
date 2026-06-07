@@ -6,7 +6,7 @@ use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::DrawCtx;
-use crate::ui::colored_keywords;
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::ui::styled_text;
 use crate::ui::widget::{self, TextStyle};
 
@@ -53,12 +53,12 @@ pub fn push_lessons_banner(
     let label_font = typography::size(typography::H42, h);
     let prompt_font = typography::size(typography::H36, h);
     let tip_font = typography::size(typography::H42, h);
-    let label_h = colored_keywords::colored_row_line_step(label_font);
+    let label_h = styled_text::colored_row_line_step(label_font);
     let prompt_h = styled_text::styled_line_block_height_at_font_px(
         prompt,
         copy_w,
         prompt_font,
-        true,
+        GlossaryMode::Prose,
         color::CHAMPAGNE,
     );
     let tip_h = if show_river_tip {
@@ -66,7 +66,7 @@ pub fn push_lessons_banner(
             river_tip,
             copy_w,
             tip_font,
-            false,
+            GlossaryMode::Off,
             color::PARCHMENT,
         )
     } else {
@@ -105,7 +105,7 @@ pub fn push_lessons_banner(
             color: color::CHAMPAGNE,
             padding: 0.0,
             align: TextAlign::Left,
-            glossary_tint: true,
+            glossary: GlossaryMode::Prose,
         },
         h,
     );
@@ -120,7 +120,7 @@ pub fn push_lessons_banner(
                 color: color::PARCHMENT,
                 padding: 0.0,
                 align: TextAlign::Left,
-                glossary_tint: false,
+                glossary: GlossaryMode::Off,
             },
             h,
         );
@@ -176,7 +176,7 @@ pub fn push_finale_intro_banner(frame: &mut UiFrame, ctx: &DrawCtx<'_>, run: &Ru
             color: color::PARCHMENT,
             padding: 0.0,
             align: TextAlign::Left,
-            glossary_tint: true,
+            glossary: GlossaryMode::Prose,
         },
         h,
     );

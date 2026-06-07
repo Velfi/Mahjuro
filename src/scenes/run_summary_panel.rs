@@ -5,7 +5,8 @@ use std::time::Instant;
 use crate::core::progression::{POINTS_PER_LEVEL, meta_depth_roman};
 use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
 use crate::render::theme::{color, typography};
-use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::render::vocabulary_colors::GlossaryMode;
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::scenes::DrawCtx;
 use crate::ui::clip::intersect_rect;
 use crate::ui::controller_hints::{
@@ -13,6 +14,7 @@ use crate::ui::controller_hints::{
 };
 use crate::ui::input::InputMode;
 use crate::ui::smooth_scroll::SmoothScroll;
+use crate::ui::styled_text::{StyledBlockStyle, styled_line_block_height_at_font_px};
 use crate::ui::widget::wrap_text;
 
 #[derive(Clone, Debug)]
@@ -38,6 +40,8 @@ pub struct RunSummaryPanelLevel {
 pub struct RunSummaryPanelContent {
     pub headline: String,
     pub subtitle: String,
+    /// Narrative at the top of the scroll panel, before depth (defeat reason or victory status).
+    pub pre_depth_text: Option<String>,
     pub hint: String,
     pub stats_rows: Vec<(String, String)>,
     pub level: RunSummaryPanelLevel,
@@ -49,12 +53,34 @@ pub struct RunSummaryPanelTheme {
     pub anchor_right: bool,
     pub headline_color: [f32; 4],
     pub rule_color: [f32; 4],
+    /// Glossary-tinted styled markup on the headline (defeat thank-you line).
+    pub headline_styled: bool,
 }
 
 /// Shared panel width for victory and defeat game-over screens.
 const PANEL_WIDTH_FRAC: f32 = 0.28;
 /// Fixed subtitle slot height (in line heights) so panel size stays consistent.
 const SUBTITLE_SLOT_LINES: f32 = 2.5;
+/// Footer hints are smaller than the global standard and span the full window.
+const RUN_SUMMARY_HINT_SCALE: f32 = 0.68;
+
+#[inline]
+fn run_summary_headline_font_px(h: f32, theme: &RunSummaryPanelTheme) -> f32 {
+    if theme.headline_styled {
+        typography::size(typography::H12, h)
+    } else {
+        typography::size(typography::H5, h)
+    }
+}
+
+fn run_summary_hint_style(window_w: f32, h: f32) -> HintStyle {
+    let mut style = HintStyle::standard(window_w, h);
+    style.font_px *= RUN_SUMMARY_HINT_SCALE;
+    style.line_h *= RUN_SUMMARY_HINT_SCALE;
+    style.icon_px *= RUN_SUMMARY_HINT_SCALE;
+    style.gap_after_icon *= RUN_SUMMARY_HINT_SCALE;
+    style
+}
 
 impl RunSummaryPanelTheme {
     pub fn victory() -> Self {
@@ -63,6 +89,7 @@ impl RunSummaryPanelTheme {
             anchor_right: true,
             headline_color: color::CHAMPAGNE,
             rule_color: color::alpha(color::CHAMPAGNE, 0.35),
+            headline_styled: true,
         }
     }
 
@@ -70,8 +97,9 @@ impl RunSummaryPanelTheme {
         Self {
             panel_x_frac: 0.08,
             anchor_right: false,
-            headline_color: [0.62, 0.12, 0.18, 1.0],
+            headline_color: [0.72, 0.09, 0.16, 1.0],
             rule_color: color::alpha(color::RUBY, 0.35),
+            headline_styled: true,
         }
     }
 }
@@ -104,6 +132,7 @@ pub struct RunSummaryPanelLayout {
     pub max_scroll_px: f32,
     pub scrollbar_track: Option<[f32; 4]>,
     pub subtitle_slot_rect: [f32; 4],
+    pub pre_depth_text_rect: Option<[f32; 4]>,
 }
 
 /// Smooth scroll state for an overflowing run-summary panel.
@@ -388,11 +417,12 @@ impl RunSummaryPanelLayout {
         let row_font_px = typography::size(typography::H36, h);
         let row_line_h = row_font_px * 1.35;
         let pad_v = row_font_px * 0.8;
+        let pad_h = row_font_px * 0.55;
+        let scroll_bottom_pad = row_font_px * 0.45;
         let panel_w = w * PANEL_WIDTH_FRAC;
         let content_w = panel_w;
-        let inner_w = panel_w * 0.90;
-        let label_col_w = inner_w * 0.48;
-        let value_col_w = inner_w * 0.50;
+        let label_col_frac = 0.48;
+        let value_col_frac = 0.50;
         let level_well_inset = row_font_px * 0.32;
         let level_inner_w_est = panel_w - 12.0;
         let (_, well_height_px) = depth_well_size(level_inner_w_est, level_well_inset, row_line_h);
@@ -410,6 +440,11 @@ impl RunSummaryPanelLayout {
         let level_header_h = header_h + transition_h + progress_h + well_gap;
         let level_block_h = level_header_h + well_height_px + row_font_px * 0.22;
         let level_block_gap = row_font_px * 0.60;
+        let scrollbar_track_w = (row_font_px * 0.22).max(4.0);
+        let scrollbar_gutter_est = scrollbar_track_w + row_font_px * 0.36;
+        let scroll_inner_w = (panel_w - pad_h * 2.0 - scrollbar_gutter_est).max(0.0);
+        let label_col_w = scroll_inner_w * label_col_frac;
+        let value_col_w = scroll_inner_w * value_col_frac;
         let stats_h = content
             .stats_rows
             .iter()
@@ -428,45 +463,127 @@ impl RunSummaryPanelLayout {
         let gap = row_font_px * 0.5;
         let sub_font = typography::size(typography::H32, h);
         let sub_line_h = sub_font * 1.3;
-        let headline_font = typography::size(typography::H5, h);
-        let headline_h = headline_font * 1.25;
-        let top_pad = (h * 0.04).max(row_font_px * 0.6);
-        let subtitle_slot_h = sub_line_h * SUBTITLE_SLOT_LINES;
-
-        let hint_style = HintStyle::standard(h);
-        let hint_h = hint_style.line_h;
-        let hint_gap = hint_h * 0.35;
-        let hint_row_gap = hint_h * 0.20;
-        let hint_rows = if content.hint.is_empty() { 1.0 } else { 2.0 };
-        let hint_stack_h = hint_h * hint_rows + hint_row_gap * (hint_rows - 1.0);
-        let bottom_pad = row_font_px * 0.4;
-        let rule_h = 2.0;
-
-        let fixed_top = top_pad + headline_h + gap + subtitle_slot_h + gap + rule_h + gap;
-        let fixed_bottom = hint_gap + hint_stack_h + bottom_pad;
-        let available_panel_h = (h - fixed_top - fixed_bottom).max(row_line_h * 3.0);
-
-        let scroll_content_h = level_block_h + level_block_gap + stats_h;
-        let panel_h = available_panel_h;
-        let scroll_viewport_h = (panel_h - pad_v * 2.0).max(0.0);
-        let max_scroll_px = (scroll_content_h - scroll_viewport_h).max(0.0);
-
-        let panel_y = fixed_top;
-        let headline_y = top_pad;
-        let sub_y = top_pad + headline_h + gap;
-        let rule_y = sub_y + subtitle_slot_h + gap;
-
-        let panel_rect = [panel_x, panel_y, panel_w, panel_h];
-        let scrollbar_track_w = (row_font_px * 0.22).max(4.0);
-        let scrollbar_gutter = if max_scroll_px > 0.0 {
-            scrollbar_track_w + row_font_px * 0.36
+        let headline_font = run_summary_headline_font_px(h, theme);
+        let headline_measure_w = if theme.headline_styled { w } else { content_w };
+        let headline_h = if theme.headline_styled {
+            styled_line_block_height_at_font_px(
+                &content.headline,
+                headline_measure_w,
+                headline_font,
+                GlossaryMode::Prose,
+                color::CHAMPAGNE,
+            )
+        } else {
+            headline_font * 1.25
+        };
+        let top_pad = if theme.headline_styled {
+            (h * 0.012).max(row_font_px * 0.2)
+        } else {
+            (h * 0.04).max(row_font_px * 0.6)
+        };
+        let min_top_pad = top_pad;
+        let headline_panel_gap = if theme.headline_styled {
+            row_font_px * 0.22
+        } else {
+            gap
+        };
+        const RULE_H: f32 = 2.0;
+        let headline_rule_h = if theme.headline_styled { 0.0 } else { RULE_H };
+        let has_subtitle = !content.subtitle.is_empty();
+        let subtitle_slot_h = if has_subtitle {
+            sub_line_h * SUBTITLE_SLOT_LINES
         } else {
             0.0
         };
+        let pre_depth_gap = if content.pre_depth_text.is_some() {
+            row_font_px * 0.45
+        } else {
+            0.0
+        };
+        let pre_depth_text_h = content
+            .pre_depth_text
+            .as_ref()
+            .map(|text| {
+                wrapped_row_height(text, scroll_inner_w, sub_font, sub_line_h) + pre_depth_gap
+            })
+            .unwrap_or(0.0);
+
+        let hint_style = run_summary_hint_style(w, h);
+        let hint_h = hint_style.line_h;
+        let hint_row_gap = hint_h * 0.20;
+        let hint_rows = if content.hint.is_empty() { 1.0 } else { 2.0 };
+        let hint_stack_h = hint_h * hint_rows + hint_row_gap * (hint_rows - 1.0);
+        let bottom_pad = (h * 0.035).max(row_font_px * 0.55);
+
+        let scroll_content_h =
+            pre_depth_text_h + level_block_h + level_block_gap + stats_h + scroll_bottom_pad;
+        let content_panel_h = scroll_content_h + pad_v * 2.0;
+
+        let (panel_y, panel_h, headline_y, sub_y, rule_y) = if theme.headline_styled {
+            let headline_band_h = headline_h
+                + if has_subtitle {
+                    gap + subtitle_slot_h + gap
+                } else {
+                    0.0
+                }
+                + headline_rule_h
+                + headline_panel_gap;
+            let headline_reserve = headline_band_h + min_top_pad * 2.0;
+            let panel_h = content_panel_h.min((h - headline_reserve).max(row_line_h * 3.0));
+            let panel_y = (h - panel_h) * 0.5;
+            let headline_y = if has_subtitle {
+                let block_h = headline_h + gap + subtitle_slot_h;
+                ((panel_y - block_h) * 0.5).max(min_top_pad)
+            } else {
+                ((panel_y - headline_h) * 0.5).max(min_top_pad)
+            };
+            let sub_y = headline_y + headline_h + if has_subtitle { gap } else { 0.0 };
+            let rule_y = if has_subtitle {
+                sub_y + subtitle_slot_h + gap
+            } else {
+                headline_y + headline_h + headline_panel_gap
+            };
+            (panel_y, panel_h, headline_y, sub_y, rule_y)
+        } else {
+            let fixed_top = top_pad
+                + headline_h
+                + if has_subtitle {
+                    gap + subtitle_slot_h + gap
+                } else {
+                    0.0
+                }
+                + headline_rule_h
+                + headline_panel_gap;
+            let available_panel_h = (h - fixed_top - bottom_pad).max(row_line_h * 3.0);
+            let panel_h = content_panel_h.min(available_panel_h);
+            let panel_y = fixed_top;
+            let headline_y = top_pad;
+            let sub_y = top_pad + headline_h + if has_subtitle { gap } else { 0.0 };
+            let rule_y = if has_subtitle {
+                sub_y + subtitle_slot_h + gap
+            } else {
+                top_pad + headline_h + headline_panel_gap
+            };
+            (panel_y, panel_h, headline_y, sub_y, rule_y)
+        };
+
+        let scroll_viewport_h = (panel_h - pad_v * 2.0).max(0.0);
+        let max_scroll_px = (scroll_content_h - scroll_viewport_h).max(0.0);
+
+        let panel_rect = [panel_x, panel_y, panel_w, panel_h];
+        let scrollbar_gutter = if max_scroll_px > 0.0 {
+            scrollbar_gutter_est
+        } else {
+            0.0
+        };
+        let scroll_inner_w = (panel_w - pad_h * 2.0 - scrollbar_gutter).max(0.0);
+        let label_col_w = scroll_inner_w * label_col_frac;
+        let value_col_w = scroll_inner_w * value_col_frac;
+        let scroll_content_x = panel_x + pad_h;
         let scroll_clip_rect = [
-            panel_rect[0] + 3.0,
+            scroll_content_x,
             panel_rect[1] + pad_v,
-            (panel_rect[2] - 6.0 - scrollbar_gutter).max(0.0),
+            scroll_inner_w,
             scroll_viewport_h,
         ];
         let scrollbar_track = if max_scroll_px > 0.0 {
@@ -486,30 +603,44 @@ impl RunSummaryPanelLayout {
         } else {
             panel_x
         };
-        let headline_rect = [headline_x, headline_y, content_w, headline_h];
-        let rule_rect = [panel_x, rule_y, panel_w, rule_h];
+        let headline_rect = if theme.headline_styled {
+            [0.0, headline_y, w, headline_h]
+        } else {
+            [headline_x, headline_y, content_w, headline_h]
+        };
+        let rule_rect = if theme.headline_styled {
+            [panel_x, rule_y, panel_w, 0.0]
+        } else {
+            [panel_x, rule_y, panel_w, RULE_H]
+        };
 
-        let hint_base_y = panel_y + panel_h + hint_gap;
-        let hint_flavor_rect =
-            (!content.hint.is_empty()).then_some([panel_x, hint_base_y, panel_w, hint_h]);
+        let hint_base_y = (h - hint_stack_h - hint_h * 0.22).max(0.0);
+        let hint_flavor_rect = (!content.hint.is_empty())
+            .then_some([0.0, hint_base_y, w, hint_h]);
         let hint_rect = [
-            panel_x,
+            0.0,
             hint_base_y
                 + if hint_flavor_rect.is_some() {
                     hint_h + hint_row_gap
                 } else {
                     0.0
                 },
-            panel_w,
+            w,
             hint_h,
         ];
 
-        let inner_x = panel_rect[0] + panel_rect[2] * 0.05;
+        let inner_x = scroll_content_x;
+        let inner_w = scroll_inner_w;
         let inner_y = panel_rect[1] + pad_v;
+        let pre_depth_text_rect = content.pre_depth_text.as_ref().map(|text| {
+            let text_h = wrapped_row_height(text, scroll_inner_w, sub_font, sub_line_h);
+            [scroll_content_x, inner_y, scroll_inner_w, text_h]
+        });
+        let level_y = inner_y + pre_depth_text_h;
         let level_rect = [
-            panel_rect[0] + 3.0,
-            inner_y,
-            panel_rect[2] - 6.0,
+            scroll_content_x,
+            level_y,
+            scroll_inner_w,
             level_block_h,
         ];
         let level_inner_rect = [
@@ -590,7 +721,7 @@ impl RunSummaryPanelLayout {
         let well_draw_rect = depth_well_draw_rect(well_viewport);
 
         let mut stats_row_rects = Vec::with_capacity(content.stats_rows.len());
-        let mut row_y = inner_y + level_block_h + level_block_gap;
+        let mut row_y = level_y + level_block_h + level_block_gap;
         for (label, value) in &content.stats_rows {
             let label_lines = wrap_text(label, label_col_w, row_font_px / 0.99);
             let value_lines = wrap_text(value, value_col_w, row_font_px / 0.99);
@@ -632,6 +763,7 @@ impl RunSummaryPanelLayout {
             max_scroll_px,
             scrollbar_track,
             subtitle_slot_rect,
+            pre_depth_text_rect,
         }
     }
 }
@@ -651,10 +783,11 @@ pub fn push_run_summary_panel(
     let level_title_font = row_font_px * 1.45;
     let points_chip_font = row_font_px * 0.90;
     let panel_rect = layout.panel_rect;
-    let inner_w = panel_rect[2] * 0.90;
+    let clip = layout.scroll_clip_rect;
+    let inner_w = clip[2];
+    let inner_x = clip[0];
     let label_col_w = inner_w * 0.48;
     let value_col_w = inner_w * 0.50;
-    let clip = layout.scroll_clip_rect;
     let scroll = scroll_offset_px;
 
     let border_rect = [
@@ -686,31 +819,74 @@ pub fn push_run_summary_panel(
     });
 
     let sub_font = typography::size(typography::H32, h);
-    let headline_font = typography::size(typography::H5, h);
-    let sub_lines = wrap_text(&content.subtitle, layout.subtitle_rect[2], sub_font / 0.99);
+    let headline_font = run_summary_headline_font_px(h, theme);
 
-    frame.text(TextLabel {
-        rect: layout.headline_rect,
-        text: content.headline.clone(),
-        color: theme.headline_color,
-        font_px: Some(headline_font),
-        align: layout.text_align,
-        ..Default::default()
-    });
-    frame.text(TextLabel {
-        rect: layout.subtitle_rect,
-        text: sub_lines.join("\n"),
-        color: color::CHAMPAGNE,
-        font_px: Some(sub_font),
-        align: layout.text_align,
-        clip_rect: Some(layout.subtitle_slot_rect),
-        ..Default::default()
-    });
-    frame.quad(GpuInstance {
-        rect: layout.rule_rect,
-        color: theme.rule_color,
-        user: 0,
-    });
+    if theme.headline_styled {
+        let block = crate::ui::styled_text::StyledTextBlock::measure_at_font_px(
+            &content.headline,
+            layout.headline_rect[2],
+            headline_font,
+            GlossaryMode::Prose,
+            color::CHAMPAGNE,
+        );
+        let mut headline_labels = Vec::new();
+        block.push_at_font_px(
+            &mut headline_labels,
+            layout.headline_rect,
+            StyledBlockStyle {
+                color: color::CHAMPAGNE,
+                align: TextAlign::Center,
+                glossary: GlossaryMode::Prose,
+                vertical_align: Some(TextBlockVerticalAlign::Top),
+                ..Default::default()
+            },
+        );
+        for label in headline_labels {
+            frame.text(label);
+        }
+    } else {
+        frame.text(TextLabel {
+            rect: layout.headline_rect,
+            text: content.headline.clone(),
+            color: theme.headline_color,
+            font_px: Some(headline_font),
+            align: layout.text_align,
+            ..Default::default()
+        });
+    }
+    if !content.subtitle.is_empty() {
+        let sub_lines = wrap_text(&content.subtitle, layout.subtitle_rect[2], sub_font / 0.99);
+        frame.text(TextLabel {
+            rect: layout.subtitle_rect,
+            text: sub_lines.join("\n"),
+            color: color::CHAMPAGNE,
+            font_px: Some(sub_font),
+            align: layout.text_align,
+            clip_rect: Some(layout.subtitle_slot_rect),
+            ..Default::default()
+        });
+    }
+    if layout.rule_rect[3] > 0.0 {
+        frame.quad(GpuInstance {
+            rect: layout.rule_rect,
+            color: theme.rule_color,
+            user: 0,
+        });
+    }
+
+    if let (Some(text), Some(rect)) = (&content.pre_depth_text, layout.pre_depth_text_rect) {
+        let rect = shift_y(rect, scroll);
+        let lines = wrap_text(text, rect[2], sub_font / 0.99);
+        frame.text(TextLabel {
+            rect,
+            text: lines.join("\n"),
+            color: color::CHAMPAGNE,
+            font_px: Some(sub_font),
+            align: layout.text_align,
+            clip_rect: Some(clip),
+            ..Default::default()
+        });
+    }
 
     let level_rect = shift_y(layout.level_rect, scroll);
     let level_border_rect = [
@@ -842,14 +1018,14 @@ pub fn push_run_summary_panel(
         if idx % 2 == 0 {
             push_clipped_quad(
                 frame,
-                [panel_rect[0] + 3.0, row_rect[1], panel_rect[2] - 6.0, row_h],
+                [clip[0], row_rect[1], clip[2], row_h],
                 color::alpha(color::WALNUT_RAISED, 0.25),
                 clip,
             );
         }
 
         frame.text(TextLabel {
-            rect: [row_rect[0], row_rect[1], label_col_w, row_h],
+            rect: [inner_x, row_rect[1], label_col_w, row_h],
             text: label_lines.join("\n"),
             color: color::STONE,
             font_px: Some(row_font_px),
@@ -859,7 +1035,7 @@ pub fn push_run_summary_panel(
         });
         frame.text(TextLabel {
             rect: [
-                row_rect[0] + inner_w * 0.50,
+                inner_x + inner_w * 0.50,
                 row_rect[1],
                 value_col_w,
                 row_h,
@@ -881,7 +1057,13 @@ pub fn push_run_summary_panel(
     }
     hint_rects.push(layout.hint_rect);
     hint_rows.push(confirm_continue_footer_row(ctx.input_mode, ""));
-    push_inline_hint_rows(frame, ctx, &hint_rects, &hint_rows, HintStyle::standard(h));
+    push_inline_hint_rows(
+        frame,
+        ctx,
+        &hint_rects,
+        &hint_rows,
+        run_summary_hint_style(ctx.layout.window_w, h),
+    );
 
     let elapsed = opened_at.elapsed().as_secs_f32();
     let displayed_fill = (elapsed * 4.0).min(content.level.into_level as f32);
@@ -897,6 +1079,7 @@ pub fn push_run_summary_panel(
             source: ImageQuadSource::Asset {
                 path: DEPTH_WELL_LAYER_ASSETS[sprite_idx],
             },
+            clip_rect: Some(clip),
         }]);
     }
 

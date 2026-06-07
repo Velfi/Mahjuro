@@ -1,30 +1,49 @@
-//! Shared copy for the Guide scoring basics page (page 4).
+//! Shared copy for the Guide scoring basics page (page 5).
 
 pub const PAGE_TITLE: &str = "Scoring Basics";
-pub const SUBTITLE: &str = "Play to your Structure · Cash In when ready";
+pub const SUBTITLE: &str = "Select melds, Play to Structure, then Cash In to score.";
 
-pub const SECTION_LOOP: &str = "THE LOOP";
-pub const LOOP_CAPTION: &str =
-    "Play melds to Structure → Cash In → ↻ repeat · You don't score until Cash In";
+pub const SECTION_FLOW: &str = "THE FLOW";
+pub const FLOW_REMINDER: &str =
+    "Played melds do not score immediately. Cash In scores everything in your Structure and then empties it.";
 
-pub const SECTION_TILES: &str = "TILES & CHIPS";
-pub const TILES_INTRO: &str = "Tiles in your Structure are tallied when you Cash In.";
+pub const FLOW_STEP_SELECT: &str = "Select melds";
+pub const FLOW_SELECT_CAPTION: &str = "Pick melds from your hand.";
 
-pub const SECTION_YAKU: &str = "YAKU";
-pub const YAKU_INTRO: &str = "Yaku are bonus patterns made from melds. When you Cash In, each yaku your structure matches adds chips and mult.";
-pub const YAKU_TABLE_HEADER: (&str, &str, &str) = ("Yaku", "+Mult", "+Chips");
-pub const YAKU_TABLE_ROWS: &[(&str, &str, &str)] = &[
-    ("Tanyao", "2.0", "75"),
-    ("Toitoi", "3.0", "42"),
-    ("Yakuhai", "3.0", "40"),
-];
+pub const FLOW_STEP_PLAY: &str = "Play to Structure";
+pub const FLOW_PLAY_CAPTION: &str = "Your melds move to your Structure.";
 
-pub const SECTION_SCORE: &str = "YOUR SCORE";
-pub const SCORE_INTRO: &str = "When you Cash In:";
-pub const FINAL_EQUATION: &str = "score = chips × mult";
-pub const SCORE_CHIPS_LINE: &str = "Chips = tile values + yaku chips + dora + relics";
-pub const SCORE_MULT_LINE: &str = "Mult = 1.0 + yaku mult + relic mult + boss rules";
-pub const SCORE_EXAMPLE: &str = "Example: 200 chips × 3.0 mult = 600 score";
+pub const FLOW_STEP_CASH_IN: &str = "Cash In";
+pub const FLOW_CASH_IN_CAPTION: &str = "Cash in to score your structure.";
+pub const FLOW_CASH_IN_BUTTON: &str = "Cash In";
 
-/// Arrow glyph between loop diagram stages.
-pub const LOOP_ARROW: &str = "➡️";
+pub const FLOW_STEP_SCORE: &str = "Score";
+pub const FLOW_SCORE_CAPTION: &str = "Once your score meets or exceeds the target, you win the round.";
+pub const FLOW_SCORE_FORMULA: &str = "score = chips x mult";
+
+pub const SECTION_TILE_VALUES: &str = "TILE VALUES";
+pub const TILE_VALUES_CAPTION: &str = "Tiles have chip values based on their rank.";
+
+pub const SECTION_YAKU_RELICS: &str = "YAKU & RELICS";
+pub const YAKU_RELICS_INTRO: &str = "Yaku are bonus patterns in your Structure.";
+pub const YAKU_RELICS_CASH_IN: &str = "When you Cash In, they add chips and/or mult.";
+pub const YAKU_RELICS_RELICS: &str = "Relics can add chips, mult, or change the rules of the game.";
+
+pub const YAKU_TABLE_HEADER_EXAMPLE: &str = "Example";
+pub const YAKU_TABLE_HEADER_CHIPS: &str = "+ Chips";
+pub const YAKU_TABLE_HEADER_MULT: &str = "+ Mult";
+pub const YAKU_TABLE_RELIC_ROW: &str = "Relic bonus";
+
+pub const SECTION_FINAL_SCORE: &str = "FINAL SCORE";
+pub const FINAL_EQUATION: &str = "score = chips x mult";
+pub const FINAL_CHIPS_LINE: &str =
+    "Chips = tile values + meld bonuses + yaku chips + relic chips";
+pub const FINAL_MULT_LINE: &str = "Mult = 1.0 + yaku mult + relic mult + boss rules";
+pub const FINAL_EXAMPLE: &str = "200 chips x 3.0 mult = 600 score";
+
+/// Asset path (under `assets/`) for flow diagram arrows between steps.
+pub const FLOW_ARROW_ASSET: &str = "textures/arrow_right.png";
+
+/// Illustrative relic row for the yaku table (not tied to a specific relic id).
+pub const RELIC_EXAMPLE_CHIPS: i32 = 25;
+pub const RELIC_EXAMPLE_MULT: f64 = 0.5;

@@ -57,7 +57,11 @@ pub const STARFIELD: &str = concat!(
     wgsl_file!("starfield.wgsl"),
 );
 pub const GOLDEN_DUST: &str = wgsl_file!("golden_dust.wgsl");
-pub const MOONLIT_WATER: &str = wgsl_file!("moonlit_water.wgsl");
+pub const MOONLIT_WATER: &str = concat!(
+    wgsl_file!("moon_phase.wgsl"),
+    "\n",
+    wgsl_file!("moonlit_water.wgsl"),
+);
 pub const SUNLIT_WATER: &str = wgsl_file!("sunlit_water.wgsl");
 pub const SHOOTING_STAR_CASCADE: &str = wgsl_file!("shooting_star_cascade.wgsl");
 pub const SHOOTING_STAR_CASCADE_COMPOSITE: &str =

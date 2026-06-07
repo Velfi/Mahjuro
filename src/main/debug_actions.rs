@@ -7,7 +7,7 @@ use crate::scene_transition::SceneTag;
 use crate::scenes::shop::PackCelebration;
 use crate::scenes::{
     ButtonAabbLabScene, CascadeLabScene, RollerLabScene, ShadowAoLabScene,
-    ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter,
+    ShowcasePresenter, ShowcaseScene, TextShadowLabScene, TileAnchorLabScene, TileStressLabScene, TilePackPresenter,
 };
 use crate::trailer_mode::TrailerMode;
 use rand::RngExt;
@@ -119,6 +119,13 @@ impl App {
                 self.debug.show_fps = !self.debug.show_fps;
                 log::debug!("Show FPS: {}", self.debug.show_fps);
             }
+            DebugAction::ToggleFocusNavDebug => {
+                self.debug.focus_nav_overlay = !self.debug.focus_nav_overlay;
+                if !self.debug.focus_nav_overlay {
+                    self.debug.focus_nav_snapshot = None;
+                }
+                log::debug!("Focus nav debug: {}", self.debug.focus_nav_overlay);
+            }
             DebugAction::ToggleHide2dUi => {
                 self.debug.hide_2d_ui = !self.debug.hide_2d_ui;
                 log::debug!("Hide 2D UI: {}", self.debug.hide_2d_ui);
@@ -223,6 +230,26 @@ impl App {
                     log::debug!("Opened flame debug overlay");
                 }
             }
+            DebugAction::OpenVictoryMoonDebug => {
+                if self.debug.victory_moon_debug_overlay.is_some() {
+                    self.debug.victory_moon_debug_overlay = None;
+                    log::debug!("Closed victory moon debug overlay");
+                } else {
+                    let moon_phase_debug = self
+                        .renderer
+                        .as_ref()
+                        .map(|r| r.main_menu_moon_phase_debug)
+                        .unwrap_or(self.debug.main_menu_moon_phase_debug);
+                    let mut debug = self.debug.victory_moon_debug;
+                    debug.moon_phase = moon_phase_debug;
+                    self.debug.victory_moon_debug_overlay = Some(
+                        crate::render::victory_moon_debug_overlay::VictoryMoonDebugOverlay::new(
+                            debug,
+                        ),
+                    );
+                    log::debug!("Opened victory moon debug overlay");
+                }
+            }
             DebugAction::ProfileGpu => {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.start_gpu_profile(100);
@@ -284,7 +311,9 @@ impl App {
                         Scene::Defeat(_) => "Defeat",
                         Scene::Guide(_) => "Guide",
                         Scene::MaterialViewer(_) => "MaterialViewer",
+                        Scene::TextShadowLab(_) => "TextShadowLab",
                         Scene::TileAnchorLab(_) => "TileAnchorLab",
+                        Scene::TileStressLab(_) => "TileStressLab",
                         Scene::ButtonAabbLab(_) => "ButtonAabbLab",
                         Scene::Options(_) => "Options",
                         Scene::Credits(_) => "Credits",
@@ -366,10 +395,20 @@ impl App {
                     .push(Scene::ShadowAoLab(ShadowAoLabScene::new(true)));
                 log::debug!("Opened shadow & AO lab");
             }
+            DebugAction::OpenTextShadowLab => {
+                self.overlay_stack
+                    .push(Scene::TextShadowLab(TextShadowLabScene::new(true)));
+                log::debug!("Opened text shadow lab");
+            }
             DebugAction::OpenTileAnchorLab => {
                 self.overlay_stack
                     .push(Scene::TileAnchorLab(TileAnchorLabScene::new(true)));
                 log::debug!("Opened tile anchor lab");
+            }
+            DebugAction::OpenTileStressLab => {
+                self.overlay_stack
+                    .push(Scene::TileStressLab(TileStressLabScene::new(true)));
+                log::debug!("Opened tile stress lab");
             }
             DebugAction::OpenButtonAabbLab => {
                 self.overlay_stack

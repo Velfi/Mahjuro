@@ -54,6 +54,81 @@ pub fn reproject_action_button_rects(
     (discard.into(), play.into(), cash_in)
 }
 
+/// Hand slot strips for focus nav using the same camera as this frame's draw.
+pub fn reproject_hand_focus_slots(
+    layout: &crate::ui::layout::LayoutResult,
+    hand_len: usize,
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    env_h: f32,
+) -> Option<Vec<(f32, f32, f32, f32)>> {
+    gameplay_glb::with_gameplay_glb_cpu(|cpu| {
+        let cpu = cpu?;
+        let hand_strip = require_marker_pair_screen_rect(
+            w,
+            h,
+            cam,
+            env_h,
+            cpu,
+            HAND_TILES_LEFT,
+            HAND_TILES_RIGHT,
+            layout.hand_slot_h,
+        )
+        .ok()?;
+        let hand_ref_count = layout.hand_slot_count.max(1);
+        Some(hand_slots_from_markers(
+            hand_ref_count,
+            hand_len,
+            hand_strip,
+        ))
+    })
+}
+
+/// Tally fan screen rects aligned with [`gameplay_tally_fan_screen_rect`].
+pub fn reproject_tally_focus_rects(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    anchors: &GameplayGlbAnchors,
+    stick_len: f32,
+    stick_wide: f32,
+    stick_thickness: f32,
+    spread_deg: f32,
+) -> (Option<[f32; 4]>, Option<[f32; 4]>) {
+    let discard_rot = anchors.discard_tally_pose.rotation_deg();
+    let play_rot = anchors.play_tally_pose.rotation_deg();
+    let discard = gameplay_glb::gameplay_tally_fan_screen_rect(
+        win_w,
+        win_h,
+        cam,
+        anchors.discard_tally_pose.anchor,
+        stick_len,
+        stick_wide,
+        stick_thickness,
+        spread_deg,
+        discard_rot[1],
+        discard_rot,
+    );
+    let play = gameplay_glb::gameplay_tally_fan_screen_rect(
+        win_w,
+        win_h,
+        cam,
+        anchors.play_tally_pose.anchor,
+        stick_len,
+        stick_wide,
+        stick_thickness,
+        spread_deg,
+        play_rot[1],
+        play_rot,
+    );
+    let valid = |r: [f32; 4]| r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite();
+    (
+        valid(discard).then_some(discard),
+        valid(play).then_some(play),
+    )
+}
+
 /// Best-effort anchors for tooltips / popups outside `draw_frame` (no `DrawCtx`).
 pub fn try_resolve_gameplay_glb_anchors(
     layout: &crate::ui::layout::LayoutResult,
@@ -134,7 +209,7 @@ fn hand_marker_lerp_t(hand_len: usize, ref_count: usize, index: usize) -> f32 {
 }
 
 fn hand_slots_from_markers(
-    layout: &crate::ui::layout::LayoutResult,
+    ref_count: usize,
     hand_len: usize,
     strip: (f32, f32, f32, f32),
 ) -> Vec<(f32, f32, f32, f32)> {
@@ -142,7 +217,7 @@ fn hand_slots_from_markers(
         return Vec::new();
     }
     let (sx, sy, sw, sh) = strip;
-    let ref_count = layout.hand_slots.len().max(1);
+    let ref_count = ref_count.max(1);
     if hand_len <= ref_count {
         let slot_w = sw / ref_count as f32;
         let center_offset = if hand_len < ref_count {
@@ -234,7 +309,7 @@ fn resolve_gameplay_glb_anchors_from_cpu(
     cam: &CameraParams,
     env_h: f32,
 ) -> anyhow::Result<GameplayGlbAnchors> {
-    let slot_h = layout.hand_strip.h;
+    let slot_h = layout.hand_slot_h;
     let hand_strip = require_marker_pair_screen_rect(
         w,
         h,
@@ -245,12 +320,12 @@ fn resolve_gameplay_glb_anchors_from_cpu(
         HAND_TILES_RIGHT,
         slot_h,
     )?;
-    let hand_slots = hand_slots_from_markers(layout, hand_len, hand_strip);
+    let hand_ref_count = layout.hand_slot_count.max(1);
+    let hand_slots = hand_slots_from_markers(hand_ref_count, hand_len, hand_strip);
     let hand_marker_poses = [
         gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, HAND_TILES_LEFT)?,
         gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, HAND_TILES_RIGHT)?,
     ];
-    let hand_ref_count = layout.hand_slots.len().max(1);
     let hand_world_slots =
         require_hand_world_slots_from_markers(hand_len, hand_ref_count, &hand_marker_poses);
     let gold_pose = gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, PLAYER_GOLD)?;
@@ -389,6 +464,22 @@ pub fn resolve_player_gold_pose(
     })
 }
 
+/// Camera-projected screen center for the floating yen plaque above `player_gold`.
+pub fn player_gold_label_screen_center(
+    w: f32,
+    h: f32,
+    env_height_scale: f32,
+    cam: &CameraParams,
+    fallback: (f32, f32),
+) -> (f32, f32) {
+    gameplay_glb::with_gameplay_glb_cpu(|cpu| {
+        let cpu = cpu?;
+        let world = gameplay_glb::gameplay_marker_world(h, env_height_scale, cpu, PLAYER_GOLD)?;
+        Some(cam.project_world_to_screen(w, h, world))
+    })
+    .unwrap_or(fallback)
+}
+
 /// Minimal error frame when `gameplay.glb` failed validation.
 pub fn gameplay_glb_error_frame(
     layout: &crate::ui::layout::LayoutResult,
@@ -412,6 +503,197 @@ pub fn gameplay_glb_error_frame(
     frame
 }
 
+/// Focus rects projected from `gameplay.glb` at 1920×1080 — same geometry as
+/// `draw_frame` uses for spatial nav (not hand-authored guesses).
+#[cfg(test)]
+pub fn projected_gameplay_focus_rects_for_tests(
+    hand_len: usize,
+) -> Vec<(super::focus::FocusTarget, [f32; 4])> {
+    use super::focus::{FocusTarget, GameplayButton, PegKind};
+    use crate::render::gameplay_glb::{
+        self, load_gameplay_glb_from_bytes, validate_gameplay_glb,
+        gameplay_boss_ordeal_screen_rect, gameplay_journal_book_screen_rect,
+        gameplay_marker_screen_rect_resolved,
+    };
+    use crate::ui::layout::UiLayout;
+
+    let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
+    let cpu = validate_gameplay_glb(load_gameplay_glb_from_bytes(bytes).expect("gameplay.glb"))
+        .expect("validate gameplay.glb");
+    let w = 1920.0_f32;
+    let h = 1080.0_f32;
+    let env_h = 1.0_f32;
+    let layout = UiLayout::new().solve(w, h);
+    let cam = gameplay_glb::gameplay_camera_from_cpu(&cpu, h, env_h).expect("gameplay camera");
+    let layout_scale = (w.min(h)) / 600.0;
+    let anchors = resolve_gameplay_glb_anchors_from_cpu(
+        &cpu, &layout, hand_len, w, h, &cam, env_h,
+    )
+    .expect("anchors");
+
+    let mut rects = Vec::new();
+
+    let (discard, play_visual, trigger) = reproject_action_button_rects(
+        w, h, &cam, env_h, layout_scale, &anchors,
+    );
+    let play = gameplay_glb::gameplay_play_button_hit_rect(play_visual.into()).into();
+    for (btn, r) in [
+        (GameplayButton::Discard, discard),
+        (GameplayButton::Play, play),
+        (GameplayButton::Trigger, trigger),
+    ] {
+        let rect: [f32; 4] = r.into();
+        if rect[2] > 1.0 && rect[3] > 1.0 {
+            rects.push((FocusTarget::Button(btn), rect));
+        }
+    }
+
+    for (i, &slot) in anchors.hand_slots.iter().enumerate().take(hand_len) {
+        let author_scale = anchors.hand_marker_poses[0].uniform_author_scale(h, env_h);
+        let rect = crate::scenes::gameplay::hand_layout::hand_tile_screen_rect_from_slot(
+            slot,
+            hand_len,
+            slot.2,
+            author_scale,
+        );
+        rects.push((FocusTarget::HandTile(i), rect));
+    }
+
+    let tally_stick_len = layout.mm(28.0);
+    let tally_stick_wide = layout.mm(4.0);
+    let tally_stick_thickness = layout.mm(1.5);
+    let (discard_tally, play_tally) = reproject_tally_focus_rects(
+        w,
+        h,
+        &cam,
+        &anchors,
+        tally_stick_len,
+        tally_stick_wide,
+        tally_stick_thickness,
+        60.0,
+    );
+    if let Some(r) = discard_tally {
+        rects.push((FocusTarget::Peg(PegKind::Discards), r));
+    }
+    if let Some(r) = play_tally {
+        rects.push((FocusTarget::Peg(PegKind::Hands), r));
+    }
+
+    let journal_rect = gameplay_journal_book_screen_rect(w, h, &cam, &anchors.journal_pick);
+    if journal_rect[2] > 1.0 && journal_rect[3] > 1.0 {
+        rects.push((FocusTarget::Journal, journal_rect));
+    }
+    let guidebook_rect = gameplay_journal_book_screen_rect(w, h, &cam, &anchors.guidebook_pick);
+    if guidebook_rect[2] > 1.0 && guidebook_rect[3] > 1.0 {
+        rects.push((FocusTarget::Guidebook, guidebook_rect));
+    }
+
+    let plinth_rect = |anchor: [f32; 3], tile_count: usize| -> [f32; 4] {
+        let spacing = layout.mm(24.0);
+        let tile_w = layout.mm(22.0);
+        let strip_w = if tile_count >= 2 {
+            spacing + tile_w
+        } else {
+            tile_w
+        };
+        let strip_h = layout.mm(30.0);
+        [
+            anchor[0] - strip_w * 0.5,
+            anchor[1] - strip_h * 0.5,
+            strip_w,
+            strip_h,
+        ]
+    };
+    rects.push((
+        FocusTarget::Dora,
+        plinth_rect(anchors.tile_plinth_poses[0].anchor, 2),
+    ));
+    rects.push((
+        FocusTarget::RoundWind,
+        plinth_rect(anchors.tile_plinth_poses[1].anchor, 1),
+    ));
+    let tile_size_px = layout.hand_slot_w * (22.0 / crate::ui::layout::TILE_WIDTH_MM);
+    let ordeal_rect = gameplay_boss_ordeal_screen_rect(
+        &anchors.tile_plinth_poses[2],
+        w,
+        h,
+        env_h,
+        &cam,
+        tile_size_px,
+    );
+    if ordeal_rect[2] > 1.0 && ordeal_rect[3] > 1.0 {
+        rects.push((FocusTarget::Ordeal, ordeal_rect));
+    }
+
+    let relic_size = layout.mm(18.0).max(48.0);
+    for (i, _pose) in anchors.relic_poses.iter().enumerate().take(3) {
+        if let Ok(r) = gameplay_marker_screen_rect_resolved(
+            w,
+            h,
+            &cam,
+            env_h,
+            &cpu,
+            gameplay_glb::PLAYER_RELIC_MARKERS[i],
+            relic_size,
+            relic_size,
+        ) {
+            rects.push((FocusTarget::Relic(i), r));
+        }
+    }
+
+    let consumable_w = layout.mm(22.0).max(40.0);
+    let consumable_h = layout.mm(28.0).max(50.0);
+    for (i, pose) in anchors.consumable_poses.iter().enumerate() {
+        let r = [
+            pose.anchor[0] - consumable_w * 0.5,
+            pose.anchor[1] - consumable_h * 0.5,
+            consumable_w,
+            consumable_h,
+        ];
+        rects.push((FocusTarget::Consumable(i), r));
+    }
+
+    let gold_w = layout.mm(36.0).max(80.0);
+    let gold_h = layout.mm(20.0).max(48.0);
+    if let Ok(r) = gameplay_marker_screen_rect_resolved(
+        w,
+        h,
+        &cam,
+        env_h,
+        &cpu,
+        gameplay_glb::PLAYER_GOLD,
+        gold_w,
+        gold_h,
+    ) {
+        rects.push((FocusTarget::Gold, r));
+    }
+
+    let wall_layout =
+        crate::render::wall_display::wall_hud_layout(w, h, 126);
+    rects.push((FocusTarget::WallHud, wall_layout.block_rect));
+
+    if let Some((score_rect, target_rect)) =
+        crate::scenes::gameplay::score_counter::resolve_score_roller_bank_focus_rects(
+            w, h, &cam, env_h,
+        )
+    {
+        if score_rect[2] > 1.0 && score_rect[3] > 1.0 {
+            rects.push((
+                FocusTarget::ScoreRoller(super::focus::ScoreRollerBank::Score),
+                score_rect,
+            ));
+        }
+        if target_rect[2] > 1.0 && target_rect[3] > 1.0 {
+            rects.push((
+                FocusTarget::ScoreRoller(super::focus::ScoreRollerBank::Target),
+                target_rect,
+            ));
+        }
+    }
+
+    rects
+}
+
 #[cfg(test)]
 mod tests {
     use crate::render::gameplay_glb::{self, load_gameplay_glb_from_bytes, validate_gameplay_glb};
@@ -424,6 +706,32 @@ mod tests {
         assert!((super::hand_marker_lerp_t(14, 14, 0) - 0.0).abs() < 1e-4);
         assert!((super::hand_marker_lerp_t(14, 14, 13) - 1.0).abs() < 1e-4);
         assert!((super::hand_marker_lerp_t(1, 14, 0) - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn play_button_hit_rect_does_not_overlap_hand_tiles() {
+        use crate::scenes::gameplay::focus::{FocusTarget, GameplayButton};
+
+        fn rects_overlap(a: [f32; 4], b: [f32; 4]) -> bool {
+            a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[1] + b[3] && a[1] + a[3] > b[1]
+        }
+
+        let rects = super::projected_gameplay_focus_rects_for_tests(14);
+        let play = rects
+            .iter()
+            .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
+            .map(|(_, r)| *r)
+            .expect("play rect");
+        let hand_tiles: Vec<[f32; 4]> = rects
+            .iter()
+            .filter_map(|(t, r)| matches!(t, FocusTarget::HandTile(_)).then_some(*r))
+            .collect();
+        for (i, tile) in hand_tiles.iter().enumerate() {
+            assert!(
+                !rects_overlap(play, *tile),
+                "play hit rect {play:?} overlaps hand tile {i} {tile:?}"
+            );
+        }
     }
 
     #[test]

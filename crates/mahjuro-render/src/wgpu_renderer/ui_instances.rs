@@ -37,8 +37,8 @@ pub struct RenderSettings {
 /// Instance for the `gradient_quad_pipeline` — same `rect`/`color` payload
 /// as `GpuInstance` plus a per-instance `feather` vec4 that drives the
 /// shader's alpha falloff. See `shaders/gradient_quad.wgsl` for the exact
-/// contract; `feather.x` = edge softness fraction, `feather.y` = axial↔radial
-/// blend, `feather.zw` reserved.
+/// contract; `feather.x` = horizontal edge softness, `feather.z` = vertical
+/// (falls back to x when z≈0), `feather.y` = axial↔radial blend.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GradientQuadInstance {

@@ -367,7 +367,7 @@ fn indices_from_play_mask(hand_len: usize, mask: u32) -> Vec<usize> {
     (0..hand_len).filter(|i| mask & (1 << i) != 0).collect()
 }
 
-/// Whether a commit of `new_sets` with `scoring_tile_count` tiles fits the structure bank.
+/// Whether a commit of `new_sets` with `scoring_tile_count` tiles fits in structure.
 fn structure_commit_fits(
     run: &RunState,
     scoring_tile_count: usize,
@@ -692,7 +692,7 @@ fn peak_chamber_relic_state(run: &RunState) -> Vec<PeakChamberRelicState> {
         .collect()
 }
 
-/// Masks that pass meld validation and structure-bank checks (still may score to zero).
+/// Masks that pass meld validation and structure checks (still may score to zero).
 fn masks_passing_validate_and_structure(run: &RunState, hand: &[Tile], masks: &[u32]) -> usize {
     let n = hand.len();
     if !(2..=20).contains(&n) {
@@ -809,7 +809,7 @@ pub fn bench_evaluate_play_masks(
     evaluate_play_masks(run, hand, None, None, masks)
 }
 
-/// Count masks that pass validation + structure-bank checks (before scoring).
+/// Count masks that pass validation + structure checks (before scoring).
 #[doc(hidden)]
 pub fn bench_count_masks_validate_structure(run: &RunState, hand: &[Tile], masks: &[u32]) -> usize {
     masks_passing_validate_and_structure(run, hand, masks)
@@ -1188,7 +1188,7 @@ fn play_chamber(
             let yen_before = run.yen;
             let yaku_levels_before = run.yaku_levels.clone();
             let golden_engine_active = run.relics.has(RelicId::GoldenEngine);
-            let bank_before_commit = run.structure_tiles().to_vec();
+            let structure_before_commit = run.structure_tiles().to_vec();
             let mut idx_sorted: Vec<usize> = indices.to_vec();
             idx_sorted.sort_unstable();
             let selected_tiles: Vec<Tile> = idx_sorted
@@ -1226,7 +1226,7 @@ fn play_chamber(
             let play_delta = run.round_score.saturating_sub(score_before);
             if play_delta > 0 {
                 let tiles = if run.structure_tiles().is_empty() {
-                    let mut full = bank_before_commit;
+                    let mut full = structure_before_commit;
                     if let Some((_, scoring_tiles)) = &commit_melds {
                         full.extend(scoring_tiles.iter().copied());
                     } else {
@@ -1407,7 +1407,7 @@ mod tests {
     }
 
     #[test]
-    fn bot_skips_structure_commits_that_overflow_the_bank() {
+    fn bot_skips_structure_commits_that_overflow_structure() {
         let mut run = RunState::new_demo();
         *run.structure_tiles_mut() = run.hand().iter().take(12).copied().collect();
         *run.structure_sets_mut() = vec![
@@ -1435,7 +1435,7 @@ mod tests {
             best.as_ref()
                 .map(|(_, indices)| run.structure_tiles().len() + indices.len() <= HAND_SIZE)
                 .unwrap_or(true),
-            "bot should not choose a play that the structure bank would reject"
+            "bot should not choose a play that structure would reject"
         );
     }
 

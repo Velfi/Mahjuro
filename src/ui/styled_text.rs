@@ -1,4 +1,4 @@
-//! Safe inline markup for player-facing UI copy (not full Markdown).
+//! Unified player-facing UI text: safe inline markup + glossary vocabulary tints.
 //!
 //! # Grammar (whitelist)
 //!
@@ -7,25 +7,115 @@
 //! - __Underline__: `__` toggles underline.
 //! - **Effects**: `{{effect:name}}` … `{{/effect}}` — curated names only; see
 //!   [`crate::render::text_effect::TextEffectId::from_markup_name`].
+//! - **Glossary terms**: `{{term:Honors}}` — force a vocabulary tint (preserves tag casing).
 //! - **Escapes**: `\` before `*`, `_`, `{`, `}`, `\` emits the literal next character.
+//!
+//! # Glossary modes
+//!
+//! [`GlossaryMode`] controls auto-tinting via [`crate::render::vocabulary_colors`]:
+//! - `Off` — plain text
+//! - `Prose` — mixed English + jargon (suppresses ambiguous title-cased honor words)
+//! - `Panel` — guide glossary rows (always tint table hits)
 //!
 //! # Limits
 //!
 //! [`MAX_STYLED_INPUT_BYTES`], [`MAX_EFFECT_STACK`], [`MAX_STYLED_RUNS`].
-//!
-//! # Glossary tint vs colored keywords
-//!
-//! [`StyledBlockStyle::glossary_tint`] (and [`crate::ui::widget::TextStyle::glossary_tint`]) turns on
-//! per-word colors using the same [`crate::render::vocabulary_colors::color_for_token`] table
-//! documented in [`crate::ui::colored_keywords`]. That module also provides word-wrap helpers for
-//! plain copy; styled markup goes through this module instead.
 
-use crate::render::decal::{load_ui_font, load_ui_font_italic};
+use crate::render::decal::{load_mono_font, load_ui_font, load_ui_font_italic};
 use crate::render::text_effect::TextEffectId;
-use crate::render::theme::typography;
-use crate::render::vocabulary_colors::colored_token_segments;
+use crate::render::theme::{color, typography};
+use crate::render::vocabulary_colors::{
+    GlossaryMode, colored_token_segments, glossary_word_segments,
+    glossary_word_segments_forced, text_effect_for_glossary_tint,
+};
+pub use crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
-use crate::ui::widget::TextStyle;
+use crate::ui::clip::intersect_rect;
+use crate::ui::text_wrap::{TextBreakUnit, break_units_kp};
+use crate::ui::widget::{self, TextStyle};
+
+/// Vertical step between glossary text rows. All measure/push paths use this multiplier.
+pub const COLORED_ROW_LINE_STEP_MUL: f32 = 1.4;
+
+/// Dark stroke for glossary keyword tints on light panel fills (e.g. mint "Play" on white).
+pub const KEYWORD_OUTLINE_COLOR: [f32; 4] = color::WALNUT_INK;
+/// **The House** polychrome — crisp black rim so gold/crimson bands read on dark UI.
+pub const HOUSE_OUTLINE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+/// **The Moon** polychrome — twilight field rim so moonlight bands read on dark UI.
+pub const MOON_OUTLINE_COLOR: [f32; 4] = color::keyword::MOON_OUTLINE;
+
+#[inline]
+pub fn keyword_is_tinted(segment_color: [f32; 4], default_color: [f32; 4]) -> bool {
+    segment_color != default_color
+}
+
+#[inline]
+fn keyword_outline_color(segment_color: [f32; 4]) -> [f32; 4] {
+    if crate::render::vocabulary_colors::is_house_keyword_color(segment_color) {
+        HOUSE_OUTLINE_COLOR
+    } else if crate::render::vocabulary_colors::is_moon_keyword_color(segment_color) {
+        MOON_OUTLINE_COLOR
+    } else {
+        KEYWORD_OUTLINE_COLOR
+    }
+}
+
+#[inline]
+fn proper_noun_polychrome_outline(segment_color: [f32; 4]) -> bool {
+    crate::render::vocabulary_colors::is_house_keyword_color(segment_color)
+        || crate::render::vocabulary_colors::is_moon_keyword_color(segment_color)
+}
+
+#[inline]
+fn keyword_outline_offsets(font_px: f32, house: bool) -> [(f32, f32); 8] {
+    let d = if house {
+        (font_px * 0.068).clamp(1.5, 2.5)
+    } else {
+        (font_px * 0.055).clamp(1.0, 2.0)
+    };
+    [
+        (-d, 0.0),
+        (d, 0.0),
+        (0.0, -d),
+        (0.0, d),
+        (-d, -d),
+        (d, -d),
+        (-d, d),
+        (d, d),
+    ]
+}
+
+/// Push `label`, optionally preceded by an ink outline when it is a glossary tint.
+pub fn push_keyword_label(
+    out: &mut Vec<TextLabel>,
+    label: TextLabel,
+    default_color: [f32; 4],
+    outline_tinted: bool,
+) {
+    let font_px = label.font_px.unwrap_or(label.rect[3]);
+    if outline_tinted && keyword_is_tinted(label.color, default_color) {
+        let thick = proper_noun_polychrome_outline(label.color);
+        for (dx, dy) in keyword_outline_offsets(font_px, thick) {
+            let mut stroke = label.clone();
+            stroke.rect[0] += dx;
+            stroke.rect[1] += dy;
+            stroke.color = keyword_outline_color(label.color);
+            stroke.text_effect = TextEffectId::Flat;
+            out.push(stroke);
+        }
+    }
+    out.push(label);
+}
+
+#[inline]
+pub fn colored_row_line_step(line_h: f32) -> f32 {
+    line_h * COLORED_ROW_LINE_STEP_MUL
+}
+
+#[inline]
+pub fn ui_text_line_step(line_h: f32) -> f32 {
+    colored_row_line_step(line_h)
+}
 
 /// Max UTF-8 bytes accepted by the parser.
 pub const MAX_STYLED_INPUT_BYTES: usize = 12_000;
@@ -38,6 +128,8 @@ pub const MAX_STYLED_RUNS: usize = 128;
 const TAG_CLOSE_EFFECT_LEN: usize = 11;
 /// `{{effect:` — opening delimiter before the effect name.
 const TAG_EFFECT_OPEN_PREFIX_LEN: usize = 9;
+/// `{{term:` — opening delimiter before a forced glossary term.
+const TAG_TERM_OPEN_PREFIX_LEN: usize = 7;
 
 #[inline]
 fn active_effect(effect_stack: &[TextEffectId]) -> TextEffectId {
@@ -59,6 +151,8 @@ pub struct StyledRun {
     pub italic: bool,
     pub underline: bool,
     pub effect: TextEffectId,
+    /// From `{{term:…}}` — bypass title-case guard in [`GlossaryMode::Prose`].
+    pub force_glossary: bool,
 }
 
 fn merge_adjacent_runs(runs: Vec<StyledRun>) -> Vec<StyledRun> {
@@ -75,6 +169,7 @@ fn merge_adjacent_runs(runs: Vec<StyledRun>) -> Vec<StyledRun> {
             && last.italic == r.italic
             && last.underline == r.underline
             && last.effect == r.effect
+            && last.force_glossary == r.force_glossary
         {
             last.text.push_str(&r.text);
         } else {
@@ -91,6 +186,7 @@ fn flush_styled_run(
     italic: bool,
     underline: bool,
     effect: TextEffectId,
+    force_glossary: bool,
 ) -> Result<(), StyledParseError> {
     if buf.is_empty() {
         return Ok(());
@@ -104,6 +200,7 @@ fn flush_styled_run(
         italic,
         underline,
         effect,
+        force_glossary,
     });
     Ok(())
 }
@@ -133,7 +230,7 @@ pub fn parse_styled_text(input: &str) -> Result<Vec<StyledRun>, StyledParseError
         // {{/effect}}
         if char_slice_starts_with_str(&chars, i, "{{/effect}}") {
             let eff = active_effect(&effect_stack);
-            flush_styled_run(&mut buf, &mut runs, bold, italic, underline, eff)?;
+            flush_styled_run(&mut buf, &mut runs, bold, italic, underline, eff, false)?;
             let _ = effect_stack.pop();
             i += TAG_CLOSE_EFFECT_LEN;
             continue;
@@ -142,7 +239,7 @@ pub fn parse_styled_text(input: &str) -> Result<Vec<StyledRun>, StyledParseError
         // {{effect:name}}
         if char_slice_starts_with_str(&chars, i, "{{effect:") {
             let eff = active_effect(&effect_stack);
-            flush_styled_run(&mut buf, &mut runs, bold, italic, underline, eff)?;
+            flush_styled_run(&mut buf, &mut runs, bold, italic, underline, eff, false)?;
             let start = i + TAG_EFFECT_OPEN_PREFIX_LEN;
             let mut j = start;
             while j + 1 < chars.len() && !(chars[j] == '}' && chars[j + 1] == '}') {
@@ -161,9 +258,37 @@ pub fn parse_styled_text(input: &str) -> Result<Vec<StyledRun>, StyledParseError
             continue;
         }
 
+        // {{term:name}}
+        if char_slice_starts_with_str(&chars, i, "{{term:") {
+            let eff = active_effect(&effect_stack);
+            flush_styled_run(&mut buf, &mut runs, bold, italic, underline, eff, false)?;
+            let start = i + TAG_TERM_OPEN_PREFIX_LEN;
+            let mut j = start;
+            while j + 1 < chars.len() && !(chars[j] == '}' && chars[j + 1] == '}') {
+                j += 1;
+            }
+            if j + 1 >= chars.len() {
+                return Err(StyledParseError::UnclosedEffectRegion);
+            }
+            let term: String = chars[start..j].iter().collect();
+            if runs.len() >= MAX_STYLED_RUNS {
+                return Err(StyledParseError::TooManyRuns);
+            }
+            runs.push(StyledRun {
+                text: term,
+                bold,
+                italic,
+                underline,
+                effect: eff,
+                force_glossary: true,
+            });
+            i = j + 2;
+            continue;
+        }
+
         if i + 1 < chars.len() && chars[i] == '*' && chars[i + 1] == '*' {
             let eff = active_effect(&effect_stack);
-            flush_styled_run(&mut buf, &mut runs, bold, italic, underline, eff)?;
+            flush_styled_run(&mut buf, &mut runs, bold, italic, underline, eff, false)?;
             bold = !bold;
             i += 2;
             continue;
@@ -171,7 +296,7 @@ pub fn parse_styled_text(input: &str) -> Result<Vec<StyledRun>, StyledParseError
 
         if i + 1 < chars.len() && chars[i] == '_' && chars[i + 1] == '_' {
             let eff = active_effect(&effect_stack);
-            flush_styled_run(&mut buf, &mut runs, bold, italic, underline, eff)?;
+            flush_styled_run(&mut buf, &mut runs, bold, italic, underline, eff, false)?;
             underline = !underline;
             i += 2;
             continue;
@@ -179,7 +304,7 @@ pub fn parse_styled_text(input: &str) -> Result<Vec<StyledRun>, StyledParseError
 
         if chars[i] == '*' {
             let eff = active_effect(&effect_stack);
-            flush_styled_run(&mut buf, &mut runs, bold, italic, underline, eff)?;
+            flush_styled_run(&mut buf, &mut runs, bold, italic, underline, eff, false)?;
             italic = !italic;
             i += 1;
             continue;
@@ -196,6 +321,7 @@ pub fn parse_styled_text(input: &str) -> Result<Vec<StyledRun>, StyledParseError
         italic,
         underline,
         active_effect(&effect_stack),
+        false,
     )?;
 
     if !effect_stack.is_empty() {
@@ -228,6 +354,7 @@ pub fn parse_styled_text_lossy(input: &str) -> Vec<StyledRun> {
                     italic: false,
                     underline: false,
                     effect: TextEffectId::Flat,
+                    force_glossary: false,
                 }]
             } else {
                 r
@@ -241,6 +368,7 @@ pub fn parse_styled_text_lossy(input: &str) -> Vec<StyledRun> {
                 italic: false,
                 underline: false,
                 effect: TextEffectId::Flat,
+                force_glossary: false,
             }]
         }
     }
@@ -259,20 +387,32 @@ struct Cell {
 fn push_glossary_word_cells(
     cells: &mut Vec<Cell>,
     word: &str,
+    words: &[&str],
+    word_idx: usize,
     run: &StyledRun,
+    mode: GlossaryMode,
     default_color: [f32; 4],
 ) {
     if word.is_empty() {
         return;
     }
-    for (segment, col) in colored_token_segments(word, default_color) {
+    let segments = if run.force_glossary {
+        glossary_word_segments_forced(words, word_idx, mode, default_color, true)
+    } else {
+        glossary_word_segments(words, word_idx, mode, default_color)
+    };
+    for (segment, col) in segments {
+        let effect = match text_effect_for_glossary_tint(col) {
+            TextEffectId::Flat => run.effect,
+            fx => fx,
+        };
         for ch in segment.chars() {
             cells.push(Cell {
                 ch,
                 bold: run.bold,
                 italic: run.italic,
                 underline: run.underline,
-                effect: run.effect,
+                effect,
                 color: col,
             });
         }
@@ -282,11 +422,11 @@ fn push_glossary_word_cells(
 fn runs_to_cells_with_glossary(
     runs: &[StyledRun],
     default_color: [f32; 4],
-    glossary: bool,
+    mode: GlossaryMode,
 ) -> Vec<Cell> {
     let mut cells: Vec<Cell> = Vec::new();
-    for run in runs {
-        if !glossary {
+    if matches!(mode, GlossaryMode::Off) {
+        for run in runs {
             for ch in run.text.chars() {
                 cells.push(Cell {
                     ch,
@@ -297,13 +437,52 @@ fn runs_to_cells_with_glossary(
                     color: default_color,
                 });
             }
-            continue;
         }
+        return cells;
+    }
+
+    let joined: String = runs.iter().map(|r| r.text.as_str()).collect();
+    let all_words: Vec<&str> = joined.split_whitespace().collect();
+    let mut word_idx = 0usize;
+
+    let flush_word = |cells: &mut Vec<Cell>,
+                          word: &mut String,
+                          run: &StyledRun,
+                          word_idx: &mut usize| {
+        if word.is_empty() {
+            return;
+        }
+        if *word_idx < all_words.len() {
+            push_glossary_word_cells(
+                cells,
+                word,
+                &all_words,
+                *word_idx,
+                run,
+                mode,
+                default_color,
+            );
+            *word_idx += 1;
+        } else {
+            for ch in word.chars() {
+                cells.push(Cell {
+                    ch,
+                    bold: run.bold,
+                    italic: run.italic,
+                    underline: run.underline,
+                    effect: run.effect,
+                    color: default_color,
+                });
+            }
+        }
+        word.clear();
+    };
+
+    for run in runs {
         let mut word = String::new();
         for ch in run.text.chars() {
             if ch == '\n' {
-                push_glossary_word_cells(&mut cells, &word, run, default_color);
-                word.clear();
+                flush_word(&mut cells, &mut word, run, &mut word_idx);
                 cells.push(Cell {
                     ch: '\n',
                     bold: run.bold,
@@ -315,8 +494,7 @@ fn runs_to_cells_with_glossary(
                 continue;
             }
             if ch.is_whitespace() {
-                push_glossary_word_cells(&mut cells, &word, run, default_color);
-                word.clear();
+                flush_word(&mut cells, &mut word, run, &mut word_idx);
                 cells.push(Cell {
                     ch,
                     bold: run.bold,
@@ -329,7 +507,7 @@ fn runs_to_cells_with_glossary(
                 word.push(ch);
             }
         }
-        push_glossary_word_cells(&mut cells, &word, run, default_color);
+        flush_word(&mut cells, &mut word, run, &mut word_idx);
     }
     cells
 }
@@ -530,11 +708,11 @@ fn layout_styled_visual_lines_at_font_px(
     text: &str,
     max_width_px: f32,
     font_px: f32,
-    glossary_tint: bool,
+    glossary: GlossaryMode,
     default_color: [f32; 4],
 ) -> Vec<Vec<Cell>> {
     let runs = parse_styled_text_lossy(text);
-    let cells = runs_to_cells_with_glossary(&runs, default_color, glossary_tint);
+    let cells = runs_to_cells_with_glossary(&runs, default_color, glossary);
     let hard_lines = split_lines_by_newline(&cells);
     let regular = load_ui_font();
     let italic = load_ui_font_italic();
@@ -566,7 +744,7 @@ impl StyledTextBlock {
         text: &str,
         max_width_px: f32,
         font_px: f32,
-        glossary_tint: bool,
+        glossary: GlossaryMode,
         default_color: [f32; 4],
     ) -> Self {
         Self {
@@ -574,7 +752,7 @@ impl StyledTextBlock {
                 text,
                 max_width_px,
                 font_px,
-                glossary_tint,
+                glossary,
                 default_color,
             ),
             font_px,
@@ -586,14 +764,14 @@ impl StyledTextBlock {
         max_width_px: f32,
         tier: f32,
         window_h: f32,
-        glossary_tint: bool,
+        glossary: GlossaryMode,
         default_color: [f32; 4],
     ) -> Self {
         Self::measure_at_font_px(
             text,
             max_width_px,
             typography::size(tier, window_h),
-            glossary_tint,
+            glossary,
             default_color,
         )
     }
@@ -605,7 +783,7 @@ impl StyledTextBlock {
 
     /// Block height after markup parse + wrap (uses [`colored_row_line_step`]).
     pub fn block_height(&self) -> f32 {
-        crate::ui::colored_keywords::colored_row_line_step(self.font_px) * self.line_count() as f32
+        colored_row_line_step(self.font_px) * self.line_count() as f32
     }
 
     pub fn push_at_font_px(
@@ -623,10 +801,10 @@ pub fn styled_line_block_height_at_font_px(
     text: &str,
     max_width_px: f32,
     font_px: f32,
-    glossary_tint: bool,
+    glossary: GlossaryMode,
     default_color: [f32; 4],
 ) -> f32 {
-    StyledTextBlock::measure_at_font_px(text, max_width_px, font_px, glossary_tint, default_color)
+    StyledTextBlock::measure_at_font_px(text, max_width_px, font_px, glossary, default_color)
         .block_height()
 }
 
@@ -635,18 +813,11 @@ pub fn styled_line_block_height(
     max_width_px: f32,
     tier: f32,
     window_h: f32,
-    glossary_tint: bool,
+    glossary: GlossaryMode,
     default_color: [f32; 4],
 ) -> f32 {
-    StyledTextBlock::measure(
-        text,
-        max_width_px,
-        tier,
-        window_h,
-        glossary_tint,
-        default_color,
-    )
-    .block_height()
+    StyledTextBlock::measure(text, max_width_px, tier, window_h, glossary, default_color)
+        .block_height()
 }
 
 fn push_styled_visual_lines(
@@ -660,7 +831,7 @@ fn push_styled_visual_lines(
     let pad = style.padding;
     let inner_w = (w - 2.0 * pad).max(1.0);
     let inner_h = (h - 2.0 * pad).max(1.0);
-    let line_step = crate::ui::colored_keywords::colored_row_line_step(font_px);
+    let line_step = colored_row_line_step(font_px);
     let max_lines = ((inner_h / line_step).floor() as usize).max(1);
 
     let regular = load_ui_font();
@@ -670,7 +841,13 @@ fn push_styled_visual_lines(
     let drawn: Vec<_> = visual_lines.iter().take(max_lines).collect();
     let n = drawn.len().max(1);
     let block_h = inner_h.min(n as f32 * line_step);
-    let base_y = y + pad + (inner_h - block_h) * 0.5;
+    let base_y = match style.vertical_align {
+        Some(crate::render::wgpu_renderer::TextBlockVerticalAlign::Top) => y + pad,
+        Some(crate::render::wgpu_renderer::TextBlockVerticalAlign::Bottom) => {
+            y + pad + inner_h - block_h
+        }
+        None => y + pad + (inner_h - block_h) * 0.5,
+    };
 
     for (row, line_cells) in drawn.iter().enumerate() {
         if line_cells.is_empty() {
@@ -686,7 +863,7 @@ fn push_styled_visual_lines(
         };
         for chunk in chunks {
             let piece_w = chunk.advance_width.max(1.0);
-            crate::ui::colored_keywords::push_keyword_label(
+            push_keyword_label(
                 out,
                 TextLabel {
                     rect: [cx, line_y, piece_w, line_step],
@@ -702,7 +879,7 @@ fn push_styled_visual_lines(
                     ..Default::default()
                 },
                 style.color,
-                style.glossary_tint,
+                style.glossary.tints(),
             );
             cx += piece_w;
         }
@@ -719,9 +896,12 @@ pub fn push_styled_text_block_at_font_px(
 ) {
     let [_, _, w, _] = rect;
     let inner_w = (w - 2.0 * style.padding).max(1.0);
-    StyledTextBlock::measure_at_font_px(text, inner_w, font_px, style.glossary_tint, style.color)
+    StyledTextBlock::measure_at_font_px(text, inner_w, font_px, style.glossary, style.color)
         .push_at_font_px(out, rect, style);
 }
+
+/// Alias for [`StyledTextBlock`] — unified UI text measure/push.
+pub type UiTextBlock = StyledTextBlock;
 
 /// Style for [`push_styled_text_block`].
 #[derive(Clone, Copy, Debug)]
@@ -730,8 +910,10 @@ pub struct StyledBlockStyle {
     pub color: [f32; 4],
     pub padding: f32,
     pub align: TextAlign,
-    /// When true, apply [`color_for_token`] per word inside styled runs.
-    pub glossary_tint: bool,
+    /// Per-word vocabulary tint mode inside styled runs.
+    pub glossary: GlossaryMode,
+    /// When set, pins the block to the top or bottom of `rect`; `None` keeps legacy centering.
+    pub vertical_align: Option<crate::render::wgpu_renderer::TextBlockVerticalAlign>,
 }
 
 impl Default for StyledBlockStyle {
@@ -741,7 +923,8 @@ impl Default for StyledBlockStyle {
             color: crate::render::theme::color::PARCHMENT,
             padding: 0.0,
             align: TextAlign::Center,
-            glossary_tint: false,
+            glossary: GlossaryMode::Off,
+            vertical_align: None,
         }
     }
 }
@@ -753,7 +936,8 @@ impl From<TextStyle> for StyledBlockStyle {
             color: s.color,
             padding: s.padding,
             align: s.align,
-            glossary_tint: s.glossary_tint,
+            glossary: s.glossary,
+            vertical_align: None,
         }
     }
 }
@@ -776,15 +960,567 @@ pub fn push_styled_text_block(
     );
 }
 
+// --- Plain-text glossary layout (former `colored_keywords` API) ---
+
+fn glue_same_color_trailing_punct(line: &mut Vec<(String, [f32; 4])>) {
+    let mut i = 1usize;
+    while i < line.len() {
+        if line[i].0 == " " {
+            i += 1;
+            continue;
+        }
+        if crate::render::vocabulary_colors::is_punctuation_only(&line[i].0)
+            && line[i].1 == line[i - 1].1
+            && line[i - 1].0 != " "
+        {
+            let (punct, _) = line.remove(i);
+            line[i - 1].0.push_str(&punct);
+            continue;
+        }
+        i += 1;
+    }
+}
+
+fn word_width(font: &fontdue::Font, word: &str, font_px: f32) -> f32 {
+    word.chars()
+        .map(|ch| font.metrics(ch, font_px).advance_width)
+        .sum()
+}
+
+fn wrap_measure_font(italic: bool) -> Option<&'static fontdue::Font> {
+    if italic {
+        load_ui_font_italic().or_else(load_ui_font)
+    } else {
+        load_ui_font()
+    }
+}
+
+fn italic_trailing_slack(font_px: f32) -> f32 {
+    font_px * 0.05
+}
+
+pub fn colored_wrapped_rows_height(rows: &[Vec<(String, [f32; 4])>], line_h: f32) -> f32 {
+    colored_row_line_step(line_h) * rows.len().max(1) as f32
+}
+
+pub fn colored_line_block_height(
+    text: &str,
+    inner_w: f32,
+    line_h: f32,
+    default: [f32; 4],
+    glossary: GlossaryMode,
+) -> f32 {
+    let wrapped = wrap_colored_words(text, inner_w, line_h, default, false, glossary);
+    colored_wrapped_rows_height(&wrapped, line_h)
+}
+
+pub fn colored_multiline_text_height(
+    text: &str,
+    inner_w: f32,
+    line_h: f32,
+    default: [f32; 4],
+    glossary: GlossaryMode,
+) -> f32 {
+    let lines = wrap_colored_text_multiline(text, inner_w, line_h, default, false, glossary);
+    colored_wrapped_rows_height(&lines, line_h)
+}
+
+pub fn colored_lines_block_height(
+    lines: &[&str],
+    inner_w: f32,
+    line_h: f32,
+    default: [f32; 4],
+    glossary: GlossaryMode,
+) -> f32 {
+    lines
+        .iter()
+        .map(|line| colored_line_block_height(line, inner_w, line_h, default, glossary))
+        .sum()
+}
+
+pub struct ColoredLineBlock {
+    wrapped: Vec<Vec<(String, [f32; 4])>>,
+    line_h: f32,
+}
+
+impl ColoredLineBlock {
+    pub fn measure(
+        text: &str,
+        inner_w: f32,
+        line_h: f32,
+        default: [f32; 4],
+        glossary: GlossaryMode,
+    ) -> Self {
+        Self {
+            wrapped: wrap_colored_words(text, inner_w, line_h, default, false, glossary),
+            line_h,
+        }
+    }
+
+    pub fn height(&self) -> f32 {
+        colored_wrapped_rows_height(&self.wrapped, self.line_h)
+    }
+
+    pub fn push_left(
+        &self,
+        out: &mut Vec<TextLabel>,
+        text_left: f32,
+        top_y: f32,
+        inner_w: f32,
+        fallback_plain: &str,
+        fallback_color: [f32; 4],
+        glossary: GlossaryMode,
+    ) {
+        push_colored_rows_left(
+            out,
+            ColoredRowsLayout {
+                text_left,
+                top_y,
+                inner_w,
+                line_h: self.line_h,
+                fallback_plain,
+                fallback_color,
+                italic: false,
+                glossary,
+            },
+            &self.wrapped,
+        );
+    }
+}
+
+pub fn push_colored_line_left(
+    out: &mut Vec<TextLabel>,
+    text_left: f32,
+    top_y: f32,
+    inner_w: f32,
+    line_h: f32,
+    text: &str,
+    default: [f32; 4],
+    glossary: GlossaryMode,
+) -> f32 {
+    let block = ColoredLineBlock::measure(text, inner_w, line_h, default, glossary);
+    let h = block.height();
+    block.push_left(out, text_left, top_y, inner_w, text, default, glossary);
+    h
+}
+
+pub fn colored_paragraph_preferred_width(
+    text: &str,
+    line_h: f32,
+    max_width_px: f32,
+    glossary: GlossaryMode,
+) -> f32 {
+    let text = text.trim();
+    if text.is_empty() {
+        return 0.0;
+    }
+    let Some(font) = load_ui_font() else {
+        return (text.chars().count() as f32 * line_h * 0.55).min(max_width_px);
+    };
+    let font_px = line_h * 0.99;
+    let space_w = font.metrics(' ', font_px).advance_width;
+    let default = [0.0; 4];
+    let mut widest = 0.0_f32;
+    for paragraph in text.split('\n') {
+        let words: Vec<&str> = paragraph.split_whitespace().collect();
+        if words.is_empty() {
+            continue;
+        }
+        let mut line_w = 0.0;
+        for (i, word) in words.iter().enumerate() {
+            if i > 0 {
+                line_w += space_w;
+            }
+            for (seg, _) in colored_token_segments(word, default, glossary) {
+                line_w += word_width(font, &seg, font_px);
+            }
+        }
+        widest = widest.max(line_w);
+    }
+    widest.clamp(0.0, max_width_px)
+}
+
+pub fn ui_text_preferred_width(
+    text: &str,
+    line_h: f32,
+    max_width_px: f32,
+    glossary: GlossaryMode,
+) -> f32 {
+    colored_paragraph_preferred_width(text, line_h, max_width_px, glossary)
+}
+
+pub fn wrap_colored_words(
+    text: &str,
+    max_width_px: f32,
+    line_h: f32,
+    default: [f32; 4],
+    italic: bool,
+    glossary: GlossaryMode,
+) -> Vec<Vec<(String, [f32; 4])>> {
+    let Some(font) = wrap_measure_font(italic) else {
+        return vec![vec![(text.to_string(), default)]];
+    };
+    let font_px = line_h * 0.99;
+    let space_w = font.metrics(' ', font_px).advance_width;
+
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() {
+        if text.trim().is_empty() {
+            return vec![];
+        }
+        return vec![vec![(text.to_string(), default)]];
+    }
+
+    let units: Vec<TextBreakUnit<Vec<(String, [f32; 4])>>> = words
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let segments = glossary_word_segments(&words, i, glossary, default);
+            let width = segments
+                .iter()
+                .map(|(seg, _)| word_width(font, seg, font_px))
+                .sum();
+            TextBreakUnit {
+                width,
+                payload: segments,
+            }
+        })
+        .collect();
+
+    let broken = break_units_kp(&units, max_width_px, space_w);
+    broken
+        .into_iter()
+        .map(|word_segments| {
+            let mut line: Vec<(String, [f32; 4])> = Vec::new();
+            for (wi, segments) in word_segments.into_iter().enumerate() {
+                if wi > 0 {
+                    line.push((" ".to_string(), default));
+                }
+                line.extend(segments);
+            }
+            glue_same_color_trailing_punct(&mut line);
+            line
+        })
+        .collect()
+}
+
+pub fn wrap_colored_text_multiline(
+    text: &str,
+    max_width_px: f32,
+    line_h: f32,
+    default: [f32; 4],
+    italic: bool,
+    glossary: GlossaryMode,
+) -> Vec<Vec<(String, [f32; 4])>> {
+    if wrap_measure_font(italic).is_none() {
+        return widget::wrap_text(text, max_width_px, line_h)
+            .into_iter()
+            .map(|s| vec![(s, default)])
+            .collect();
+    }
+    let mut out: Vec<Vec<(String, [f32; 4])>> = Vec::new();
+    for paragraph in text.split('\n') {
+        if paragraph.is_empty() {
+            out.push(vec![(String::new(), default)]);
+            continue;
+        }
+        out.extend(wrap_colored_words(
+            paragraph,
+            max_width_px,
+            line_h,
+            default,
+            italic,
+            glossary,
+        ));
+    }
+    if out.is_empty() {
+        out.push(vec![(String::new(), default)]);
+    }
+    out
+}
+
+pub fn colored_multiline_block_height(line_count: usize, line_h: f32) -> f32 {
+    colored_row_line_step(line_h) * line_count as f32
+}
+
+pub struct ColoredRowsLayout<'a> {
+    pub text_left: f32,
+    pub top_y: f32,
+    pub inner_w: f32,
+    pub line_h: f32,
+    pub fallback_plain: &'a str,
+    pub fallback_color: [f32; 4],
+    pub italic: bool,
+    pub glossary: GlossaryMode,
+}
+
+fn line_start_x(origin_x: f32, span_w: f32, total_w: f32, align: TextAlign) -> f32 {
+    match align {
+        TextAlign::Right => origin_x + span_w - total_w,
+        TextAlign::Center => origin_x + (span_w - total_w) * 0.5,
+        TextAlign::Left => origin_x,
+    }
+}
+
+fn measure_tinted_run(font: &fontdue::Font, segments: &[(String, [f32; 4])], font_px: f32) -> f32 {
+    segments
+        .iter()
+        .map(|(s, _)| word_width(font, s, font_px))
+        .sum()
+}
+
+fn push_tinted_segment_run(
+    out: &mut Vec<TextLabel>,
+    segments: &[(String, [f32; 4])],
+    font: &fontdue::Font,
+    font_px: f32,
+    y: f32,
+    row_h: f32,
+    cursor_x: &mut f32,
+    clip_rect: Option<[f32; 4]>,
+    mono: bool,
+    default_color: [f32; 4],
+    italic: bool,
+    glossary: GlossaryMode,
+) {
+    let trailing_slack = if italic {
+        italic_trailing_slack(font_px)
+    } else {
+        0.0
+    };
+    for (i, (s, c)) in segments.iter().enumerate() {
+        let mut piece_w = word_width(font, s, font_px).max(1.0);
+        if italic && i + 1 == segments.len() {
+            piece_w += trailing_slack;
+        }
+        let text_effect = text_effect_for_glossary_tint(*c);
+        push_keyword_label(
+            out,
+            TextLabel {
+                rect: [*cursor_x, y, piece_w, row_h],
+                text: s.clone(),
+                color: *c,
+                font_px: Some(font_px),
+                align: TextAlign::Left,
+                clip_rect,
+                mono,
+                italic,
+                text_effect,
+                ..Default::default()
+            },
+            default_color,
+            glossary.tints(),
+        );
+        *cursor_x += piece_w;
+    }
+}
+
+fn colored_line_segments(text: &str, default: [f32; 4], glossary: GlossaryMode) -> Vec<(String, [f32; 4])> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let mut segments = Vec::new();
+    for (wi, word) in words.iter().enumerate() {
+        if wi > 0 {
+            segments.push((" ".to_string(), default));
+        }
+        segments.extend(glossary_word_segments(&words, wi, glossary, default));
+    }
+    if segments.is_empty() && !text.is_empty() {
+        segments.push((text.to_string(), default));
+    }
+    glue_same_color_trailing_punct(&mut segments);
+    segments
+}
+
+pub fn push_colored_rows_left(
+    out: &mut Vec<TextLabel>,
+    layout: ColoredRowsLayout<'_>,
+    lines: &[Vec<(String, [f32; 4])>],
+) {
+    let ColoredRowsLayout {
+        text_left,
+        top_y,
+        inner_w,
+        line_h,
+        fallback_plain,
+        fallback_color,
+        italic,
+        glossary,
+    } = layout;
+    let font_px = line_h;
+    let line_step = colored_row_line_step(line_h);
+    let Some(font) = wrap_measure_font(italic) else {
+        let wrapped = widget::wrap_text(fallback_plain, inner_w, line_h);
+        let joined = wrapped.join("\n");
+        let h = colored_multiline_block_height(wrapped.len().max(1), line_h);
+        out.push(TextLabel {
+            rect: [text_left, top_y, inner_w, h],
+            text: joined,
+            color: fallback_color,
+            font_px: Some(font_px),
+            align: TextAlign::Left,
+            italic,
+            ..Default::default()
+        });
+        return;
+    };
+
+    for (row, chunks) in lines.iter().enumerate() {
+        let line_y = top_y + row as f32 * line_step;
+        let mut cx = text_left;
+        push_tinted_segment_run(
+            out,
+            chunks,
+            font,
+            font_px,
+            line_y,
+            line_step,
+            &mut cx,
+            None,
+            false,
+            fallback_color,
+            italic,
+            glossary,
+        );
+    }
+}
+
+pub fn push_colored_line_clipped(
+    out: &mut Vec<TextLabel>,
+    rect: [f32; 4],
+    clip_rect: Option<[f32; 4]>,
+    text: &str,
+    default: [f32; 4],
+    font_px: f32,
+    align: TextAlign,
+    mono: bool,
+    glossary: GlossaryMode,
+) {
+    let clip = clip_rect.unwrap_or(rect);
+    let Some(clipped) = intersect_rect(rect, clip) else {
+        return;
+    };
+    let segments = colored_line_segments(text, default, glossary);
+    let font = if mono {
+        load_mono_font().or_else(load_ui_font)
+    } else {
+        load_ui_font()
+    };
+    let Some(font) = font else {
+        out.push(TextLabel {
+            rect: clipped,
+            text: text.into(),
+            color: default,
+            font_px: Some(font_px),
+            align,
+            clip_rect: Some(clipped),
+            mono,
+            ..Default::default()
+        });
+        return;
+    };
+    let total_w = measure_tinted_run(font, &segments, font_px);
+    let mut x = line_start_x(clipped[0], clipped[2], total_w, align);
+    push_tinted_segment_run(
+        out,
+        &segments,
+        font,
+        font_px,
+        clipped[1],
+        clipped[3],
+        &mut x,
+        Some(clipped),
+        mono,
+        default,
+        false,
+        glossary,
+    );
+}
+
+pub fn push_colored_rows_in_width(
+    out: &mut Vec<TextLabel>,
+    layout: ColoredRowsLayout<'_>,
+    lines: &[Vec<(String, [f32; 4])>],
+    align: TextAlign,
+) {
+    let ColoredRowsLayout {
+        text_left: block_left,
+        top_y,
+        inner_w,
+        line_h,
+        fallback_plain,
+        fallback_color,
+        italic,
+        glossary,
+    } = layout;
+    let font_px = line_h;
+    let line_step = colored_row_line_step(line_h);
+    let Some(font) = wrap_measure_font(italic) else {
+        let wrapped = widget::wrap_text(fallback_plain, inner_w, line_h);
+        let joined = wrapped.join("\n");
+        let h = colored_multiline_block_height(wrapped.len().max(1), line_h);
+        out.push(TextLabel {
+            rect: [block_left, top_y, inner_w, h],
+            text: joined,
+            color: fallback_color,
+            font_px: Some(font_px),
+            align,
+            italic,
+            ..Default::default()
+        });
+        return;
+    };
+
+    for (row, chunks) in lines.iter().enumerate() {
+        let line_y = top_y + row as f32 * line_step;
+        let total_w = measure_tinted_run(font, chunks, font_px);
+        let mut cx = line_start_x(block_left, inner_w, total_w, align);
+        push_tinted_segment_run(
+            out,
+            chunks,
+            font,
+            font_px,
+            line_y,
+            line_step,
+            &mut cx,
+            None,
+            false,
+            fallback_color,
+            italic,
+            glossary,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn the_house_glossary_tint_uses_score_pop_polychrome() {
+        let runs = parse_styled_text("Vital to beating The House.").unwrap();
+        let cells = runs_to_cells_with_glossary(
+            &runs,
+            crate::render::theme::color::CHAMPAGNE,
+            GlossaryMode::Prose,
+        );
+        let house_cells: Vec<_> = cells
+            .iter()
+            .filter(|c| c.color == crate::render::theme::color::keyword::HOUSE)
+            .collect();
+        assert!(!house_cells.is_empty());
+        for c in house_cells {
+            assert_eq!(c.effect, TextEffectId::Polychrome);
+        }
+    }
+
+    #[test]
     fn glossary_tint_preserves_whitespace_around_bold() {
         let runs = parse_styled_text("Select tiles. **Discard** what you don't need.").unwrap();
-        let cells =
-            runs_to_cells_with_glossary(&runs, crate::render::theme::color::PARCHMENT, true);
+        let cells = runs_to_cells_with_glossary(
+            &runs,
+            crate::render::theme::color::PARCHMENT,
+            GlossaryMode::Prose,
+        );
         let text: String = cells.iter().map(|c| c.ch).collect();
         assert_eq!(text, "Select tiles. Discard what you don't need.");
     }
@@ -795,12 +1531,45 @@ mod tests {
         let font_px = 18.0;
         let w = 240.0;
         let color = crate::render::theme::color::PARCHMENT;
-        let block = StyledTextBlock::measure_at_font_px(text, w, font_px, true, color);
-        let visual = layout_styled_visual_lines_at_font_px(text, w, font_px, true, color);
+        let block = StyledTextBlock::measure_at_font_px(text, w, font_px, GlossaryMode::Prose, color);
+        let visual =
+            layout_styled_visual_lines_at_font_px(text, w, font_px, GlossaryMode::Prose, color);
         assert_eq!(block.line_count(), visual.len().max(1));
         assert_eq!(
-            styled_line_block_height_at_font_px(text, w, font_px, true, color),
+            styled_line_block_height_at_font_px(text, w, font_px, GlossaryMode::Prose, color),
             block.block_height(),
+        );
+    }
+
+    #[test]
+    fn term_markup_forces_tint_in_prose() {
+        let runs = parse_styled_text("{{term:Honors}} cannot form sequences.").unwrap();
+        let d = [0.5, 0.5, 0.5, 1.0];
+        let cells = runs_to_cells_with_glossary(&runs, d, GlossaryMode::Prose);
+        let honors: Vec<_> = cells
+            .iter()
+            .filter(|c| c.color == crate::render::theme::color::keyword::HONORS)
+            .collect();
+        assert!(!honors.is_empty());
+    }
+
+    #[test]
+    fn panel_mode_tints_title_cased_honors() {
+        let d = [0.5, 0.5, 0.5, 1.0];
+        let lines = wrap_colored_words(
+            "Honors cannot form sequences.",
+            400.0,
+            22.0,
+            d,
+            false,
+            GlossaryMode::Panel,
+        );
+        let rendered: String = lines[0].iter().map(|(s, _)| s.as_str()).collect();
+        assert!(rendered.contains("Honors"));
+        assert!(
+            lines[0]
+                .iter()
+                .any(|(_, c)| *c == crate::render::theme::color::keyword::HONORS)
         );
     }
 

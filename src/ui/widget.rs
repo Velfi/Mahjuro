@@ -186,8 +186,8 @@ pub struct TextStyle {
     pub padding: f32,
     /// Horizontal alignment for each wrapped line.
     pub align: TextAlign,
-    /// Per-word vocabulary tint ([`crate::ui::colored_keywords::color_for_token`]).
-    pub glossary_tint: bool,
+    /// Per-word vocabulary tint mode ([`crate::render::vocabulary_colors::GlossaryMode`]).
+    pub glossary: crate::render::vocabulary_colors::GlossaryMode,
 }
 
 impl Default for TextStyle {
@@ -197,7 +197,7 @@ impl Default for TextStyle {
             color: color::PARCHMENT,
             padding: 0.0,
             align: TextAlign::Center,
-            glossary_tint: false,
+            glossary: crate::render::vocabulary_colors::GlossaryMode::Off,
         }
     }
 }

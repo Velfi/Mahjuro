@@ -93,7 +93,7 @@ impl OnboardingState {
         match self.step {
             0 if !has_selection => "Select tiles that form a valid meld.",
             0 | 1 if has_selection && !has_structure => {
-                "Press Play to bank your meld into the structure."
+                "Press Play to play your meld into the structure."
             }
             2 if has_structure => "Press Cash In to score your structure.",
             3 if !self.discard_river_tooltip_shown => {
@@ -102,7 +102,7 @@ impl OnboardingState {
             3 => "Try a discard to improve your hand.",
             4 => "Play another meld, then Cash In again to reach the target.",
             _ if !has_selection => "Select tiles to form a valid meld.",
-            _ if has_selection && !has_structure => "Press Play to bank your meld.",
+            _ if has_selection && !has_structure => "Press Play to play your meld.",
             _ if has_structure => "Press Cash In when you're ready to score.",
             _ => "Reach the target score before you run out of plays.",
         }
@@ -127,12 +127,12 @@ pub fn tutorial_yaku() -> Vec<YakuKind> {
 /// Hint text after failing the Lessons blind.
 pub fn lessons_failure_feedback(round_score: u64, target: u32, plays_remaining: u32) -> String {
     if round_score == 0 {
-        return "You scored 0 — select valid tiles, press Play to bank them, then Cash In."
+        return "You scored 0 — select valid tiles, press Play to play them, then Cash In."
             .to_string();
     }
     if plays_remaining > 0 {
         return format!(
-            "You scored {} / {}. You still had {} play{} left — bank another meld and Cash In again.",
+            "You scored {} / {}. You still had {} play{} left — play another meld and Cash In again.",
             format_score(round_score),
             format_score(target as u64),
             plays_remaining,
@@ -141,7 +141,7 @@ pub fn lessons_failure_feedback(round_score: u64, target: u32, plays_remaining: 
     }
     let gap = target.saturating_sub(round_score.min(u32::MAX as u64) as u32);
     format!(
-        "You scored {} / {} — {} short. Try discarding a useless tile, then bank another meld before you Cash In.",
+        "You scored {} / {} — {} short. Try discarding a useless tile, then play another meld before you Cash In.",
         format_score(round_score),
         format_score(target as u64),
         format_score(gap as u64),
@@ -162,7 +162,7 @@ pub fn finale_failure_feedback(
     };
 
     if round_score == 0 {
-        return "You scored 0 — bank valid melds with Play, then press Cash In. If you run out of plays first, the round ends.".to_string();
+        return "You scored 0 — play valid melds with Play, then press Cash In. If you run out of plays first, the round ends.".to_string();
     }
 
     if discards_left >= 2 {

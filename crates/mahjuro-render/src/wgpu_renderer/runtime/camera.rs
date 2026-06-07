@@ -1,9 +1,10 @@
 use super::*;
 
+use crate::draw_cmd::CameraParams;
 use crate::scene_keys;
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct CameraFrame {
+pub(crate) struct CameraFrame {
     pub cam_pos: glam::Vec3,
     pub look_target: glam::Vec3,
     pub view_proj: Mat4,
@@ -14,10 +15,18 @@ pub(super) struct CameraFrame {
 
 impl CameraFrame {
     pub(super) fn build(frame: &UiFrame, size: crate::physical_size::PhysicalSize) -> Self {
+        Self::build_from(frame.camera_override.as_ref(), frame, size)
+    }
+
+    pub(super) fn build_from(
+        override_cam: Option<&CameraParams>,
+        frame: &UiFrame,
+        size: crate::physical_size::PhysicalSize,
+    ) -> Self {
         let w = size.width.max(1) as f32;
         let h = size.height.max(1) as f32;
         let aspect = w / h;
-        let (cam_pos, look_target, fov_y) = if let Some(ref c) = frame.camera_override {
+        let (cam_pos, look_target, fov_y) = if let Some(c) = override_cam {
             (
                 glam::Vec3::from_array(c.eye),
                 glam::Vec3::from_array(c.target),
@@ -31,16 +40,19 @@ impl CameraFrame {
                 c.fovy_deg.to_radians(),
             )
         };
-        let up_v = frame
-            .camera_override
-            .as_ref()
+        let up_v = override_cam
             .map(|c| glam::Vec3::from_array(c.up))
+            .or_else(|| {
+                frame
+                    .camera_override
+                    .as_ref()
+                    .map(|c| glam::Vec3::from_array(c.up))
+            })
             .unwrap_or(glam::Vec3::Z);
         let view_mat = Mat4::look_at_rh(cam_pos, look_target, up_v);
-        let (near, far) = frame
-            .camera_override
-            .as_ref()
+        let (near, far) = override_cam
             .map(|c| c.clip_planes(h))
+            .or_else(|| frame.camera_override.as_ref().map(|c| c.clip_planes(h)))
             .unwrap_or((1.0, h * crate::draw_cmd::SCENE_PERSPECTIVE_FAR_MUL));
         let proj = Mat4::perspective_rh(fov_y, aspect, near, far);
         let view_proj = proj * view_mat;
@@ -175,7 +187,14 @@ impl WgpuRenderer {
         &self,
         frame: &crate::draw_cmd::UiFrame,
     ) -> [f32; 4] {
-        let scale = if frame.scene_lighting.embedded_gltf_punctual {
+        self.tile_punctual_tuning_for(frame.foreground_scene_lighting())
+    }
+
+    pub(super) fn tile_punctual_tuning_for(
+        &self,
+        lighting: &crate::draw_cmd::SceneLighting,
+    ) -> [f32; 4] {
+        let scale = if lighting.embedded_gltf_punctual {
             self.active_frame_env().tile_gltf_punctual_scale
         } else {
             1.0
@@ -210,6 +229,7 @@ impl WgpuRenderer {
                 | Some(scene_keys::ARCHIVE)
                 | Some(scene_keys::SHADOW_AO_LAB)
         ) || frame.shadow_ao_lab_layout.is_some()
+            || frame.gameplay_env_cash_in_only
             || (k == Some("showcase") && h.collection_tonemap_context);
         let shop_scene = k == Some(scene_keys::SHOP)
             || (k == Some("showcase") && h.shop_tonemap_and_lit_mesh_context);
@@ -236,7 +256,10 @@ impl WgpuRenderer {
             || tile_pack_celebration
             || shop_showcase_without_env
             || shop_scene
-            || table_like;
+            || table_like
+            || k == Some(scene_keys::VICTORY)
+            || k == Some(scene_keys::DEFEAT)
+            || frame.cmds.iter().any(|c| matches!(c, DrawCmd::MainMenuEnvironment));
         if !hdr_active {
             return [0.0; 4];
         }

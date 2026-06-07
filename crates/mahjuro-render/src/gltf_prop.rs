@@ -1,20 +1,70 @@
 //! Instanced props decoded from standalone GLB files and drawn through the
 //! glTF PBR path in `tile_3d.wgsl` (same material slots as hand tiles / shop room).
 
-use glam::Mat4;
 use wgpu::util::DeviceExt;
 
 use crate::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
-use crate::lit_mesh::ShadowCasterUniform;
 use crate::tile_glb::{LoadedPrimitive, LoadedTile, Vertex3dTex};
 use crate::wgpu_renderer::{
-    GltfPropGpu, TileGlbPipelineKey, TileMeshGpuSet, TilePrimitiveGpu, TileUniform,
+    TileGlbPipelineKey, TileMeshGpuSet, TilePrimitiveGpu,
     resources::{TextureUploadParams, upload_rgba_texture_with_mips, white_albedo},
 };
 
-/// `TileUniform.tile_visual_params.w` — selects the imported glTF PBR branch
+/// `tile_visual_params.w` — selects the imported glTF PBR branch
 /// in `tile_3d.wgsl` (albedo + normal + metallic-roughness, no mahjong decal).
 pub const GLTF_PROP_BODY_KIND: f32 = 4.0;
+
+pub(crate) fn create_tile_material_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    frame_uniform: &wgpu::Buffer,
+    prim: &TilePrimitiveGpu,
+    decal_view: &wgpu::TextureView,
+    distortion_placeholder: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("tile-material-bg"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: frame_uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&prim.albedo_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&prim.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(decal_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(&prim.normal_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: prim.pbr_uniform_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(&prim.metallic_roughness_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(&prim.emissive_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: distortion_placeholder.as_entire_binding(),
+            },
+        ],
+    })
+}
 
 pub struct GltfTileGpuDefaults<'a> {
     pub device: &'a wgpu::Device,
@@ -133,6 +183,7 @@ pub(crate) fn upload_gltf_tile_primitives(
             pbr_uniform_buffer,
             sampler,
             pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+            material_bind_group: None,
         });
     }
     out
@@ -191,101 +242,5 @@ pub(crate) fn upload_tile_mesh_gpu_set(
         outline_vertex_buffer,
         outline_index_buffer,
         outline_index_count,
-    }
-}
-
-pub(crate) fn make_gltf_prop_gpu(
-    device: &wgpu::Device,
-    layout: &wgpu::BindGroupLayout,
-    shadow_caster_layout: &wgpu::BindGroupLayout,
-    primitives: &[TilePrimitiveGpu],
-    decal_placeholder: &wgpu::TextureView,
-    distortion_placeholder: &wgpu::Buffer,
-) -> GltfPropGpu {
-    let identity = Mat4::IDENTITY;
-    let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("gltf-prop-uniform"),
-        contents: bytemuck::bytes_of(&TileUniform {
-            view_proj: identity.to_cols_array(),
-            model: identity.to_cols_array(),
-            tile_visual_params: [1.0, 1.0, 1.0, GLTF_PROP_BODY_KIND],
-            cam_pos: [0.0; 3],
-            tile_material_seed: 0.0,
-            tile_decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
-            tile_post_params: [0.0; 4],
-            tile_punctual_params: [0.0; 4],
-        }),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    let bind_groups: Vec<wgpu::BindGroup> = primitives
-        .iter()
-        .map(|prim| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("gltf-prop-bg"),
-                layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&prim.albedo_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&prim.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(decal_placeholder),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(&prim.normal_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: prim.pbr_uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::TextureView(&prim.metallic_roughness_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::TextureView(&prim.emissive_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: distortion_placeholder.as_entire_binding(),
-                    },
-                ],
-            })
-        })
-        .collect();
-    let initial_shadow = ShadowCasterUniform {
-        light_view_proj: identity.to_cols_array(),
-        model: identity.to_cols_array(),
-    };
-    let shadow_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("gltf-prop-shadow-uniform"),
-        contents: bytemuck::bytes_of(&initial_shadow),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("gltf-prop-shadow-bg"),
-        layout: shadow_caster_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: shadow_uniform_buffer.as_entire_binding(),
-        }],
-    });
-    GltfPropGpu {
-        uniform_buffer,
-        bind_groups,
-        shadow_uniform_buffer,
-        shadow_bind_group,
-        cached_shadow_caster: initial_shadow,
     }
 }

@@ -266,7 +266,15 @@ impl WgpuRenderer {
         // Camera / room GLB use window-space layout (`layout.window_*`); only the
         // offscreen targets are allocated at `render_size`.
         let camera = CameraFrame::build(frame, self.size);
+        let showcase_camera = if frame.camera_override_after_depth_clear.is_some() {
+            CameraFrame::build_from(frame.foreground_camera(), frame, self.size)
+        } else {
+            camera
+        };
         self.upload_camera_uniforms(&camera, ssr_enabled, frame);
+        self.pass_a_draw_camera = Some(camera);
+        self.pass_a_frame_gamma = gamma;
+        self.pass_a_frame_ssr_enabled = ssr_enabled;
         let look_target = camera.look_target;
         let w = camera.w;
         let h = camera.h;
@@ -354,6 +362,14 @@ impl WgpuRenderer {
             } else {
                 font_italic.unwrap_or(font)
             };
+            let vertical_align = match lbl.block_vertical_align {
+                super::internal_slots::TextBlockVerticalAlign::Top => {
+                    crate::decal::LabelVerticalAlign::Top
+                }
+                super::internal_slots::TextBlockVerticalAlign::Bottom => {
+                    crate::decal::LabelVerticalAlign::Bottom
+                }
+            };
             let shape_key = TextLabelShapeKey {
                 mono: lbl.mono,
                 emoji_path: emoji_fallback.is_some(),
@@ -363,6 +379,7 @@ impl WgpuRenderer {
                 width_px: tw,
                 height_px: th,
                 align: lbl.align,
+                block_vertical_align: lbl.block_vertical_align,
                 scroll_offset_px,
                 rotation_quarters,
                 baseline_shift_q: (lbl.baseline_shift_px * 8.0).round() as i16,
@@ -374,15 +391,26 @@ impl WgpuRenderer {
             };
 
             let rasterize = || -> Vec<u8> {
+                let sizing_text = if lbl.text.is_empty() {
+                    flavor
+                        .map(mahjuro_core::core::relic::flavor_spans_plain_text)
+                        .unwrap_or_default()
+                } else {
+                    lbl.text.clone()
+                };
                 if let Some(spans) = flavor {
                     let floor = crate::theme::typography::readable_floor_px(window_h);
-                    let px = crate::decal::resolve_label_font_px(
-                        face_font,
-                        emoji_fallback,
-                        &lbl.text,
+                    let target = lbl.font_px.unwrap_or(floor).max(floor);
+                    let px = crate::decal::resolve_flavor_spans_font_px(
+                        &crate::decal::DecalFonts {
+                            regular: face_font,
+                            italic: Some(face_italic),
+                            emoji: emoji_fallback,
+                        },
+                        spans,
                         tw,
                         th,
-                        lbl.font_px,
+                        target,
                         floor,
                     );
                     crate::decal::rasterize_label_flavor_spans(
@@ -397,6 +425,7 @@ impl WgpuRenderer {
                             height: th,
                             font_px: px,
                             align,
+                            vertical_align,
                         },
                     )
                 } else if lbl.bold || lbl.italic || lbl.underline {
@@ -404,7 +433,7 @@ impl WgpuRenderer {
                     let px = crate::decal::resolve_label_font_px(
                         face_font,
                         emoji_fallback,
-                        &lbl.text,
+                        &sizing_text,
                         tw,
                         th,
                         lbl.font_px,
@@ -428,6 +457,7 @@ impl WgpuRenderer {
                             height: th,
                             font_px: px,
                             align,
+                            vertical_align,
                         },
                     )
                 } else {
@@ -501,7 +531,7 @@ impl WgpuRenderer {
                 (bg, Some(tex))
             };
 
-            let packed_effect = if flatten_time_text_fx && lbl.text_effect.uses_time_in_fragment() {
+            let packed_effect = if flatten_time_text_fx && lbl.text_effect.flattened_when_effects_low() {
                 crate::text_effect::TextEffectId::Flat
             } else {
                 lbl.text_effect
@@ -555,6 +585,8 @@ impl WgpuRenderer {
         let mut quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
         let mut depth_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
         let mut overlay_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
+        let mut debug_overlay_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
+            Vec::new();
         let mut overlay_squircle_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
             Vec::new();
         let mut gradient_quad_buffers: Vec<crate::wgpu_renderer::frame_pool::PoolSlice> =
@@ -570,6 +602,8 @@ impl WgpuRenderer {
         // `device.create_buffer_init` that could share the bump pool.
         let mut flame_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut text_draws: Vec<TextDraw> = Vec::new();
+        let mut debug_text_draws: Vec<TextDraw> = Vec::new();
+        let mut debug_ops: Vec<RenderOp> = Vec::new();
         let mut tile_face_quads: Vec<TileFaceQuad> = Vec::new();
         let mut tile_face_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut image_quads: Vec<crate::draw_cmd::ImageQuad> = Vec::new();
@@ -577,6 +611,7 @@ impl WgpuRenderer {
         let yaku_tablet_batches: Vec<&[YakuTabletPlacement]> = Vec::new();
         let wall_stack_cmds: Vec<&WallStackPlacement> = Vec::new();
         let mut showcase_tile_batches: Vec<&[ShowcaseTilePlacement]> = Vec::new();
+        let mut showcase_tile_batch_clips: Vec<Option<[f32; 4]>> = Vec::new();
         let mut object3d_cmds: Vec<&[crate::draw_cmd::Object3d]> = Vec::new();
         let mut object3d_draw_list: Vec<(DrawKind, usize)> = Vec::new();
         let mut object3d_shadow_draw_list: Vec<(DrawKind, usize)> = Vec::new();
@@ -833,6 +868,43 @@ impl WgpuRenderer {
                     }
                     i += 1;
                 }
+                DrawCmd::DebugOverlayQuad(_) => {
+                    let mut batch: Vec<GpuInstance> = Vec::new();
+                    while let Some(DrawCmd::DebugOverlayQuad(inst)) = frame.cmds.get(i) {
+                        batch.push(*inst);
+                        i += 1;
+                    }
+                    let slice = self
+                        .frame_buffer_pool
+                        .alloc(&self.device, &self.queue, &batch);
+                    let buf_idx = debug_overlay_quad_buffers.len();
+                    debug_overlay_quad_buffers.push(slice);
+                    debug_ops.push(RenderOp::OverlayQuadBatch {
+                        buf_idx,
+                        count: batch.len() as u32,
+                    });
+                }
+                DrawCmd::DebugOverlayText(lbl) => {
+                    if let Some(ref font) = self.ui_font {
+                        let td = make_text_draw(
+                            &self.device,
+                            &self.queue,
+                            &self.text_bind_group_layout,
+                            &self.tile_sampler,
+                            &mut self.text_label_cache,
+                            cache_frame_id,
+                            lbl,
+                            font,
+                            self.ui_font_italic.as_ref(),
+                            self.mono_font.as_ref(),
+                            self.emoji_font.as_ref(),
+                        );
+                        let idx = debug_text_draws.len();
+                        debug_text_draws.push(td);
+                        debug_ops.push(RenderOp::TextDraw(idx));
+                    }
+                    i += 1;
+                }
                 DrawCmd::TileFaceQuad(face) => {
                     let key = (
                         face.tile.suit,
@@ -904,9 +976,10 @@ impl WgpuRenderer {
                     ops.push(RenderOp::ImageQuad(idx));
                     i += 1;
                 }
-                DrawCmd::ShowcaseTileBatch(placements) => {
+                DrawCmd::ShowcaseTileBatch(batch) => {
                     let idx = showcase_tile_batches.len();
-                    showcase_tile_batches.push(placements.as_slice());
+                    showcase_tile_batches.push(batch.placements.as_slice());
+                    showcase_tile_batch_clips.push(batch.clip_rect);
                     ops.push(RenderOp::ShowcaseTileBatch(idx));
                     i += 1;
                 }
@@ -1135,7 +1208,7 @@ impl WgpuRenderer {
 
         self.run_showcase_tiles_placement(
             frame,
-            &camera,
+            &showcase_camera,
             tile_basis,
             tile_preset,
             dt,
@@ -1408,7 +1481,7 @@ impl WgpuRenderer {
                 self.write_main_menu_room_punctual_occluders(&camera);
             }
         }
-        if ops_flags.gameplay_env {
+        if ops_flags.gameplay_env && frame.gameplay_cash_in_overlay_camera.is_none() {
             self.write_gameplay_environment_uniforms(
                 frame,
                 &camera,
@@ -1477,6 +1550,7 @@ impl WgpuRenderer {
             image_quads: &image_quads,
             object3d_draw_list: &object3d_draw_list,
             showcase_tile_batches: &showcase_tile_batches,
+            showcase_tile_batch_clips: &showcase_tile_batch_clips,
             tile_glows: &tile_glows,
             tile_glow_buffer: tile_glow_buffer.as_ref(),
             relic_glows: &relic_glows,
@@ -1510,6 +1584,7 @@ impl WgpuRenderer {
             image_quads: &image_quads,
             object3d_draw_list: &object3d_draw_list,
             showcase_tile_batches: &showcase_tile_batches,
+            showcase_tile_batch_clips: &showcase_tile_batch_clips,
             tile_glows: &tile_glows,
             tile_glow_buffer: tile_glow_buffer.as_ref(),
             relic_glows: &relic_glows,
@@ -1661,6 +1736,21 @@ impl WgpuRenderer {
                 if !pass_a_chunks.is_empty() {
                     let n_scene_chunks = pass_a_chunks.len();
                     for (ci, chunk) in pass_a_chunks.iter().enumerate() {
+                        if ci > 0 && frame.camera_override_after_depth_clear.is_some() {
+                            let chunk_cam = CameraFrame::build_from(
+                                frame.pass_a_chunk_camera(ci),
+                                frame,
+                                self.size,
+                            );
+                            self.upload_camera_uniforms(&chunk_cam, ssr_enabled, frame);
+                            self.upload_punctual_light_buffers(
+                                frame,
+                                frame.foreground_scene_lighting(),
+                                frame.foreground_camera(),
+                                gamma,
+                            );
+                            self.pass_a_draw_camera = Some(chunk_cam);
+                        }
                         let depth_load = if ci == 0 {
                             wgpu::LoadOp::Load
                         } else {
@@ -1710,6 +1800,21 @@ impl WgpuRenderer {
                 if !pass_a_chunks.is_empty() {
                     let n_chunks = pass_a_chunks.len();
                     for (ci, chunk) in pass_a_chunks.iter().enumerate() {
+                        if ci > 0 && frame.camera_override_after_depth_clear.is_some() {
+                            let chunk_cam = CameraFrame::build_from(
+                                frame.pass_a_chunk_camera(ci),
+                                frame,
+                                self.size,
+                            );
+                            self.upload_camera_uniforms(&chunk_cam, ssr_enabled, frame);
+                            self.upload_punctual_light_buffers(
+                                frame,
+                                frame.foreground_scene_lighting(),
+                                frame.foreground_camera(),
+                                gamma,
+                            );
+                            self.pass_a_draw_camera = Some(chunk_cam);
+                        }
                         let color_load = if ci == 0 {
                             wgpu::LoadOp::Clear(scene_viewport_clear())
                         } else {
@@ -1963,7 +2068,12 @@ impl WgpuRenderer {
                 && self.gameplay_environment.is_some()
                 && !self.gameplay_env_primitives.is_empty()
             {
-                self.write_gameplay_environment_uniforms(frame, &camera, true, None);
+                let gameplay_cam = frame
+                    .gameplay_cash_in_overlay_camera
+                    .as_ref()
+                    .map(|c| CameraFrame::build_from(Some(c), frame, self.size))
+                    .unwrap_or(camera);
+                self.write_gameplay_environment_uniforms(frame, &gameplay_cam, true, None);
                 {
                     let room_bloom_ts = self
                         .gpu_profiler
@@ -2674,6 +2784,76 @@ impl WgpuRenderer {
                         | RenderOp::OverlaySquircleQuadBatch { .. }
                 ) {
                     self.process_op(&mut pass, op, &process_ctx_overlay);
+                }
+            }
+        }
+
+        // ── Debug overlay pass: tuning panels, focus-nav overlay, FPS ───
+        // After normal UI so scene text/quads never paint over debug panels.
+        if !debug_ops.is_empty() {
+            let process_ctx_debug = ProcessOpCtx {
+                frame,
+                frame_pool_buffer: self.frame_buffer_pool.buffer(),
+                bg_inst_buffers: &bg_inst_buffers,
+                quad_buffers: &quad_buffers,
+                depth_quad_buffers: &depth_quad_buffers,
+                overlay_quad_buffers: &debug_overlay_quad_buffers,
+                overlay_squircle_quad_buffers: &overlay_squircle_quad_buffers,
+                gradient_quad_buffers: &gradient_quad_buffers,
+                arc_ring_quad_buffers: &arc_ring_quad_buffers,
+                squircle_quad_buffers: &squircle_quad_buffers,
+                flame_buffers: &flame_buffers,
+                text_draws: &debug_text_draws,
+                tile_face_inst_buffers: &tile_face_inst_buffers,
+                tile_face_quads: &tile_face_quads,
+                image_quad_inst_buffers: &image_quad_inst_buffers,
+                image_quads: &image_quads,
+                object3d_draw_list: &object3d_draw_list,
+                showcase_tile_batches: &showcase_tile_batches,
+                showcase_tile_batch_clips: &showcase_tile_batch_clips,
+                tile_glows: &tile_glows,
+                tile_glow_buffer: tile_glow_buffer.as_ref(),
+                relic_glows: &relic_glows,
+                relic_glow_buffer: relic_glow_buffer.as_ref(),
+                glyph_popup_glows: &glyph_popup_glows,
+                glyph_popup_glow_buffer: glyph_popup_glow_buffer.as_ref(),
+                relic_debuff_markers: &relic_debuff_markers,
+                relic_debuff_buffer: relic_debuff_buffer.as_ref(),
+                scene_hdr_attachment: overlay_hdr,
+            };
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("debug-overlay-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.overlay_depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            for op in &debug_ops {
+                if matches!(
+                    op,
+                    RenderOp::TextDraw(_)
+                        | RenderOp::ImageQuad(_)
+                        | RenderOp::ArcRingQuadBatch { .. }
+                        | RenderOp::OverlayQuadBatch { .. }
+                        | RenderOp::OverlaySquircleQuadBatch { .. }
+                ) {
+                    self.process_op(&mut pass, op, &process_ctx_debug);
                 }
             }
         }

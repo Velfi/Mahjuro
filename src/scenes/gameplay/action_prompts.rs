@@ -38,6 +38,7 @@ pub fn gameplay_west_north_legend_active(
                     | FocusTarget::Dora
                     | FocusTarget::Ordeal
                     | FocusTarget::RoundWind
+                    | FocusTarget::ScoreRoller(_)
                     | FocusTarget::Consumable(_),
                 ) => false,
                 Some(_) => true,

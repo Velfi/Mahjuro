@@ -160,6 +160,10 @@ pub struct RoomEnvPrimitiveCpu {
     pub archive_decal_face_aspect: f32,
 }
 
+/// Above this triangle count, build a BVH so per-frame ray queries (rain) skip the
+/// brute-force scan. Below it the broad-phase AABB + linear scan is already cheap.
+const COLLISION_BVH_MIN_TRIS: usize = 64;
+
 /// CPU triangle soup for one named GLB node (typically invisible anchor geometry).
 #[derive(Clone)]
 pub struct RoomCollisionMesh {
@@ -168,16 +172,25 @@ pub struct RoomCollisionMesh {
     /// Mesh-local AABB of all triangle vertices (ray broad-phase).
     pub local_min: Vec3,
     pub local_max: Vec3,
+    /// Ray-segment acceleration structure for large soups (`Arc` keeps clones cheap). Built
+    /// once when the mesh exceeds [`COLLISION_BVH_MIN_TRIS`]; small meshes scan linearly.
+    pub accel: Option<Arc<crate::raycast::TriBvh>>,
 }
 
 impl RoomCollisionMesh {
     pub fn from_triangles(node_name: impl Into<String>, triangles: Vec<[Vec3; 3]>) -> Self {
         let (local_min, local_max) = local_bounds_from_tris(&triangles);
+        let accel = if triangles.len() >= COLLISION_BVH_MIN_TRIS {
+            crate::raycast::TriBvh::build(&triangles).map(Arc::new)
+        } else {
+            None
+        };
         Self {
             node_name: node_name.into(),
             triangles,
             local_min,
             local_max,
+            accel,
         }
     }
 

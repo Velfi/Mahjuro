@@ -136,6 +136,12 @@ pub mod color {
         pub const GOLD: [f32; 4] = [0.94, 0.78, 0.28, 1.0];
         pub const PLAY: [f32; 4] = [0.373, 0.831, 0.659, 1.0];
         pub const TRIGGER: [f32; 4] = [0.784, 0.565, 0.118, 1.0];
+        /// Final-boss proper noun — crimson base for polychrome glossary tint.
+        pub const HOUSE: [f32; 4] = [0.90, 0.15, 0.10, 1.0];
+        /// Victory proper noun — moonlight field for moon polychrome bands.
+        pub const MOON: [f32; 4] = [232.0 / 255.0, 235.0 / 255.0, 240.0 / 255.0, 1.0];
+        /// Twilight rim for **The Moon** polychrome outline strokes.
+        pub const MOON_OUTLINE: [f32; 4] = [58.0 / 255.0, 69.0 / 255.0, 101.0 / 255.0, 1.0];
     }
 
     // ── Porcelain: aged ceramic surfaces — temple-merchant pottery, the

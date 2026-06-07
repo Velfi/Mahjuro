@@ -585,7 +585,8 @@ pub struct RoomGlbCpu {
     /// Invisible `rain_hit_*` shells for CPU rain splashes (main menu, etc.).
     pub rain_surface_meshes: Vec<RoomCollisionMesh>,
     /// [`rain_surface_meshes`] merged for per-drop raycasts (built at glTF load).
-    pub rain_surface_merged: Option<RoomCollisionMesh>,
+    /// `Arc` so per-frame accessors hand out a cheap handle instead of cloning the triangle soup.
+    pub rain_surface_merged: Option<std::sync::Arc<RoomCollisionMesh>>,
     /// Named node bind poses captured during the glTF scene walk.
     pub node_bind_poses: FxHashMap<String, renv::RoomNodeBindPose>,
     /// Parsed glTF node TRS animation clips keyed by animation name.
@@ -595,7 +596,7 @@ pub struct RoomGlbCpu {
 impl RoomGlbCpu {
     /// Merged `rain_hit_*` soup for CPU rain collision (see [`Self::rain_surface_merged`]).
     #[inline]
-    pub fn rain_collision_mesh(&self) -> Option<&RoomCollisionMesh> {
+    pub fn rain_collision_mesh(&self) -> Option<&std::sync::Arc<RoomCollisionMesh>> {
         self.rain_surface_merged.as_ref()
     }
 
@@ -832,7 +833,8 @@ pub fn load_room_glb_from_bytes(
         hooks.log_asset_label(),
     );
 
-    let rain_surface_merged = renv::RoomCollisionMesh::merge_rain_surfaces(&rain_surface_meshes);
+    let rain_surface_merged =
+        renv::RoomCollisionMesh::merge_rain_surfaces(&rain_surface_meshes).map(std::sync::Arc::new);
     if !embedded_spot_lights.is_empty() {
         log::error!(
             "{}: {} embedded spot light(s) in glTF — remove spot nodes; use programmatic \

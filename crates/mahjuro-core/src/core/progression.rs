@@ -153,8 +153,8 @@ pub enum RunOutcome {
     Defeat { reason: GameOverReason },
 }
 
-/// Meta depth pacing: four points per tier (~four losses or two wins per unlock).
-pub const POINTS_PER_LEVEL: u32 = 4;
+/// Meta depth pacing: five points per tier (~five losses or two wins per unlock).
+pub const POINTS_PER_LEVEL: u32 = 5;
 pub const LEVEL_UP_POINTS_FOR_WIN: u32 = 3;
 pub const LEVEL_UP_POINTS_FOR_LOSS: u32 = 1;
 pub const MAX_PROGRESS_LEVEL: u32 = 14;
@@ -1165,15 +1165,15 @@ mod tests {
     fn level_progression() {
         let mut p = PlayerProgress::new();
         assert_eq!(p.current_level(), 1);
-        p.level_progress_points = 4;
+        p.level_progress_points = 5;
         assert_eq!(p.current_level(), 2);
-        p.level_progress_points = 16;
-        assert_eq!(p.current_level(), 5);
         p.level_progress_points = 20;
+        assert_eq!(p.current_level(), 5);
+        p.level_progress_points = 25;
         assert_eq!(p.current_level(), 6);
-        p.level_progress_points = 36;
+        p.level_progress_points = 45;
         assert_eq!(p.current_level(), 10);
-        p.level_progress_points = 52;
+        p.level_progress_points = 65;
         assert_eq!(p.current_level(), 14);
         p.level_progress_points = 100;
         assert_eq!(p.current_level(), 14);

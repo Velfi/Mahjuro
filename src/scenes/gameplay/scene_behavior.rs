@@ -1,9 +1,10 @@
-use super::focus::GameplayButton;
+use super::focus::{GameplayButton, ScoreRollerBank};
 use super::*;
 use super::{animation_state, cascade_controller, input_handler};
 use crate::core::consumable::Consumable;
 use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
 use crate::render::theme::color;
+use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextLabel};
 use crate::scenes::options;
 use crate::scenes::{BackgroundId, GuideScene, OverlayRequest};
 use crate::ui::controller_hints::{
@@ -320,7 +321,7 @@ impl SceneBehavior for GameplayScene {
         None
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, mut ctx: DrawCtx<'_>) -> UiFrame {
         let vis = ctx.debug_visibility;
         let layout = ctx.layout;
         let run = ctx.run;
@@ -359,26 +360,7 @@ impl SceneBehavior for GameplayScene {
         );
 
         // Score-panel overlay quads (plays/discard pips) — empty; fans on the
-        // table show remaining plays/discards. Kept as a vec for the HUD merge.
-        let score_panel_quads = build_instances_from_layout(
-            (
-                layout.score_panel.x,
-                layout.score_panel.y,
-                layout.score_panel.w,
-                layout.score_panel.h,
-            ),
-            (
-                layout.modifier_strip.x,
-                layout.modifier_strip.y,
-                layout.modifier_strip.w,
-                layout.modifier_strip.h,
-            ),
-            ctx.anim.transform_for(ENTITY_SCORE_PANEL).scale,
-            gameplay.plays_remaining,
-            gameplay.plays_max,
-            gameplay.discards_remaining,
-            gameplay.discards_max,
-        );
+        // table show remaining plays/discards.
 
         let env_h = ctx.room_gltf_height_scale;
         let glb_load = crate::render::gameplay_glb::gameplay_glb_load_state();
@@ -420,7 +402,7 @@ impl SceneBehavior for GameplayScene {
                 return super::glb_anchors::gameplay_glb_error_frame(layout, &e.to_string());
             }
         };
-        let hand_slots = glb_anchors.hand_slots.clone();
+        let hand_slots_fallback = glb_anchors.hand_slots.clone();
 
         // Boss payload for the dedicated boss plinth inspect target.
         let boss_title_text = gameplay.ordeal_ofuda_title.clone();
@@ -523,10 +505,25 @@ impl SceneBehavior for GameplayScene {
         let input_handler::ActionRowOutputs {
             wood_tablet_placements,
             discard_bowl_placement,
-            bronze_mirror_placement,
+            mut bronze_mirror_placement,
             journal_book,
             guidebook,
         } = action_row;
+        if let Some(mirror) = bronze_mirror_placement.as_mut()
+            && let crate::render::draw_cmd::Object3dKind::Mirror { valid_play_glow } =
+                &mut mirror.kind
+        {
+            *valid_play_glow = if !paused
+                && !ctx.modal_active
+                && self.cascade_queue.is_empty()
+                && play_enabled
+                && selected_count > 0
+            {
+                0.88 + 0.12 * (self.candle_time * 4.5).sin()
+            } else {
+                0.0
+            };
+        }
 
         // Dora indicator screen rect. Pre-computed up here so the focus
         // rect graph entry can both use it.
@@ -674,12 +671,52 @@ impl SceneBehavior for GameplayScene {
                 layout_scale,
                 &glb_anchors,
             );
-        let btn_rects = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
+        let play_hit_rect: (f32, f32, f32, f32) =
+            crate::render::gameplay_glb::gameplay_play_button_hit_rect([
+                play_btn_rect.0,
+                play_btn_rect.1,
+                play_btn_rect.2,
+                play_btn_rect.3,
+            ])
+            .into();
+        let meld_count = gameplay.structure_sets.len();
+        let (cash_in_glow, cash_in_wiggle_amp) = if !paused && cash_in_visible && meld_count > 0 {
+            self.structure_cash_in_feedback(meld_count, gameplay.structure_complete)
+        } else {
+            (0.0, 0.0)
+        };
+        let cash_in_wiggle = self.structure_cash_in_wiggle_px(cash_in_wiggle_amp);
+        let btn_rects = [discard_btn_rect, play_hit_rect, trigger_btn_rect];
         input_handler::push_action_button_focus_rects(
             &btn_rects,
             cash_in_visible,
             &mut focus_rect_graph,
         );
+        let tally_stick_len = layout.mm(28.0);
+        let tally_stick_wide = layout.mm(4.0);
+        let tally_stick_thickness = layout.mm(1.5);
+        const TALLY_SPREAD_DEG: f32 = 60.0;
+        let hand_focus_slots = super::glb_anchors::reproject_hand_focus_slots(
+            layout,
+            interaction.hand_len,
+            layout.window_w,
+            layout.window_h,
+            &scene_camera,
+            env_h,
+        )
+        .unwrap_or(hand_slots_fallback);
+        let (discard_tally_focus_rect, play_tally_focus_rect) =
+            super::glb_anchors::reproject_tally_focus_rects(
+                layout.window_w,
+                layout.window_h,
+                &scene_camera,
+                &glb_anchors,
+                tally_stick_len,
+                tally_stick_wide,
+                tally_stick_thickness,
+                TALLY_SPREAD_DEG,
+            );
+        let hand_slots = hand_focus_slots;
         if !vis.hide_journal && self.journal_transition.is_none() {
             let journal_rect = crate::render::gameplay_glb::gameplay_journal_book_screen_rect(
                 layout.window_w,
@@ -700,11 +737,7 @@ impl SceneBehavior for GameplayScene {
                 focus_rect_graph.push((FocusTarget::Guidebook, guidebook_rect));
             }
         }
-        let hand_slot_w = layout
-            .hand_slots
-            .first()
-            .map(|r| r.w)
-            .unwrap_or(layout.window_w * crate::ui::layout::HAND_SLOT_W_RATIO);
+        let hand_slot_w = layout.hand_slot_w;
         let tile_size_px = hand_slot_w * (22.0 / crate::ui::layout::TILE_WIDTH_MM);
         let (boss_ordeal_obj, ordeal_icon_rect, boss_ordeal_glow, boss_ordeal_wiggle) = if !vis
             .hide_boss_icon
@@ -754,6 +787,9 @@ impl SceneBehavior for GameplayScene {
             None
         };
         frame.gameplay_cash_in_button_visible = cash_in_visible;
+        frame.gameplay_cash_in_glow = cash_in_glow;
+        frame.gameplay_cash_in_wiggle = cash_in_wiggle;
+        frame.gameplay_cash_in_blocked = cash_in_blocked;
         frame.gameplay_action_picks = Some(crate::render::draw_cmd::GameplayActionPickProxies {
             bowl: discard_bowl_placement.clone(),
             mirror: bronze_mirror_placement.clone(),
@@ -763,6 +799,28 @@ impl SceneBehavior for GameplayScene {
         });
         frame.background(BackgroundId::Black);
         frame.gameplay_score_roller_values = Some((live_score, gameplay.target_score as u64));
+        if !cash_in_blocked && cash_in_glow > 0.0 {
+            let trigger_rect = [
+                trigger_btn_rect.0,
+                trigger_btn_rect.1,
+                trigger_btn_rect.2,
+                trigger_btn_rect.3,
+            ];
+            if trigger_rect[2] > 1.0 && trigger_rect[3] > 1.0 {
+                let pad = trigger_rect[2].max(trigger_rect[3]) * 0.55;
+                let alpha = 0.10 + 0.22 * cash_in_glow;
+                frame.gradient_quads([GradientQuadInstance {
+                    rect: [
+                        trigger_rect[0] - pad,
+                        trigger_rect[1] - pad + cash_in_wiggle,
+                        trigger_rect[2] + pad * 2.0,
+                        trigger_rect[3] + pad * 2.0,
+                    ],
+                    color: [0.96, 0.82, 0.52, alpha],
+                    feather: [0.62, 1.0, 0.0, 0.0],
+                }]);
+            }
+        }
         if !vis.hide_environment {
             frame.gameplay_environment();
         }
@@ -809,12 +867,19 @@ impl SceneBehavior for GameplayScene {
         let yen_label_rect = if vis.hide_yen_label {
             [0.0, 0.0, 0.0, 0.0]
         } else {
+            let gold_label_center = super::glb_anchors::player_gold_label_screen_center(
+                layout.window_w,
+                layout.window_h,
+                env_h,
+                &scene_camera,
+                (gold_pose.anchor[0], gold_pose.anchor[1]),
+            );
             crate::render::yen_display::push_yen_amount_label(
                 &mut frame,
                 layout.window_w,
                 layout.window_h,
                 gameplay.yen,
-                (gold_pose.anchor[0], gold_pose.anchor[1]),
+                gold_label_center,
             )
         };
         if !vis.hide_wall_hud {
@@ -891,6 +956,7 @@ impl SceneBehavior for GameplayScene {
                     } else {
                         None
                     },
+                    outline_sel: None,
                     pick_id: Some(i),
                     overlay_rect_group: None,
                 });
@@ -925,10 +991,9 @@ impl SceneBehavior for GameplayScene {
         let score_counter = score_cascade.counter;
         // Debug visibility: `hide_score_readout` gates the 2D score line.
         // Anchor it from the plaque's *actual* left edge instead of the raw
-        // score-panel bounds: perspective projection pulls taller / higher
-        // objects inward on screen, so a naive "some pixels left of
-        // score_panel.x" anchor can still drift back over the wood plaque
-        // and obscure the plaque text.
+        // score-frame bounds: perspective projection pulls taller / higher
+        // objects inward on screen, so a naive screen anchor can still drift
+        // back over the wood plaque and obscure the plaque text.
         // Counter fans — upright tally sticks standing in front of the action
         // objects. Play fan (green) stands in front of the bronze mirror;
         // discard fan (orange) stands in front of the discard river. Each
@@ -937,10 +1002,10 @@ impl SceneBehavior for GameplayScene {
         // upright core stays intact and the consumption reads as a spent
         // stick rather than a re-deal.
         {
-            let stick_len = layout.mm(28.0);
-            let stick_wide = layout.mm(4.0);
-            let stick_thickness = layout.mm(1.5);
-            let spread_deg = 60.0;
+            let stick_len = tally_stick_len;
+            let stick_wide = tally_stick_wide;
+            let stick_thickness = tally_stick_thickness;
+            let spread_deg = TALLY_SPREAD_DEG;
             // Push each fan just toward-the-camera of its anchor so the
             // sticks stand on the table surface in front of (not inside)
             // the mirror/river.
@@ -1037,24 +1102,6 @@ impl SceneBehavior for GameplayScene {
                 });
             }
         }
-        if cash_in_blocked {
-            let trigger_rect = [
-                trigger_btn_rect.0,
-                trigger_btn_rect.1,
-                trigger_btn_rect.2,
-                trigger_btn_rect.3,
-            ];
-            if trigger_rect[2] > 1.0 && trigger_rect[3] > 1.0 {
-                hud_quads.push(GpuInstance {
-                    rect: trigger_rect,
-                    color: color::alpha(color::WALNUT_INK, 0.42),
-                    user: 0,
-                });
-                frame.image_quads([crate::render::draw_cmd::debuff_marker_image_quad(
-                    trigger_rect,
-                )]);
-            }
-        }
         if let Some(undo_rect) = discard_undo_rect {
             let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
             let bg = if is_focus {
@@ -1073,11 +1120,7 @@ impl SceneBehavior for GameplayScene {
             ));
         }
         {
-            let cap = score_panel_quads.len().saturating_add(hud_quads.len());
-            let mut merged = Vec::with_capacity(cap);
-            merged.extend(score_panel_quads);
-            merged.append(&mut hud_quads);
-            frame.quads(merged);
+            frame.quads(std::mem::take(&mut hud_quads));
         }
         // Committed structure melds + tier tokens: inserted before the hand
         // `ShowcaseTileBatch` at end of `draw_frame` so they sit behind the rack (depth order).
@@ -1176,7 +1219,7 @@ impl SceneBehavior for GameplayScene {
         if let (Some(obj), Some(icon_rect)) = (boss_ordeal_obj, ordeal_icon_rect) {
             if boss_ordeal_glow > 0.0 {
                 let pad = icon_rect[2].max(icon_rect[3]) * 0.42;
-                hud_quads.push(GpuInstance {
+                frame.quad(GpuInstance {
                     rect: [
                         icon_rect[0] - pad + boss_ordeal_wiggle,
                         icon_rect[1] - pad,
@@ -1230,14 +1273,33 @@ impl SceneBehavior for GameplayScene {
                     return;
                 }
                 let fs = typography::size(typography::H28, layout.window_h);
-                out.push(TextLabel {
+                let label = TextLabel {
                     rect,
                     text: copy.into(),
                     color: color::CHAMPAGNE,
                     font_px: Some(fs),
                     align: crate::render::wgpu_renderer::TextAlign::Center,
                     ..Default::default()
-                });
+                };
+                let d = (fs * 0.055).clamp(1.0, 2.5);
+                let outline = [0.0, 0.0, 0.0, color::CHAMPAGNE[3].min(0.95)];
+                for (dx, dy) in [
+                    (-d, 0.0),
+                    (d, 0.0),
+                    (0.0, -d),
+                    (0.0, d),
+                    (-d, -d),
+                    (d, -d),
+                    (-d, d),
+                    (d, d),
+                ] {
+                    let mut stroke = label.clone();
+                    stroke.rect[0] += dx;
+                    stroke.rect[1] += dy;
+                    stroke.color = outline;
+                    out.push(stroke);
+                }
+                out.push(label);
             };
             let discard_rect = [
                 discard_btn_rect.0,
@@ -1316,30 +1378,38 @@ impl SceneBehavior for GameplayScene {
         // pegs, gold) before the centralized focus ring so the lookup
         // can find them. The button-bar and consumable strip already
         // pushed their entries inline above.
-        for (i, rect) in ctx.proj.hand_rects.iter() {
-            focus_rect_graph.push((FocusTarget::HandTile(*i), *rect));
-        }
-        if ctx.proj.hand_rects.is_empty() {
-            for (i, slot) in hand_slots.iter().enumerate() {
-                focus_rect_graph.push((FocusTarget::HandTile(i), [slot.0, slot.1, slot.2, slot.3]));
-            }
+        // Hand rack: tile-sized projected bounds (same source as mouse picking).
+        let hand_scale_mul = glb_anchors.hand_marker_poses[0]
+            .uniform_author_scale(layout.window_h, env_h);
+        for i in 0..interaction.hand_len {
+            let slot = hand_slots
+                .get(i)
+                .copied()
+                .unwrap_or((0.0, 0.0, layout.hand_slot_w, layout.hand_slot_h));
+            let rect = super::hand_layout::hand_tile_screen_rect(
+                i,
+                slot,
+                interaction.hand_len,
+                slot.2,
+                hand_scale_mul,
+                &ctx.proj.hand_rects,
+            );
+            focus_rect_graph.push((FocusTarget::HandTile(i), rect));
         }
         for (i, r) in ctx.proj.relic_rects.iter().enumerate() {
             if r[2] > 1.0 && r[3] > 1.0 {
                 focus_rect_graph.push((FocusTarget::Relic(i), *r));
             }
         }
-        if let Some(r) = ctx.proj.peg_rects[0]
-            && r[2] > 1.0
-            && r[3] > 1.0
-        {
-            focus_rect_graph.push((FocusTarget::Peg(PegKind::Hands), r));
-        }
-        if let Some(r) = ctx.proj.peg_rects[1]
-            && r[2] > 1.0
-            && r[3] > 1.0
+        if !vis.hide_discard_tally_fan
+            && let Some(r) = discard_tally_focus_rect
         {
             focus_rect_graph.push((FocusTarget::Peg(PegKind::Discards), r));
+        }
+        if !vis.hide_play_tally_fan
+            && let Some(r) = play_tally_focus_rect
+        {
+            focus_rect_graph.push((FocusTarget::Peg(PegKind::Hands), r));
         }
         // Anchor the gold focus rect to the actual 3D coin pile (when
         // there is gold to display). The pile rect was computed up at
@@ -1363,6 +1433,27 @@ impl SceneBehavior for GameplayScene {
             focus_rect_graph.push((FocusTarget::Ordeal, rect));
         }
         focus_rect_graph.push((FocusTarget::RoundWind, round_wind_rect));
+        if let Some((score_rect, target_rect)) =
+            super::score_counter::resolve_score_roller_bank_focus_rects(
+                layout.window_w,
+                layout.window_h,
+                &scene_camera,
+                env_h,
+            )
+        {
+            if score_rect[2] > 1.0 && score_rect[3] > 1.0 {
+                focus_rect_graph.push((
+                    FocusTarget::ScoreRoller(ScoreRollerBank::Score),
+                    score_rect,
+                ));
+            }
+            if target_rect[2] > 1.0 && target_rect[3] > 1.0 {
+                focus_rect_graph.push((
+                    FocusTarget::ScoreRoller(ScoreRollerBank::Target),
+                    target_rect,
+                ));
+            }
+        }
 
         // Focus inspect: [`crate::ui::tooltip`] frame + wrapped text (shop uses the same helper).
         if !self.pause_menu.paused
@@ -1455,13 +1546,27 @@ impl SceneBehavior for GameplayScene {
                                 &run.tile_debuffs,
                                 interaction.selected.get(i).copied().unwrap_or(false),
                             );
+                            let hand_scale_mul = glb_anchors.hand_marker_poses[0]
+                                .uniform_author_scale(layout.window_h, env_h);
+                            let slot = hand_slots
+                                .get(i)
+                                .copied()
+                                .unwrap_or((rect[0], rect[1], rect[2], rect[3]));
+                            let tooltip_rect = super::hand_layout::hand_tile_tooltip_rect(
+                                i,
+                                slot,
+                                interaction.hand_len,
+                                slot.2,
+                                hand_scale_mul,
+                                &ctx.proj.hand_rects,
+                            );
                             push_focus_tooltip_panel_2d(
                                 &mut inspect_tooltip_quads,
                                 &mut inspect_tooltip_texts,
                                 FocusTooltipPanelParams {
                                     window_w: layout.window_w,
                                     window_h: layout.window_h,
-                                    anchor_rect: Some(rect),
+                                    anchor_rect: Some(tooltip_rect),
                                     title: &title,
                                     desc: &desc,
                                     cta: "",
@@ -1659,7 +1764,7 @@ impl SceneBehavior for GameplayScene {
                                 window_h: layout.window_h,
                                 anchor_rect: Some(rect),
                                 title: "Play",
-                                desc: "Confirm to bank the selected meld into your structure.",
+                                desc: "Confirm to play the selected meld into your structure.",
                                 cta: "",
                                 accent_color: color::CHAMPAGNE,
                                 hover_is_owned: false,
@@ -1746,6 +1851,42 @@ impl SceneBehavior for GameplayScene {
                             },
                         );
                     }
+                    FocusTarget::ScoreRoller(ScoreRollerBank::Score) => {
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: "Round score",
+                                desc: "Points you've earned this round.",
+                                cta: &format_score(live_score),
+                                accent_color: color::CHAMPAGNE,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
+                    FocusTarget::ScoreRoller(ScoreRollerBank::Target) => {
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: "Blind target",
+                                desc: "Score needed to clear this round.",
+                                cta: &format_score(gameplay.target_score as u64),
+                                accent_color: color::BRASS,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
                     _ => {}
                 }
             }
@@ -1804,13 +1945,13 @@ impl SceneBehavior for GameplayScene {
                     GAMEPLAY_3D_HIT_ID,
                 ));
             }
-            if play_btn_rect.2 > 1.0 && play_btn_rect.3 > 1.0 {
+            if play_hit_rect.2 > 1.0 && play_hit_rect.3 > 1.0 {
                 buttons.push(ButtonDef::scene(
                     (
-                        play_btn_rect.0,
-                        play_btn_rect.1,
-                        play_btn_rect.2,
-                        play_btn_rect.3,
+                        play_hit_rect.0,
+                        play_hit_rect.1,
+                        play_hit_rect.2,
+                        play_hit_rect.3,
                     ),
                     GAMEPLAY_3D_HIT_ID,
                 ));
@@ -1887,7 +2028,7 @@ impl SceneBehavior for GameplayScene {
                 &mut frame,
                 &ctx,
                 gameplay_footer_row(ctx.input_mode, show_discard, show_play, show_cash_in),
-                HintStyle::standard(layout.window_h),
+                HintStyle::standard(layout.window_w, layout.window_h),
             );
 
             // Hold-to-cash-in progress ring around the footer cash-in glyph (mirrors
@@ -1929,6 +2070,19 @@ impl SceneBehavior for GameplayScene {
         frame.buttons = buttons;
         frame.window_title = window_title;
         frame.debug_axes = self.debug_show_axes;
+
+        if self.pause_menu.paused {
+            self.pause_menu
+                .stash_focus_nav_debug(&mut ctx, layout.window_w, layout.window_h);
+        } else {
+            ctx.stash_focus_nav_graph(
+                &focus_rect_graph,
+                &super::focus::gameplay_nav_edges(&focus_rect_graph),
+                self.focus,
+                self.focus_nav.memory(),
+                |t| format!("{t:?}"),
+            );
+        }
 
         // Stash the focus rect graph for the next frame's `update()` to
         // hit-test the cursor and run spatial navigation against.

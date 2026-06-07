@@ -273,7 +273,7 @@ impl SceneBehavior for TileAnchorLabScene {
                 w * 0.04,
                 h * 0.09,
                 w * 0.92,
-                crate::ui::colored_keywords::colored_row_line_step(body_font),
+                crate::ui::styled_text::colored_row_line_step(body_font),
             ],
             text: "Corner probes (off-center)".into(),
             color: color::STONE,
@@ -308,7 +308,7 @@ impl SceneBehavior for TileAnchorLabScene {
         }
 
         if !placements.is_empty() {
-            frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements));
+            frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements.into()));
         }
 
         let btn_font = typography::size(typography::H36, h);
@@ -338,7 +338,7 @@ impl SceneBehavior for TileAnchorLabScene {
             &mut frame,
             &ctx,
             back_footer_row(ctx.input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
         frame
     }
@@ -405,6 +405,7 @@ fn layout_single_tile_group(
             outline: false,
             glow: false,
             glow_color: None,
+                    outline_sel: None,
             pick_id: None,
             overlay_rect_group: None,
         });

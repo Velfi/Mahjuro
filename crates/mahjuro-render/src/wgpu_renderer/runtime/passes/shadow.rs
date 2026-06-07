@@ -85,7 +85,7 @@ impl WgpuRenderer {
         let model = self.room_env_shadow_base_model(active_room_env, camera_h);
         let prim_deltas = match active_room_env {
             ActiveRoomEnv::Shop => self.shop_gltf_anim_prim_deltas(frame),
-            ActiveRoomEnv::Gameplay => self.gameplay_score_roller_frame_state(frame),
+            ActiveRoomEnv::Gameplay => self.gameplay_env_prim_deltas(frame),
             _ => rustc_hash::FxHashMap::default(),
         };
         let mut _changed = false;
@@ -108,7 +108,7 @@ impl WgpuRenderer {
         shadow_pass: &mut wgpu::RenderPass<'_>,
         frame: &UiFrame,
         object3d_draw_list: &[(DrawKind, usize)],
-        showcase_tile_batches: &[&[ShowcaseTilePlacement]],
+        _showcase_tile_batches: &[&[ShowcaseTilePlacement]],
         _tile_3d_rects: &[(usize, [f32; 4])],
     ) -> u32 {
         let mut room_draws = 0u32;
@@ -141,13 +141,15 @@ impl WgpuRenderer {
                     room_draws += self.draw_archive_environment_shadow(shadow_pass, frame);
                 }
                 ActiveRoomEnv::MainMenu => {
-                    if let Some(ref gpu) = self.main_menu_environment {
-                        room_draws += self.draw_gltf_room_env_shadow(
-                            shadow_pass,
-                            &self.main_menu_env_primitives,
-                            gpu,
-                            |_| false,
-                        );
+                    if !frame.main_menu_env_moon_only {
+                        if let Some(ref gpu) = self.main_menu_environment {
+                            room_draws += self.draw_gltf_room_env_shadow(
+                                shadow_pass,
+                                &self.main_menu_env_primitives,
+                                gpu,
+                                |pi| self.main_menu_env_skip_prim(pi, frame),
+                            );
+                        }
                     }
                 }
                 ActiveRoomEnv::Gameplay => {
@@ -157,8 +159,12 @@ impl WgpuRenderer {
                             &self.gameplay_env_primitives,
                             gpu,
                             |pi| {
-                                !frame.gameplay_cash_in_button_visible
-                                    && self.gameplay_cash_in_prim_indices.contains(&pi)
+                                if frame.gameplay_env_cash_in_only {
+                                    !self.gameplay_cash_in_prim_indices.contains(&pi)
+                                } else {
+                                    !frame.gameplay_cash_in_button_visible
+                                        && self.gameplay_cash_in_prim_indices.contains(&pi)
+                                }
                             },
                         );
                     }
@@ -173,29 +179,51 @@ impl WgpuRenderer {
 
         if !self.active_tile_mesh().primitives.is_empty()
             && self.active_tile_mesh().outline_index_count > 0
+            && !self.tile_shadow_batch_ranges.is_empty()
         {
-            shadow_pass
-                .set_vertex_buffer(0, self.active_tile_mesh().outline_vertex_buffer.slice(..));
+            shadow_pass.set_pipeline(&self.shadow_pipeline_instanced);
+            shadow_pass.set_bind_group(0, &self.tile_shadow_frame_bind_group, &[]);
+            shadow_pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
+            shadow_pass.set_vertex_buffer(
+                0,
+                self.active_tile_mesh().outline_vertex_buffer.slice(..),
+            );
+            shadow_pass.set_vertex_buffer(1, self.tile_shadow_instance_buffer.slice(..));
             shadow_pass.set_index_buffer(
                 self.active_tile_mesh().outline_index_buffer.slice(..),
                 wgpu::IndexFormat::Uint32,
             );
 
-            let total_showcase: usize = showcase_tile_batches
-                .iter()
-                .map(|b| b.len())
-                .sum::<usize>()
-                .min(MAX_SHOWCASE_TILE_SLOTS);
-            for slot_i in 0..total_showcase {
-                let Some(stg) = self.showcase_tiles.get(slot_i) else {
-                    break;
-                };
-                if !stg.casts_shadow {
+            for &(batch_start, batch_count) in &self.tile_shadow_batch_ranges {
+                if batch_count == 0 {
                     continue;
                 }
-                shadow_pass.set_bind_group(0, &stg.shadow_bind_group, &[]);
-                shadow_pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
-                shadow_pass.draw_indexed(0..self.active_tile_mesh().outline_index_count, 0, 0..1);
+                shadow_pass.draw_indexed(
+                    0..self.active_tile_mesh().outline_index_count,
+                    0,
+                    batch_start..batch_start + batch_count,
+                );
+            }
+        }
+
+        if let Some((coin_shadow_start, coin_shadow_count)) = self.coin_shadow_batch_range
+            && coin_shadow_count > 0
+        {
+            shadow_pass.set_pipeline(&self.shadow_pipeline_instanced);
+            shadow_pass.set_bind_group(0, &self.tile_shadow_frame_bind_group, &[]);
+            shadow_pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
+            shadow_pass.set_vertex_buffer(1, self.tile_shadow_instance_buffer.slice(..));
+            for prim in &self.coin_glb_primitives {
+                shadow_pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                shadow_pass.set_index_buffer(
+                    prim.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                shadow_pass.draw_indexed(
+                    0..prim.index_count,
+                    0,
+                    coin_shadow_start..coin_shadow_start + coin_shadow_count,
+                );
             }
         }
         room_draws
@@ -368,16 +396,7 @@ impl WgpuRenderer {
                 self.draw_lit_mesh_shadow(pass, mesh, inst);
             }
             DrawKind::GltfCoin => {
-                let Some(inst) = self.coin_glb_instances.get(slot_i) else {
-                    return;
-                };
-                for prim in &self.coin_glb_primitives {
-                    pass.set_bind_group(0, &inst.shadow_bind_group, &[]);
-                    pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
-                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
-                }
+                // Coin shadows are drawn in one instanced batch after showcase tiles.
             }
             DrawKind::Primitive(shape) => {
                 let (Some(mesh), Some(inst)) = (

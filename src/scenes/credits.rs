@@ -5,6 +5,7 @@ use crate::core::credits::{CreditEntry, credits_catalog};
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, typography};
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{
@@ -57,7 +58,7 @@ fn compute_layout(w: f32, h: f32) -> Layout {
     let slot_gap = (10.0 * scale).max(5.0);
 
     let back_h = (42.0 * scale).max(28.0);
-    let back_y = h - screen_footer_reserve(h) - back_h - (18.0 * scale);
+    let back_y = h - screen_footer_reserve(w, h) - back_h - (18.0 * scale);
     let back_w = content_w;
     let back_x = content_x;
 
@@ -390,6 +391,7 @@ impl SceneBehavior for CreditsScene {
                             color: color::UMBER,
                             padding: 0.0,
                             align: TextAlign::Center,
+                            glossary: GlossaryMode::Prose,
                             ..Default::default()
                         },
                         h,
@@ -425,6 +427,7 @@ impl SceneBehavior for CreditsScene {
                             } else {
                                 TextAlign::Left
                             },
+                            glossary: GlossaryMode::Prose,
                             ..Default::default()
                         },
                         h,
@@ -499,7 +502,7 @@ impl SceneBehavior for CreditsScene {
             &mut frame,
             &ctx,
             back_scroll_footer_row(ctx.input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
         frame.window_title = "Mahjuro — Credits".into();
         frame

@@ -17,7 +17,7 @@ use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typograph
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::render::world_space::LayoutAnchorPx;
 use crate::sfx_id::SfxId;
-use crate::ui::colored_keywords;
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::ui::controller_hints::{
     HintStyle, menu_footer_row, push_screen_footer_hint, screen_footer_reserve,
 };
@@ -426,7 +426,7 @@ impl TutorialCampaignScene {
             subtitle_w,
             typography::H36,
             h,
-            true,
+            GlossaryMode::Prose,
             color::PARCHMENT,
         )
         .min(128.0 * scale)
@@ -480,7 +480,7 @@ impl TutorialCampaignScene {
             Self::glossary_term_metrics(page.glossary, glossary_w, term_font, scale);
         let glossary_block_h = 28.0 * scale + 24.0 * scale + terms_h;
 
-        let nav_top = Self::tutorial_nav_top(h, scale);
+        let nav_top = Self::tutorial_nav_top(w, h, scale);
         let callout_rect = page.callout.map(|callout| {
             let callout_w = right_col_w - 8.0 * scale;
             let callout_x = right_col_x + 4.0 * scale;
@@ -547,7 +547,7 @@ impl TutorialCampaignScene {
             color,
             padding: 0.0,
             align,
-            glossary_tint: true,
+            glossary: GlossaryMode::Prose,
         }
     }
 
@@ -562,7 +562,7 @@ impl TutorialCampaignScene {
     }
 
     fn tutorial_text_block_height(text: &str, w: f32, tier: f32, h: f32, color: [f32; 4]) -> f32 {
-        styled_text::styled_line_block_height(text, w, tier, h, true, color)
+        styled_text::styled_line_block_height(text, w, tier, h, GlossaryMode::Prose, color)
     }
 
     /// Inner text width inside a callout box (`draw_frame` uses 24px left + 16px right inset).
@@ -585,7 +585,7 @@ impl TutorialCampaignScene {
             inner_w,
             tier,
             h,
-            true,
+            GlossaryMode::Prose,
             color::CHAMPAGNE,
         );
         let box_h = text_h + 28.0 * scale;
@@ -650,7 +650,13 @@ impl TutorialCampaignScene {
         default_color: [f32; 4],
     ) -> f32 {
         let font_px = Self::tutorial_tiles_copy_line_h(tier, h, line_mul);
-        styled_text::styled_line_block_height_at_font_px(text, copy_w, font_px, true, default_color)
+        styled_text::styled_line_block_height_at_font_px(
+            text,
+            copy_w,
+            font_px,
+            GlossaryMode::Panel,
+            default_color,
+        )
     }
 
     fn tutorial_tiles_copy_natural_height(copy_w: f32, h: f32, line_mul: f32) -> f32 {
@@ -718,8 +724,8 @@ impl TutorialCampaignScene {
 
     /// Left copy may extend below the tile-column `content_floor` — the page
     /// callout only occupies the right column, not this text stack.
-    fn tutorial_nav_top(h: f32, scale: f32) -> f32 {
-        h - screen_footer_reserve(h) - (46.0 * scale).max(30.0) - 22.0 * scale
+    fn tutorial_nav_top(window_w: f32, h: f32, scale: f32) -> f32 {
+        h - screen_footer_reserve(window_w, h) - (46.0 * scale).max(30.0) - 22.0 * scale
     }
 
     fn tutorial_tiles_copy_floor(nav_top: f32, scale: f32) -> f32 {
@@ -786,7 +792,7 @@ impl TutorialCampaignScene {
             text,
             copy_w,
             line_h,
-            true,
+            GlossaryMode::Panel,
             default_color,
         );
         let block_h = block.block_height();
@@ -798,7 +804,8 @@ impl TutorialCampaignScene {
                 color: default_color,
                 padding: 0.0,
                 align: TextAlign::Left,
-                glossary_tint: true,
+                glossary: GlossaryMode::Panel,
+                vertical_align: None,
             },
         );
         block_h
@@ -948,7 +955,7 @@ impl TutorialCampaignScene {
                 term,
                 term_w,
                 term_font,
-                true,
+                GlossaryMode::Prose,
                 color::STONE,
             );
             heights.push(term_h);
@@ -977,7 +984,7 @@ impl TutorialCampaignScene {
         let btn_w = (170.0 * scale).max(120.0);
         let btn_h = (46.0 * scale).max(30.0);
         let gap = 14.0 * scale;
-        let y = Self::tutorial_nav_top(h, scale);
+        let y = Self::tutorial_nav_top(w, h, scale);
         let next_x = w * 0.5 + gap * 0.5;
         let back_x = next_x - btn_w - gap;
 
@@ -1065,6 +1072,7 @@ impl TutorialCampaignScene {
                 outline: false,
                 glow: false,
                 glow_color: None,
+                    outline_sel: None,
                 pick_id: None,
                 overlay_rect_group: None,
             });
@@ -1460,6 +1468,7 @@ impl TutorialCampaignScene {
                     outline: false,
                     glow: false,
                     glow_color: None,
+                    outline_sel: None,
                     pick_id: None,
                     overlay_rect_group: None,
                 });
@@ -1515,9 +1524,9 @@ impl TutorialCampaignScene {
                 label.x,
                 label.y,
                 label.w,
-                colored_keywords::colored_row_line_step(label_font),
+                styled_text::colored_row_line_step(label_font),
             ];
-            colored_keywords::push_colored_line_clipped(
+            styled_text::push_colored_line_clipped(
                 texts,
                 label_rect,
                 None,
@@ -1526,6 +1535,7 @@ impl TutorialCampaignScene {
                 label_font,
                 TextAlign::Center,
                 false,
+                GlossaryMode::Prose,
             );
         }
     }
@@ -1601,7 +1611,7 @@ impl SceneBehavior for TutorialCampaignScene {
         }
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, mut ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let scale = metrics::scene_scale(w, h);
@@ -1684,7 +1694,7 @@ impl SceneBehavior for TutorialCampaignScene {
             ..Default::default()
         });
 
-        let nav_top = Self::tutorial_nav_top(h, scale);
+        let nav_top = Self::tutorial_nav_top(w, h, scale);
         let content_top = panel_y + panel_h * 0.11;
         let pad_x = panel_w * 0.04;
         // Wider copy column — fewer wraps so body text can scale up to fill height.
@@ -1896,7 +1906,9 @@ impl SceneBehavior for TutorialCampaignScene {
                     (wobble_t * 2.4).sin() * 7.5,
                 ),
                 color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Mirror,
+                kind: Object3dKind::Mirror {
+                    valid_play_glow: 0.0,
+                },
                 hover_target: if play_focused { 1.0 } else { 0.0 },
                 anim_id: 2,
             });
@@ -2123,7 +2135,7 @@ impl SceneBehavior for TutorialCampaignScene {
 
         frame.quads(bg_quads);
         if !showcase_tiles.is_empty() {
-            frame.cmds.push(DrawCmd::ShowcaseTileBatch(showcase_tiles));
+            frame.cmds.push(DrawCmd::ShowcaseTileBatch(showcase_tiles.into()));
         }
         if let Some(bowl) = bowl_placement {
             frame.object3d(bowl);
@@ -2202,9 +2214,10 @@ impl SceneBehavior for TutorialCampaignScene {
             &mut frame,
             &ctx,
             menu_footer_row(ctx.input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
         frame.window_title = format!("Mahjuro — {}", page.title);
+        ctx.stash_focus_nav_tree_flat(&self.tree, &items, |a| format!("{a:?}"));
         frame
     }
 }
@@ -2218,7 +2231,7 @@ mod tests {
         let panel_y = h * 0.07;
         let panel_w = w * 0.88;
         let panel_h = h * 0.84;
-        let nav_top = TutorialCampaignScene::tutorial_nav_top(h, scale);
+        let nav_top = TutorialCampaignScene::tutorial_nav_top(w, h, scale);
         let content_top = panel_y + panel_h * 0.11;
         let copy_frac = if h < 820.0 { 0.46 } else { 0.40 };
         let copy_w = panel_w * copy_frac;
@@ -2303,7 +2316,7 @@ mod tests {
         let panel_y = h * 0.07;
         let panel_w = w * 0.88;
         let panel_h = h * 0.84;
-        let nav_top = TutorialCampaignScene::tutorial_nav_top(h, scale);
+        let nav_top = TutorialCampaignScene::tutorial_nav_top(w, h, scale);
         let layout = TutorialCampaignScene::compute_scoring_page_layout(
             page, w, h, panel_x, panel_y, panel_w, panel_h,
         );
@@ -2337,7 +2350,7 @@ mod tests {
             callout,
             inner_w,
             font_px,
-            true,
+            GlossaryMode::Prose,
             color::CHAMPAGNE,
         );
         assert!(

@@ -320,6 +320,11 @@ pub struct RelicFlavorSpan {
     pub italic: bool,
 }
 
+/// Plain copy for font sizing / layout (`\n` preserved).
+pub fn flavor_spans_plain_text(spans: &[RelicFlavorSpan]) -> String {
+    spans.iter().map(|s| s.text).collect()
+}
+
 /// Cache key for rasterized flavor labels (must change when content or styles change).
 pub fn flavor_spans_cache_key(spans: &[RelicFlavorSpan]) -> String {
     let mut s = String::new();
@@ -820,14 +825,17 @@ fn load_relic_defs() -> Vec<RelicDef> {
                 let v: Vec<RelicFlavorSpan> = r
                     .flavor_spans
                     .into_iter()
-                    .filter(|s| !s.text.trim().is_empty())
+                    .filter(|s| !s.text.is_empty())
                     .map(|s| RelicFlavorSpan {
                         text: Box::leak(s.text.into_boxed_str()),
                         bold: s.bold,
                         italic: s.italic,
                     })
                     .collect();
-                if v.is_empty() {
+                if v.is_empty()
+                    || v.iter()
+                        .all(|s| s.text.chars().all(char::is_whitespace))
+                {
                     &[]
                 } else {
                     Box::leak(v.into_boxed_slice())
@@ -1219,9 +1227,10 @@ pub struct ScoreContext<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        KINDLING_MULT_CAP, KINDLING_STACK_CAP, RelicId, RelicState, SNOWBALL_CHIPS_PER_CLEAR,
-        SNOWBALL_STACK_CAP, apply_merchants_eye_discount, golden_engine_mult_bonus,
-        kindling_mult_bonus, relic_buy_price, relic_shop_price, snowball_score_chips,
+        KINDLING_MULT_CAP, KINDLING_STACK_CAP, RelicFlavorSpan, RelicId, RelicState,
+        SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP, all_relic_defs,
+        apply_merchants_eye_discount, golden_engine_mult_bonus, kindling_mult_bonus,
+        relic_buy_price, relic_shop_price, snowball_score_chips,
     };
 
     #[test]
@@ -1274,6 +1283,43 @@ mod tests {
             relic_shop_price(RelicId::TripletBoost, &relics),
             (base * 3 / 4).max(1)
         );
+    }
+
+    #[test]
+    fn flavor_load_preserves_embedded_and_separator_newlines() {
+        let cosmopolitan = all_relic_defs()
+            .iter()
+            .find(|d| d.id == RelicId::Cosmopolitan)
+            .expect("cosmopolitan def");
+        assert!(
+            cosmopolitan.flavor.iter().any(|s| s.text.contains('\n')),
+            "embedded newlines should survive relic flavor load"
+        );
+
+        let separator: Vec<RelicFlavorSpan> = vec![
+            RelicFlavorSpan {
+                text: "First",
+                bold: false,
+                italic: false,
+            },
+            RelicFlavorSpan {
+                text: "\n",
+                bold: false,
+                italic: false,
+            },
+            RelicFlavorSpan {
+                text: "Second",
+                bold: false,
+                italic: false,
+            },
+        ];
+        // Mirror load filter: keep `\n`-only separator spans between copy runs.
+        let kept: Vec<_> = separator
+            .into_iter()
+            .filter(|s| !s.text.is_empty())
+            .collect();
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[1].text, "\n");
     }
 
     #[test]

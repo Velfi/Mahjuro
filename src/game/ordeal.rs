@@ -146,8 +146,12 @@ fn whisper_apply(run: &mut RunState) {
     });
 }
 
-fn tribute_apply(run: &mut RunState) {
-    run.ordeal.yen_cost_per_play = 1;
+fn tax_collector_per_play(run: &mut RunState) {
+    // Tax fires after the play has resolved. Gold is allowed to go negative
+    // during boss rounds — the player can still finish the round but will
+    // need to earn it back in the shop/payout phase.
+    let cost = run.ordeal.yen_cost_per_play as i32;
+    run.apply_yen_delta(-cost, None);
 }
 
 fn famine_apply(run: &mut RunState) {
@@ -158,14 +162,6 @@ fn famine_apply(run: &mut RunState) {
 fn tempest_play(run: &mut RunState) {
     // Burn one tile off the top of the wall. No-op if wall is empty.
     let _ = run.wall.draw();
-}
-
-fn tribute_play(run: &mut RunState) {
-    // Tax fires after the play has resolved. Gold is allowed to go negative
-    // during boss rounds — the player can still finish the round but will
-    // need to earn it back in the shop/payout phase.
-    let cost = run.ordeal.yen_cost_per_play as i32;
-    run.apply_yen_delta(-cost, None);
 }
 
 // ── Reactive boss hooks ───────────────────────────────────────────────────
@@ -224,8 +220,7 @@ fn mirror_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
 }
 
 /// Tax Collector — per-play gold tax that scales with the player's hoard at
-/// reveal time. Mirrors Tribute's hook pair, but the cost is dynamic. The
-/// chosen cost is written to `RunState::tax_collector_cost` here so the
+/// reveal time. The chosen cost is written to `RunState::tax_collector_cost` here so the
 /// `on_apply` hook can read it during the boss blind. Locking the cost at
 /// reveal means a player who spends gold down before the boss blind can't
 /// escape — the price was set when the ante began.
@@ -237,60 +232,54 @@ fn tax_collector_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
         tile_debuffs: vec![],
         relic_debuffs: vec![],
         on_apply: Some(tax_collector_apply),
-        on_play: Some(tribute_play),
+        on_play: Some(tax_collector_per_play),
         description_override: Some(format!("Pay {cost} gold each play")),
     }
 }
 
 fn tax_collector_apply(run: &mut RunState) {
     // The cost was stashed on RunState by `tax_collector_reveal`. Mirror
-    // Tribute's path: set yen_cost_per_play and let `tribute_play` drain it.
+    // set yen_cost_per_play and let `tax_collector_per_play` drain it.
     run.ordeal.yen_cost_per_play = run.ordeal.tax_collector_cost;
 }
 
 fn blight_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
+    let hand = run.hand();
+    let dominant_rank = TileDebuff::dominant_rank(hand);
     let candidates = [
         (
             TileDebuff::Suit(crate::core::tile::Suit::Manzu),
-            run.hand()
-                .iter()
+            hand.iter()
                 .filter(|t| t.suit == crate::core::tile::Suit::Manzu)
                 .count(),
         ),
         (
             TileDebuff::Suit(crate::core::tile::Suit::Souzu),
-            run.hand()
-                .iter()
+            hand.iter()
                 .filter(|t| t.suit == crate::core::tile::Suit::Souzu)
                 .count(),
         ),
         (
             TileDebuff::Suit(crate::core::tile::Suit::Pinzu),
-            run.hand()
-                .iter()
+            hand.iter()
                 .filter(|t| t.suit == crate::core::tile::Suit::Pinzu)
                 .count(),
         ),
         (
             TileDebuff::Class(TileDebuffClass::Honors),
-            run.hand()
-                .iter()
+            hand.iter()
                 .filter(|t| TileDebuffClass::Honors.matches(t))
                 .count(),
         ),
         (
             TileDebuff::Class(TileDebuffClass::Terminals),
-            run.hand()
-                .iter()
+            hand.iter()
                 .filter(|t| TileDebuffClass::Terminals.matches(t))
                 .count(),
         ),
         (
-            TileDebuff::Suit(crate::core::tile::Suit::Flower),
-            run.hand()
-                .iter()
-                .filter(|t| t.suit == crate::core::tile::Suit::Flower)
-                .count(),
+            dominant_rank,
+            hand.iter().filter(|t| dominant_rank.matches(t)).count(),
         ),
     ];
     let chosen = candidates
@@ -304,7 +293,10 @@ fn blight_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
         relic_debuffs: vec![],
         on_apply: None,
         on_play: None,
-        description_override: Some(format!("{} tiles are debuffed", chosen.label())),
+        description_override: Some(format!(
+            "{} tiles are debuffed",
+            chosen.display_label()
+        )),
     }
 }
 
@@ -515,10 +507,6 @@ fn ordeal_behavior(kind: OrdealKind) -> OrdealBehavior {
     match kind {
         B::Drought => b.on_apply = Some(drought_apply),
         B::Whisper => b.on_apply = Some(whisper_apply),
-        B::Tribute => {
-            b.on_apply = Some(tribute_apply);
-            b.on_play = Some(tribute_play);
-        }
         B::Gate => b.tile_debuffs = &[TileDebuff::Suit(Suit::Manzu)],
         B::Grove => b.tile_debuffs = &[TileDebuff::Suit(Suit::Souzu)],
         B::Coin => b.tile_debuffs = &[TileDebuff::Suit(Suit::Pinzu)],
@@ -540,6 +528,7 @@ fn ordeal_behavior(kind: OrdealKind) -> OrdealBehavior {
         B::TaxCollector => b.on_reveal = Some(tax_collector_reveal),
         B::Dragon => {} // honorless structures debuffed in scoring_tile_debuffs
         B::House => b.rule_pushes = &[RuleModifier::CashInRequiresNoDiscards],
+        B::DeadAir | B::StGeorge => {} // scored honor destruction in apply_scored_melds
     }
     b
 }
@@ -665,12 +654,12 @@ mod tests {
     }
 
     #[test]
-    fn blight_can_choose_flower_debuffs() {
+    fn blight_can_choose_dominant_rank_debuff() {
         let mut run = RunState::new(GameMode::standard());
         *run.hand_mut() = vec![
-            custom_tile(Suit::Flower, 1, 1),
-            custom_tile(Suit::Flower, 2, 2),
-            custom_tile(Suit::Flower, 3, 3),
+            custom_tile(Suit::Pinzu, 6, 1),
+            custom_tile(Suit::Pinzu, 6, 2),
+            custom_tile(Suit::Pinzu, 6, 3),
             custom_tile(Suit::Manzu, 1, 4),
             custom_tile(Suit::Souzu, 2, 5),
         ];
@@ -678,7 +667,11 @@ mod tests {
 
         let effect = blight_reveal(&mut run);
 
-        assert_eq!(effect.tile_debuffs, vec![TileDebuff::Suit(Suit::Flower)]);
+        assert_eq!(effect.tile_debuffs, vec![TileDebuff::Rank(6)]);
+        assert_eq!(
+            effect.description_override.as_deref(),
+            Some("Rank-6 tiles are debuffed")
+        );
     }
 
     #[test]
@@ -715,7 +708,6 @@ mod tests {
             match kind {
                 OrdealKind::Drought
                 | OrdealKind::Whisper
-                | OrdealKind::Tribute
                 | OrdealKind::Gate
                 | OrdealKind::Grove
                 | OrdealKind::Coin
@@ -736,7 +728,9 @@ mod tests {
                 | OrdealKind::Counterweight
                 | OrdealKind::TaxCollector
                 | OrdealKind::Dragon
-                | OrdealKind::House => {}
+                | OrdealKind::House
+                | OrdealKind::DeadAir
+                | OrdealKind::StGeorge => {}
             }
             // Both presentation lookup and behaviour lookup must succeed.
             let _ = kind.def();

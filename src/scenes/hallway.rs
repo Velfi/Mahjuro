@@ -17,9 +17,10 @@ use crate::render::hallway_glb::{self, BTN_SKIP_ROUND};
 use crate::render::room_glb;
 use crate::render::scene_keys;
 use crate::render::theme::{color, metrics, typography};
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
-use crate::ui::colored_keywords;
+use crate::ui::styled_text;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
 use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
@@ -146,9 +147,15 @@ fn hallway_button_screen_rect(
 
 fn wrapped_text_height(text: &str, col_w: f32, font_px: f32, _line_h: f32) -> f32 {
     let default = [0.0; 4];
-    let wrapped =
-        colored_keywords::wrap_colored_text_multiline(text, col_w, font_px / 0.99, default, false);
-    colored_keywords::colored_wrapped_rows_height(&wrapped, font_px)
+    let wrapped = styled_text::wrap_colored_text_multiline(
+        text,
+        col_w,
+        font_px / 0.99,
+        default,
+        false,
+        GlossaryMode::Prose,
+    );
+    styled_text::colored_wrapped_rows_height(&wrapped, font_px)
 }
 
 struct WrappedColumnLine<'a> {
@@ -175,11 +182,18 @@ fn push_wrapped_column_line(line: WrappedColumnLine<'_>) {
         color,
         align,
     } = line;
-    let wrapped = colored_keywords::wrap_colored_text_multiline(text, col_w, font_px / 0.99, color, false);
-    let block_h = colored_keywords::colored_wrapped_rows_height(&wrapped, font_px);
-    colored_keywords::push_colored_rows_in_width(
+    let wrapped = styled_text::wrap_colored_text_multiline(
+        text,
+        col_w,
+        font_px / 0.99,
+        color,
+        false,
+        GlossaryMode::Prose,
+    );
+    let block_h = styled_text::colored_wrapped_rows_height(&wrapped, font_px);
+    styled_text::push_colored_rows_in_width(
         texts,
-        colored_keywords::ColoredRowsLayout {
+        styled_text::ColoredRowsLayout {
             text_left: x,
             top_y: *y,
             inner_w: col_w,
@@ -187,6 +201,7 @@ fn push_wrapped_column_line(line: WrappedColumnLine<'_>) {
             fallback_plain: text,
             fallback_color: color,
             italic: false,
+            glossary: GlossaryMode::Prose,
         },
         &wrapped,
         align,
@@ -338,7 +353,7 @@ impl SceneBehavior for HallwayScene {
         }
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, mut ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
 
@@ -656,6 +671,7 @@ impl SceneBehavior for HallwayScene {
                             user: 0,
                         },
                         source: ordeal_icon_source(bk),
+                        clip_rect: None,
                     });
                 }
                 push_wrapped_column_line(WrappedColumnLine {
@@ -767,6 +783,7 @@ impl SceneBehavior for HallwayScene {
                                 user: 0,
                             },
                             source: skip_tag_icon_source(tag),
+                            clip_rect: None,
                         });
                         push_wrapped_column_line(WrappedColumnLine {
                             texts: &mut texts,
@@ -865,10 +882,24 @@ impl SceneBehavior for HallwayScene {
                 &mut frame,
                 &ctx,
                 menu_footer_row(ctx.input_mode),
-                HintStyle::standard(h),
+                HintStyle::standard(w, h),
             );
         }
         frame.window_title = "Mahjuro".to_string();
+
+        if self.pause_menu.paused {
+            self.pause_menu.stash_focus_nav_debug(&mut ctx, w, h);
+        } else if !hide_scene_hud {
+            let items = Self::flat_items_hallway(
+                w,
+                h,
+                &cam,
+                ctx.room_gltf_height_scale,
+                can_skip,
+                play_node,
+            );
+            ctx.stash_focus_nav_tree_flat(&self.tree, &items, |a| format!("{a:?}"));
+        }
 
         frame
     }

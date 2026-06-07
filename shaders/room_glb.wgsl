@@ -9,7 +9,8 @@
 // - `room_env_params.y` = 1/world_scale — inverse-square uses document-space distance (glTF units)
 // - `room_env_params.z` = glTF emissive strength multiplier (see `SHOP_GLTF_EMISSIVE_SCALE`)
 // - `room_env_params.w` = main-menu hub moon synodic phase (`0..1`; unused elsewhere)
-// - `room_post_params.w` = main-menu pride rainbow scene time (`0` = off)
+// - `room_post_params.w` = main-menu pride rainbow scene time, or gameplay House
+//   polychrome time on blocked cash-in (`0` = off for both)
 //
 // Point / spot `pos.w` = max light distance in **world units** (`KHR_lights_punctual` range),
 // or `0` for infinite range (pure inverse-square with a minimum distance clamp).
@@ -19,6 +20,15 @@ const GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT: u32 = 1u << 0u;
 const GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL: u32 = 1u << 1u;
 const GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE: u32 = 1u << 2u;
 const GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW: u32 = 1u << 3u;
+const GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME: u32 = 1u << 4u;
+// UI polychrome (The House) — coarser bands than 3D score pops at label sizes.
+const POLYCHROME_COORD_X: f32 = 2.0;
+const POLYCHROME_COORD_Y: f32 = 1.25;
+const POLYCHROME_WARP_Y: f32 = 3.5;
+const POLYCHROME_WARP_X: f32 = 2.5;
+const POLYCHROME_LIGHT_GOLD: vec3<f32> = vec3<f32>(1.0, 0.68, 0.08);
+const POLYCHROME_SATURATION: f32 = 1.42;
+const HOUSE_BASE_RGB: vec3<f32> = vec3<f32>(0.90, 0.15, 0.10);
 /// Default `RoomEnvLightingTune::linear_exposure_base` (`2^-9`); gold signage fill is
 /// normalized against this so Scene Look exposure tracks punctual lights, not emissive.
 const ROOM_LINEAR_EXPOSURE_BASE_DEFAULT: f32 = 1.0 / 512.0;
@@ -231,6 +241,33 @@ struct ShopShaded {
     out_alpha: f32,
 }
 
+fn saturate_rgb(rgb: vec3<f32>, amount: f32) -> vec3<f32> {
+    let luma = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return mix(vec3<f32>(luma), rgb, amount);
+}
+
+// Port of `score_glyph_band_albedo_uv` in text_quad.wgsl — band timing in sync with UI House text.
+fn score_glyph_band_albedo_uv(base: vec3<f32>, band_coord: vec2<f32>, uv: vec2<f32>, time: f32) -> vec3<f32> {
+    let local = (uv - vec2<f32>(0.5)) * 2.0;
+    let drift = time * 0.8;
+    let warp = sin(time * 2.2 + band_coord.y * POLYCHROME_WARP_Y) * 0.28
+             + sin(time * 1.4 + band_coord.x * POLYCHROME_WARP_X) * 0.18;
+    let coord = band_coord.x * POLYCHROME_COORD_X + band_coord.y * POLYCHROME_COORD_Y + warp + drift;
+    let wave = 0.5 + 0.5 * sin(coord * 6.2831855);
+    let band = smoothstep(0.26, 0.74, wave);
+    let bright = saturate_rgb(min(POLYCHROME_LIGHT_GOLD * 1.08, vec3<f32>(1.0)), POLYCHROME_SATURATION);
+    let dark = saturate_rgb(base * 0.58, POLYCHROME_SATURATION * 1.08);
+    var albedo = mix(dark, bright, band);
+    let edge = length(local);
+    let rim = pow(min(edge * 1.4, 1.0), 1.8) * 0.38;
+    let rim_tint = saturate_rgb(
+        mix(dark * 1.15, bright * 0.95, 0.62),
+        POLYCHROME_SATURATION,
+    );
+    albedo = mix(albedo, rim_tint, rim);
+    return saturate_rgb(albedo, 1.12);
+}
+
 
 fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let base_s = textureSample(base_color, base_sampler, in.uv);
@@ -265,6 +302,11 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     if (is_archive_decal) {
         let dec = textureSample(decal_tex, base_sampler, in.uv);
         albedo = mix(albedo, dec.rgb, dec.a);
+    }
+    if ((pbr.flags & GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME) != 0u
+        && cam.room_post_params.w > 0.0) {
+        let band_coord = in.world_pos.xy * 0.02;
+        albedo = score_glyph_band_albedo_uv(HOUSE_BASE_RGB, band_coord, in.uv, cam.room_post_params.w);
     }
 
     // Animation-lab false shading: albedo × simple N·L (skips punctual PBR / shadows).
@@ -303,6 +345,8 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let V = normalize(cam.cam_pos - in.world_pos);
         let phase_col =
             moon_hub_phase_emissive(albedo, n_world, V, cam.room_env_params.w);
+        let phase_glow =
+            moon_hub_phase_outer_glow(n_world, V, cam.room_env_params.w);
         if (cam.room_post_params.w > 0.0) {
             let lit_mask = moon_phase_lit_mask(n_world, V, cam.room_env_params.w);
             let mask = max(emissive.r, max(emissive.g, emissive.b));
@@ -313,9 +357,9 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
             let phase_lum = dot(phase_col, vec3<f32>(0.299, 0.587, 0.114));
             let rb_lum = max(dot(rb, vec3<f32>(0.299, 0.587, 0.114)), 1e-4);
             let tint = rb * (phase_lum / rb_lum);
-            emissive = mix(phase_col, tint, clamp(lit_mask * 0.94, 0.0, 1.0));
+            emissive = mix(phase_col, tint, clamp(lit_mask * 0.94, 0.0, 1.0)) + phase_glow;
         } else {
-            emissive = phase_col;
+            emissive = phase_col + phase_glow;
         }
         return ShopShaded(emissive, emissive, out_alpha);
     }

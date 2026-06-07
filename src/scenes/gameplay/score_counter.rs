@@ -1,13 +1,15 @@
 //! Score-panel layout anchors for the gameplay HUD. Cascade HUD glyphs and
 //! streaming score popups align with the authored score frame in
-//! [`gameplay.glb`](../../../assets/3d/gameplay.glb) (`frame` mesh bounds),
-//! not the legacy Cassowary [`crate::ui::layout::LayoutResult::score_panel`].
+//! [`gameplay.glb`](../../../assets/3d/gameplay.glb) (`frame` mesh bounds).
 //!
 //! [`crate::ui::layout::LayoutResult::mm`] is still the right source for any
 //! world-unit lifts that must match hand tiles.
 
 use crate::render::draw_cmd::CameraParams;
 use crate::render::gameplay_glb::{self, SCORE_FRAME};
+use crate::render::score_roller_layout::{
+    collect_score_roller_pivots_doc, score_roller_bank_screen_rect,
+};
 use crate::render::world_space::LayoutAnchorPx;
 use crate::ui::layout::LayoutResult;
 use crate::ui::scene_layout::GameplayPositions;
@@ -110,10 +112,10 @@ pub fn resolve_score_popup_fly_dest(
     if let Some(cascade) = try_resolve_score_cascade_layout(layout, positions, env_height_scale) {
         return cascade.counter.reel;
     }
-    let sp = layout.score_panel;
+    let (px, py) = layout.fallback_score_center();
     LayoutAnchorPx {
-        px: sp.x + sp.w * 0.5,
-        py: sp.y + sp.h * 0.5,
+        px,
+        py,
         lift_z: layout.mm(positions.score_reel_lift_mm) * 1.08,
     }
 }
@@ -155,6 +157,47 @@ pub fn try_resolve_score_cascade_layout(
     .ok()
 }
 
+fn split_score_frame_rect([fx, fy, fw, fh]: [f32; 4]) -> ([f32; 4], [f32; 4]) {
+    let half = fw * 0.5;
+    let pad = fw * 0.02;
+    (
+        [fx + pad, fy, half - pad * 1.5, fh],
+        [fx + half + pad * 0.5, fy, half - pad * 1.5, fh],
+    )
+}
+
+/// Focus rects for the round-score and blind-target odometer banks.
+pub fn resolve_score_roller_bank_focus_rects(
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    env_height_scale: f32,
+) -> Option<([f32; 4], [f32; 4])> {
+    gameplay_glb::with_gameplay_glb_cpu(|cpu| {
+        let cpu = cpu?;
+        let min_rw = (w * 0.04).max(32.0);
+        let min_rh = (h * 0.03).max(16.0);
+        let frame = gameplay_glb::gameplay_marker_screen_rect_resolved(
+            w,
+            h,
+            cam,
+            env_height_scale,
+            cpu,
+            SCORE_FRAME,
+            min_rw,
+            min_rh,
+        )
+        .ok()?;
+        let pivots = collect_score_roller_pivots_doc(cpu);
+        let score = score_roller_bank_screen_rect(w, h, cam, env_height_scale, cpu, &pivots, 0);
+        let target = score_roller_bank_screen_rect(w, h, cam, env_height_scale, cpu, &pivots, 1);
+        Some(match (score, target) {
+            (Some(score), Some(target)) => (score, target),
+            _ => split_score_frame_rect(frame),
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,15 +223,15 @@ mod tests {
         let cam = gameplay_glb::gameplay_camera_from_cpu(&cpu, h, env_h).expect("camera");
         let cascade =
             resolve_score_cascade_layout(&layout, &positions, w, h, &cam, env_h).expect("layout");
-        let sp = layout.score_panel;
+        let (fallback_x, fallback_y) = layout.fallback_score_center();
         let reel = cascade.counter.reel;
         assert!(
             reel.px.is_finite() && reel.py.is_finite() && reel.lift_z.is_finite(),
             "reel finite"
         );
         assert!(
-            reel.px > sp.x + sp.w * 0.5 || reel.py < sp.y,
-            "GLB frame reel should differ from legacy score_panel center ({reel:?} vs panel {sp:?})"
+            reel.px > fallback_x || reel.py < fallback_y,
+            "GLB frame reel should differ from fallback score center ({reel:?} vs ({fallback_x}, {fallback_y}))"
         );
         assert!(cascade.counter.plaque_w > 32.0);
     }

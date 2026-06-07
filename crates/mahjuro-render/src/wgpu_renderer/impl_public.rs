@@ -230,12 +230,18 @@ impl WgpuRenderer {
             && self.main_menu_environment.is_some()
     }
 
-    /// Upload hub `main_menu.glb` (and advance CPU prefetch) while the splash plate is up.
+    /// Upload hub/run room GLBs (and advance CPU prefetch) while the splash plate is up.
+    ///
+    /// Performance/Visuals also GPU-warm every hub/run room before dismiss when possible; splash
+    /// still hands off once showcase atlases and `main_menu.glb` are ready.
     pub fn tick_splash_hub_boot(&mut self) {
         crate::room_preload::try_drain_room_cpu_prefetch_threads();
         crate::room_preload::kick_eager_all_room_cpu_prefetches();
         self.ensure_main_menu_room_gpu();
         crate::room_preload::advance_hub_cpu_prefetch_chain(false);
+        if self.graphics_mode != mahjuro_gfx_types::GraphicsMode::LowMemory {
+            self.drive_splash_eager_room_gpu_boot();
+        }
     }
 
     /// Upload the hub room while the splash loading screen is still up.

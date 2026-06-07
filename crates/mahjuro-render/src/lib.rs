@@ -30,7 +30,6 @@ pub mod gpu_profiler;
 pub mod gpu_types;
 pub mod hallway_glb;
 pub mod kenney_atlas;
-pub mod kenney_svg;
 pub mod lit_mesh;
 pub mod loader_pool;
 #[cfg(feature = "windowed")]
@@ -80,6 +79,7 @@ pub mod score_popups;
 pub mod score_reel;
 pub mod score_roller_layout;
 pub mod shadow_ao_lab;
+pub mod text_shadow_lab;
 pub mod shop_bell_mesh;
 pub mod showcase_decal_atlas;
 pub mod showcase_tile_layout;
@@ -97,6 +97,9 @@ pub mod tile_glb;
 pub mod transition_fx;
 pub mod tuning;
 pub mod vocabulary_colors;
+#[cfg(feature = "windowed")]
+pub mod victory_moon_debug_overlay;
+pub mod victory_moon_tuning;
 pub mod wall_display;
 pub mod wgpu_renderer;
 pub mod wood_tablet_mesh;

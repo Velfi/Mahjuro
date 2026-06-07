@@ -143,6 +143,12 @@ pub(super) struct ShadersAndPipelinesInit {
     pub tile_outline_frame_uniform_buffer: wgpu::Buffer,
     pub tile_outline_instance_buffer: wgpu::Buffer,
     pub tile_outline_pipeline: wgpu::RenderPipeline,
+    pub tile_frame_uniform_buffer: wgpu::Buffer,
+    pub tile_3d_instance_buffer: wgpu::Buffer,
+    pub tile_shadow_instance_buffer: wgpu::Buffer,
+    pub tile_shadow_frame_uniform_buffer: wgpu::Buffer,
+    pub tile_shadow_frame_bind_group: wgpu::BindGroup,
+    pub shadow_pipeline_instanced: wgpu::RenderPipeline,
     pub tile_pipeline_blend_cull: wgpu::RenderPipeline,
     pub tile_pipeline_blend_double: wgpu::RenderPipeline,
     pub tile_pipeline_opaque_cull: wgpu::RenderPipeline,
@@ -707,6 +713,49 @@ pub(super) fn init_shaders_and_pipelines(
             * (super::super::MAX_SHOWCASE_TILE_SLOTS as u64),
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
+    });
+    let tile_frame_uniform_buffer =
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tile-frame-uniform"),
+            contents: bytemuck::bytes_of(&TileFrameUniform {
+                view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+                cam_pos: [0.0; 3],
+                _pad0: 0.0,
+                tile_post_params: [0.0; 4],
+                tile_punctual_params: [0.0; 4],
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+    let tile_3d_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("tile-3d-instances"),
+        size: (std::mem::size_of::<Tile3dInstance>() as u64)
+            * (super::super::MAX_SHOWCASE_TILE_SLOTS as u64),
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let tile_shadow_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("tile-shadow-instances"),
+        size: (std::mem::size_of::<TileShadowInstance>() as u64)
+            * (super::super::MAX_SHOWCASE_TILE_SLOTS as u64),
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let tile_shadow_frame_uniform_buffer =
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tile-shadow-frame"),
+            contents: bytemuck::bytes_of(&crate::lit_mesh::ShadowCasterUniform {
+                light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+                model: glam::Mat4::IDENTITY.to_cols_array(),
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+    let tile_shadow_frame_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("tile-shadow-frame-bg"),
+        layout: &shadow_caster_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: tile_shadow_frame_uniform_buffer.as_entire_binding(),
+        }],
     });
     let tile_outline_frame_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("tile-outline-frame-bg"),
@@ -1580,6 +1629,49 @@ pub(super) fn init_shaders_and_pipelines(
         ],
     };
 
+    let tile_3d_instance_vertex_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<super::super::Tile3dInstance>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &[
+            wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 6,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 16,
+                shader_location: 7,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 32,
+                shader_location: 8,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 48,
+                shader_location: 9,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 64,
+                shader_location: 10,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 80,
+                shader_location: 11,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 96,
+                shader_location: 12,
+                format: wgpu::VertexFormat::Float32,
+            },
+        ],
+    };
+    let tile_3d_vertex_buffers = [tile_vertex_layout.clone(), tile_3d_instance_vertex_layout];
+
     let mk_tile_pipeline = |label: &'static str,
                             blend: Option<wgpu::BlendState>,
                             depth: &wgpu::DepthStencilState,
@@ -1592,7 +1684,7 @@ pub(super) fn init_shaders_and_pipelines(
                 module: &tile_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: std::slice::from_ref(&tile_vertex_layout),
+                buffers: &tile_3d_vertex_buffers,
             },
             fragment: Some(wgpu::FragmentState {
                 module: &tile_shader,
@@ -2218,7 +2310,65 @@ pub(super) fn init_shaders_and_pipelines(
             cull_mode: None,
             ..Default::default()
         },
-        depth_stencil: Some(shadow_depth_state),
+        depth_stencil: Some(shadow_depth_state.clone()),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    let tile_shadow_instance_vertex_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<super::super::TileShadowInstance>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &[
+            wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 16,
+                shader_location: 2,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 32,
+                shader_location: 3,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 48,
+                shader_location: 4,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+        ],
+    };
+    let shadow_pipeline_instanced = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("shadow-pipeline-instanced"),
+        layout: Some(&shadow_pl),
+        vertex: wgpu::VertexState {
+            module: &shadow_shader,
+            entry_point: Some("vs_instanced"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[
+                wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        offset: 0,
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x3,
+                    }],
+                },
+                tile_shadow_instance_vertex_layout,
+            ],
+        },
+        fragment: None,
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: Some(wgpu::Face::Back),
+            ..Default::default()
+        },
+        depth_stencil: Some(shadow_depth_state.clone()),
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,
@@ -2884,6 +3034,12 @@ pub(super) fn init_shaders_and_pipelines(
         tile_outline_frame_uniform_buffer,
         tile_outline_instance_buffer,
         tile_outline_pipeline,
+        tile_frame_uniform_buffer,
+        tile_3d_instance_buffer,
+        tile_shadow_instance_buffer,
+        tile_shadow_frame_uniform_buffer,
+        tile_shadow_frame_bind_group,
+        shadow_pipeline_instanced,
         tile_pipeline_blend_cull,
         tile_pipeline_blend_double,
         tile_pipeline_opaque_cull,

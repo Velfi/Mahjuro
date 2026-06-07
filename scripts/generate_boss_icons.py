@@ -59,7 +59,7 @@ except ImportError:
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BOSS_JSON_PATH = REPO_ROOT / "assets" / "data" / "ordeals.json"
-BOSS_RS_PATH = REPO_ROOT / "src" / "core" / "ordeal.rs"
+BOSS_RS_PATH = REPO_ROOT / "crates" / "mahjuro-core" / "src" / "core" / "ordeal_kind.rs"
 OUTPUT_DIR = REPO_ROOT / "assets" / "textures" / "ordeal_icons"
 
 COLUMNS = 5
@@ -99,19 +99,16 @@ BOSS_VISUALS: dict[str, str] = {
         "listening shell — sound without voice. Bold S-curves, twilight-blue "
         "shadow facets."
     ),
-    "tribute": (
-        "A small brass offering bowl with one heavy gold coin half-dropped in "
-        "and a tiny downward arrow carved on the bowl lip — pay to play. "
-        "Chunky low-poly metal."
-    ),
     "gate": (
         "A miniature torii gate made of ink-black lacquer bars with one wet "
         "ink splash frozen in mid-air before the threshold — characters blocked "
         "at the gate. Flat black vs parchment negative space."
     ),
     "grove": (
-        "A tight cluster of three bamboo shoots bent under invisible weight — "
-        "jade-green segmented stalks, one snapped segment on the ground."
+        "A small dead bamboo forest: three withered bamboo stalks gray-brown and "
+        "snapped, leafless segmented culms leaning at harsh angles with dry "
+        "parchment-colored leaves scattered at the base — jade grove gone to "
+        "blight. Umber and stone-gray facets, one fallen hollow stalk."
     ),
     "coin": (
         "A thick copper wheel / coin seen almost edge-on with a single large "
@@ -158,8 +155,10 @@ BOSS_VISUALS: dict[str, str] = {
         "veins eating into a generic tile silhouette beneath — blight spreads."
     ),
     "hex": (
-        "A wax-sealed hexagram paper talisman with one broken chain link "
-        "piercing through — relic hexed. Parchment, umber seal, iron chain."
+        "A chunky brass relic dish or curio plaque with a large umber wax "
+        "seal stamped on top bearing the bold red Chinese character 咒 "
+        "(zhòu, curse) in relief — one owned relic hexed for the round. "
+        "Parchment tag edge, umber wax drip, cracked seal read."
     ),
     "famine": (
         "An empty rice bowl on a scale plate tipped steeply upward with a "
@@ -195,6 +194,20 @@ BOSS_VISUALS: dict[str, str] = {
         "A stacked house of playing-card backs with a brass padlock on the "
         "discard chute — cannot cash in until discards spent. Casino-house dread."
     ),
+    "dead_air": (
+        "A chunky vintage radio microphone with a small antenna beside a "
+        "rectangle of gray TV static snow swallowing an east-wind tile face — "
+        "broadcast dead air, scored winds snuffed to silence. Bold static "
+        "noise facets, twilight-blue signal arcs breaking off, wind tile "
+        "half-dissolved into horizontal static bars."
+    ),
+    "st_george": (
+        "A brass lance piercing straight through a white mahjong Chun tile — "
+        "the red dragon tile with the bold red Chinese character 中 (zhōng) "
+        "on its face, cracked from the impact. A small white shield with a "
+        "red Saint George cross beside the tile. Dragon-slayer read, gold "
+        "lance through the Chun face."
+    ),
 }
 
 STYLE_BASE = (
@@ -213,9 +226,8 @@ STYLE_BASE = (
     "  • Chunky geometric shapes with 3–6 flat color regions per surface.\n"
     "  • Wordless pictogram icon — shapes and colors only.\n"
     "  • Flat cel-shaded color planes with hard facet boundaries.\n\n"
-    "Style reference: a wrapped present with faceted green planes, a bold "
-    "red bow, and a crisp gold outline — clean vector-like edges, readable "
-    "when displayed at 64×64 pixels."
+    "Rendering quality: faceted flat color planes, hard facet edges, thin "
+    "gold-tinted outline stroke, cel-shaded highlights — legible at 64×64 pixels."
 )
 
 
@@ -282,7 +294,7 @@ def load_bosses() -> list[BossDef]:
 
 
 ORDEALS = load_bosses()
-LAYOUT = [b.slug for b in ORDEALS] + [""]  # 5×5 pad cell
+LAYOUT = [b.slug for b in ORDEALS]
 
 
 def layout_rows() -> list[list[str]]:
@@ -315,7 +327,7 @@ def pack_atlas(processed_dir: Path, output_dir: Path) -> Path:
         layout=LAYOUT,
         columns=COLUMNS,
         cell_size=CELL_SIZE,
-        file_prefix="boss",
+        file_prefix="ordeal",
     )
 
 

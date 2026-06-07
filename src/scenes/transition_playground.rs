@@ -474,7 +474,7 @@ impl SceneBehavior for TransitionPlaygroundScene {
         None
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, mut ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let layout = Self::layout(w, h);
@@ -542,9 +542,10 @@ impl SceneBehavior for TransitionPlaygroundScene {
             &mut frame,
             &ctx,
             back_footer_row(ctx.input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
         frame.window_title = "Mahjuro — Transition Playground".into();
+        ctx.stash_focus_nav_tree_flat(&self.tree, &controls, |a| format!("{a:?}"));
         frame
     }
 }

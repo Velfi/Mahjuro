@@ -129,8 +129,9 @@ pub fn main_menu_rain_surface_meshes() -> Vec<crate::room_env_gltf::RoomCollisio
     })
 }
 
-/// Merged `rain_hit_*` soup clone for CPU rain raycasts.
-pub fn main_menu_rain_collision_mesh() -> Option<crate::room_env_gltf::RoomCollisionMesh> {
+/// Merged `rain_hit_*` soup handle for CPU rain raycasts (`Arc` clone — no triangle copy).
+pub fn main_menu_rain_collision_mesh()
+-> Option<std::sync::Arc<crate::room_env_gltf::RoomCollisionMesh>> {
     with_main_menu_glb_cpu(|opt| opt.and_then(|c| c.rain_collision_mesh().cloned()))
 }
 
@@ -361,6 +362,134 @@ pub fn main_menu_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
 pub fn main_menu_glb_has_embedded_lights() -> bool {
     with_main_menu_glb_cpu(|opt| {
         opt.is_some_and(crate::room_gltf_punctual::room_glb_has_embedded_lights)
+    })
+}
+
+/// Aspect-corrected moon disc radius from `moonlit_water.wgsl` (`moon_r`).
+pub const MOONLIT_WATER_MOON_UV_RADIUS: f32 = 0.072;
+/// Procedural moon center in `moonlit_water` UV space (0 = top, 1 = bottom).
+pub const MOONLIT_WATER_MOON_CENTER_UV: [f32; 2] = [0.5, 0.28];
+
+/// Screen-height fraction matching the procedural victory moon disc diameter.
+#[inline]
+pub fn moonlit_water_moon_diameter_screen_h() -> f32 {
+    MOONLIT_WATER_MOON_UV_RADIUS * 2.0
+}
+
+/// World +Z offset so a recentered victory moon projects to [`MOONLIT_WATER_MOON_CENTER_UV`].
+fn victory_moon_z_offset_for_uv_y(
+    window_w: f32,
+    window_h: f32,
+    standoff: f32,
+    fovy_deg: f32,
+    uv_y: f32,
+) -> f32 {
+    let cam = crate::draw_cmd::CameraParams {
+        eye: [0.0, -standoff, 0.0],
+        target: [0.0, 0.0, 0.0],
+        up: [0.0, 0.0, 1.0],
+        fovy_deg,
+        clip_near: Some(0.01),
+        clip_far: Some(window_h * crate::draw_cmd::SCENE_PERSPECTIVE_FAR_MUL),
+    };
+    let aspect = window_w / window_h.max(1.0);
+    let cam_pos = glam::Vec3::from_array(cam.eye);
+    let look_target = glam::Vec3::from_array(cam.target);
+    let up_v = glam::Vec3::from_array(cam.up);
+    let view_mat = glam::Mat4::look_at_rh(cam_pos, look_target, up_v);
+    let (near, far) = cam.clip_planes(window_h);
+    let proj = glam::Mat4::perspective_rh(fovy_deg.to_radians(), aspect, near, far);
+    let view_proj = proj * view_mat;
+
+    let screen_y = |z: f32| {
+        let clip = view_proj * glam::Vec4::new(0.0, 0.0, z, 1.0);
+        let inv_w = 1.0 / clip.w.max(1e-6);
+        let ny = clip.y * inv_w;
+        (1.0 - (ny * 0.5 + 0.5)) * window_h
+    };
+
+    let target_sy = uv_y * window_h;
+    let mut lo = -window_h;
+    let mut hi = window_h;
+    for _ in 0..32 {
+        let mid = (lo + hi) * 0.5;
+        if screen_y(mid) > target_sy {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    (lo + hi) * 0.5
+}
+
+/// Extra scale applied to the victory run-summary moon after recentering (tune in Blender units).
+pub const VICTORY_MOON_EXTRA_SCALE: f32 = 1.0;
+/// Euler XYZ radians for the victory run-summary 3D moon.
+pub const VICTORY_MOON_ROTATION_XYZ: [f32; 3] = [0.000000, 0.000000, -1.221730];
+
+/// Camera + model delta for the victory screen's isolated `MoonObject` draw.
+///
+/// Recenters the hub moon at world origin so it sits in the middle of the view;
+/// tune [`VICTORY_MOON_EXTRA_SCALE`] and [`VICTORY_MOON_ROTATION_XYZ`] as needed.
+pub fn victory_summary_moon_setup(
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    rotation_xyz: [f32; 3],
+) -> Option<(CameraParams, glam::Mat4)> {
+    with_main_menu_glb_cpu(|opt| {
+        let cpu = opt?;
+        let moon = room_glb::room_node_mesh_center_world(
+            cpu,
+            window_h,
+            env_height_scale,
+            MAIN_MENU_MOON_MESH_NODE,
+        )?;
+        let moon_radius = room_node_mesh_radius_world(
+            cpu,
+            window_h,
+            env_height_scale,
+            MAIN_MENU_MOON_MESH_NODE,
+        )
+        .unwrap_or(window_h * 0.015);
+
+        let mut model_delta = glam::Mat4::from_translation(-moon);
+
+        const FOVY_DEG: f32 = 45.0;
+        let tan_half = (FOVY_DEG.to_radians() * 0.5).tan();
+        let standoff = moon_radius * 3.5 + window_h * 0.02;
+        let fit_scale = moonlit_water_moon_diameter_screen_h() * standoff * tan_half
+            / moon_radius.max(1e-6);
+        let scale = fit_scale * VICTORY_MOON_EXTRA_SCALE;
+        model_delta = glam::Mat4::from_scale(glam::Vec3::splat(scale)) * model_delta;
+        if rotation_xyz != [0.0, 0.0, 0.0] {
+            model_delta = glam::Mat4::from_euler(
+                glam::EulerRot::XYZ,
+                rotation_xyz[0],
+                rotation_xyz[1],
+                rotation_xyz[2],
+            ) * model_delta;
+        }
+        let z_offset = victory_moon_z_offset_for_uv_y(
+            window_w,
+            window_h,
+            standoff,
+            FOVY_DEG,
+            MOONLIT_WATER_MOON_CENTER_UV[1],
+        );
+        model_delta = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, z_offset)) * model_delta;
+
+        Some((
+            CameraParams {
+                eye: [0.0, -standoff, 0.0],
+                target: [0.0, 0.0, 0.0],
+                up: [0.0, 0.0, 1.0],
+                fovy_deg: FOVY_DEG,
+                clip_near: Some(0.01),
+                clip_far: Some(window_h * crate::draw_cmd::SCENE_PERSPECTIVE_FAR_MUL),
+            },
+            model_delta,
+        ))
     })
 }
 

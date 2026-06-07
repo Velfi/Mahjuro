@@ -28,7 +28,7 @@
     "id": "cold_feet",
     "flavor_spans": [
       {
-        "text": "Cold feet on the landing.\nEach wing is harder than the last.\nThe inner room is climbed\nstep by step.",
+        "text": "You stand upon the landing.\nEach wing more difficult than the last.\nStructures are built one tile at a time.",
         "bold": false,
         "italic": false
       }
@@ -48,7 +48,7 @@
     "id": "cooled_tea",
     "flavor_spans": [
       {
-        "text": "In the storeroom, tea sets sit in lacquer boxes with the cups already poured. No one has touched them. The House has little patience for ceremony.",
+        "text": "In the storeroom, tea sets sit in lacquer boxes with the cups already poured. Ah, but The House has little patience for ceremony.",
         "bold": false,
         "italic": false
       }
@@ -83,7 +83,7 @@
     "id": "wrong_door",
     "flavor_spans": [
       {
-        "text": "The door you came through\nis not the door\nyou leave by.\nYou stopped checking\nafter the third wing.",
+        "text": "The door you come through\nis not the door\nyou leave by.\nEventually you stop checking.",
         "bold": false,
         "italic": false
       }
@@ -93,14 +93,9 @@
     "id": "dust_shaft",
     "flavor_spans": [
       {
-        "text": "Dust falls\nthrough a shaft\nwith no window above it.\nThe inner room\nmust be ",
+        "text": "Dust falls down\nthrough the soft lantern light.\nOnto an old carpet.",
         "bold": false,
         "italic": false
-      },
-      {
-        "text": "near.",
-        "bold": false,
-        "italic": true
       }
     ]
   },
@@ -108,17 +103,7 @@
     "id": "cracked_screen",
     "flavor_spans": [
       {
-        "text": "A cracked screen in the corridor shows another table, another hand being played, always one move ahead of yours. You walk faster. The image does not change.",
-        "bold": false,
-        "italic": false
-      }
-    ]
-  },
-  {
-    "id": "ordeal_draft",
-    "flavor_spans": [
-      {
-        "text": "After the ordeal\nthis staircase feels longer.\nIt wasn't longer yesterday.\nYou know it wasn't.",
+        "text": "Another table, another hand to be played.\nYou walk faster.",
         "bold": false,
         "italic": false
       }
@@ -128,17 +113,7 @@
     "id": "lost_run",
     "flavor_spans": [
       {
-        "text": "When you fell last time, The House took your yen and your relics. You started again with someone else's leftovers in your pockets and pretended that was a fresh beginning.",
-        "bold": false,
-        "italic": false
-      }
-    ]
-  },
-  {
-    "id": "wall_tile",
-    "flavor_spans": [
-      {
-        "text": "A tile\nface-down\non the carpet.\nNot yours.\nNot yet.",
+        "text": "When you fell last time, The House took your yen and your relics. You started again with someone else's leftovers in your pockets and pretended that was a fresh start.",
         "bold": false,
         "italic": false
       }
@@ -158,7 +133,7 @@
     "id": "storeroom_memory",
     "flavor_spans": [
       {
-        "text": "The storeroom remembers\nits losers\ndisplayed and priced.\nYou browse\nyour predecessors.",
+        "text": "The House will remember you when you're gone. It cares for its guests, in its own way.",
         "bold": false,
         "italic": false
       }
@@ -175,20 +150,10 @@
     ]
   },
   {
-    "id": "sealed_table",
-    "flavor_spans": [
-      {
-        "text": "They say the sealed table\nis one wing deeper.\nYou've heard that\nsince wing one.",
-        "bold": false,
-        "italic": false
-      }
-    ]
-  },
-  {
     "id": "sound_nowhere",
     "flavor_spans": [
       {
-        "text": "Tiles clack somewhere behind the wall — a full hand being played in a room with no door. You pause on the landing. The sound stops when you listen for it.",
+        "text": "Tiles clack somewhere behind the wall — Melds being played in a room with no door. You pause on the landing. The sound stops when you listen for it.",
         "bold": false,
         "italic": false
       }
@@ -208,32 +173,18 @@
     "id": "footstep_echo",
     "flavor_spans": [
       {
-        "text": "Your footsteps\nand another\none echo behind.\nYou stop.\nSilence.",
+        "text": "Your footsteps\necho behind you.\nBut when you stop:\nSilence.",
         "bold": false,
         "italic": false
       }
     ]
   },
-  {
-    "id": "inner_quiet",
-    "flavor_spans": [
-      {
-        "text": "The outer wings are cluttered — racks, screens, closed doors.\nDeeper in, it gets quieter.\nThe quiet feels like ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "certainty.",
-        "bold": false,
-        "italic": true
-      }
-    ]
-  },
+
   {
     "id": "stair_count",
     "flavor_spans": [
       {
-        "text": "Thirty-seven steps\nthis landing.\nYesterday\nthere were forty-one.",
+        "text": "Thirty-seven steps\ntoday.\nYesterday\nthere were forty-one.",
         "bold": false,
         "italic": false
       }
@@ -243,7 +194,7 @@
     "id": "hope_shattered",
     "flavor_spans": [
       {
-        "text": "A hope-shattered gambler sat on this step once. The cushion still holds his shape. You sit beside it and don't ask how long they've been gone.",
+        "text": "A hope-shattered gambler sat on this step once. The cushion still holds their shape. You sit beside it and don't ask how long they've been gone.",
         "bold": false,
         "italic": false
       }

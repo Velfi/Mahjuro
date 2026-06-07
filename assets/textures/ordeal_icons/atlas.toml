@@ -4,9 +4,9 @@ tile_height = 512
 columns = 5
 
 layout = [
-    "drought","whisper","tribute","gate","grove",
-    "coin","rot","hermit","forest","bureaucrat",
-    "drunkard","ash","furnace","relic","blight",
-    "hex","famine","tempest","censor","mirror",
-    "counterweight","tax_collector","dragon","house","",
+    "drought","whisper","gate","grove","coin",
+    "rot","hermit","forest","bureaucrat","drunkard",
+    "ash","furnace","relic","blight","hex",
+    "famine","tempest","censor","mirror","counterweight",
+    "tax_collector","dragon","house","dead_air","st_george",
 ]

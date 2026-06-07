@@ -158,8 +158,13 @@ impl ShopScene {
             self.focus = inspect_rects.first().map(|(focus, _)| *focus);
             return self.focus.is_some();
         }
-        if let Some(rect) = current_focus_rect
-            && let Some(next) = pick_neighbor(rect, dir, &inspect_rects)
+        if let Some(cur) = self.focus
+            && let Some(next) = super::focus::shop_inspect_nav_pick(
+                &mut self.focus_nav,
+                &inspect_rects,
+                cur,
+                dir,
+            )
             && Some(next) != self.focus
         {
             self.focus = Some(next);
@@ -372,12 +377,6 @@ impl ShopScene {
             self.focus = new_focus;
         }
 
-        let current_focus_rect = self.focus.and_then(|t| {
-            focus_rects
-                .iter()
-                .find_map(|(t2, r)| (*t2 == t).then_some(*r))
-        });
-
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
 
@@ -458,8 +457,13 @@ impl ShopScene {
                     }
                     continue;
                 }
-                if let Some(rect) = current_focus_rect
-                    && let Some(next) = pick_neighbor(rect, dir, &focus_rects)
+                if let Some(cur) = self.focus
+                    && let Some(next) = super::focus::shop_directional_pick(
+                        &mut self.focus_nav,
+                        &focus_rects,
+                        cur,
+                        dir,
+                    )
                 {
                     self.focus = Some(next);
                 }

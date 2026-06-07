@@ -268,31 +268,18 @@ impl WgpuRenderer {
         light_view_proj_arr: [f32; 16],
         object3d_draw_list: &[(super::DrawKind, usize)],
         _tile_pick_models: &[(usize, glam::Mat4)],
-        showcase_tile_batches: &[&[super::ShowcaseTilePlacement]],
+        _showcase_tile_batches: &[&[super::ShowcaseTilePlacement]],
     ) {
+        self.queue.write_buffer(
+            &self.tile_shadow_frame_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&ShadowCasterUniform {
+                light_view_proj: light_view_proj_arr,
+                model: glam::Mat4::IDENTITY.to_cols_array(),
+            }),
+        );
         for &(kind, slot_i) in object3d_draw_list {
             self.rewrite_object3d_shadow_light(kind, slot_i, light_view_proj_arr);
-        }
-        let total_showcase: usize = showcase_tile_batches
-            .iter()
-            .map(|b| b.len())
-            .sum::<usize>()
-            .min(super::super::MAX_SHOWCASE_TILE_SLOTS);
-        for slot_i in 0..total_showcase {
-            let Some(stg) = self.showcase_tiles.get(slot_i) else {
-                break;
-            };
-            if !stg.casts_shadow {
-                continue;
-            }
-            self.queue.write_buffer(
-                &stg.shadow_uniform_buffer,
-                0,
-                bytemuck::bytes_of(&ShadowCasterUniform {
-                    light_view_proj: light_view_proj_arr,
-                    model: stg.cached_shadow_caster.model,
-                }),
-            );
         }
     }
 
@@ -331,18 +318,7 @@ impl WgpuRenderer {
                 rewrite!(self.tally_stick_instances)
             }
             super::DrawKind::ExtrudedGlyph => rewrite!(self.extruded_glyph_instances),
-            super::DrawKind::GltfCoin => {
-                if let Some(inst) = self.coin_glb_instances.get(slot_i) {
-                    self.queue.write_buffer(
-                        &inst.shadow_uniform_buffer,
-                        0,
-                        bytemuck::bytes_of(&ShadowCasterUniform {
-                            light_view_proj: light_view_proj_arr,
-                            model: inst.cached_shadow_caster.model,
-                        }),
-                    );
-                }
-            }
+            super::DrawKind::GltfCoin => {}
             super::DrawKind::Primitive(shape) => {
                 if let Some(pool) = self.primitive_instances.get(&shape) {
                     rewrite!(pool);

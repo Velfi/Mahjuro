@@ -1086,14 +1086,29 @@ fn rasterize_plaque_walnut_ink_colored_keywords(
 
     for (i, line) in chosen_lines.iter().enumerate() {
         let mut chunks: Vec<(String, [f32; 4])> = Vec::new();
-        for (idx, word) in line.split_whitespace().enumerate() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let relic_mask = super::vocabulary_colors::relic_name_word_mask(&words);
+        let house_mask = super::vocabulary_colors::house_name_word_mask(&words);
+        for (idx, word) in words.iter().enumerate() {
             if idx > 0 {
                 chunks.push((" ".to_string(), DEFAULT_INK));
             }
-            chunks.extend(super::vocabulary_colors::colored_token_segments(
-                word,
-                DEFAULT_INK,
-            ));
+            if relic_mask[idx] {
+                chunks.push(((*word).to_string(), DEFAULT_INK));
+            } else if house_mask[idx] {
+                chunks.extend(super::vocabulary_colors::colored_token_segments_tinted(
+                    word,
+                    crate::theme::color::keyword::HOUSE,
+                    DEFAULT_INK,
+                ));
+            } else {
+                chunks.extend(super::vocabulary_colors::glossary_word_segments(
+                    &words,
+                    idx,
+                    super::vocabulary_colors::GlossaryMode::Prose,
+                    DEFAULT_INK,
+                ));
+            }
         }
         if chunks.is_empty() {
             continue;
@@ -1857,6 +1872,14 @@ pub struct LabelRasterParams {
     pub height: u32,
     pub font_px: f32,
     pub align: LabelAlign,
+    pub vertical_align: LabelVerticalAlign,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LabelVerticalAlign {
+    #[default]
+    Bottom,
+    Top,
 }
 
 /// Multi-line block layout. Lines are stacked vertically, all rendered at the
@@ -2397,6 +2420,153 @@ fn blit_flavor_line(
     }
 }
 
+/// Measured layout for relic flavor copy — matches [`rasterize_label_flavor_spans`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FlavorCaptionMetrics {
+    pub font_px: f32,
+    pub line_h: f32,
+    pub line_count: usize,
+    /// `line_h * line_count` at the resolved font size.
+    pub text_block_h: f32,
+    /// Widest wrapped line advance at the resolved font size.
+    pub text_block_w: f32,
+}
+
+fn build_flavor_soft_lines(
+    fonts: &DecalFonts<'_>,
+    spans: &[RasterStyleSpan<'_>],
+    band_w: u32,
+    font_px: f32,
+) -> Vec<Vec<FlavorCell>> {
+    if spans.is_empty() {
+        return Vec::new();
+    }
+    let hard_lines = flatten_raster_style_to_hard_lines(spans);
+    let max_w = band_w as f32;
+    let mut soft_lines: Vec<Vec<FlavorCell>> = Vec::new();
+    for hl in &hard_lines {
+        if hl.is_empty() {
+            soft_lines.push(Vec::new());
+            continue;
+        }
+        let mut wrapped = wrap_flavor_hard_line(fonts, hl, max_w, font_px);
+        soft_lines.append(&mut wrapped);
+    }
+    soft_lines
+}
+
+fn relic_spans_to_raster_spans(spans: &[RelicFlavorSpan]) -> Vec<RasterStyleSpan<'_>> {
+    spans
+        .iter()
+        .map(|s| RasterStyleSpan {
+            text: s.text,
+            bold: s.bold,
+            italic: s.italic,
+            underline: false,
+        })
+        .collect()
+}
+
+/// Soft-wrapped line count using the same rules as [`rasterize_label_raster_spans`].
+pub fn flavor_raster_soft_line_count(
+    fonts: &DecalFonts<'_>,
+    spans: &[RasterStyleSpan<'_>],
+    band_w: u32,
+    font_px: f32,
+) -> usize {
+    let count = build_flavor_soft_lines(fonts, spans, band_w, font_px)
+        .into_iter()
+        .filter(|line| !line.is_empty())
+        .count();
+    count.max(1)
+}
+
+/// Relic flavor labels: wrap at `target_font_px`, shrink only when the wrapped
+/// block exceeds `band_h`, and never go below `min_font_px` (global readable floor).
+pub fn resolve_flavor_spans_font_px(
+    fonts: &DecalFonts<'_>,
+    spans: &[RelicFlavorSpan],
+    band_w: u32,
+    band_h: u32,
+    target_font_px: f32,
+    min_font_px: f32,
+) -> f32 {
+    let raster_spans = relic_spans_to_raster_spans(spans);
+    let min_px = min_font_px.max(8.0);
+    let target = target_font_px.max(min_px);
+
+    let wrapped_block_h = |font_px: f32| -> f32 {
+        let soft_lines = build_flavor_soft_lines(fonts, &raster_spans, band_w, font_px);
+        let line_count = soft_lines
+            .iter()
+            .filter(|line| !line.is_empty())
+            .count()
+            .max(1);
+        let line_h = fonts
+            .regular
+            .horizontal_line_metrics(font_px)
+            .map(|lm| lm.new_line_size)
+            .unwrap_or(font_px * 1.2);
+        line_h * line_count as f32
+    };
+
+    let band_h_f = band_h as f32;
+    if wrapped_block_h(target) <= band_h_f {
+        return target;
+    }
+
+    let mut candidate = target;
+    loop {
+        if wrapped_block_h(candidate) <= band_h_f || candidate <= min_px {
+            return candidate.max(min_px);
+        }
+        candidate = (candidate * 0.93).max(min_px);
+    }
+}
+
+/// Resolve font size + wrapped line geometry before rasterizing or sizing the shadow.
+pub fn measure_flavor_spans_layout(
+    fonts: &DecalFonts<'_>,
+    spans: &[RelicFlavorSpan],
+    band_w: u32,
+    band_h: u32,
+    target_font_px: f32,
+    min_font_px: f32,
+) -> FlavorCaptionMetrics {
+    let font_px = resolve_flavor_spans_font_px(
+        fonts,
+        spans,
+        band_w,
+        band_h,
+        target_font_px,
+        min_font_px,
+    );
+    let raster_spans = relic_spans_to_raster_spans(spans);
+    let soft_lines = build_flavor_soft_lines(fonts, &raster_spans, band_w, font_px);
+    let line_count = soft_lines
+        .iter()
+        .filter(|line| !line.is_empty())
+        .count()
+        .max(1);
+    let text_block_w = soft_lines
+        .iter()
+        .map(|line| flavor_line_advance(fonts, line, font_px))
+        .fold(0.0_f32, f32::max)
+        .min(band_w as f32);
+    let line_h = fonts
+        .regular
+        .horizontal_line_metrics(font_px)
+        .map(|lm| lm.new_line_size)
+        .unwrap_or(font_px * 1.2);
+    FlavorCaptionMetrics {
+        font_px,
+        line_h,
+        line_count,
+        text_block_h: line_h * line_count as f32,
+        text_block_w: text_block_w.max(font_px),
+    }
+}
+
 /// Multi-line mixed-style text (bold / italic / underline) at a fixed `font_px`,
 /// bottom-aligned in `height`. Used by relic flavor and UI styled labels.
 pub fn rasterize_label_raster_spans(
@@ -2409,22 +2579,13 @@ pub fn rasterize_label_raster_spans(
         height,
         font_px,
         align,
+        vertical_align,
     } = *params;
     if spans.is_empty() {
         return vec![0u8; (width * height * 4) as usize];
     }
     let font_px = font_px.max(8.0);
-    let hard_lines = flatten_raster_style_to_hard_lines(spans);
-    let max_w = width as f32;
-    let mut soft_lines: Vec<Vec<FlavorCell>> = Vec::new();
-    for hl in &hard_lines {
-        if hl.is_empty() {
-            soft_lines.push(Vec::new());
-            continue;
-        }
-        let mut wrapped = wrap_flavor_hard_line(fonts, hl, max_w, font_px);
-        soft_lines.append(&mut wrapped);
-    }
+    let soft_lines = build_flavor_soft_lines(fonts, spans, width, font_px);
     if soft_lines.is_empty() {
         return vec![0u8; (width * height * 4) as usize];
     }
@@ -2435,7 +2596,10 @@ pub fn rasterize_label_raster_spans(
         (font_px * 1.2, font_px * 0.8)
     };
     let total_h = line_h * soft_lines.len() as f32;
-    let block_top = (height as f32 - total_h).max(0.0);
+    let block_top = match vertical_align {
+        LabelVerticalAlign::Top => 0.0,
+        LabelVerticalAlign::Bottom => (height as f32 - total_h).max(0.0),
+    };
     let mut rgba = vec![0u8; (width * height * 4) as usize];
     for (i, line) in soft_lines.iter().enumerate() {
         if line.is_empty() {
@@ -2472,15 +2636,7 @@ pub fn rasterize_label_flavor_spans(
         let height = params.height;
         return vec![0u8; (width * height * 4) as usize];
     }
-    let mapped: Vec<RasterStyleSpan> = spans
-        .iter()
-        .map(|s| RasterStyleSpan {
-            text: s.text,
-            bold: s.bold,
-            italic: s.italic,
-            underline: false,
-        })
-        .collect();
+    let mapped: Vec<RasterStyleSpan> = relic_spans_to_raster_spans(spans);
     rasterize_label_raster_spans(fonts, &mapped, params)
 }
 
@@ -2607,6 +2763,82 @@ pub fn decal_dimensions(layout: &crate::primitive::DecalLayout, extents: [f32; 3
             let w = ((h as f32 * face_aspect).round() as u32).clamp(256, 4096);
             (w, h)
         }
+    }
+}
+
+#[cfg(test)]
+mod flavor_layout_tests {
+    use super::*;
+    use mahjuro_core::core::relic::RelicFlavorSpan;
+
+    fn test_fonts() -> Option<DecalFonts<'static>> {
+        load_ui_font().map(|regular| DecalFonts {
+            regular,
+            italic: load_ui_font_italic(),
+            emoji: None,
+        })
+    }
+
+    #[test]
+    fn long_single_line_flavor_wraps_at_target_not_single_line_shrink() {
+        let Some(fonts) = test_fonts() else {
+            return;
+        };
+        let spans = &[RelicFlavorSpan {
+            text: "Power surges through your tiles! You are kind of afraid to touch them now, You didn't even know these were conductive.",
+            bold: false,
+            italic: false,
+        }];
+        let band_w = 1040u32;
+        let target_px = 32.0;
+        let floor_px = 24.0;
+        let metrics = measure_flavor_spans_layout(&fonts, spans, band_w, u32::MAX, target_px, floor_px);
+        assert!(
+            metrics.line_count >= 2,
+            "long flavor should wrap at target size, got {} lines",
+            metrics.line_count
+        );
+        assert!(
+            (metrics.font_px - target_px).abs() < 0.01,
+            "expected target font size, got {}",
+            metrics.font_px
+        );
+        assert!(
+            metrics.font_px >= floor_px,
+            "font should not shrink below readable floor"
+        );
+    }
+
+    #[test]
+    fn nest_egg_shadow_is_narrower_than_full_band() {
+        let Some(fonts) = test_fonts() else {
+            return;
+        };
+        let spans = &[
+            RelicFlavorSpan {
+                text: "The storeroom remembers",
+                bold: false,
+                italic: false,
+            },
+            RelicFlavorSpan {
+                text: "\n",
+                bold: false,
+                italic: false,
+            },
+            RelicFlavorSpan {
+                text: "its losers displayed and priced.",
+                bold: false,
+                italic: false,
+            },
+        ];
+        let band_w = 1040u32;
+        let metrics = measure_flavor_spans_layout(&fonts, spans, band_w, 96, 32.0, 12.0);
+        assert!(
+            metrics.text_block_w < band_w as f32 * 0.72,
+            "two short lines should not span the full band: {} vs {}",
+            metrics.text_block_w,
+            band_w,
+        );
     }
 }
 

@@ -166,6 +166,7 @@ pub fn push_yen_amount_label(
         color: color::CHAMPAGNE,
         font_px: Some(credits_font_px),
         align: TextAlign::Center,
+        block_vertical_align: Default::default(),
         scroll_offset: 0.0,
         flavor_spans: None,
         bold: false,

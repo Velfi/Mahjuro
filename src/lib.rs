@@ -1,4 +1,4 @@
-//! Mahjuro — UI-first shell: SDL3 + wgpu + cassowary + input + scene system.
+//! Mahjuro — UI-first shell: SDL3 + wgpu + input + scene system.
 //!
 //! The executable entry point is [`run`]; this library exists so benchmarks
 //! (`cargo bench`) can link the game logic.
@@ -62,7 +62,7 @@ pub mod sfx_id;
 #[cfg(feature = "game")]
 mod trailer_mode;
 pub use mahjuro_render::physical_size;
-#[cfg(any(feature = "game", feature = "headless-screenshot"))]
+#[cfg(feature = "game")]
 #[path = "main/scene_transition.rs"]
 mod scene_transition;
 pub mod scenes;

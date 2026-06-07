@@ -80,7 +80,7 @@ In [`scene_behavior.rs`](src/scenes/gameplay/scene_behavior.rs) hand `ShowcaseTi
 - For selected slots, set distinct `glow_color` per meld index (reuse existing per-tile override; keep invalid-flash red overriding).
 - Optional: slightly increase gap feel by nudging `center_pos` per meld cluster (only if cheap; tint alone may suffice).
 
-**B. Structure strip — grouped layout (when banked structure exists OR selection preview needs strip)**
+**B. Structure strip — grouped layout (when played structure exists OR selection preview needs strip)**
 
 Reuse existing meld layout in [`build_yaku_panel_and_tablets`](src/scenes/gameplay/input_handler.rs) (`intra_gap` / `inter_gap` over `showcase.sets`):
 
@@ -120,7 +120,7 @@ Replace all “selection melds” paths to use `chosen_selection_sets()`:
 ### 5. Tests
 
 - **Core**: extend [`hand/tests.rs`](crates/mahjuro-core/src/core/hand/tests.rs) — six identical souzu 6s → `enumerate_decompositions` len ≥ 2 (kong+pair vs two triplets).
-- **Run**: [`run/tests.rs`](src/game/run/tests.rs) — given hand + selection, `default_index` matches `pick_best_decomposition`; cycling changes `chosen_selection_sets`; commit banks chosen partition.
+- **Run**: [`run/tests.rs`](src/game/run/tests.rs) — given hand + selection, `default_index` matches `pick_best_decomposition`; cycling changes `chosen_selection_sets`; commit plays chosen partition.
 - **Regression**: yaku preview uses chosen sets (e.g. Iipeikou vs Ryanpeikou-sensitive partition differs by choice).
 
 ### 6. Docs

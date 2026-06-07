@@ -225,7 +225,7 @@ impl SceneBehavior for RollerLabScene {
             &mut frame,
             &ctx,
             back_footer_row(ctx.input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
         frame
     }

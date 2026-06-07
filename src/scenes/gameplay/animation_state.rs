@@ -203,11 +203,7 @@ pub(super) fn build_ambient_table_objects(
     use crate::core::tile::{Suit, Tile};
     use crate::render::draw_cmd::ShowcaseTilePlacement;
 
-    let hand_slot_w = layout
-        .hand_slots
-        .first()
-        .map(|r| r.w)
-        .unwrap_or(layout.window_w * crate::ui::layout::HAND_SLOT_W_RATIO);
+    let hand_slot_w = layout.hand_slot_w;
     let tile_size_px = hand_slot_w * (22.0 / crate::ui::layout::TILE_WIDTH_MM);
     let tile_spacing = hand_slot_w * (24.0 / crate::ui::layout::TILE_WIDTH_MM);
     let tile_on_plinth_lift = |z: f32| z;
@@ -251,6 +247,7 @@ pub(super) fn build_ambient_table_objects(
                     outline: false,
                     glow: false,
                     glow_color: None,
+                    outline_sel: None,
                     pick_id: None,
                     overlay_rect_group: Some(
                         crate::render::draw_cmd::TileOverlayRectGroup::DoraTiles,
@@ -298,6 +295,7 @@ pub(super) fn build_ambient_table_objects(
                 outline: false,
                 glow: false,
                 glow_color: None,
+                    outline_sel: None,
                 pick_id: None,
                 overlay_rect_group: Some(
                     crate::render::draw_cmd::TileOverlayRectGroup::RoundWindTiles,

@@ -1,6 +1,7 @@
 // Alpha-gradient quad. Same vertex layout as `quad.wgsl` plus a per-instance
-// `feather` vec4: x=edge softness (0..1, fraction of the shortest side),
-// y=radial vs. axial (0=axial-rect, 1=radial), z/w=reserved.
+// `feather` vec4: x=horizontal edge softness, z=vertical edge softness
+// (when z≈0, both axes use x), y=radial vs. axial (0=axial-rect, 1=radial),
+// w=reserved.
 //
 // axial mode (y=0): alpha smoothly ramps from 0 at the outer edge to full
 // `color.a` at an inner rect inset by `feather.x` on each side. Reads as a
@@ -48,17 +49,24 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let edge = clamp(in.feather.x, 0.001, 0.999);
+    let edge_x = clamp(in.feather.x, 0.001, 0.999);
+    let edge_y_raw = in.feather.z;
+    let edge_y = clamp(
+        select(edge_x, edge_y_raw, edge_y_raw > 0.001),
+        0.001,
+        0.999,
+    );
 
     // Axial (rect): alpha = 1 in center, ramps to 0 within `edge` of each
     // edge. abs(uv) is the normalized distance to center along each axis.
-    let ax = 1.0 - smoothstep(1.0 - edge, 1.0, abs(in.uv.x));
-    let ay = 1.0 - smoothstep(1.0 - edge, 1.0, abs(in.uv.y));
+    let ax = 1.0 - smoothstep(1.0 - edge_x, 1.0, abs(in.uv.x));
+    let ay = 1.0 - smoothstep(1.0 - edge_y, 1.0, abs(in.uv.y));
     let axial = ax * ay;
 
     // Radial: alpha smoothstepped from center to corner distance.
     let r = length(in.uv);
-    let radial = 1.0 - smoothstep(1.0 - edge, 1.0, r);
+    let edge_r = max(edge_x, edge_y);
+    let radial = 1.0 - smoothstep(1.0 - edge_r, 1.0, r);
 
     let mode = clamp(in.feather.y, 0.0, 1.0);
     let falloff = mix(axial, radial, mode);

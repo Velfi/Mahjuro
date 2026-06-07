@@ -265,14 +265,12 @@ pub fn build_mirror_mesh() -> MeshCpu {
     MeshCpu {
         vertices,
         indices,
-        // Polished bronze: warm orange-gold base with a high specular
-        // strength so it catches the candle highlights and reads as
-        // metal. Routed through the Metal shader path for the Schlick
-        // Fresnel response.
+        // Polished bronze routed through the dedicated BronzeMirror
+        // material (conductor spec + view Schlick rim + valid-play jade).
         default_material: MaterialParams {
-            kind: MaterialKind::Metal,
+            kind: MaterialKind::BronzeMirror,
             base_color: [0.78, 0.48, 0.18, 1.0],
-            specular_strength: 0.90,
+            specular_strength: 2.05,
             specular_power: 64.0,
         },
     }

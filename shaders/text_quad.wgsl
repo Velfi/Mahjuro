@@ -1,7 +1,7 @@
 /// Text quad shader: renders a CPU-rasterized text bitmap as an alpha-masked
 /// quad in screen space.  The `rect` instance attribute positions the quad in
 /// pixel coordinates; the text bitmap is sampled as an alpha channel.
-/// `user` low byte: 0=flat, 1=rainbow, 2=pulse, 3=shimmer, 4=gold tint.
+/// `user` low byte: 0=flat, 1=rainbow, 2=pulse, 3=shimmer, 4=gold tint, 5=polychrome, 6=moon polychrome.
 /// bits 8–9: clockwise quarter-turns (0 = upright, 1 = 90°, …).
 
 const TAU: f32 = 6.2831855;
@@ -15,6 +15,19 @@ const SHIMMER_U_SCALE: f32 = 18.0;
 const SHIMMER_TIME_SCALE: f32 = 4.0;
 const SHIMMER_POWER: f32 = 8.0;
 const SHIMMER_ADD: f32 = 0.35;
+// UI polychrome (The House) — coarser bands than 3D score pops at label sizes.
+const POLYCHROME_BAND_SCREEN_X: f32 = 0.010;
+const POLYCHROME_BAND_SCREEN_Y: f32 = 0.016;
+const POLYCHROME_COORD_X: f32 = 2.0;
+const POLYCHROME_COORD_Y: f32 = 1.25;
+const POLYCHROME_WARP_Y: f32 = 3.5;
+const POLYCHROME_WARP_X: f32 = 2.5;
+// Bright / dark band anchors — tuned hotter than flat glossary tints.
+const POLYCHROME_LIGHT_GOLD: vec3<f32> = vec3<f32>(1.0, 0.68, 0.08);
+const POLYCHROME_SATURATION: f32 = 1.42;
+// **The Moon** — cool moonlight bands on a twilight field.
+const MOON_STRIPE: vec3<f32> = vec3<f32>(58.0 / 255.0, 69.0 / 255.0, 101.0 / 255.0);
+const MOON_FIELD: vec3<f32> = vec3<f32>(232.0 / 255.0, 235.0 / 255.0, 240.0 / 255.0);
 
 struct Globals {
     screen: vec2<f32>,
@@ -31,6 +44,8 @@ struct VsOut {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) effect_id: u32,
+    /// Screen-space coords for polychrome bands (shared phase across adjacent labels).
+    @location(3) band_coord: vec2<f32>,
 };
 
 fn rotate_local(local: vec2<f32>, quarters: u32) -> vec2<f32> {
@@ -71,13 +86,60 @@ fn vs_main(
     out.uv = corner;
     out.color = color;
     out.effect_id = user & 0xFFu;
+    out.band_coord = vec2<f32>(x * POLYCHROME_BAND_SCREEN_X, y * POLYCHROME_BAND_SCREEN_Y);
     return out;
+}
+
+fn saturate_rgb(rgb: vec3<f32>, amount: f32) -> vec3<f32> {
+    let luma = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return mix(vec3<f32>(luma), rgb, amount);
+}
+
+// Port of score_glyph_band_albedo in lit_mesh.wgsl — band timing in sync; UI colors hotter.
+fn score_glyph_band_albedo_uv(base: vec3<f32>, band_coord: vec2<f32>, uv: vec2<f32>, time: f32) -> vec3<f32> {
+    let local = (uv - vec2<f32>(0.5)) * 2.0;
+    let drift = time * 0.8;
+    let warp = sin(time * 2.2 + band_coord.y * POLYCHROME_WARP_Y) * 0.28
+             + sin(time * 1.4 + band_coord.x * POLYCHROME_WARP_X) * 0.18;
+    let coord = band_coord.x * POLYCHROME_COORD_X + band_coord.y * POLYCHROME_COORD_Y + warp + drift;
+    let wave = 0.5 + 0.5 * sin(coord * 6.2831855);
+    let band = smoothstep(0.26, 0.74, wave);
+    let bright = saturate_rgb(min(POLYCHROME_LIGHT_GOLD * 1.08, vec3<f32>(1.0)), POLYCHROME_SATURATION);
+    let dark = saturate_rgb(base * 0.58, POLYCHROME_SATURATION * 1.08);
+    var albedo = mix(dark, bright, band);
+    let edge = length(local);
+    let rim = pow(min(edge * 1.4, 1.0), 1.8) * 0.38;
+    let rim_tint = saturate_rgb(
+        mix(dark * 1.15, bright * 0.95, 0.62),
+        POLYCHROME_SATURATION,
+    );
+    albedo = mix(albedo, rim_tint, rim);
+    return saturate_rgb(albedo, 1.12);
+}
+
+fn moon_glyph_band_albedo_uv(band_coord: vec2<f32>, uv: vec2<f32>, time: f32) -> vec3<f32> {
+    let local = (uv - vec2<f32>(0.5)) * 2.0;
+    let drift = time * 0.8;
+    let warp = sin(time * 2.2 + band_coord.y * POLYCHROME_WARP_Y) * 0.28
+             + sin(time * 1.4 + band_coord.x * POLYCHROME_WARP_X) * 0.18;
+    let coord = band_coord.x * POLYCHROME_COORD_X + band_coord.y * POLYCHROME_COORD_Y + warp + drift;
+    let wave = 0.5 + 0.5 * sin(coord * 6.2831855);
+    let band = smoothstep(0.26, 0.74, wave);
+    let bright = MOON_STRIPE;
+    let dark = MOON_FIELD;
+    var albedo = mix(dark, bright, band);
+    let edge = length(local);
+    let rim = pow(min(edge * 1.4, 1.0), 1.8) * 0.32;
+    let rim_tint = mix(dark * 1.08, bright * 0.92, 0.58);
+    albedo = mix(albedo, rim_tint, rim);
+    return saturate_rgb(albedo, 1.06);
 }
 
 fn apply_text_effect(
     base_rgb: vec3<f32>,
     a: f32,
     uv: vec2<f32>,
+    band_coord: vec2<f32>,
     effect_id: u32,
     t: f32,
 ) -> vec4<f32> {
@@ -102,6 +164,10 @@ fn apply_text_effect(
     } else if effect_id == 4u {
         let warm = vec3<f32>(1.08, 0.92, 0.72);
         rgb = rgb * warm;
+    } else if effect_id == 5u {
+        rgb = score_glyph_band_albedo_uv(base_rgb, band_coord, uv, t);
+    } else if effect_id == 6u {
+        rgb = moon_glyph_band_albedo_uv(band_coord, uv, t);
     }
 
     return vec4<f32>(rgb, out_a);
@@ -116,6 +182,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         base_rgb,
         in.color.a * samp_a,
         in.uv,
+        in.band_coord,
         in.effect_id,
         globals.time,
     );

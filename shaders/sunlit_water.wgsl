@@ -31,21 +31,41 @@ fn vs_main(@builtin(vertex_index) vid: u32) -> VsOut {
     return out;
 }
 
-fn hash21(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+// Integer lattice hash — stable on Metal and DX12/FXC (no sin/fract).
+fn hash_u32(x: u32) -> u32 {
+    var v = x;
+    v = v ^ (v >> 16u);
+    v = v * 0x7feb352du;
+    v = v ^ (v >> 15u);
+    v = v * 0x846ca68bu;
+    v = v ^ (v >> 16u);
+    return v;
+}
+
+fn hash21_i(i: vec2<i32>) -> f32 {
+    let n = hash_u32(u32(i.x) * 0x9e3779b9u ^ u32(i.y) * 0x85ebca6bu);
+    return f32(n >> 8u) * (1.0 / 16777215.0);
 }
 
 fn value_noise(p: vec2<f32>) -> f32 {
-    let i = floor(p);
+    let i = vec2<i32>(floor(p));
     let f = fract(p);
-    let u = f * f * (3.0 - 2.0 * f);
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 
-    let a = hash21(i);
-    let b = hash21(i + vec2<f32>(1.0, 0.0));
-    let c = hash21(i + vec2<f32>(0.0, 1.0));
-    let d = hash21(i + vec2<f32>(1.0, 1.0));
+    let a = hash21_i(i);
+    let b = hash21_i(i + vec2<i32>(1, 0));
+    let c = hash21_i(i + vec2<i32>(0, 1));
+    let d = hash21_i(i + vec2<i32>(1, 1));
 
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+fn warp_coords(p: vec2<f32>, strength: f32) -> vec2<f32> {
+    let w = vec2<f32>(
+        value_noise(p * 0.55 + vec2<f32>(0.0, 1.7)) - 0.5,
+        value_noise(p * 0.55 + vec2<f32>(4.1, 0.0)) - 0.5,
+    );
+    return p + w * strength;
 }
 
 fn fbm2(p: vec2<f32>) -> f32 {
@@ -81,10 +101,15 @@ fn water_height(p: vec2<f32>, time: f32) -> f32 {
 
     let swell0 = sin(long_x * x_scale + time * 0.40) * 0.32;
     let swell1 = sin(long_x * (x_scale * 2.1) - time * 0.52 + p.y * 1.1) * 0.12;
-    let chop = (fbm2(vec2<f32>(
-        p.x * mix(7.0, 16.0, far_mix) - time * 0.020,
-        p.y * mix(3.5, 14.0, far_mix) + time * 0.010,
-    )) - 0.5) * 0.18;
+    let chop_seed = vec2<f32>(
+        p.x * mix(6.0, 13.0, far_mix) - time * 0.020,
+        p.y * mix(5.0, 13.0, far_mix) + time * 0.010,
+    );
+    let chop_p = warp_coords(
+        chop_seed + vec2<f32>(time * 0.013, -time * 0.007),
+        mix(0.12, 0.06, far_mix),
+    );
+    let chop = (fbm2(chop_p) - 0.5) * 0.18;
     let capillary = sin(long_x * mix(34.0, 86.0, far_mix) - time * 0.85) * 0.030;
     return swell0 + swell1 + chop + capillary;
 }
@@ -158,7 +183,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let reflection_dx = abs(drifted_x - reflection_center);
         let reflection_column = smoothstep(reflection_width, 0.0, reflection_dx);
         let glint_mask = pow(max(1.0 - abs(h_dx) * 78.0 - abs(h_dy) * 26.0, 0.0), 6.2);
-        let sparkle_noise = fbm2(vec2<f32>(drifted_x * 16.0 - t * 0.04, water_y * 86.0 + t * 0.025));
+        let sparkle_noise = fbm2(warp_coords(
+            vec2<f32>(drifted_x * 16.0 - t * 0.04, water_y * 86.0 + t * 0.025),
+            0.07,
+        ));
         let streaks = 0.5 + 0.5 * sin(water_y * 300.0 - t * 1.55 + sparkle_noise * 8.5);
         let breakup = smoothstep(0.62, 0.92, streaks) * smoothstep(0.46, 0.88, sparkle_noise)
             * (0.26 + 0.74 * glint_mask);

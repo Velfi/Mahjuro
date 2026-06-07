@@ -18,6 +18,7 @@
 //   15.0 = polychrome  — holographic thin-film rainbow
 //   21.0 = chitin      — abalone talisman tablets (oily iridescence / memorial stone)
 //   20.0 = emissive    — additive self-illumination (strength in specular_strength)
+//   23.0 = bronze_mirror — gameplay play mirror (conductor + view Fresnel + jade rim)
 //
 // All material variants share the candle/spot point-light loop from the tile
 // shader so the new geometry catches the same warm pools as the hand tiles.
@@ -29,6 +30,8 @@ struct MeshUniform {
     // x = material_kind, y = specular_strength (emissive scale for kind 20),
     // z = specular_power, w = decal / talisman slot (see lit_mesh.rs)
     material_params: vec4<f32>,
+    // x = play-mirror valid-hand jade fresnel (Metal only)
+    instance_params: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> mesh: MeshUniform;
@@ -36,6 +39,11 @@ struct MeshUniform {
 @group(0) @binding(2) var albedo_samp: sampler;
 /// Relic relief data (linear): `.r` = height, `.g` = specular mask (soft-enamel pins).
 @group(0) @binding(3) var relief_tex: texture_2d<f32>;
+
+fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
+    let ct = clamp(cos_theta, 0.0, 1.0);
+    return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - ct, 5.0);
+}
 
 struct PointLight {
     pos: vec4<f32>,   // xyz = world position, w = radius or inverse-square range
@@ -87,7 +95,7 @@ fn ign(p: vec2<f32>) -> f32 {
 // extruded glyphs pass spec_power >= 40 (see object3d_placement.rs); talisman
 // tablets use ~32 and keep the legacy rainbow polychrome look.
 fn score_glyph_band_albedo(local_pos: vec3<f32>, base: vec3<f32>, time: f32) -> vec3<f32> {
-    let drift = time * 1.6;
+    let drift = time * 0.8;
     let warp = sin(time * 2.2 + local_pos.y * 7.0) * 0.28
              + sin(time * 1.4 + local_pos.x * 5.5) * 0.18;
     let coord = local_pos.x * 5.0 + local_pos.y * 3.2 + warp + drift;
@@ -733,6 +741,7 @@ fn fs_main(
     let is_emissive  = (kind > 19.5 && kind < 20.5);
     let is_chitin    = (kind > 20.5 && kind < 21.5);
     let is_unshaded  = (kind > 21.5 && kind < 22.5);
+    let is_bronze_mirror = (kind > 22.5 && kind < 23.5);
     let marker_punctual_mul = gameplay_marker_spawn_punctual_mul(
         ssr_globals.shop_punctual.w,
         kind,
@@ -750,7 +759,7 @@ fn fs_main(
     // Fresnel-spec branch and for the rim halo. Skips the coin-face
     // heightmap perturbation since brass fittings are smooth, not
     // engraved.
-    let is_conductor = (is_metal || is_brass);
+    let is_conductor = (is_metal || is_brass || is_bronze_mirror);
     // Talisman tablets: beetle chitin + legacy gem kinds (material viewer).
     let is_talisman  = (is_chitin || is_jade || is_moonstone || is_pearl || is_goldnug || is_poly);
     // Chitin: classify by local normal — rim verts share |z| with caps but face outward.
@@ -811,6 +820,9 @@ fn fs_main(
     if (is_brass) {
         // Brass: smooth polished conductor, no heightmap. Albedo is the
         // base tint and the conductor Fresnel sheen does the rest.
+        albedo = mesh.base_color.rgb;
+    }
+    if (is_bronze_mirror) {
         albedo = mesh.base_color.rgb;
     }
     if (is_leather) {
@@ -1410,6 +1422,9 @@ fn fs_main(
     var enamel_height = 0.0;
     var enamel_ridge = 0.0;
     var enamel_spec_mask = 1.0;
+    var mirror_relief_spec = 1.0;
+    var mirror_carve = 0.0;
+    var mirror_grad = 0.0;
     if (is_metal) {
         let face_flat = abs(n.y);
         if (face_flat > 0.6) {
@@ -1438,6 +1453,55 @@ fn fs_main(
             // between disc and rim doesn't pop.
             let blend = smoothstep(0.6, 0.95, face_flat);
             n = normalize(mix(n, n_face, blend));
+        }
+    }
+    // Bronze play mirror: heightmap is bound at albedo slot 1 (see
+    // init_deferred.rs). Perturb in LOCAL space (+Y cap, XZ tangents) so
+    // the cast relief reads regardless of table/market orientation.
+    if (is_bronze_mirror && in.local_n.y > 0.55) {
+        let radial = length(in.uv - vec2<f32>(0.5)) * 2.0;
+        if (radial < 0.92) {
+            let dim = vec2<f32>(textureDimensions(albedo_tex, 0));
+            let texel = vec2<f32>(1.0 / max(dim.x, 1.0), 1.0 / max(dim.y, 1.0));
+            let h_c = textureSampleLevel(albedo_tex, albedo_samp, in.uv, 0.0).r;
+            let h_l = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(-texel.x, 0.0), 0.0).r;
+            let h_r = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>( texel.x, 0.0), 0.0).r;
+            let h_d = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0, -texel.y), 0.0).r;
+            let h_u = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0,  texel.y), 0.0).r;
+            let bump = 28.0;
+            let dhdu = (h_r - h_l) * bump;
+            let dhdv = (h_u - h_d) * bump;
+            let n_local = normalize(vec3<f32>(-dhdu, 1.0, -dhdv));
+            let n_world_perturbed = normalize((mesh.model * vec4(n_local, 0.0)).xyz);
+            let cap_blend = smoothstep(0.55, 0.92, in.local_n.y);
+            n = normalize(mix(n, n_world_perturbed, cap_blend));
+            let carve = smoothstep(0.26, 0.68, h_c);
+            let valley = 1.0 - smoothstep(0.18, 0.44, h_c);
+            mirror_carve = carve;
+            mirror_grad = length(vec2<f32>(dhdu, dhdv));
+            albedo = mix(
+                albedo * (0.22 + valley * 0.28),
+                albedo * 1.62 + vec3<f32>(0.32, 0.20, 0.07),
+                carve,
+            );
+            mirror_relief_spec = 1.0 + carve * 5.0 + valley * 0.75;
+            // Fixed rake toward the table candles so carved relief reads even
+            // when the gameplay camera is nearly top-down.
+            let rake_light = normalize(vec3<f32>(0.62, 0.28, 0.74));
+            let rake = max(dot(n, rake_light), 0.0);
+            albedo = albedo * (0.40 + rake * 0.95 + carve * 0.42 - valley * 0.18);
+            let play_glow_albedo = mesh.instance_params.x;
+            if (play_glow_albedo > 0.01) {
+                let jade_tint = vec3<f32>(0.10, 0.78, 0.38);
+                let face_fill = (1.0 - smoothstep(0.0, 0.72, radial)) * 0.55
+                    + pow(smoothstep(0.18, 0.92, radial), 1.1) * 0.42;
+                let ridge_jade = carve * 0.48;
+                albedo = mix(
+                    albedo,
+                    albedo * 0.68 + jade_tint * 0.95,
+                    clamp((face_fill + ridge_jade) * play_glow_albedo * 0.85, 0.0, 1.0),
+                );
+            }
         }
     }
     if (is_enamel) {
@@ -1780,6 +1844,13 @@ fn fs_main(
             if (is_wood) {
                 s = s * mix(0.55, 1.15, wood_grain) * (1.0 - wood_pore * 0.85);
             }
+            if (is_bronze_mirror) {
+                s = s * (1.0 + mirror_carve * 4.5);
+                let soft_mirror = pow(nh, max(spec_power * 0.16, 5.0)) * 0.52;
+                s = s + soft_mirror * (0.62 + mirror_carve * 1.1);
+                let ridge_spark = pow(nh, 28.0) * mirror_grad * 0.18;
+                s = s + ridge_spark * (0.85 + mirror_carve * 1.4);
+            }
             if (is_conductor) {
                 // Conductor: Schlick Fresnel against the half-vector with
                 // F0 = base colour. The reflected light then takes on the
@@ -1792,7 +1863,14 @@ fn fs_main(
                 let f_metal = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
                 // Brass is slightly less reflective than "Metal" so the
                 // warm body tone stays readable under museum lighting.
-                let conductor_scale = select(1.0, 0.85, is_brass);
+                // Bronze mirror: polished gameplay disc — punchy candle pinpoints.
+                var conductor_scale = 1.0;
+                if (is_brass) {
+                    conductor_scale = 0.85;
+                }
+                if (is_bronze_mirror) {
+                    conductor_scale = 2.15 * mirror_relief_spec;
+                }
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * f_metal * conductor_scale;
             } else if (is_enamel) {
                 let vdh = max(dot(view_dir, h), 0.0);
@@ -2026,7 +2104,7 @@ fn fs_main(
                 if (is_score_glyph) {
                     // Score pops: band-swept sheen keyed to the popup tint.
                     let time = lights.extras.y;
-                    let drift = time * 2.0;
+                    let drift = time * 1.0;
                     let coord = in.local_pos.x * 4.5 + in.local_pos.y * 3.0
                               + sin(time * 2.8 + in.local_pos.y * 6.0) * 0.3;
                     let wave = 0.5 + 0.5 * sin(coord * 6.28 - drift);
@@ -2214,11 +2292,17 @@ fn fs_main(
     // base specular and clearcoat add on top. For wood we Fresnel-fade
     // the diffuse so energy flows into the coat at glancing angles.
     var diffuse_scale = 1.0;
-    if (is_metal) {
+    if (is_metal || is_bronze_mirror) {
         // Conductors do not diffusely scatter light — almost all of the
         // response is in the tinted Fresnel spec lobe above. Leave a
         // sliver of diffuse so unlit-side coins don't read as cutouts.
         diffuse_scale = 0.08;
+    }
+    if (is_bronze_mirror) {
+        // Carved relief needs enough diffuse for candle raking light to
+        // read from the gameplay camera; scale with ridge height.
+        diffuse_scale = mix(0.14, 0.52, clamp(mirror_carve * 0.82 + 0.18, 0.0, 1.0));
+        lit = lit * (0.72 + mirror_carve * 2.6);
     }
     if (is_brass) {
         // Brass fittings keep a bit more diffuse so shelf rails etc.
@@ -2445,6 +2529,7 @@ fn fs_main(
     // outside specular angles. Independent of light direction so the
     // disc reads as polished bronze from every camera angle, not just
     // when a candle aligns with the half-vector.
+    //
     if (is_metal) {
         let edge = 1.0 - ndv_view;
         let rim = pow(edge, 3.0) * 0.55;
@@ -2604,6 +2689,43 @@ fn fs_main(
     if (is_emissive) {
         emissive = emissive + mesh.base_color.rgb * spec_strength;
     }
+    if (is_bronze_mirror) {
+        // View-facing Schlick rims — independent of punctual light direction
+        // so the disc reads polished from every camera angle.
+        let bronze_f0 = mesh.base_color.rgb * 0.52;
+        let f_bronze = fresnel_schlick(ndv_view, bronze_f0);
+        let warm_edge = mix(vec3<f32>(1.0, 0.93, 0.72), vec3<f32>(1.0), 0.25);
+        sheen_acc = sheen_acc + f_bronze * warm_edge * 0.58;
+        let relief_catch = mirror_carve * (0.55 + mirror_grad * 0.12);
+        sheen_acc = sheen_acc + warm_edge * relief_catch * 1.35;
+
+        let play_glow = mesh.instance_params.x;
+        if (play_glow > 0.01) {
+            let jade_color = vec3<f32>(0.18, 1.0, 0.48);
+            let jade_f0 = vec3<f32>(0.04, 0.22, 0.10);
+            let radial = length(in.uv - vec2<f32>(0.5)) * 2.0;
+            let mirror_polished_face = in.local_n.y > 0.82 && radial < 0.94;
+
+            if (mirror_polished_face) {
+                let rim_w = pow(smoothstep(0.22, 0.94, radial), 1.05);
+                let center_w = (1.0 - smoothstep(0.0, 0.68, radial)) * 0.55;
+                let ridge_w = mirror_carve * 0.72;
+                let jade_strength = (rim_w * 7.5 + center_w + ridge_w) * play_glow;
+                let f_view = fresnel_schlick(ndv_view, jade_f0);
+                sheen_acc = sheen_acc + jade_color * jade_strength * 11.0;
+                sheen_acc = sheen_acc + f_view * jade_color * play_glow * 5.5;
+                emissive = emissive + jade_color * jade_strength * 4.2;
+                emissive = emissive + jade_color * play_glow * center_w * 2.4;
+            } else {
+                let f_jade = fresnel_schlick(ndv_view, jade_f0);
+                let grazing = pow(1.0 - ndv_view, 1.6) * play_glow;
+                sheen_acc = sheen_acc + jade_color * f_jade * play_glow * 7.5;
+                sheen_acc = sheen_acc + jade_color * grazing * 4.5;
+                emissive = emissive + jade_color * f_jade * play_glow * 2.2;
+                emissive = emissive + jade_color * grazing * 2.8;
+            }
+        }
+    }
     if (is_unshaded) {
         rgb = albedo;
     } else {
@@ -2638,6 +2760,14 @@ fn fs_main(
             var hdr = rgb;
             hdr = hdr + albedo * vec3<f32>(amb) * diffuse_scale * baked_contact;
             hdr = hdr * ssr_globals.hdr_tonemap.y;
+            if (is_bronze_mirror && mesh.instance_params.x > 0.01) {
+                let pg = mesh.instance_params.x;
+                let jade_hdr = vec3<f32>(0.08, 0.72, 0.34);
+                let radial_pg = length(in.uv - vec2<f32>(0.5)) * 2.0;
+                let rim_pg = pow(smoothstep(0.20, 0.94, radial_pg), 0.95);
+                let center_pg = (1.0 - smoothstep(0.0, 0.55, radial_pg)) * 0.28;
+                hdr = hdr + jade_hdr * pg * (rim_pg * 1.65 + center_pg + mirror_carve * 0.62);
+            }
             out_rgb = hdr;
         }
     } else if (is_unshaded) {

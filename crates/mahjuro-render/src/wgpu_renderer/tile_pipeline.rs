@@ -38,6 +38,9 @@ pub(crate) struct TilePrimitiveGpu {
     pub pbr_uniform_buffer: wgpu::Buffer,
     pub sampler: wgpu::Sampler,
     pub pipeline_key: TileGlbPipelineKey,
+    /// Per-primitive material bind group (frame uniform + textures). Refreshed when the
+    /// showcase decal atlas or frame uniform buffer identity changes.
+    pub material_bind_group: Option<wgpu::BindGroup>,
 }
 
 /// GPU resources for one player [`mahjuro_gfx_types::TileMaterial`] mesh variant.

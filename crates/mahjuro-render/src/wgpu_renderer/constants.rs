@@ -72,7 +72,7 @@ pub const MAX_SPOT_LIGHTS: usize = 8;
 /// sized so the full hand fits.
 pub const MAX_TILE_OCCLUDERS: usize = 16;
 
-pub(crate) const MAX_SHOWCASE_TILE_SLOTS: usize = 160;
+pub(crate) const MAX_SHOWCASE_TILE_SLOTS: usize = 2048;
 
 /// Frames an unused entry stays in `text_label_cache` before eviction.
 pub(crate) const TEXT_CACHE_TTL_FRAMES: u64 = 120;

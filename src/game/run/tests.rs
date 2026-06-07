@@ -88,6 +88,7 @@ mod cases {
             tile_enhancements: BTreeMap::new(),
             global_buff_enhancement: None,
             removed_tile_ids: rustc_hash::FxHashSet::default(),
+            decimations_used: 0,
             upcoming_chamber: ChamberKind::Small,
             wall,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
@@ -880,6 +881,27 @@ mod cases {
     }
 
     #[test]
+    fn advance_round_after_boss_clears_ordeal_tile_debuffs() {
+        use crate::core::debuff::{TileDebuff, TileDebuffClass};
+        use crate::core::tile::Suit;
+
+        let mut run = test_run();
+        let mut bus = bus();
+        run.chamber = ChamberKind::Ordeal;
+        run.upcoming_chamber = ChamberKind::Ordeal;
+        run.tile_debuffs = vec![
+            TileDebuff::Suit(Suit::Souzu),
+            TileDebuff::Class(TileDebuffClass::Honors),
+        ];
+        run.relics.set_debuffed([crate::core::relic::RelicId::MirrorTile]);
+
+        run.advance_round(&mut bus);
+
+        assert!(run.tile_debuffs.is_empty());
+        assert!(!run.relics.is_debuffed(crate::core::relic::RelicId::MirrorTile));
+    }
+
+    #[test]
     fn ensure_ordeal_revealed_rolls_for_current_wing() {
         let mut run = RunState::new_demo();
         run.wing = 2;
@@ -1025,7 +1047,7 @@ mod cases {
         assert!(run.commit_selection_to_structure(&mut bus) > 0);
         assert!(
             !run.honors_scored_this_round,
-            "banking honors must not count toward Green Luck until cash-in scores them"
+            "playing honors must not count toward Green Luck until cash-in scores them"
         );
     }
 
@@ -1099,6 +1121,137 @@ mod cases {
         assert!(
             baseline_score > 0,
             "non-Dragon blind should still score tile chips from the same structure"
+        );
+    }
+
+    #[test]
+    fn dead_air_destroys_scored_wind_tiles() {
+        let (tiles, sets) = winning_structure();
+        let wind_ids: Vec<u32> = tiles
+            .iter()
+            .filter(|t| t.suit == Suit::Wind)
+            .map(|t| t.id)
+            .collect();
+
+        let mut run = test_run();
+        run.chamber = ChamberKind::Ordeal;
+        run.upcoming_chamber = ChamberKind::Ordeal;
+        run.ordeal.upcoming = Some(OrdealKind::DeadAir);
+        run.structure_tiles = tiles;
+        run.structure_sets = sets;
+        let mut bus = bus();
+        let _ = run.trigger_structure_manual(&mut bus);
+
+        for id in wind_ids {
+            assert!(
+                run.removed_tile_ids.contains(&id),
+                "Dead Air should permanently remove scored wind tile {id}"
+            );
+        }
+        assert!(
+            bus.queue
+                .iter()
+                .any(|e| matches!(e, GameEvent::TilesDestroyed)),
+            "Dead Air destruction should emit TilesDestroyed"
+        );
+    }
+
+    #[test]
+    fn st_george_destroys_scored_dragon_tiles() {
+        let tiles = vec![
+            Tile::new(Suit::Manzu, 1, 1),
+            Tile::new(Suit::Manzu, 1, 2),
+            Tile::new(Suit::Manzu, 2, 3),
+            Tile::new(Suit::Manzu, 3, 4),
+            Tile::new(Suit::Manzu, 4, 5),
+            Tile::new(Suit::Pinzu, 2, 6),
+            Tile::new(Suit::Pinzu, 3, 7),
+            Tile::new(Suit::Pinzu, 4, 8),
+            Tile::new(Suit::Souzu, 5, 9),
+            Tile::new(Suit::Souzu, 6, 10),
+            Tile::new(Suit::Souzu, 7, 11),
+            Tile::new(Suit::Dragon, 1, 12),
+            Tile::new(Suit::Dragon, 1, 13),
+            Tile::new(Suit::Dragon, 1, 14),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![6, 7, 8],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![9, 10, 11],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![12, 13, 14],
+            },
+        ];
+        let dragon_ids = [12u32, 13, 14];
+
+        let mut run = test_run();
+        run.chamber = ChamberKind::Ordeal;
+        run.upcoming_chamber = ChamberKind::Ordeal;
+        run.ordeal.upcoming = Some(OrdealKind::StGeorge);
+        run.structure_tiles = tiles;
+        run.structure_sets = sets;
+        let mut bus = bus();
+        let _ = run.trigger_structure_manual(&mut bus);
+
+        for id in dragon_ids {
+            assert!(
+                run.removed_tile_ids.contains(&id),
+                "St. George should permanently remove scored dragon tile {id}"
+            );
+        }
+        assert!(
+            bus.queue
+                .iter()
+                .any(|e| matches!(e, GameEvent::TilesDestroyed)),
+            "St. George destruction should emit TilesDestroyed"
+        );
+    }
+
+    #[test]
+    fn decimation_removes_ten_tiles_from_shop_preview() {
+        use crate::game::decimation::{
+            apply_decimation, decimation_eligible_tiles, decimation_house_pool, pick_house_tiles,
+            HOUSE_PICKS, PLAYER_PICKS,
+        };
+        use crate::game::wall_ledger::shop_wall_hud_count;
+
+        let mut run = test_run();
+        let mut bus = bus();
+        let before = shop_wall_hud_count(&run);
+        let eligible = decimation_eligible_tiles(&run);
+        assert!(eligible.len() >= 10);
+        let player: [u32; PLAYER_PICKS] = eligible
+            .iter()
+            .take(PLAYER_PICKS)
+            .map(|t| t.id)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let pool = decimation_house_pool(&run, &player);
+        let house: [u32; HOUSE_PICKS] = pick_house_tiles(&pool, &mut rand::rng())
+            .try_into()
+            .unwrap();
+        apply_decimation(&mut run, player, house, &mut bus, true);
+        assert_eq!(shop_wall_hud_count(&run), before - 10);
+        assert_eq!(run.decimations_used, 1);
+        assert!(
+            bus.queue
+                .iter()
+                .any(|e| matches!(e, GameEvent::TilesDestroyed))
         );
     }
 

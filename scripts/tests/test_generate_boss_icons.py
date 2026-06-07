@@ -32,17 +32,17 @@ class BossDataTests(unittest.TestCase):
         cls.m = _load_module()
 
     def test_boss_json_order_matches_rust_all(self):
-        json_ids = [b.slug for b in self.m.BOSSES]
+        json_ids = [b.slug for b in self.m.ORDEALS]
         rust_ids = self.m.load_boss_kind_order()
         self.assertEqual(json_ids, rust_ids)
 
     def test_every_boss_has_visual(self):
-        for boss in self.m.BOSSES:
+        for boss in self.m.ORDEALS:
             self.assertIn(boss.slug, self.m.BOSS_VISUALS)
 
-    def test_layout_is_five_by_five_with_pad(self):
+    def test_layout_is_full_five_by_five_grid(self):
         self.assertEqual(len(self.m.LAYOUT), 25)
-        self.assertEqual(self.m.LAYOUT[-1], "")
+        self.assertEqual(len(self.m.LAYOUT) % self.m.COLUMNS, 0)
 
     def test_style_base_is_vector_inventory_art(self):
         self.assertIn("vector-style polygon shading", self.m.STYLE_BASE)
@@ -60,14 +60,14 @@ class BossAtlasPackTests(unittest.TestCase):
             proc = Path(tmp) / "processed"
             out = Path(tmp) / "out"
             proc.mkdir()
-            for boss in self.m.BOSSES:
+            for boss in self.m.ORDEALS:
                 img = Image.new("RGBA", (128, 128), (232, 177, 74, 255))
-                img.save(proc / f"boss_{boss.slug}.png")
+                img.save(proc / f"ordeal_{boss.slug}.png")
             atlas_path = self.m.pack_atlas(proc, out)
             self.assertTrue(atlas_path.exists())
             self.assertTrue((out / "atlas.toml").exists())
             with Image.open(atlas_path) as atlas:
-                self.assertEqual(atlas.size, (640, 640))
+                self.assertEqual(atlas.size, (2560, 2560))
 
 
 if __name__ == "__main__":

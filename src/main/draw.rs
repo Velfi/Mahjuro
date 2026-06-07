@@ -9,6 +9,8 @@ use crate::scene_transition::{PendingSceneDestination, SceneTag, overlay_kind_fo
 use crate::scenes::SceneIntent;
 #[cfg(feature = "game")]
 use crate::core;
+#[cfg(feature = "game")]
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render;
 use crate::ui::modal::{Modal, ModalTheme, UnlockPage};
 #[cfg(feature = "game")]
@@ -22,8 +24,8 @@ fn append_fullscreen_debug_panel(
     insts: Vec<GpuInstance>,
     labels: Vec<TextLabel>,
 ) {
-    frame.quads(insts);
-    frame.texts(labels);
+    frame.debug_overlay_quads(insts);
+    frame.debug_overlay_texts(labels);
     active_buttons.clear();
 }
 
@@ -413,6 +415,7 @@ impl App {
             || self.debug.scene_look_debug_overlay.is_some()
             || self.debug.rain_debug_overlay.is_some()
             || self.debug.flame_debug_overlay.is_some()
+            || self.debug.victory_moon_debug_overlay.is_some()
             || self.debug.hallway_distortion_debug_overlay.is_some();
         let preserve_overlay_stack_buttons = matches!(
             self.overlay_stack.last(),
@@ -422,10 +425,12 @@ impl App {
                     | Scene::TransitionPlayground(_)
                     | Scene::AnimationLab(_)
                     | Scene::TileAnchorLab(_)
+                    | Scene::TileStressLab(_)
                     | Scene::ButtonAabbLab(_)
                     | Scene::RollerLab(_)
                     | Scene::CascadeLab(_)
                     | Scene::ShadowAoLab(_)
+                    | Scene::TextShadowLab(_)
             )
         );
         let scene_look = self.resolved_scene_look();
@@ -502,6 +507,9 @@ impl App {
         } else {
             1.0
         };
+        if self.debug.focus_nav_overlay {
+            self.debug.focus_nav_snapshot = None;
+        }
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -553,6 +561,9 @@ impl App {
             self.hub_loading,
             renderer.main_menu_effects,
             renderer.flame_tuning,
+            self.debug.victory_moon_debug,
+            self.debug.focus_nav_overlay,
+            &mut self.debug.focus_nav_snapshot,
         );
         self.cpu_profiler
             .end(crate::render::cpu_profiler::CpuStage::DrawPrep);
@@ -701,10 +712,31 @@ impl App {
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
+        // Victory 3D moon rotation + phase (left panel).
+        if let Some(ref overlay) = self.debug.victory_moon_debug_overlay {
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
+            append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
+        }
+
         // Debug visibility overlay — on top of modals.
         if let Some(ref overlay) = self.debug.visibility_overlay {
             let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
+        }
+
+        if self.debug.focus_nav_overlay {
+            if let Some(ref snap) = self.debug.focus_nav_snapshot {
+                let w = size.width as f32;
+                let h = size.height as f32;
+                let scale = crate::render::theme::metrics::scene_scale(w, h);
+                let mut insts = Vec::new();
+                let mut lbls = Vec::new();
+                crate::ui::focus_nav::push_focus_nav_debug_overlay(
+                    snap, w, h, scale, &mut insts, &mut lbls,
+                );
+                frame.debug_overlay_quads(insts);
+                frame.debug_overlay_texts(lbls);
+            }
         }
 
         hide_all_ui |= self.debug.hide_2d_ui;
@@ -738,10 +770,11 @@ impl App {
                     crate::render::theme::metrics::tooltip_max_panel_px(w, h) * 0.72;
                 let max_inner_w = (max_tooltip_w - 2.0 * pad).max(40.0);
                 let preferred_inner_w =
-                    crate::ui::colored_keywords::colored_paragraph_preferred_width(
+                    crate::ui::styled_text::colored_paragraph_preferred_width(
                         label.as_ref(),
                         line_h,
                         max_inner_w,
+                        GlossaryMode::Prose,
                     )
                     .max(40.0);
                 let tooltip_w = (preferred_inner_w + 2.0 * pad).clamp(72.0, max_tooltip_w);
@@ -752,14 +785,15 @@ impl App {
 
                 let parchment = crate::render::theme::color::PARCHMENT;
                 let inner_w = (tooltip_w - 2.0 * pad).max(40.0);
-                let color_lines = crate::ui::colored_keywords::wrap_colored_text_multiline(
+                let color_lines = crate::ui::styled_text::wrap_colored_text_multiline(
                     label.as_ref(),
                     inner_w,
                     line_h,
                     parchment,
                     false,
+                    GlossaryMode::Prose,
                 );
-                let content_h = crate::ui::colored_keywords::colored_multiline_block_height(
+                let content_h = crate::ui::styled_text::colored_multiline_block_height(
                     color_lines.len(),
                     line_h,
                 );
@@ -787,9 +821,9 @@ impl App {
                 frame.overlay_quads(tip_quads);
                 let text_top = tip_y + pad + ((tooltip_h - 2.0 * pad - content_h) * 0.5).max(0.0);
                 let mut tip_texts: Vec<crate::render::wgpu_renderer::TextLabel> = Vec::new();
-                crate::ui::colored_keywords::push_colored_rows_in_width(
+                crate::ui::styled_text::push_colored_rows_in_width(
                     &mut tip_texts,
-                    crate::ui::colored_keywords::ColoredRowsLayout {
+                    crate::ui::styled_text::ColoredRowsLayout {
                         text_left: tip_x + pad,
                         top_y: text_top,
                         inner_w,
@@ -797,6 +831,7 @@ impl App {
                         fallback_plain: label.as_ref(),
                         fallback_color: parchment,
                         italic: false,
+                        glossary: GlossaryMode::Prose,
                     },
                     &color_lines,
                     crate::render::wgpu_renderer::TextAlign::Center,
@@ -818,12 +853,12 @@ impl App {
             let label_h = (h * 0.03).max(20.0);
             let label_w = label_h * 4.0;
             let margin = label_h * 0.3;
-            frame.quad(GpuInstance {
+            frame.debug_overlay_quads([GpuInstance {
                 rect: [w - label_w - margin, margin, label_w, label_h],
                 color: [0.0, 0.0, 0.0, 0.55],
                 user: 0,
-            });
-            frame.text(TextLabel {
+            }]);
+            frame.debug_overlay_texts([TextLabel {
                 rect: [w - label_w - margin, margin, label_w, label_h],
                 text: format!("{:.0} FPS", self.debug.fps_smoothed),
                 color: [0.9, 0.9, 0.3, 1.0],
@@ -832,7 +867,7 @@ impl App {
                     h,
                 )),
                 ..Default::default()
-            });
+            }]);
         }
 
         // Final scene-transition blackout pass. `apply_alpha` fades 2D draw
@@ -919,6 +954,9 @@ impl App {
             .begin(crate::render::cpu_profiler::CpuStage::Render);
         if let Err(e) = renderer.render(&frame, render_settings) {
             log::error!("render: {e:?}");
+        }
+        if let Scene::Gameplay(gp) = &self.scene {
+            gp.stash_hand_tile_pick_rects(renderer.projections().hand_rects.clone());
         }
         let rollers_loop = frame
             .gameplay_score_roller_values

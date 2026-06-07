@@ -171,6 +171,18 @@ impl WgpuRenderer {
             .unwrap_or_default()
     }
 
+    fn main_menu_moon_prim_indices_for_draw(&self) -> Vec<usize> {
+        self.main_menu_moon_prim_indices.clone()
+    }
+
+    pub(super) fn main_menu_env_skip_prim(&self, pi: usize, frame: &crate::draw_cmd::UiFrame) -> bool {
+        if !frame.main_menu_env_moon_only {
+            return false;
+        }
+        let moon_indices = self.main_menu_moon_prim_indices_for_draw();
+        !moon_indices.is_empty() && !moon_indices.contains(&pi)
+    }
+
     pub(super) fn shop_gltf_anim_prim_deltas(
         &self,
         frame: &crate::draw_cmd::UiFrame,
@@ -244,7 +256,7 @@ impl WgpuRenderer {
         (visual_phase as f32) * (-std::f32::consts::TAU / 10.0)
     }
 
-    pub(super) fn gameplay_score_roller_frame_state(
+    fn gameplay_score_roller_prim_deltas(
         &self,
         frame: &crate::draw_cmd::UiFrame,
     ) -> rustc_hash::FxHashMap<usize, glam::Mat4> {
@@ -289,6 +301,34 @@ impl WgpuRenderer {
                     deltas.insert(pi, delta);
                 }
             }
+        }
+        deltas
+    }
+
+    fn gameplay_cash_in_wiggle_prim_deltas(
+        &self,
+        wiggle_px: f32,
+    ) -> rustc_hash::FxHashMap<usize, glam::Mat4> {
+        let mut deltas = rustc_hash::FxHashMap::default();
+        if wiggle_px.abs() < 1e-4 || self.gameplay_cash_in_prim_indices.is_empty() {
+            return deltas;
+        }
+        // Map screen-space wiggle into gameplay.glb document units (world Z-up).
+        let doc_shift = wiggle_px * 0.003;
+        let delta = Mat4::from_translation(glam::Vec3::new(0.0, 0.0, doc_shift));
+        for &pi in &self.gameplay_cash_in_prim_indices {
+            deltas.insert(pi, delta);
+        }
+        deltas
+    }
+
+    pub(super) fn gameplay_env_prim_deltas(
+        &self,
+        frame: &crate::draw_cmd::UiFrame,
+    ) -> rustc_hash::FxHashMap<usize, glam::Mat4> {
+        let mut deltas = self.gameplay_score_roller_prim_deltas(frame);
+        for (pi, delta) in self.gameplay_cash_in_wiggle_prim_deltas(frame.gameplay_cash_in_wiggle) {
+            deltas.insert(pi, delta);
         }
         deltas
     }
@@ -380,7 +420,7 @@ impl WgpuRenderer {
         let Some(ref gpu) = self.gameplay_environment else {
             return;
         };
-        let skip = |pi: usize| self.gameplay_env_skip_cash_in_prim(pi, frame);
+        let skip = |pi: usize| self.gameplay_env_skip_prim(pi, frame);
         self.draw_gltf_room_env_meshes(
             pass,
             frame,
@@ -482,9 +522,12 @@ impl WgpuRenderer {
         // as scene time for moon/star swirl meshes flagged via room-env PBR bits.
         let _ = bloom_linear_hdr_output;
         room_post_params[3] = if main_menu_env
+            && !frame.main_menu_env_moon_only
             && crate::main_menu_glb::main_menu_pride_rainbow_active(
                 self.main_menu_pride_rainbow_debug,
             ) {
+            self.creation_time.elapsed().as_secs_f32()
+        } else if !main_menu_env && frame.gameplay_cash_in_blocked {
             self.creation_time.elapsed().as_secs_f32()
         } else {
             0.0
@@ -644,12 +687,16 @@ impl WgpuRenderer {
             opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, height, cpu))
         })
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
-        let prim_deltas = self.gameplay_score_roller_frame_state(frame);
+        let prim_deltas = self.gameplay_env_prim_deltas(frame);
+        let lighting = frame
+            .gameplay_cash_in_overlay_lighting
+            .as_ref()
+            .unwrap_or(&frame.scene_lighting);
         self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
             frame,
             camera,
             env_scene_key: env_key,
-            embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
+            embedded_gltf_punctual: lighting.embedded_gltf_punctual,
             main_menu_env: false,
             bloom_linear_hdr_output,
             model,
@@ -856,7 +903,7 @@ impl WgpuRenderer {
             &self.main_menu_env_primitives,
             gpu,
             room_hdr_mrt_emissive,
-            |_| false,
+            |pi| self.main_menu_env_skip_prim(pi, frame),
         );
     }
 
@@ -873,10 +920,12 @@ impl WgpuRenderer {
         let height = self.env_tune_for(scene_keys::MAIN_MENU).height_scale;
         let env_h = crate::main_menu_glb::main_menu_env_height_scale(height);
         let s = crate::room_glb::room_env_world_scale(camera.h, env_h);
-        let model = crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
+        let base_model = crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
             opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, env_h, cpu))
         })
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
+        // Victory moon recentering is a world-space offset applied after room centering.
+        let model = frame.main_menu_env_model_delta * base_model;
         let prim_deltas = rustc_hash::FxHashMap::default();
         self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
             frame,
@@ -940,6 +989,55 @@ impl WgpuRenderer {
     #[inline]
     fn gameplay_env_skip_cash_in_prim(&self, pi: usize, frame: &crate::draw_cmd::UiFrame) -> bool {
         !frame.gameplay_cash_in_button_visible && self.gameplay_cash_in_prim_indices.contains(&pi)
+    }
+
+    #[inline]
+    fn gameplay_env_skip_prim(&self, pi: usize, frame: &crate::draw_cmd::UiFrame) -> bool {
+        if frame.gameplay_env_cash_in_only {
+            return !self.gameplay_cash_in_prim_indices.contains(&pi);
+        }
+        self.gameplay_env_skip_cash_in_prim(pi, frame)
+    }
+
+    /// Pass A dispatch for [`RenderOp::GameplayEnvironment`]; restores the active
+    /// chunk camera after an optional guide cash-in overlay draw.
+    pub(super) fn draw_gameplay_environment_for_op(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        frame: &crate::draw_cmd::UiFrame,
+    ) {
+        if self.gameplay_environment.is_none() {
+            return;
+        }
+        if let Some(overlay) = frame.gameplay_cash_in_overlay_camera.as_ref() {
+            let Some(restore) = self.pass_a_draw_camera else {
+                self.draw_gameplay_environment_meshes(pass, frame, false);
+                return;
+            };
+            let overlay_cam = super::CameraFrame::build_from(Some(overlay), frame, self.size);
+            let overlay_lit = frame
+                .gameplay_cash_in_overlay_lighting
+                .as_ref()
+                .unwrap_or(&frame.scene_lighting);
+            self.upload_camera_uniforms(&overlay_cam, self.pass_a_frame_ssr_enabled, frame);
+            self.upload_punctual_light_buffers(
+                frame,
+                overlay_lit,
+                Some(overlay),
+                self.pass_a_frame_gamma,
+            );
+            self.write_gameplay_environment_uniforms(frame, &overlay_cam, false, None);
+            self.draw_gameplay_environment_meshes(pass, frame, false);
+            self.upload_camera_uniforms(&restore, self.pass_a_frame_ssr_enabled, frame);
+            self.upload_punctual_light_buffers(
+                frame,
+                frame.foreground_scene_lighting(),
+                frame.foreground_camera(),
+                self.pass_a_frame_gamma,
+            );
+        } else {
+            self.draw_gameplay_environment_meshes(pass, frame, false);
+        }
     }
 
     #[inline]

@@ -15,9 +15,9 @@ use crate::scene_keys;
 use std::time::{Duration, Instant};
 
 use crate::gltf_helpers::{
-    GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE, GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW,
-    GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL, GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT, GltfPbrUniform,
-    build_sampler_descriptor,
+    GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME, GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE,
+    GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW, GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL,
+    GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT, GltfPbrUniform, build_sampler_descriptor,
 };
 use crate::room_env_gltf::{RoomEnvPrimitiveCpu, RoomTextureUsageClass};
 use crate::wgpu_renderer::resources::{RoomEnvTextureCache, RoomEnvTextureDedupeHint};
@@ -46,6 +46,25 @@ const GAMEPLAY_EAGER_UPLOAD_BUDGET_MS: f32 = 32.0;
 const ROOM_ENV_GPU_UPLOAD_BUDGET_MS: f32 = 4.0;
 /// Eager warm-up budget for standard room env uploads while idle on non-low-memory presets.
 const ROOM_ENV_EAGER_UPLOAD_BUDGET_MS: f32 = 24.0;
+/// Per-frame GPU upload budget while the splash loading plate is up (Performance/Visuals).
+const SPLASH_EAGER_ROOM_GPU_UPLOAD_BUDGET_MS: f32 = 96.0;
+
+fn splash_eager_room_gpu_mask(mode: mahjuro_gfx_types::GraphicsMode) -> u8 {
+    match mode {
+        mahjuro_gfx_types::GraphicsMode::LowMemory => ROOM_MAIN_MENU,
+        _ => {
+            ROOM_MAIN_MENU | ROOM_SHOP | ROOM_ARCHIVE | ROOM_HALLWAY | ROOM_GAMEPLAY | ROOM_STAIRCASE
+        }
+    }
+}
+
+pub(super) fn splash_eager_rooms_gpu_loaded(
+    mode: mahjuro_gfx_types::GraphicsMode,
+    rooms_gpu_loaded: u8,
+) -> bool {
+    let mask = splash_eager_room_gpu_mask(mode);
+    rooms_gpu_loaded & mask == mask
+}
 /// Per-frame upload budget while a transition is held at full black.
 ///
 /// Keeping this bounded prevents single-frame stalls when destination rooms still need
@@ -486,6 +505,7 @@ fn load_shop_room_gpu(
                     pbr_uniform_buffer,
                     sampler,
                     pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                    material_bind_group: None,
                 });
             }
             let (_white_tex, shop_decal_view) = white_albedo(ctx.device, ctx.queue);
@@ -699,6 +719,7 @@ fn load_hallway_room_gpu(
                     pbr_uniform_buffer,
                     sampler,
                     pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                    material_bind_group: None,
                 });
             }
             let (_white_tex, hallway_decal_view) = white_albedo(ctx.device, ctx.queue);
@@ -901,6 +922,7 @@ fn load_main_menu_room_gpu(
                     pbr_uniform_buffer,
                     sampler,
                     pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                    material_bind_group: None,
                 });
             }
             let (_white_tex, main_menu_decal_view) = white_albedo(ctx.device, ctx.queue);
@@ -1103,6 +1125,7 @@ fn load_staircase_room_gpu(
                     pbr_uniform_buffer,
                     sampler,
                     pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                    material_bind_group: None,
                 });
             }
             let (_white_tex, staircase_decal_view) = white_albedo(ctx.device, ctx.queue);
@@ -1389,6 +1412,7 @@ fn load_archive_room_gpu(
                     pbr_uniform_buffer,
                     sampler,
                     pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                    material_bind_group: None,
                 });
             }
             let decal_layout = crate::primitive::DecalLayout::Fit {
@@ -1664,6 +1688,7 @@ fn upload_incremental_room_env_prim_gpu(
         pbr_uniform_buffer,
         sampler,
         pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+        material_bind_group: None,
     }
 }
 
@@ -1870,8 +1895,11 @@ fn upload_gameplay_env_prim_gpu(
         mips,
         ctx.tile_glb_default_emissive_view,
     );
-    let pbr_uniform =
+    let mut pbr_uniform =
         room_env_pbr_uniform(prim, scene_keys::GAMEPLAY, env_prim.gltf_node_name.as_deref());
+    if env_prim.gltf_node_name.as_deref() == Some(crate::gameplay_glb::BTN_CASH_IN) {
+        pbr_uniform.add_flags(GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME);
+    }
     let pbr_uniform_buffer = ctx
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1893,6 +1921,7 @@ fn upload_gameplay_env_prim_gpu(
         pbr_uniform_buffer,
         sampler,
         pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+        material_bind_group: None,
     }
 }
 
@@ -2580,8 +2609,12 @@ impl WgpuRenderer {
             }
             Some(scene_keys::STAIRWAY) => self.ensure_staircase_room_gpu(),
             Some(scene_keys::ARCHIVE) => self.ensure_archive_room_gpu(),
-            Some(scene_keys::GAMEPLAY) | Some(scene_keys::VICTORY) | Some(scene_keys::DEFEAT) => {
-                self.ensure_gameplay_room_gpu()
+            Some(scene_keys::VICTORY) => {
+                self.ensure_main_menu_room_gpu();
+                self.ensure_gameplay_room_gpu();
+            }
+            Some(scene_keys::GAMEPLAY) | Some(scene_keys::DEFEAT) => {
+                self.ensure_gameplay_room_gpu();
             }
             // Legacy aliases
             Some("staircase") => self.ensure_staircase_room_gpu(),
@@ -2868,6 +2901,7 @@ impl WgpuRenderer {
             RoomGpuResidentId::MainMenu => {
                 self.main_menu_env_primitives.clear();
                 self.main_menu_environment = None;
+                self.main_menu_moon_prim_indices.clear();
                 self.main_menu_env_collision_meshes.clear();
             }
             RoomGpuResidentId::Shop => {
@@ -2923,6 +2957,21 @@ impl WgpuRenderer {
             |this, prims, gpu_wrap| {
                 this.main_menu_env_primitives = prims;
                 this.main_menu_environment = Some(gpu_wrap);
+                this.main_menu_moon_prim_indices =
+                    crate::main_menu_glb::with_main_menu_glb_cpu(|o| {
+                        o.map(|cpu| {
+                            cpu.environment_primitives
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(i, ep)| {
+                                    (ep.gltf_node_name.as_deref()
+                                        == Some(crate::main_menu_glb::MAIN_MENU_MOON_MESH_NODE))
+                                    .then_some(i)
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                    });
                 this.main_menu_env_collision_meshes =
                     crate::main_menu_glb::with_main_menu_glb_cpu(|o| {
                         o.map(|c| c.collision_meshes.clone()).unwrap_or_default()
@@ -3123,6 +3172,121 @@ impl WgpuRenderer {
 
     pub(super) fn ensure_gameplay_room_gpu(&mut self) {
         self.drive_gameplay_room_gpu_upload(f32::MAX);
+    }
+
+    /// Upload every hub/run room GLB while the splash plate is up (Performance/Visuals only).
+    pub(super) fn drive_splash_eager_room_gpu_boot(&mut self) {
+        if self.graphics_mode == mahjuro_gfx_types::GraphicsMode::LowMemory {
+            return;
+        }
+        if splash_eager_rooms_gpu_loaded(self.graphics_mode, self.rooms_gpu_loaded) {
+            return;
+        }
+        let deadline = Instant::now()
+            + Duration::from_secs_f32(SPLASH_EAGER_ROOM_GPU_UPLOAD_BUDGET_MS / 1000.0);
+        while Instant::now() < deadline {
+            if splash_eager_rooms_gpu_loaded(self.graphics_mode, self.rooms_gpu_loaded) {
+                break;
+            }
+            let before = self.rooms_gpu_loaded;
+            let remaining_ms = deadline
+                .saturating_duration_since(Instant::now())
+                .as_secs_f32()
+                * 1000.0;
+            if remaining_ms <= 0.05 {
+                break;
+            }
+            self.drive_splash_next_eager_room_upload(remaining_ms);
+            let in_flight = self.shop_room_gpu_upload.is_some()
+                || self.hallway_room_gpu_upload.is_some()
+                || self.gameplay_room_gpu_upload.is_some();
+            if self.rooms_gpu_loaded == before && !in_flight {
+                self.join_splash_blocking_cpu_decode_for_next_room();
+                break;
+            }
+        }
+    }
+
+    /// Splash may block briefly on CPU decode so GPU warm-up keeps moving during the logo plate.
+    fn join_splash_blocking_cpu_decode_for_next_room(&self) {
+        if self.rooms_gpu_loaded & ROOM_SHOP == 0
+            && !crate::room_glb::shop_cpu_ready_for_gpu_upload()
+        {
+            crate::room_preload::start_shop_cpu_prefetch();
+            crate::room_preload::join_shop_cpu_prefetch_blocking();
+            return;
+        }
+        if self.rooms_gpu_loaded & ROOM_ARCHIVE == 0
+            && !crate::archive_glb::archive_cpu_ready_for_gpu_upload()
+        {
+            crate::room_preload::start_archive_cpu_prefetch();
+            crate::room_preload::join_archive_cpu_prefetch_blocking();
+            return;
+        }
+        if self.rooms_gpu_loaded & ROOM_HALLWAY == 0
+            && !crate::hallway_glb::hallway_cpu_ready_for_gpu_upload()
+        {
+            crate::room_preload::start_hallway_cpu_prefetch();
+            crate::room_preload::join_hallway_cpu_prefetch_blocking();
+            return;
+        }
+        if self.rooms_gpu_loaded & ROOM_GAMEPLAY == 0
+            && !crate::gameplay_glb::gameplay_cpu_ready_for_gpu_upload()
+        {
+            crate::room_preload::start_gameplay_cpu_prefetch();
+            crate::room_preload::join_gameplay_cpu_prefetch_blocking();
+            return;
+        }
+        if self.rooms_gpu_loaded & ROOM_STAIRCASE == 0
+            && !crate::staircase_glb::staircase_cpu_ready_for_gpu_upload()
+        {
+            crate::room_preload::kick_eager_all_room_cpu_prefetches();
+            let _ = crate::staircase_glb::with_staircase_glb_cpu(|_| ());
+        }
+    }
+
+    fn drive_splash_next_eager_room_upload(&mut self, budget_ms: f32) {
+        if self.gameplay_room_gpu_upload.is_some() {
+            self.drive_gameplay_room_gpu_upload(budget_ms.min(GAMEPLAY_EAGER_UPLOAD_BUDGET_MS));
+            return;
+        }
+        if self.shop_room_gpu_upload.is_some() {
+            self.drive_shop_room_gpu_upload(budget_ms);
+            return;
+        }
+        if self.hallway_room_gpu_upload.is_some() {
+            self.drive_hallway_room_gpu_upload(budget_ms);
+            return;
+        }
+        if self.rooms_gpu_loaded & ROOM_SHOP == 0
+            && crate::room_glb::shop_cpu_ready_for_gpu_upload()
+        {
+            self.drive_shop_room_gpu_upload(budget_ms);
+            return;
+        }
+        if self.rooms_gpu_loaded & ROOM_ARCHIVE == 0
+            && crate::archive_glb::archive_cpu_ready_for_gpu_upload()
+        {
+            self.ensure_archive_room_gpu();
+            return;
+        }
+        if self.rooms_gpu_loaded & ROOM_HALLWAY == 0
+            && crate::hallway_glb::hallway_cpu_ready_for_gpu_upload()
+        {
+            self.drive_hallway_room_gpu_upload(budget_ms);
+            return;
+        }
+        if self.rooms_gpu_loaded & ROOM_GAMEPLAY == 0
+            && crate::gameplay_glb::gameplay_cpu_ready_for_gpu_upload()
+        {
+            self.drive_gameplay_room_gpu_upload(budget_ms.min(GAMEPLAY_EAGER_UPLOAD_BUDGET_MS));
+            return;
+        }
+        if self.rooms_gpu_loaded & ROOM_STAIRCASE == 0
+            && crate::staircase_glb::staircase_cpu_ready_for_gpu_upload()
+        {
+            self.ensure_staircase_room_gpu();
+        }
     }
 
     /// Frame-paced eager GPU warm-up for rooms not required by the active scene.
@@ -3439,6 +3603,35 @@ impl WgpuRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn splash_eager_room_gpu_mask_low_memory_is_main_menu_only() {
+        assert_eq!(
+            splash_eager_room_gpu_mask(mahjuro_gfx_types::GraphicsMode::LowMemory),
+            ROOM_MAIN_MENU
+        );
+    }
+
+    #[test]
+    fn splash_eager_room_gpu_mask_performance_includes_all_hub_run_rooms() {
+        let mask = splash_eager_room_gpu_mask(mahjuro_gfx_types::GraphicsMode::Performance);
+        assert_eq!(
+            mask,
+            ROOM_MAIN_MENU | ROOM_SHOP | ROOM_ARCHIVE | ROOM_HALLWAY | ROOM_GAMEPLAY | ROOM_STAIRCASE
+        );
+    }
+
+    #[test]
+    fn splash_eager_rooms_gpu_loaded_respects_mode_mask() {
+        assert!(!splash_eager_rooms_gpu_loaded(
+            mahjuro_gfx_types::GraphicsMode::Performance,
+            ROOM_MAIN_MENU
+        ));
+        assert!(splash_eager_rooms_gpu_loaded(
+            mahjuro_gfx_types::GraphicsMode::LowMemory,
+            ROOM_MAIN_MENU
+        ));
+    }
 
     #[test]
     fn room_env_shader_flags_hallway_walls_only() {

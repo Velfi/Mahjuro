@@ -1,4 +1,4 @@
-//! Gameplay debug visibility toggles (Debug → Overlays → Gameplay Visibility…).
+//! Gameplay debug visibility toggles (Debug → Overlays → HUD Visibility…).
 
 use crate::render::draw_cmd::{DrawCmd, Object3dKind, ShowcaseTilePlacement, TileOverlayRectGroup};
 
@@ -104,7 +104,7 @@ impl DebugVisibility {
             Object3dKind::WoodTablet { .. } => self.hide_wood_tablets,
             Object3dKind::Book { .. } => self.hide_journal,
             Object3dKind::Bowl => self.hide_discard_bowl,
-            Object3dKind::Mirror => self.hide_play_mirror,
+            Object3dKind::Mirror { .. } => self.hide_play_mirror,
             Object3dKind::TallyFan { kind, .. } => match kind {
                 crate::render::draw_cmd::TallyFanKind::Draws => self.hide_play_tally_fan,
                 crate::render::draw_cmd::TallyFanKind::Discards => self.hide_discard_tally_fan,
@@ -151,9 +151,9 @@ pub fn filter_gameplay_frame_cmds(
     frame.cmds.retain_mut(|cmd| match cmd {
         DrawCmd::ShowcaseTileBatch(batch) => {
             if vis.hide_hand_tiles || vis.hide_discard_tiles || vis.hide_plinth_tiles {
-                batch.retain(|p| !showcase_tile_hidden(p, vis));
+                batch.placements.retain(|p| !showcase_tile_hidden(p, vis));
             }
-            !batch.is_empty()
+            !batch.placements.is_empty()
         }
         DrawCmd::Object3d(obj) => !vis.hide_object3d_kind(&obj.kind),
         DrawCmd::Object3dBatch(batch) => {

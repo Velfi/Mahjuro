@@ -1,14 +1,7 @@
-struct TileUniform {
+struct TileFrameUniform {
     view_proj: mat4x4<f32>,
-    model: mat4x4<f32>,
-    tile_visual_params: vec4<f32>,
     cam_pos: vec3<f32>,
-    // Per-tile seed written by the renderer (slot index as f32). Used to
-    // offset procedural noise so each tile's pattern is unique — currently
-    // only sampled by the tortoise-shell branch in `tortoise_albedo`.
-    tile_material_seed: f32,
-    // Showcase decal atlas: xy = origin in normalized atlas coords, zw = scale per axis.
-    tile_decal_atlas_uv: vec4<f32>,
+    _pad0: f32,
     /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient (albedo * 0.08);
     /// w = inverse document scale for embedded glTF punctual attenuation.
     tile_post_params: vec4<f32>,
@@ -19,7 +12,7 @@ struct TileUniform {
 // ACES tonemapping is applied once in `tonemap_composite.wgsl`. This shader
 // writes linear HDR to `scene_color` (`Rgba16Float`).
 
-@group(0) @binding(0) var<uniform> cam: TileUniform;
+@group(0) @binding(0) var<uniform> frame: TileFrameUniform;
 @group(0) @binding(1) var base_color: texture_2d<f32>;
 @group(0) @binding(2) var base_sampler: sampler;
 @group(0) @binding(3) var decal_tex: texture_2d<f32>;
@@ -252,13 +245,17 @@ struct VsOut {
     @location(2) local_pos: vec3<f32>,
     @location(3) local_n: vec3<f32>,
     @location(4) world_pos: vec3<f32>,
-    /// World-space tangent (orthogonalized to vertex normal).
-    @location(5) t_w: vec3<f32>,
-    /// World-space bitangent (`cross(N, T) * handedness`).
-    @location(6) b_w: vec3<f32>,
+    /// World-space tangent (xyz) + glTF handedness (w).
+    @location(5) t_w: vec4<f32>,
     /// UV for normal / metallic-roughness / emissive (glTF secondary TEXCOORD when present).
-    @location(7) uv_emr: vec2<f32>,
-    @location(8) v_color: vec4<f32>,
+    @location(6) uv_emr: vec2<f32>,
+    @location(7) v_color: vec4<f32>,
+    @location(8) tile_visual_params: vec4<f32>,
+    @location(9) tile_decal_atlas_uv: vec4<f32>,
+    @location(10) tile_mat_col0: vec4<f32>,
+    @location(11) tile_mat_col1: vec4<f32>,
+    @location(12) tile_mat_col2: vec4<f32>,
+    @location(13) tile_material_seed: f32,
 };
 
 @vertex
@@ -269,10 +266,19 @@ fn vs_main(
     @location(3) tangent: vec4<f32>,
     @location(4) uv_emr_in: vec2<f32>,
     @location(5) v_color_in: vec4<f32>,
+    @location(6) inst_model_c0: vec4<f32>,
+    @location(7) inst_model_c1: vec4<f32>,
+    @location(8) inst_model_c2: vec4<f32>,
+    @location(9) inst_model_c3: vec4<f32>,
+    @location(10) inst_visual: vec4<f32>,
+    @location(11) inst_decal_uv: vec4<f32>,
+    @location(12) inst_seed: f32,
 ) -> VsOut {
-    let world_h = (cam.model * vec4<f32>(pos, 1.0)).xyz;
-    let N0 = normalize((cam.model * vec4<f32>(n, 0.0)).xyz);
-    let Tw = (cam.model * vec4<f32>(tangent.xyz, 0.0)).xyz;
+    let model = mat4x4<f32>(inst_model_c0, inst_model_c1, inst_model_c2, inst_model_c3);
+
+    let world_h = (model * vec4<f32>(pos, 1.0)).xyz;
+    let N0 = normalize((model * vec4<f32>(n, 0.0)).xyz);
+    let Tw = (model * vec4<f32>(tangent.xyz, 0.0)).xyz;
     let Torth = normalize(Tw - N0 * dot(N0, Tw));
     let Borth = normalize(cross(N0, Torth)) * tangent.w;
 
@@ -286,21 +292,26 @@ fn vs_main(
         world_normal_after_distortion(world_h, Torth, Borth, hd, N0),
         hd.flags.x > 0.5,
     );
-    let Tw2 = (cam.model * vec4<f32>(tangent.xyz, 0.0)).xyz;
+    let Tw2 = (model * vec4<f32>(tangent.xyz, 0.0)).xyz;
     let Torth2 = normalize(Tw2 - N * dot(N, Tw2));
     let Borth2 = normalize(cross(N, Torth2)) * tangent.w;
 
     var o: VsOut;
-    o.clip_pos = cam.view_proj * vec4<f32>(world, 1.0);
+    o.clip_pos = frame.view_proj * vec4<f32>(world, 1.0);
     o.wn = N;
     o.uv = uv;
     o.local_pos = pos;
     o.local_n = n;
     o.world_pos = world;
-    o.t_w = Torth2;
-    o.b_w = Borth2;
+    o.t_w = vec4<f32>(Torth2, tangent.w);
     o.uv_emr = uv_emr_in;
     o.v_color = v_color_in;
+    o.tile_visual_params = inst_visual;
+    o.tile_decal_atlas_uv = inst_decal_uv;
+    o.tile_mat_col0 = inst_model_c0;
+    o.tile_mat_col1 = inst_model_c1;
+    o.tile_mat_col2 = inst_model_c2;
+    o.tile_material_seed = inst_seed;
     return o;
 }
 
@@ -316,11 +327,11 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         && in.local_n.y >= abs(in.local_n.x)
         && in.local_n.y >= abs(in.local_n.z);
 
-    // cam.tile_visual_params.w — see `tile_body.rs`:
+    // tile_visual_params.w — see `tile_body.rs`:
     //   0–2 = procedural tile body (`TileBodyShaderKind`),
     //   4 = sample bound base-color texture, no decal projection (shop room),
     //   5 = sample bound base-color per primitive + mahjong decal on **Face** material only.
-    let body_kind = cam.tile_visual_params.w;
+    let body_kind = in.tile_visual_params.w;
     let use_textured_env = body_kind > 3.5 && body_kind < 4.5;
     let use_textured_tile_glb = body_kind > 4.5 && body_kind < 5.5;
     let use_textured_albedo = use_textured_env || use_textured_tile_glb;
@@ -386,7 +397,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
         // ── Tortoise shell (mat 2) ──────────────────────────────────────
         let tortoise_body =
-            tortoise_albedo(in.local_pos, cam.tile_material_seed, normalize(in.local_n));
+            tortoise_albedo(in.local_pos, in.tile_material_seed, normalize(in.local_n));
         let honey_mean = vec3<f32>(0.72, 0.48, 0.18);
         // Keep most of the shell mottle on the face — heavy flattening made every tile read identical.
         let tortoise_face = mix(tortoise_body, honey_mean, 0.06);
@@ -419,7 +430,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let proj_uv = vec2<f32>(1.0 - raw_u, raw_v);
         let decal_uv_face = proj_uv;
         let decal_uv =
-            decal_uv_face * cam.tile_decal_atlas_uv.zw + cam.tile_decal_atlas_uv.xy;
+            decal_uv_face * in.tile_decal_atlas_uv.zw + in.tile_decal_atlas_uv.xy;
         let decal = textureSample(decal_tex, base_sampler, decal_uv);
         let in_uv = decal_uv_face.x >= 0.0 && decal_uv_face.x <= 1.0 && decal_uv_face.y >= 0.0 && decal_uv_face.y <= 1.0;
         // Imported tile meshes: decal only on the authored **Face** material (`v_color.a`).
@@ -467,8 +478,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         if (!front_facing) {
             Ngeom = -Ngeom;
         }
-        let T = normalize(in.t_w);
-        let B = normalize(in.b_w);
+        let T = normalize(in.t_w.xyz);
+        let B = normalize(cross(Ngeom, T)) * in.t_w.w;
         n_world = normalize(nm.x * T + nm.y * B + nm.z * Ngeom);
     } else {
         n_world = normalize(in.wn);
@@ -479,7 +490,13 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let edge_mag = abs(carve_dhdu) + abs(carve_dhdv);
         if (edge_mag > 0.001) {
             let perturbed_local = normalize(vec3<f32>(-carve_dhdu, 1.0, -carve_dhdv));
-            let perturbed_world = normalize((cam.model * vec4<f32>(perturbed_local, 0.0)).xyz);
+            let inst_model = mat4x4<f32>(
+                in.tile_mat_col0,
+                in.tile_mat_col1,
+                in.tile_mat_col2,
+                vec4<f32>(0.0, 0.0, 0.0, 1.0),
+            );
+            let perturbed_world = normalize((inst_model * vec4<f32>(perturbed_local, 0.0)).xyz);
             let blend_edge = clamp(edge_mag * 1.5, 0.0, 1.0);
             n_world = normalize(mix(n_world, perturbed_world, blend_edge));
         }
@@ -487,11 +504,11 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
     // Enhancement kind from tile_visual_params.z:
     //   0 = none, 1 = pearl, 2 = gilded, 3 = polychrome.
-    let enh = cam.tile_visual_params.z;
+    let enh = in.tile_visual_params.z;
     let has_enh = enh > 0.5;
 
     // View direction from the actual camera position passed via uniform.
-    let view_dir = normalize(cam.cam_pos - in.world_pos);
+    let view_dir = normalize(frame.cam_pos - in.world_pos);
     let ndv_global = max(dot(n_world, view_dir), 0.0);
 
     var point_contrib = vec3<f32>(0.0);
@@ -509,12 +526,12 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let kind = lights.lights[i].params.x;
         let lc = lights.lights[i].color.rgb * punc_rgb_mul;
         let intensity =
-            lights.lights[i].color.a * select(1.0, cam.tile_punctual_params.x, kind > 0.5);
+            lights.lights[i].color.a * select(1.0, frame.tile_punctual_params.x, kind > 0.5);
         let to_light = lp - in.world_pos;
         let dist = length(to_light);
         // `tile_post_params.w` carries inverse document scale on tile draws (see
         // `showcase_tiles.rs`); `tile_decal_atlas_uv.y` is decal-atlas V — not inv_doc.
-        let inv_doc = cam.tile_post_params.w;
+        let inv_doc = frame.tile_post_params.w;
         let atten = select(
             scene_smooth_point_atten(dist, radius),
             punctual_attenuation_with_inv_doc_scale(dist, radius, inv_doc),
@@ -655,7 +672,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let mr_s = textureSample(metallic_roughness_tex, base_sampler, in.uv_emr);
         let metallic = clamp(mr_s.b * pbr.metallic_factor, 0.0, 1.0);
         let emissive_base = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb * pbr.emissive_factor.rgb;
-        let emissive_scale = select(1.0, cam.tile_decal_atlas_uv.z, use_textured_env);
+        let emissive_scale = select(1.0, in.tile_decal_atlas_uv.z, use_textured_env);
         let emissive = emissive_base * emissive_scale;
         gltf_emissive_hdr = emissive;
         lit_rgb = lit_rgb * (1.0 - metallic * 0.78);
@@ -666,7 +683,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // tile_visual_params.x: 1.0 = free/playable, <1.0 = blocked.
     // Desaturate toward luminance then scale down so blocked tiles
     // read as inert stone without becoming illegible.
-    let brightness = cam.tile_visual_params.x;
+    let brightness = in.tile_visual_params.x;
     if (brightness < 0.99) {
         let lum = dot(lit_rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
         lit_rgb = mix(lit_rgb, vec3<f32>(lum), 0.35) * brightness;
@@ -676,7 +693,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // tile_visual_params.y: 0.0 = none, 0.5 = hovered, 1.0 = selected.
     // Hover: saturated electric-blue rim (thin, tight).
     // Selected: warm champagne-gold rim (wider, brighter).
-    let sel = cam.tile_visual_params.y;
+    let sel = in.tile_visual_params.y;
     if (sel > 0.25) {
         let edge = 1.0 - ndv_global;
         if (sel < 0.75) {
@@ -694,7 +711,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     var out_rgb: vec3<f32>;
-    if (cam.tile_post_params.x > 0.5) {
+    if (frame.tile_post_params.x > 0.5) {
         // Table / room linear HDR path: write the un-tonemapped HDR into
         // `scene_color`. `tonemap_composite.wgsl` applies the single ACES
         // pass + sRGB encode; the per-shader `lights.extras.x` gamma slider
@@ -705,8 +722,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         // bright point lights on the same mesh (e.g. hallway lamp bulbs) swamp it and changing
         // emissive scale is invisible. Keep emissive out of that multiply (same idea as
         // `room_glb.wgsl`: emissive is not scaled by room linear exposure).
-        let hem = cam.tile_post_params.z * rgb * vec3<f32>(0.08);
-        var hdr = (lit_rgb - gltf_emissive_hdr + hem) * cam.tile_post_params.y;
+        let hem = frame.tile_post_params.z * rgb * vec3<f32>(0.08);
+        var hdr = (lit_rgb - gltf_emissive_hdr + hem) * frame.tile_post_params.y;
         hdr = hdr + gltf_emissive_hdr;
         out_rgb = hdr;
     } else {

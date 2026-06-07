@@ -17,6 +17,7 @@ use crate::game::event_bus::RoundPayout;
 use crate::render::decal::{load_mono_font, load_ui_font};
 use crate::render::draw_cmd::{Object3d, Object3dKind};
 use crate::render::table_transform::euler_xyz_rad_from_deg;
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
@@ -639,7 +640,7 @@ impl ModalQueue {
         let body_inner_w = card_w - padding * 2.0;
         let [dr, dg, db, da] = modal.theme.body_color();
         let body_color = [dr, dg, db, da * alpha];
-        let body_line_step = crate::ui::colored_keywords::colored_row_line_step(body_font);
+        let body_line_step = crate::ui::styled_text::colored_row_line_step(body_font);
         let chrome_h = padding + title_h + padding * 0.5 + padding;
         let max_body_h = window_h * 0.85 - chrome_h;
 
@@ -651,7 +652,7 @@ impl ModalQueue {
                 &modal.body,
                 body_inner_w,
                 body_font,
-                true,
+                GlossaryMode::Prose,
                 body_color,
             ))
         } else {
@@ -732,7 +733,8 @@ impl ModalQueue {
                     color: body_color,
                     padding: 0.0,
                     align: TextAlign::Left,
-                    glossary_tint: true,
+                    glossary: GlossaryMode::Prose,
+                    vertical_align: None,
                 },
             );
         }
@@ -1053,7 +1055,7 @@ fn draw_modal_paginated_unlock(
             0.0,
             category_y,
             window_w,
-            crate::ui::colored_keywords::colored_row_line_step(category_font),
+            crate::ui::styled_text::colored_row_line_step(category_font),
         ],
         text: page.category.to_uppercase(),
         color: {
@@ -1082,8 +1084,13 @@ fn draw_modal_paginated_unlock(
     let desc_x = (window_w - desc_w) * 0.5;
     let [dr, dg, db, _da] = crate::render::theme::color::PARCHMENT;
     let desc_color = [dr, dg, db, 0.92 * alpha];
-    let desc_block =
-        StyledTextBlock::measure_at_font_px(&page.description, desc_w, desc_font, true, desc_color);
+    let desc_block = StyledTextBlock::measure_at_font_px(
+        &page.description,
+        desc_w,
+        desc_font,
+        GlossaryMode::Prose,
+        desc_color,
+    );
     let desc_h = desc_block.block_height();
     desc_block.push_at_font_px(
         labels,
@@ -1093,7 +1100,8 @@ fn draw_modal_paginated_unlock(
             color: desc_color,
             padding: 0.0,
             align: TextAlign::Center,
-            glossary_tint: true,
+            glossary: GlossaryMode::Prose,
+            vertical_align: None,
         },
     );
 

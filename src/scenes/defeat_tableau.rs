@@ -6,7 +6,10 @@ use crate::render::primitive::{MaterialSpec, MeshId};
 use crate::render::table_transform::rot_fixed_axes_deg;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::PointLight;
-use crate::render::world_space::pixel_to_world;
+use crate::render::world_space::{
+    object3d_pos_for_screen_at_world_z, object3d_pos_triple_for_world_center, pixel_to_world,
+    world_on_camera_ray_plane_z,
+};
 use crate::ui::placement::{Placement, PlacementAnchor};
 use glam::Vec3;
 
@@ -33,9 +36,9 @@ const DEFEAT_WOOD_PLACEMENT: Placement = Placement {
 const DEFEAT_FOVY_DEG: f32 = 38.0;
 const DEFEAT_WOOD_WIDTH_MUL: f32 = 1.65;
 const DEFEAT_WOOD_DEPTH_MUL: f32 = 5.0;
-const DEFEAT_WOOD_THICKNESS_MUL: f32 = 0.012;
-/// Scene key/fill intensities relative to the first defeat-tableau pass.
-const DEFEAT_LIGHT_SCALE: f32 = 0.08;
+const DEFEAT_WOOD_THICKNESS_MUL: f32 = 0.018;
+/// Scene key/fill intensities for the black-void memorial tableau.
+const DEFEAT_LIGHT_SCALE: f32 = 0.32;
 
 /// Push wood floor + centered, lit memorial talisman (no sunlit-water backdrop).
 pub fn push_defeat_memorial_tableau(
@@ -61,16 +64,15 @@ pub fn push_defeat_memorial_tableau(
     let cs = (h / 2104.0_f32).max(1e-4);
     let eye = Vec3::new(target_w.x, target_w.y - 980.0 * cs, target_w.z + 440.0 * cs);
     let look_target = Vec3::new(target_w.x, target_w.y, target_w.z + 12.0 * cs);
-    let cam_eye = eye.to_array();
-    let cam_target = look_target.to_array();
-    frame.camera_override = Some(CameraParams {
-        eye: cam_eye,
-        target: cam_target,
+    let cam = CameraParams {
+        eye: eye.to_array(),
+        target: look_target.to_array(),
         up: [0.0, 0.0, 1.0],
         fovy_deg: DEFEAT_FOVY_DEG,
-        clip_near: None,
+        clip_near: Some(0.05),
         clip_far: None,
-    });
+    };
+    frame.camera_override = Some(cam);
 
     let hero = h.min(w);
     let tscale = hero * 0.13;
@@ -83,18 +85,23 @@ pub fn push_defeat_memorial_tableau(
         &DEFEAT_WOOD_PLACEMENT,
         layout,
     );
-    let mut board_pos = wood_anchor.pos;
+    let board_px = wood_anchor.pos[0];
+    let mut board_py = wood_anchor.pos[1];
     // Nudge toward the bottom edge so the slab reads as a floor receding into the black above.
-    board_pos[1] += h * 0.08;
+    board_py += h * 0.08;
+    let wood_plane_z = target_w.z * 0.22;
+    let wood_world =
+        world_on_camera_ray_plane_z(w, h, &cam, board_px, board_py, wood_plane_z);
+    let wood_pos = object3d_pos_for_screen_at_world_z(w, h, &cam, board_px, board_py, wood_plane_z);
     let wood_board = Object3d {
-        pos: board_pos,
+        pos: wood_pos,
         extents: [
             w * DEFEAT_WOOD_WIDTH_MUL,
             h * DEFEAT_WOOD_DEPTH_MUL,
             hero * DEFEAT_WOOD_THICKNESS_MUL,
         ],
         rotation: wood_anchor.object3d_rotation(),
-        color: color::darken(color::WALNUT_DEEP, 0.18),
+        color: color::darken(color::WALNUT_RAISED, 0.08),
         kind: Object3dKind::Primitive {
             shape: MeshId::Cube,
             material: MaterialSpec::lacquered_wood_flat(),
@@ -124,7 +131,14 @@ pub fn push_defeat_memorial_tableau(
 
     let parchment = color::rgb(color::PARCHMENT);
     let accent_rgb = [accent[0], accent[1], accent[2]];
+    let wood_fill = wood_world + Vec3::new(0.0, -h * 0.12, h * 0.22);
     frame.scene_lighting.set_smooth_points(vec![
+        PointLight {
+            pos: object3d_pos_triple_for_world_center(w, h, wood_fill),
+            radius: w.max(h) * 2.0,
+            color: parchment,
+            intensity: 3.4 * DEFEAT_LIGHT_SCALE,
+        },
         PointLight {
             pos: [tx, ty - h * 0.05, tz + h * 0.40],
             radius: w.max(h) * 2.4,

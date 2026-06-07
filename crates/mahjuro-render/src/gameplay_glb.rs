@@ -32,8 +32,8 @@ use crate::river_mesh::{RIVER_LOCAL_CENTER_Y, RIVER_LOCAL_HALF};
 use crate::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
 use crate::table_transform::{
-    compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad, tile_mesh_local_to_world,
-    translate_rot_scale,
+    apply_rotation_deg_to_model, compose_rotation_euler, mat4_to_euler_xyz_rad,
+    rot_euler_xyz_rad, tile_mesh_local_to_world, translate_rot_scale,
 };
 use crate::wgpu_renderer::{PointLight, SpotLight};
 use crate::world_space::{
@@ -65,6 +65,10 @@ pub const LABEL_CASH_IN: &str = "label_cash_in";
 pub const GAMEPLAY_CAMERA_NODE: &str = "default";
 const GAMEPLAY_ACTION_PICK_SHRINK_MUL: f32 = 0.125;
 const GAMEPLAY_DISCARD_RIVER_SIZE_MUL: f32 = 1.5;
+/// Fractional insets (top, right, bottom, left) on the play mirror's projected
+/// rect for mouse/focus hit targets. The visual mirror is tall enough that a
+/// tight AABB still overlaps hand tiles above; shrink mostly from the top.
+const GAMEPLAY_PLAY_BUTTON_HIT_INSET_FRAC: [f32; 4] = [0.26, 0.14, 0.06, 0.14];
 
 pub const PLAYER_RELIC_MARKERS: [&str; 5] = [
     "player_relic",
@@ -397,6 +401,26 @@ pub fn lerp_marker_anchor(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
         a[1] + t * (b[1] - a[1]),
         a[2] + t * (b[2] - a[2]),
     ]
+}
+
+/// Screen-space bone-tablet metrics for 2D UI that mirrors gameplay yaku selectors.
+///
+/// Returns `(row_h, max_pill_w)` — band height and per-tablet width cap for
+/// 2D bone-tablet pills. Calibrated from authored
+/// `yaku_tablets_*` marker span at 1920×1080; scales with window width.
+pub fn gameplay_yaku_tablet_ui_metrics(w: f32, h: f32, tablet_count: usize) -> (f32, f32) {
+    let layout_scale = (w.min(h)) / 600.0;
+    const REF_W: f32 = 1920.0;
+    const REF_SPAN: f32 = 755.6;
+    let span = REF_SPAN * (w / REF_W);
+    let card_gap = 6.0 * layout_scale;
+    let n = tablet_count.max(1) as f32;
+    let natural_card_w = ((span - card_gap * 2.0) / 3.0).max(40.0);
+    let card_w = ((span - card_gap * (n - 1.0)) / n).min(natural_card_w);
+    let panel_h = (24.0 * layout_scale).max(18.0);
+    // Tilted porcelain tablets project slightly taller than the marker strip height.
+    let row_h = (panel_h * 1.22).clamp(34.0, 68.0);
+    (row_h, card_w)
 }
 
 /// Screen-space distance between two marker anchors (for strip sizing).
@@ -737,7 +761,9 @@ pub fn gameplay_pick_play_mirror(
         extents,
         rotation: rotate_marker_pose_x_180(pose.rotation_rad),
         color: [1.0, 1.0, 1.0, 1.0],
-        kind: Object3dKind::Mirror,
+        kind: Object3dKind::Mirror {
+            valid_play_glow: 0.0,
+        },
         hover_target: 0.0,
         anim_id: 2,
     })
@@ -795,6 +821,36 @@ fn project_model_aabb_rect(
     [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]
 }
 
+/// Screen rect for a tally-stick fan at a GLB marker — matches the renderer's
+/// [`TallyFan`](Object3dKind::TallyFan) pick bounds with the same camera.
+pub fn gameplay_tally_fan_screen_rect(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    anchor: [f32; 3],
+    stick_len: f32,
+    stick_wide: f32,
+    stick_thickness: f32,
+    spread_deg: f32,
+    rotation_y_deg: f32,
+    placement_rot_deg: [f32; 3],
+) -> [f32; 4] {
+    let spread_rad = spread_deg.to_radians();
+    let fan_width = stick_len * (spread_rad * 0.5).sin() * 2.0 + stick_wide;
+    let fan_height = stick_len + stick_wide * 0.5;
+    let fan_center = pixel_to_world(win_w, win_h, anchor[0], anchor[1], anchor[2] + stick_len * 0.5);
+    let fan_yaw = Mat4::from_rotation_z(rotation_y_deg.to_radians());
+    let fan_model = apply_rotation_deg_to_model(
+        translate_rot_scale(
+            fan_center,
+            fan_yaw,
+            Vec3::new(fan_width, stick_thickness * 2.0, fan_height),
+        ),
+        placement_rot_deg,
+    );
+    project_model_aabb_rect(win_w, win_h, cam, fan_model, [0.5, 0.5, 0.5], 0.0)
+}
+
 /// Project the spawned discard river model at its GLB marker pose.
 pub fn gameplay_discard_river_model_screen_rect(
     win_w: f32,
@@ -811,6 +867,20 @@ pub fn gameplay_discard_river_model_screen_rect(
         RIVER_LOCAL_CENTER_Y,
         true,
     )
+}
+
+/// Shrink a screen rect by fractional per-edge insets (top, right, bottom, left).
+pub fn inset_screen_rect_fractional(rect: [f32; 4], inset_frac: [f32; 4]) -> [f32; 4] {
+    let [x, y, w, h] = rect;
+    let [top, right, bottom, left] = inset_frac;
+    let w = w * (1.0 - left - right).max(0.0);
+    let h = h * (1.0 - top - bottom).max(0.0);
+    [x + rect[2] * left, y + rect[3] * top, w, h]
+}
+
+/// Click/focus target for the play mirror — inset inside [`gameplay_play_mirror_model_screen_rect`].
+pub fn gameplay_play_button_hit_rect(visual: [f32; 4]) -> [f32; 4] {
+    inset_screen_rect_fractional(visual, GAMEPLAY_PLAY_BUTTON_HIT_INSET_FRAC)
 }
 
 /// Project the spawned play mirror model at its GLB marker pose.
@@ -1181,6 +1251,210 @@ pub fn gameplay_gltf_candle_flame_emitters(
     })
 }
 
+fn cash_in_mesh_bounds_doc(cpu: &RoomGlbCpu) -> Option<room_glb::RoomEnvironmentBounds> {
+    let btn = *cpu.marker_mesh_bounds_doc.get(BTN_CASH_IN)?;
+    Some(match cpu.marker_mesh_bounds_doc.get(LABEL_CASH_IN) {
+        Some(label) => room_glb::RoomEnvironmentBounds {
+            min: btn.min.min(label.min),
+            max: btn.max.max(label.max),
+        },
+        None => btn,
+    })
+}
+
+fn cash_in_bounds_corners_world(
+    cpu: &RoomGlbCpu,
+    win_h: f32,
+    env_height_scale: f32,
+) -> Option<Vec<Vec3>> {
+    let bounds_doc = cash_in_mesh_bounds_doc(cpu)?;
+    let center_doc = cpu
+        .environment_bounds_doc
+        .map(|b| b.center())
+        .unwrap_or(Vec3::ZERO);
+    let s = room_glb::room_env_world_scale(win_h, env_height_scale);
+    Some(
+        bounds_doc
+            .corners()
+            .into_iter()
+            .map(|c| (c - center_doc) * s)
+            .collect(),
+    )
+}
+
+fn project_world_corners_screen(
+    cam: &CameraParams,
+    win_w: f32,
+    win_h: f32,
+    corners_world: &[Vec3],
+) -> [f32; 4] {
+    let mut mn_x = f32::INFINITY;
+    let mut mn_y = f32::INFINITY;
+    let mut mx_x = f32::NEG_INFINITY;
+    let mut mx_y = f32::NEG_INFINITY;
+    for world in corners_world {
+        let (sx, sy) = cam.project_world_to_screen(win_w, win_h, *world);
+        mn_x = mn_x.min(sx);
+        mn_y = mn_y.min(sy);
+        mx_x = mx_x.max(sx);
+        mx_y = mx_y.max(sy);
+    }
+    let cx = (mn_x + mx_x) * 0.5;
+    let cy = (mn_y + mx_y) * 0.5;
+    let rw = (mx_x - mn_x).max(1.0);
+    let rh = (mx_y - mn_y).max(1.0);
+    [cx - rw * 0.5, cy - rh * 0.5, rw, rh]
+}
+
+fn nudge_camera_screen_delta(
+    mut cam: CameraParams,
+    win_w: f32,
+    win_h: f32,
+    dx_px: f32,
+    dy_px: f32,
+) -> CameraParams {
+    let eye = Vec3::from_array(cam.eye);
+    let target = Vec3::from_array(cam.target);
+    let forward = (target - eye).normalize_or_zero();
+    if forward.length_squared() < 1e-12 {
+        return cam;
+    }
+    let up = Vec3::from_array(cam.up);
+    let right = forward.cross(up).normalize_or_zero();
+    let cam_up = right.cross(forward).normalize_or_zero();
+    let depth = (target - eye).length().max(1.0);
+    let world_per_px_y = 2.0 * depth * (cam.fovy_deg.to_radians() * 0.5).tan() / win_h.max(1.0);
+    let world_per_px_x = world_per_px_y * (win_w / win_h.max(1.0));
+    let shift = right * (-dx_px * world_per_px_x) + cam_up * (dy_px * world_per_px_y);
+    cam.eye = (eye + shift).to_array();
+    cam.target = (target + shift).to_array();
+    cam
+}
+
+fn rect_is_sane(rect: [f32; 4], win_w: f32, win_h: f32) -> bool {
+    rect[0].is_finite()
+        && rect[1].is_finite()
+        && rect[2].is_finite()
+        && rect[3].is_finite()
+        && rect[2] > 1.0
+        && rect[3] > 1.0
+        && rect[0] > -win_w
+        && rect[1] > -win_h
+        && rect[0] + rect[2] < win_w * 2.0
+        && rect[1] + rect[3] < win_h * 2.0
+}
+
+/// Perspective camera that frames authored cash-in meshes into a screen rect (guide scoring flow).
+pub fn gameplay_cash_in_camera_for_screen_rect(
+    win_w: f32,
+    win_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    target_rect: [f32; 4],
+) -> Option<CameraParams> {
+    let corners_world = cash_in_bounds_corners_world(cpu, win_h, env_height_scale)?;
+    let bounds_doc = cash_in_mesh_bounds_doc(cpu)?;
+    let center_doc = cpu
+        .environment_bounds_doc
+        .map(|b| b.center())
+        .unwrap_or(Vec3::ZERO);
+    let s = room_glb::room_env_world_scale(win_h, env_height_scale);
+    let focus = (bounds_doc.center() - center_doc) * s;
+
+    let base = gameplay_camera_from_cpu(cpu, win_h, env_height_scale)?;
+    let base_eye = Vec3::from_array(base.eye);
+    let base_target = Vec3::from_array(base.target);
+    let view_dir = (base_eye - base_target).normalize_or_zero();
+    if view_dir.length_squared() < 1e-12 {
+        return Some(base);
+    }
+
+    let want_cx = target_rect[0] + target_rect[2] * 0.5;
+    let want_cy = target_rect[1] + target_rect[3] * 0.5;
+    let want_w = target_rect[2] * 0.90;
+    let want_h = target_rect[3] * 0.90;
+    let extent = corners_world
+        .iter()
+        .map(|c| (*c - focus).length())
+        .fold(0.0_f32, f32::max)
+        .max(s * 0.01);
+
+    let mut dist_lo = extent * 2.0;
+    let mut dist_hi = (base_eye - base_target).length().max(extent * 24.0);
+
+    for _ in 0..28 {
+        let dist = (dist_lo + dist_hi) * 0.5;
+        let cam = CameraParams {
+            eye: (focus + view_dir * dist).to_array(),
+            target: focus.to_array(),
+            up: base.up,
+            fovy_deg: base.fovy_deg,
+            clip_near: Some((dist * 0.02).max(0.25)),
+            clip_far: Some(dist * 40.0),
+        };
+        let rect = project_world_corners_screen(&cam, win_w, win_h, &corners_world);
+        if !rect_is_sane(rect, win_w, win_h) {
+            dist_lo = dist;
+            continue;
+        }
+        if rect[2] > want_w || rect[3] > want_h {
+            dist_lo = dist;
+        } else {
+            dist_hi = dist;
+        }
+    }
+
+    let dist = dist_hi;
+    let mut cam = CameraParams {
+        eye: (focus + view_dir * dist).to_array(),
+        target: focus.to_array(),
+        up: base.up,
+        fovy_deg: base.fovy_deg,
+        clip_near: Some((dist * 0.02).max(0.25)),
+        clip_far: Some(dist * 40.0),
+    };
+
+    for _ in 0..24 {
+        let rect = project_world_corners_screen(&cam, win_w, win_h, &corners_world);
+        if !rect_is_sane(rect, win_w, win_h) {
+            break;
+        }
+        let dx = want_cx - (rect[0] + rect[2] * 0.5);
+        let dy = want_cy - (rect[1] + rect[3] * 0.5);
+        if dx.abs() < 0.75 && dy.abs() < 0.75 {
+            break;
+        }
+        cam = nudge_camera_screen_delta(cam, win_w, win_h, dx, dy);
+    }
+
+    Some(room_glb::room_camera_with_room_clip_planes(
+        cam,
+        win_h,
+        env_height_scale,
+        cpu,
+    ))
+}
+
+/// [`gameplay_cash_in_camera_for_screen_rect`] using the embedded gameplay GLB when loaded.
+pub fn gameplay_cash_in_camera_for_screen_rect_if_present(
+    win_w: f32,
+    win_h: f32,
+    env_height_scale: f32,
+    target_rect: [f32; 4],
+) -> Option<CameraParams> {
+    with_gameplay_glb_cpu(|opt| {
+        opt.and_then(|cpu| {
+            gameplay_cash_in_camera_for_screen_rect(
+                win_w,
+                win_h,
+                env_height_scale,
+                cpu,
+                target_rect,
+            )
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1190,5 +1464,49 @@ mod tests {
         let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
         let cpu = load_gameplay_glb_from_bytes(bytes).expect("decode gameplay.glb");
         validate_gameplay_glb(cpu).expect("valid gameplay.glb");
+    }
+
+    #[test]
+    fn cash_in_guide_camera_fits_target_rect() {
+        let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
+        let cpu = load_gameplay_glb_from_bytes(bytes).expect("decode gameplay.glb");
+        let win_w = 1920.0_f32;
+        let win_h = 1080.0_f32;
+        let env_h = 1.0_f32;
+        let target = [820.0, 318.0, 168.0, 52.0];
+        let cam =
+            gameplay_cash_in_camera_for_screen_rect(win_w, win_h, env_h, &cpu, target).expect("cam");
+        let corners = cash_in_bounds_corners_world(&cpu, win_h, env_h).expect("corners");
+        let projected = project_world_corners_screen(&cam, win_w, win_h, &corners);
+        let px = projected[0].max(target[0]);
+        let py = projected[1].max(target[1]);
+        let px2 = (projected[0] + projected[2]).min(target[0] + target[2]);
+        let py2 = (projected[1] + projected[3]).min(target[1] + target[3]);
+        assert!(
+            px2 > px && py2 > py,
+            "projected {projected:?} should overlap target {target:?}"
+        );
+    }
+
+    #[test]
+    fn gameplay_yaku_tablet_ui_metrics_matches_marker_strip() {
+        let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
+        let cpu = load_gameplay_glb_from_bytes(bytes).expect("decode gameplay.glb");
+        let w = 1920.0_f32;
+        let h = 1080.0_f32;
+        let env_h = 1.0_f32;
+        let left =
+            require_gameplay_marker_pose(w, h, env_h, &cpu, YAKU_TABLETS_LEFT).expect("left");
+        let right =
+            require_gameplay_marker_pose(w, h, env_h, &cpu, YAKU_TABLETS_RIGHT).expect("right");
+        let span = marker_pair_span_px(left.anchor, right.anchor);
+        let layout_scale = (w.min(h)) / 600.0;
+        let card_gap = 6.0 * layout_scale;
+        let natural_card_w = (span - card_gap * 2.0) / 3.0;
+        let (_, pill_w) = gameplay_yaku_tablet_ui_metrics(w, h, 1);
+        assert!(
+            (pill_w - natural_card_w).abs() < 2.0,
+            "pill_w {pill_w} vs marker natural_card_w {natural_card_w}"
+        );
     }
 }

@@ -89,6 +89,28 @@ pub(crate) fn setup_gameplay_screenshot_state(run: &mut RunState) {
     crate::room_bake::setup_gameplay_bake_state(run);
 }
 
+/// Gameplay with a valid meld selected (green dragon triplet) for mirror-glow captures.
+#[cfg(feature = "screenshot")]
+pub(crate) fn setup_gameplay_valid_play_screenshot_state(run: &mut RunState) {
+    use mahjuro::core::tile::Suit;
+
+    setup_gameplay_screenshot_state(run);
+    let hand_len = run.hand().len();
+    let mut pick = vec![false; hand_len];
+    let mut souzu_seq = [5u8, 6, 7];
+    for (i, tile) in run.hand().iter().enumerate() {
+        if tile.suit == Suit::Souzu {
+            if let Some(slot) = souzu_seq.iter().position(|&rank| rank == tile.rank) {
+                pick[i] = true;
+                souzu_seq[slot] = 0;
+            }
+        }
+    }
+    *run.selected_mut() = pick;
+    run.plays_remaining = run.plays_remaining.max(3);
+    debug_assert!(run.is_selection_valid());
+}
+
 /// Gameplay backdrop for the round-win celebration modal capture.
 #[cfg(feature = "screenshot")]
 pub(crate) fn setup_round_win_screenshot_state(run: &mut RunState) {

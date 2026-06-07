@@ -8,7 +8,7 @@ use crate::ui::input::MarqueeSelect;
 /// Engine-owned gameplay core state for the first ownership slice.
 ///
 /// This deliberately covers the high-churn gameplay interaction surface:
-/// hand contents, selection, structure bank, round resources, and
+/// hand contents, selection, structure, round resources, and
 /// consumables. Legacy `RunState` still owns the rest of the run while the
 /// engine migrates incrementally.
 ///
@@ -169,7 +169,7 @@ impl GameplayCoreState {
         (removed, indices)
     }
 
-    /// Push validated sets onto the structure bank, extend structure tiles,
+    /// Push validated sets onto structure, extend structure tiles,
     /// and decrement plays.
     pub fn commit_sets_to_structure(&mut self, sets: &[DetectedMeld], scoring_tiles: &[Tile]) {
         for set in sets {
@@ -193,8 +193,8 @@ impl GameplayCoreState {
         self.selected = vec![false; self.hand.len()];
     }
 
-    /// Clear hand, selection mask, and structure bank (inter-round / skip transitions).
-    pub fn clear_hand_structure_bank(&mut self) {
+    /// Clear hand, selection mask, and structure (inter-round / skip transitions).
+    pub fn clear_hand_and_structure(&mut self) {
         self.hand.clear();
         self.selected.clear();
         self.structure_sets.clear();

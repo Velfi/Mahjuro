@@ -212,7 +212,7 @@ impl SceneBehavior for RumbleLabScene {
         }
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, mut ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let items = Self::layout_items(w, h);
@@ -300,9 +300,10 @@ impl SceneBehavior for RumbleLabScene {
             &mut frame,
             &ctx,
             back_footer_row(ctx.input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
         frame.window_title = "Mahjuro — Rumble Lab".into();
+        ctx.stash_focus_nav_tree_flat(&self.tree, &items, |a| a.label().into());
         frame
     }
 }

@@ -15,11 +15,13 @@ pub(crate) mod flowers_intro_copy;
 pub mod gameplay;
 pub mod guide;
 pub mod hallway;
+pub(crate) mod header_chrome;
 pub mod journal_transition;
 pub mod lamp_moths;
 pub mod main_menu;
 pub mod material_viewer;
 pub(crate) mod melds_intro_copy;
+pub(crate) mod yaku_intro_copy;
 pub mod object3d_inspect;
 pub mod options;
 pub mod pause_menu;
@@ -30,6 +32,7 @@ pub mod run_summary;
 mod run_summary_panel;
 pub mod scene_intent;
 pub(crate) mod scoring_intro_copy;
+pub(crate) mod tanuki_tips_intro_copy;
 pub mod shadow_ao_lab;
 pub mod shop;
 pub mod showcase;
@@ -37,7 +40,10 @@ pub mod showcase_stage;
 pub mod splash;
 pub mod stairway;
 pub mod start_game_modal;
+pub mod text_shadow_lab;
 pub mod tile_anchor_lab;
+pub mod tile_picker;
+pub mod tile_stress_lab;
 pub(crate) mod tiles_intro_copy;
 pub mod transition_playground;
 pub mod tutorial_campaign;
@@ -71,7 +77,9 @@ pub use showcase::{
 pub use splash::SplashScene;
 pub use stairway::StairwayScene;
 pub use start_game_modal::TileSelectScene;
+pub use text_shadow_lab::TextShadowLabScene;
 pub use tile_anchor_lab::TileAnchorLabScene;
+pub use tile_stress_lab::TileStressLabScene;
 pub use transition_playground::TransitionPlaygroundScene;
 pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_summary::TutorialSummaryScene;
@@ -284,6 +292,12 @@ pub struct DrawCtx<'a> {
     pub hub_loading: crate::scenes::main_menu::HubMenuLoading,
     pub main_menu_effects: crate::render::main_menu_effects_tuning::MainMenuEffectsTuning,
     pub flame_tuning: crate::render::flame_tuning::FlameTuning,
+    /// Victory run-summary 3D moon rotation + synodic phase (debug overlay).
+    pub victory_moon_debug: crate::render::victory_moon_tuning::VictoryMoonDebug,
+    /// When true, scenes may stash a [`crate::ui::focus_nav::FocusNavDebugSnapshot`]
+    /// into [`Self::focus_nav_snapshot_out`] for the debug overlay.
+    pub focus_nav_debug: bool,
+    pub focus_nav_snapshot_out: &'a mut Option<crate::ui::focus_nav::FocusNavDebugSnapshot>,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -323,6 +337,9 @@ impl<'a> DrawCtx<'a> {
         hub_loading: crate::scenes::main_menu::HubMenuLoading,
         main_menu_effects: crate::render::main_menu_effects_tuning::MainMenuEffectsTuning,
         flame_tuning: crate::render::flame_tuning::FlameTuning,
+        victory_moon_debug: crate::render::victory_moon_tuning::VictoryMoonDebug,
+        focus_nav_debug: bool,
+        focus_nav_snapshot_out: &'a mut Option<crate::ui::focus_nav::FocusNavDebugSnapshot>,
     ) -> Self {
         Self {
             layout,
@@ -354,7 +371,57 @@ impl<'a> DrawCtx<'a> {
             hub_loading,
             main_menu_effects,
             flame_tuning,
+            victory_moon_debug,
+            focus_nav_debug,
+            focus_nav_snapshot_out,
         }
+    }
+
+    /// Stash a pre-built focus-nav debug snapshot when the overlay is enabled.
+    pub fn stash_focus_nav_debug(&mut self, snapshot: crate::ui::focus_nav::FocusNavDebugSnapshot) {
+        if self.focus_nav_debug {
+            *self.focus_nav_snapshot_out = Some(snapshot);
+        }
+    }
+
+    /// Capture the live [`crate::ui::focus_nav::FocusNavState`] graph.
+    pub fn stash_focus_nav<T: Copy + PartialEq>(
+        &mut self,
+        nav: &crate::ui::focus_nav::FocusNavState<T>,
+        current: Option<T>,
+        label: impl Fn(T) -> String,
+    ) {
+        if self.focus_nav_debug {
+            *self.focus_nav_snapshot_out = Some(nav.debug_snapshot(current, label));
+        }
+    }
+
+    /// Rebuild inferred focus-nav geometry from explicit rects for this frame.
+    pub fn stash_focus_nav_graph<T: Copy + PartialEq>(
+        &mut self,
+        candidates: &[(T, [f32; 4])],
+        edges: &[(T, crate::ui::focus_nav::FocusDir, T)],
+        current: Option<T>,
+        memory: &crate::ui::focus_nav::FocusMemory,
+        label: impl Fn(T) -> String,
+    ) {
+        if self.focus_nav_debug {
+            *self.focus_nav_snapshot_out = Some(
+                crate::ui::focus_nav::debug_snapshot_from_candidates(
+                    candidates, edges, current, memory, label,
+                ),
+            );
+        }
+    }
+
+    /// [`crate::ui::widget_tree::TreeState`] + flat items from the same draw pass.
+    pub fn stash_focus_nav_tree_flat<A: Copy>(
+        &mut self,
+        tree: &crate::ui::widget_tree::TreeState,
+        items: &[crate::ui::widget_tree::FlatItem<A>],
+        label: impl Fn(A) -> String,
+    ) {
+        self.stash_focus_nav_debug(tree.focus_nav_debug_snapshot_flat(items, label));
     }
 
     /// Room punctual tuning + glTF height for a specific scene bucket.
@@ -496,7 +563,9 @@ pub enum Scene {
     Defeat(DefeatScene),
     Guide(GuideScene),
     MaterialViewer(MaterialViewerScene),
+    TextShadowLab(TextShadowLabScene),
     TileAnchorLab(TileAnchorLabScene),
+    TileStressLab(TileStressLabScene),
     ButtonAabbLab(ButtonAabbLabScene),
     Options(OptionsScene),
     Credits(CreditsScene),
@@ -530,7 +599,9 @@ pub fn active_scene_key(scene: &Scene) -> Option<&'static str> {
         Scene::Guide(_) => Some("guide"),
         Scene::YakuJournal(_) => Some("yaku_journal"),
         Scene::WallLedger(_) => Some("wall_ledger"),
+        Scene::TextShadowLab(_) => Some("text_shadow_lab"),
         Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
+        Scene::TileStressLab(_) => Some("tile_stress_lab"),
         Scene::ButtonAabbLab(_) => Some("button_aabb_lab"),
         Scene::AnimationLab(_) => Some(scene_keys::SHOP),
         Scene::RollerLab(_) => Some(scene_keys::GAMEPLAY),
@@ -569,11 +640,6 @@ pub fn active_scene_key_for_renderer(top: &Scene, parent: Option<&Scene>) -> Opt
         return Some(key);
     }
     active_scene_key(top)
-}
-
-/// Return from profile picker to the Archive (collection) without a `profile_select` ↔ `collection` cycle.
-pub(crate) fn scene_archive() -> Scene {
-    Scene::Archive(ArchiveScene::new())
 }
 
 #[cfg(test)]

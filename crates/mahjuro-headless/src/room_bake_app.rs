@@ -201,6 +201,7 @@ impl RoomBakeApp {
             ));
         }
 
+        let mut focus_nav_snapshot = None;
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -231,6 +232,9 @@ impl RoomBakeApp {
             mahjuro::scenes::main_menu::HubMenuLoading::default(),
             self.renderer.main_menu_effects,
             self.renderer.flame_tuning,
+            mahjuro::render::victory_moon_tuning::VictoryMoonDebug::default(),
+            false,
+            &mut focus_nav_snapshot,
         );
         let frame: UiFrame = self.scene.draw_frame(ctx);
 

@@ -243,6 +243,7 @@ impl ShopScene {
             remaining_free_restocks,
             pause_menu: PauseMenu::new(),
             focus,
+            focus_nav: crate::ui::focus_nav::FocusNavState::new(),
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
             score_popups: ScorePopupSystem::new(),
             particles: ParticleSystem::new(),

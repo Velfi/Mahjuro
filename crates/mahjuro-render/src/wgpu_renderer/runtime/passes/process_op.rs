@@ -24,6 +24,7 @@ pub(super) struct ProcessOpCtx<'a> {
     pub image_quads: &'a [crate::draw_cmd::ImageQuad],
     pub object3d_draw_list: &'a [(DrawKind, usize)],
     pub showcase_tile_batches: &'a [&'a [ShowcaseTilePlacement]],
+    pub showcase_tile_batch_clips: &'a [Option<[f32; 4]>],
     pub tile_glows: &'a [GpuInstance],
     pub tile_glow_buffer: Option<&'a wgpu::Buffer>,
     pub relic_glows: &'a [GpuInstance],
@@ -39,6 +40,50 @@ pub(super) struct ProcessOpCtx<'a> {
 }
 
 impl WgpuRenderer {
+    /// Instanced draw for `tile_3d.wgsl` meshes (showcase tiles and glTF coins).
+    fn draw_tile_gltf_instanced<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        primitives: &'a [TilePrimitiveGpu],
+        instance_start: u32,
+        instance_count: u32,
+    ) {
+        if instance_count == 0 {
+            return;
+        }
+        pass.set_vertex_buffer(1, self.tile_3d_instance_buffer.slice(..));
+        for blend_phase in [false, true] {
+            let mut textured_last_pi: Option<usize> = None;
+            let mut textured_last_key: Option<TileGlbPipelineKey> = None;
+            for (pi, prim) in primitives.iter().enumerate() {
+                if prim.pipeline_key.is_blend() != blend_phase {
+                    continue;
+                }
+                let Some(bg) = prim.material_bind_group.as_ref() else {
+                    continue;
+                };
+                if textured_last_key != Some(prim.pipeline_key) {
+                    pass.set_pipeline(self.tile_glb_pipeline(prim.pipeline_key));
+                    textured_last_key = Some(prim.pipeline_key);
+                }
+                if textured_last_pi != Some(pi) {
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        prim.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    textured_last_pi = Some(pi);
+                }
+                pass.set_bind_group(0, bg, &[]);
+                pass.draw_indexed(
+                    0..prim.index_count,
+                    0,
+                    instance_start..instance_start + instance_count,
+                );
+            }
+        }
+    }
+
     /// Dispatch a single render op into a render pass. Used by every
     /// scene-rendering pass (Pass A) so they all
     /// share the same op-dispatch table.
@@ -63,6 +108,7 @@ impl WgpuRenderer {
         let image_quads = ctx.image_quads;
         let object3d_draw_list = ctx.object3d_draw_list;
         let showcase_tile_batches = ctx.showcase_tile_batches;
+        let showcase_tile_batch_clips = ctx.showcase_tile_batch_clips;
         let tile_glows = ctx.tile_glows;
         let tile_glow_buffer = ctx.tile_glow_buffer;
         let relic_glows = ctx.relic_glows;
@@ -258,36 +304,22 @@ impl WgpuRenderer {
                         continue;
                     }
                     if matches!(kind, DrawKind::GltfCoin) {
-                        let Some(inst) = self.coin_glb_instances.get(slot_i) else {
+                        let Some((coin_base, coin_count)) = self.coin_3d_batch_range else {
                             continue;
                         };
-                        pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
-                        for blend_phase in [false, true] {
-                            let mut textured_last_pi: Option<usize> = None;
-                            let mut textured_last_key: Option<TileGlbPipelineKey> = None;
-                            for (pi, prim) in self.coin_glb_primitives.iter().enumerate() {
-                                if prim.pipeline_key.is_blend() != blend_phase {
-                                    continue;
-                                }
-                                if textured_last_key != Some(prim.pipeline_key) {
-                                    pass.set_pipeline(self.tile_glb_pipeline(prim.pipeline_key));
-                                    textured_last_key = Some(prim.pipeline_key);
-                                }
-                                if textured_last_pi != Some(pi) {
-                                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                                    pass.set_index_buffer(
-                                        prim.index_buffer.slice(..),
-                                        wgpu::IndexFormat::Uint32,
-                                    );
-                                    textured_last_pi = Some(pi);
-                                }
-                                let Some(bg) = inst.bind_groups.get(pi) else {
-                                    continue;
-                                };
-                                pass.set_bind_group(0, bg, &[]);
-                                pass.draw_indexed(0..prim.index_count, 0, 0..1);
-                            }
+                        if slot_i as u32 >= coin_count {
+                            continue;
                         }
+                        pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                        pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
+                        pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
+                        let inst_start = coin_base + slot_i as u32;
+                        self.draw_tile_gltf_instanced(
+                            pass,
+                            &self.coin_glb_primitives,
+                            inst_start,
+                            1,
+                        );
                         pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
                         continue;
                     }
@@ -433,22 +465,34 @@ impl WgpuRenderer {
                 }
             }
             RenderOp::GameplayEnvironment => {
-                if self.gameplay_environment.is_some() {
-                    self.draw_gameplay_environment_meshes(pass, frame, false);
-                }
+                self.draw_gameplay_environment_for_op(pass, frame);
             }
             RenderOp::ShowcaseTileBatch(batch_idx) => {
+                if let Some(sc) = showcase_tile_batch_clips
+                    .get(*batch_idx)
+                    .copied()
+                    .flatten()
+                    .and_then(to_scissor)
+                {
+                    pass.set_scissor_rect(sc[0], sc[1], sc[2], sc[3]);
+                }
                 if !self.active_tile_mesh().primitives.is_empty() {
                     let batch = showcase_tile_batches[*batch_idx];
                     if !batch.is_empty() {
                         pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
                         pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
                         pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
-                        let start_slot: usize = showcase_tile_batches
-                            .iter()
-                            .take(*batch_idx)
-                            .map(|b| b.len())
-                            .sum();
+                        let Some(&(batch_start, batch_count)) =
+                            self.tile_3d_batch_ranges.get(*batch_idx)
+                        else {
+                            pass.set_scissor_rect(
+                                full_scissor[0],
+                                full_scissor[1],
+                                full_scissor[2],
+                                full_scissor[3],
+                            );
+                            return;
+                        };
 
                         // Glow halos for selected hand tiles (additive, drawn before mesh).
                         let has_glow = batch.iter().any(|p| p.glow);
@@ -488,47 +532,20 @@ impl WgpuRenderer {
                         }
 
                         // Pass B: regular textured tile meshes (opaque before blend).
-                        for blend_phase in [false, true] {
-                            let mut textured_last_pi: Option<usize> = None;
-                            let mut textured_last_key: Option<TileGlbPipelineKey> = None;
-                            for (i, _) in batch.iter().enumerate() {
-                                let slot_i = start_slot + i;
-                                if slot_i >= MAX_SHOWCASE_TILE_SLOTS {
-                                    break;
-                                }
-                                let Some(stg) = self.showcase_tiles.get(slot_i) else {
-                                    break;
-                                };
-                                for (pi, prim) in
-                                    self.active_tile_mesh().primitives.iter().enumerate()
-                                {
-                                    if prim.pipeline_key.is_blend() != blend_phase {
-                                        continue;
-                                    }
-                                    if textured_last_key != Some(prim.pipeline_key) {
-                                        pass.set_pipeline(
-                                            self.tile_glb_pipeline(prim.pipeline_key),
-                                        );
-                                        textured_last_key = Some(prim.pipeline_key);
-                                    }
-                                    if textured_last_pi != Some(pi) {
-                                        pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                                        pass.set_index_buffer(
-                                            prim.index_buffer.slice(..),
-                                            wgpu::IndexFormat::Uint32,
-                                        );
-                                        textured_last_pi = Some(pi);
-                                    }
-                                    let Some(bg) = stg.bind_groups.get(pi) else {
-                                        continue;
-                                    };
-                                    pass.set_bind_group(0, bg, &[]);
-                                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
-                                }
-                            }
-                        }
+                        self.draw_tile_gltf_instanced(
+                            pass,
+                            &self.active_tile_mesh().primitives,
+                            batch_start,
+                            batch_count,
+                        );
                     }
                 }
+                pass.set_scissor_rect(
+                    full_scissor[0],
+                    full_scissor[1],
+                    full_scissor[2],
+                    full_scissor[3],
+                );
             }
             RenderOp::QuadBatch { buf_idx, count } => {
                 let slice = quad_buffers[*buf_idx];
@@ -711,6 +728,16 @@ impl WgpuRenderer {
             }
             RenderOp::ImageQuad(idx) => {
                 let quad = &image_quads[*idx];
+                if let Some(sc) = quad.clip_rect.and_then(to_scissor) {
+                    pass.set_scissor_rect(sc[0], sc[1], sc[2], sc[3]);
+                } else {
+                    pass.set_scissor_rect(
+                        full_scissor[0],
+                        full_scissor[1],
+                        full_scissor[2],
+                        full_scissor[3],
+                    );
+                }
                 if let Some(gpu) = self.image_quad_overlays.get(&quad.source.cache_key()) {
                     self.draw_image_textured_quad(
                         pass,
@@ -719,6 +746,12 @@ impl WgpuRenderer {
                         &image_quad_inst_buffers[*idx],
                     );
                 }
+                pass.set_scissor_rect(
+                    full_scissor[0],
+                    full_scissor[1],
+                    full_scissor[2],
+                    full_scissor[3],
+                );
             }
         }
     }
