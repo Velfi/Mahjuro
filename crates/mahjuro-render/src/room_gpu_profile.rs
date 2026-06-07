@@ -94,24 +94,24 @@ fn count_loaded_primitive(prim: &LoadedPrimitive, out: &mut RoomCpuUploadPayload
     out.vertex_bytes += (prim.vertices.len() * std::mem::size_of::<Vertex3dTex>()) as u64;
     out.index_bytes += (prim.indices.len() * std::mem::size_of::<u32>()) as u64;
     count_texture_slot(
-        prim.albedo_rgba.as_ref(),
+        prim.albedo_rgba.as_deref(),
         prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
         out,
     );
     count_texture_slot(
-        prim.normal_rgba.as_ref(),
+        prim.normal_rgba.as_deref(),
         prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
         out,
     );
     count_texture_slot(
-        prim.metallic_roughness_rgba.as_ref(),
+        prim.metallic_roughness_rgba.as_deref(),
         prim.metallic_roughness_mip_chain
             .as_deref()
             .map(|c| c.as_slice()),
         out,
     );
     count_texture_slot(
-        prim.emissive_rgba.as_ref(),
+        prim.emissive_rgba.as_deref(),
         prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
         out,
     );
@@ -422,21 +422,21 @@ pub fn log_room_texture_audit(
             &mut rows,
             env_prim,
             RoomTextureUsageClass::BaseColorSrgb,
-            env_prim.mesh.albedo_rgba.as_ref(),
+            env_prim.mesh.albedo_rgba.as_deref(),
             env_prim.mesh.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
         );
         collect_texture_audit_row(
             &mut rows,
             env_prim,
             RoomTextureUsageClass::NormalLinear,
-            env_prim.mesh.normal_rgba.as_ref(),
+            env_prim.mesh.normal_rgba.as_deref(),
             env_prim.mesh.normal_mip_chain.as_deref().map(|c| c.as_slice()),
         );
         collect_texture_audit_row(
             &mut rows,
             env_prim,
             RoomTextureUsageClass::MetallicRoughnessLinear,
-            env_prim.mesh.metallic_roughness_rgba.as_ref(),
+            env_prim.mesh.metallic_roughness_rgba.as_deref(),
             env_prim
                 .mesh
                 .metallic_roughness_mip_chain
@@ -447,7 +447,7 @@ pub fn log_room_texture_audit(
             &mut rows,
             env_prim,
             RoomTextureUsageClass::EmissiveSrgb,
-            env_prim.mesh.emissive_rgba.as_ref(),
+            env_prim.mesh.emissive_rgba.as_deref(),
             env_prim.mesh.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
         );
     }
