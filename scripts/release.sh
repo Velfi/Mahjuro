@@ -11,9 +11,10 @@
 #
 # This will:
 #   1. Verify the working tree is clean and on `main`
-#   2. Compile .changes/*.md fragments into CHANGELOG.md (or a placeholder if none)
+#   2. For stable releases only: compile .changes/*.md into CHANGELOG.md
+#      (pre-releases skip this — fragments accumulate until the stable cut)
 #   3. Update the version in Cargo.toml (and refresh Cargo.lock)
-#   4. Commit the version bump + changelog
+#   4. Commit the version bump (and changelog, for stable releases)
 #   5. Create an annotated `v<version>` tag
 #   6. Push the commit and tag to `origin`, which triggers .github/workflows/release.yml
 
@@ -72,9 +73,18 @@ if [[ "$LOCAL" != "$REMOTE" ]]; then
     exit 1
 fi
 
-# Compile changelog fragments into CHANGELOG.md (or a single placeholder line
-# when .changes/ has no fragments). Stages deletion of any fragment files.
-python3 scripts/compile_changelog.py "$VERSION"
+IS_PRERELEASE=false
+if [[ "$VERSION" == *-* ]]; then
+    IS_PRERELEASE=true
+fi
+
+if [[ "$IS_PRERELEASE" == true ]]; then
+    echo "Pre-release: skipping changelog compile (.changes/ kept for stable release)"
+else
+    # Compile changelog fragments into CHANGELOG.md (or a single placeholder line
+    # when .changes/ has no fragments). Stages deletion of any fragment files.
+    python3 scripts/compile_changelog.py "$VERSION"
+fi
 
 # Bump version in [workspace.package] (member crates use version.workspace = true).
 python3 - "$VERSION" <<'PY'
@@ -95,9 +105,12 @@ PY
 # Refresh Cargo.lock so the version bump is recorded
 cargo update --workspace --quiet
 
-git add Cargo.toml Cargo.lock CHANGELOG.md
-# Stage fragment deletions (compile_changelog.py removed them from the working tree).
-git add -u .changes
+git add Cargo.toml Cargo.lock
+if [[ "$IS_PRERELEASE" != true ]]; then
+    git add CHANGELOG.md
+    # Stage fragment deletions (compile_changelog.py removed them from the working tree).
+    git add -u .changes
+fi
 git commit -m "Release ${TAG}"
 git tag -a "${TAG}" -m "Release ${TAG}"
 

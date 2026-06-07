@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Build GitHub release notes from CHANGELOG.md for a given tag.
+"""Build GitHub release notes from CHANGELOG.md for a stable release tag.
 
 Collects every changelog section that is strictly after the most recent *stable*
 ( non-prerelease ) version older than the tag, and not newer than the tag's
-version — in document order (newest first). This way a prerelease or final
-0.5.0 publish includes notes for 0.5.0-0, 0.5.0-1, etc. since 0.4.5.
+version — in document order (newest first). Pre-releases use
+`prerelease_notes.py` (commit-range link) instead; they do not add CHANGELOG
+sections.
 
 Usage:
     python3 scripts/aggregate_release_notes.py <version-or-tag>
