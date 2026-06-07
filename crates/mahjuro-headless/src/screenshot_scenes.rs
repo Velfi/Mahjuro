@@ -41,6 +41,9 @@ pub(crate) fn validate_screenshot_cli(
     if s.shop_focus.is_some() && !shop_like {
         anyhow::bail!("--shop-focus is only valid with --scene shop");
     }
+    if s.collection_focus.is_some() && !collection_like {
+        anyhow::bail!("--collection-focus is only valid with --scene collection (or archive, chronicle, …)");
+    }
     let showcase_like = matches!(s.scene.as_str(), "showcase");
     let celebration_like =
         matches!(s.scene.as_str(), "zodiac_celebration") || (showcase_like && s.pack.is_none());

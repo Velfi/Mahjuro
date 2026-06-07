@@ -31,9 +31,9 @@ use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_
 use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{
     HintSegment, HintStyle, archive_browse_footer_row, inspect_camera_hint_row,
-    push_inline_hint_rows, screen_footer_reserve,
+    push_inline_hint_rows, push_screen_footer_hint, screen_footer_reserve, screen_footer_top,
 };
-use crate::ui::inspect_plaque::push_floating_relic_flavor_labels;
+use crate::ui::inspect_plaque::push_relic_flavor_inspect_panel;
 use crate::ui::focus_nav::{FocusDir, FocusNavState, push_focus_ring};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -247,6 +247,64 @@ impl ArchiveScene {
         *self = Self::with_active_tab(Tab::Talismans);
         self.focused_row = None;
         self.archive_page = 0;
+    }
+
+    /// Headless screenshot: focus a catalog entry before capture.
+    ///
+    /// Slugs: `humility`, `relic:humility`, or `relic:N` (grid index on the active tab).
+    pub fn set_focus_for_screenshot(
+        &mut self,
+        slug: &str,
+        progress: &crate::core::progression::PlayerProgress,
+    ) -> Result<(), String> {
+        let target = slug.strip_prefix("relic:").unwrap_or(slug);
+        let chronicle_last_seen = self.chronicle_last_seen.unwrap_or(0);
+        let all = tab_artifacts(self.active_tab, progress, chronicle_last_seen);
+
+        if let Ok(idx) = target.parse::<usize>() {
+            if idx >= all.len() {
+                return Err(format!(
+                    "--collection-focus 'relic:{idx}' — index out of range (tab has {} entries)",
+                    all.len()
+                ));
+            }
+            self.apply_collection_focus_idx(idx);
+            return Ok(());
+        }
+
+        let normalized = target
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['_', '-', ' '], "");
+
+        for (idx, art) in all.iter().enumerate() {
+            let ArtifactKind::Relic(rid) = art.kind else {
+                continue;
+            };
+            let Some(def) = all_relic_defs().iter().find(|d| d.id == rid) else {
+                continue;
+            };
+            let name_norm = def.name.to_ascii_lowercase().replace([' ', '-', '_'], "");
+            let id_norm = format!("{:?}", rid).to_ascii_lowercase();
+            let file_norm = rid
+                .asset_filename()
+                .trim_end_matches(".png")
+                .replace('_', "");
+            if normalized == name_norm || normalized == id_norm || normalized == file_norm {
+                self.apply_collection_focus_idx(idx);
+                return Ok(());
+            }
+        }
+
+        Err(format!(
+            "--collection-focus '{slug}' — no matching entry on the active tab (try relic:N or a relic name/id slug)"
+        ))
+    }
+
+    fn apply_collection_focus_idx(&mut self, idx: usize) {
+        self.focused_row = Some(idx);
+        self.selected_artifact = Some(idx);
+        self.archive_page = archive_page_for_idx(idx);
     }
 
     pub fn is_chronicle_tab(&self) -> bool {
@@ -914,7 +972,7 @@ impl ArchiveScene {
             } else {
                 format!("{}\n\n{}", boss.name, body)
             };
-            // Relic inspect: name on the room plaque; flavor floats below (shop parity).
+            // Relic inspect: name on the room plaque; flavor in a left-side panel.
             let sign_text = if inspect.is_some()
                 && boss.unlocked
                 && let ArtifactKind::Relic(rid) = &boss.kind
@@ -1138,19 +1196,23 @@ impl ArchiveScene {
         } else {
             hint_line_h * hint_line_count as f32 + 10.0
         };
-        let hint_y = if chronicle_ledger {
+        let hint_y = if inspect_open {
+            screen_footer_top(h, hint_style)
+        } else if chronicle_ledger {
             h - hint_h - (h * 0.018).max(10.0)
         } else {
             footer_anchor_y - hint_h - (h * 0.014).max(10.0)
         };
 
-        for i in 0..hint_line_count {
-            legend_row_rects.push([
-                hint_band_x,
-                hint_y + hint_line_h * i as f32,
-                hint_band_w,
-                hint_line_h,
-            ]);
+        if !inspect_open {
+            for i in 0..hint_line_count {
+                legend_row_rects.push([
+                    hint_band_x,
+                    hint_y + hint_line_h * i as f32,
+                    hint_band_w,
+                    hint_line_h,
+                ]);
+            }
         }
 
         // Page indicator — `Page X / Y · ● ○ ○ …` centred in the gap between
@@ -1210,7 +1272,11 @@ impl ArchiveScene {
             &mut ctx,
             inspect,
         );
-        if !legend_rows.is_empty() {
+        if inspect_open {
+            if let Some(row) = legend_rows.first() {
+                push_screen_footer_hint(&mut frame, &ctx, row.clone(), hint_style);
+            }
+        } else if !legend_rows.is_empty() {
             push_inline_hint_rows(
                 &mut frame,
                 &ctx,
@@ -1233,17 +1299,17 @@ impl ArchiveScene {
             } else {
                 0.0
             };
-            let mut flavor_gradients = Vec::new();
+            let mut flavor_quads = Vec::new();
             let mut flavor_texts = Vec::new();
-            push_floating_relic_flavor_labels(
-                &mut flavor_gradients,
+            push_relic_flavor_inspect_panel(
+                &mut flavor_quads,
                 &mut flavor_texts,
                 w,
                 h,
                 def.flavor,
                 extra_bottom_reserve,
             );
-            frame.gradient_quads(flavor_gradients);
+            frame.quads(flavor_quads);
             frame.texts(flavor_texts);
         }
 

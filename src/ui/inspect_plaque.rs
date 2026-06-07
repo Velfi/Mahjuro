@@ -2,15 +2,19 @@
 
 use crate::core::consumable::Consumable;
 use crate::core::debuff::TileDebuff;
-use crate::core::relic::RelicFlavorSpan;
+use crate::core::relic::{RelicFlavorSpan, flavor_spans_plain_text};
 use crate::core::tile::{Suit, Tile, TileEnhancement};
-use crate::render::decal::{DecalFonts, load_ui_font, load_ui_font_italic};
+use crate::render::decal::{
+    DecalFonts, load_ui_font, load_ui_font_italic, measure_flavor_spans_layout,
+};
 use crate::render::text_shadow_lab::{
     FloatingFlavorShadowTuning, layout_floating_flavor_caption_for_spans,
 };
 use crate::render::theme::{color, typography};
 use crate::render::vocabulary_colors::GlossaryMode;
-use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{
+    GpuInstance, GradientQuadInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
+};
 use crate::ui::styled_text;
 use crate::ui::tooltip::push_tooltip_frame_quads;
 
@@ -248,6 +252,94 @@ pub fn push_focus_tooltip_panel_2d(
             y += section_gap;
         }
     }
+}
+
+/// Relic inspect flavor in a left-docked tooltip panel (Archive inspect).
+///
+/// `extra_bottom_reserve` shrinks the vertical band (e.g. leave room for footer hints).
+pub fn push_relic_flavor_inspect_panel(
+    quads: &mut Vec<GpuInstance>,
+    texts: &mut Vec<TextLabel>,
+    window_w: f32,
+    window_h: f32,
+    flavor: &'static [RelicFlavorSpan],
+    extra_bottom_reserve: f32,
+) {
+    if flavor.is_empty() {
+        return;
+    }
+
+    let margin = window_w * 0.04;
+    let pad = 14.0_f32.max(10.0);
+    const FILL_INSET_PX: f32 = 2.0;
+    let rim = crate::render::theme::metrics::tooltip_border_px(window_w, window_h);
+    let body_px = typography::size(typography::H32, window_h);
+    let min_font_px = typography::readable_floor_px(window_h);
+    let max_inner_w = (window_w * 0.38).clamp(320.0, 520.0);
+    let min_inner_w = (window_w * 0.32).clamp(280.0, max_inner_w);
+    let inner_w = flavor_spans_layout_width(flavor, body_px, max_inner_w)
+        .clamp(min_inner_w, max_inner_w);
+    let inner_w_u = inner_w.max(1.0) as u32;
+    let top_margin = window_h * 0.10;
+    let bottom_margin = extra_bottom_reserve.max(0.0) + window_h * 0.02;
+    let frame_inset = pad * 2.0 + FILL_INSET_PX * 2.0;
+    let available_inner_h =
+        (window_h - top_margin - bottom_margin - frame_inset).max(body_px * 2.0);
+    let available_inner_h_u = available_inner_h.max(1.0) as u32;
+
+    let (content_h, label_font_px) = if let Some(font) = load_ui_font() {
+        let fonts = DecalFonts {
+            regular: font,
+            italic: load_ui_font_italic(),
+            emoji: None,
+        };
+        let metrics = measure_flavor_spans_layout(
+            &fonts,
+            flavor,
+            inner_w_u,
+            u32::MAX,
+            body_px,
+            min_font_px,
+        );
+        let metrics = if metrics.text_block_h > available_inner_h {
+            measure_flavor_spans_layout(
+                &fonts,
+                flavor,
+                inner_w_u,
+                available_inner_h_u,
+                body_px,
+                min_font_px,
+            )
+        } else {
+            metrics
+        };
+        (metrics.text_block_h.ceil(), metrics.font_px)
+    } else {
+        let line_step = styled_text::colored_row_line_step(body_px);
+        let content_lines =
+            estimated_flavor_line_count(flavor, inner_w, body_px, 64);
+        (line_step * content_lines as f32, body_px)
+    };
+
+    let panel_w = inner_w + frame_inset;
+    let panel_h = content_h + frame_inset;
+    let top = top_margin.min((window_h - bottom_margin - panel_h).max(0.0));
+    let left = margin;
+
+    push_tooltip_frame_quads(quads, left, top, panel_w, panel_h, rim);
+
+    let text_left = left + pad + FILL_INSET_PX;
+    let text_top = top + pad + FILL_INSET_PX;
+    texts.push(TextLabel {
+        rect: [text_left, text_top, inner_w, content_h],
+        text: flavor_spans_plain_text(flavor),
+        color: color::PARCHMENT,
+        font_px: Some(label_font_px),
+        align: TextAlign::Left,
+        block_vertical_align: TextBlockVerticalAlign::Top,
+        flavor_spans: Some(flavor),
+        ..Default::default()
+    });
 }
 
 /// Relic inspect flavor only: no tooltip frame; draw as a bottom-centered band

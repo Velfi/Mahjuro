@@ -880,7 +880,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "\n",
+        "text": "I’m Nobody! Who are you?\n\nAre you – Nobody – too? \n\nThen there’s a pair of us! \n\nDon’t tell! they’d advertise – you know!\nHow dreary – to be – Somebody!\n\nHow public – like a Frog – \n\nTo tell one’s name – the livelong June – \n\nTo an admiring Bog!",
         "bold": false,
         "italic": false
       }
@@ -1074,7 +1074,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "\n",
+        "text": "Under snow, the root keeps its counsel.\nNo sprout pokes at the ice.\nThe pond holds the gray sky\nwithout asking it to clear.\nWhen spring comes, it does not apologize\nfor taking all winter.\n",
         "bold": false,
         "italic": false
       }
@@ -1087,7 +1087,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "\n",
+        "text": "Can I see anothers woe,\nAnd not be in sorrow too.\nCan I see anothers grief,\nAnd not seek for kind relief.\n",
         "bold": false,
         "italic": false
       }
@@ -1100,9 +1100,9 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Temperance wherever it rests.",
+        "text": "The Soul selects her own Society —\nThen — shuts the Door —\nTo her divine Majority —\nPresent no more —\nUnmoved — she notes the Chariots — pausing —\nAt her low Gate —\nUnmoved — an Emperor be kneeling\nUpon her Mat —\nI've known her — from an ample nation —\nChoose One —\nThen — close the Valves of her attention —\nLike Stone —",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -1113,9 +1113,9 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Chastity wherever it rests.",
+        "text": "How could the moon make me fall into thought by saying \"Lament!\"? Although it is attributed to me being in love, I attribute my tears falling down to the moon.\n",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -1126,7 +1126,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Charity wherever it rests.",
+        "text": "Tis' better to give than to receive.",
         "bold": false,
         "italic": true
       }
@@ -1139,7 +1139,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "\n",
+        "text": "Before enlightenment; chop wood, carry water.\nAfter enlightenment; chop wood, carry water.",
         "bold": false,
         "italic": false
       }

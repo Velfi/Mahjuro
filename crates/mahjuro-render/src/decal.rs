@@ -2401,6 +2401,21 @@ fn build_flavor_soft_lines(
     soft_lines
 }
 
+/// Vertical extent of wrapped flavor copy — matches [`rasterize_label_raster_spans`]
+/// (blank hard lines still consume a line step).
+fn flavor_soft_lines_block_h(
+    fonts: &DecalFonts<'_>,
+    soft_lines: &[Vec<FlavorCell>],
+    font_px: f32,
+) -> f32 {
+    let line_h = fonts
+        .regular
+        .horizontal_line_metrics(font_px)
+        .map(|lm| lm.new_line_size)
+        .unwrap_or(font_px * 1.2);
+    line_h * soft_lines.len().max(1) as f32
+}
+
 fn relic_spans_to_raster_spans(spans: &[RelicFlavorSpan]) -> Vec<RasterStyleSpan<'_>> {
     spans
         .iter()
@@ -2420,11 +2435,9 @@ pub fn flavor_raster_soft_line_count(
     band_w: u32,
     font_px: f32,
 ) -> usize {
-    let count = build_flavor_soft_lines(fonts, spans, band_w, font_px)
-        .into_iter()
-        .filter(|line| !line.is_empty())
-        .count();
-    count.max(1)
+    build_flavor_soft_lines(fonts, spans, band_w, font_px)
+        .len()
+        .max(1)
 }
 
 /// Relic flavor labels: wrap at `target_font_px`, shrink only when the wrapped
@@ -2443,17 +2456,7 @@ pub fn resolve_flavor_spans_font_px(
 
     let wrapped_block_h = |font_px: f32| -> f32 {
         let soft_lines = build_flavor_soft_lines(fonts, &raster_spans, band_w, font_px);
-        let line_count = soft_lines
-            .iter()
-            .filter(|line| !line.is_empty())
-            .count()
-            .max(1);
-        let line_h = fonts
-            .regular
-            .horizontal_line_metrics(font_px)
-            .map(|lm| lm.new_line_size)
-            .unwrap_or(font_px * 1.2);
-        line_h * line_count as f32
+        flavor_soft_lines_block_h(fonts, &soft_lines, font_px)
     };
 
     let band_h_f = band_h as f32;
@@ -2489,26 +2492,22 @@ pub fn measure_flavor_spans_layout(
     );
     let raster_spans = relic_spans_to_raster_spans(spans);
     let soft_lines = build_flavor_soft_lines(fonts, &raster_spans, band_w, font_px);
-    let line_count = soft_lines
-        .iter()
-        .filter(|line| !line.is_empty())
-        .count()
-        .max(1);
+    let line_count = soft_lines.len().max(1);
     let text_block_w = soft_lines
         .iter()
         .map(|line| flavor_line_advance(fonts, line, font_px))
         .fold(0.0_f32, f32::max)
         .min(band_w as f32);
-    let line_h = fonts
-        .regular
-        .horizontal_line_metrics(font_px)
-        .map(|lm| lm.new_line_size)
-        .unwrap_or(font_px * 1.2);
+    let text_block_h = flavor_soft_lines_block_h(fonts, &soft_lines, font_px);
     FlavorCaptionMetrics {
         font_px,
-        line_h,
+        line_h: fonts
+            .regular
+            .horizontal_line_metrics(font_px)
+            .map(|lm| lm.new_line_size)
+            .unwrap_or(font_px * 1.2),
         line_count,
-        text_block_h: line_h * line_count as f32,
+        text_block_h,
         text_block_w: text_block_w.max(font_px),
     }
 }
@@ -2752,6 +2751,33 @@ mod flavor_layout_tests {
         assert!(
             metrics.font_px >= floor_px,
             "font should not shrink below readable floor"
+        );
+    }
+
+    #[test]
+    fn blank_hard_lines_add_vertical_extent() {
+        let Some(fonts) = test_fonts() else {
+            return;
+        };
+        let spans = &[RelicFlavorSpan {
+            text: "First stanza\n\nSecond stanza\n\nThird stanza",
+            bold: false,
+            italic: false,
+        }];
+        let band_w = 520u32;
+        let metrics =
+            measure_flavor_spans_layout(&fonts, spans, band_w, u32::MAX, 32.0, 12.0);
+        let raster_spans = relic_spans_to_raster_spans(spans);
+        let soft_lines = build_flavor_soft_lines(&fonts, &raster_spans, band_w, metrics.font_px);
+        assert_eq!(
+            metrics.line_count,
+            soft_lines.len(),
+            "line_count should match raster soft line slots"
+        );
+        assert!(
+            metrics.line_count >= 5,
+            "paragraph breaks should reserve blank line steps, got {}",
+            metrics.line_count
         );
     }
 
