@@ -3,7 +3,6 @@ use crate::room_gpu_resident::{
     ROOM_ARCHIVE, ROOM_GAMEPLAY, ROOM_HALLWAY, ROOM_MAIN_MENU, ROOM_SHOP, ROOM_STAIRCASE,
 };
 use crate::scene_keys;
-use std::sync::OnceLock;
 
 impl WgpuRenderer {
     pub fn queue_screenshot(&self, path: std::path::PathBuf) {
@@ -213,21 +212,32 @@ impl WgpuRenderer {
             || tuning.vhs_vignette > 0.0;
     }
 
-    /// True when every player-visible tileset has an offline baked atlas on disk.
+    /// True when every built-in player tileset has an offline baked atlas on disk.
+    pub fn builtin_showcase_decal_atlases_ready() -> bool {
+        mahjuro_assets::asset_path::list_builtin_player_tilesets()
+            .iter()
+            .all(|name| crate::showcase_decal_atlas::baked_showcase_decal_atlas_available(name))
+    }
+
+    /// Back-compat alias: built-in tilesets only (mods bake on demand).
     pub fn showcase_decal_atlases_baked_for_all_player_tilesets(&self) -> bool {
-        static SHOWCASE_ATLAS_ALL_READY: OnceLock<bool> = OnceLock::new();
-        *SHOWCASE_ATLAS_ALL_READY.get_or_init(|| {
-            let tilesets = mahjuro_assets::asset_path::list_player_tilesets();
-            tilesets
-                .iter()
-                .all(|name| crate::showcase_decal_atlas::baked_showcase_decal_atlas_available(name))
-        })
+        Self::builtin_showcase_decal_atlases_ready()
+    }
+
+    fn active_tileset_showcase_ready(&self, active_tileset: &str) -> bool {
+        if self.showcase_decal_atlas_tileset.as_deref() == Some(active_tileset)
+            && self.showcase_decal_atlas.is_some()
+        {
+            return true;
+        }
+        crate::showcase_decal_atlas::baked_showcase_decal_atlas_available(active_tileset)
     }
 
     /// True when splash can hand off to the main-menu hub without a first-frame shadow hitch.
-    pub fn splash_hub_boot_ready(&self) -> bool {
-        self.showcase_decal_atlases_baked_for_all_player_tilesets()
+    pub fn splash_hub_boot_ready(&self, active_tileset: &str) -> bool {
+        Self::builtin_showcase_decal_atlases_ready()
             && self.main_menu_environment.is_some()
+            && self.active_tileset_showcase_ready(active_tileset)
     }
 
     /// Upload hub/run room GLBs (and advance CPU prefetch) while the splash plate is up.
@@ -250,9 +260,11 @@ impl WgpuRenderer {
     }
 
     /// Partial hub readiness for the unified loading progress bar (0–1).
-    pub fn splash_hub_boot_progress(&self) -> f32 {
+    pub fn splash_hub_boot_progress(&self, active_tileset: &str) -> f32 {
         let mut done = 0.0f32;
-        if self.showcase_decal_atlases_baked_for_all_player_tilesets() {
+        if Self::builtin_showcase_decal_atlases_ready()
+            && self.active_tileset_showcase_ready(active_tileset)
+        {
             done += 1.0;
         }
         if self.main_menu_environment.is_some() {

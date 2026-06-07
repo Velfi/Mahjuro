@@ -1,15 +1,10 @@
-//! Steam achievements (always) and Steamworks client (interactive builds).
-//!
-//! Controller input is handled entirely by SDL3. The client covers
-//! achievements, stats sync, and Steam callbacks only.
+//! Distribution re-exports — achievements and platform client.
 
-pub mod achievement;
-pub use achievement::Achievement;
+pub use mahjuro_distribution::Achievement;
+pub use mahjuro_distribution::{
+    DistributionBackend, DistributionClient, DistributionConfig,
+};
+pub use mahjuro_distribution::{PlatformPaths, PlatformShell};
 
-#[cfg(any(feature = "game", feature = "headless-screenshot"))]
-mod client;
-#[cfg(any(feature = "game", feature = "headless-screenshot"))]
-pub(crate) mod stat;
-
-#[cfg(any(feature = "game", feature = "headless-screenshot"))]
-pub use client::{SteamClient, steamworks_dll_ready};
+#[cfg(feature = "dist-steam")]
+pub use mahjuro_distribution::steam::steamworks_dll_ready;

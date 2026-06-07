@@ -266,7 +266,11 @@ impl PauseMenu {
                 }
                 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
                 if opts.take_export_requested() {
-                    let path = crate::persistence::play_stats_export_path(_active_profile);
+                    if let Some(path) =
+                        mahjuro_distribution::PlatformShell::resolve_play_stats_export_path(
+                            _active_profile,
+                        )
+                    {
                     match crate::bot::export_play_history_html(&path, progress) {
                         Ok(()) => bus.push(GameEvent::InfoModal {
                             title: "Stats exported".into(),
@@ -277,6 +281,16 @@ impl PauseMenu {
                             body: format!("{e:#}"),
                         }),
                     }
+                    }
+                }
+                #[cfg(any(feature = "game", feature = "headless-screenshot"))]
+                if opts.take_open_tileset_mods_requested()
+                    && let Err(e) = crate::shell_open::open_tileset_mods_folder()
+                {
+                    bus.push(GameEvent::InfoModal {
+                        title: "Could not open folder".into(),
+                        body: e,
+                    });
                 }
                 if opts.take_credits_requested() {
                     bus.push(GameEvent::UiSound(SfxId::UiConfirm));

@@ -32,8 +32,9 @@ const GAMMA_STEP: f32 = 0.05;
 
 /// Click-id base for TOC links (high range to avoid collisions).
 const TOC_ID_BASE: u32 = 0xF200;
-/// Click-id for the fixed Back button.
+/// Click-id for the fixed bottom buttons (below the scroll area).
 const BACK_ID: u32 = 0xF210;
+const TILESET_MODS_FOLDER_ID: u32 = 0xF213;
 /// Tile set row: mouse-only prev/next arrows (registered before the row hit target).
 const TILESET_ARROW_PREV_ID: u32 = 0xF211;
 const TILESET_ARROW_NEXT_ID: u32 = 0xF212;
@@ -340,7 +341,10 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
         Row::Gamma => ("Gamma", format!("{:.2}", scene.gamma)),
         Row::Effects => ("Effects quality", scene.effects_quality.label().into()),
         Row::Tile => ("Tile style", scene.tile_preset.label().into()),
-        Row::Tileset => ("Tile set", scene.tileset_name.clone()),
+        Row::Tileset => (
+            "Tile set",
+            crate::asset_path::tileset_display_name(&scene.tileset_name),
+        ),
         Row::BorderlessFullscreen => (
             "Window mode",
             if scene.borderless_fullscreen {
@@ -386,7 +390,9 @@ struct PanelLayout {
     slot_h: f32,
     slot_gap: f32,
     visible_slots: usize,
-    // Back button
+    // Bottom buttons
+    tileset_mods_x: f32,
+    tileset_mods_w: f32,
     back_x: f32,
     back_y: f32,
     back_w: f32,
@@ -421,14 +427,17 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
     let slot_h = (40.0 * scale).max(26.0);
     let slot_gap = (10.0 * scale).max(5.0);
 
-    // Back button and version sit above the screen footer hint row.
+    // Bottom buttons and version sit above the screen footer hint row.
     let footer_reserve = screen_footer_reserve(w, h);
     let back_h = (42.0 * scale).max(28.0);
     let version_h = (14.0 * scale).max(10.0);
     let version_y = h - footer_reserve - version_h - (4.0 * scale);
     let back_y = version_y - back_h - (12.0 * scale);
-    let back_w = total_w;
-    let back_x = margin;
+    let bottom_gap = (12.0 * scale).max(8.0);
+    let back_w = (total_w * 0.30).max(96.0 * scale).min(total_w * 0.42);
+    let tileset_mods_w = total_w - back_w - bottom_gap;
+    let tileset_mods_x = margin;
+    let back_x = margin + tileset_mods_w + bottom_gap;
 
     let content_end_y = back_y - (12.0 * scale);
     let slot_step = slot_h + slot_gap;
@@ -450,6 +459,8 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
         slot_h,
         slot_gap,
         visible_slots,
+        tileset_mods_x,
+        tileset_mods_w,
         back_x,
         back_y,
         back_w,
@@ -457,6 +468,14 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
         version_y,
         version_h,
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum BottomFocus {
+    #[default]
+    None,
+    TilesetMods,
+    Back,
 }
 
 /// Frame input for [`OptionsScene::update_input`].
@@ -475,8 +494,8 @@ pub struct OptionsInput<'a> {
 
 pub struct OptionsScene {
     focused: Row,
-    /// When true the Back button (below the scroll area) has keyboard focus.
-    back_focused: bool,
+    /// Keyboard focus on a bottom-bar button (below the scroll area).
+    bottom_focus: BottomFocus,
     /// Latched when user input changes focus to a different row/back button.
     focus_changed: bool,
     confirm_requested: bool,
@@ -485,6 +504,8 @@ pub struct OptionsScene {
     export_requested: bool,
     /// User activated "Credits" this frame (after [`Self::update_input`]).
     credits_requested: bool,
+    /// User activated "Open tileset mods" this frame (after [`Self::update_input`]).
+    open_tileset_mods_requested: bool,
     /// Smooth-scrolling state for the content pane.
     scroll: SmoothScroll,
     /// While `Some`, LMB is held after pressing on this row's slider track.
@@ -546,12 +567,13 @@ impl OptionsScene {
         };
         Self {
             focused: Row::Master,
-            back_focused: false,
+            bottom_focus: BottomFocus::None,
             focus_changed: false,
             confirm_requested: false,
             cancel_requested: false,
             export_requested: false,
             credits_requested: false,
+            open_tileset_mods_requested: false,
             scroll: SmoothScroll::new(),
             dragging_slider: None,
             master_volume_restore: volume_restore_default(settings.master_volume),
@@ -658,6 +680,12 @@ impl OptionsScene {
     pub fn take_credits_requested(&mut self) -> bool {
         let v = self.credits_requested;
         self.credits_requested = false;
+        v
+    }
+
+    pub fn take_open_tileset_mods_requested(&mut self) -> bool {
+        let v = self.open_tileset_mods_requested;
+        self.open_tileset_mods_requested = false;
         v
     }
 
@@ -976,7 +1004,7 @@ impl OptionsScene {
         self.cursor_pos = cursor_pos;
         let layout = compute_layout(window_w, window_h);
         self.sync_scroll(&layout);
-        let prev_focus = (self.focused, self.back_focused);
+        let prev_focus = (self.focused, self.bottom_focus);
 
         // ── Scroll wheel ───────────────────────────────────────────────
         // Apply when the cursor is over the content area.
@@ -1012,16 +1040,22 @@ impl OptionsScene {
                         && cy <= ry + layout.slot_h
                     {
                         self.focused = row;
-                        self.back_focused = false;
+                        self.bottom_focus = BottomFocus::None;
                     }
                 }
             }
-            if cx >= layout.back_x
+            if cx >= layout.tileset_mods_x
+                && cx <= layout.tileset_mods_x + layout.tileset_mods_w
+                && cy >= layout.back_y
+                && cy <= layout.back_y + layout.back_h
+            {
+                self.bottom_focus = BottomFocus::TilesetMods;
+            } else if cx >= layout.back_x
                 && cx <= layout.back_x + layout.back_w
                 && cy >= layout.back_y
                 && cy <= layout.back_y + layout.back_h
             {
-                self.back_focused = true;
+                self.bottom_focus = BottomFocus::Back;
             }
         }
 
@@ -1037,8 +1071,14 @@ impl OptionsScene {
                     _ => None,
                 }) {
                     self.focused = first_row;
-                    self.back_focused = false;
+                    self.bottom_focus = BottomFocus::None;
                 }
+                continue;
+            }
+            if cid == TILESET_MODS_FOLDER_ID {
+                self.bottom_focus = BottomFocus::TilesetMods;
+                self.open_tileset_mods_requested = true;
+                self.confirm_requested = true;
                 continue;
             }
             if cid == BACK_ID {
@@ -1048,7 +1088,7 @@ impl OptionsScene {
             }
             if cid == TILESET_ARROW_PREV_ID {
                 self.focused = Row::Tileset;
-                self.back_focused = false;
+                self.bottom_focus = BottomFocus::None;
                 self.cycle_tileset(-1);
                 self.save_settings();
                 self.confirm_requested = true;
@@ -1056,7 +1096,7 @@ impl OptionsScene {
             }
             if cid == TILESET_ARROW_NEXT_ID {
                 self.focused = Row::Tileset;
-                self.back_focused = false;
+                self.bottom_focus = BottomFocus::None;
                 self.cycle_tileset(1);
                 self.save_settings();
                 self.confirm_requested = true;
@@ -1064,7 +1104,7 @@ impl OptionsScene {
             }
             if let Some(row) = Row::from_click_id(cid) {
                 self.focused = row;
-                self.back_focused = false;
+                self.bottom_focus = BottomFocus::None;
                 self.confirm_requested = true;
                 let close = self.apply_click(row, &layout, cursor_pos);
                 if row.is_slider() && Self::cursor_on_slider_track(&layout, cursor_pos) {
@@ -1085,9 +1125,15 @@ impl OptionsScene {
         // ── Keyboard / gamepad ─────────────────────────────────────────
         for a in actions {
             match a {
-                UiAction::FocusDown if self.back_focused => {}
-                UiAction::FocusUp if self.back_focused => {
-                    self.back_focused = false;
+                UiAction::FocusDown if self.bottom_focus == BottomFocus::Back => {}
+                UiAction::FocusDown if self.bottom_focus == BottomFocus::TilesetMods => {
+                    self.bottom_focus = BottomFocus::Back;
+                }
+                UiAction::FocusUp if self.bottom_focus == BottomFocus::Back => {
+                    self.bottom_focus = BottomFocus::TilesetMods;
+                }
+                UiAction::FocusUp if self.bottom_focus == BottomFocus::TilesetMods => {
+                    self.bottom_focus = BottomFocus::None;
                     self.focused = *ROWS.last().unwrap();
                     self.ensure_focused_visible(&layout);
                 }
@@ -1097,7 +1143,7 @@ impl OptionsScene {
                         self.focused = ROWS[idx + 1];
                         self.ensure_focused_visible(&layout);
                     } else {
-                        self.back_focused = true;
+                        self.bottom_focus = BottomFocus::TilesetMods;
                     }
                 }
                 UiAction::FocusUp => {
@@ -1108,16 +1154,22 @@ impl OptionsScene {
                     }
                 }
                 UiAction::FocusNext => {
-                    if !self.back_focused {
+                    if self.bottom_focus == BottomFocus::None {
                         self.adjust_row_right();
                     }
                 }
                 UiAction::FocusPrev => {
-                    if !self.back_focused {
+                    if self.bottom_focus == BottomFocus::None {
                         self.adjust_row_left();
                     }
                 }
-                UiAction::Confirm | UiAction::CommitDiscard if self.back_focused => {
+                UiAction::Confirm | UiAction::CommitDiscard
+                    if self.bottom_focus == BottomFocus::TilesetMods =>
+                {
+                    self.open_tileset_mods_requested = true;
+                    self.confirm_requested = true;
+                }
+                UiAction::Confirm | UiAction::CommitDiscard if self.bottom_focus == BottomFocus::Back => {
                     self.save_settings();
                     self.cancel_requested = true;
                     return true;
@@ -1136,7 +1188,7 @@ impl OptionsScene {
                 _ => {}
             }
         }
-        self.focus_changed = prev_focus != (self.focused, self.back_focused);
+        self.focus_changed = prev_focus != (self.focused, self.bottom_focus);
         false
     }
 
@@ -1261,7 +1313,8 @@ impl OptionsScene {
                     }
                 }
                 ContentSlot::Row(row) => {
-                    let is_focused = !self.back_focused && row == self.focused;
+                    let is_focused =
+                        self.bottom_focus == BottomFocus::None && row == self.focused;
                     self.draw_row(
                         instances,
                         text_labels,
@@ -1336,8 +1389,51 @@ impl OptionsScene {
             });
         }
 
-        // ── Back button ────────────────────────────────────────────────
-        let back_bg = if self.back_focused {
+        // ── Bottom buttons ───────────────────────────────────────────
+        let mods_focused = self.bottom_focus == BottomFocus::TilesetMods;
+        let mods_bg = if mods_focused {
+            color::WALNUT_BRIGHT
+        } else {
+            color::WALNUT_RAISED
+        };
+        instances.push(GpuInstance {
+            rect: [
+                layout.tileset_mods_x,
+                layout.back_y,
+                layout.tileset_mods_w,
+                layout.back_h,
+            ],
+            color: mods_bg,
+            user: 0,
+        });
+        let mods_text = if mods_focused {
+            color::CHAMPAGNE
+        } else {
+            color::STONE
+        };
+        text_labels.push(TextLabel {
+            rect: [
+                layout.tileset_mods_x,
+                layout.back_y,
+                layout.tileset_mods_w,
+                layout.back_h,
+            ],
+            text: "Open tileset mods".into(),
+            color: mods_text,
+            ..Default::default()
+        });
+        buttons.push(ButtonDef::scene(
+            (
+                layout.tileset_mods_x,
+                layout.back_y,
+                layout.tileset_mods_w,
+                layout.back_h,
+            ),
+            TILESET_MODS_FOLDER_ID,
+        ));
+
+        let back_focused = self.bottom_focus == BottomFocus::Back;
+        let back_bg = if back_focused {
             color::WALNUT_BRIGHT
         } else {
             color::WALNUT_RAISED
@@ -1347,7 +1443,7 @@ impl OptionsScene {
             color: back_bg,
             user: 0,
         });
-        let back_text = if self.back_focused {
+        let back_text = if back_focused {
             color::CHAMPAGNE
         } else {
             color::STONE
@@ -1598,7 +1694,13 @@ impl SceneBehavior for OptionsScene {
         }
         #[cfg(any(feature = "game", feature = "headless-screenshot"))]
         if self.take_export_requested() {
-            let path = crate::persistence::play_stats_export_path(ctx.active_profile);
+            let Some(path) =
+                mahjuro_distribution::PlatformShell::resolve_play_stats_export_path(
+                    ctx.active_profile,
+                )
+            else {
+                return None;
+            }; // user cancelled save panel
             match crate::bot::export_play_history_html(&path, ctx.progress) {
                 Ok(()) => ctx.bus.push(GameEvent::InfoModal {
                     title: "Stats exported".into(),
@@ -1613,6 +1715,15 @@ impl SceneBehavior for OptionsScene {
         if self.take_credits_requested() {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             return Some(SceneIntent::CreditsFromOptions);
+        }
+        #[cfg(any(feature = "game", feature = "headless-screenshot"))]
+        if self.take_open_tileset_mods_requested() {
+            if let Err(e) = crate::shell_open::open_tileset_mods_folder() {
+                ctx.bus.push(GameEvent::InfoModal {
+                    title: "Could not open folder".into(),
+                    body: e,
+                });
+            }
         }
         None
     }

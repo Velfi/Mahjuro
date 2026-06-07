@@ -58,6 +58,8 @@ pub mod main_render_settings;
 #[path = "main/room_gltf_brownout.rs"]
 mod main_room_gltf_brownout;
 pub mod persistence;
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
+mod shell_open;
 pub mod sfx_id;
 #[cfg(feature = "game")]
 mod trailer_mode;
@@ -70,6 +72,8 @@ pub mod scenes;
 mod sdl_shell;
 pub use mahjuro_render::startup_profile;
 pub mod steam;
+#[cfg(feature = "game")]
+pub(crate) use steam::DistributionBackend;
 pub mod ui;
 #[cfg(test)]
 mod shader_fxc_lints;
@@ -209,12 +213,10 @@ pub(crate) struct App {
     scene_look: SceneLookTuningSet,
     deferred_round_end: Option<GameEvent>,
     modifiers: Mod,
-    /// Steamworks integration. Either `Connected` (initialized successfully
-    /// and the user is signed into Steam) or `Disabled` (init failed,
-    /// Steam isn't running, or `--no-steam` was passed). Every method on
-    /// `SteamClient` is safe to call in either state — `Disabled` is a
-    /// logged no-op — so no `Option` wrapping is needed at call sites.
-    steam: steam::SteamClient,
+    /// Platform distribution backend (Steam, Game Center, Xbox, or disabled).
+    /// Every method is safe when disabled — logged no-op — so no `Option`
+    /// wrapping is needed at call sites.
+    dist: steam::DistributionClient,
     /// Mirrors `AppSettings::archive_last_seen_run_len` for menu hints without disk reads.
     archive_last_seen_run_len: [u32; 3],
     /// Optional CPU-side frame timer; sibling of the renderer's `GpuProfiler`.
@@ -278,6 +280,13 @@ fn init_env_logger() {
     let mut builder =
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
     if let Some(path_raw) = std::env::var_os("MAHJURO_LOG_FILE") {
+        if !mahjuro_distribution::PlatformPaths::allows_external_log_file() {
+            let container = mahjuro_distribution::PlatformPaths::data_root().join("mahjuro.log");
+            eprintln!(
+                "MAHJURO_LOG_FILE ignored on store builds; use container log: {}",
+                container.display()
+            );
+        } else {
         let path = Path::new(&path_raw);
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -292,6 +301,7 @@ fn init_env_logger() {
                     path.display()
                 );
             }
+        }
         }
     }
     builder.init();
@@ -327,6 +337,7 @@ pub fn run() -> anyhow::Result<()> {
     crash_guard::install();
     init_env_logger();
     let cli = Cli::parse();
+    let no_platform = cli.no_platform_services();
 
     if main_commands::run_cli_command(cli.command)? {
         return Ok(());
@@ -337,31 +348,19 @@ pub fn run() -> anyhow::Result<()> {
         asset_path::init();
         asset_path::log_all_assets();
     }
-
-    let no_steam = cli.no_steam;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
         || -> anyhow::Result<()> {
-            // Steam init runs before the window so the SDK can hook the
-            // rendering surface as it's created. `--no-steam` short-circuits
-            // this for dev runs where you don't want the overlay attaching
-            // or Steam claiming the foreground process slot. Init failures
-            // (Steam not running, no license, etc.) are logged and we fall
-            // back to `Disabled` — the game then runs normally without
-            // achievements/overlay.
-            let steam = {
-                let _steam_scope = crate::startup_profile::scope("steam.init");
-                if no_steam {
-                    log::debug!("--no-steam: skipping Steamworks init");
-                    steam::SteamClient::disabled()
-                } else if !steam::steamworks_dll_ready() {
-                    log::warn!(
-                        "steam_api64.dll was not found next to this executable (or failed to load); \
-                         Steam achievements and overlay are disabled this session",
-                    );
-                    steam::SteamClient::disabled()
-                } else {
-                    steam::SteamClient::init()
+            // Platform services init runs before the window (Steam hooks the
+            // rendering surface as it's created). `--no-platform-services` /
+            // `--no-steam` short-circuit for dev runs.
+            let dist = {
+                let _scope = crate::startup_profile::scope("dist.init");
+                if no_platform {
+                    log::debug!("platform services disabled via CLI");
                 }
+                mahjuro_distribution::init(steam::DistributionConfig {
+                    platform_services_disabled: no_platform,
+                })
             };
 
             let settings = persistence::load_settings();
@@ -373,7 +372,7 @@ pub fn run() -> anyhow::Result<()> {
             };
             let app = {
                 let _app = crate::startup_profile::scope("app.new");
-                App::new(steam)
+                App::new(dist)
             };
             app.run_sdl_main(&mut shell)?;
             Ok(())

@@ -129,70 +129,6 @@ fn atlas_cache() -> &'static Mutex<FxHashMap<String, Option<std::sync::Arc<Atlas
     CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
 }
 
-/// Minimal parser for the fixed-schema atlas.toml our packer emits.
-/// Recognises: `image = "..."`, `tile_width = N`, `tile_height = N`,
-/// `columns = N`, and a `layout = [ "CODE", "CODE", … ]` block that may span
-/// multiple lines. Values outside this schema are ignored.
-/// Extract quoted tokens from one line of a layout block.
-///
-/// A quoted empty string (`""`) represents an intentional empty layout slot —
-/// the cell exists in the grid but has no tile content. These must be
-/// preserved in the output vector so subsequent tile codes land at the
-/// correct row/col index. Bare commas, brackets, and whitespace are skipped;
-/// unquoted tokens are ignored.
-fn push_layout_tokens(line: &str, out: &mut Vec<String>) {
-    let mut rest = line;
-    while let Some(start) = rest.find('"') {
-        rest = &rest[start + 1..];
-        let Some(end) = rest.find('"') else { break };
-        out.push(rest[..end].to_string());
-        rest = &rest[end + 1..];
-    }
-}
-
-fn parse_atlas_toml(src: &str) -> Option<(u32, u32, u32, Vec<String>)> {
-    let mut tile_w: Option<u32> = None;
-    let mut tile_h: Option<u32> = None;
-    let mut columns: Option<u32> = None;
-    let mut layout: Vec<String> = Vec::new();
-
-    let mut in_layout = false;
-    for raw in src.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if in_layout {
-            push_layout_tokens(line, &mut layout);
-            if line.contains(']') {
-                in_layout = false;
-            }
-            continue;
-        }
-        if let Some((k, v)) = line.split_once('=') {
-            let key = k.trim();
-            let val = v.trim();
-            match key {
-                "tile_width" => tile_w = val.parse().ok(),
-                "tile_height" => tile_h = val.parse().ok(),
-                "columns" => columns = val.parse().ok(),
-                "layout" => {
-                    in_layout = true;
-                    // codes may sit on this same line after '['
-                    if let Some(rest) = val.strip_prefix('[') {
-                        push_layout_tokens(rest, &mut layout);
-                        if rest.contains(']') {
-                            in_layout = false;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    Some((tile_w?, tile_h?, columns?, layout))
-}
-
 /// Load+decode an atlas for `tile_set`, caching the result. Returns `None` if
 /// the set has no atlas.toml, the atlas PNG is missing, or either fails to
 /// parse. Subsequent calls for the same set are O(1).
@@ -211,18 +147,28 @@ fn load_atlas(tile_set: &str) -> Option<std::sync::Arc<Atlas>> {
     result
 }
 
-fn decode_atlas(tile_set: &str) -> Option<Atlas> {
+fn atlas_source_bytes(tile_set: &str) -> Option<(Vec<u8>, Vec<u8>)> {
+    if mahjuro_assets::tileset_mod::is_mod_tileset(tile_set) {
+        let toml = mahjuro_assets::tileset_mod::read_mod_file(tile_set, "atlas.toml")?;
+        let png = mahjuro_assets::tileset_mod::read_mod_file(tile_set, "atlas.png")?;
+        return Some((toml, png));
+    }
     let toml_path = format!("textures/tile_sets/{tile_set}/atlas.toml");
+    let png_path = format!("textures/tile_sets/{tile_set}/atlas.png");
     let toml_file = mahjuro_assets::asset_path::get(&toml_path)?;
-    let toml_src = std::str::from_utf8(toml_file.data.as_ref()).ok()?;
-    let (tile_w, tile_h, columns, layout) = parse_atlas_toml(toml_src)?;
+    let png_file = mahjuro_assets::asset_path::get(&png_path)?;
+    Some((toml_file.data, png_file.data))
+}
+
+fn decode_atlas(tile_set: &str) -> Option<Atlas> {
+    let (toml_bytes, png_bytes) = atlas_source_bytes(tile_set)?;
+    let toml_src = std::str::from_utf8(&toml_bytes).ok()?;
+    let (tile_w, tile_h, columns, layout) = mahjuro_assets::atlas_toml::parse_atlas_toml(toml_src)?;
     if tile_w == 0 || tile_h == 0 || columns == 0 {
         return None;
     }
 
-    let png_path = format!("textures/tile_sets/{tile_set}/atlas.png");
-    let png_file = mahjuro_assets::asset_path::get(&png_path)?;
-    let decoder = image::ImageReader::new(std::io::Cursor::new(png_file.data.as_slice()))
+    let decoder = image::ImageReader::new(std::io::Cursor::new(png_bytes.as_slice()))
         .with_guessed_format()
         .ok()?;
     let img = decoder.decode().ok()?.to_rgba8();
@@ -2844,7 +2790,7 @@ mod flavor_layout_tests {
 
 #[cfg(test)]
 mod atlas_parser_tests {
-    use super::parse_atlas_toml;
+    use mahjuro_assets::atlas_toml::parse_atlas_toml;
 
     #[test]
     fn preserves_empty_layout_slots_so_indices_align() {

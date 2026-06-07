@@ -1,0 +1,52 @@
+name: Release build (macOS App Store)
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    name: Release macOS App Store
+    runs-on: macos-latest
+
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag }}
+          lfs: false
+
+      - uses: ./.github/actions/hydrate-lfs-bundle
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          prefix-key: release-macos-store
+
+      - name: Package sandbox .app
+        run: scripts/package-macos-store.sh --universal
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: mahjuro-macos-store
+          path: |
+            Mahjuro-Store.app
+            mahjuro-store-v*.pkg

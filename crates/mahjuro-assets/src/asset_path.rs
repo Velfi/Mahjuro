@@ -38,10 +38,55 @@ pub fn is_internal_only_tileset(name: &str) -> bool {
     INTERNAL_ONLY_TILESETS.contains(&name)
 }
 
-/// Like [`list_tilesets`] but excludes [`INTERNAL_ONLY_TILESETS`].
-pub fn list_player_tilesets() -> Vec<String> {
+/// Built-in tilesets from mounted assets (packs or `MAHJURO_ASSETS`), excluding
+/// [`INTERNAL_ONLY_TILESETS`].
+pub fn list_builtin_player_tilesets() -> Vec<String> {
     list_tilesets()
         .into_iter()
         .filter(|n| !is_internal_only_tileset(n))
         .collect()
+}
+
+/// Built-in + validated player mod tilesets (`mod:<folder_name>`).
+pub fn list_player_tilesets() -> Vec<String> {
+    let mut names = list_builtin_player_tilesets();
+    for entry in crate::tileset_mod::list_mod_tilesets() {
+        names.push(entry.id);
+    }
+    names
+}
+
+pub use crate::tileset_mod::tileset_display_name;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn list_mod_tileset_ids_use_namespace() {
+        let base = std::env::temp_dir().join(format!(
+            "mahjuro_list_player_tilesets_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        crate::tileset_mod::set_mod_tilesets_root_for_tests(base.clone());
+
+        let good = base.join("mods/tilesets/cobalt");
+        fs::create_dir_all(&good).unwrap();
+        fs::write(
+            good.join("atlas.toml"),
+            "tile_width = 8\ntile_height = 8\ncolumns = 9\nlayout = [\"B1\"]\n",
+        )
+        .unwrap();
+        let img = image::RgbaImage::new(72, 8);
+        img.save(good.join("atlas.png")).unwrap();
+
+        let mods: Vec<String> = crate::tileset_mod::list_mod_tilesets()
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert!(mods.iter().any(|n| n == "mod:cobalt"));
+        assert_eq!(tileset_display_name("mod:cobalt"), "cobalt (mod)");
+    }
 }

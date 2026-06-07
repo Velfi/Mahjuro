@@ -92,7 +92,9 @@ fn main() {
         asset_pack_bake::maybe_bake_asset_packs(&repo, &profile_dir);
     }
 
-    copy_steam_redistributable_next_to_binary();
+    if env::var("CARGO_FEATURE_DIST_STEAM").is_ok() {
+        copy_steam_redistributable_next_to_binary();
+    }
 }
 
 fn copy_steam_redistributable_next_to_binary() {

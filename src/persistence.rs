@@ -106,11 +106,20 @@ const APP_DIR: &str = "Mahjuro";
 /// Falls back to the current directory if the platform config dir is
 /// unavailable or can't be created.
 fn data_dir() -> PathBuf {
-    if let Some(base) = dirs::config_dir() {
-        let dir = base.join(APP_DIR);
-        if fs::create_dir_all(&dir).is_ok() {
-            return dir;
+    let dir = {
+        #[cfg(any(feature = "game", feature = "headless-screenshot"))]
+        {
+            mahjuro_distribution::PlatformPaths::data_root()
         }
+        #[cfg(not(any(feature = "game", feature = "headless-screenshot")))]
+        {
+            dirs::config_dir()
+                .map(|base| base.join(APP_DIR))
+                .unwrap_or_else(|| PathBuf::from("."))
+        }
+    };
+    if fs::create_dir_all(&dir).is_ok() {
+        return dir;
     }
     PathBuf::from(".")
 }
@@ -563,16 +572,23 @@ pub fn has_saved_run(index: usize) -> bool {
 /// Destination for an Options-menu "export play stats" HTML report. Uses
 /// `Downloads/Mahjuro/` when available, then Documents, then local data dir.
 pub fn play_stats_export_path(profile_index: usize) -> PathBuf {
-    let base = dirs::download_dir()
-        .or_else(dirs::document_dir)
-        .map(|p| p.join(APP_DIR))
-        .unwrap_or_else(data_dir);
-    let _ = fs::create_dir_all(&base);
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    base.join(format!("play_stats_profile{}_{ts}.html", profile_index + 1))
+    #[cfg(any(feature = "game", feature = "headless-screenshot"))]
+    {
+        return mahjuro_distribution::PlatformPaths::play_stats_export_path(profile_index);
+    }
+    #[cfg(not(any(feature = "game", feature = "headless-screenshot")))]
+    {
+        let base = dirs::download_dir()
+            .or_else(dirs::document_dir)
+            .map(|p| p.join(APP_DIR))
+            .unwrap_or_else(data_dir);
+        let _ = fs::create_dir_all(&base);
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        base.join(format!("play_stats_profile{}_{ts}.html", profile_index + 1))
+    }
 }
 
 /// Wrapper that stamps each saved run with the build version. On load we

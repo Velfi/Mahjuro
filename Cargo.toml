@@ -3,6 +3,7 @@ members = [
     ".",
     "crates/mahjuro-assets",
     "crates/mahjuro-bake-stamp",
+    "crates/mahjuro-distribution",
     "crates/mahjuro-gfx-types",
     "crates/mahjuro-types",
     "crates/mahjuro-core",
@@ -20,6 +21,7 @@ publish = false
 [workspace.dependencies]
 mahjuro = { path = ".", default-features = false }
 mahjuro-assets = { path = "crates/mahjuro-assets" }
+mahjuro-distribution = { path = "crates/mahjuro-distribution", default-features = false }
 mahjuro-bake-stamp = { path = "crates/mahjuro-bake-stamp" }
 mahjuro-core = { path = "crates/mahjuro-core" }
 mahjuro-gfx-types = { path = "crates/mahjuro-gfx-types" }
@@ -78,19 +80,27 @@ edition.workspace = true
 default-run = "mahjuro"
 
 [features]
-default = ["game"]
+default = ["game", "dist-steam"]
 game = [
-    "dep:steamworks",
     "dep:rodio",
     "dep:muda",
     "dep:arboard",
     "mahjuro-render/clipboard",
     "mahjuro-render/windowed",
 ]
+dist-steam = ["mahjuro-distribution/steam"]
+dist-mas = [
+    "mahjuro-distribution/macos-store",
+    "mahjuro-assets/store-bundle-only",
+]
+dist-msstore = [
+    "mahjuro-distribution/windows-store",
+    "mahjuro-assets/store-bundle-only",
+]
 headless-screenshot = [
     "dep:rodio",
     "dep:arboard",
-    "dep:steamworks",
+    "mahjuro-distribution/steam",
     "mahjuro-render/clipboard",
 ]
 # Skips committed offline bake freshness in `build.rs` while compiling `mahjuro` as a
@@ -146,7 +156,7 @@ rayon.workspace = true
 indicatif.workspace = true
 rustc-hash.workspace = true
 human_format.workspace = true
-steamworks = { workspace = true, optional = true }
+mahjuro-distribution.workspace = true
 
 # Patched wgpu-hal:
 #   - Clear stale Metal vertex buffer slots when switching pipelines (fixes
