@@ -36,7 +36,7 @@ You can play **one meld or many** in a single play, as long as every selected ti
 
 ---
 
-## Structure → your "bank"
+## Structure
 
 **Structure** = all melds you've played this round, sitting ready to score.
 
@@ -114,9 +114,9 @@ score = floor(chips × mult)
 ```
 tile   = +rank chips (honors +12, flowers +0)
 meld   = 2–4 tiles grouped (chips come from tiles only)
-structure = melds banked across plays; cash in to score them all
+structure = melds played across plays; cash in to score them all
 yaku   = pattern bonus on the whole structure (+chips AND +mult each)
 score  = floor( (tiles + yaku + dora + relics) × (1.0 + yaku + relics + boss rules) )
 ```
 
-**Structure is the bank.** **Yaku are optional bonuses** (except boss rules). **Nothing counts toward the round target until you Cash In.**
+**Structure holds your played melds.** **Yaku are optional bonuses** (except boss rules). **Nothing counts toward the round target until you Cash In.**

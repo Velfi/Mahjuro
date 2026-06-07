@@ -782,6 +782,7 @@ pub fn sinking_placements(
                 outline: false,
                 glow: false,
                 glow_color: None,
+                    outline_sel: None,
                 pick_id: None,
                 overlay_rect_group: None,
             })
@@ -885,6 +886,7 @@ pub fn in_flight_placements(
             outline: false,
             glow: false,
             glow_color: None,
+                    outline_sel: None,
             pick_id: None,
             overlay_rect_group: None,
         });
@@ -931,6 +933,7 @@ pub fn settled_placements(
                 outline: false,
                 glow: false,
                 glow_color: None,
+                    outline_sel: None,
                 pick_id: None,
                 overlay_rect_group: None,
             },
@@ -959,35 +962,11 @@ mod tests {
 
     #[test]
     fn arc_spaced_18_tiles_keep_min_gap() {
-        use crate::ui::layout::{LayoutResult, Rect};
+        use crate::ui::layout::UiLayout;
 
-        let layout = LayoutResult {
-            window_w: 800.0,
-            window_h: 600.0,
-            score_panel: Rect {
-                x: 0.0,
-                y: 0.0,
-                w: 100.0,
-                h: 50.0,
-            },
-            modifier_strip: Rect {
-                x: 0.0,
-                y: 50.0,
-                w: 100.0,
-                h: 30.0,
-            },
-            hand_strip: Rect {
-                x: 128.0,
-                y: 400.0,
-                w: 544.0,
-                h: 80.0,
-            },
-            hand_slots: vec![Rect {
-                x: 128.0,
-                y: 400.0,
-                w: 34.0,
-                h: 80.0,
-            }],
+        let layout = {
+            let mut engine = UiLayout::new();
+            engine.solve(800.0, 600.0)
         };
         let bowl = Object3d {
             pos: [400.0, 420.0, 44.0],
@@ -1028,35 +1007,11 @@ mod tests {
     #[test]
     fn river_slots_spread_along_flow_axis() {
         use crate::render::draw_cmd::Object3dKind;
-        use crate::ui::layout::{LayoutResult, Rect};
+        use crate::ui::layout::UiLayout;
 
-        let layout = LayoutResult {
-            window_w: 800.0,
-            window_h: 600.0,
-            score_panel: Rect {
-                x: 0.0,
-                y: 0.0,
-                w: 100.0,
-                h: 50.0,
-            },
-            modifier_strip: Rect {
-                x: 0.0,
-                y: 50.0,
-                w: 100.0,
-                h: 30.0,
-            },
-            hand_strip: Rect {
-                x: 128.0,
-                y: 400.0,
-                w: 544.0,
-                h: 80.0,
-            },
-            hand_slots: vec![Rect {
-                x: 128.0,
-                y: 400.0,
-                w: 34.0,
-                h: 80.0,
-            }],
+        let layout = {
+            let mut engine = UiLayout::new();
+            engine.solve(800.0, 600.0)
         };
         let bowl = Object3d {
             pos: [400.0, 420.0, 44.0],

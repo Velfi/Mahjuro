@@ -1963,7 +1963,7 @@
           ['Yaku', 'Detected yaku for this action (with levels).'],
           ['Yaku steps', 'Yaku/Dora score-step deltas that compose Yaku pts.'],
           ['Relic steps', 'Relic score-step deltas that compose Relic pts.'],
-          ['Tiles', 'Meld-grouped labels (same as in-game cascade: Pair / Sequence / Triplet / Kong + faces). Full bank on cash-in; partial commits show only melds just played.']
+          ['Tiles', 'Meld-grouped labels (same as in-game cascade: Pair / Sequence / Triplet / Kong + faces). Full structure on cash-in; partial commits show only melds just played.']
         ];
         for (const [lab, h] of peakCols) {
           hr.appendChild(h ? thPlain(lab, h) : el('th', null, lab));
@@ -2058,7 +2058,7 @@
       'Actual per-run average: ' + fmtExactAvg(swAvg) + ' · ' + swTotal + ' total / ' + runs + ' runs');
     row('Avg structure cash-ins',
       (pr.structure_triggers ?? 0).toFixed(2) + ' (' + (pr.structure_trigger_points_per_run ?? 0).toFixed(0) + ' pts/run from structure)',
-      'Mean in-run structure (bank) cash-in events per run; parentheses = average points from structure per run.');
+      'Mean in-run structure cash-in events per run; parentheses = average points from structure per run.');
     row('Avg turns / run', (pr.turns ?? 0).toFixed(2) + ' (avg peak hand size ' + (pr.peak_hand_size ?? 0).toFixed(2) + ')',
       'Mean player turns per run. Peak hand size is the largest hand count seen in a run, averaged across runs.');
     row('Tiles destroyed / relic activations',

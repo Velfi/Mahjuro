@@ -417,4 +417,42 @@ impl PauseMenu {
         };
         self.tree.draw(&tree, &mut frame);
     }
+
+    /// Publish pause-menu focus rects for the debug overlay (when not in options).
+    pub fn stash_focus_nav_debug(
+        &self,
+        ctx: &mut super::DrawCtx<'_>,
+        window_w: f32,
+        window_h: f32,
+    ) {
+        if !self.paused || self.options_overlay.is_some() {
+            return;
+        }
+        let tree = self.build_tree(window_w, window_h);
+        let label = |id: FocusId| {
+            [
+                PauseAction::Resume,
+                PauseAction::Restart,
+                PauseAction::Options,
+                PauseAction::MainMenu,
+                PauseAction::Exit,
+            ]
+            .into_iter()
+            .find(|a| a.id() == id)
+            .map(|a| match a {
+                PauseAction::Resume => "Resume",
+                PauseAction::Restart => "Restart",
+                PauseAction::Options => "Options",
+                PauseAction::MainMenu => "Main Menu",
+                PauseAction::Exit => "Exit",
+            })
+            .unwrap_or("?")
+            .into()
+        };
+        ctx.stash_focus_nav_debug(self.tree.focus_nav_debug_snapshot_tree(
+            &tree,
+            (window_w, window_h),
+            label,
+        ));
+    }
 }

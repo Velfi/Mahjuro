@@ -69,12 +69,30 @@ impl App {
         self.pending_scene_intent.is_some() || self.pending_scene.is_some()
     }
 
+    /// Scene fades normally pause while a modal is up; stairway → shop after
+    /// decimation (burn handoff or Descend) should never wait on one.
+    pub(super) fn scene_transition_unblocked(&self) -> bool {
+        if !self.modals.is_active() {
+            return true;
+        }
+        matches!(
+            (SceneTag::from(&self.scene), self.pending_scene_intent.as_ref()),
+            (SceneTag::Stairway, Some(crate::scenes::SceneIntent::ShopFromRun))
+        )
+    }
+
     pub(super) fn begin_scene_replace(
         &mut self,
         intent: crate::scenes::SceneIntent,
         from_tag: SceneTag,
         destination: PendingSceneDestination,
     ) {
+        if self.pending_scene_intent.as_ref() == Some(&intent) {
+            return;
+        }
+        if from_tag == SceneTag::Stairway && intent == crate::scenes::SceneIntent::ShopFromRun {
+            while self.modals.dismiss() {}
+        }
         if intent.grants_memorial_on_start() {
             self.run.grant_pending_memorial(&mut self.progress);
             self.mark_profile_dirty();
@@ -461,7 +479,7 @@ impl App {
             // We feed `update_pointer_hover` synthetic slots so only
             // the picked tile contains the cursor — the rest are
             // collapsed off-screen so they can't compete.
-            let hand_slot_count = self.run.hand().len().max(layout.hand_slots.len());
+            let hand_slot_count = self.run.hand().len().max(layout.hand_slot_count);
             let mut slots: Vec<(f32, f32, f32, f32)> =
                 vec![(-9999.0, -9999.0, 0.0, 0.0); hand_slot_count];
             let picked = self
@@ -770,6 +788,45 @@ impl App {
             button_clicks.clear();
         }
 
+        if let Some(mut overlay) = self.debug.victory_moon_debug_overlay.take() {
+            use crate::render::victory_moon_debug_overlay::VictoryMoonDebugResult;
+            use crate::render::victory_moon_tuning::VictoryMoonDebug;
+            let (ww, wh) = (
+                self.last_drawable_px.width as f32,
+                self.last_drawable_px.height as f32,
+            );
+            let mouse = self.input.as_ref().map(|i| {
+                (
+                    i.last_cursor.0,
+                    i.last_cursor.1,
+                    self.mouse_clicked,
+                    self.mouse_left_down,
+                )
+            });
+            let mut close = false;
+            match overlay.update(&actions, mouse, ww, wh) {
+                VictoryMoonDebugResult::Stay => {}
+                VictoryMoonDebugResult::Reset => {
+                    overlay.debug = VictoryMoonDebug::shipping_default();
+                    log::debug!("Reset victory moon debug to defaults");
+                }
+                VictoryMoonDebugResult::Close => close = true,
+            }
+            self.debug.victory_moon_debug = overlay.debug;
+            self.debug.main_menu_moon_phase_debug = overlay.debug.moon_phase;
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.main_menu_moon_phase_debug = overlay.debug.moon_phase;
+            }
+            self.mouse_clicked = false;
+            if !close {
+                self.debug.victory_moon_debug_overlay = Some(overlay);
+            } else {
+                log::debug!("Closed victory moon debug overlay");
+            }
+            actions.clear();
+            button_clicks.clear();
+        }
+
         // 3b''. If the debug visibility overlay is open, intercept
         // input. Mirror the toggle state back to App fields each
         // frame so the gameplay scene + retain filter pick up live
@@ -909,7 +966,7 @@ impl App {
         let pending_scene_key = self.pending_destination_scene_key();
         let pending_transition_at_black = self.scene_replace_in_flight()
             && self.transition_alpha <= 0.0
-            && !self.modals.is_active();
+            && self.scene_transition_unblocked();
         if pending_scene_key.is_some_and(|k| {
             matches!(
                 k,
@@ -918,6 +975,11 @@ impl App {
         }) {
             self.audio.prefetch_gameplay_music();
         }
+        let tile_stress_lab_open = self
+            .overlay_stack
+            .last()
+            .is_some_and(|s| matches!(s, Scene::TileStressLab(_)));
+        let stairway_tile_pick = matches!(&self.scene, Scene::Stairway(s) if s.wants_hand_tile_pick());
         self.frame_picks = if let Some(r) = self.renderer.as_mut() {
             r.poll_room_prefetch_gpu_uploads(
                 scene_key,
@@ -928,7 +990,10 @@ impl App {
             );
             r.ensure_rooms_for_scene_key(scene_key);
             FramePicks {
-                hand: if matches!(scene_key, Some("gameplay") | Some("tutorial")) {
+                hand: if matches!(scene_key, Some("gameplay") | Some("tutorial"))
+                    || tile_stress_lab_open
+                    || stairway_tile_pick
+                {
                     r.pick_hand_tile(cursor_pos.0, cursor_pos.1)
                 } else {
                     None
@@ -971,11 +1036,12 @@ impl App {
             self.frame_picks.hand
         };
         let mut scroll_lines = std::mem::take(&mut self.scroll_delta);
+        let active_scene = self.overlay_stack.last().unwrap_or(&self.scene);
         // Stick vertical scroll is opt-in by scene. Yaku Journal, Chronicle,
         // and Credits use the right stick; defeat/victory run summaries accept
-        // both sticks. Other scenes keep sticks free for gameplay / orbit.
+        // both sticks. Guide Tanuki tips maps right-stick X into scroll_lines
+        // for horizontal panning. Other scenes keep sticks free for gameplay / orbit.
         let stick_scroll_axis = {
-            let active_scene = self.overlay_stack.last().unwrap_or(&self.scene);
             let input = self.input.as_ref();
             let right = input.map(|i| i.right_stick_scroll_axis).unwrap_or(0.0);
             match active_scene {
@@ -991,6 +1057,17 @@ impl App {
         if stick_scroll_axis.abs() > 0.0 {
             const STICK_SCROLL_LINES_PER_SEC: f32 = 24.0;
             scroll_lines += stick_scroll_axis * self.last_frame_dt * STICK_SCROLL_LINES_PER_SEC;
+        }
+        if matches!(active_scene, Scene::Guide(g) if g.is_tanuki_tips_page()) {
+            let right_x = self
+                .input
+                .as_ref()
+                .map(|i| i.right_stick_scroll_axis_x)
+                .unwrap_or(0.0);
+            if right_x.abs() > 0.0 {
+                const STICK_SCROLL_LINES_PER_SEC: f32 = 24.0;
+                scroll_lines += right_x * self.last_frame_dt * STICK_SCROLL_LINES_PER_SEC;
+            }
         }
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
         let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
@@ -1408,7 +1485,8 @@ impl App {
         // Pause the transition while a modal is active so the player
         // must dismiss milestone / celebration modals before the scene
         // change proceeds (e.g. "First Pair!" before the recap screen).
-        if self.scene_replace_in_flight() && !self.modals.is_active() {
+        // Stairway → shop after decimation is exempt — burn already finished.
+        if self.scene_replace_in_flight() && self.scene_transition_unblocked() {
             self.transition_alpha -= self.transition_speed;
             // Map alpha 1→0 onto timer 0→0.5 (first half of transition).
             self.transition_timer = (1.0 - self.transition_alpha.max(0.0)).clamp(0.0, 1.0) * 0.5;

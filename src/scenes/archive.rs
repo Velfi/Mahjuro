@@ -31,10 +31,10 @@ use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_
 use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{
     HintSegment, HintStyle, archive_browse_footer_row, inspect_camera_hint_row,
-    push_inline_hint_rows,
+    push_inline_hint_rows, screen_footer_reserve,
 };
 use crate::ui::inspect_plaque::push_floating_relic_flavor_labels;
-use crate::ui::focus_nav::{FocusDir, pick_neighbor, push_focus_ring};
+use crate::ui::focus_nav::{FocusDir, FocusNavState, push_focus_ring};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use glam::{Mat4, Quat, Vec3};
@@ -45,24 +45,17 @@ use crate::scenes::object3d_inspect::{
     InspectDolly, InspectRig, ItemInspectOrbitState, inspect_orbit_camera, lerp_camera,
     prepend_inspect_orbit_subject_rotation, tick_inspect_dolly,
 };
-/// 2D chrome sizes shared by [`ArchiveScene::draw_collection_frame`] and
-/// [`ArchiveScene::flat_items`] — tuned for legibility at TV distance.
+/// Screen-space overlay sizing for focus rings, badges, and footer hints.
 #[derive(Clone, Copy)]
-struct ArchiveChromeLayout {
+struct ArchiveOverlayLayout {
     scale: f32,
     margin_x: f32,
-    chrome_btn_h: f32,
 }
 
-fn archive_chrome_layout(w: f32, h: f32) -> ArchiveChromeLayout {
-    let scale = metrics::scene_scale(w, h);
-    let margin_x = w * 0.04;
-    // ~5% of screen height, clamped so 720p sofas stay readable and 4K doesn't balloon.
-    let chrome_btn_h = (h * 0.052).clamp(44.0, 72.0);
-    ArchiveChromeLayout {
-        scale,
-        margin_x,
-        chrome_btn_h,
+fn archive_overlay_layout(w: f32, h: f32) -> ArchiveOverlayLayout {
+    ArchiveOverlayLayout {
+        scale: metrics::scene_scale(w, h),
+        margin_x: w * 0.04,
     }
 }
 
@@ -219,6 +212,8 @@ pub struct ArchiveScene {
     chronicle_run_log_scroll: std::cell::Cell<f32>,
     /// Which Chronicle column owns directional scroll (left run log vs right career/detail).
     chronicle_focused_pane: crate::ui::chronicle_dashboard::ChronicleScrollPane,
+    /// Auto-inferred spatial nav over the latest `flat_items` rects + axis memory.
+    focus_nav: FocusNavState<CollectionAction>,
 }
 
 impl Default for ArchiveScene {
@@ -278,7 +273,20 @@ impl ArchiveScene {
             chronicle_dashboard_scroll: std::cell::Cell::new(0.0),
             chronicle_run_log_scroll: std::cell::Cell::new(0.0),
             chronicle_focused_pane: crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog,
+            focus_nav: FocusNavState::new(),
         }
+    }
+
+    fn rebuild_focus_nav(&mut self, items: &[FlatItem<CollectionAction>]) {
+        self.focus_nav.begin_frame();
+        self.focus_nav.clear_edges();
+        for it in items {
+            self.focus_nav.add(it.action, it.rect);
+        }
+        for (from, dir, to) in archive_nav_edges(items) {
+            self.focus_nav.edge(from, dir, to);
+        }
+        self.focus_nav.end_frame();
     }
 
     /// Chrome action that should currently render a focus ring. Controller /
@@ -415,10 +423,6 @@ impl ArchiveScene {
             let page_count = archive_page_count(all.len());
             let page = self.archive_page.min(page_count.saturating_sub(1));
             let cell = (w * 0.12).min(h * 0.18);
-            let cell_gap = cell * 0.22;
-            let cell_pitch = cell + cell_gap;
-            let rect_w = cell_pitch * 0.95;
-            let rect_h = cell_pitch * 0.95;
             let vp = camera_view_proj(w, h, &cam);
             for (slot, anchor) in anchors.iter().enumerate().take(page_size) {
                 let Some(anchor) = anchor else {
@@ -428,14 +432,16 @@ impl ArchiveScene {
                 if global_idx >= all.len() {
                     continue;
                 }
+                let is_focus = self.focused_row == Some(global_idx);
+                let face = archive_artifact_face_size(cell, is_focus);
                 let world = pixel_to_world_xy(w, h, anchor[0], anchor[1], anchor[2]);
                 let (sx, sy) = world_to_screen(vp, w, h, world);
-                if !screen_hit_anchor_is_finite(sx, sy, rect_w, rect_h) {
+                if !screen_hit_anchor_is_finite(sx, sy, face, face) {
                     continue;
                 }
                 items.push(FlatItem::new(
                     CollectionAction::SelectArtifact(global_idx).id(),
-                    [sx - rect_w * 0.5, sy - rect_h * 0.5, rect_w, rect_h],
+                    [sx - face * 0.5, sy - face * 0.5, face, face],
                     CollectionAction::SelectArtifact(global_idx),
                 ));
             }
@@ -529,6 +535,7 @@ impl ArchiveScene {
             return false;
         }
         let items = self.flat_items(w, h, progress, env_h, chronicle_last_seen);
+        self.rebuild_focus_nav(&items);
         if archive_directional_step(
             self,
             bus,
@@ -554,7 +561,7 @@ impl ArchiveScene {
         mut quads: Vec<GpuInstance>,
         text_labels: &mut Vec<TextLabel>,
         bosses: &[Artifact],
-        ctx: &DrawCtx<'_>,
+        ctx: &mut DrawCtx<'_>,
         inspect: Option<&ItemInspectOrbitState>,
     ) -> UiFrame {
         let w = ctx.layout.window_w;
@@ -926,8 +933,7 @@ impl ArchiveScene {
             }
         }
 
-        // Assemble the frame. 2D chrome from the caller (`quads` / `text_labels`)
-        // is merged here with the grid and focus plaques.
+        // Assemble the frame. Caller overlays (focus rings, badges, hints) merge with the grid.
         frame.quads(quads);
         frame.object3d_batch(plaques);
         if chronicle_dashboard {
@@ -967,16 +973,18 @@ impl ArchiveScene {
         }
         frame.texts(std::mem::take(text_labels));
 
-        // Hit rects for 2D chrome — skipped while [`ItemInspectScene`] owns input.
-        if inspect.is_none() {
-            let items = self.flat_items(
+        // Projected glTF chrome hit rects — skipped while [`ItemInspectScene`] owns input.
+        let chrome_items = inspect.is_none().then(|| {
+            self.flat_items(
                 w,
                 h,
                 ctx.progress,
                 env_scale,
                 ctx.archive_chronicle_last_seen_run_len,
-            );
-            self.tree.register_flat_buttons(&items, &mut frame.buttons);
+            )
+        });
+        if let Some(ref items) = chrome_items {
+            self.tree.register_flat_buttons(items, &mut frame.buttons);
         }
 
         frame.window_title = {
@@ -995,12 +1003,30 @@ impl ArchiveScene {
                 format!("Mahjuro — Archive ({})", self.active_tab.label())
             }
         };
+
+        if let Some(ref items) = chrome_items {
+            let candidates: Vec<(CollectionAction, [f32; 4])> =
+                items.iter().map(|it| (it.action, it.rect)).collect();
+            let current = self.focused_chrome.or_else(|| {
+                self.tree
+                    .focused()
+                    .and_then(|id| items.iter().find(|it| it.id == id).map(|it| it.action))
+            });
+            ctx.stash_focus_nav_graph(
+                &candidates,
+                &archive_nav_edges(items),
+                current,
+                self.focus_nav.memory(),
+                |a| format!("{a:?}"),
+            );
+        }
+
         frame
     }
 
     pub(crate) fn draw_collection_frame(
         &self,
-        ctx: DrawCtx<'_>,
+        mut ctx: DrawCtx<'_>,
         inspect: Option<&ItemInspectOrbitState>,
     ) -> UiFrame {
         let w = ctx.layout.window_w;
@@ -1009,9 +1035,9 @@ impl ArchiveScene {
             .set(collection_sanitized_room_gltf_height_scale(
                 ctx.room_gltf_height_scale,
             ));
-        let ch = archive_chrome_layout(w, h);
-        let scale = ch.scale;
-        let margin_x = ch.margin_x;
+        let overlay = archive_overlay_layout(w, h);
+        let scale = overlay.scale;
+        let margin_x = overlay.margin_x;
 
         let frame = UiFrame::new();
 
@@ -1020,7 +1046,6 @@ impl ArchiveScene {
 
         let env_h_draw = collection_sanitized_room_gltf_height_scale(ctx.room_gltf_height_scale);
         let cam = archive_glb::archive_camera_base(w, h, env_h_draw);
-        let back_h = ch.chrome_btn_h;
         let ring_focus = self.chrome_focus_for_draw(ctx.input_mode);
         let page_nav = archive_page_nav(self.active_tab, ctx.progress, self.archive_page);
         let chronicle_open = matches!(self.active_tab, Tab::Chronicle) && inspect.is_none();
@@ -1072,7 +1097,7 @@ impl ArchiveScene {
             }
         }
 
-        let footer_anchor_y = h - back_h - h * 0.02;
+        let footer_anchor_y = h - screen_footer_reserve(w, h) - (h * 0.014).max(8.0);
         let chronicle_ledger = chronicle_open;
 
         // Control hints — pinned above the footer chrome. The page / scroll
@@ -1083,7 +1108,7 @@ impl ArchiveScene {
             tab_artifacts(self.active_tab, ctx.progress, chronicle_last_seen).len();
         let archive_page_count_now = archive_page_count(all_count_hint);
         let archive_multi_page = archive_page_count_now > 1;
-        let hint_style = HintStyle::standard(h);
+        let hint_style = HintStyle::standard(w, h);
         let hint_line_h = hint_style.line_h;
         let hint_band_x = margin_x * 0.5;
         let hint_band_w = w - margin_x;
@@ -1182,7 +1207,7 @@ impl ArchiveScene {
             quads,
             &mut text_labels,
             &all_artifacts,
-            &ctx,
+            &mut ctx,
             inspect,
         );
         if !legend_rows.is_empty() {
@@ -1272,6 +1297,7 @@ impl SceneBehavior for ArchiveScene {
             self.drawn_room_gltf_height_scale.get(),
             chronicle_last_seen,
         );
+        self.rebuild_focus_nav(&items);
         // Keyboard / directional / Confirm: grid moves use each artifact's
         // screen AABB (`flat_items`) + spatial neighbors first, then fall
         // back to column/row index rules (horizontal archive window scroll,
@@ -2248,10 +2274,7 @@ fn push_archive_cubby_new_badges(
     texts: &mut Vec<TextLabel>,
 ) {
     let page_size = archive_page_size();
-    let cell_gap = cell * 0.22;
-    let cell_pitch = cell + cell_gap;
-    let rect_w = cell_pitch * 0.95;
-    let rect_h = cell_pitch * 0.95;
+    let face = archive_artifact_face_size(cell, false);
     let vp = camera_view_proj(w, h, cam);
     for (slot, anchor) in anchors.iter().enumerate().take(page_size) {
         let Some(anchor) = anchor else {
@@ -2267,10 +2290,10 @@ fn push_archive_cubby_new_badges(
         }
         let world = pixel_to_world_xy(w, h, anchor[0], anchor[1], anchor[2]);
         let (sx, sy) = world_to_screen(vp, w, h, world);
-        if !screen_hit_anchor_is_finite(sx, sy, rect_w, rect_h) {
+        if !screen_hit_anchor_is_finite(sx, sy, face, face) {
             continue;
         }
-        let rect = [sx - rect_w * 0.5, sy - rect_h * 0.5, rect_w, rect_h];
+        let rect = [sx - face * 0.5, sy - face * 0.5, face, face];
         crate::ui::corner_badge::push_center_badge(quads, texts, rect, h, "NEW", sign_occluder);
     }
 }
@@ -2441,11 +2464,24 @@ fn flat_rect_xywh_is_finite(rect: [f32; 4]) -> bool {
 
 /// Screen-space AABB hit targets for catalog cells (`FlatItem` rects), for spatial D-pad / arrow
 /// moves between neighbors.
-fn collection_artifact_hit_rects(items: &[FlatItem<CollectionAction>]) -> Vec<(usize, [f32; 4])> {
+fn collection_artifact_candidates(
+    items: &[FlatItem<CollectionAction>],
+) -> Vec<(CollectionAction, [f32; 4])> {
     items
         .iter()
         .filter_map(|it| match it.action {
-            CollectionAction::SelectArtifact(i) => Some((i, it.rect)),
+            CollectionAction::SelectArtifact(_) => Some((it.action, it.rect)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+fn collection_artifact_hit_rects(items: &[FlatItem<CollectionAction>]) -> Vec<(usize, [f32; 4])> {
+    collection_artifact_candidates(items)
+        .into_iter()
+        .filter_map(|(action, rect)| match action {
+            CollectionAction::SelectArtifact(i) => Some((i, rect)),
             _ => None,
         })
         .collect()
@@ -2454,18 +2490,27 @@ fn collection_artifact_hit_rects(items: &[FlatItem<CollectionAction>]) -> Vec<(u
 /// Next artifact index when moving from `focused` in `dir` using each cell's screen rect, or
 /// [`None`] when no neighbor qualifies (caller may fall back to scroll / grid index rules).
 fn collection_spatial_artifact_step(
+    nav: &mut FocusNavState<CollectionAction>,
     items: &[FlatItem<CollectionAction>],
     focused: Option<usize>,
     dir: FocusDir,
 ) -> Option<usize> {
-    let candidates = collection_artifact_hit_rects(items);
+    let current = focused.map(CollectionAction::SelectArtifact)?;
+    let candidates = collection_artifact_candidates(items);
     if candidates.is_empty() {
         return None;
     }
-    let cur_rect = focused
-        .and_then(|fi| candidates.iter().find(|(i, _)| *i == fi).map(|(_, r)| *r))
-        .or_else(|| candidates.first().map(|(_, r)| *r))?;
-    pick_neighbor(cur_rect, dir, &candidates)
+    nav.load_candidates(&candidates, &[]);
+    match nav.pick(current, dir)? {
+        CollectionAction::SelectArtifact(i) => Some(i),
+        _ => None,
+    }
+}
+
+/// Screen hit size for a cabinet cell — matches [`collection_push_grid_cell_object3d`] plate extents.
+#[inline]
+fn archive_artifact_face_size(cell: f32, is_focus: bool) -> f32 {
+    cell * if is_focus { 0.78 } else { 0.62 }
 }
 
 #[inline]
@@ -2695,7 +2740,8 @@ fn archive_directional_step(
     if all_count == 0 {
         return false;
     }
-    if let Some(ni) = collection_spatial_artifact_step(items, scene.focused_row, dir)
+    if let Some(ni) =
+        collection_spatial_artifact_step(&mut scene.focus_nav, items, scene.focused_row, dir)
         && Some(ni) != scene.focused_row
     {
         bus.push(GameEvent::UiSound(SfxId::TilePlace));
@@ -2711,11 +2757,8 @@ fn archive_directional_step(
     let last_col = archive_glb::ARCHIVE_SLOT_COLS.saturating_sub(1);
     match dir {
         FocusDir::Right => {
-            if let Some(from) = collection_focused_artifact_rect(items, scene.focused_row) {
-                let chrome = collection_chrome_rects(items);
-                if collection_focus_chrome_spatial(scene, bus, from, FocusDir::Right, &chrome) {
-                    return true;
-                }
+            if collection_enter_chrome_from_artifact(scene, bus, items, FocusDir::Right) {
+                return true;
             }
             archive_page_step(
                 scene,
@@ -2730,11 +2773,8 @@ fn archive_directional_step(
             true
         }
         FocusDir::Left => {
-            if let Some(from) = collection_focused_artifact_rect(items, scene.focused_row) {
-                let chrome = collection_chrome_rects(items);
-                if collection_focus_chrome_spatial(scene, bus, from, FocusDir::Left, &chrome) {
-                    return true;
-                }
+            if collection_enter_chrome_from_artifact(scene, bus, items, FocusDir::Left) {
+                return true;
             }
             archive_page_step(
                 scene,
@@ -2750,6 +2790,100 @@ fn archive_directional_step(
         }
         _ => false,
     }
+}
+
+/// Explicit chrome links the auto-inferred graph cannot derive (lower Chronicle shelf, etc.).
+fn archive_nav_edges(
+    items: &[FlatItem<CollectionAction>],
+) -> Vec<(CollectionAction, FocusDir, CollectionAction)> {
+    let chronicle = CollectionAction::SelectTab(collection_chronicle_tab_index());
+    if !items.iter().any(|it| it.action == chronicle) {
+        return Vec::new();
+    }
+    let mut edges = Vec::new();
+    for from_idx in [collection_ordeals_tab_index(), collection_yaku_tab_index()] {
+        let from = CollectionAction::SelectTab(from_idx);
+        if items.iter().any(|it| it.action == from) {
+            edges.push((from, FocusDir::Down, chronicle));
+        }
+    }
+    edges
+}
+
+fn collection_apply_chrome_focus(
+    scene: &mut ArchiveScene,
+    bus: &mut crate::game::event_bus::EventBus,
+    target: CollectionAction,
+) -> bool {
+    match target {
+        CollectionAction::Back
+        | CollectionAction::SwitchSave
+        | CollectionAction::PrevPage
+        | CollectionAction::NextPage
+        | CollectionAction::SelectTab(_) => {
+            scene.focused_chrome = Some(target);
+            scene.tree.set_focus(target.id());
+            bus.push(GameEvent::UiSound(SfxId::TilePlace));
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Explicit edges whose endpoints are both present in `candidates`.
+fn archive_nav_edges_for_candidates(
+    items: &[FlatItem<CollectionAction>],
+    candidates: &[(CollectionAction, [f32; 4])],
+) -> Vec<(CollectionAction, FocusDir, CollectionAction)> {
+    archive_nav_edges(items)
+        .into_iter()
+        .filter(|(from, _, to)| {
+            candidates.iter().any(|(a, _)| *a == *from)
+                && candidates.iter().any(|(a, _)| *a == *to)
+        })
+        .collect()
+}
+
+/// Spatial pick among chrome buttons only — excludes cabinet cells so grid→tab
+/// moves are not stolen by artifact rects in the shared graph.
+fn collection_chrome_nav_pick(
+    items: &[FlatItem<CollectionAction>],
+    candidates: &[(CollectionAction, [f32; 4])],
+    from: CollectionAction,
+    dir: FocusDir,
+) -> Option<CollectionAction> {
+    let edges = archive_nav_edges_for_candidates(items, candidates);
+    let mut nav = FocusNavState::new();
+    nav.load_candidates(candidates, &edges);
+    nav.pick(from, dir)
+}
+
+fn collection_chrome_pick_from_rect(
+    items: &[FlatItem<CollectionAction>],
+    candidates: &[(CollectionAction, [f32; 4])],
+    from_rect: [f32; 4],
+    dir: FocusDir,
+) -> Option<CollectionAction> {
+    let edges = archive_nav_edges_for_candidates(items, candidates);
+    let mut nav = FocusNavState::new();
+    nav.load_candidates(candidates, &edges);
+    nav.pick_from_rect(from_rect, dir)
+}
+
+fn collection_enter_chrome_from_artifact(
+    scene: &mut ArchiveScene,
+    bus: &mut crate::game::event_bus::EventBus,
+    items: &[FlatItem<CollectionAction>],
+    dir: FocusDir,
+) -> bool {
+    let chrome = collection_chrome_rects(items);
+    let Some(from) = collection_focused_artifact_rect(items, scene.focused_row) else {
+        return false;
+    };
+    let Some(target) = collection_chrome_pick_from_rect(items, &chrome, from, dir) else {
+        return false;
+    };
+    collection_apply_chrome_focus(scene, bus, target)
 }
 
 /// Chrome buttons currently in the flat-item list. Used for spatial neighbour
@@ -2974,16 +3108,6 @@ fn collection_focused_artifact_rect(
     })
 }
 
-fn collection_chrome_rect_for(
-    items: &[FlatItem<CollectionAction>],
-    action: CollectionAction,
-) -> Option<[f32; 4]> {
-    collection_chrome_rects(items)
-        .into_iter()
-        .find(|(a, _)| *a == action)
-        .map(|(_, rect)| rect)
-}
-
 fn collection_tab_chrome_rects(
     items: &[FlatItem<CollectionAction>],
 ) -> Vec<(CollectionAction, [f32; 4])> {
@@ -3034,21 +3158,21 @@ fn collection_tab_chrome_rects_for_vertical_step(
         .collect()
 }
 
-/// Move chrome focus to the spatial neighbour of `from_rect` within `candidates`.
+/// Move chrome focus to the spatial neighbour among chrome buttons only.
 fn collection_focus_chrome_spatial(
     scene: &mut ArchiveScene,
     bus: &mut crate::game::event_bus::EventBus,
-    from_rect: [f32; 4],
+    items: &[FlatItem<CollectionAction>],
+    from: CollectionAction,
     dir: FocusDir,
-    candidates: &[(CollectionAction, [f32; 4])],
+    filtered_candidates: Option<&[(CollectionAction, [f32; 4])]>,
 ) -> bool {
-    let Some(target) = pick_neighbor(from_rect, dir, candidates) else {
+    let chrome = collection_chrome_rects(items);
+    let candidates = filtered_candidates.unwrap_or(chrome.as_slice());
+    let Some(target) = collection_chrome_nav_pick(items, candidates, from, dir) else {
         return false;
     };
-    scene.focused_chrome = Some(target);
-    scene.tree.set_focus(target.id());
-    bus.push(GameEvent::UiSound(SfxId::TilePlace));
-    true
+    collection_apply_chrome_focus(scene, bus, target)
 }
 
 /// Move focus from the focused cabinet cell into chrome along `dir`.
@@ -3058,10 +3182,7 @@ fn collection_enter_chrome(
     items: &[FlatItem<CollectionAction>],
     dir: FocusDir,
 ) -> bool {
-    let Some(from) = collection_focused_artifact_rect(items, scene.focused_row) else {
-        return false;
-    };
-    collection_focus_chrome_spatial(scene, bus, from, dir, &collection_chrome_rects(items))
+    collection_enter_chrome_from_artifact(scene, bus, items, dir)
 }
 
 /// Directional move while chrome is focused.
@@ -3074,15 +3195,12 @@ fn collection_chrome_directional(
     let Some(cur) = scene.focused_chrome else {
         return;
     };
-    let Some(cur_rect) = collection_chrome_rect_for(items, cur) else {
-        return;
-    };
     let on_tab = collection_chrome_is_tab(cur);
     let on_bottom = collection_chrome_is_bottom(cur);
 
     if on_tab && dir == FocusDir::Down {
         let tabs = collection_tab_chrome_rects_for_vertical_step(items, cur, FocusDir::Down);
-        if collection_focus_chrome_spatial(scene, bus, cur_rect, FocusDir::Down, &tabs) {
+        if collection_focus_chrome_spatial(scene, bus, items, cur, FocusDir::Down, Some(&tabs)) {
             return;
         }
         scene.focused_chrome = None;
@@ -3114,8 +3232,7 @@ fn collection_chrome_directional(
         return;
     }
 
-    let chrome = collection_chrome_rects(items);
-    collection_focus_chrome_spatial(scene, bus, cur_rect, dir, &chrome);
+    collection_focus_chrome_spatial(scene, bus, items, cur, dir, None);
 }
 
 fn archive_marker_screen_rect(
@@ -3217,7 +3334,7 @@ fn archive_page_indicator_rect(
     let right = archive_page_right_btn_rect(w, h, cam, env_h)?;
     let btn_top = left[1].min(right[1]);
     let btn_h = left[3].max(right[3]);
-    let band_h = crate::ui::colored_keywords::colored_row_line_step(font_px);
+    let band_h = crate::ui::styled_text::colored_row_line_step(font_px);
     let gap = btn_h * 0.08;
     // Full-width band keeps the pinned body tier from shrinking to fit the
     // narrow gap between the projected page-button markers.
@@ -3304,6 +3421,72 @@ mod tests {
     }
 
     #[test]
+    fn archive_artifact_hit_rects_match_relic_face_size() {
+        use crate::core::progression::PlayerProgress;
+        let w = 1920.0;
+        let h = 1080.0;
+        let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
+        let cell = (w * 0.12_f32).min(h * 0.18);
+        let mut progress = PlayerProgress::default();
+        progress.cheat_unlock_all_transformation_chains_meta();
+        let scene = ArchiveScene::new();
+        let items = scene.flat_items(w, h, &progress, env_h, 0);
+        let artifact_rects = collection_artifact_hit_rects(&items);
+        assert!(
+            !artifact_rects.is_empty(),
+            "unlocked relics should produce cabinet hit targets"
+        );
+        let max_face = archive_artifact_face_size(cell, true);
+        for (idx, rect) in artifact_rects {
+            assert!(flat_rect_xywh_is_finite(rect), "artifact {idx} rect should be finite");
+            let [_, _, rw, rh] = rect;
+            assert!(
+                rw <= max_face + 0.5 && rh <= max_face + 0.5,
+                "artifact {idx} hit rect {rw}x{rh} should not exceed focused face {max_face}"
+            );
+        }
+    }
+
+    #[test]
+    fn archive_artifact_spatial_nav_follows_cabinet_grid() {
+        use crate::core::progression::PlayerProgress;
+
+        let w = 1920.0;
+        let h = 1080.0;
+        let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
+        let mut progress = PlayerProgress::default();
+        progress.cheat_unlock_all_transformation_chains_meta();
+        let scene = ArchiveScene::new();
+        let items = scene.flat_items(w, h, &progress, env_h, 0);
+        let cols = archive_glb::ARCHIVE_SLOT_COLS.max(1);
+        assert!(
+            collection_artifact_candidates(&items).len() > cols,
+            "need at least one full row plus a cell below for grid nav test"
+        );
+
+        assert_eq!(
+            collection_spatial_artifact_step(&mut FocusNavState::new(), &items, Some(0), FocusDir::Right),
+            Some(1),
+            "Right from the first slot should reach its row neighbour, not skip ahead"
+        );
+        let down = collection_spatial_artifact_step(
+            &mut FocusNavState::new(),
+            &items,
+            Some(0),
+            FocusDir::Down,
+        );
+        assert_ne!(
+            down,
+            Some(1),
+            "Down from the first slot must not walk catalogue sequence order"
+        );
+        assert!(
+            down.is_some_and(|i| i >= cols),
+            "Down from the first slot should reach a lower cabinet row, got {down:?}"
+        );
+    }
+
+    #[test]
     fn chronicle_tab_new_badge_stays_on_screen() {
         let w = 1920.0;
         let h = 1080.0;
@@ -3329,7 +3512,6 @@ mod tests {
     #[test]
     fn archive_chronicle_tab_spatially_reachable_from_bosses_and_grid() {
         use crate::core::progression::PlayerProgress;
-        use crate::ui::focus_nav::pick_neighbor;
 
         let w = 1920.0;
         let h = 1080.0;
@@ -3340,45 +3522,35 @@ mod tests {
             .iter()
             .map(|(ti, rect)| (CollectionAction::SelectTab(*ti), *rect))
             .collect();
+        let tab_items: Vec<FlatItem<CollectionAction>> = chrome
+            .iter()
+            .map(|(action, rect)| FlatItem::new(action.id(), *rect, *action))
+            .collect();
         let chronicle_idx = TABS.len() - 1;
         let bosses_idx = chronicle_idx - 1;
         let yaku_idx = collection_yaku_tab_index();
-        let bosses = chrome
-            .iter()
-            .find(
-                |(action, _)| matches!(action, CollectionAction::SelectTab(i) if *i == bosses_idx),
-            )
-            .expect("bosses tab rect")
-            .1;
+        let bosses_action = CollectionAction::SelectTab(bosses_idx);
+        let yaku_action = CollectionAction::SelectTab(yaku_idx);
+        let relics_action = CollectionAction::SelectTab(0);
+        let chronicle_action = CollectionAction::SelectTab(chronicle_idx);
         assert_eq!(
-            pick_neighbor(bosses, FocusDir::Down, &chrome),
-            Some(CollectionAction::SelectTab(chronicle_idx)),
+            collection_chrome_nav_pick(&tab_items, &chrome, bosses_action, FocusDir::Down),
+            Some(chronicle_action),
             "Down from Ordeals should reach the lower-shelf Chronicle btn"
         );
-        let yaku = chrome
-            .iter()
-            .find(|(action, _)| matches!(action, CollectionAction::SelectTab(i) if *i == yaku_idx))
-            .expect("yaku tab rect")
-            .1;
         assert_eq!(
-            pick_neighbor(yaku, FocusDir::Down, &chrome),
-            Some(CollectionAction::SelectTab(chronicle_idx)),
+            collection_chrome_nav_pick(&tab_items, &chrome, yaku_action, FocusDir::Down),
+            Some(chronicle_action),
             "Down from Yaku (zodiacs btn) should reach Chronicle"
         );
-        let relics = chrome
-            .iter()
-            .find(|(action, _)| matches!(action, CollectionAction::SelectTab(0)))
-            .expect("relics tab rect")
-            .1;
-        let relics_tabs: Vec<_> = chrome
-            .iter()
-            .filter(|(action, _)| {
-                !matches!(action, CollectionAction::SelectTab(i) if *i == chronicle_idx)
-            })
-            .copied()
-            .collect();
+        let relics_tabs: Vec<_> = collection_tab_chrome_rects_for_vertical_step(
+            &tab_items,
+            relics_action,
+            FocusDir::Down,
+        );
         assert!(
-            pick_neighbor(relics, FocusDir::Down, &relics_tabs).is_none(),
+            collection_chrome_nav_pick(&tab_items, &relics_tabs, relics_action, FocusDir::Down)
+                .is_none(),
             "Down from main-row tabs should not reach Chronicle"
         );
 
@@ -3406,18 +3578,13 @@ mod tests {
             .map(|(_, rect)| rect)
             .expect("cabinet should surface at least one artifact rect");
         assert_eq!(
-            pick_neighbor(bottom_right, FocusDir::Down, &chrome),
-            Some(CollectionAction::SelectTab(chronicle_idx)),
+            collection_chrome_pick_from_rect(&items, &chrome, bottom_right, FocusDir::Down),
+            Some(chronicle_action),
             "Down from the bottom-right cabinet slot should reach Chronicle"
         );
 
-        let chronicle = chrome
-            .iter()
-            .find(|(action, _)| matches!(action, CollectionAction::SelectTab(i) if *i == chronicle_idx))
-            .expect("chronicle tab rect")
-            .1;
         assert!(
-            pick_neighbor(chronicle, FocusDir::Left, &chrome).is_some(),
+            collection_chrome_nav_pick(&items, &chrome, chronicle_action, FocusDir::Left).is_some(),
             "Left from Chronicle should reach some chrome neighbour"
         );
     }

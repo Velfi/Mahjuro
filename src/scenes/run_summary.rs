@@ -13,6 +13,7 @@ use crate::game::memorial_run::snapshot_from_run;
 use crate::game::run::RunState;
 use crate::persistence;
 use crate::render::draw_cmd::UiFrame;
+use crate::render::main_menu_glb;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::GpuInstance;
 use crate::sfx_id::SfxId;
@@ -160,10 +161,21 @@ impl RunSummaryScene {
     }
 
     fn panel_content(&self, progress: &PlayerProgress) -> RunSummaryPanelContent {
-        let subtitle = if self.won {
-            "Final wing cleared".to_string()
+        let defeat_loss_line = if self.won {
+            None
         } else if let Some(ref line) = self.memorial_subtitle {
-            line.clone()
+            Some(line.clone())
+        } else {
+            self.loss_reason
+                .map(|reason| reason.loss_summary().to_string())
+        };
+        let pre_depth_text = if self.won {
+            Some("The House's hold is broken — for now.".to_string())
+        } else {
+            defeat_loss_line
+        };
+        let subtitle = if self.won || pre_depth_text.is_some() {
+            String::new()
         } else {
             format!(
                 "{} / {}",
@@ -191,11 +203,7 @@ impl RunSummaryScene {
         } else {
             "Onward and downward".to_string()
         };
-        let progress_value = if current_level >= MAX_PROGRESS_LEVEL {
-            "".to_string()
-        } else {
-            format!("{into_level}/{POINTS_PER_LEVEL}")
-        };
+        let progress_value = "".to_string();
         let level_transition = if current_level > prev_level {
             Some(format!(
                 "{} → {}",
@@ -206,7 +214,7 @@ impl RunSummaryScene {
             None
         };
 
-        let mut stats_rows = vec![
+        let stats_rows = vec![
             ("Total score".to_string(), self.summary.total_score.clone()),
             (
                 "Best structure".to_string(),
@@ -218,17 +226,15 @@ impl RunSummaryScene {
             ),
             ("Completion".to_string(), self.summary.completion.clone()),
         ];
-        if let Some(reason) = self.loss_reason.map(GameOverReason::loss_summary) {
-            stats_rows.push(("Defeat cause".to_string(), reason.to_string()));
-        }
 
         RunSummaryPanelContent {
             headline: if self.won {
-                "VICTORY".to_string()
+                "The Moon's light welcomes you into the cool night.".to_string()
             } else {
-                "DEFEAT".to_string()
+                "The House embraces you, wholly and eternally.".to_string()
             },
             subtitle,
+            pre_depth_text,
             hint: "Is your fate settled then?".to_string(),
             stats_rows,
             level: RunSummaryPanelLevel {
@@ -311,7 +317,7 @@ impl SceneBehavior for RunSummaryScene {
         None
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, mut ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let content = self.panel_content(ctx.progress);
@@ -343,6 +349,25 @@ impl SceneBehavior for RunSummaryScene {
             if ctx.effect_layers.fullscreen_water_backdrop {
                 frame.moonlit_water();
             }
+            if main_menu_glb::main_menu_room_draw_ready() {
+                let env_scale =
+                    main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
+                if let Some((cam, model_delta)) = main_menu_glb::victory_summary_moon_setup(
+                    w,
+                    h,
+                    env_scale,
+                    ctx.victory_moon_debug.rotation_xyz,
+                ) {
+                    frame.moonlit_water_hide_disc = ctx.effect_layers.fullscreen_water_backdrop;
+                    frame.main_menu_environment();
+                    frame.main_menu_env_moon_only = true;
+                    frame.main_menu_env_model_delta = model_delta;
+                    frame.camera_override = Some(cam);
+                    let room_glb = main_menu_glb::main_menu_glb_has_embedded_lights();
+                    frame.scene_lighting.embedded_gltf_punctual = room_glb;
+                    frame.scene_lighting.room_glb_brdf = room_glb;
+                }
+            }
         } else if let Some(kind) = self.memorial_kind {
             super::defeat_tableau::push_defeat_memorial_tableau(&mut frame, ctx.layout, kind);
         } else if ctx.effect_layers.fullscreen_water_backdrop {
@@ -369,6 +394,7 @@ impl SceneBehavior for RunSummaryScene {
                 format_score(self.target_score as u64)
             )
         };
+        ctx.stash_focus_nav_tree_flat(&self.tree, &items, |_| "Continue".into());
         frame
     }
 }

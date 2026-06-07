@@ -223,6 +223,7 @@ impl App {
                 // atlas pre-bake so boot loading does not stall until the window refocuses.
                 let mut did_loader_work = false;
                 let continue_warmup = self.continue_room_warmup();
+                let scene_transition_unblocked = self.scene_transition_unblocked();
                 if let Some(renderer) = self.renderer.as_mut() {
                     if renderer.is_loading() {
                         renderer.poll_pending_texture_uploads();
@@ -255,7 +256,7 @@ impl App {
                         let pending_transition_at_black = (self.pending_scene_intent.is_some()
                             || self.pending_scene.is_some())
                             && self.transition_alpha <= 0.0
-                            && !self.modals.is_active();
+                            && scene_transition_unblocked;
                         renderer.poll_room_prefetch_gpu_uploads(
                             crate::scenes::active_scene_key(&self.scene),
                             self.last_frame_dt * 1000.0,
@@ -566,7 +567,7 @@ impl App {
                 self.last_drawable_px.height as f32,
             );
             // Same raycast-based pick as the per-frame update path.
-            let hand_slot_count = self.run.hand().len().max(layout.hand_slots.len());
+            let hand_slot_count = self.run.hand().len().max(layout.hand_slot_count);
             let mut slots: Vec<(f32, f32, f32, f32)> =
                 vec![(-9999.0, -9999.0, 0.0, 0.0); hand_slot_count];
             let picked = self
@@ -649,6 +650,12 @@ impl App {
             }
         }
         if let Some(ref mut o) = self.debug.flame_debug_overlay {
+            let ctrl = mod_ctrl(self.modifiers) || mod_gui(self.modifiers);
+            if o.feed_key_event(scancode, ctrl) {
+                return Ok(());
+            }
+        }
+        if let Some(ref mut o) = self.debug.victory_moon_debug_overlay {
             let ctrl = mod_ctrl(self.modifiers) || mod_gui(self.modifiers);
             if o.feed_key_event(scancode, ctrl) {
                 return Ok(());

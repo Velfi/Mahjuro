@@ -52,7 +52,7 @@ impl ProfileCardLayout {
 
     fn compute(w: f32, h: f32) -> Self {
         let scale = (w.min(h)) / 600.0;
-        let hint_style = HintStyle::standard(h);
+        let hint_style = HintStyle::standard(w, h);
         let footer_reserve = hint_style.line_h + h * 0.02;
         let title_font = typography::size(typography::H20, h);
         let title_h = title_font * 1.35;
@@ -325,7 +325,7 @@ impl SceneBehavior for ProfileSelectScene {
         None
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, mut ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let layout = ProfileCardLayout::compute(w, h);
@@ -559,7 +559,7 @@ impl SceneBehavior for ProfileSelectScene {
         }
 
         // Scene-specific action hints (delete is not a universal face-button mapping).
-        let hint_style = HintStyle::standard(h);
+        let hint_style = HintStyle::standard(w, h);
         let hint_h = hint_style.line_h;
         let hint_y = h - hint_h - h * 0.02;
         let bottom_rect = [0.0, hint_y, w, hint_h];
@@ -603,6 +603,7 @@ impl SceneBehavior for ProfileSelectScene {
 
         frame.buttons = buttons;
         frame.window_title = "Mahjuro — Select Profile".into();
+        ctx.stash_focus_nav_tree_flat(&self.tree, &items, |a| format!("Profile {}", a.0 + 1));
         frame
     }
 }

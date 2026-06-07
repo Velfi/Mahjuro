@@ -35,6 +35,7 @@ use std::time::Instant;
 use super::{
     BackgroundId, ButtonDef, DrawCtx, OverlayRequest, SceneBehavior, SceneTransition, UpdateCtx,
 };
+use super::header_chrome::HeaderChromeMetrics;
 
 const CLICK_ROW_BASE: u32 = 0xE100;
 
@@ -102,23 +103,22 @@ fn scroll_rows_from_cursor(my: f32, grab_y: f32, sb: &JournalScrollbar, max_scro
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum JournalNav {
     Back,
+    Row(usize),
 }
 
 impl JournalNav {
     fn id(self) -> FocusId {
-        FocusId(0xE0F0 + self as u32)
+        match self {
+            Self::Back => FocusId(0xE0F0),
+            Self::Row(i) => FocusId(CLICK_ROW_BASE + i as u32),
+        }
     }
 }
 
 /// Upper-left Back control — same sizing as [`super::guide::GuideLayout::header_chrome`].
 fn journal_header_chrome(window_w: f32, window_h: f32) -> ([f32; 4], f32) {
-    let ui = (window_w / 1920.0).min(window_h / 1080.0).clamp(0.55, 1.35);
-    let margin = 48.0 * ui;
-    let header_btn_h = (window_h * 0.052).clamp(44.0, 72.0);
-    let back_w = (108.0 * (margin / 48.0)).clamp(88.0, 132.0);
-    let back = [margin, margin, back_w, header_btn_h];
-    let chrome_bottom = margin + header_btn_h + 12.0 * ui;
-    (back, chrome_bottom)
+    let chrome = HeaderChromeMetrics::from_window(window_w, window_h);
+    (chrome.back_rect_left(), chrome.chrome_bottom())
 }
 
 /// Couch / TV legibility: ramps up font floors and tile mins from ~720p
@@ -201,23 +201,67 @@ impl Default for YakuJournalScene {
 
 impl YakuJournalScene {
     pub fn new() -> Self {
+        let mut tree = TreeState::new();
+        tree.set_focus(JournalNav::Row(0).id());
         Self {
             selected: 0,
             scroll_rows: 0.0,
             target_scroll_rows: 0.0,
             scroll_last_tick: Instant::now(),
-            tree: TreeState::new(),
+            tree,
             dragging_scrollbar: false,
             scroll_drag_grab_y: 0.0,
             prev_mouse_down: false,
         }
     }
 
-    fn flat_items(&self, w: f32, h: f32) -> Vec<FlatItem<JournalNav>> {
+    fn flat_items(
+        &self,
+        w: f32,
+        h: f32,
+        table: &JournalTableLayout,
+        scroll: f32,
+        total_rows: usize,
+    ) -> Vec<FlatItem<JournalNav>> {
         let (back, _) = journal_header_chrome(w, h);
-        vec![FlatItem::new(JournalNav::Back.id(), back, JournalNav::Back)]
+        let mut items = vec![FlatItem::new(JournalNav::Back.id(), back, JournalNav::Back)];
+        if total_rows == 0 {
+            return items;
+        }
+        let body_top = table.table_y + table.header_h;
+        for idx in 0..total_rows {
+            let row_y = body_top + (idx as f32 - scroll) * table.row_h;
+            items.push(FlatItem::new(
+                JournalNav::Row(idx).id(),
+                [table.table_x, row_y, table.table_w, table.row_h],
+                JournalNav::Row(idx),
+            ));
+        }
+        items
     }
 
+    fn sync_selected_from_focus(&mut self, visible_rows: usize, max_scroll: f32) {
+        let Some(id) = self.tree.focused() else {
+            return;
+        };
+        if let JournalNav::Row(idx) = journal_nav_from_id(id) {
+            self.selected = idx;
+            self.ensure_selected_visible(visible_rows, max_scroll);
+        }
+    }
+}
+
+fn journal_nav_from_id(id: FocusId) -> JournalNav {
+    if id == JournalNav::Back.id() {
+        JournalNav::Back
+    } else if id.0 >= CLICK_ROW_BASE {
+        JournalNav::Row((id.0 - CLICK_ROW_BASE) as usize)
+    } else {
+        JournalNav::Back
+    }
+}
+
+impl YakuJournalScene {
     fn go_back(overlay_request: &mut Option<OverlayRequest>) -> SceneTransition {
         *overlay_request = Some(OverlayRequest::Pop);
         None
@@ -317,16 +361,15 @@ impl SceneBehavior for YakuJournalScene {
         }
         self.prev_mouse_down = mouse_down;
 
-        for &cid in ctx.button_clicks {
-            if scrollbar_hit {
-                continue;
-            }
-            if cid >= CLICK_ROW_BASE && cid < CLICK_ROW_BASE + total_rows as u32 {
-                self.selected = (cid - CLICK_ROW_BASE) as usize;
-                self.ensure_selected_visible(table.visible_rows, max_scroll);
-                continue;
-            }
-        }
+        let row_clicks: Vec<u32> = if scrollbar_hit {
+            Vec::new()
+        } else {
+            ctx.button_clicks
+                .iter()
+                .copied()
+                .filter(|&cid| cid >= CLICK_ROW_BASE && cid < CLICK_ROW_BASE + total_rows as u32)
+                .collect()
+        };
 
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel | UiAction::Pause | UiAction::Help) {
@@ -334,28 +377,18 @@ impl SceneBehavior for YakuJournalScene {
             }
         }
 
-        let items = self.flat_items(w, h);
+        let items = self.flat_items(w, h, &table, self.target_scroll_rows, total_rows);
         let nav_actions: Vec<UiAction> = ctx
             .actions
             .iter()
             .copied()
-            .filter(|a| {
-                !matches!(
-                    a,
-                    UiAction::FocusUp
-                        | UiAction::FocusDown
-                        | UiAction::FocusPrev
-                        | UiAction::FocusNext
-                        | UiAction::PagePrev
-                        | UiAction::PageNext
-                )
-            })
+            .filter(|a| !matches!(a, UiAction::PagePrev | UiAction::PageNext))
             .collect();
         let nav_action = self.tree.update_flat(
             &items,
             TreeInput {
                 actions: &nav_actions,
-                button_clicks: ctx.button_clicks,
+                button_clicks: &row_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (w, h),
                 input_mode: ctx.input_mode,
@@ -365,30 +398,28 @@ impl SceneBehavior for YakuJournalScene {
         if self.tree.take_focus_changed() {
             ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
         }
-        if let Some(JournalNav::Back) = nav_action {
-            ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-            return Self::go_back(ctx.overlay_request);
+        self.sync_selected_from_focus(table.visible_rows, max_scroll);
+        match nav_action {
+            Some(JournalNav::Back) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+                return Self::go_back(ctx.overlay_request);
+            }
+            Some(JournalNav::Row(i)) => {
+                self.selected = i;
+                self.ensure_selected_visible(table.visible_rows, max_scroll);
+            }
+            None => {}
         }
 
         for a in ctx.actions {
             match a {
-                UiAction::FocusUp | UiAction::FocusPrev => {
-                    if total_rows > 0 {
-                        self.selected = self.selected.saturating_sub(1);
-                        self.ensure_selected_visible(table.visible_rows, max_scroll);
-                    }
-                }
-                UiAction::FocusDown | UiAction::FocusNext => {
-                    if total_rows > 0 {
-                        self.selected = (self.selected + 1).min(total_rows.saturating_sub(1));
-                        self.ensure_selected_visible(table.visible_rows, max_scroll);
-                    }
-                }
                 UiAction::PagePrev => {
                     if total_rows > 0 {
                         let page = table.visible_rows.max(1);
                         self.selected = self.selected.saturating_sub(page);
                         self.ensure_selected_visible(table.visible_rows, max_scroll);
+                        self.tree
+                            .set_focus(JournalNav::Row(self.selected).id());
                     }
                 }
                 UiAction::PageNext => {
@@ -396,6 +427,8 @@ impl SceneBehavior for YakuJournalScene {
                         let page = table.visible_rows.max(1);
                         self.selected = (self.selected + page).min(total_rows.saturating_sub(1));
                         self.ensure_selected_visible(table.visible_rows, max_scroll);
+                        self.tree
+                            .set_focus(JournalNav::Row(self.selected).id());
                     }
                 }
                 _ => {}
@@ -406,7 +439,7 @@ impl SceneBehavior for YakuJournalScene {
         None
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, mut ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let jr = journal_read_boost(w, h);
@@ -732,6 +765,8 @@ impl SceneBehavior for YakuJournalScene {
             frame.showcase_tile_batch(placements);
         }
 
+        let items = self.flat_items(w, h, &table, self.target_scroll_rows, total_rows);
+        ctx.stash_focus_nav_tree_flat(&self.tree, &items, |a| format!("{a:?}"));
         frame
     }
 }
@@ -1371,6 +1406,7 @@ fn draw_plaque(
                     outline: false,
                     glow: hand_glow,
                     glow_color: hand_glow_color,
+                    outline_sel: None,
                     pick_id: None,
                     overlay_rect_group: None,
                 });
@@ -1401,7 +1437,7 @@ fn draw_plaque(
         face_w - header_pad * 0.7,
         footer_h * 0.72,
     ];
-    let hint_style = HintStyle::fit_inline_rect(h, hint_rect[3]);
+    let hint_style = HintStyle::fit_inline_rect(w, h, hint_rect[3]);
     push_inline_hint_rows(
         frame,
         ctx,

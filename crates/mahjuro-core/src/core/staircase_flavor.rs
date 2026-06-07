@@ -28,14 +28,14 @@ struct StaircaseFlavorEntryRaw {
 fn leak_flavor_spans(raw: Vec<StaircaseFlavorSpanRaw>) -> &'static [RelicFlavorSpan] {
     let v: Vec<RelicFlavorSpan> = raw
         .into_iter()
-        .filter(|s| !s.text.trim().is_empty())
+        .filter(|s| !s.text.is_empty())
         .map(|s| RelicFlavorSpan {
             text: Box::leak(s.text.into_boxed_str()),
             bold: s.bold,
             italic: s.italic,
         })
         .collect();
-    if v.is_empty() {
+    if v.is_empty() || v.iter().all(|s| s.text.chars().all(char::is_whitespace)) {
         &[]
     } else {
         Box::leak(v.into_boxed_slice())

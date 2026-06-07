@@ -1,6 +1,6 @@
 //! Single-run state: wall, hand, score target, round modifiers.
 //!
-//! Hand, selection, structure bank, and the fields mirrored by
+//! Hand, selection, structure, and the fields mirrored by
 //! [`crate::game::engine_state::GameplayCoreState`] should be mutated through
 //! [`GameplayCoreState::with_run_mut`](crate::game::engine_state::GameplayCoreState::with_run_mut)
 //! or [`crate::game::engine::GameEngine`] so `hand` and `selected` stay aligned.
@@ -75,7 +75,7 @@ pub struct OrdealState {
     pub effect: Option<crate::core::ordeal::ResolvedOrdealEffect>,
     /// Per-round hand-size delta from boss effects.
     pub bonus_hand_size: i32,
-    /// Yen cost charged after each successful play (set by The Tribute).
+    /// Per-play yen cost charged after each successful play (The Tax Collector).
     pub yen_cost_per_play: u32,
     /// Per-play cost baked in by The Tax Collector at reveal time.
     #[serde(default)]
@@ -316,7 +316,7 @@ pub struct RunState {
     /// [`Self::yaku_times_played`] to gate zodiac ribbon spawns.
     #[serde(default)]
     pub profile_yaku_scored: rustc_hash::FxHashSet<crate::core::yaku::YakuKind>,
-    /// Cumulative tiles committed from hand into the structure bank (melds).
+    /// Cumulative tiles committed from hand into structure (melds).
     #[serde(default)]
     pub tiles_played: u32,
     /// Cumulative tiles thrown away via the discard action.
@@ -355,6 +355,9 @@ pub struct RunState {
     /// Filtered out during wall construction each round.
     #[serde(default)]
     pub removed_tile_ids: rustc_hash::FxHashSet<u32>,
+    /// Stairway decimations performed this run.
+    #[serde(default)]
+    pub decimations_used: u32,
     /// Tile packs purchased from the shop. Each pack permanently injects
     /// extra tiles into the wall every round. Append-only.
     #[serde(default)]
@@ -685,7 +688,7 @@ impl RunState {
         self.relic_hooks_on_run_yen_changed(bus);
     }
 
-    /// Extensible hook for relics that care about the bank after any yen mutation.
+    /// Extensible hook for relics that care about structure after any yen mutation.
     fn relic_hooks_on_run_yen_changed(&mut self, bus: Option<&mut EventBus>) {
         self.turtle_shell_on_yen_broke(bus);
     }
@@ -853,6 +856,7 @@ impl RunState {
             tile_enhancements: BTreeMap::new(),
             global_buff_enhancement: None,
             removed_tile_ids: rustc_hash::FxHashSet::default(),
+            decimations_used: 0,
             tile_packs: Vec::new(),
             joker_extra_faces: Vec::new(),
             small_chamber_tag: None,

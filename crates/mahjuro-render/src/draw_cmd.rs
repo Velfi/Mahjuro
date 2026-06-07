@@ -10,6 +10,8 @@
 //!
 //! There are no stages, no z-indexes, no overlay-split indices. Modals,
 //! tooltips, and pause menus are just "more cmds pushed at the end."
+//! Debug overlays use [`DrawCmd::DebugOverlayQuad`] / [`DrawCmd::DebugOverlayText`]
+//! and render in a separate post-UI pass so tuning panels stay readable.
 
 use crate::lit_mesh::MaterialParams;
 use crate::scene_keys;
@@ -73,6 +75,18 @@ pub struct SceneLighting {
 }
 
 impl SceneLighting {
+    /// Single smooth point for showcase tile grids (stress lab, decimation picker).
+    pub fn showcase_tile_picker(w: f32, h: f32) -> Self {
+        let mut lit = Self::default();
+        lit.push_smooth(PointLight {
+            pos: [w * 0.5, h * 0.38, h * 1.35],
+            radius: h * 3.1,
+            color: color::rgb(color::PARCHMENT),
+            intensity: 1.22,
+        });
+        lit
+    }
+
     pub fn set_smooth_points(&mut self, v: Vec<PointLight>) {
         self.punctual = v.into_iter().map(ScenePunctualLight::Smooth).collect();
         self.punctual_gltf_nodes = vec![None; self.punctual.len()];
@@ -172,6 +186,8 @@ impl ShowcaseRenderHints {
                     | "tile_pack_celebration"
                     | "guide"
                     | "tile_anchor_lab"
+                    | "tile_stress_lab"
+                    | scene_keys::STAIRWAY
             )
         ) || (active_scene_key == Some("showcase") && self.tile_pack_celebration_tonemap)
     }
@@ -401,11 +417,30 @@ pub struct ShowcaseTilePlacement {
     /// back to the default warm champagne gold. Used to mark dora tiles
     /// with a red glow.
     pub glow_color: Option<[f32; 4]>,
+    /// Override [`tile_outline.wgsl`] rim mode (`base_color_factor.y`). `None`
+    /// derives from `selected` / `hovered` (gold / blue). `2.0` = decimation red.
+    pub outline_sel: Option<f32>,
     /// Logical slot index for ray-cast tile picking and `proj.hand_rects` tracking.
     /// `None` = not pickable (pack-open showcase tiles, etc.).
     pub pick_id: Option<usize>,
     /// When set, this tile contributes to a merged screen overlay rect (dora / round wind).
     pub overlay_rect_group: Option<TileOverlayRectGroup>,
+}
+
+/// One [`DrawCmd::ShowcaseTileBatch`] — optional screen scissor for scroll panels.
+#[derive(Clone, Debug)]
+pub struct ShowcaseTileBatchCmd {
+    pub placements: Vec<ShowcaseTilePlacement>,
+    pub clip_rect: Option<[f32; 4]>,
+}
+
+impl From<Vec<ShowcaseTilePlacement>> for ShowcaseTileBatchCmd {
+    fn from(placements: Vec<ShowcaseTilePlacement>) -> Self {
+        Self {
+            placements,
+            clip_rect: None,
+        }
+    }
 }
 
 /// Merged HUD overlay rect sources for groups of showcase tiles.
@@ -469,6 +504,8 @@ impl ImageQuadSource {
 pub struct ImageQuad {
     pub inst: GpuInstance,
     pub source: ImageQuadSource,
+    /// When set, the renderer applies a scissor rect for this draw.
+    pub clip_rect: Option<[f32; 4]>,
 }
 
 /// Screen-space debuff X centered on `anchor_rect` (matches relic/tile overlay sizing).
@@ -484,6 +521,7 @@ pub fn debuff_marker_image_quad(anchor_rect: [f32; 4]) -> ImageQuad {
             user: 0,
         },
         source: ImageQuadSource::DebuffMarker,
+        clip_rect: None,
     }
 }
 
@@ -595,7 +633,12 @@ pub enum Object3dKind {
     /// Discard bowl. Hover animation is driven by [`Object3d::hover_target`].
     Bowl,
     /// Bronze "play hand" mirror. Hover animation is driven by [`Object3d::hover_target`].
-    Mirror,
+    /// [`valid_play_glow`] drives the jade fresnel rim when the hand selection is
+    /// playable (`lit_mesh.wgsl` `instance_params.x`).
+    Mirror {
+        /// Valid-hand jade fresnel intensity in \[0, 1\]. `0.0` when idle.
+        valid_play_glow: f32,
+    },
     // (Dish is now modeled as `Primitive { shape: DiscSquare or
     // DiscRound, material: MaterialSpec::plain() }`. Callers set `pos[2]` to the dish center (base + extents[1] *
     // 0.5) rather than the base, since the generic dispatch no longer
@@ -797,7 +840,7 @@ pub enum DrawCmd {
     ClearSceneDepth,
     /// Batch of showcase tiles with explicit 3D transforms — used for hand
     /// tiles, pack-opening celebrations, and any other 3D tile placement.
-    ShowcaseTileBatch(Vec<ShowcaseTilePlacement>),
+    ShowcaseTileBatch(ShowcaseTileBatchCmd),
     /// Flat screen-space tile face using the real per-tile decal art.
     TileFaceQuad(TileFaceQuad),
     /// Generic 2D quad (panels, dimmers, borders…).
@@ -823,6 +866,10 @@ pub enum DrawCmd {
     Flame,
     /// Rasterized text label.
     Text(TextLabel),
+    /// Post-tonemap debug panel quad — drawn after normal UI overlay pass.
+    DebugOverlayQuad(GpuInstance),
+    /// Post-tonemap debug panel label — drawn after normal UI overlay pass.
+    DebugOverlayText(TextLabel),
     /// Tinted RGBA texture quad (logos, Kenney prompts, atlas sprites, …).
     ImageQuad(ImageQuad),
     // ── Skeuomorphic gameplay HUD ──
@@ -868,6 +915,14 @@ pub struct UiFrame {
     /// the default "person at the table" gameplay camera. The shop scene
     /// uses this to frame the curio cabinet + foreground dishes.
     pub camera_override: Option<CameraParams>,
+    /// When set together with [`DrawCmd::ClearSceneDepth`], the first Pass A
+    /// subpass keeps [`Self::camera_override`] (e.g. room background); later
+    /// subpasses and showcase-tile placement use this camera instead.
+    pub camera_override_after_depth_clear: Option<CameraParams>,
+    /// When set with [`DrawCmd::ClearSceneDepth`], Pass A subpasses after the
+    /// first depth clear use this lighting instead of [`Self::scene_lighting`]
+    /// (e.g. decimation tiles must not inherit staircase embedded punctual).
+    pub scene_lighting_after_depth_clear: Option<SceneLighting>,
     /// Debug overlay: when true, the renderer draws three colored axis bars
     /// (red = +X, green = +Y, blue = +Z) anchored at the camera's look
     /// target. Toggled from the native Debug menu in the gameplay scene to
@@ -932,10 +987,28 @@ pub struct UiFrame {
     pub gameplay_action_picks: Option<GameplayActionPickProxies>,
     /// When false, `btn_cash_in` / `label_cash_in` env meshes are not drawn or pickable.
     pub gameplay_cash_in_button_visible: bool,
+    /// When true, gameplay room env draws only cash-in control meshes (guide scoring flow).
+    pub gameplay_env_cash_in_only: bool,
+    /// Guide scoring flow: isolated cash-in env draw uses this camera after showcase tiles.
+    pub gameplay_cash_in_overlay_camera: Option<CameraParams>,
+    /// Lighting paired with [`Self::gameplay_cash_in_overlay_camera`] (gameplay embedded punctual).
+    pub gameplay_cash_in_overlay_lighting: Option<SceneLighting>,
+    /// Sustained pulse (0..1) for the cash-in control; scales with played meld count.
+    pub gameplay_cash_in_glow: f32,
+    /// Vertical wiggle (screen px) for the cash-in control; scales with played meld count.
+    pub gameplay_cash_in_wiggle: f32,
+    /// The House ordeal: animate `btn_cash_in` with glossary polychrome bands until discards are spent.
+    pub gameplay_cash_in_blocked: bool,
     /// Active shop glTF node TRS animation samples (clip name, playback time in seconds).
     pub shop_gltf_anim_samples: Vec<(String, f32)>,
     /// When true, shop room env draws only the `Eyeball` node mesh (animation lab).
     pub shop_env_eyeball_only: bool,
+    /// When true, main-menu room env draws only `MoonObject` (victory run summary).
+    pub main_menu_env_moon_only: bool,
+    /// Extra model matrix applied after hub room centering (victory moon recenter / scale).
+    pub main_menu_env_model_delta: glam::Mat4,
+    /// When true, `moonlit_water.wgsl` skips the procedural 2D moon disc (3D moon replaces it).
+    pub moonlit_water_hide_disc: bool,
     /// Animation lab: flat albedo + simple N·L in `room_glb.wgsl` (no punctual PBR).
     pub shop_env_unlit_debug: bool,
     /// Gameplay score roller digits `(live_score, target_score)` when the HUD roller is active.
@@ -955,6 +1028,8 @@ impl UiFrame {
             flame_height_world: 0.0,
             cursor_pos: None,
             camera_override: None,
+            camera_override_after_depth_clear: None,
+            scene_lighting_after_depth_clear: None,
             debug_axes: false,
             debug_rain_hit_colliders: false,
             debug_rain_depth: false,
@@ -976,8 +1051,17 @@ impl UiFrame {
             procedural_flame_emitters: Vec::new(),
             gameplay_action_picks: None,
             gameplay_cash_in_button_visible: false,
+            gameplay_env_cash_in_only: false,
+            gameplay_cash_in_overlay_camera: None,
+            gameplay_cash_in_overlay_lighting: None,
+            gameplay_cash_in_glow: 0.0,
+            gameplay_cash_in_wiggle: 0.0,
+            gameplay_cash_in_blocked: false,
             shop_gltf_anim_samples: Vec::new(),
             shop_env_eyeball_only: false,
+            main_menu_env_moon_only: false,
+            main_menu_env_model_delta: glam::Mat4::IDENTITY,
+            moonlit_water_hide_disc: false,
             shop_env_unlit_debug: false,
             gameplay_score_roller_values: None,
             shadow_ao_lab_layout: None,
@@ -985,10 +1069,54 @@ impl UiFrame {
         }
     }
 
-    /// `room_glb.wgsl` for room meshes vs `tile_3d`.
+    /// Lighting for showcase tiles and post–depth-clear 3D when set.
+    #[inline]
+    pub fn foreground_scene_lighting(&self) -> &SceneLighting {
+        self.scene_lighting_after_depth_clear
+            .as_ref()
+            .unwrap_or(&self.scene_lighting)
+    }
+
+    /// Camera for showcase tiles and post–depth-clear 3D when set; otherwise
+    /// [`Self::camera_override`].
+    #[inline]
+    pub fn foreground_camera(&self) -> Option<&CameraParams> {
+        self.camera_override_after_depth_clear
+            .as_ref()
+            .or(self.camera_override.as_ref())
+    }
+
+    /// `true` when a depth reset precedes the first showcase tile batch.
+    pub fn depth_clear_before_showcase(&self) -> bool {
+        let mut seen_clear = false;
+        for cmd in &self.cmds {
+            match cmd {
+                DrawCmd::ClearSceneDepth => seen_clear = true,
+                DrawCmd::ShowcaseTileBatch(_) if seen_clear => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Pass A subpass `chunk_index` camera: background subpass uses
+    /// [`Self::camera_override`]; later subpasses use [`Self::foreground_camera`].
+    #[inline]
+    pub fn pass_a_chunk_camera(&self, chunk_index: usize) -> Option<&CameraParams> {
+        if chunk_index > 0 && self.camera_override_after_depth_clear.is_some() {
+            self.foreground_camera()
+        } else {
+            self.camera_override.as_ref()
+        }
+    }
+
     #[inline]
     pub fn uses_room_glb_shader(&self) -> bool {
         self.scene_lighting.room_glb_brdf
+            || self
+                .gameplay_cash_in_overlay_lighting
+                .as_ref()
+                .is_some_and(|l| l.room_glb_brdf)
     }
 
     // ── Push helpers ────────────────────────────────────────────────────
@@ -1051,6 +1179,16 @@ impl UiFrame {
         self.cmds.extend(iter.into_iter().map(DrawCmd::OverlayQuad));
     }
 
+    pub fn debug_overlay_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
+        self.cmds
+            .extend(iter.into_iter().map(DrawCmd::DebugOverlayQuad));
+    }
+
+    pub fn debug_overlay_texts<I: IntoIterator<Item = TextLabel>>(&mut self, iter: I) {
+        self.cmds
+            .extend(iter.into_iter().map(DrawCmd::DebugOverlayText));
+    }
+
     pub fn overlay_squircle_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
         self.cmds
             .extend(iter.into_iter().map(DrawCmd::OverlaySquircleQuad));
@@ -1091,7 +1229,18 @@ impl UiFrame {
         self.cmds.push(DrawCmd::Object3dBatch(objs));
     }
     pub fn showcase_tile_batch(&mut self, placements: Vec<ShowcaseTilePlacement>) {
-        self.cmds.push(DrawCmd::ShowcaseTileBatch(placements));
+        self.showcase_tile_batch_clipped(placements, None);
+    }
+
+    pub fn showcase_tile_batch_clipped(
+        &mut self,
+        placements: Vec<ShowcaseTilePlacement>,
+        clip_rect: Option<[f32; 4]>,
+    ) {
+        self.cmds.push(DrawCmd::ShowcaseTileBatch(ShowcaseTileBatchCmd {
+            placements,
+            clip_rect,
+        }));
     }
     pub fn tile_face_quads<I: IntoIterator<Item = TileFaceQuad>>(&mut self, iter: I) {
         self.cmds
@@ -1113,6 +1262,7 @@ impl UiFrame {
                 DrawCmd::Quad(inst) => inst.color[3] *= alpha,
                 DrawCmd::DepthQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::OverlayQuad(inst) => inst.color[3] *= alpha,
+                DrawCmd::DebugOverlayQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::OverlaySquircleQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::SquircleQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::TileFaceQuad(face) => face.inst.color[3] *= alpha,
@@ -1127,6 +1277,7 @@ impl UiFrame {
                 // because the underlying scene quads behind it fade.
                 DrawCmd::Flame => {}
                 DrawCmd::Text(lbl) => lbl.color[3] *= alpha,
+                DrawCmd::DebugOverlayText(lbl) => lbl.color[3] *= alpha,
                 DrawCmd::Background(_)
                 | DrawCmd::Starfield
                 | DrawCmd::GoldenDust

@@ -208,7 +208,7 @@ The original MVP scope is fully implemented and significantly exceeded:
 | MVP target                        | Status      | Current reality                           |
 | --------------------------------- | ----------- | ----------------------------------------- |
 | Tile draw/discard                 | Done        | Wall refill, discard bowl, river mesh     |
-| Pair / Triplet / Sequence         | Done        | + Kong, flower wildcards, structure bank   |
+| Pair / Triplet / Sequence         | Done        | + Kong, flower wildcards, structure   |
 | Scoring system                    | Done        | Balatro-style chips × mult with cascades  |
 | 10–15 relics                      | Exceeded    | Large pool — `assets/data/relics.json`    |
 | 1–2 rule modifiers                | Exceeded    | Broad `RuleModifier` set + rich boss hooks |

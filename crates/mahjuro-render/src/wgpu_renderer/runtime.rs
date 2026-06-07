@@ -1,7 +1,7 @@
 use super::*;
 
 mod camera;
-use camera::CameraFrame;
+pub(crate) use camera::CameraFrame;
 mod debug_axes;
 mod debug_rain_hit;
 mod flame_emitters;

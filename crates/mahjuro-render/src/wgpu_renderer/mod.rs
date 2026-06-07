@@ -25,7 +25,6 @@ mod showcase;
 mod constants;
 mod hash_util;
 mod internal_slots;
-mod layout_instances;
 mod lighting_buffers;
 mod moon;
 mod picking_types;
@@ -65,7 +64,7 @@ use crate::lit_mesh::Aabb;
 use crate::lit_mesh::MeshCpu;
 use crate::lit_mesh::push_box;
 use crate::lit_mesh::{
-    LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform,
+    LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams,
     ShadowDepthArrayGpu, ShadowGlobals, SsrGlobals, create_lit_mesh_material_layout,
     create_lit_mesh_spot_ssr_layout, create_room_env_camera_uniform_buffers,
     create_room_env_shadow_gpu_batch, create_shadow_caster_layout, create_shadow_sample_layout,
@@ -254,6 +253,8 @@ pub struct WgpuRenderer {
     /// [`main_menu.glb`](../../assets/3d/main_menu.glb) hub waterfront.
     main_menu_env_primitives: Vec<TilePrimitiveGpu>,
     main_menu_environment: Option<ShopEnvironmentGpu>,
+    /// GPU primitive indices for `MoonObject` in [`main_menu_env_primitives`].
+    main_menu_moon_prim_indices: Vec<usize>,
     gameplay_env_primitives: Vec<TilePrimitiveGpu>,
     /// GPU primitive indices for `btn_cash_in` / `label_cash_in` (multi-material meshes).
     gameplay_cash_in_prim_indices: Vec<usize>,
@@ -302,10 +303,24 @@ pub struct WgpuRenderer {
     /// Active tileset directory name (e.g. `"original"`). When `Some`, tile
     /// decals are loaded from `assets/textures/tile_sets/<name>/` instead of rasterized.
     tile_set: Option<String>,
-    /// Per-showcase-tile GPU resources (pack celebration, etc.). Grown on
-    /// demand up to `MAX_SHOWCASE_TILE_SLOTS`; decals re-rasterised only
-    /// when the tile identity changes.
-    showcase_tiles: Vec<ShowcaseTileGpu>,
+    /// Per-frame tile 3D instancing (showcase tiles + coins).
+    tile_frame_uniform_buffer: wgpu::Buffer,
+    tile_3d_instance_buffer: wgpu::Buffer,
+    tile_3d_instances_staging: Vec<Tile3dInstance>,
+    tile_3d_batch_ranges: Vec<(u32, u32)>,
+    tile_shadow_instance_buffer: wgpu::Buffer,
+    tile_shadow_frame_uniform_buffer: wgpu::Buffer,
+    tile_shadow_frame_bind_group: wgpu::BindGroup,
+    tile_shadow_instances_staging: Vec<TileShadowInstance>,
+    tile_shadow_batch_ranges: Vec<(u32, u32)>,
+    /// Subrange in the shared tile instance buffers for all coins this frame.
+    coin_3d_batch_range: Option<(u32, u32)>,
+    coin_shadow_batch_range: Option<(u32, u32)>,
+    /// Per-frame coin transforms staged during object3d placement, merged into
+    /// the tile instance buffers before upload.
+    coin_3d_draw_state: Vec<Coin3dDrawState>,
+    /// When the active decal tileset changes, per-primitive material bind groups refresh.
+    tile_material_bind_groups_tileset: Option<String>,
     /// Cached 2D tile-face overlays keyed by tile identity.
     tile_face_overlays: FxHashMap<
         (
@@ -383,6 +398,10 @@ pub struct WgpuRenderer {
     pub(super) last_pick_camera: Option<PickCamera>,
     /// Previous frame: authored cash-in control drawn and pickable.
     pub(super) last_gameplay_cash_in_button_visible: bool,
+    /// Pass A camera/lighting scratch for mid-pass env overlay restore (guide cash-in).
+    pub(super) pass_a_draw_camera: Option<runtime::CameraFrame>,
+    pub(super) pass_a_frame_gamma: f32,
+    pub(super) pass_a_frame_ssr_enabled: bool,
     /// Timestamp of the previous frame — used to compute delta time for lerping.
     last_frame: Instant,
     /// Delta time of the *current* frame in seconds (set early in
@@ -773,8 +792,6 @@ pub struct WgpuRenderer {
     primitive_textures: FxHashMap<crate::primitive::MeshId, (wgpu::TextureView, wgpu::TextureView)>,
     /// Authored mesh + material slots from [`coin.glb`](../../../assets/3d/coin.glb).
     coin_glb_primitives: Vec<TilePrimitiveGpu>,
-    /// Per-instance uniforms/bind groups for [`DrawKind::GltfCoin`].
-    coin_glb_instances: Vec<GltfPropGpu>,
     /// Per-pick-id model matrix snapshot for primitive hit-testing.
     pub(super) last_primitive_pick_models: FxHashMap<u32, Mat4>,
     /// Three reusable lit-mesh instances for the debug world-axes overlay
@@ -826,6 +843,8 @@ pub struct WgpuRenderer {
     /// casters and hand tiles share this pipeline because both vertex
     /// layouts start with `position : vec3<f32>` at offset 0.
     shadow_pipeline: wgpu::RenderPipeline,
+    /// Instanced tile / coin shadow casters (model in vertex buffer slot 1).
+    shadow_pipeline_instanced: wgpu::RenderPipeline,
     /// Room GLB shadow pass — double-sided so thin shelves / panels cast.
     shadow_pipeline_room_env: wgpu::RenderPipeline,
     /// Optional GPU timestamp profiler. Built once at startup; activated
@@ -871,8 +890,7 @@ pub use constants::{
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
     MAX_YAKU_TABLET_SLOTS, MEMORIAL_TALISMAN_TEXTURE_BASE,
 };
-pub use internal_slots::{TextAlign, TextLabel};
-pub use layout_instances::build_instances_from_layout;
+pub use internal_slots::{TextAlign, TextBlockVerticalAlign, TextLabel};
 pub use picking_types::{GameplayPick, MainMenuPick, ShopHit};
 pub use projection::ProjectionCache;
 pub use targets::TargetInit;
@@ -895,7 +913,8 @@ pub(crate) use targets::RenderTarget;
 pub(crate) use tile_pipeline::{TileGlbPipelineKey, TileMeshGpuSet, TilePrimitiveGpu};
 pub(crate) use uniforms::{
     BloomParams, FlameViewUniform, Globals, ProbeGiFrameUniform, RoomEnvUniform,
-    TileOutlineFrameUniform, TileOutlineInstance, TileUniform, TonemapParams,
+    Tile3dInstance, TileFrameUniform, TileOutlineFrameUniform, TileOutlineInstance,
+    TileShadowInstance, TonemapParams,
 };
 
 pub(super) use constants::{
@@ -904,6 +923,6 @@ pub(super) use constants::{
 pub(crate) use projection::PickCamera;
 
 pub(crate) use internal_slots::{
-    CachedTextLabel, GltfPropGpu, ShopEnvironmentGpu, ShowcaseTileGpu, TextLabelShapeKey,
+    CachedTextLabel, Coin3dDrawState, ShopEnvironmentGpu, TextLabelShapeKey,
     TileFaceOverlayGpu,
 };

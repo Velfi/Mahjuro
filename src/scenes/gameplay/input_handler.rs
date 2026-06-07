@@ -7,9 +7,8 @@ use std::time::Instant;
 
 use super::GameplayScene;
 use super::cascade_hud::CascadeShowcase;
-use super::focus::{
-    FocusTarget, GameplayButton, default_hand_tile_focus, focus_after_consumable_use, focus_kind,
-    focus_kind_sfx, play_select_sfx, relic_to_dora_focus, wrap_hand_tile_focus,
+use super::focus::{FocusTarget, GameplayButton, default_hand_tile_focus, focus_after_consumable_use,
+    focus_kind, focus_kind_sfx, play_select_sfx, rebuild_focus_nav,
 };
 use crate::core::relic::relic_visual;
 use crate::core::scoring::StepKind;
@@ -23,7 +22,7 @@ use crate::scenes::{
     GuideScene, OverlayRequest, Scene, SceneTransition, UpdateCtx, WallLedgerScene,
     YakuJournalScene,
 };
-use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
+use crate::ui::focus_nav::{FocusDir, rect_contains};
 use crate::ui::input::{UiAction, apply_ui_actions};
 
 /// Vertical bounce (mm, before `layout.mm`) when a scoring step highlights this source.
@@ -122,7 +121,8 @@ pub(super) fn process_focus_and_actions(
             | FocusTarget::YakuTablet(_)
             | FocusTarget::Dora
             | FocusTarget::Ordeal
-            | FocusTarget::RoundWind => true,
+            | FocusTarget::RoundWind
+            | FocusTarget::ScoreRoller(_) => true,
             FocusTarget::Journal => scene.journal_transition.is_none(),
             FocusTarget::Guidebook => scene.journal_transition.is_none(),
             FocusTarget::WallHud => true,
@@ -174,10 +174,16 @@ pub(super) fn process_focus_and_actions(
     }
     if ctx.input_mode == crate::ui::input::InputMode::Cursor {
         let (cx, cy) = ctx.cursor_pos;
-        let new_focus = if let Some(idx) = ctx.picked_hand_tile {
+        let hand_rects = scene.last_hand_tile_pick_rects.borrow();
+        let new_focus = if let Some(idx) = super::hand_layout::hand_tile_pick_at_cursor(
+            ctx.picked_hand_tile,
+            &hand_rects,
+            cx,
+            cy,
+        ) {
             Some(FocusTarget::HandTile(idx))
         } else {
-            focus_target_at_cursor(&focus_rects, cx, cy)
+            focus_non_hand_target_at_cursor(&focus_rects, cx, cy)
         };
         scene.focus = new_focus;
     }
@@ -260,60 +266,20 @@ pub(super) fn process_focus_and_actions(
                     .find_map(|(t, r)| matches!(t, FocusTarget::HandTile(_)).then_some(*r))
             });
             if let Some(rect) = start_rect {
-                let spatial = pick_neighbor(rect, dir, &focus_rects);
-                // Navigation overrides for the action bar (vertical links + cash-in row).
-                let overridden = match (scene.focus, dir) {
-                    // RIGHT from Play → Cash in when banked structure can be scored
-                    (Some(FocusTarget::Button(GameplayButton::Play)), FocusDir::Right)
-                        if {
-                            let g = GameEngine::read(ctx.run);
-                            g.trigger_enabled || g.cash_in_blocked_until_discards_spent
-                        } =>
-                    {
-                        focus_rects
-                            .iter()
-                            .find(|(t, _)| {
-                                matches!(t, FocusTarget::Button(GameplayButton::Trigger))
-                            })
-                            .map(|(t, _)| *t)
-                    }
-                    // LEFT from Cash in → Play
-                    (Some(FocusTarget::Button(GameplayButton::Trigger)), FocusDir::Left) => {
-                        focus_rects
-                            .iter()
-                            .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
-                            .map(|(t, _)| *t)
-                    }
-                    // DOWN from Play → journal book
-                    (Some(FocusTarget::Button(GameplayButton::Play)), FocusDir::Down) => {
-                        focus_rects
-                            .iter()
-                            .find(|(t, _)| matches!(t, FocusTarget::Journal))
-                            .map(|(t, _)| *t)
-                    }
-                    // UP from journal / guidebook → Play
-                    (Some(FocusTarget::Journal), FocusDir::Up)
-                    | (Some(FocusTarget::Guidebook), FocusDir::Up) => focus_rects
+                rebuild_focus_nav(
+                    &mut scene.focus_nav,
+                    &focus_rects,
+                    scene.pause_menu.paused,
+                );
+                let current_target = scene.focus.or_else(|| {
+                    focus_rects
                         .iter()
-                        .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
-                        .map(|(t, _)| *t),
-                    // DOWN from Discard (river) → Undo when the accessibility control is shown
-                    (Some(FocusTarget::Button(GameplayButton::Discard)), FocusDir::Down) => {
-                        focus_rects
-                            .iter()
-                            .find(|(t, _)| matches!(t, FocusTarget::DiscardUndo))
-                            .map(|(t, _)| *t)
-                    }
-                    // UP from Undo → back to Discard
-                    (Some(FocusTarget::DiscardUndo), FocusDir::Up) => focus_rects
-                        .iter()
-                        .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Discard)))
-                        .map(|(t, _)| *t),
-                    _ => None,
-                };
-                let hand_wrap = wrap_hand_tile_focus(scene.focus, dir, &focus_rects);
-                let relic_dora = relic_to_dora_focus(scene.focus, dir, &focus_rects);
-                if let Some(next) = overridden.or(hand_wrap).or(relic_dora).or(spatial) {
+                        .find(|(_, r)| *r == rect)
+                        .map(|(t, _)| *t)
+                });
+                if let Some(current) = current_target
+                    && let Some(next) = scene.focus_nav.pick(current, dir)
+                {
                     scene.focus = Some(next);
                 }
             } else if let Some((first, _)) = focus_rects.first() {
@@ -526,6 +492,7 @@ pub(super) fn process_focus_and_actions(
                     | Some(FocusTarget::Dora)
                     | Some(FocusTarget::Ordeal)
                     | Some(FocusTarget::RoundWind)
+                    | Some(FocusTarget::ScoreRoller(_))
                     | Some(FocusTarget::Journal)
                     | Some(FocusTarget::Guidebook) => {}
                     None => {}
@@ -703,7 +670,7 @@ pub(super) fn process_focus_and_actions(
         match a {
             UiAction::ScoreHand => {
                 let gameplay = GameEngine::read(ctx.run);
-                let bank_before = GameEngine::structure_banked_meld_chips(ctx.run);
+                let played_chips_before = GameEngine::structure_played_meld_chips(ctx.run);
                 let round_before = gameplay.round_score;
                 let score_before = gameplay.round_score;
                 let cascade_showcase = if gameplay.selected_count == 0 {
@@ -784,14 +751,13 @@ pub(super) fn process_focus_and_actions(
                         scene.begin_scoring_cascade(ctx, score_before, gained, cascade_showcase);
                     } else if step > 0 {
                         ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
-                        let bank_after = GameEngine::structure_banked_meld_chips(ctx.run);
-                        let d = bank_after.saturating_sub(bank_before);
+                        let played_chips_after = GameEngine::structure_played_meld_chips(ctx.run);
+                        let d = played_chips_after.saturating_sub(played_chips_before);
                         if d > 0 {
                             let structure_is_complete =
                                 GameEngine::read(ctx.run).structure_complete;
-                            let sp = ctx.layout.score_panel;
-                            let px = sp.x + sp.w * 0.5;
-                            let py = sp.y + sp.h * 0.5 + 40.0;
+                            let (px, py) = ctx.layout.fallback_score_center();
+                            let py = py + 40.0;
                             let is_final_tiles = !structure_was_complete && structure_is_complete;
                             if is_final_tiles {
                                 scene.final_tiles_fov_pop_at = Some(Instant::now());
@@ -1550,7 +1516,7 @@ pub(super) fn build_yaku_panel_and_tablets(
         yaku_preview_sets.extend(selected_sets.iter().cloned());
     }
 
-    // Banked melds alone cover cash-in preview; when the row is still empty,
+    // Played melds alone cover cash-in preview; when the row is still empty,
     // treat structure + rack as one hand so a complete chicken shape shows its
     // tablet before every tile is played to structure.
     if yaku_preview_sets.is_empty() && selected_tiles_for_yaku.is_empty() {
@@ -1672,6 +1638,7 @@ pub(super) fn build_yaku_panel_and_tablets(
                     } else {
                         None
                     },
+                    outline_sel: None,
                     pick_id: None,
                     overlay_rect_group: None,
                 });
@@ -1795,4 +1762,30 @@ pub(super) fn build_yaku_panel_and_tablets(
         yaku_tablet_placements,
         structure_showcase,
     }
+}
+
+/// Cursor hit-test for HUD focus targets, excluding full-height hand slot strips.
+fn focus_non_hand_target_at_cursor(
+    focus_rects: &[(FocusTarget, [f32; 4])],
+    cx: f32,
+    cy: f32,
+) -> Option<FocusTarget> {
+    let mut best: Option<(FocusTarget, f32)> = None;
+    for &(target, rect) in focus_rects {
+        if matches!(target, FocusTarget::HandTile(_)) {
+            continue;
+        }
+        if !rect_contains(rect, cx, cy) {
+            continue;
+        }
+        let area = rect[2] * rect[3];
+        let is_better = match best {
+            None => true,
+            Some((_, ba)) => area < ba,
+        };
+        if is_better {
+            best = Some((target, area));
+        }
+    }
+    best.map(|(t, _)| t)
 }

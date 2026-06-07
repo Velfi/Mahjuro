@@ -51,7 +51,7 @@ impl WgpuRenderer {
             self.last_bowl_model = Some(hover_model);
         }
         if let Some(mirror) = &picks.mirror
-            && matches!(mirror.kind, Object3dKind::Mirror)
+            && matches!(mirror.kind, Object3dKind::Mirror { .. })
         {
             let center = pixel_to_world(
                 w,
@@ -163,6 +163,7 @@ impl WgpuRenderer {
         relic_debuff_markers: &mut Vec<GpuInstance>,
         mut shadow: Option<&mut super::shadow_setup::Object3dShadowCtx<'_>>,
     ) {
+        self.coin_3d_draw_state.clear();
         self.talisman_slot_kind.fill(None);
         let cam_pos = camera.cam_pos;
         let look_target = camera.look_target;
@@ -1059,6 +1060,7 @@ impl WgpuRenderer {
                                 talisman_model,
                                 material,
                                 kind_idx as f32,
+                                [0.0; 4],
                             );
                             self.write_lit_mesh_shadow(
                                 &mut shadow,
@@ -1222,7 +1224,7 @@ impl WgpuRenderer {
                                 slot_i,
                             );
                         }
-                        Object3dKind::Mirror => {
+                        Object3dKind::Mirror { valid_play_glow } => {
                             self.ensure_gameplay_hud_pools();
                             if obj3d_mirror_slot >= MAX_MIRROR_SLOTS {
                                 continue;
@@ -1249,11 +1251,12 @@ impl WgpuRenderer {
                                 Mat4::from_rotation_x(tilt) * obj.rotation_matrix(),
                                 glam::Vec3::from(obj.extents),
                             );
-                            self.mirror_instances[slot_i].write_uniform(
+                            self.mirror_instances[slot_i].write_mirror_uniform(
                                 &self.queue,
                                 view_proj_arr,
                                 hover_model,
                                 self.mirror_mesh.default_material,
+                                *valid_play_glow,
                             );
                             self.write_lit_mesh_shadow(
                                 &mut shadow,

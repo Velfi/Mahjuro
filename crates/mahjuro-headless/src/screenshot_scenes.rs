@@ -1,6 +1,6 @@
 use mahjuro::game::run::RunState;
 use mahjuro::scenes::shop::ShopScene;
-use mahjuro::scenes::{DefeatScene, GameplayScene, Scene, VictoryScene};
+use mahjuro::scenes::{DefeatScene, GameplayScene, Scene, VictoryScene, WallLedgerScene};
 use mahjuro::scenes::{
     MetaLevelUpPresenter, ShowcasePresenter, ShowcaseScene, TilePackPresenter,
     TutorialCampaignScene, ZodiacPresenter,
@@ -8,7 +8,8 @@ use mahjuro::scenes::{
 
 use super::fixtures::{
     prime_shop_stock, setup_defeat_game_over_screenshot_state, setup_gameplay_screenshot_state,
-    setup_hero_state, setup_shop_state, setup_victory_game_over_screenshot_state,
+    setup_gameplay_valid_play_screenshot_state, setup_hero_state, setup_shop_state,
+    setup_victory_game_over_screenshot_state,
 };
 use super::slug::{parse_tile_pack_slug, parse_zodiac_slug};
 
@@ -271,8 +272,16 @@ pub(crate) fn resolve_screenshot_scene(
                 false,
             )
         }
-        "gameplay" => {
-            setup_gameplay_screenshot_state(run);
+        "wall_ledger" => {
+            setup_shop_state(run);
+            (Scene::WallLedger(WallLedgerScene::shop_preview()), true)
+        }
+        "gameplay" | "gameplay_valid_play" => {
+            if s.scene.as_str() == "gameplay_valid_play" {
+                setup_gameplay_valid_play_screenshot_state(run);
+            } else {
+                setup_gameplay_screenshot_state(run);
+            }
             (Scene::Gameplay(Box::new(GameplayScene::new())), true)
         }
         "gameplay_hero" => {
@@ -289,6 +298,22 @@ pub(crate) fn resolve_screenshot_scene(
             (Scene::Hallway(mahjuro::scenes::HallwayScene::new()), true)
         }
         "stairway" | "staircase" => (Scene::Stairway(mahjuro::scenes::StairwayScene::new()), true),
+        "decimation" => {
+            setup_shop_state(run);
+            (
+                Scene::Stairway(mahjuro::scenes::StairwayScene::for_decimation_screenshot(run)),
+                true,
+            )
+        }
+        "decimation_revealed" => {
+            setup_shop_state(run);
+            (
+                Scene::Stairway(mahjuro::scenes::StairwayScene::for_decimation_revealed_screenshot(
+                    run,
+                )),
+                true,
+            )
+        }
         "shop" => {
             setup_shop_state(run);
             let mut shop = ShopScene::new(run, progress);
@@ -389,7 +414,7 @@ pub(crate) fn resolve_screenshot_scene(
         other => {
             anyhow::bail!(
                 "unsupported --scene '{other}' (supported: archive, archive_ordeals, chronicle, \
-                yaku_journal, gameplay, gameplay_hero, round_win, hallway, stairway, shop, options, \
+                yaku_journal, wall_ledger, gameplay, gameplay_valid_play, gameplay_hero, round_win, hallway, stairway, decimation, shop, options, \
                 main_menu, tile_select, guide, tutorial, transition_playground, \
                 material_viewer, tile_anchor_lab, relic_unlock, game_over_level_up, defeat, victory, meta_level_up, \
                 showcase, zodiac_celebration, tile_pack_celebration)"

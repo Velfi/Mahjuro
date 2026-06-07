@@ -60,7 +60,7 @@ pub fn test_run() -> RunState {
     deterministic_run_with_mode(mode)
 }
 
-/// Unshuffled wall + first `HAND_SIZE` tiles drawn; structure bank cleared.
+/// Unshuffled wall + first `HAND_SIZE` tiles drawn; structure cleared.
 pub fn deterministic_run_with_mode(mode: GameMode) -> RunState {
     let mut run = RunState::new(mode);
     let tiles = build_wall();

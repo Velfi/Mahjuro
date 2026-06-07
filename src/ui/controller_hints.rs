@@ -21,6 +21,24 @@ const HINT_BAR_H_FRAC: f32 = 0.056;
 const HINT_ICON_BAR_FRAC: f32 = 0.72;
 /// Slightly smaller than the raw shop-legend reference (icons, labels, row height).
 const HINT_METRICS_SCALE: f32 = 0.85;
+/// Below 1080p, shrink hint icons (not labels) so dense rows fit without oversized keys.
+const HINT_ICON_COMPACT_REF_H: f32 = 1080.0;
+const HINT_ICON_COMPACT_FLOOR_H: f32 = 576.0;
+const HINT_ICON_COMPACT_MIN_SCALE: f32 = 0.76;
+const HINT_ROW_WIDTH_FRAC: f32 = 0.96;
+const HINT_FIT_MIN_ICON_PX: f32 = 16.0;
+const HINT_FIT_MIN_FONT_PX: f32 = 11.0;
+
+#[inline]
+fn hint_icon_compact_scale(window_h: f32) -> f32 {
+    if window_h >= HINT_ICON_COMPACT_REF_H {
+        return 1.0;
+    }
+    let t = ((window_h - HINT_ICON_COMPACT_FLOOR_H)
+        / (HINT_ICON_COMPACT_REF_H - HINT_ICON_COMPACT_FLOOR_H))
+        .clamp(0.0, 1.0);
+    HINT_ICON_COMPACT_MIN_SCALE + t * (1.0 - HINT_ICON_COMPACT_MIN_SCALE)
+}
 
 // ── Shared sizing (shop legend is the reference) ─────────────────────────────
 
@@ -35,12 +53,15 @@ pub struct HintMetrics {
 }
 
 impl HintMetrics {
-    pub fn primary(h: f32) -> Self {
+    /// Height-proportional icon and label sizes; width fitting happens at draw time.
+    pub fn primary(_window_w: f32, window_h: f32) -> Self {
         let s = HINT_METRICS_SCALE;
-        let bar_h_ref = h * HINT_BAR_H_FRAC;
-        let icon_px =
-            (bar_h_ref * HINT_ICON_BAR_FRAC * 3.0).clamp(HINT_ICON_PX_MIN, HINT_ICON_PX_MAX) * s;
-        let legend_font_px = typography::size(typography::H24, h);
+        let bar_h_ref = window_h * HINT_BAR_H_FRAC;
+        let icon_px = (bar_h_ref * HINT_ICON_BAR_FRAC * 3.0)
+            .clamp(HINT_ICON_PX_MIN, HINT_ICON_PX_MAX)
+            * s
+            * hint_icon_compact_scale(window_h);
+        let legend_font_px = typography::size(typography::H24, window_h);
         let ui_font = load_ui_font();
         let legend_line_h = ui_font
             .as_ref()
@@ -48,7 +69,7 @@ impl HintMetrics {
             .map(|lm| lm.new_line_size)
             .unwrap_or(legend_font_px * 1.2)
             .max(legend_font_px * 0.85);
-        let caption_px = typography::size(typography::H45, h);
+        let caption_px = typography::size(typography::H45, window_h);
         let row_height = (icon_px * 1.06).max(legend_line_h).max(caption_px * 1.35);
         let gap_after_icon = icon_px * 0.18;
         Self {
@@ -272,17 +293,17 @@ impl HintStyle {
     }
 
     /// Shared footer look for every scene.
-    pub fn standard(h: f32) -> Self {
+    pub fn standard(window_w: f32, window_h: f32) -> Self {
         Self::from_metrics(
-            HintMetrics::primary(h),
+            HintMetrics::primary(window_w, window_h),
             [0.78, 0.80, 0.88, 0.92],
             color::alpha(color::PORCELAIN_AGED, 0.94),
         )
     }
 
     /// Scale [`standard`] metrics down so icons and labels fit a short inline band.
-    pub fn fit_inline_rect(window_h: f32, rect_h: f32) -> Self {
-        let mut style = Self::standard(window_h);
+    pub fn fit_inline_rect(window_w: f32, window_h: f32, rect_h: f32) -> Self {
+        let mut style = Self::standard(window_w, window_h);
         let cap = rect_h.max(10.0);
         let tallest = style.line_h.max(style.icon_px);
         if tallest > cap {
@@ -444,10 +465,7 @@ fn help_bind(input_mode: InputMode) -> HintBind {
         InputMode::Controller => HintBind::alternatives("guide", vec![HintKey::SystemHelp]),
         InputMode::Keyboard | InputMode::Cursor => HintBind::alternatives(
             "guide",
-            vec![
-                HintKey::Keyboard("keyboard_h"),
-                HintKey::Keyboard("keyboard_slash_forward"),
-            ],
+            vec![HintKey::Keyboard("keyboard_question")],
         ),
     }
 }
@@ -623,6 +641,105 @@ pub fn back_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
         .into_segments()
 }
 
+fn count_step_bind(input_mode: InputMode) -> HintBind {
+    match input_mode {
+        InputMode::Controller => HintBind::alternatives(
+            "±10",
+            vec![
+                HintKey::Shoulder(ShoulderSide::Left),
+                HintKey::Shoulder(ShoulderSide::Right),
+            ],
+        ),
+        InputMode::Keyboard | InputMode::Cursor => HintBind::alternatives(
+            "±10",
+            vec![
+                HintKey::Keyboard("keyboard_bracket_left"),
+                HintKey::Keyboard("keyboard_bracket_right"),
+            ],
+        ),
+    }
+}
+
+fn focus_toggle_bind(input_mode: InputMode) -> HintBind {
+    HintBind::alternatives(
+        "focus",
+        vec![HintKey::for_input(
+            input_mode,
+            UiAction::InvertSelection,
+            "keyboard_z",
+        )],
+    )
+}
+
+/// Stairway prompt: ritual of decimation or pass unscathed.
+pub fn stairway_prompt_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    HintRow::new()
+        .push(navigate_bind(input_mode).into())
+        .sep()
+        .push(confirm_bind(input_mode, "select").into())
+        .into_segments()
+}
+
+/// Decimation picker: spatial nav across tiles, suit sections, and footer.
+pub fn decimation_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    let mut row = HintRow::new().push(navigate_bind(input_mode).into());
+    match input_mode {
+        InputMode::Controller => {
+            row = row.sep().push(section_bind().into());
+        }
+        InputMode::Keyboard => {
+            row = row.sep().push(
+                HintBind::alternatives(
+                    "section",
+                    vec![
+                        HintKey::Keyboard("keyboard_tab"),
+                        HintKey::Keyboard("keyboard_bracket_left"),
+                        HintKey::Keyboard("keyboard_bracket_right"),
+                    ],
+                )
+                .into(),
+            );
+        }
+        InputMode::Cursor => {}
+    }
+    row.sep()
+        .push(confirm_bind(input_mode, "select").into())
+        .sep()
+        .push(back_bind(input_mode).into())
+        .into_segments()
+}
+
+/// Tile stress lab: navigate tiles or footer, adjust tile count, confirm, back.
+pub fn tile_stress_lab_footer_row(
+    input_mode: InputMode,
+    pickable: bool,
+    tiles_focused: bool,
+    controls_focused: bool,
+) -> Vec<HintSegment> {
+    let mut row = HintRow::new();
+    if pickable && matches!(input_mode, InputMode::Controller | InputMode::Keyboard) {
+        let nav_label = if tiles_focused { "tiles" } else { "footer" };
+        row = row.push(match input_mode {
+            InputMode::Controller => {
+                HintBind::alternatives(nav_label, vec![HintKey::Dpad]).into()
+            }
+            InputMode::Keyboard | InputMode::Cursor => {
+                HintBind::alternatives(nav_label, vec![HintKey::Keyboard("keyboard_arrows")]).into()
+            }
+        });
+        row = row.sep().push(focus_toggle_bind(input_mode).into());
+    } else {
+        row = row.push(navigate_bind(input_mode).into());
+    }
+    row = row.sep().push(count_step_bind(input_mode).into());
+    let confirm_label = if controls_focused { "pick" } else { "select" };
+    row.sep()
+        .push(confirm_bind(input_mode, confirm_label).into())
+        .sep()
+        .push(back_bind(input_mode).into())
+        .into_segments()
+}
+
 /// Guide / book chrome: back out, turn pages with shoulders or PgUp/PgDn.
 pub fn guide_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
     HintRow::new()
@@ -727,8 +844,8 @@ pub fn push_screen_footer_fade(frame: &mut UiFrame, window_w: f32, window_h: f32
 }
 
 /// Vertical space to leave clear at the bottom when using [`push_screen_footer_hint`].
-pub fn screen_footer_reserve(h: f32) -> f32 {
-    HintStyle::standard(h).line_h + h * SCREEN_FOOTER_BOTTOM_FRAC
+pub fn screen_footer_reserve(window_w: f32, window_h: f32) -> f32 {
+    HintStyle::standard(window_w, window_h).line_h + window_h * SCREEN_FOOTER_BOTTOM_FRAC
 }
 
 /// Push a single centred footer row above the bottom edge.
@@ -880,20 +997,50 @@ fn measure_inline_bind(
 fn measure_inline_row(
     glyphs: GlyphResolver,
     surface: PromptInputSurface,
-    icon_px: f32,
-    gap_after_icon: f32,
-    font_px: f32,
+    style: HintStyle,
     segments: &[InlineSegmentRef<'_>],
 ) -> f32 {
     segments.iter().fold(0.0, |acc, seg| {
         acc + match *seg {
-            InlineSegmentRef::Sep => measure_text(font_px, INLINE_SEP),
-            InlineSegmentRef::PlainText(text) => measure_text(font_px, text),
-            InlineSegmentRef::Bind(bind) => {
-                measure_inline_bind(glyphs, surface, icon_px, gap_after_icon, font_px, bind)
-            }
+            InlineSegmentRef::Sep => measure_text(style.font_px, INLINE_SEP),
+            InlineSegmentRef::PlainText(text) => measure_text(style.font_px, text),
+            InlineSegmentRef::Bind(bind) => measure_inline_bind(
+                glyphs,
+                surface,
+                style.icon_px,
+                style.gap_after_icon,
+                style.font_px,
+                bind,
+            ),
         }
     })
+}
+
+fn shrink_hint_style_to_fit_width(
+    mut style: HintStyle,
+    glyphs: GlyphResolver,
+    surface: PromptInputSurface,
+    rows: &[Vec<HintSegment>],
+    max_row_w: f32,
+) -> HintStyle {
+    let max_w = max_row_w.max(1.0);
+    loop {
+        let fits = rows.iter().all(|row| {
+            let mut scratch: Vec<InlineSegmentRef<'_>> = Vec::new();
+            let segs = inline_segment_refs(&mut scratch, row);
+            measure_inline_row(glyphs, surface, style, segs) <= max_w
+        });
+        if fits {
+            return style;
+        }
+        if style.icon_px <= HINT_FIT_MIN_ICON_PX && style.font_px <= HINT_FIT_MIN_FONT_PX {
+            return style;
+        }
+        style.icon_px = (style.icon_px * 0.94).max(HINT_FIT_MIN_ICON_PX);
+        style.font_px = (style.font_px * 0.94).max(HINT_FIT_MIN_FONT_PX);
+        style.gap_after_icon = style.icon_px * 0.18;
+        style.line_h = style.line_h.min(style.icon_px * 1.06).max(style.font_px * 1.05);
+    }
 }
 
 /// Icon geometry emitted for one bind key in an inline hint row (e.g. hold-progress rings).
@@ -942,14 +1089,7 @@ fn emit_inline_row(
     let [rx, ry, rw, rh] = rect;
     let icon_px = icon_px.min(rh);
     let line_h = style.line_h.min(rh);
-    let row_w = measure_inline_row(
-        glyphs,
-        surface,
-        icon_px,
-        gap_after_icon,
-        style.font_px,
-        segments,
-    );
+    let row_w = measure_inline_row(glyphs, surface, style, segments);
     let mut x = rx + (rw - row_w).max(0.0) * 0.5;
     let iy = ry + (rh - icon_px).max(0.0) * 0.5;
     let text_y = ry + (rh - line_h).max(0.0) * 0.5;
@@ -1009,6 +1149,7 @@ fn emit_inline_row(
                                     user: 0,
                                 },
                                 source,
+                                clip_rect: None,
                             });
                             slots.push(InlineHintIconSlot { key, icon_rect });
                             x += icon_px;
@@ -1058,40 +1199,24 @@ pub fn push_inline_hint_rows_for(
     }
 
     let surface = prompt_surface(input_mode);
-    let mut icon_px = style.icon_px;
-    let mut gap_after_icon = style.gap_after_icon;
-
     let max_row_w = row_rects
         .iter()
         .map(|r| r[2])
         .fold(0.0_f32, f32::max)
-        .max(1.0);
+        .max(1.0)
+        * HINT_ROW_WIDTH_FRAC;
     let max_row_h = row_rects
         .iter()
         .map(|r| r[3])
         .fold(0.0_f32, f32::max)
         .max(1.0);
-    icon_px = icon_px.min(max_row_h);
-    gap_after_icon = gap_after_icon.min(icon_px * 0.18);
-    loop {
-        let fits = rows.iter().all(|row| {
-            let mut scratch: Vec<InlineSegmentRef<'_>> = Vec::new();
-            let segs = inline_segment_refs(&mut scratch, row);
-            measure_inline_row(
-                glyphs,
-                surface,
-                icon_px,
-                gap_after_icon,
-                style.font_px,
-                segs,
-            ) <= max_row_w
-        });
-        if fits || icon_px <= 18.0 {
-            break;
-        }
-        icon_px -= 1.0;
-        gap_after_icon = icon_px * 0.18;
-    }
+    let mut style = style;
+    style.icon_px = style.icon_px.min(max_row_h);
+    style.line_h = style.line_h.min(max_row_h);
+    style.gap_after_icon = style.gap_after_icon.min(style.icon_px * 0.18);
+    style = shrink_hint_style_to_fit_width(style, glyphs, surface, rows, max_row_w);
+    let icon_px = style.icon_px;
+    let gap_after_icon = style.gap_after_icon;
 
     let mut icon_cmds: Vec<ImageQuad> = Vec::new();
     let mut texts: Vec<TextLabel> = Vec::new();
@@ -1158,4 +1283,53 @@ fn push_outlined_inline_text_label(texts: &mut Vec<TextLabel>, rect: [f32; 4], t
         texts.push(stroke);
     }
     texts.push(label);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::button_prompts::GamepadStyle;
+    use crate::ui::input::InputMode;
+
+    #[test]
+    fn labels_scale_with_height_icons_compact_below_1080p() {
+        let tall = HintStyle::standard(1920.0, 1080.0);
+        let short = HintStyle::standard(1024.0, 576.0);
+        let tall_font_ratio = tall.font_px / 1080.0;
+        let short_font_ratio = short.font_px / 576.0;
+        assert!(
+            (tall_font_ratio - short_font_ratio).abs() < 0.002,
+            "label font/window_h should stay constant"
+        );
+        assert!(
+            short.icon_px < tall.icon_px * (576.0 / 1080.0),
+            "576p icons should be smaller than pure height scaling"
+        );
+        assert!(
+            (hint_icon_compact_scale(576.0) - HINT_ICON_COMPACT_MIN_SCALE).abs() < f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn gameplay_footer_fits_common_resolutions() {
+        let glyphs = GlyphResolver::new(GamepadStyle::Xbox, false, false);
+        let row = gameplay_footer_row(InputMode::Cursor, true, true, true);
+        for (w, h) in [(1920.0, 1080.0), (1280.0, 720.0), (1024.0, 576.0)] {
+            let max_w = w * HINT_ROW_WIDTH_FRAC;
+            let style = shrink_hint_style_to_fit_width(
+                HintStyle::standard(w, h),
+                glyphs,
+                PromptInputSurface::MouseOrKeyboard,
+                std::slice::from_ref(&row),
+                max_w,
+            );
+            let mut scratch = Vec::new();
+            let segs = inline_segment_refs(&mut scratch, &row);
+            let width = measure_inline_row(glyphs, PromptInputSurface::MouseOrKeyboard, style, segs);
+            assert!(
+                width <= max_w + 0.5,
+                "gameplay footer overflow at {w}x{h}: {width:.1}px > {max_w:.1}px"
+            );
+        }
+    }
 }

@@ -120,17 +120,13 @@ pub fn push_kpi_card(
 ) {
     push_ledger_panel_clipped(quads, clip, [x, y, w, h], LedgerPanelStyle::KPI);
     let text_w = (w - inset * 2.0).max(1.0);
-    let row_h = val_h.max(cap_h);
-    let ly = y + inset;
-    let label_w = (text_w * 0.44).clamp(36.0, text_w * 0.55);
-    let value_w = (text_w - label_w - stack * 0.35).max(1.0);
-    let value_x = x + inset + text_w - value_w;
+    let mut ly = y + inset;
     push_label_clipped(
         labels,
-        [x + inset, ly, label_w, row_h],
+        [x + inset, ly, text_w, cap_h],
         clip,
         TextLabel {
-            rect: [x + inset, ly, label_w, row_h],
+            rect: [x + inset, ly, text_w, cap_h],
             text: kpi.label.into(),
             color: color::STONE,
             font_px: Some(caption_px),
@@ -138,12 +134,13 @@ pub fn push_kpi_card(
             ..Default::default()
         },
     );
+    ly += cap_h + stack;
     let value_default = match kpi.label {
         "Peak wing" => archive_career::chronicle_wing_color(),
         "Win rate" => color::CHAMPAGNE,
         _ => archive_career::chronicle_chips_color(),
     };
-    let value_rect = [value_x, ly, value_w, row_h];
+    let value_rect = [x + inset, ly, text_w, val_h];
     push_colored_label_clipped(
         labels,
         value_rect,
@@ -151,7 +148,7 @@ pub fn push_kpi_card(
         &kpi.value,
         value_default,
         body_px,
-        TextAlign::Right,
+        TextAlign::Left,
         true,
     );
 }
@@ -237,6 +234,7 @@ pub fn push_score_history_ledger(
     caption_px: f32,
     body_px: f32,
     dense: bool,
+    show_stat_panels: bool,
 ) {
     if points.is_empty() {
         return;
@@ -254,7 +252,6 @@ pub fn push_score_history_ledger(
     let inset = 4.0;
     let inline_gap = 6.0;
     let panel_gap = 4.0;
-    let stat_row_gap = 4.0;
     let axis_label_h = cap_h + 2.0;
     let edge_pad = 2.0;
 
@@ -267,7 +264,12 @@ pub fn push_score_history_ledger(
     let peak_score = points[peak_i].score;
     let peak_text = archive_career::format_chips_compact(peak_score);
     let avg_text = (avg_score > 0).then(|| archive_career::format_chips_compact(avg_score));
-    let stat_row_h = score_history_stat_row_height(cap_h.max(val_h), inset);
+    let stat_row_h = if show_stat_panels {
+        score_history_stat_row_height(cap_h.max(val_h), inset)
+    } else {
+        0.0
+    };
+    let stat_row_gap = if show_stat_panels { 4.0 } else { 0.0 };
     let chart_x = x;
     let chart_w = w;
     let axis_w = chart_y_axis_width_for_max(max_v, caption_px);
@@ -319,45 +321,59 @@ pub fn push_score_history_ledger(
         TextAlign::Left,
     );
 
-    let mut stat_x = plot_x;
-    let stat_row_h_inner = cap_h.max(val_h);
-    if let Some(avg) = avg_text {
-        let panel_w =
-            score_history_stat_panel_width("Avg.", &avg, caption_px, body_px, inset, inline_gap);
+    if show_stat_panels {
+        let mut stat_x = plot_x;
+        let stat_row_h_inner = cap_h.max(val_h);
+        if let Some(avg) = avg_text {
+            let panel_w = score_history_stat_panel_width(
+                "Avg.",
+                &avg,
+                caption_px,
+                body_px,
+                inset,
+                inline_gap,
+            );
+            push_score_stat_panel(
+                quads,
+                labels,
+                clip,
+                stat_x,
+                y,
+                panel_w,
+                inset,
+                inline_gap,
+                stat_row_h_inner,
+                caption_px,
+                body_px,
+                "Avg.",
+                &avg,
+            );
+            stat_x += panel_w + panel_gap;
+        }
+        let peak_panel_w = score_history_stat_panel_width(
+            "Peak",
+            &peak_text,
+            caption_px,
+            body_px,
+            inset,
+            inline_gap,
+        );
         push_score_stat_panel(
             quads,
             labels,
             clip,
             stat_x,
             y,
-            panel_w,
+            peak_panel_w,
             inset,
             inline_gap,
             stat_row_h_inner,
             caption_px,
             body_px,
-            "Avg.",
-            &avg,
+            "Peak",
+            &peak_text,
         );
-        stat_x += panel_w + panel_gap;
     }
-    let peak_panel_w =
-        score_history_stat_panel_width("Peak", &peak_text, caption_px, body_px, inset, inline_gap);
-    push_score_stat_panel(
-        quads,
-        labels,
-        clip,
-        stat_x,
-        y,
-        peak_panel_w,
-        inset,
-        inline_gap,
-        stat_row_h_inner,
-        caption_px,
-        body_px,
-        "Peak",
-        &peak_text,
-    );
 
     if avg_score > 0 {
         let avg_frac = (avg_score as f32 / max_v as f32).clamp(0.0, 1.0);
@@ -513,10 +529,10 @@ pub fn push_ordeal_record_rows(
     caption_px: f32,
     body_px: f32,
 ) {
-    let gutter = 4.0;
-    let score_w = (caption_px * 5.2).max(52.0).min(w * 0.32);
-    let wl_w = (caption_px * 6.8).max(60.0).min(w * 0.30);
-    let name_w = (w - score_w - wl_w - gutter * 2.0).max(0.0);
+    let gutter = 6.0;
+    let score_w = (w * 0.22).clamp(56.0, 88.0);
+    let wl_w = (caption_px * 5.5).max(48.0).min(w * 0.22);
+    let name_w = (w - score_w - wl_w - gutter * 2.0).max(48.0);
     let wl_x = x + name_w + gutter;
     let score_x = x + w - score_w;
     for (i, row) in rows.iter().take(5).enumerate() {
@@ -527,18 +543,15 @@ pub fn push_ordeal_record_rows(
             clip,
             color::alpha(color::BRASS, 0.12),
         );
-        push_label_clipped(
+        push_colored_label_clipped(
             labels,
             [x, ry, name_w, row_h],
             clip,
-            TextLabel {
-                rect: [x, ry, name_w, row_h],
-                text: row.ordeal.name().into(),
-                color: color::alpha(color::PARCHMENT, 0.92),
-                font_px: Some(caption_px),
-                align: TextAlign::Left,
-                ..Default::default()
-            },
+            row.ordeal.name(),
+            color::alpha(color::PARCHMENT, 0.92),
+            caption_px,
+            TextAlign::Left,
+            false,
         );
         let wl = format!("{}W · {}L", row.wins, row.losses);
         push_label_clipped(

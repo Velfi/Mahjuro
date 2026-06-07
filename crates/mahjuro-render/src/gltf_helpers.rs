@@ -21,6 +21,7 @@ pub const GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT: u32 = 1 << 0;
 pub const GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL: u32 = 1 << 1;
 pub const GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE: u32 = 1 << 2;
 pub const GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW: u32 = 1 << 3;
+pub const GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME: u32 = 1 << 4;
 
 impl GltfPbrUniform {
     pub fn from_loaded(

@@ -3,7 +3,6 @@ pub mod chart_primitives;
 pub mod chronicle_charts;
 pub mod chronicle_dashboard;
 pub mod clip;
-pub mod colored_keywords;
 pub mod controller_hints;
 pub mod corner_badge;
 pub mod focus_nav;

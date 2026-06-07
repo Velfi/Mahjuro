@@ -1,4 +1,5 @@
-use mahjuro_core::core::tile::Suit;
+
+use super::uniforms::Tile3dInstance;
 
 /// Horizontal alignment of text inside its rect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -8,6 +9,16 @@ pub enum TextAlign {
     Center,
 
     Right,
+}
+
+/// Vertical placement of a multi-line block inside its rect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum TextBlockVerticalAlign {
+    /// Bottom of the rect (relic flavor band, bottom captions).
+    #[default]
+    Bottom,
+    /// Top of the rect (stairway flavor at the top of the screen).
+    Top,
 }
 
 /// A rasterized text label to draw over a screen-space rect.
@@ -37,6 +48,8 @@ pub struct TextLabel {
     pub font_px: Option<f32>,
     /// Horizontal alignment within the rect.
     pub align: TextAlign,
+    /// Vertical placement for multi-line blocks (flavor spans and `\n` text).
+    pub block_vertical_align: TextBlockVerticalAlign,
     /// Horizontal scroll offset in pixels (for marquee-style text).
     /// Shifts the rasterised text leftward by this many pixels so the
     /// caller can animate it for overflow text.  Default 0.0.
@@ -73,6 +86,7 @@ impl Default for TextLabel {
             color: [1.0; 4],
             font_px: None,
             align: TextAlign::Center,
+            block_vertical_align: TextBlockVerticalAlign::Bottom,
             scroll_offset: 0.0,
             flavor_spans: None,
             bold: false,
@@ -109,6 +123,7 @@ pub(crate) struct TextLabelShapeKey {
     /// Rasterized texture height in px (rect.h clamped to [1, 16384]).
     pub height_px: u32,
     pub align: TextAlign,
+    pub block_vertical_align: TextBlockVerticalAlign,
     /// Scroll offset in px, quantized to int. Distinct values still rasterize
     /// distinct entries; identical-offset frames collide.
     pub scroll_offset_px: i32,
@@ -126,34 +141,9 @@ pub(crate) struct CachedTextLabel {
     pub last_used: u64,
 }
 
-/// GPU resources for an instanced standalone GLB prop (e.g. yen coins).
-pub(crate) struct GltfPropGpu {
-    pub uniform_buffer: wgpu::Buffer,
-    pub bind_groups: Vec<wgpu::BindGroup>,
-    pub shadow_uniform_buffer: wgpu::Buffer,
-    pub shadow_bind_group: wgpu::BindGroup,
-    pub cached_shadow_caster: crate::lit_mesh::ShadowCasterUniform,
-}
-
-/// GPU resources for a showcase tile (pack celebration, hand strip, choose-tiles grid, etc.).
-pub(crate) struct ShowcaseTileGpu {
-    /// Sub-rect within `showcase_decal_atlas` for this tile identity (see `tile_3d.wgsl`).
-    pub decal_atlas_uv: [f32; 4],
-    pub uniform_buffer: wgpu::Buffer,
-    pub bind_groups: Vec<wgpu::BindGroup>,
-    pub shadow_uniform_buffer: wgpu::Buffer,
-    pub shadow_bind_group: wgpu::BindGroup,
-    /// Last-uploaded shadow caster uniform — skips writes + shadow depth pass when static.
-    pub cached_shadow_caster: crate::lit_mesh::ShadowCasterUniform,
-    /// Cache key to skip re-rasterisation when the tile hasn't changed.
-    pub tile_id: (
-        Suit,
-        u8,
-        Option<mahjuro_core::core::tile::TileEnhancement>,
-        bool,
-    ),
-    /// Hand tiles cast into the punctual shadow pre-pass; structure / celebration
-    /// overlays receive shadows but should not cross-shadow the table row.
+/// Per-frame coin payload merged into the shared tile instance buffer.
+pub(crate) struct Coin3dDrawState {
+    pub instance: Tile3dInstance,
     pub casts_shadow: bool,
 }
 

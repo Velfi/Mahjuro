@@ -39,7 +39,6 @@ use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
 use crate::render::score_reel::ScoreReel;
 use crate::render::theme::color;
-use crate::render::wgpu_renderer::{GpuInstance, TextLabel, build_instances_from_layout};
 use crate::ui::input::UiAction;
 
 use cascade_hud::{CascadeHudState, build_cascade_hud_placements};
@@ -96,6 +95,12 @@ pub struct GameplayScene {
     /// a `RefCell` because `draw_frame` takes `&self` but needs to update
     /// this stash.
     last_focus_rects: std::cell::RefCell<Vec<(FocusTarget, [f32; 4])>>,
+    /// Projected 3D hand-tile screen bounds from the previous render pass.
+    /// Used for cursor hover hit-tests (not the full-height GLB slot strips
+    /// stored in [`Self::last_focus_rects`] for keyboard / controller nav).
+    last_hand_tile_pick_rects: std::cell::RefCell<Vec<(usize, [f32; 4])>>,
+    /// Axis memory for auto-inferred spatial navigation.
+    focus_nav: crate::ui::focus_nav::FocusNavState<focus::FocusTarget>,
     /// When set, a discard removed tiles but [`RunState::refill_hand`] has not
     /// run yet — the UI waits for the river animation first. See
     /// [`RunState::discard_refill_pending`]. Timing uses
@@ -252,6 +257,10 @@ const INVALID_MELD_FLASH_SECS: f32 = 0.55;
 const INVALID_BOSS_FLASH_SECS: f32 = 0.55;
 /// How long the lessons tutorial panel wiggles after a blocked action.
 const TUTORIAL_PANEL_WIGGLE_SECS: f32 = 0.55;
+/// Peak vertical wiggle (screen px) for a full structure cash-in nudge.
+const STRUCTURE_CASH_IN_WIGGLE_PX: f32 = 3.0;
+/// Fixed wiggle angular speed (rad/s); meld count only scales amplitude.
+const STRUCTURE_CASH_IN_WIGGLE_OMEGA: f32 = 11.0;
 /// Fullscreen gold tint on the cascade's final beat (see `gold_flash_at`).
 const GOLD_FLASH_SECS: f32 = 0.4;
 
@@ -334,9 +343,8 @@ impl GameplayScene {
                 .map(|&(x, y, w, h)| (x + w * 0.5, y + h * 0.5))
                 .collect()
         } else {
-            let ms = layout.modifier_strip;
             (0..5)
-                .map(|i| (ms.x + ms.w * (0.15 + 0.175 * i as f32), ms.y + ms.h * 0.5))
+                .map(|i| layout.fallback_modifier_point(0.15 + 0.175 * i as f32, 0.5))
                 .collect()
         };
 
@@ -484,6 +492,63 @@ impl GameplayScene {
         self.invalid_boss_flash_phase(now).0 > 0.0 || self.boss_rule_feedback_live
     }
 
+    #[inline]
+    fn cubic_ramp(t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        t * t * t
+    }
+
+    /// Wiggle intensity 0..1 from played meld count (1 meld → none; 5 / complete → full).
+    fn structure_cash_in_wiggle_intensity(meld_count: usize, structure_complete: bool) -> f32 {
+        if structure_complete {
+            return 1.0;
+        }
+        if meld_count <= 1 {
+            return 0.0;
+        }
+        let linear = ((meld_count.saturating_sub(1) as f32) / 4.0).min(1.0);
+        Self::cubic_ramp(linear)
+    }
+
+    /// Glow intensity 0..1 — stays off until the structure is nearly full.
+    fn structure_cash_in_glow_intensity(meld_count: usize, structure_complete: bool) -> f32 {
+        if structure_complete {
+            return 1.0;
+        }
+        if meld_count <= 3 {
+            return 0.0;
+        }
+        let linear = ((meld_count.saturating_sub(3) as f32) / 2.0).min(1.0);
+        Self::cubic_ramp(linear)
+    }
+
+    /// `(glow 0..1, wiggle amplitude 0..1)` from played meld count.
+    pub(super) fn structure_cash_in_feedback(
+        &self,
+        meld_count: usize,
+        structure_complete: bool,
+    ) -> (f32, f32) {
+        let wiggle_amp =
+            Self::structure_cash_in_wiggle_intensity(meld_count, structure_complete);
+        let glow_i = Self::structure_cash_in_glow_intensity(meld_count, structure_complete);
+        if wiggle_amp <= 0.0 && glow_i <= 0.0 {
+            return (0.0, 0.0);
+        }
+        let pulse = 0.55 + 0.45 * (self.candle_time * 5.2).sin();
+        let glow = if glow_i > 0.0 { pulse * glow_i } else { 0.0 };
+        (glow, wiggle_amp)
+    }
+
+    /// Instantaneous vertical wiggle offset (screen px) at fixed frequency.
+    pub(super) fn structure_cash_in_wiggle_px(&self, amplitude: f32) -> f32 {
+        if amplitude <= 0.0 {
+            return 0.0;
+        }
+        STRUCTURE_CASH_IN_WIGGLE_PX
+            * amplitude
+            * (self.candle_time * STRUCTURE_CASH_IN_WIGGLE_OMEGA).sin()
+    }
+
     /// `(glow 0..1, wiggle px)` for boss-icon feedback.
     pub(super) fn boss_rule_feedback(&self, now: Instant, live_blocked: bool) -> (f32, f32) {
         let (reject_glow, reject_wiggle) = self.invalid_boss_flash_phase(now);
@@ -555,6 +620,8 @@ impl GameplayScene {
             pause_menu: PauseMenu::new(),
             focus: None,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
+            last_hand_tile_pick_rects: std::cell::RefCell::new(Vec::new()),
+            focus_nav: crate::ui::focus_nav::FocusNavState::new(),
             pending_discard_refill: None,
             active_discard_anim: None,
             river_settled_tiles: Vec::new(),
@@ -597,6 +664,12 @@ impl GameplayScene {
             tutorial_panel_wiggle_at: None,
             boss_rule_feedback_live: false,
         }
+    }
+
+    /// Cache projected hand-tile bounds after render for next frame's cursor hit-test.
+    #[cfg(feature = "game")]
+    pub(crate) fn stash_hand_tile_pick_rects(&self, rects: Vec<(usize, [f32; 4])>) {
+        *self.last_hand_tile_pick_rects.borrow_mut() = rects;
     }
 
     pub(super) fn clear_discard_undo(&mut self) {
@@ -685,10 +758,7 @@ impl GameplayScene {
                     ctx.room_gltf_height_scale,
                 )
                 .map(|c| (c.counter.reel.px, c.counter.reel.py))
-                .unwrap_or_else(|| {
-                    let sp = ctx.layout.score_panel;
-                    (sp.x + sp.w * 0.5, sp.y + sp.h * 0.5)
-                });
+                .unwrap_or_else(|| ctx.layout.fallback_score_center());
                 let mag = (gained as f32).max(1.0).log2();
                 let count = ((16.0 + mag * 8.0) as usize).clamp(16, 128);
                 self.particles
@@ -754,11 +824,10 @@ impl GameplayScene {
             return Self::yaku_popup_source(layout, run, cascade_showcase, &step.source);
         }
 
-        let ms = layout.modifier_strip;
         let (px, py) = match step.kind {
-            StepKind::Chips => (ms.x + ms.w * 0.30, ms.y + ms.h * 0.60),
-            StepKind::Mult => (ms.x + ms.w * 0.70, ms.y + ms.h * 0.60),
-            StepKind::Yen | StepKind::Final => (ms.x + ms.w * 0.50, ms.y + ms.h * 0.45),
+            StepKind::Chips => layout.fallback_modifier_point(0.30, 0.60),
+            StepKind::Mult => layout.fallback_modifier_point(0.70, 0.60),
+            StepKind::Yen | StepKind::Final => layout.fallback_modifier_point(0.50, 0.45),
         };
         crate::render::world_space::LayoutAnchorPx {
             px,
@@ -1008,7 +1077,7 @@ fn insert_structure_before_hand(
     if !structure_showcase.is_empty() {
         frame
             .cmds
-            .insert(insert_at, DrawCmd::ShowcaseTileBatch(structure_showcase));
+            .insert(insert_at, DrawCmd::ShowcaseTileBatch(structure_showcase.into()));
     }
     frame
 }

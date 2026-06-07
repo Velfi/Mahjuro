@@ -18,7 +18,7 @@ Do **not** invent ad-hoc vertical multipliers at call sites (e.g. `line_h * 1.4`
 
 | Content | Measure | Push / wrap |
 |---------|---------|-------------|
-| Tinted vocabulary lines | [`colored_keywords::colored_line_block_height`](../../src/ui/colored_keywords.rs) | [`push_colored_line_left`](../../src/ui/colored_keywords.rs), [`colored_row_line_step`](../../src/ui/colored_keywords.rs) |
+| Tinted vocabulary lines | [`styled_text::colored_line_block_height`](../../src/ui/styled_text.rs) | [`push_colored_line_left`](../../src/ui/styled_text.rs), [`colored_row_line_step`](../../src/ui/styled_text.rs) |
 | Plain `wrap_text` blocks | [`widget::plain_text_block_height`](../../src/ui/widget.rs) | [`widget::PLAIN_TEXT_LINE_STEP_MUL`](../../src/ui/widget.rs) (1.22) |
 
 For word-wrap at a fixed font size, use [`widget::wrap_text`](../../src/ui/widget.rs) — it measures at the render font size instead of going through auto-shrink measurement (which would never break lines).

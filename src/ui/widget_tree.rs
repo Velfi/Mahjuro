@@ -44,7 +44,10 @@ use crate::render::theme::{ButtonState, ButtonVariant, metrics};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::clip::intersect_rect;
-use crate::ui::focus_nav::push_focus_ring;
+use crate::ui::focus_nav::{
+    FocusDir, FocusNavDebugSnapshot, FocusNavState, debug_snapshot_from_candidates,
+    push_focus_ring,
+};
 use crate::ui::input::UiAction;
 use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::widget;
@@ -157,6 +160,8 @@ pub struct TreeState {
     anchor_height: f32,
     /// Scroll viewport clip rect in screen pixels.
     scroll_clip_rect: Option<[f32; 4]>,
+    /// Auto-inferred spatial navigation for flat items.
+    focus_nav: FocusNavState<FocusId>,
 }
 
 #[derive(Clone, Copy)]
@@ -184,6 +189,7 @@ impl TreeState {
             content_height: 0.0,
             anchor_height: 0.0,
             scroll_clip_rect: None,
+            focus_nav: FocusNavState::new(),
         }
     }
 
@@ -208,7 +214,7 @@ impl TreeState {
 
     /// Hover/click resolution for a flat list of pre-computed (id, rect, action)
     /// hit targets. Use this for scenes that already know their item rects
-    /// (e.g. derived from `LayoutResult::hand_slots`, or hand-laid card grids)
+    /// (e.g. GLB-projected hand slots, custom card grids, hand-laid tab bars)
     /// and only want focus management + click routing — not the full Node tree.
     ///
     /// Companion: [`TreeState::register_flat_buttons`] pushes the corresponding
@@ -258,15 +264,13 @@ impl TreeState {
             }
         }
 
-        // Keyboard / gamepad nav. Treat the list as 1D (linear order).
+        // Keyboard / gamepad nav — spatial nearest-neighbour over item rects.
         for a in input.actions {
             match a {
-                UiAction::FocusDown | UiAction::FocusNext => {
-                    self.move_focus(1);
-                }
-                UiAction::FocusUp | UiAction::FocusPrev => {
-                    self.move_focus(-1);
-                }
+                UiAction::FocusDown => self.move_focus_spatial(FocusDir::Down),
+                UiAction::FocusUp => self.move_focus_spatial(FocusDir::Up),
+                UiAction::FocusNext => self.move_focus_spatial(FocusDir::Right),
+                UiAction::FocusPrev => self.move_focus_spatial(FocusDir::Left),
                 UiAction::Confirm | UiAction::CommitDiscard => {
                     let f = self.focused?;
                     if let Some(it) = items.iter().find(|i| i.id == f) {
@@ -295,6 +299,59 @@ impl TreeState {
             }
             buttons.push(def);
         }
+    }
+
+    /// Snapshot of the inferred focus graph for debug overlay drawing.
+    pub fn focus_nav_debug_snapshot_flat<A: Copy>(
+        &self,
+        items: &[FlatItem<A>],
+        label: impl Fn(A) -> String,
+    ) -> FocusNavDebugSnapshot {
+        let candidates: Vec<(FocusId, [f32; 4])> =
+            items.iter().map(|it| (it.id, it.rect)).collect();
+        debug_snapshot_from_candidates(
+            &candidates,
+            &[],
+            self.focused(),
+            self.focus_nav.memory(),
+            |id| {
+                items
+                    .iter()
+                    .find(|it| it.id == id)
+                    .map(|it| label(it.action))
+                    .unwrap_or_else(|| format!("id {}", id.0))
+            },
+        )
+    }
+
+    /// Same as [`Self::focus_nav_debug_snapshot_flat`] but labels come from
+    /// [`FocusId`] only (declarative trees without a flat action list).
+    pub fn focus_nav_debug_snapshot_ids(
+        &self,
+        candidates: &[(FocusId, [f32; 4])],
+        label: impl Fn(FocusId) -> String,
+    ) -> FocusNavDebugSnapshot {
+        debug_snapshot_from_candidates(
+            candidates,
+            &[],
+            self.focused(),
+            self.focus_nav.memory(),
+            label,
+        )
+    }
+
+    /// Declarative [`Tree`] layout for the current window size.
+    pub fn focus_nav_debug_snapshot_tree<A: Copy>(
+        &self,
+        tree: &Tree<A>,
+        window: (f32, f32),
+        label: impl Fn(FocusId) -> String,
+    ) -> FocusNavDebugSnapshot {
+        let mut layout_scratch = Vec::new();
+        let _ = layout_tree(tree, window, &mut layout_scratch);
+        let candidates: Vec<(FocusId, [f32; 4])> =
+            layout_scratch.iter().map(|l| (l.id, l.rect)).collect();
+        self.focus_nav_debug_snapshot_ids(&candidates, label)
     }
 }
 
@@ -631,12 +688,20 @@ impl TreeState {
     fn handle_action<A: Copy>(&mut self, tree: &Tree<A>, action: UiAction) -> Option<A> {
         let focused = self.focused?;
         match action {
-            UiAction::FocusDown | UiAction::FocusNext => {
-                self.move_focus(1);
+            UiAction::FocusDown => {
+                self.move_focus_spatial(FocusDir::Down);
                 None
             }
-            UiAction::FocusUp | UiAction::FocusPrev => {
-                self.move_focus(-1);
+            UiAction::FocusUp => {
+                self.move_focus_spatial(FocusDir::Up);
+                None
+            }
+            UiAction::FocusNext => {
+                self.move_focus_spatial(FocusDir::Right);
+                None
+            }
+            UiAction::FocusPrev => {
+                self.move_focus_spatial(FocusDir::Left);
                 None
             }
             UiAction::Confirm | UiAction::CommitDiscard => self.activate_id(tree, focused),
@@ -644,25 +709,19 @@ impl TreeState {
         }
     }
 
-    fn move_focus(&mut self, delta: i32) {
-        if self.layout.is_empty() {
+    fn move_focus_spatial(&mut self, dir: FocusDir) {
+        let Some(id) = self.focused else {
             return;
-        }
-        let cur = self
-            .focused
-            .and_then(|id| self.layout.iter().position(|l| l.id == id))
-            .unwrap_or(0);
-        let n = self.layout.len() as i32;
-        // Step `delta` at a time, skipping disabled items. Bail after a full
-        // revolution so an all-disabled layout doesn't loop forever.
-        let mut idx = cur as i32;
-        for _ in 0..n {
-            idx = (idx + delta).rem_euclid(n);
-            let slot = &self.layout[idx as usize];
-            if slot.enabled {
-                self.set_focus_changed(Some(slot.id));
-                return;
-            }
+        };
+        let candidates: Vec<(FocusId, [f32; 4])> = self
+            .layout
+            .iter()
+            .filter(|l| l.enabled)
+            .map(|l| (l.id, l.rect))
+            .collect();
+        self.focus_nav.load_candidates(&candidates, &[]);
+        if let Some(next) = self.focus_nav.pick(id, dir) {
+            self.set_focus_changed(Some(next));
         }
     }
 
@@ -877,11 +936,59 @@ mod tests {
     }
 
     #[test]
+    fn flat_spatial_nav_moves_to_nearest_rect_not_list_order() {
+        // Guide header: Back (left), Prev (center-right), Next (far right).
+        // Linear FocusPrev from Back would wrap to Next; spatial should stay put.
+        let mut tree = TreeState::new();
+        tree.set_focus(FocusId(1));
+
+        let items = vec![
+            FlatItem::new(FocusId(1), [48.0, 48.0, 108.0, 52.0], 'b'),
+            FlatItem::new(FocusId(2), [1500.0, 48.0, 58.0, 52.0], 'p'),
+            FlatItem::new(FocusId(3), [1600.0, 48.0, 58.0, 52.0], 'n'),
+        ];
+
+        let _ = tree.update_flat(
+            &items,
+            TreeInput {
+                actions: &[UiAction::FocusPrev],
+                button_clicks: &[],
+                cursor_pos: (0.0, 0.0),
+                window: (1920.0, 1080.0),
+                input_mode: InputMode::Controller,
+                scroll_lines: 0.0,
+            },
+        );
+        assert_eq!(
+            tree.focused(),
+            Some(FocusId(1)),
+            "no spatial neighbour left of Back — focus should not wrap"
+        );
+
+        let _ = tree.update_flat(
+            &items,
+            TreeInput {
+                actions: &[UiAction::FocusNext],
+                button_clicks: &[],
+                cursor_pos: (0.0, 0.0),
+                window: (1920.0, 1080.0),
+                input_mode: InputMode::Controller,
+                scroll_lines: 0.0,
+            },
+        );
+        assert_eq!(
+            tree.focused(),
+            Some(FocusId(2)),
+            "right from Back should land on Prev"
+        );
+    }
+
+    #[test]
     fn pick_chamber_cursor_over_rect_overrides_focus_move() {
         // Under cursor mode, hover-follow runs BEFORE the action loop. If
         // cursor is over Play and we also press FocusNext, what happens?
         // Order: layout -> hover-follow (sets focus to Play) -> click route
-        // -> action loop (move_focus(1) → Skip). So action wins.
+        // -> action loop (FocusNext → Skip). So action wins.
         let mut tree = TreeState::new();
         tree.set_focus(FocusId(2));
 

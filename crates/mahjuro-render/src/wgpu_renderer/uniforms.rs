@@ -8,8 +8,7 @@ pub(crate) struct Globals {
     pub transition_progress: f32,
     pub quality_level: f32,
     pub moon_phase: f32,
-    /// `[0]` cascade quality (`shooting_star_cascade.wgsl`); `[1]` main-menu pride
-    /// rainbow (`starfield.wgsl` reads `_globals_pad.x`); `[2]` unused.
+    /// `[0]` cascade quality; `[1]` main-menu pride rainbow; `[2]` moonlit-water disc strength (0 = hidden).
     pub _globals_pad: [f32; 3],
 }
 
@@ -69,27 +68,35 @@ pub(crate) struct ProbeGiFrameUniform {
     pub sample_params: [u32; 4],
 }
 
+/// Per-frame camera + tonemap data for `tile_3d.wgsl` group 0 binding 0.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct TileUniform {
+pub(crate) struct TileFrameUniform {
     pub view_proj: [f32; 16],
+    pub cam_pos: [f32; 3],
+    pub _pad0: f32,
+    /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient; w = inv doc scale.
+    pub tile_post_params: [f32; 4],
+    /// x = embedded glTF inverse-square intensity scale for tiles.
+    pub tile_punctual_params: [f32; 4],
+}
+
+/// One instanced showcase / glTF-prop tile for `tile_3d.wgsl` vertex buffer slot 1.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct Tile3dInstance {
     pub model: [f32; 16],
     pub tile_visual_params: [f32; 4],
-    /// World-space camera position, used for fresnel/view-dependent effects in tile_3d.wgsl.
-    pub cam_pos: [f32; 3],
-    /// Per-tile instance seed — any finite float. Read by `tile_3d.wgsl` to
-    /// offset procedural noise so every tile's tortoise-shell pattern (and
-    /// future material variations) is unique. Not all materials sample it.
-    pub tile_material_seed: f32,
-    /// xy = atlas origin, zw = scale — maps face UV 0..1 into the showcase decal atlas.
     pub tile_decal_atlas_uv: [f32; 4],
-    /// x = use shop-style ACES HDR path (`1`/`0`); y = linear exposure; z = hemispheric ambient scale;
-    /// w = tile shader inverse document scale for embedded glTF punctual attenuation.
-    /// Matches `SsrGlobals.hdr_tonemap.xyz` on `lit_mesh` for the same frame; `w` differs.
-    pub tile_post_params: [f32; 4],
-    /// x = embedded glTF inverse-square intensity scale for tiles (`tile_3d` only; `lit_mesh` uses
-    /// point-light `extras.w`). yzw reserved.
-    pub tile_punctual_params: [f32; 4],
+    pub tile_material_seed: f32,
+    pub _pad: [f32; 3],
+}
+
+/// One shadow-caster instance (model only) for instanced tile outline draws.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct TileShadowInstance {
+    pub model: [f32; 16],
 }
 
 /// Room-environment variant of [`TileUniform`] for `room_glb.wgsl`.

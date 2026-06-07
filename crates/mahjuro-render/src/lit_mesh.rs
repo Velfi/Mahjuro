@@ -130,6 +130,9 @@ pub enum MaterialKind {
     /// Flat texture read — boss ordeal icons and other extruded decals that should
     /// match their 2D atlas art without scene lighting or specular.
     Unshaded = 22,
+    /// Gameplay play mirror — polished bronze conductor with an optional
+    /// view-facing jade dielectric Fresnel rim (`instance_params.x`).
+    BronzeMirror = 23,
 }
 
 /// Whether instances using this material should participate in the
@@ -198,14 +201,19 @@ impl MaterialParams {
     }
 }
 
+/// `instance_params.x` — play-mirror valid-hand jade fresnel (`Metal` only).
+pub const LIT_MESH_INSTANCE_PLAY_MIRROR_GLOW: usize = 0;
+
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MeshUniform {
     pub view_proj: [f32; 16],
     pub model: [f32; 16],
     pub base_color: [f32; 4],
-    /// (kind, specular_strength, specular_power, _pad)
+    /// (kind, specular_strength, specular_power, decal_or_talisman_slot)
     pub material_params: [f32; 4],
+    /// Per-instance effect channels (see `LIT_MESH_INSTANCE_*` indices).
+    pub instance_params: [f32; 4],
 }
 
 /// CPU-side mesh data ready to be uploaded.
@@ -319,6 +327,7 @@ impl LitMeshInstance {
             model: identity,
             base_color: [1.0; 4],
             material_params: [0.0; 4],
+            instance_params: [0.0; 4],
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("lit-mesh-uniform"),
@@ -557,6 +566,7 @@ impl LitMeshInstance {
             model,
             material,
             if has_decal { 1.0 } else { 0.0 },
+            [0.0; 4],
         );
     }
 
@@ -571,6 +581,7 @@ impl LitMeshInstance {
         model: glam::Mat4,
         material: MaterialParams,
         params_w: f32,
+        instance_params: [f32; 4],
     ) {
         let u = MeshUniform {
             view_proj,
@@ -582,6 +593,7 @@ impl LitMeshInstance {
                 material.specular_power,
                 params_w,
             ],
+            instance_params,
         };
         let mut last = self.last_main_uniform.borrow_mut();
         if *last == u {
@@ -612,6 +624,7 @@ impl LitMeshInstance {
                 material.specular_power,
                 0.0,
             ],
+            instance_params: [0.0; 4],
         };
         let mut last = self.last_main_uniform.borrow_mut();
         if *last == u {
@@ -619,6 +632,20 @@ impl LitMeshInstance {
         }
         *last = u;
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));
+    }
+
+    /// Play mirror: bronze metal + optional valid-hand jade fresnel.
+    pub fn write_mirror_uniform(
+        &self,
+        queue: &wgpu::Queue,
+        view_proj: [f32; 16],
+        model: glam::Mat4,
+        material: MaterialParams,
+        valid_play_glow: f32,
+    ) {
+        let mut instance_params = [0.0; 4];
+        instance_params[LIT_MESH_INSTANCE_PLAY_MIRROR_GLOW] = valid_play_glow.clamp(0.0, 1.0);
+        self.write_uniform_raw_w(queue, view_proj, model, material, 0.0, instance_params);
     }
 }
 

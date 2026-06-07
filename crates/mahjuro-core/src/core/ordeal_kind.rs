@@ -9,7 +9,6 @@ use mahjuro_types::theme_tokens;
 pub enum OrdealKind {
     Drought,
     Whisper,
-    Tribute,
     Gate,
     Grove,
     Coin,
@@ -32,6 +31,8 @@ pub enum OrdealKind {
     TaxCollector,
     Dragon,
     House,
+    DeadAir,
+    StGeorge,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,7 +49,6 @@ impl OrdealKind {
     pub const ALL: &'static [OrdealKind] = &[
         OrdealKind::Drought,
         OrdealKind::Whisper,
-        OrdealKind::Tribute,
         OrdealKind::Gate,
         OrdealKind::Grove,
         OrdealKind::Coin,
@@ -70,6 +70,8 @@ impl OrdealKind {
         OrdealKind::TaxCollector,
         OrdealKind::Dragon,
         OrdealKind::House,
+        OrdealKind::DeadAir,
+        OrdealKind::StGeorge,
     ];
 
     /// Stable atlas cell id (`assets/data/ordeals.json` `id`, `textures/ordeal_icons/atlas.toml`).
@@ -77,7 +79,6 @@ impl OrdealKind {
         match self {
             OrdealKind::Drought => "drought",
             OrdealKind::Whisper => "whisper",
-            OrdealKind::Tribute => "tribute",
             OrdealKind::Gate => "gate",
             OrdealKind::Grove => "grove",
             OrdealKind::Coin => "coin",
@@ -99,6 +100,8 @@ impl OrdealKind {
             OrdealKind::TaxCollector => "tax_collector",
             OrdealKind::Dragon => "dragon",
             OrdealKind::House => "house",
+            OrdealKind::DeadAir => "dead_air",
+            OrdealKind::StGeorge => "st_george",
         }
     }
 }

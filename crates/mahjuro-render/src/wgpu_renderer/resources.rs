@@ -538,7 +538,7 @@ pub(super) fn default_emissive_map(
 
 /// Decode the embedded bronze mirror heightmap PNG and upload it as a
 /// linear data texture. Bound at slot 1 of every gameplay mirror instance;
-/// the metal branch in lit_mesh.wgsl samples it as a heightfield to perturb
+/// the BronzeMirror branch in lit_mesh.wgsl samples it as a heightfield to perturb
 /// the polished face's surface normal so the cast four-spirit relief catches
 /// the candle highlights. Same fallback behavior as the coin loader.
 pub(super) fn load_mirror_heightmap(

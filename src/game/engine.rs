@@ -4,7 +4,7 @@
 //! dispatch typed commands and receive semantic outcomes, while the current
 //! `RunState` still acts as the legacy mutation backend underneath.
 //!
-//! Gameplay mutations to hand, selection, structure bank, and the resource
+//! Gameplay mutations to hand, selection, structure, and the resource
 //! fields owned by [`GameplayCoreState`](crate::game::engine_state::GameplayCoreState)
 //! should go through [`GameEngine`] commands or
 //! [`GameplayCoreState::with_run_mut`](crate::game::engine_state::GameplayCoreState::with_run_mut)
@@ -262,7 +262,7 @@ pub struct GameplayReadModel {
     pub structure_tiles: Vec<Tile>,
     pub structure_sets: Vec<DetectedMeld>,
     pub trigger_enabled: bool,
-    /// True when structure is banked but cash-in is blocked until discards are spent (The House).
+    /// True when structure has been played but cash-in is blocked until discards are spent (The House).
     pub cash_in_blocked_until_discards_spent: bool,
     pub trigger_preview_total: u64,
     pub selected_count: usize,
@@ -442,7 +442,7 @@ impl<'a> GameEngine<'a> {
 
     pub fn prepare_pending_chamber(run: &mut RunState) {
         GameplayCoreState::with_run_mut(run, |core| {
-            core.clear_hand_structure_bank();
+            core.clear_hand_and_structure();
         });
     }
 
@@ -607,8 +607,8 @@ impl<'a> GameEngine<'a> {
         }
     }
 
-    pub fn structure_banked_meld_chips(run: &RunState) -> i32 {
-        run.structure_banked_meld_chips()
+    pub fn structure_played_meld_chips(run: &RunState) -> i32 {
+        run.structure_played_meld_chips()
     }
 
     pub fn preview_manual_trigger_breakdown(run: &RunState) -> Option<ScoreBreakdown> {
@@ -1553,7 +1553,7 @@ mod tests {
         assert_hand_selection_invariant(&run);
     }
 
-    fn winning_structure_bank() -> (Vec<Tile>, Vec<DetectedMeld>) {
+    fn winning_structure_fixture() -> (Vec<Tile>, Vec<DetectedMeld>) {
         let tiles = vec![
             tile(Suit::Manzu, 1, 1),
             tile(Suit::Manzu, 1, 2),
@@ -1599,7 +1599,7 @@ mod tests {
     fn trigger_structure_command_preserves_hand_selection_invariant() {
         let mut run = deterministic_run();
         run.set_auto_cash_in_on_full_structure(false);
-        let (tiles, sets) = winning_structure_bank();
+        let (tiles, sets) = winning_structure_fixture();
         *run.structure_tiles_mut() = tiles;
         *run.structure_sets_mut() = sets;
         assert!(

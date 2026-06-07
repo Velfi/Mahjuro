@@ -275,7 +275,7 @@ impl HeadlessApp {
                 cursor_pos: (0.0, 0.0),
                 mouse_left_down: false,
                 loading_done,
-                hub_loading: crate::scenes::main_menu::HubMenuLoading::default(),
+                hub_loading: mahjuro::scenes::main_menu::HubMenuLoading::default(),
                 cascade_tuning: &headless_cascade,
                 picked_shop_object: None,
                 picked_gameplay_object: None,
@@ -349,7 +349,7 @@ impl HeadlessApp {
                     cursor_pos: (0.0, 0.0),
                     mouse_left_down: false,
                     loading_done,
-                    hub_loading: crate::scenes::main_menu::HubMenuLoading::default(),
+                    hub_loading: mahjuro::scenes::main_menu::HubMenuLoading::default(),
                     cascade_tuning: &headless_cascade,
                     picked_shop_object: None,
                     picked_gameplay_object: None,
@@ -416,6 +416,7 @@ impl HeadlessApp {
                 mahjuro_render::tuning::scene_look::room_env_frame_from_scene_look(&look, room),
             ));
         }
+        let mut focus_nav_snapshot = None;
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -446,6 +447,9 @@ impl HeadlessApp {
             mahjuro::scenes::main_menu::HubMenuLoading::default(),
             self.renderer.main_menu_effects,
             self.renderer.flame_tuning,
+            mahjuro::render::victory_moon_tuning::VictoryMoonDebug::default(),
+            false,
+            &mut focus_nav_snapshot,
         );
         let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
             top.draw_frame(ctx)

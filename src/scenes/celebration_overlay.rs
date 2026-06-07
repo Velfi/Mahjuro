@@ -143,7 +143,7 @@ pub fn push_confirm_continue_footer(
     }
     let h = ctx.layout.window_h;
     let w = ctx.layout.window_w;
-    let style = hint_style_with_alpha(HintStyle::standard(h), alpha);
+    let style = hint_style_with_alpha(HintStyle::standard(w, h), alpha);
     let line_h = style.line_h;
     push_inline_hint_rows(
         frame,
@@ -167,7 +167,7 @@ pub fn push_confirm_unseal_footer(
     }
     let h = ctx.layout.window_h;
     let w = ctx.layout.window_w;
-    let style = hint_style_with_alpha(HintStyle::standard(h), alpha);
+    let style = hint_style_with_alpha(HintStyle::standard(w, h), alpha);
     let line_h = style.line_h;
     push_inline_hint_rows(
         frame,

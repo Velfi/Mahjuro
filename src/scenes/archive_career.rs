@@ -476,7 +476,10 @@ pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
     vec![
         CareerKpi {
             label: "Best run",
-            value: format!("{} · #{best_run_num}", format_chips(best_run)),
+            value: format!(
+                "{} · #{best_run_num}",
+                format_chips_compact(best_run)
+            ),
         },
         CareerKpi {
             label: "Win rate",
@@ -488,7 +491,7 @@ pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
         },
         CareerKpi {
             label: "Total score",
-            value: format_chips(total_score),
+            value: format_chips_compact(total_score),
         },
     ]
 }

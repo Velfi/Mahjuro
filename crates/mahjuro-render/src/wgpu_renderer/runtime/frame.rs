@@ -1,3 +1,5 @@
+use crate::draw_cmd::SceneLighting;
+
 use super::*;
 
 pub(super) enum RenderFrame {
@@ -63,6 +65,51 @@ impl WgpuRenderer {
         .unwrap_or_else(|e| panic!("{e}"));
         self.showcase_decal_atlas = Some(atlas);
         self.showcase_decal_atlas_tileset = Some(tileset_name.to_string());
+        self.tile_material_bind_groups_tileset = None;
+        self.refresh_tile_material_bind_groups();
+    }
+
+    pub(super) fn refresh_tile_material_bind_groups(&mut self) {
+        let Some(tileset) = self.showcase_decal_atlas_tileset.clone() else {
+            return;
+        };
+        if self.tile_material_bind_groups_tileset.as_deref() == Some(tileset.as_str()) {
+            return;
+        }
+        let Some(atlas) = self.showcase_decal_atlas.as_ref() else {
+            return;
+        };
+        let decal_view = &atlas.view;
+        let refresh_primitives = |prims: &mut [TilePrimitiveGpu]| {
+            for prim in prims.iter_mut() {
+                prim.material_bind_group = Some(crate::gltf_prop::create_tile_material_bind_group(
+                    &self.device,
+                    &self.tile_material_layout,
+                    &self.tile_frame_uniform_buffer,
+                    prim,
+                    decal_view,
+                    &self.tile_env_distortion_placeholder,
+                ));
+            }
+        };
+        for mesh in self.tile_meshes.iter_mut() {
+            refresh_primitives(&mut mesh.primitives);
+        }
+        refresh_primitives(&mut self.coin_glb_primitives);
+        self.tile_material_bind_groups_tileset = Some(tileset);
+    }
+
+    pub(super) fn decal_atlas_uv_for(&self, tile: &Tile) -> [f32; 4] {
+        let key = (
+            tile.suit,
+            tile.rank,
+            tile.enhancement,
+            tile.debuffed_visual,
+        );
+        self.showcase_decal_atlas
+            .as_ref()
+            .and_then(|a| a.lookup.get(&key).copied())
+            .unwrap_or([0.0, 0.0, 1.0, 1.0])
     }
 
     pub(super) fn apply_render_settings(
@@ -85,7 +132,6 @@ impl WgpuRenderer {
 
         if self.active_tile_material != tile_material {
             self.active_tile_material = tile_material;
-            self.showcase_tiles.clear();
         }
 
         // Swap tilesets: if the user picked a different set in Options, update
@@ -95,7 +141,6 @@ impl WgpuRenderer {
             self.push_active_showcase_decal_atlas_to_cache();
             self.tile_set = Some(tileset_name.to_owned());
             self.tile_face_overlays.clear();
-            self.showcase_tiles.clear();
             let _ = self.activate_cached_showcase_decal_atlas(tileset_name);
         }
     }
@@ -296,21 +341,39 @@ impl WgpuRenderer {
                     } else {
                         0.0
                     },
-                    0.0,
+                    if frame.moonlit_water_hide_disc {
+                        0.0
+                    } else {
+                        1.0
+                    },
                 ],
             }),
         );
-        // Gameplay / artist-style point lights (group 1 for tiles + lit_mesh).
+        let bg_cam = if frame.camera_override_after_depth_clear.is_some() {
+            frame.camera_override.as_ref()
+        } else {
+            frame.foreground_camera()
+        };
+        self.upload_punctual_light_buffers(frame, &frame.scene_lighting, bg_cam, gamma);
+    }
+
+    pub(super) fn upload_punctual_light_buffers(
+        &self,
+        frame: &UiFrame,
+        lighting: &SceneLighting,
+        ray_plane_cam: Option<&crate::draw_cmd::CameraParams>,
+        gamma: f32,
+    ) {
         let pl_w = self.size.width.max(1) as f32;
         let pl_h = self.size.height.max(1) as f32;
         let time_s = self.creation_time.elapsed().as_secs_f32();
-        let lit_mesh_inv_scale = if frame.scene_lighting.embedded_gltf_punctual {
+        let lit_mesh_inv_scale = if lighting.embedded_gltf_punctual {
             self.active_frame_env().lit_mesh_gltf_punctual_scale
         } else {
             1.0
         };
         let punctual_bake = PunctualLightBakeParams {
-            src: &frame.scene_lighting.punctual,
+            src: &lighting.punctual,
             candle_count: frame.candle_light_count,
             flame_height_world: frame.flame_height_world,
             lit_mesh_punctual_intensity_scale: lit_mesh_inv_scale,
@@ -319,17 +382,16 @@ impl WgpuRenderer {
             gamma,
             time: time_s,
         };
-        let shop_camera_punctual = |cam: &crate::draw_cmd::CameraParams| {
-            PointLightsBuf::from_scene_punctual_shop_camera(&PunctualLightBakeShopCameraParams {
-                bake: &punctual_bake,
-                cam,
-            })
-        };
         let use_ray_plane = frame
             .showcase_render_hints
             .layout_uses_ray_plane(self.active_scene_key);
-        let point_lights_buf = match (use_ray_plane, frame.camera_override.as_ref()) {
-            (true, Some(cam)) => shop_camera_punctual(cam),
+        let point_lights_buf = match (use_ray_plane, ray_plane_cam) {
+            (true, Some(cam)) => PointLightsBuf::from_scene_punctual_shop_camera(
+                &PunctualLightBakeShopCameraParams {
+                    bake: &punctual_bake,
+                    cam,
+                },
+            ),
             _ => PointLightsBuf::from_scene_punctual(&punctual_bake),
         };
         self.queue.write_buffer(
@@ -338,9 +400,8 @@ impl WgpuRenderer {
             bytemuck::bytes_of(&point_lights_buf),
         );
 
-        // Upload spotlights (tile + `lit_mesh` group 3).
         let spot_cam = if use_ray_plane {
-            frame.camera_override.as_ref()
+            ray_plane_cam
         } else {
             None
         };
@@ -348,7 +409,7 @@ impl WgpuRenderer {
             &self.spot_lights_buffer,
             0,
             bytemuck::bytes_of(&SpotLightsBuf::from_lights(
-                &frame.scene_lighting.spot_lights,
+                &lighting.spot_lights,
                 pl_w,
                 pl_h,
                 spot_cam,

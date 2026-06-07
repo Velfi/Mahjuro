@@ -424,6 +424,7 @@ impl InputState {
         self.item_inspect_zoom_triggers = 0.0;
         self.shop_storeroom_orbit_stick = (0.0, 0.0);
         self.right_stick_scroll_axis = 0.0;
+        self.right_stick_scroll_axis_x = 0.0;
         self.left_stick_scroll_axis = 0.0;
 
         let before = actions.len();
@@ -494,6 +495,7 @@ impl InputState {
             self.shop_storeroom_orbit_stick = Self::sample_right_stick_xy(shell);
         }
         self.right_stick_scroll_axis = Self::sample_stick_scroll_axis(shell, GpAxis::RightY);
+        self.right_stick_scroll_axis_x = Self::sample_stick_scroll_axis(shell, GpAxis::RightX);
         self.left_stick_scroll_axis = Self::sample_stick_scroll_axis(shell, GpAxis::LeftY);
         Self::emit_held_navigation_repeats(
             shell,

@@ -226,10 +226,50 @@ impl SceneBehavior for ButtonAabbLabScene {
                 frame.archive_environment();
                 frame.archive_page_left_visible = true;
                 frame.archive_page_right_visible = true;
+                let room_glb = archive_glb::archive_glb_has_embedded_lights();
+                frame.scene_lighting.embedded_gltf_punctual = room_glb;
+                frame.scene_lighting.room_glb_brdf = true;
+                frame.scene_lighting.clear_spot_lights();
+                if room_glb {
+                    let (punctual, nodes) =
+                        crate::render::room_gltf_punctual::tagged_to_scene_punctual(
+                            archive_glb::archive_embedded_point_lights_runtime_tagged(
+                                w,
+                                h,
+                                env_h,
+                                &ctx.room_env_for(crate::render::scene_keys::ARCHIVE).0,
+                            ),
+                        );
+                    frame.scene_lighting.punctual = punctual;
+                    frame.scene_lighting.punctual_gltf_nodes = nodes;
+                }
             }
             RoomPreset::Gameplay => {
                 frame.gameplay_environment();
                 frame.gameplay_cash_in_button_visible = true;
+                let room_glb = gameplay_glb::gameplay_glb_has_embedded_lights();
+                frame.scene_lighting.embedded_gltf_punctual = room_glb;
+                frame.scene_lighting.room_glb_brdf = true;
+                if room_glb {
+                    let tune = ctx.room_env_for("gameplay").0;
+                    let (punctual, nodes) =
+                        crate::render::room_gltf_punctual::tagged_to_scene_punctual(
+                            gameplay_glb::gameplay_embedded_point_lights_runtime_tagged(
+                                w,
+                                h,
+                                env_h,
+                                &tune,
+                                0.0,
+                                1.0,
+                                ctx.flame_tuning.candle_flicker_amp,
+                            ),
+                        );
+                    frame.scene_lighting.punctual = punctual;
+                    frame.scene_lighting.punctual_gltf_nodes = nodes;
+                    frame.scene_lighting.set_gltf_embedded_spot_lights(
+                        gameplay_glb::gameplay_embedded_spot_lights_runtime(w, h, env_h, &tune),
+                    );
+                }
             }
         }
 
@@ -318,7 +358,7 @@ impl SceneBehavior for ButtonAabbLabScene {
             &mut frame,
             &ctx,
             back_footer_row(ctx.input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
         frame
     }

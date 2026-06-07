@@ -11,7 +11,7 @@ use crate::render::theme::{ButtonState, ButtonVariant, button_colors, color, met
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
-use crate::ui::focus_nav::{self, FocusDir};
+use crate::ui::focus_nav::{self, FocusDir, FocusNavState};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::FocusId;
@@ -80,10 +80,10 @@ impl LeftPanelLayout {
         let season_desc_px = typography::size(typography::H28, h);
         let hint_px = typography::size(typography::H42, h);
 
-        let title_h = crate::ui::colored_keywords::colored_row_line_step(title_px);
-        let bonus_h = crate::ui::colored_keywords::colored_row_line_step(bonus_px);
-        let season_desc_h = crate::ui::colored_keywords::colored_row_line_step(season_desc_px);
-        let hint_h = crate::ui::colored_keywords::colored_row_line_step(hint_px);
+        let title_h = crate::ui::styled_text::colored_row_line_step(title_px);
+        let bonus_h = crate::ui::styled_text::colored_row_line_step(bonus_px);
+        let season_desc_h = crate::ui::styled_text::colored_row_line_step(season_desc_px);
+        let hint_h = crate::ui::styled_text::colored_row_line_step(hint_px);
 
         let x = positions.left_panel.nx * w;
         let content_w = panel_w * 0.90;
@@ -283,6 +283,7 @@ fn season_glyph(season: Season) -> &'static str {
 
 pub struct TileSelectScene {
     focus: Option<ModalAction>,
+    focus_nav: FocusNavState<ModalAction>,
     pub positions: crate::ui::scene_layout::TileSelectPositions,
     material: TileMaterial,
     /// Currently-selected difficulty season. Cycled by SeasonPrev/SeasonNext
@@ -304,6 +305,7 @@ impl TileSelectScene {
     pub fn new() -> Self {
         Self {
             focus: None,
+            focus_nav: FocusNavState::new(),
             positions: crate::ui::scene_layout::TileSelectPositions::default(),
             material: TileMaterial::default(),
             season: Season::default(),
@@ -315,6 +317,7 @@ impl TileSelectScene {
     pub fn new_tutorial() -> Self {
         Self {
             focus: None,
+            focus_nav: FocusNavState::new(),
             positions: crate::ui::scene_layout::TileSelectPositions::default(),
             material: TileMaterial::Bamboo,
             season: Season::Spring,
@@ -400,17 +403,6 @@ impl TileSelectScene {
         if self.focus.is_none_or(|focus| !valid(focus)) {
             self.focus = self.default_focus(targets);
         }
-    }
-
-    fn current_focus_rect(
-        focus: Option<ModalAction>,
-        targets: &[(ModalAction, [f32; 4])],
-    ) -> Option<[f32; 4]> {
-        let focus = focus?;
-        targets
-            .iter()
-            .find(|(action, _)| *action == focus)
-            .map(|(_, rect)| *rect)
     }
 
     fn activate_focus(&mut self, action: ModalAction, ctx: &mut UpdateCtx<'_>) -> SceneTransition {
@@ -717,7 +709,7 @@ impl SceneBehavior for TileSelectScene {
             }
         }
 
-        let current_rect = Self::current_focus_rect(self.focus, &targets);
+        self.focus_nav.load_candidates(&targets, &[]);
         let mut activated = false;
         for &a in ctx.actions {
             let dir = match a {
@@ -731,11 +723,15 @@ impl SceneBehavior for TileSelectScene {
                 }
                 _ => None,
             };
-            if let Some(dir) = dir
-                && let Some(rect) = current_rect
-                && let Some(next) = focus_nav::pick_neighbor(rect, dir, &targets)
-            {
-                self.focus = Some(next);
+            if let Some(dir) = dir {
+                let current = self
+                    .focus
+                    .or_else(|| targets.first().map(|(target, _)| *target));
+                if let Some(cur) = current
+                    && let Some(next) = self.focus_nav.pick(cur, dir)
+                {
+                    self.focus = Some(next);
+                }
             }
         }
 
@@ -763,7 +759,7 @@ impl SceneBehavior for TileSelectScene {
         None
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, mut ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
 
@@ -945,6 +941,7 @@ impl SceneBehavior for TileSelectScene {
                         outline: false,
                         glow: false,
                         glow_color: None,
+                    outline_sel: None,
                         pick_id: None,
                         overlay_rect_group: None,
                     }
@@ -981,13 +978,23 @@ impl SceneBehavior for TileSelectScene {
             &mut frame,
             &ctx,
             menu_footer_row(ctx.input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
         frame.window_title = if self.tutorial_mode {
             "Mahjuro — Tutorial Prompt".into()
         } else {
             "Mahjuro — Choose Tiles".into()
         };
+        let targets = self.focus_targets(w, h, ctx.progress, &self.positions);
+        let candidates: Vec<(ModalAction, [f32; 4])> =
+            targets.iter().map(|(a, r)| (*a, *r)).collect();
+        ctx.stash_focus_nav_graph(
+            &candidates,
+            &[],
+            self.focus,
+            self.focus_nav.memory(),
+            |a| format!("{a:?}"),
+        );
         frame
     }
 }

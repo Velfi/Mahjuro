@@ -4,6 +4,7 @@
 
 mod actions;
 mod draw;
+mod focus;
 mod layout;
 pub(crate) mod pack_celebration;
 pub(crate) mod pick_ids;
@@ -53,7 +54,7 @@ use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, ShopHit, TextAlign, TextLabel};
-use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
+use crate::ui::focus_nav::{FocusDir, FocusNavState, focus_target_at_cursor};
 use crate::ui::input::{InputMode, UiAction};
 
 use super::pause_menu::PauseMenu;
@@ -76,6 +77,7 @@ pub struct ShopScene {
     /// (or the leave bell when the shelf is empty). In cursor mode, hover follows
     /// the 3D pick when present; otherwise screen rects (shelf slots + HUD buttons).
     focus: Option<ShopFocus>,
+    focus_nav: FocusNavState<ShopFocus>,
     /// Focus rect graph captured at the end of the previous `draw_frame`,
     /// consumed by `update()` for cursor hit-tests and spatial navigation.
     /// One frame stale — same pattern as `projected_relic_rects` and the

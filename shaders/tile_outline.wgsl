@@ -68,17 +68,27 @@ fn vs_main(
 @fragment
 fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     // base_color_factor.y encodes hover/select state:
-    //   >= 0.75 → selected (warm gold rim)
+    //   >= 0.75 && < 1.25 → selected (warm gold rim)
     //   ~0.5    → hovered (saturated blue rim)
     //   >= 1.25 → alternating hover/selected perimeter colors
+    //   >= 1.90 && < 2.50 → decimation pick (crimson rim)
+    //   >= 2.50 && < 3.50 → house claim (umber rim)
     let sel = in.sel_y;
-    let is_combo = sel >= 1.25;
-    let is_selected = sel >= 0.75 && !is_combo;
+    let is_combo = sel >= 1.25 && sel < 1.90;
+    let is_decimation = sel >= 1.90 && sel < 2.50;
+    let is_house_claim = sel >= 2.50 && sel < 3.50;
+    let is_selected = sel >= 0.75 && sel < 1.25;
     let is_hovered = sel > 0.25 && sel < 0.75;
     let selected_color = vec3<f32>(1.00, 0.38, 0.02);
+    let decimation_color = vec3<f32>(0.90, 0.12, 0.08);
+    let house_color = vec3<f32>(0.62, 0.38, 0.28);
     let hovered_color = vec3<f32>(0.05, 0.40, 1.00);
     var base_color = vec3<f32>(0.72, 0.88, 1.00);
-    if (is_selected) {
+    if (is_decimation) {
+        base_color = decimation_color;
+    } else if (is_house_claim) {
+        base_color = house_color;
+    } else if (is_selected) {
         base_color = selected_color;
     } else if (is_hovered) {
         base_color = hovered_color;
@@ -99,8 +109,10 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let key = normalize(vec3<f32>(0.25, 1.0, 0.35));
     let ndl = max(dot(n_local, key), 0.0);
     var base_shade = 0.45 + 0.55 * ndl;
-    if (is_selected) {
+    if (is_decimation || is_selected) {
         base_shade = 0.72 + 0.33 * ndl;
+    } else if (is_house_claim) {
+        base_shade = 0.55 + 0.38 * ndl;
     } else if (is_hovered) {
         base_shade = 0.58 + 0.48 * ndl;
     } else if (is_combo) {
@@ -129,8 +141,10 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let nl = max(dot(n_world, l_dir), 0.0);
         // Diffuse floor + sharper specular-ish term for the metallic look.
         var metal = 0.30 + 1.60 * pow(nl, 1.8);
-        if (is_selected) {
+        if (is_decimation || is_selected) {
             metal = 0.35 + 2.05 * pow(nl, 1.65);
+        } else if (is_house_claim) {
+            metal = 0.32 + 1.55 * pow(nl, 1.72);
         } else if (is_hovered) {
             metal = 0.32 + 1.85 * pow(nl, 1.72);
         } else if (is_combo) {
@@ -142,11 +156,17 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     var lit = base_color * base_shade + base_color * contrib;
     // Emissive + chroma punch so ACES/HDR does not wash rims to grey/white.
     lit = lit + select(vec3<f32>(0.0), base_color * 0.16, is_hovered);
-    lit = lit + select(vec3<f32>(0.0), base_color * 0.26, is_selected);
+    lit = lit + select(vec3<f32>(0.0), base_color * 0.26, is_selected || is_decimation);
+    lit = lit + select(vec3<f32>(0.0), base_color * 0.18, is_house_claim);
     lit = lit + select(vec3<f32>(0.0), base_color * 0.23, is_combo);
-    if (is_selected) {
+    if (is_decimation || is_selected) {
         let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
         let sat = 1.75;
+        lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
+        lit = max(lit, vec3<f32>(0.0));
+    } else if (is_house_claim) {
+        let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let sat = 1.35;
         lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
         lit = max(lit, vec3<f32>(0.0));
     } else if (is_hovered) {
@@ -161,8 +181,10 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         lit = max(lit, vec3<f32>(0.0));
     }
     var gain = 1.0;
-    if (is_selected) {
+    if (is_decimation || is_selected) {
         gain = 1.38;
+    } else if (is_house_claim) {
+        gain = 1.12;
     } else if (is_hovered) {
         gain = 1.20;
     } else if (is_combo) {

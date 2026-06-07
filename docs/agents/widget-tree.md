@@ -10,7 +10,7 @@ There are two entry points depending on how a scene's geometry is computed:
 
 1. **`Tree<A>` — declarative layout** (`Tree::vertical_menu`, `Tree::anchored`, with `wt::button_id`, `wt::slider`, `wt::toggle`, `wt::cycle`, `wt::tab` builders). Use when you want the tree to *compute* the rects: vertical menus, anchored modals, generic Column/Row/Grid containers. See [`start_screen.rs`](../../src/scenes/start_screen.rs), [`pause_menu.rs`](../../src/scenes/pause_menu.rs).
 
-2. **`FlatItem<A>` — bring-your-own rects** (`TreeState::update_flat`, `TreeState::register_flat_buttons`). Use when the rects come from external geometry — `LayoutResult::hand_slots`, custom card grids, hand-laid tab bars. The scene supplies `Vec<FlatItem { id, rect, action }>`; the tree handles hover, focus, click routing, and keyboard linear nav. See [`shop.rs`](../../src/scenes/shop.rs), [`options.rs`](../../src/scenes/options.rs), [`collection.rs`](../../src/scenes/collection.rs), [`results.rs`](../../src/scenes/results.rs), [`pick_chamber.rs`](../../src/scenes/pick_chamber.rs), [`profile_select.rs`](../../src/scenes/profile_select.rs), [`game_over.rs`](../../src/scenes/game_over.rs).
+2. **`FlatItem<A>` — bring-your-own rects** (`TreeState::update_flat`, `TreeState::register_flat_buttons`). Use when the rects come from external geometry — GLB-projected hand slots, custom card grids, hand-laid tab bars. The scene supplies `Vec<FlatItem { id, rect, action }>`; the tree handles hover, focus, click routing, and keyboard linear nav. See [`shop.rs`](../../src/scenes/shop.rs), [`options.rs`](../../src/scenes/options.rs), [`collection.rs`](../../src/scenes/collection.rs), [`results.rs`](../../src/scenes/results.rs), [`pick_chamber.rs`](../../src/scenes/pick_chamber.rs), [`profile_select.rs`](../../src/scenes/profile_select.rs), [`game_over.rs`](../../src/scenes/game_over.rs).
 
 ## The contract
 
@@ -68,7 +68,7 @@ impl MyScene {
 
 4. **Hover-follow is automatic.** The tree updates its focused id from `cursor_pos` *before* processing actions, so a keyboard `Confirm` always acts on whatever the mouse is over.
 
-5. **Keyboard nav is automatic.** `FocusUp/Down/Prev/Next` move linearly through the layout-cache order. `Confirm`/`CommitDiscard` activate the focused item.
+5. **Keyboard nav is automatic.** `FocusUp/Down/Prev/Next` move via auto-inferred rows/columns (`focus_nav::graph`), with beam fallback. `Confirm`/`CommitDiscard` activate the focused item.
 
 6. **`Esc`/`Pause` shortcuts stay in the scene.** The tree only handles activation. Scenes still loop over `ctx.actions` themselves to handle `Cancel`/`Pause`/scene-specific shortcuts.
 
@@ -83,7 +83,7 @@ Scene body copy that needs wrapping or emphasis goes through [`widget::push_text
 - `**bold**`, `*italic*`, `__underline__`
 - `{{effect:rainbow}}…{{/effect}}` (and other registered effects)
 
-Set `TextStyle::glossary_tint: true` to combine markup with per-word vocabulary coloring ([`colored_keywords`](../../src/ui/colored_keywords.rs)). [`widget::push_button`](../../src/ui/widget.rs) labels stay plain — no markup.
+Set `TextStyle::glossary` to [`GlossaryMode::Prose`](../../crates/mahjuro-render/src/vocabulary_colors.rs) or [`GlossaryMode::Panel`](../../crates/mahjuro-render/src/vocabulary_colors.rs) to combine markup with per-word vocabulary coloring via [`styled_text.rs`](../../src/ui/styled_text.rs). Use `{{term:Honors}}` to force a tint in prose. [`widget::push_button`](../../src/ui/widget.rs) labels stay plain — no markup.
 
 Layout height for styled blocks: see [font-scaling.md](font-scaling.md).
 

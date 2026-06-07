@@ -13,7 +13,7 @@ use crate::{
         rules::{ChamberKind, RuleModifier},
         scoring::{EffectiveRelics, ScoreBreakdown, score_sets_with_original, tile_is_debuffed},
         structure::{
-            StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure,
+            StructureTriggerKind, StructureTriggerMeta, can_trigger_structure, played_meld_chips,
             is_winning_structure_shape, star_tile_yaku_pool,
         },
         tile::{Suit, Tile},
@@ -355,6 +355,26 @@ impl RunState {
                     TAOTIE_CHIPS_PER_DEVOURED * devoured;
                 self.push_relic_activation(RelicId::Taotie);
                 bus.push(GameEvent::TilesDestroyed);
+            }
+        }
+        if self.chamber == ChamberKind::Ordeal {
+            let destroy_suit = match self.ordeal.upcoming {
+                Some(OrdealKind::DeadAir) => Some(Suit::Wind),
+                Some(OrdealKind::StGeorge) => Some(Suit::Dragon),
+                _ => None,
+            };
+            if let Some(suit) = destroy_suit {
+                let mut destroyed = 0u32;
+                for tile in &scoring_tiles {
+                    if tile.suit == suit {
+                        self.removed_tile_ids.insert(tile.id);
+                        self.tile_enhancements.remove(&tile.id);
+                        destroyed += 1;
+                    }
+                }
+                if destroyed > 0 {
+                    bus.push(GameEvent::TilesDestroyed);
+                }
             }
         }
         if self.relics.has(RelicId::StarTile) {
@@ -731,9 +751,9 @@ impl RunState {
         true
     }
 
-    /// Banked meld chips in structure (for HUD tiers).
-    pub fn structure_banked_meld_chips(&self) -> i32 {
-        banked_meld_chips(&self.structure_tiles, &self.structure_sets)
+    /// Played meld chips in structure (for HUD tiers).
+    pub fn structure_played_meld_chips(&self) -> i32 {
+        played_meld_chips(&self.structure_tiles, &self.structure_sets)
     }
 
     /// Whether [`Self::trigger_structure_manual`] can score (structure non-empty and rules allow).

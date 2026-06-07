@@ -6,9 +6,10 @@
 //! precompute comparisons (avg line, numeric labels) instead of asking viewers to do visual math.
 
 use crate::render::theme::color;
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::clip::intersect_rect;
-use crate::ui::colored_keywords::push_colored_line_clipped;
+use crate::ui::styled_text::push_colored_line_clipped;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ChartClip {
@@ -163,6 +164,7 @@ pub fn push_colored_label_clipped(
         font_px,
         align,
         mono,
+        GlossaryMode::Prose,
     );
 }
 

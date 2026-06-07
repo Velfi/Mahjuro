@@ -422,7 +422,7 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
     let slot_gap = (10.0 * scale).max(5.0);
 
     // Back button and version sit above the screen footer hint row.
-    let footer_reserve = screen_footer_reserve(h);
+    let footer_reserve = screen_footer_reserve(w, h);
     let back_h = (42.0 * scale).max(28.0);
     let version_h = (14.0 * scale).max(10.0);
     let version_y = h - footer_reserve - version_h - (4.0 * scale);
@@ -1646,7 +1646,7 @@ impl SceneBehavior for OptionsScene {
             &mut frame,
             &ctx,
             options_footer_row(ctx.input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
         frame.window_title = "Mahjuro — Options".into();
         frame

@@ -1,4 +1,5 @@
 pub mod cascade;
+pub mod decimation;
 pub mod engine;
 pub(crate) mod engine_state;
 pub mod event_bus;

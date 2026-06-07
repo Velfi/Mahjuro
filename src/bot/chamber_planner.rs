@@ -141,10 +141,10 @@ fn chamber_utility_with(run: &RunState, best_play: u64, structure_preview: u64) 
     let progress = 1.0 - need / target;
     let reach = (optimistic / target).clamp(0.0, 1.5);
 
-    let bank = run.structure_tiles().len() as f64;
-    let bank_value = bank * best * 0.08;
+    let structure_tiles = run.structure_tiles().len() as f64;
+    let structure_value = structure_tiles * best * 0.08;
 
-    progress * 12_000.0 + reach * 6_000.0 + resources * 80.0 + bank_value
+    progress * 12_000.0 + reach * 6_000.0 + resources * 80.0 + structure_value
 }
 
 /// Cheap one-step score for branch pruning (no play-mask enumeration).
@@ -159,8 +159,8 @@ fn quick_chamber_utility(run: &RunState) -> f64 {
     let need = (run.target_score as u64).saturating_sub(run.round_score) as f64;
     let progress = 1.0 - need / target;
     let resources = run.plays_remaining as f64 + 0.3 * run.discards_remaining as f64;
-    let bank = run.structure_tiles().len() as f64;
-    progress * 12_000.0 + resources * 80.0 + bank * 200.0
+    let structure_tiles = run.structure_tiles().len() as f64;
+    progress * 12_000.0 + resources * 80.0 + structure_tiles * 200.0
 }
 
 fn utility_after_action(run: &RunState) -> f64 {
@@ -310,7 +310,7 @@ pub(crate) fn execute_planned_turn(
             let yen_before = run.yen;
             let yaku_levels_before = run.yaku_levels.clone();
             let golden_engine_active = run.relics.has(crate::core::relic::RelicId::GoldenEngine);
-            let bank_before_commit = run.structure_tiles().to_vec();
+            let structure_before_commit = run.structure_tiles().to_vec();
             let mut idx_sorted = indices.clone();
             idx_sorted.sort_unstable();
             let selected_tiles: Vec<_> = idx_sorted
@@ -335,7 +335,7 @@ pub(crate) fn execute_planned_turn(
             let play_delta = run.round_score.saturating_sub(score_before);
             if play_delta > 0 {
                 let tiles = if run.structure_tiles().is_empty() {
-                    let mut full = bank_before_commit;
+                    let mut full = structure_before_commit;
                     if let Some((_, scoring_tiles)) = &commit_melds {
                         full.extend(scoring_tiles.iter().copied());
                     } else {

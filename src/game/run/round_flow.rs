@@ -229,7 +229,7 @@ impl RunState {
         // starts the next one — otherwise gameplay round-end still shows the
         // next ordeal's icon and target before the player enters that blind.
         GameplayCoreState::with_run_mut(self, |core| {
-            core.clear_hand_structure_bank();
+            core.clear_hand_and_structure();
         });
         self.tag_bonus_hand_size = 0;
 
@@ -245,6 +245,10 @@ impl RunState {
             self.ordeal.upcoming = None;
             self.ordeal.effect = None;
             self.ordeal.tax_collector_cost = 0;
+            // Ordeal debuffs only apply during the blind; stairway decimation
+            // and shop previews must not inherit the red-X overlay.
+            self.tile_debuffs.clear();
+            self.relics.clear_debuffs();
         }
     }
 
@@ -288,7 +292,7 @@ impl RunState {
         self.upcoming_chamber = self.upcoming_chamber.next();
         self.chamber = self.upcoming_chamber;
         GameplayCoreState::with_run_mut(self, |core| {
-            core.clear_hand_structure_bank();
+            core.clear_hand_and_structure();
         });
         self.tag_bonus_hand_size = 0;
     }
@@ -321,7 +325,7 @@ impl RunState {
         self.memorial_round.clear();
         self.chamber = self.upcoming_chamber;
         GameplayCoreState::with_run_mut(self, |core| {
-            core.clear_hand_structure_bank();
+            core.clear_hand_and_structure();
         });
     }
 }

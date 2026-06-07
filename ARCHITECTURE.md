@@ -249,7 +249,7 @@ struct SaveData {
 | ------------------ | ----------------------------- |
 | Rendering          | `wgpu`, `wgpu_glyph`          |
 | Texture / Image    | `image`, `rusttype`           |
-| Constraint solver  | `cassowary`                   |
+| HUD frame layout   | `src/ui/layout.rs` (inline)   |
 | Serialization      | `serde`, `ron`                |
 | Event system       | `hecs` ECS or custom EventBus |
 | Game loop / timing | `winit` + `instant`           |

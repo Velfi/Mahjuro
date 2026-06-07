@@ -13,6 +13,8 @@ use crate::debug_overlays::{
 use crate::render::draw_cmd::CameraParams;
 use crate::render::flame_debug_overlay::FlameDebugOverlay;
 use crate::render::rain_debug_overlay::RainDebugOverlay;
+use crate::render::victory_moon_debug_overlay::VictoryMoonDebugOverlay;
+use crate::render::victory_moon_tuning::VictoryMoonDebug;
 use crate::trailer_mode::TrailerMode;
 
 /// Debug-only state: overlays, visibility toggles, FPS counter, and the
@@ -38,10 +40,16 @@ pub struct DebugState {
     pub trailer_mode: Option<TrailerMode>,
     pub rain_debug_overlay: Option<RainDebugOverlay>,
     pub flame_debug_overlay: Option<FlameDebugOverlay>,
+    pub victory_moon_debug_overlay: Option<VictoryMoonDebugOverlay>,
+    /// Victory 3D moon rotation + phase — synced from [`Self::victory_moon_debug_overlay`].
+    pub victory_moon_debug: VictoryMoonDebug,
     /// Main menu moon tab — pride rainbow on moon / stars (defaults on in June).
     pub main_menu_pride_rainbow_debug: bool,
     /// Main menu moon tab — live calendar vs forced synodic phase.
     pub main_menu_moon_phase_debug: crate::render::main_menu_moon_tuning::MainMenuMoonPhaseDebug,
+    /// Draw inferred focus-nav rows/groups over the scene.
+    pub focus_nav_overlay: bool,
+    pub focus_nav_snapshot: Option<crate::ui::focus_nav::FocusNavDebugSnapshot>,
     /// Effective 3D camera after the scene's `draw_frame` (override or table
     /// default), updated each paint — used to seed camera debug overlay.
     pub last_effective_camera: CameraParams,
@@ -65,10 +73,14 @@ impl DebugState {
             trailer_mode: None,
             rain_debug_overlay: None,
             flame_debug_overlay: None,
+            victory_moon_debug_overlay: None,
+            victory_moon_debug: VictoryMoonDebug::default(),
             main_menu_pride_rainbow_debug:
                 crate::render::main_menu_glb::main_menu_pride_rainbow_default_enabled(),
             main_menu_moon_phase_debug:
                 crate::render::main_menu_moon_tuning::MainMenuMoonPhaseDebug::default(),
+            focus_nav_overlay: false,
+            focus_nav_snapshot: None,
             last_effective_camera: CameraParams::default_table_camera(800.0),
         }
     }
@@ -82,6 +94,7 @@ impl DebugState {
             || self.hallway_distortion_debug_overlay.is_some()
             || self.rain_debug_overlay.is_some()
             || self.flame_debug_overlay.is_some()
+            || self.victory_moon_debug_overlay.is_some()
             || self.visibility_overlay.is_some()
     }
 }

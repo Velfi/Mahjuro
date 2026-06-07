@@ -8,15 +8,18 @@ use crate::game::event_bus::GameEvent;
 use crate::game::wall_ledger::{WallLedgerFaceGroup, WallLedgerMode, read_wall_ledger};
 use crate::render::draw_cmd::{CameraParams, ShowcaseTilePlacement, UiFrame};
 use crate::render::text_effect::TextEffectId;
-use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
+use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
-use crate::ui::controller_hints::{HintStyle, back_scroll_footer_row, push_inline_hint_rows};
+use crate::ui::controller_hints::{
+    HintStyle, back_scroll_footer_row, push_screen_footer_hint, screen_footer_reserve,
+};
 use crate::ui::focus_nav;
 use crate::ui::input::UiAction;
 use crate::ui::widget::{self, PLAIN_TEXT_LINE_STEP_MUL};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
+use super::header_chrome::{HeaderChromeMetrics, HeaderTitleLayout};
 use super::{BackgroundId, DrawCtx, OverlayRequest, SceneBehavior, SceneTransition, UpdateCtx};
 
 const DRAWN_BRIGHTNESS: f32 = 0.32;
@@ -26,7 +29,7 @@ const GRID_TOP_PAD_FRAC: f32 = 0.014;
 /// Breathing room below the flowers row inside the scroll panel.
 const GRID_BOTTOM_PAD_FRAC: f32 = 0.028;
 /// Bottom band of each grid cell reserved for the drawable/total counter.
-const CELL_COUNTER_BAND_FRAC: f32 = 0.22;
+const CELL_COUNTER_BAND_FRAC: f32 = 0.28;
 /// Inset from the top of the tile band so tiles sit above the counter comfortably.
 const CELL_TILE_TOP_PAD_FRAC: f32 = 0.06;
 
@@ -95,7 +98,7 @@ impl WallLedgerScene {
     }
 
     fn flat_items(&self, w: f32, h: f32) -> Vec<FlatItem<LedgerNav>> {
-        let (back, _) = header_chrome(w, h);
+        let back = HeaderChromeMetrics::from_window(w, h).back_rect_left();
         vec![FlatItem::new(LedgerNav::Back.id(), back, LedgerNav::Back)]
     }
 
@@ -108,16 +111,6 @@ impl WallLedgerScene {
         let t = (dt * 12.0).clamp(0.0, 1.0);
         self.scroll_px += (self.target_scroll_px - self.scroll_px) * t;
     }
-}
-
-fn header_chrome(window_w: f32, window_h: f32) -> ([f32; 4], f32) {
-    let ui = (window_w / 1920.0).min(window_h / 1080.0).clamp(0.55, 1.35);
-    let margin = 48.0 * ui;
-    let header_btn_h = (window_h * 0.052).clamp(44.0, 72.0);
-    let back_w = (108.0 * (margin / 48.0)).clamp(88.0, 132.0);
-    let back = [margin, margin, back_w, header_btn_h];
-    let chrome_bottom = margin + header_btn_h + 12.0 * ui;
-    (back, chrome_bottom)
 }
 
 #[inline]
@@ -158,7 +151,6 @@ struct LedgerLayout {
     label_col_w: f32,
     slot_h: f32,
     row_gap: f32,
-    hints_h: f32,
 }
 
 fn grid_row_metrics(w: f32, h: f32, jr: f32, content_h: f32) -> (f32, f32, f32, f32, f32, f32, f32) {
@@ -195,10 +187,8 @@ fn grid_row_metrics(w: f32, h: f32, jr: f32, content_h: f32) -> (f32, f32, f32, 
     )
 }
 
-fn footer_hint_metrics(h: f32, jr: f32) -> (f32, f32) {
-    let hint_h = (34.0 * jr).clamp(28.0, 46.0);
-    let bottom_margin = (h * 0.028).max(16.0 * jr);
-    (hint_h, bottom_margin)
+fn cell_counter_font_px(slot_w: f32, window_h: f32) -> f32 {
+    typography::tier_at_most(slot_w * 0.34, window_h)
 }
 
 /// Fixed header band above the scroll panel — layout and draw must share these rects.
@@ -207,24 +197,23 @@ struct HeaderBandMetrics {
     sub_px: f32,
     title_line_h: f32,
     subtitle_line_h: f32,
+    copy_x: f32,
     title_y: f32,
     subtitle_y: f32,
-    /// Total vertical space reserved below the back-button chrome.
-    block_h: f32,
+    content_top: f32,
 }
 
 fn header_band_metrics(
-    chrome_bottom: f32,
+    back: [f32; 4],
     w: f32,
     h: f32,
     jr: f32,
     subtitle: &str,
 ) -> HeaderBandMetrics {
+    let scale = metrics::scene_scale(w, h);
     let title_px = typography::size(typography::H24, h) * jr.min(1.12);
     let sub_px = typography::size(typography::H42, h) * jr.min(1.05);
-    let title_top_gap = 6.0 * jr;
     let title_line_h = text_line_h(title_px);
-    let subtitle_gap = 4.0 * jr;
     let subtitle_line_h = widget::plain_text_block_height(
         subtitle,
         subtitle_max_w(w),
@@ -232,17 +221,23 @@ fn header_band_metrics(
         PLAIN_TEXT_LINE_STEP_MUL,
     );
     let after_subtitle_gap = 14.0 * jr;
-    let title_y = chrome_bottom + title_top_gap;
-    let subtitle_y = title_y + title_line_h + subtitle_gap;
-    let block_h = title_top_gap + title_line_h + subtitle_gap + subtitle_line_h + after_subtitle_gap;
+    let title = HeaderTitleLayout::nav_row_aligned(
+        back,
+        copy_inset_x(w),
+        (18.0 * scale).max(10.0),
+        title_px,
+        jr,
+    );
+    let content_top = title.subtitle_y + subtitle_line_h + after_subtitle_gap;
     HeaderBandMetrics {
         title_px,
         sub_px,
         title_line_h,
         subtitle_line_h,
-        title_y,
-        subtitle_y,
-        block_h,
+        copy_x: title.copy_x,
+        title_y: title.title_y,
+        subtitle_y: title.subtitle_y,
+        content_top,
     }
 }
 
@@ -253,11 +248,10 @@ fn ledger_layout(
     pack_row_count: usize,
     subtitle: &str,
 ) -> LedgerLayout {
-    let (_, chrome_bottom) = header_chrome(w, h);
-    let header = header_band_metrics(chrome_bottom, w, h, jr, subtitle);
-    let (hints_h, hints_bottom) = footer_hint_metrics(h, jr);
-    let bottom_safe = hints_bottom + hints_h;
-    let content_top = chrome_bottom + header.block_h;
+    let back = HeaderChromeMetrics::from_window(w, h).back_rect_left();
+    let header = header_band_metrics(back, w, h, jr, subtitle);
+    let bottom_safe = screen_footer_reserve(w, h);
+    let content_top = header.content_top;
     let content_h = (h - bottom_safe - content_top).max(120.0 * jr);
 
     let label_col_w = w * 0.09;
@@ -290,7 +284,6 @@ fn ledger_layout(
         label_col_w,
         slot_h,
         row_gap,
-        hints_h,
     }
 }
 
@@ -304,22 +297,20 @@ fn face_supply_counts(entries: &[crate::game::wall_ledger::WallTileEntry]) -> (u
     (drawable, total)
 }
 
-fn cell_counter_band_h(cell_h: f32, window_h: f32) -> f32 {
+fn cell_counter_band_h(cell_h: f32, counter_font_px: f32) -> f32 {
     let desired = cell_h * CELL_COUNTER_BAND_FRAC;
-    let cap = 30.0_f32.min(cell_h * 0.34);
-    let readable_min = text_line_h(typography::readable_floor_px(window_h)) + 4.0;
-    // Prefer a readable band when the cell allows it; never invert clamp bounds.
-    let lo = readable_min.min(cap);
-    let hi = cap.max(lo);
-    desired.clamp(lo, hi).max(1.0)
+    let readable_min = text_line_h(counter_font_px) + 4.0;
+    // Reserve at least the counter tier even when that steals from the tile band.
+    let max_band = (cell_h * 0.42).max(readable_min);
+    desired.max(readable_min).min(max_band).max(1.0)
 }
 
 fn cell_tile_and_counter_areas(
     cell: (f32, f32, f32, f32),
-    window_h: f32,
+    counter_font_px: f32,
 ) -> ((f32, f32, f32, f32), (f32, f32, f32, f32)) {
     let (cx, cy, cw, ch) = cell;
-    let counter_h = cell_counter_band_h(ch, window_h);
+    let counter_h = cell_counter_band_h(ch, counter_font_px);
     let tile_h = (ch - counter_h).max(1.0);
     let tile_area = (cx, cy, cw, tile_h);
     let counter_area = (cx, cy + tile_h, cw, counter_h);
@@ -356,6 +347,7 @@ fn push_cell_tile(
         outline: false,
         glow: false,
         glow_color: None,
+        outline_sel: None,
         pick_id: None,
         overlay_rect_group: None,
     });
@@ -397,6 +389,7 @@ fn push_cell_supply_counter(
         rotation_quarters: 0,
         baseline_shift_px: 0.0,
         clip_rect: clip,
+        block_vertical_align: Default::default(),
         mono: true,
     });
 }
@@ -408,14 +401,13 @@ fn push_wall_ledger_cell(
     cell: (f32, f32, f32, f32),
     run: &crate::game::run::RunState,
     counter_font_px: f32,
-    window_h: f32,
     clip: Option<[f32; 4]>,
 ) {
     let Some(entry) = representative_entry(entries) else {
         return;
     };
     let (drawable, total) = face_supply_counts(entries);
-    let (tile_area, counter_area) = cell_tile_and_counter_areas(cell, window_h);
+    let (tile_area, counter_area) = cell_tile_and_counter_areas(cell, counter_font_px);
     push_cell_tile(placements, entry, drawable, tile_area, run);
     push_cell_supply_counter(
         counter_texts,
@@ -486,6 +478,20 @@ impl SceneBehavior for WallLedgerScene {
             return Self::go_back(ctx.overlay_request);
         }
 
+        let scroll_step = layout.slot_h * 0.85;
+        for a in ctx.actions {
+            match a {
+                UiAction::FocusUp => {
+                    self.target_scroll_px = (self.target_scroll_px - scroll_step).max(0.0);
+                }
+                UiAction::FocusDown => {
+                    self.target_scroll_px =
+                        (self.target_scroll_px + scroll_step).min(max_scroll);
+                }
+                _ => {}
+            }
+        }
+
         self.tick_scroll();
         None
     }
@@ -510,14 +516,15 @@ impl SceneBehavior for WallLedgerScene {
         });
 
         let cam_scale = h / 1600.0;
-        frame.camera_override = Some(CameraParams {
+        let cam = CameraParams {
             eye: [0.0, 0.0, 2040.0 * cam_scale],
             target: [0.0, 0.0, 0.0],
             up: [0.0, 1.0, 0.0],
             fovy_deg: 45.0,
             clip_near: None,
             clip_far: None,
-        });
+        };
+        frame.camera_override = Some(cam);
         // Placement policy: `wall_ledger` is on the pixel-to-world deny list (top-down 1:1 grid).
 
         frame.scene_lighting.push_smooth(PointLight {
@@ -529,14 +536,14 @@ impl SceneBehavior for WallLedgerScene {
 
         push_back_button(&mut frame, &self.tree, w, h);
 
-        let (_, chrome_bottom) = header_chrome(w, h);
-        let header = header_band_metrics(chrome_bottom, w, h, jr, &ledger.subtitle);
+        let back = HeaderChromeMetrics::from_window(w, h).back_rect_left();
+        let header = header_band_metrics(back, w, h, jr, &ledger.subtitle);
         let subtitle_lines =
             widget::wrap_text(&ledger.subtitle, subtitle_max_w(w), header.sub_px / 0.99);
         frame.texts([
             TextLabel {
                 rect: [
-                    copy_inset_x(w),
+                    header.copy_x,
                     header.title_y,
                     w * 0.55,
                     header.title_line_h,
@@ -554,11 +561,12 @@ impl SceneBehavior for WallLedgerScene {
                 rotation_quarters: 0,
                 baseline_shift_px: 0.0,
                 clip_rect: None,
+                block_vertical_align: Default::default(),
                 mono: false,
             },
             TextLabel {
                 rect: [
-                    copy_inset_x(w),
+                    header.copy_x,
                     header.subtitle_y,
                     subtitle_max_w(w),
                     header.subtitle_line_h,
@@ -576,6 +584,7 @@ impl SceneBehavior for WallLedgerScene {
                 rotation_quarters: 0,
                 baseline_shift_px: 0.0,
                 clip_rect: None,
+                block_vertical_align: Default::default(),
                 mono: false,
             },
         ]);
@@ -611,8 +620,8 @@ impl SceneBehavior for WallLedgerScene {
         let slot_w = layout.grid_w / 9.0;
 
         let label_px = typography::tier_at_most(layout.label_col_w * 0.92, h);
-        let counter_band = cell_counter_band_h(layout.slot_h, h);
-        let counter_px = typography::tier_at_most(counter_band * 0.88, h);
+        let counter_px = cell_counter_font_px(slot_w, h);
+        let counter_band = cell_counter_band_h(layout.slot_h, counter_px);
         let label_line_h = text_line_h(label_px);
         let tile_band_h = (layout.slot_h - counter_band).max(1.0);
         for (row_idx, label) in ROW_LABELS.iter().enumerate() {
@@ -642,6 +651,7 @@ impl SceneBehavior for WallLedgerScene {
                 rotation_quarters: 0,
                 baseline_shift_px: 0.0,
                 clip_rect: None,
+                block_vertical_align: Default::default(),
                 mono: false,
             }]);
         }
@@ -664,7 +674,6 @@ impl SceneBehavior for WallLedgerScene {
                     *slot,
                     ctx.run,
                     counter_px,
-                    h,
                     cell_clip,
                 );
             }
@@ -688,6 +697,7 @@ impl SceneBehavior for WallLedgerScene {
                     rotation_quarters: 0,
                     baseline_shift_px: 0.0,
                     clip_rect: Some(clip),
+                    block_vertical_align: Default::default(),
                     mono: false,
                 }]);
             }
@@ -708,7 +718,6 @@ impl SceneBehavior for WallLedgerScene {
                         cell,
                         ctx.run,
                         counter_px,
-                        h,
                         cell_clip,
                     );
                 }
@@ -722,12 +731,12 @@ impl SceneBehavior for WallLedgerScene {
             frame.texts(counter_texts);
         }
 
-        let (_, hints_bottom) = footer_hint_metrics(h, jr);
-        let hints_y = h - hints_bottom - layout.hints_h;
-        let hint_style = HintStyle::standard(h);
-        let hint_rect = [0.0, hints_y, w, layout.hints_h];
-        let hint_row = back_scroll_footer_row(ctx.input_mode);
-        push_inline_hint_rows(&mut frame, &ctx, &[hint_rect], &[hint_row], hint_style);
+        push_screen_footer_hint(
+            &mut frame,
+            &ctx,
+            back_scroll_footer_row(ctx.input_mode),
+            HintStyle::standard(w, h),
+        );
 
         frame
     }
@@ -768,7 +777,7 @@ fn pack_display_rows(groups: &[WallLedgerFaceGroup]) -> Vec<Vec<&WallLedgerFaceG
 
 fn push_back_button(frame: &mut UiFrame, tree: &TreeState, w: f32, h: f32) {
     let scale = (w.min(h)) / 600.0;
-    let (back, _) = header_chrome(w, h);
+    let back = HeaderChromeMetrics::from_window(w, h).back_rect_left();
     let focused = tree.focused() == Some(LedgerNav::Back.id());
     let mut nav_quads = Vec::new();
     let mut nav_texts = Vec::new();

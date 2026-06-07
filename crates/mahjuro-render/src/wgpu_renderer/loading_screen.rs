@@ -282,6 +282,7 @@ pub fn append_splash_frame(
             source: ImageQuadSource::Asset {
                 path: LOADING_LOGO_ASSET,
             },
+            clip_rect: None,
         }]);
     }
 

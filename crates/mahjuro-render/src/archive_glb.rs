@@ -13,10 +13,9 @@
 //!   section tabs (meshes draw; hit rects project mesh AABBs like shop `exit_btn`).
 //! - `btn_main_menu`, `btn_switch_save` — title-bar chrome.
 //! - `btn_page_left`, `btn_page_right` — cabinet page step (hidden at first/last page).
-//! - `section_buttons_left_bound` / `section_buttons_right_bound` — legacy bounds (collision only when present).
 //! - `archive_spawn_focused_item` — large featured / inspect anchor.
 //!
-//! **Description copy:** name/body text is **CPU-rasterized** in [`ArchiveScene`](../../scenes/collection.rs)
+//! **Description copy:** name/body text is **CPU-rasterized** in [`ArchiveScene`](../../src/scenes/archive.rs)
 //! into the archive decal texture (see `sync_archive_description_decal_texture`).
 //! [`archive_description_sign_use_left_for_ref_x`] picks the side (cursor X in
 //! [`crate::ui::input::InputMode::Cursor`]; projected focused-item X in keyboard / controller mode);
@@ -41,8 +40,6 @@ pub const SIGN_DESCRIPTION_LEFT: &str = "sign_description_left";
 pub const SIGN_DESCRIPTION_RIGHT: &str = "sign_description_right";
 pub const INSPECT_PLAQUE: &str = "inspect_plaque";
 pub const PLAQUE_BACKING: &str = "plaque_backing";
-pub const SECTION_BUTTONS_LEFT_BOUND: &str = "section_buttons_left_bound";
-pub const SECTION_BUTTONS_RIGHT_BOUND: &str = "section_buttons_right_bound";
 pub const ARCHIVE_SPAWN_FOCUSED_ITEM: &str = "archive_spawn_focused_item";
 
 pub const BTN_RELICS_TAB: &str = "btn_relics_tab";
@@ -281,12 +278,7 @@ fn is_archive_marker_name(name: &str) -> bool {
     is_archive_button_node(name)
         || matches!(
             name,
-            SIGN_DESCRIPTION_LEFT
-                | SIGN_DESCRIPTION_RIGHT
-                | INSPECT_PLAQUE
-                | SECTION_BUTTONS_LEFT_BOUND
-                | SECTION_BUTTONS_RIGHT_BOUND
-                | ARCHIVE_SPAWN_FOCUSED_ITEM
+            SIGN_DESCRIPTION_LEFT | SIGN_DESCRIPTION_RIGHT | INSPECT_PLAQUE | ARCHIVE_SPAWN_FOCUSED_ITEM
         )
         || is_archive_spawn_item_name(name)
 }
@@ -306,12 +298,7 @@ impl RoomEnvWalkHooks for ArchiveRoomWalkHooks {
         ) || is_archive_button_node(name)
         {
             RoomMeshPolicy::EnvironmentDraw
-        } else if matches!(
-            name,
-            SECTION_BUTTONS_LEFT_BOUND | SECTION_BUTTONS_RIGHT_BOUND
-        ) || is_archive_spawn_item_name(name)
-            || name == ARCHIVE_SPAWN_FOCUSED_ITEM
-        {
+        } else if is_archive_spawn_item_name(name) || name == ARCHIVE_SPAWN_FOCUSED_ITEM {
             RoomMeshPolicy::SkipDrawCollisionIfMarker
         } else {
             RoomMeshPolicy::EnvironmentDraw
@@ -330,7 +317,7 @@ pub fn load_archive_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
         "archive.glb has no scenes",
         &ArchiveRoomWalkHooks,
     )?;
-    // Section bounds (when present) keep collision only; tab/chrome buttons draw like shop controls.
+    // Spawn anchors stay collision-only; tab/chrome buttons draw like shop controls.
     Ok(cpu)
 }
 

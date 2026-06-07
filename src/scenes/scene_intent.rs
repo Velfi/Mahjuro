@@ -7,6 +7,7 @@ use crate::game::engine::GameEngine;
 use crate::game::run::RunState;
 use crate::persistence::{self, ResumeScene, TileMaterial};
 use crate::render::scene_keys;
+#[cfg(feature = "game")]
 use crate::scene_transition::SceneTag;
 use mahjuro_types::GameOverReason;
 
@@ -20,7 +21,7 @@ use crate::core::progression::PlayerProgress;
 /// `None` = stay in current scene; `Some(intent)` = fade out, then resolve at black.
 pub type SceneTransition = Option<SceneIntent>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SceneIntent {
     MainMenu,
     Archive,
@@ -55,7 +56,8 @@ pub struct SceneResolveCtx<'a> {
 }
 
 impl SceneIntent {
-    pub fn scene_tag(&self) -> SceneTag {
+    #[cfg(feature = "game")]
+    pub(crate) fn scene_tag(&self) -> SceneTag {
         use SceneTag::*;
         match self {
             Self::MainMenu => MainMenu,

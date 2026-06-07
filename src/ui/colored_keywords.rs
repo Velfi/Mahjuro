@@ -7,6 +7,9 @@
 //! Match is ASCII case-insensitive. **Longest** needle in
 //! [`COLORED_KEYWORD_TABLE`](crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE)
 //! wins; each entry maps to a [`color::keyword`](crate::render::theme::color::keyword) tint.
+//! The proper noun **The House** is a two-word phrase (`The` + `House`) tinted
+//! crimson with the score-pop polychrome shader ([`TextEffectId::Polychrome`]).
+//! **The Moon** uses twilight polychrome ([`TextEffectId::MoonPolychrome`]).
 //!
 //! 3D cascade labels and streaming score popups reuse `LAPIS` / `RUBY` /
 //! `RELIC_GOLD` / `PARCHMENT` for chips, mult, gold, and final totals — see
@@ -17,6 +20,7 @@
 //! (`glossary_tint: true`) instead of this module’s plain-text wrappers.
 
 use crate::render::decal::{load_mono_font, load_ui_font, load_ui_font_italic};
+use crate::render::text_effect::TextEffectId;
 use crate::render::theme::color;
 #[allow(unused_imports)] // Re-exported for API parity; table lives in `vocabulary_colors`.
 pub use crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE;
@@ -35,6 +39,10 @@ pub const COLORED_ROW_LINE_STEP_MUL: f32 = 1.4;
 
 /// Dark stroke for glossary keyword tints on light panel fills (e.g. mint "Play" on white).
 pub const KEYWORD_OUTLINE_COLOR: [f32; 4] = color::WALNUT_INK;
+/// **The House** polychrome — crisp black rim so gold/crimson bands read on dark UI.
+pub const HOUSE_OUTLINE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+/// **The Moon** polychrome — twilight field rim so moonlight bands read on dark UI.
+pub const MOON_OUTLINE_COLOR: [f32; 4] = color::keyword::MOON_OUTLINE;
 
 #[inline]
 pub fn keyword_is_tinted(segment_color: [f32; 4], default_color: [f32; 4]) -> bool {
@@ -42,8 +50,29 @@ pub fn keyword_is_tinted(segment_color: [f32; 4], default_color: [f32; 4]) -> bo
 }
 
 #[inline]
-fn keyword_outline_offsets(font_px: f32) -> [(f32, f32); 8] {
-    let d = (font_px * 0.055).clamp(1.0, 2.0);
+fn keyword_outline_color(segment_color: [f32; 4]) -> [f32; 4] {
+    if crate::render::vocabulary_colors::is_house_keyword_color(segment_color) {
+        HOUSE_OUTLINE_COLOR
+    } else if crate::render::vocabulary_colors::is_moon_keyword_color(segment_color) {
+        MOON_OUTLINE_COLOR
+    } else {
+        KEYWORD_OUTLINE_COLOR
+    }
+}
+
+#[inline]
+fn proper_noun_polychrome_outline(segment_color: [f32; 4]) -> bool {
+    crate::render::vocabulary_colors::is_house_keyword_color(segment_color)
+        || crate::render::vocabulary_colors::is_moon_keyword_color(segment_color)
+}
+
+#[inline]
+fn keyword_outline_offsets(font_px: f32, house: bool) -> [(f32, f32); 8] {
+    let d = if house {
+        (font_px * 0.068).clamp(1.5, 2.5)
+    } else {
+        (font_px * 0.055).clamp(1.0, 2.0)
+    };
     [
         (-d, 0.0),
         (d, 0.0),
@@ -65,11 +94,13 @@ pub fn push_keyword_label(
 ) {
     let font_px = label.font_px.unwrap_or(label.rect[3]);
     if outline_tinted && keyword_is_tinted(label.color, default_color) {
-        for (dx, dy) in keyword_outline_offsets(font_px) {
+        let thick = proper_noun_polychrome_outline(label.color);
+        for (dx, dy) in keyword_outline_offsets(font_px, thick) {
             let mut stroke = label.clone();
             stroke.rect[0] += dx;
             stroke.rect[1] += dy;
-            stroke.color = KEYWORD_OUTLINE_COLOR;
+            stroke.color = keyword_outline_color(label.color);
+            stroke.text_effect = TextEffectId::Flat;
             out.push(stroke);
         }
     }
@@ -175,6 +206,27 @@ pub fn push_colored_line_left(
     h
 }
 
+/// Merge a punctuation-only chunk onto the previous chunk when both share a
+/// color so raster kerning stays intact (see `colored_token_segments`).
+fn glue_same_color_trailing_punct(line: &mut Vec<(String, [f32; 4])>) {
+    let mut i = 1usize;
+    while i < line.len() {
+        if line[i].0 == " " {
+            i += 1;
+            continue;
+        }
+        if crate::render::vocabulary_colors::is_punctuation_only(&line[i].0)
+            && line[i].1 == line[i - 1].1
+            && line[i - 1].0 != " "
+        {
+            let (punct, _) = line.remove(i);
+            line[i - 1].0.push_str(&punct);
+            continue;
+        }
+        i += 1;
+    }
+}
+
 fn word_width(font: &fontdue::Font, word: &str, font_px: f32) -> f32 {
     word.chars()
         .map(|ch| font.metrics(ch, font_px).advance_width)
@@ -253,10 +305,28 @@ pub fn wrap_colored_words(
         return vec![vec![(text.to_string(), default)]];
     }
 
+    let relic_mask = crate::render::vocabulary_colors::relic_name_word_mask(&words);
+    let house_mask = crate::render::vocabulary_colors::house_name_word_mask(&words);
+
     let units: Vec<TextBreakUnit<Vec<(String, [f32; 4])>>> = words
         .iter()
-        .map(|w| {
-            let segments = colored_token_segments(w, default);
+        .enumerate()
+        .map(|(i, w)| {
+            let segments = if relic_mask[i] {
+                vec![(w.to_string(), default)]
+            } else if house_mask[i] {
+                crate::render::vocabulary_colors::colored_token_segments_tinted(
+                    w,
+                    color::keyword::HOUSE,
+                    default,
+                )
+            } else {
+                crate::render::vocabulary_colors::colored_token_segments_with_next(
+                    w,
+                    words.get(i + 1).copied(),
+                    default,
+                )
+            };
             let width = segments
                 .iter()
                 .map(|(seg, _)| word_width(font, seg, font_px))
@@ -279,6 +349,7 @@ pub fn wrap_colored_words(
                 }
                 line.extend(segments);
             }
+            glue_same_color_trailing_punct(&mut line);
             line
         })
         .collect()
@@ -426,6 +497,8 @@ fn push_tinted_segment_run(
         if italic && i + 1 == segments.len() {
             piece_w += trailing_slack;
         }
+        let text_effect =
+            crate::render::vocabulary_colors::text_effect_for_glossary_tint(*c);
         push_keyword_label(
             out,
             TextLabel {
@@ -437,6 +510,7 @@ fn push_tinted_segment_run(
                 clip_rect,
                 mono,
                 italic,
+                text_effect,
                 ..Default::default()
             },
             default_color,
@@ -447,16 +521,41 @@ fn push_tinted_segment_run(
 }
 
 fn colored_line_segments(text: &str, default: [f32; 4]) -> Vec<(String, [f32; 4])> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let relic_mask = crate::render::vocabulary_colors::relic_name_word_mask(&words);
+    let house_mask = crate::render::vocabulary_colors::house_name_word_mask(&words);
+    let moon_mask = crate::render::vocabulary_colors::moon_name_word_mask(&words);
     let mut segments = Vec::new();
-    for (wi, word) in text.split_whitespace().enumerate() {
+    for (wi, word) in words.iter().enumerate() {
         if wi > 0 {
             segments.push((" ".to_string(), default));
         }
-        segments.extend(colored_token_segments(word, default));
+        if relic_mask[wi] {
+            segments.push(((*word).to_string(), default));
+        } else if house_mask[wi] {
+            segments.extend(crate::render::vocabulary_colors::colored_token_segments_tinted(
+                word,
+                color::keyword::HOUSE,
+                default,
+            ));
+        } else if moon_mask[wi] {
+            segments.extend(crate::render::vocabulary_colors::colored_token_segments_tinted(
+                word,
+                color::keyword::MOON,
+                default,
+            ));
+        } else {
+            segments.extend(crate::render::vocabulary_colors::colored_token_segments_with_next(
+                word,
+                words.get(wi + 1).copied(),
+                default,
+            ));
+        }
     }
     if segments.is_empty() && !text.is_empty() {
         segments.push((text.to_string(), default));
     }
+    glue_same_color_trailing_punct(&mut segments);
     segments
 }
 
@@ -590,6 +689,68 @@ mod tests {
         let line_h = 20.0;
         let h = colored_line_block_height("foo bar", 800.0, line_h, [1.0; 4]);
         assert!((h - colored_row_line_step(line_h)).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_house_phrase_gets_crimson_polychrome() {
+        let text = "Vital to beating The House.";
+        let line_h = 22.0;
+        let default = color::CHAMPAGNE;
+        let mut labels = Vec::new();
+        push_colored_line_left(&mut labels, 0.0, 0.0, 400.0, line_h, text, default);
+        let house_tinted: Vec<_> = labels
+            .iter()
+            .filter(|l| l.color == color::keyword::HOUSE)
+            .collect();
+        let words: Vec<&str> = house_tinted.iter().map(|l| l.text.as_str()).collect();
+        assert!(words.contains(&"The"));
+        assert!(words.contains(&"House"));
+        for l in house_tinted {
+            assert_eq!(l.text_effect, TextEffectId::Polychrome);
+        }
+        let strokes: Vec<_> = labels
+            .iter()
+            .filter(|l| l.color == HOUSE_OUTLINE_COLOR)
+            .collect();
+        assert!(
+            strokes.len() >= 8,
+            "expected black outline strokes around House tokens"
+        );
+        for s in strokes {
+            assert_eq!(s.text_effect, TextEffectId::Flat);
+        }
+    }
+
+    #[test]
+    fn melds_intro_punct_has_no_space_before_comma() {
+        let text = "Melds are small tile groups — pairs, sequences, triplets, and kongs.";
+        let line_h = 28.0 / 0.99;
+        let default = color::PARCHMENT;
+        for max_w in [200.0, 300.0, 400.0, 800.0] {
+            let lines = wrap_colored_words(text, max_w, line_h, default, false);
+            for (li, line) in lines.iter().enumerate() {
+                let rendered: String = line.iter().map(|(s, _)| s.as_str()).collect();
+                assert!(
+                    !rendered.contains(" ,"),
+                    "space before comma at width {max_w} line {li}: {rendered:?} chunks={line:?}"
+                );
+                assert!(
+                    !rendered.contains(" ."),
+                    "space before period at width {max_w} line {li}: {rendered:?}"
+                );
+            }
+        }
+        let text2 = "Valid melds can be played into your structure.";
+        for max_w in [200.0, 300.0, 400.0, 800.0] {
+            let lines = wrap_colored_words(text2, max_w, line_h, default, false);
+            for line in &lines {
+                let rendered: String = line.iter().map(|(s, _)| s.as_str()).collect();
+                assert!(
+                    !rendered.contains(" ."),
+                    "space before period at width {max_w}: {rendered:?} chunks={line:?}"
+                );
+            }
+        }
     }
 
     #[test]

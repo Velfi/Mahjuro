@@ -24,8 +24,8 @@ pub struct StructureTriggerMeta {
     pub inject_chicken_if_no_yaku: bool,
 }
 
-/// Sum of tile point values banked in structure — exposed for tier HUD.
-pub fn banked_meld_chips(tiles: &[Tile], sets: &[DetectedMeld]) -> i32 {
+/// Sum of tile point values played into structure — exposed for tier HUD.
+pub fn played_meld_chips(tiles: &[Tile], sets: &[DetectedMeld]) -> i32 {
     sets.iter()
         .flat_map(|s| s.tile_ids.iter())
         .filter_map(|id| tiles.iter().find(|t| t.id == *id))

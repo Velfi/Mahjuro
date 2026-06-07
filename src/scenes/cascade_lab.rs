@@ -1426,6 +1426,7 @@ impl CascadeLabScene {
                             user: 0,
                         },
                         source: ImageQuadSource::Relic(def.id),
+                        clip_rect: None,
                     }]);
                     frame.text(TextLabel {
                         rect: [
@@ -1565,6 +1566,7 @@ impl CascadeLabScene {
                             user: 0,
                         },
                         source: ordeal_icon_source(kind),
+                        clip_rect: None,
                     }]);
                     frame.text(TextLabel {
                         rect: [
@@ -2014,7 +2016,7 @@ impl SceneBehavior for CascadeLabScene {
             input_mode,
             glyphs,
             back_footer_row(input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
 
         frame

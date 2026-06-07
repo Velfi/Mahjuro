@@ -172,6 +172,54 @@ impl MarqueeSelect {
         }
         (added, removed)
     }
+
+    /// Like [`Self::apply`], but newly selected slots stop once `max_selected`
+    /// would be exceeded. Deselections inside the sweep still apply.
+    pub fn apply_capped(&self, selected: &mut [bool], max_selected: usize) -> (u32, u32) {
+        let lo = self.start_slot.min(self.current_slot);
+        let hi = self.start_slot.max(self.current_slot);
+        let mut desired: Vec<bool> = selected
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let snap = self.snapshot.get(i).copied().unwrap_or(false);
+                if i >= lo && i <= hi {
+                    !snap
+                } else {
+                    snap
+                }
+            })
+            .collect();
+
+        let mut sel_count = desired.iter().filter(|&&s| s).count();
+        if sel_count > max_selected {
+            let trim_order: Vec<usize> = if self.current_slot >= self.start_slot {
+                (lo..=hi).rev().collect()
+            } else {
+                (lo..=hi).collect()
+            };
+            for i in trim_order {
+                let snap = self.snapshot.get(i).copied().unwrap_or(false);
+                if !snap && desired[i] && sel_count > max_selected {
+                    desired[i] = false;
+                    sel_count -= 1;
+                }
+            }
+        }
+
+        let mut added = 0u32;
+        let mut removed = 0u32;
+        for (i, slot) in selected.iter_mut().enumerate() {
+            let next = desired.get(i).copied().unwrap_or(*slot);
+            if next && !*slot {
+                added += 1;
+            } else if !next && *slot {
+                removed += 1;
+            }
+            *slot = next;
+        }
+        (added, removed)
+    }
 }
 
 pub struct InputState {
@@ -228,6 +276,8 @@ pub struct InputState {
     pub item_inspect_zoom_triggers: f32,
     /// Right stick vertical axis used for list/pane scroll scenes (`-1..1`).
     pub right_stick_scroll_axis: f32,
+    /// Right stick horizontal axis for horizontal scroll panes (`-1..1`).
+    pub right_stick_scroll_axis_x: f32,
     /// Left stick vertical axis used for list/pane scroll on run-end screens (`-1..1`).
     pub left_stick_scroll_axis: f32,
     /// Controller family for on-screen button prompts (from USB vendor / name).
@@ -278,6 +328,7 @@ impl InputState {
             shop_storeroom_orbit_stick: (0.0, 0.0),
             item_inspect_zoom_triggers: 0.0,
             right_stick_scroll_axis: 0.0,
+            right_stick_scroll_axis_x: 0.0,
             left_stick_scroll_axis: 0.0,
             gamepad_style: GamepadStyle::default(),
             #[cfg(any(feature = "game", feature = "headless-screenshot"))]
@@ -399,7 +450,7 @@ impl InputState {
             // **Q** / **E** = gamepad West / North (see [`UiAction::WestFacePress`], [`UiAction::NorthFacePress`]).
             Scancode::E => actions.push(UiAction::NorthFacePress),
             Scancode::Q => actions.push(UiAction::WestFacePress),
-            // Glossary / help — `?`, `/`, `F1`; controller Select / View / −
+            // Glossary / help — `?` (Shift+/), `/`, `F1`; controller Select / View / −
             // (`GpButton::Back`, touchpad click, PS5 Create) via [`UiAction::Help`].
             Scancode::Slash | Scancode::F1 => actions.push(UiAction::Help),
             _ => {}
@@ -561,6 +612,30 @@ mod tests {
         let mut sel = vec![false; 5];
         marquee(4, 1, vec![false; 5]).apply(&mut sel);
         assert_eq!(sel, vec![false, true, true, true, true]);
+    }
+
+    #[test]
+    fn capped_marquee_stops_at_max() {
+        let mut sel = vec![true; 5];
+        let mut m = marquee(0, 4, sel.clone());
+        m.apply_capped(&mut sel, 5);
+        assert_eq!(sel, vec![false, false, false, false, false]);
+
+        let mut sel = vec![false; 8];
+        let mut m = marquee(0, 6, vec![false; 8]);
+        m.apply_capped(&mut sel, 5);
+        assert_eq!(sel.iter().filter(|&&s| s).count(), 5);
+        assert!(sel[0] && sel[1] && sel[2] && sel[3] && sel[4]);
+        assert!(!sel[5] && !sel[6]);
+    }
+
+    #[test]
+    fn capped_marquee_still_deselects_when_full() {
+        let snapshot = vec![true, true, true, true, true, false, false];
+        let mut sel = snapshot.clone();
+        let mut m = marquee(0, 2, snapshot);
+        m.apply_capped(&mut sel, 5);
+        assert_eq!(sel, vec![false, false, false, true, true, false, false]);
     }
 
     #[test]

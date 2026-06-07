@@ -565,6 +565,10 @@
         const t = el.tagName.toLowerCase();
         if (t === "b" || t === "strong") b = true;
         if (t === "i" || t === "em") i = true;
+        const block = t === "div" || t === "p";
+        if (block && chunks.length > 0) {
+          flushText("\n", b, i);
+        }
         for (const c of el.childNodes) walk(c, b, i);
       }
       for (const c of root.childNodes) walk(c, false, false);

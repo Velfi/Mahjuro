@@ -12,7 +12,7 @@ Mahjuro takes the tile-matching beauty of mahjong and reimagines it as a rogueli
 
 Each run is a series of **antes**. Each ante has three **blinds** with a score target you must beat before you run out of **plays** and **discards**.
 
-During a blind you draw tiles, group them into **melds** (pairs, sequences, triplets, kongs), and **play** those melds into **structure** — your bank for the round. **Cash In** scores everything in structure at once as **chips × multiplier**. Nothing counts toward the target until you cash in.
+During a blind you draw tiles, group them into **melds** (pairs, sequences, triplets, kongs), and **play** those melds into **structure** for the round. **Cash In** scores everything in structure at once as **chips × multiplier**. Nothing counts toward the target until you cash in.
 
 Between blinds, visit the **shop** for **relics** (persistent run upgrades), **zodiac cards**, and **talismans**. Relics stack and interact; yaku and dora add big bonuses; boss blinds rewrite the rules.
 

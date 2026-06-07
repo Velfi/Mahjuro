@@ -5,6 +5,7 @@ use crate::game::event_bus::GameEvent;
 use crate::persistence;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, typography};
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{
@@ -47,7 +48,7 @@ impl TutorialSummaryScene {
         let btn_w = (200.0 * scale).min(w * 0.38).max(140.0);
         let btn_h = (44.0 * scale).max(32.0);
         let gap = 16.0 * scale;
-        let y = h - screen_footer_reserve(h) - btn_h - 28.0 * scale;
+        let y = h - screen_footer_reserve(w, h) - btn_h - 28.0 * scale;
         let pair_w = btn_w * 2.0 + gap;
         let start_x = (w - pair_w) * 0.5;
         vec![
@@ -100,7 +101,7 @@ impl SceneBehavior for TutorialSummaryScene {
         }
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, mut ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let scale = (w / 800.0).min(h / 600.0).max(0.5);
@@ -117,7 +118,7 @@ impl SceneBehavior for TutorialSummaryScene {
             "You reached the finale but faltered against The Iconoclast. Perhaps you'll fare better next time."
         };
         let bullets = [
-            "Bank melds to your structure to form yaku. Cash in your structure to score (chips × mult).",
+            "Play melds into your structure to form yaku. Cash in your structure to score (chips × mult).",
             "Discarding tiles is essential to building large structures and scoring big.",
             "Any time during gameplay: open the Guide book on the table for a review of mechanics, melds, and yaku.",
             "Full Hand and Chiitoitsu are good yaku to memorize first.",
@@ -191,7 +192,7 @@ impl SceneBehavior for TutorialSummaryScene {
             subtitle,
             subtitle_w,
             subtitle_font,
-            true,
+            GlossaryMode::Prose,
             color::PARCHMENT,
         );
         widget::push_text_block(
@@ -203,7 +204,7 @@ impl SceneBehavior for TutorialSummaryScene {
                 color: color::PARCHMENT,
                 padding: 0.0,
                 align: TextAlign::Center,
-                glossary_tint: true,
+                glossary: GlossaryMode::Prose,
             },
             h,
         );
@@ -217,7 +218,7 @@ impl SceneBehavior for TutorialSummaryScene {
                 &bullet_text,
                 bullet_w,
                 bullet_font,
-                true,
+                GlossaryMode::Prose,
                 color::STONE,
             );
             widget::push_text_block(
@@ -229,7 +230,7 @@ impl SceneBehavior for TutorialSummaryScene {
                     color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
-                    glossary_tint: true,
+                    glossary: GlossaryMode::Prose,
                 },
                 h,
             );
@@ -287,9 +288,13 @@ impl SceneBehavior for TutorialSummaryScene {
             &mut frame,
             &ctx,
             menu_footer_row(ctx.input_mode),
-            HintStyle::standard(h),
+            HintStyle::standard(w, h),
         );
         frame.window_title = "Mahjuro — Tutorial Summary".to_string();
+        ctx.stash_focus_nav_tree_flat(&self.tree, &items, |a| match a {
+            SummaryAction::Guide => "Guide".into(),
+            SummaryAction::Continue => "Continue".into(),
+        });
         frame
     }
 }

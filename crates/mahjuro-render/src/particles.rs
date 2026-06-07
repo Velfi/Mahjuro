@@ -458,8 +458,11 @@ fn segment_hit_rain_mesh(
     if !raycast::ray_segment_hits_local_aabb(lo, ld, mesh.local_min, mesh.local_max, max_t) {
         return None;
     }
-    raycast::ray_hit_trimesh_inv(&mesh.triangles, model, inv, origin, dir_unit)
-        .filter(|hit| hit.t > 1e-5 && hit.t <= max_t)
+    let hit = match mesh.accel.as_deref() {
+        Some(bvh) => bvh.segment_hit(&mesh.triangles, lo, ld, dir_unit, model, max_t),
+        None => raycast::ray_hit_trimesh_inv(&mesh.triangles, model, inv, origin, dir_unit),
+    };
+    hit.filter(|hit| hit.t > 1e-5 && hit.t <= max_t)
         .map(|hit| (origin + dir_unit * hit.t, hit.normal))
 }
 

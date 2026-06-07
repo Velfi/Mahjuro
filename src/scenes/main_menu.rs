@@ -20,13 +20,14 @@ use crate::render::scene_light_sample::{
     PunctualOccluderAabb, RainVolumetricLit, SceneLightSampleCtx,
 };
 use crate::render::theme::{color, metrics, typography};
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{
     GpuInstance, MAIN_MENU_PICK_MOON, PointLight, SpotLight, TextAlign, TextLabel,
 };
 use crate::sfx_id::SfxId;
-use crate::ui::colored_keywords;
+use crate::ui::styled_text;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
-use crate::ui::focus_nav::{self, FocusDir};
+use crate::ui::focus_nav::{self, FocusDir, FocusNavState};
 use crate::ui::input::UiAction;
 use crate::ui::tooltip;
 
@@ -324,6 +325,7 @@ pub(crate) fn scene_from_resume(
 
 pub struct MainMenuScene {
     focus: Option<HubFocus>,
+    focus_nav: FocusNavState<HubFocus>,
     last_focus_rects: RefCell<Vec<(HubFocus, [f32; 4])>>,
     cursor_pos: (f32, f32),
     last_frame: Instant,
@@ -348,6 +350,7 @@ impl MainMenuScene {
     pub fn new() -> Self {
         Self {
             focus: None,
+            focus_nav: FocusNavState::new(),
             last_focus_rects: RefCell::new(Vec::new()),
             cursor_pos: (0.0, 0.0),
             last_frame: Instant::now(),
@@ -423,11 +426,22 @@ fn push_moon_quip_bubble(
     let body_font = typography::size(typography::H28, h);
     let line_h = body_font * 1.15;
     let max_inner_w = metrics::tooltip_max_panel_px(w, h) * 0.72;
-    let inner_w = colored_keywords::colored_paragraph_preferred_width(message, line_h, max_inner_w)
+    let inner_w = styled_text::colored_paragraph_preferred_width(
+        message,
+        line_h,
+        max_inner_w,
+        GlossaryMode::Prose,
+    )
         .clamp(72.0, max_inner_w);
-    let lines =
-        colored_keywords::wrap_colored_text_multiline(message, inner_w, line_h, color::PARCHMENT, false);
-    let inner_h = colored_keywords::colored_multiline_block_height(lines.len(), line_h);
+    let lines = styled_text::wrap_colored_text_multiline(
+        message,
+        inner_w,
+        line_h,
+        color::PARCHMENT,
+        false,
+        GlossaryMode::Prose,
+    );
+    let inner_h = styled_text::colored_multiline_block_height(lines.len(), line_h);
     let panel_w = inner_w + pad * 2.0;
     let panel_h = inner_h + pad * 2.0;
     let gap = (14.0 * scale).max(10.0);
@@ -461,9 +475,9 @@ fn push_moon_quip_bubble(
     frame.overlay_quads(quads);
     frame.overlay_squircle_quads(squircles);
     let mut texts = Vec::new();
-    colored_keywords::push_colored_rows_in_width(
+    styled_text::push_colored_rows_in_width(
         &mut texts,
-        colored_keywords::ColoredRowsLayout {
+        styled_text::ColoredRowsLayout {
             text_left: panel_x + pad,
             top_y: panel_y + pad,
             inner_w,
@@ -471,6 +485,7 @@ fn push_moon_quip_bubble(
             fallback_plain: message,
             fallback_color: color::PARCHMENT,
             italic: false,
+            glossary: GlossaryMode::Prose,
         },
         &lines,
         TextAlign::Center,
@@ -502,7 +517,7 @@ impl SceneBehavior for MainMenuScene {
                 w,
                 h,
                 env_scale,
-                rain_mesh.as_ref(),
+                rain_mesh.as_deref(),
                 Some(&lighting),
             );
         }
@@ -515,6 +530,7 @@ impl SceneBehavior for MainMenuScene {
         let prev_focus = self.focus;
 
         let focus_rects = self.last_focus_rects.borrow().clone();
+        self.focus_nav.load_candidates(&focus_rects, &[]);
 
         let pointer_pick =
             if ctx.input_mode == crate::ui::input::InputMode::Cursor && !focus_rects.is_empty() {
@@ -534,18 +550,14 @@ impl SceneBehavior for MainMenuScene {
             match action {
                 UiAction::FocusUp | UiAction::FocusPrev => {
                     if let Some(cur) = self.focus
-                        && let Some(&(_, rect)) = focus_rects.iter().find(|(t, _)| *t == cur)
-                        && let Some(next) =
-                            focus_nav::pick_neighbor(rect, FocusDir::Up, &focus_rects)
+                        && let Some(next) = self.focus_nav.pick(cur, FocusDir::Up)
                     {
                         self.focus = Some(next);
                     }
                 }
                 UiAction::FocusDown | UiAction::FocusNext => {
                     if let Some(cur) = self.focus
-                        && let Some(&(_, rect)) = focus_rects.iter().find(|(t, _)| *t == cur)
-                        && let Some(next) =
-                            focus_nav::pick_neighbor(rect, FocusDir::Down, &focus_rects)
+                        && let Some(next) = self.focus_nav.pick(cur, FocusDir::Down)
                     {
                         self.focus = Some(next);
                     }
@@ -620,7 +632,7 @@ impl SceneBehavior for MainMenuScene {
         None
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, mut ctx: DrawCtx<'_>) -> UiFrame {
         let layout = ctx.layout;
         let w = layout.window_w;
         let h = layout.window_h;
@@ -772,6 +784,7 @@ impl SceneBehavior for MainMenuScene {
                     source: ImageQuadSource::Asset {
                         path: MAIN_MENU_LOGO_ASSET,
                     },
+                    clip_rect: None,
                 }]);
             }
             frame.texts(text_labels);
@@ -788,7 +801,7 @@ impl SceneBehavior for MainMenuScene {
                 &mut frame,
                 &ctx,
                 menu_footer_row(ctx.input_mode),
-                HintStyle::standard(h),
+                HintStyle::standard(w, h),
             );
         }
         frame.window_title = format!(
@@ -799,6 +812,17 @@ impl SceneBehavior for MainMenuScene {
                 env!("CARGO_PKG_VERSION")
             }
         );
+
+        if !trailer_shot {
+            let focus_rects = self.last_focus_rects.borrow().clone();
+            ctx.stash_focus_nav_graph(
+                &focus_rects,
+                &[],
+                self.focus,
+                self.focus_nav.memory(),
+                |f| format!("{f:?}"),
+            );
+        }
 
         frame
     }

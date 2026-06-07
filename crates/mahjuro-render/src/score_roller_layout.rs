@@ -116,6 +116,56 @@ pub fn score_roller_slot_layout_anchor(
     })
 }
 
+/// Screen AABB covering one score odometer bank (0 = round score, 1 = blind target).
+pub fn score_roller_bank_screen_rect(
+    window_w: f32,
+    window_h: f32,
+    cam: &CameraParams,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    pivots_doc: &[[f32; 3]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT],
+    bank: usize,
+) -> Option<[f32; 4]> {
+    if bank >= 2 {
+        return None;
+    }
+    let base = bank * GAMEPLAY_SCORE_ROLLER_BANK_DIGITS;
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    let mut count = 0usize;
+    for local in 0..GAMEPLAY_SCORE_ROLLER_BANK_DIGITS {
+        let slot = base + local;
+        if pivots_doc[slot] == [0.0, 0.0, 0.0] {
+            continue;
+        }
+        let world = score_roller_slot_world(window_h, env_height_scale, cpu, pivots_doc, slot)?;
+        let (sx, sy) = cam.project_world_to_screen(window_w, window_h, world);
+        if !sx.is_finite() || !sy.is_finite() {
+            continue;
+        }
+        min_x = min_x.min(sx);
+        min_y = min_y.min(sy);
+        max_x = max_x.max(sx);
+        max_y = max_y.max(sy);
+        count += 1;
+    }
+    if count == 0 {
+        return None;
+    }
+    let span = (max_x - min_x).max(8.0);
+    let digit_w = span / (count.saturating_sub(1).max(1) as f32);
+    let pad_x = digit_w * 0.55;
+    let pad_y = digit_w * 1.35;
+    Some([
+        min_x - pad_x,
+        min_y - pad_y,
+        (max_x - min_x) + pad_x * 2.0,
+        (max_y - min_y) + pad_y * 2.0,
+    ])
+}
+
 /// Screen anchor for the most significant score digit on the live-score roller bank.
 pub fn try_resolve_score_reel_msd_anchor(
     window_w: f32,
