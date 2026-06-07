@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::debug_overlays::{DebugVisResult, TuningResult};
 use crate::render::scene_keys;
 use crate::scene_transition::{
     DEFAULT_QUICK_SPEC, PendingSceneDestination, PostSceneTransitionCtx, SceneTag,

@@ -1,5 +1,5 @@
 // When the debug menu is gated out (release builds without
-// `MAHJURO_DEBUG_MENU=1`), only [`DebugAction`] is kept for keyboard routing.
+// `MAHJURO_DEBUG_MENU=1`), debug actions and keyboard routing are omitted.
 
 //! Native OS menubar "Debug" menu using muda.
 //!
@@ -29,19 +29,25 @@ use sdl3::keyboard::{Mod, Scancode};
 #[cfg(debug_menu_enabled)]
 use sdl3::video::Window;
 
+#[cfg(debug_menu_enabled)]
 use crate::core::ordeal::OrdealKind;
 #[cfg(debug_menu_enabled)]
 use crate::core::ordeal::{all_ordeals, final_ordeals};
+#[cfg(debug_menu_enabled)]
 use crate::core::relic::RelicId;
 #[cfg(debug_menu_enabled)]
 use crate::core::relic::all_relic_defs;
+#[cfg(debug_menu_enabled)]
 use crate::core::talisman::TalismanKind;
+#[cfg(debug_menu_enabled)]
 use crate::core::tile::Suit;
 #[cfg(debug_menu_enabled)]
 use crate::core::tile::Tile;
+#[cfg(debug_menu_enabled)]
 use crate::core::zodiac::ZodiacKind;
 
 /// Identifies which debug action was triggered.
+#[cfg(debug_menu_enabled)]
 #[derive(Clone, Debug)]
 pub enum DebugAction {
     SetLevel(u32),

@@ -34,7 +34,7 @@ mod main_cli;
 #[cfg(feature = "game")]
 #[path = "main/commands.rs"]
 mod main_commands;
-#[cfg(feature = "game")]
+#[cfg(all(feature = "game", debug_menu_enabled))]
 #[path = "main/debug_actions.rs"]
 mod main_debug_actions;
 #[cfg(feature = "game")]
@@ -117,28 +117,12 @@ use crate::ui::modal::{Modal, ModalQueue};
 #[cfg(feature = "game")]
 use sdl3::keyboard::Mod;
 
-#[cfg(feature = "game")]
-use crate::debug_menu::DebugAction;
-#[cfg(feature = "game")]
-#[cfg(debug_menu_enabled)]
+#[cfg(all(feature = "game", debug_menu_enabled))]
 use crate::debug_menu::DebugMenuBar;
-#[cfg(feature = "game")]
-use crate::debug_overlays::{
-    CameraDebugOverlay, DebugVisResult, DebugVisibilityOverlay, SfxTestOverlay, TuningOverlay,
-    TuningResult,
-};
 #[cfg(feature = "game")]
 use crate::render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
 #[cfg(feature = "game")]
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
-#[cfg(feature = "game")]
-use crate::scenes::animation_lab::AnimationLabScene;
-#[cfg(feature = "game")]
-use crate::scenes::material_viewer::MaterialViewerScene;
-#[cfg(feature = "game")]
-use crate::scenes::rumble_lab::RumbleLabScene;
-#[cfg(feature = "game")]
-use crate::scenes::transition_playground::TransitionPlaygroundScene;
 #[cfg(feature = "game")]
 use crate::scenes::{ButtonAction, DrawCtx, UpdateCtx};
 #[cfg(feature = "game")]

@@ -7,11 +7,11 @@
     <key>CFBundleDisplayName</key>
     <string>Mahjuro</string>
     <key>CFBundleIdentifier</key>
-    <string>com.mahjuro.Mahjuro.store</string>
+    <string>com.zelda-built-this.Mahjuro.store</string>
     <key>CFBundleVersion</key>
-    <string>__VERSION__</string>
+    <string>__BUILD_VERSION__</string>
     <key>CFBundleShortVersionString</key>
-    <string>__VERSION__</string>
+    <string>__SHORT_VERSION__</string>
     <key>CFBundleExecutable</key>
     <string>mahjuro</string>
     <key>CFBundleIconFile</key>
@@ -21,7 +21,9 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>LSMinimumSystemVersion</key>
-    <string>10.13</string>
+    <string>11.0</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSPrincipalClass</key>

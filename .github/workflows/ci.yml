@@ -231,7 +231,7 @@ jobs:
       matrix:
         include:
           - name: Mac App Store
-            runner: ubuntu-latest
+            runner: macos-latest
             build: cargo build --locked --no-default-features --features game,dist-mas
           - name: Microsoft Store
             runner: windows-2022

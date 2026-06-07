@@ -2420,6 +2420,7 @@ checksum = "775acb0447622b6910bd809ae3d6b84e4b718fa13d5ea0d2a42bdf76bf03d6e9"
 dependencies = [
  "block2",
  "objc2",
+ "objc2-app-kit",
  "objc2-foundation",
 ]
 

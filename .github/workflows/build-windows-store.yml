@@ -1,31 +1,38 @@
-name: Release build (Microsoft Store)
+name: Build Windows Store MSIX
 
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
-      release_tag:
-        required: true
-        type: string
+      build_number:
+        description: "4th version quad (must increase per Partner Center upload)"
+        required: false
+        default: "1"
+      sign:
+        description: "Sign with MSSTORE_SIGNING_* secrets"
+        required: false
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
+  MAHJURO_SKIP_ROOM_GI_BAKE: "1"
+  MAHJURO_SKIP_ROOM_SHADOW_BAKE: "1"
 
 permissions:
-  contents: write
+  contents: read
   actions: write
 
 jobs:
   build:
-    name: Release Microsoft Store
+    name: Package Microsoft Store MSIX
     runs-on: windows-2022
 
     env:
-      RELEASE_TAG: ${{ inputs.release_tag }}
+      MSSTORE_BUILD_NUMBER: ${{ inputs.build_number }}
 
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.release_tag }}
           lfs: false
 
       - uses: ./.github/actions/hydrate-lfs-bundle
@@ -38,7 +45,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
-          prefix-key: release-windows-store
+          prefix-key: build-windows-store
+          cache-targets: false
 
       - name: Install asset bake tools
         shell: pwsh
@@ -51,9 +59,26 @@ jobs:
           Copy-Item $exe.FullName (Join-Path $env:RUNNER_TEMP "oxipng.exe")
           Add-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP)
 
+      - name: Restore signing certificate
+        if: inputs.sign && secrets.MSSTORE_SIGNING_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "msstore-signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String("${{ secrets.MSSTORE_SIGNING_PFX_BASE64 }}"))
+          echo "MSSTORE_SIGNING_PFX=$pfx" >> $env:GITHUB_ENV
+
       - name: Package MSIX
         shell: pwsh
-        run: .\scripts\package-windows-store.ps1 -Configuration Release -Validate
+        env:
+          MSSTORE_PUBLISHER: ${{ secrets.MSSTORE_PUBLISHER }}
+          MSSTORE_SIGNING_PASSWORD: ${{ secrets.MSSTORE_SIGNING_PASSWORD }}
+        run: |
+          $args = @("-Configuration", "Release")
+          if ("${{ inputs.sign }}" -eq "true" -and $env:MSSTORE_SIGNING_PFX) {
+            $args += "-Sign"
+          }
+          $args += "-Validate"
+          .\scripts\package-windows-store.ps1 @args
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

@@ -1174,7 +1174,7 @@ pub fn wrap_colored_words(
     let units: Vec<TextBreakUnit<Vec<(String, [f32; 4])>>> = words
         .iter()
         .enumerate()
-        .map(|(i, w)| {
+        .map(|(i, _w)| {
             let segments = glossary_word_segments(&words, i, glossary, default);
             let width = segments
                 .iter()
@@ -1318,7 +1318,7 @@ fn push_tinted_segment_run(
 fn colored_line_segments(text: &str, default: [f32; 4], glossary: GlossaryMode) -> Vec<(String, [f32; 4])> {
     let words: Vec<&str> = text.split_whitespace().collect();
     let mut segments = Vec::new();
-    for (wi, word) in words.iter().enumerate() {
+    for (wi, _word) in words.iter().enumerate() {
         if wi > 0 {
             segments.push((" ".to_string(), default));
         }

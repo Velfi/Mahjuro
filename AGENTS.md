@@ -16,6 +16,8 @@ Short pointers to deeper context. Read the linked file before working in the are
 - [Room shadows & baking](docs/agents/room-shadows-and-baking.md) — offline `.msh` / `.mgi`, live prop shadows, rebake commands, headless tools, relic RLC1.
 - [macOS dylibs / app bundle](docs/agents/macos-dylibs.md) — `libsteam_api.dylib`, static SDL3, `@loader_path` / `@rpath`, CI vs `package-macos.sh`.
 - [Multi-store distribution](docs/agents/distribution.md) — `dist-steam` / `dist-mas` / `dist-msstore`, achievements, sandbox I/O, packaging.
+- [Mac App Store release](docs/agents/macos-app-store.md) — Connect alignment, signing, Transporter upload, review notes.
+- [Microsoft Store release](docs/agents/windows-app-store.md) — Partner Center, MSIX signing, upload.
 - [Scoring](docs/agents/scoring.md) — play / cash-in loop, melds, chips, multipliers.
 - [Blind targets](docs/agents/blind-targets.md) — formula, multipliers, season scaling, current values.
 - [Gameplay table (`gameplay.glb`)](docs/agents/gameplay-glb.md) — authored room draw + spawn empties; required at runtime.

@@ -617,12 +617,12 @@ mod tests {
     #[test]
     fn capped_marquee_stops_at_max() {
         let mut sel = vec![true; 5];
-        let mut m = marquee(0, 4, sel.clone());
+        let m = marquee(0, 4, sel.clone());
         m.apply_capped(&mut sel, 5);
         assert_eq!(sel, vec![false, false, false, false, false]);
 
         let mut sel = vec![false; 8];
-        let mut m = marquee(0, 6, vec![false; 8]);
+        let m = marquee(0, 6, vec![false; 8]);
         m.apply_capped(&mut sel, 5);
         assert_eq!(sel.iter().filter(|&&s| s).count(), 5);
         assert!(sel[0] && sel[1] && sel[2] && sel[3] && sel[4]);
@@ -633,7 +633,7 @@ mod tests {
     fn capped_marquee_still_deselects_when_full() {
         let snapshot = vec![true, true, true, true, true, false, false];
         let mut sel = snapshot.clone();
-        let mut m = marquee(0, 2, snapshot);
+        let m = marquee(0, 2, snapshot);
         m.apply_capped(&mut sel, 5);
         assert_eq!(sel, vec![false, false, false, true, true, false, false]);
     }
