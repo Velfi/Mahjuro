@@ -55,7 +55,7 @@ pub fn require_all_at_startup() -> anyhow::Result<()> {
 }
 
 fn require_showcase_decal_atlases() -> anyhow::Result<()> {
-    for tileset in mahjuro_assets::asset_path::list_player_tilesets() {
+    for tileset in mahjuro_assets::asset_path::list_builtin_player_tilesets() {
         let path = crate::showcase_decal_atlas::baked_atlas_asset_path(&tileset);
         anyhow::ensure!(
             crate::showcase_decal_atlas::baked_showcase_decal_atlas_available(&tileset),

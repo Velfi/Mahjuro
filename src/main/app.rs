@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use crate::steam::DistributionBackend;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 use crate::game::scene_look_tuning::SceneLookTuningSet;
@@ -160,7 +161,7 @@ impl crate::App {
             })
     }
 
-    pub(crate) fn new(steam: crate::steam::SteamClient) -> Self {
+    pub(crate) fn new(dist: crate::steam::DistributionClient) -> Self {
         let settings = {
             let _scope = crate::startup_profile::scope("app.new.settings");
             crate::persistence::load_settings()
@@ -190,8 +191,8 @@ impl crate::App {
         run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
         run.apply_progression(&progress);
         {
-            let _scope = crate::startup_profile::scope("app.new.steam_sync");
-            steam.sync_profile_stats(&progress);
+            let _scope = crate::startup_profile::scope("app.new.dist_sync");
+            dist.sync_profile_stats(&progress);
         }
         let mut audio = {
             let _scope = crate::startup_profile::scope("app.new.audio_new");
@@ -262,7 +263,7 @@ impl crate::App {
             cascade_tuning: crate::game::cascade::CascadeTuning::default(),
             scene_look,
             modifiers: Mod::NOMOD,
-            steam,
+            dist,
             archive_last_seen_run_len: settings.archive_last_seen_run_len,
             cpu_profiler: crate::render::cpu_profiler::CpuProfiler::new(),
             profile_saver: crate::persistence::ProfileSaver::spawn(),
@@ -390,7 +391,7 @@ impl crate::App {
         self.run
             .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
         self.run.apply_progression(&self.progress);
-        self.steam.sync_profile_stats(&self.progress);
+        self.dist.sync_profile_stats(&self.progress);
         // Persist the active profile choice.
         settings.active_profile = new_index;
         let _ = crate::persistence::save_settings(&settings);

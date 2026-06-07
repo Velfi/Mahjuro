@@ -92,7 +92,7 @@ impl App {
     /// Called after incrementing the counter on run victory or defeat.
     fn sync_runs_completed_achievements(&mut self) {
         if self.progress.runs_completed >= 10 {
-            self.steam
+            self.dist
                 .unlock_achievement(crate::steam::Achievement::TenRunsPlayed);
         }
     }
@@ -153,8 +153,8 @@ impl App {
                             self.progress.tutorial_completed = true;
                             let _ = persistence::save_profile(self.active_profile, &self.progress);
                             persistence::delete_saved_run(self.active_profile);
-                            self.steam.sync_profile_stats(&self.progress);
-                            self.steam
+                            self.dist.sync_profile_stats(&self.progress);
+                            self.dist
                                 .unlock_achievement(crate::steam::Achievement::TutorialComplete);
                             self.begin_scene_replace(
                                 SceneIntent::TutorialSummary { won: true },
@@ -193,7 +193,7 @@ impl App {
                 // First non-tutorial chamber cleared. Fires every round, but
                 // Steam's set-achievement is idempotent so the toast only
                 // shows the first time.
-                self.steam
+                self.dist
                     .unlock_achievement(crate::steam::Achievement::FirstBlindCleared);
                 // Apply the gold payout now that the scoring cascade has
                 // finished — kept deferred so the UI doesn't jump early.
@@ -243,7 +243,7 @@ impl App {
                     );
                     self.progress.record_score(self.run.round_score);
                     let level_up = self.progress.check_level_up();
-                    self.steam
+                    self.dist
                         .unlock_achievement(crate::steam::Achievement::FirstRunCompleted);
                     self.sync_runs_completed_achievements();
                     // Season ladder: crediting a full victory on this
@@ -257,7 +257,7 @@ impl App {
                         if let Some(ach) =
                             crate::steam::Achievement::for_newly_unlocked_season(season)
                         {
-                            self.steam.unlock_achievement(ach);
+                            self.dist.unlock_achievement(ach);
                         }
                     }
                     self.progress.run_history.push(
@@ -268,7 +268,7 @@ impl App {
                     );
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     persistence::delete_saved_run(self.active_profile);
-                    self.steam.sync_profile_stats(&self.progress);
+                    self.dist.sync_profile_stats(&self.progress);
 
                     if let Some(result) = level_up
                         && let Some(modal) = build_level_up_modal(&result, ww, wh)
@@ -358,7 +358,7 @@ impl App {
                 // Run is over — drop any saved-on-quit snapshot so the
                 // player isn't offered "Continue" into a finished game.
                 persistence::delete_saved_run(self.active_profile);
-                self.steam.sync_profile_stats(&self.progress);
+                self.dist.sync_profile_stats(&self.progress);
 
                 if let Some(result) = level_up
                     && let Some(modal) = build_level_up_modal(&result, ww, wh)
@@ -503,7 +503,7 @@ impl App {
         }
         let loading_hub_progress = if matches!(self.scene, Scene::Splash(_)) {
             let _g = crate::render::cpu_profiler::scope("draw_prep.loading_hub_progress");
-            renderer.splash_hub_boot_progress()
+            renderer.splash_hub_boot_progress(&self.gfx.tileset_name)
         } else {
             1.0
         };

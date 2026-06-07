@@ -66,22 +66,27 @@ pub fn show_crash_report() {
 }
 
 fn crash_log_path() -> std::path::PathBuf {
-    #[cfg(target_os = "macos")]
-    if let Some(home) = std::env::var_os("HOME") {
-        return std::path::PathBuf::from(home).join("Library/Logs/Mahjuro/crash.log");
-    }
-    #[cfg(target_os = "windows")]
-    if let Some(appdata) = std::env::var_os("LOCALAPPDATA") {
-        return std::path::PathBuf::from(appdata).join("Mahjuro\\crash.log");
-    }
-    std::env::temp_dir().join("mahjuro-crash.log")
+    mahjuro_distribution::PlatformPaths::crash_log_path()
 }
 
 // ---------------------------------------------------------------------------
 // Platform-specific dialogs
 // ---------------------------------------------------------------------------
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "dist-mas"))]
+fn show_crash_dialog(path: &std::path::Path, clipboard_ok: bool) {
+    let clip_msg = if clipboard_ok {
+        "The crash log has been copied to your clipboard."
+    } else {
+        "Could not copy to clipboard."
+    };
+    eprintln!(
+        "Mahjuro has crashed unexpectedly.\n{clip_msg}\n\nSaved to:\n{}",
+        path.display()
+    );
+}
+
+#[cfg(all(target_os = "macos", not(feature = "dist-mas")))]
 fn show_crash_dialog(path: &std::path::Path, clipboard_ok: bool) {
     let clip_msg = if clipboard_ok {
         "The crash log has been copied to your clipboard."

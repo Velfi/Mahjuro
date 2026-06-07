@@ -5,12 +5,12 @@ use super::*;
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
 pub struct Cli {
-    /// Skip Steamworks SDK initialization. Use for local dev runs when
-    /// you don't want the overlay attaching or Steam taking over the
-    /// foreground app role. Offscreen tools (`mahjuro-bake`, `mahjuro-screenshot`
-    /// in `crates/mahjuro-headless`) and bot/sweep CLIs always skip Steam regardless of
-    /// this flag.
+    /// Skip platform services (Steam / Game Center / Xbox). Alias: `--no-steam`
+    /// on Steam SKUs. Offscreen tools always skip regardless of this flag.
     #[arg(long, global = true, action = ArgAction::SetTrue)]
+    pub no_platform_services: bool,
+    /// Deprecated alias for [`Self::no_platform_services`] on Steam builds.
+    #[arg(long, global = true, action = ArgAction::SetTrue, hide = true)]
     pub no_steam: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -133,6 +133,12 @@ pub struct ForcedRelicSweepCli {
     /// runs use the same pool cap (full catalog when omitted).
     #[arg(long)]
     pub meta_depth: Option<u32>,
+}
+
+impl Cli {
+    pub fn no_platform_services(&self) -> bool {
+        self.no_platform_services || self.no_steam
+    }
 }
 
 impl BotCli {

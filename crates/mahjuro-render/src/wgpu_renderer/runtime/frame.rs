@@ -57,7 +57,7 @@ impl WgpuRenderer {
         if self.activate_cached_showcase_decal_atlas(tileset_name) {
             return;
         }
-        let atlas = crate::showcase_decal_atlas::load_showcase_decal_atlas(
+        let atlas = crate::showcase_decal_atlas::load_or_bake_showcase_decal_atlas(
             &self.device,
             &self.queue,
             tileset_name,

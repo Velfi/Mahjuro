@@ -1,9 +1,9 @@
 //! Pre-rasterized atlas for showcase tile face decals — avoids CPU raster + texture
 //! upload when tile identities churn during sorts.
 //!
-//! Offline PNGs live at `textures/tile_sets/<tileset>/showcase_decal_atlas.png`
-//! (baked by `mahjuro-bake-decal-atlases` during `cargo build`). Runtime loads
-//! those files only — there is no CPU raster fallback.
+//! Built-in tilesets ship pre-baked at
+//! `textures/tile_sets/<tileset>/showcase_decal_atlas.png`. Player mod tilesets
+//! (`mod:<name>`) runtime-bake on first use and cache under the user config dir.
 
 use rustc_hash::FxHashMap;
 
@@ -197,17 +197,30 @@ pub fn upload_showcase_decal_atlas_rgba(
     }
 }
 
-/// Returns true when the baked PNG for `tileset` is present in mounted assets.
+/// Returns true when a pre-baked showcase decal atlas is available for `tileset`.
 pub fn baked_showcase_decal_atlas_available(tileset: &str) -> bool {
+    if mahjuro_assets::tileset_mod::is_mod_tileset(tileset) {
+        return mahjuro_assets::tileset_mod::mod_showcase_cache_exists(tileset);
+    }
     mahjuro_assets::asset_path::get(&baked_atlas_asset_path(tileset)).is_some()
 }
 
-/// Decode + GPU upload from a baked atlas PNG.
-pub fn load_showcase_decal_atlas(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    tileset: &str,
-) -> anyhow::Result<ShowcaseDecalAtlasGpu> {
+fn decode_showcase_decal_png(png_bytes: &[u8], path_label: &str) -> anyhow::Result<Vec<u8>> {
+    let img = image::load_from_memory(png_bytes)
+        .map_err(|e| anyhow::anyhow!("showcase decal atlas {path_label}: decode failed: {e}"))?
+        .into_rgba8();
+    let (w, h) = img.dimensions();
+    let (ew, eh) = atlas_dimensions();
+    if w != ew || h != eh {
+        anyhow::bail!(
+            "showcase decal atlas {path_label}: expected {ew}x{eh}, got {w}x{h}; re-bake with \
+             mahjuro-bake-decal-atlases"
+        );
+    }
+    Ok(img.into_raw())
+}
+
+fn load_builtin_showcase_decal_rgba(tileset: &str) -> anyhow::Result<Vec<u8>> {
     let path = baked_atlas_asset_path(tileset);
     let file = mahjuro_assets::asset_path::get(&path).ok_or_else(|| {
         anyhow::anyhow!(
@@ -216,21 +229,61 @@ pub fn load_showcase_decal_atlas(
              `cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases`"
         )
     })?;
-    let img = image::load_from_memory(&file.data)
-        .map_err(|e| anyhow::anyhow!("showcase decal atlas {path}: decode failed: {e}"))?
-        .into_rgba8();
-    let (w, h) = img.dimensions();
-    let (ew, eh) = atlas_dimensions();
-    if w != ew || h != eh {
-        anyhow::bail!(
-            "showcase decal atlas {path}: expected {ew}x{eh}, got {w}x{h}; re-bake with \
-             mahjuro-bake-decal-atlases"
-        );
+    decode_showcase_decal_png(&file.data, &path)
+}
+
+fn bake_mod_showcase_decal_rgba(tileset: &str) -> anyhow::Result<Vec<u8>> {
+    let ui_font = crate::decal::load_ui_font().cloned();
+    let emoji_font = crate::decal::load_noto_emoji_font();
+    let rgba = rasterize_showcase_decal_atlas_rgba(
+        ui_font.as_ref(),
+        emoji_font.as_ref(),
+        Some(tileset),
+    );
+    let (w, h) = atlas_dimensions();
+    let img = image::RgbaImage::from_raw(w, h, rgba.clone()).ok_or_else(|| {
+        anyhow::anyhow!("showcase decal bake buffer size mismatch for {tileset}")
+    })?;
+    if let Some(path) = mahjuro_assets::tileset_mod::mod_showcase_cache_path(tileset) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = img.save(&path) {
+            log::warn!("failed to cache showcase decal atlas for {tileset}: {e}");
+        }
     }
+    Ok(rgba)
+}
+
+/// Load a baked showcase atlas, runtime-baking player mods when needed.
+pub fn load_or_bake_showcase_decal_atlas(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tileset: &str,
+) -> anyhow::Result<ShowcaseDecalAtlasGpu> {
+    let rgba = if mahjuro_assets::tileset_mod::is_mod_tileset(tileset) {
+        if let Some(bytes) = mahjuro_assets::tileset_mod::read_mod_showcase_cache(tileset) {
+            decode_showcase_decal_png(&bytes, &format!("mod cache for {tileset}"))?
+        } else {
+            log::info!("runtime-baking showcase decal atlas for mod tileset {tileset}");
+            bake_mod_showcase_decal_rgba(tileset)?
+        }
+    } else {
+        load_builtin_showcase_decal_rgba(tileset)?
+    };
     Ok(upload_showcase_decal_atlas_rgba(
         device,
         queue,
         &format!("showcase-decal-atlas-{tileset}"),
-        img.as_raw(),
+        &rgba,
     ))
+}
+
+/// Decode + GPU upload from a baked atlas PNG.
+pub fn load_showcase_decal_atlas(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tileset: &str,
+) -> anyhow::Result<ShowcaseDecalAtlasGpu> {
+    load_or_bake_showcase_decal_atlas(device, queue, tileset)
 }

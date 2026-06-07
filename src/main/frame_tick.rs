@@ -251,7 +251,7 @@ impl App {
                     // beat lands with weight.
                     self.audio.play_sfx(audio::SfxId::ScoreFinal);
                     self.audio.play_sfx(audio::SfxId::ScoreCrescendo);
-                    self.steam
+                    self.dist
                         .unlock_achievement(crate::steam::Achievement::FirstStructure);
                     if self.controller_rumble_active() {
                         let (weak, strong, duration_ms, gain) =
@@ -338,7 +338,7 @@ impl App {
                         .iter()
                         .all(|kind| self.progress.ordeal_times_encountered.contains_key(kind))
                     {
-                        self.steam
+                        self.dist
                             .unlock_achievement(crate::steam::Achievement::AllBossesSeen);
                     }
                 }
@@ -347,10 +347,10 @@ impl App {
                         self.audio.play_sfx(audio::SfxId::OrdealDefeated);
                         *self.progress.ordeal_times_defeated.entry(bk).or_insert(0) += 1;
                         self.mark_profile_dirty();
-                        self.steam
+                        self.dist
                             .unlock_achievement(crate::steam::Achievement::FirstOrdealDefeated);
                         if bk == crate::core::ordeal::OrdealKind::House {
-                            self.steam
+                            self.dist
                                 .unlock_achievement(crate::steam::Achievement::HouseDefeated);
                         }
                     }
@@ -377,7 +377,7 @@ impl App {
                     self.mark_profile_dirty();
                 }
                 GameEvent::AchievementUnlocked(ach) => {
-                    self.steam.unlock_achievement(ach);
+                    self.dist.unlock_achievement(ach);
                 }
                 GameEvent::TransformationSuccessorDiscovered(rid) => {
                     let _ = self.progress.note_transformation_successor_discovered(rid);
@@ -938,12 +938,12 @@ impl App {
                 r.poll_pending_texture_uploads();
             }
         }
+        let active_tileset = self.gfx.tileset_name.clone();
         let loading_done = match &self.scene {
             // Splash stays up until showcase atlases and main_menu.glb are on the GPU.
-            Scene::Splash(_) => self
-                .renderer
-                .as_ref()
-                .is_some_and(|r| r.splash_hub_boot_ready()),
+            Scene::Splash(_) => self.renderer.as_ref().is_some_and(|r| {
+                r.splash_hub_boot_ready(&active_tileset)
+            }),
             _ => self.renderer.as_ref().is_none_or(|r| !r.is_loading()),
         };
         let tutorial_eligible =
@@ -1380,7 +1380,7 @@ impl App {
         if complete_onboarding {
             self.progress.tutorial_completed = true;
             self.mark_profile_dirty();
-            self.steam
+            self.dist
                 .unlock_achievement(crate::steam::Achievement::TutorialComplete);
         }
 
@@ -1456,7 +1456,7 @@ impl App {
                     .map(|saved| saved.run)
                     .unwrap_or_else(crate::game::run::RunState::new_demo);
                 self.run.apply_progression(&self.progress);
-                self.steam.sync_profile_stats(&self.progress);
+                self.dist.sync_profile_stats(&self.progress);
             }
         }
 

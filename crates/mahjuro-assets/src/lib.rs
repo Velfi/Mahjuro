@@ -4,3 +4,5 @@
 
 pub mod asset_path;
 pub mod asset_sources;
+pub mod atlas_toml;
+pub mod tileset_mod;

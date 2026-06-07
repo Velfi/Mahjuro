@@ -179,7 +179,7 @@ impl App {
         log::debug!("SDL shell: window + wgpu + input ready");
 
         'running: loop {
-            self.steam.run_callbacks();
+            self.dist.tick();
             if self.quit_requested {
                 break 'running;
             }
@@ -229,12 +229,12 @@ impl App {
                         renderer.poll_pending_texture_uploads();
                         did_loader_work = true;
                     }
-                    let splash_atlas_pending = matches!(self.scene, Scene::Splash(_))
-                        && !renderer.showcase_decal_atlases_baked_for_all_player_tilesets();
-                    if splash_atlas_pending {
+                    if matches!(self.scene, Scene::Splash(_)) {
                         let tileset = self.gfx.tileset_name.clone();
-                        renderer.ensure_active_showcase_decal_atlas(&tileset);
-                        did_loader_work = true;
+                        if !renderer.splash_hub_boot_ready(&tileset) {
+                            renderer.ensure_active_showcase_decal_atlas(&tileset);
+                            did_loader_work = true;
+                        }
                     }
                     if matches!(self.scene, Scene::Splash(_)) {
                         renderer.tick_splash_hub_boot();
