@@ -35,7 +35,8 @@ use super::pause_menu::PauseMenu;
 use super::tile_picker::{
     SCROLLABLE_GRID_COLS, ScrollableTilePickerConfig, ScrollableTilePickerLayout,
     apply_pick_selection_mask, camera_params, compute_decimation_reveal_layout,
-    compute_scrollable_tile_picker_layout, footer_button_rects, pick_selection_mask,
+    compute_scrollable_tile_picker_layout, footer_button_rects, grid_marquee_swept_slots,
+    pick_selection_mask,
     picker_header_chrome, picker_seal_button_rect, push_tile_picker_scrollbar,
     tile_picker_scroll_y_from_cursor, tile_picker_scrollbar,
 };
@@ -507,17 +508,23 @@ impl StairwayScene {
     fn apply_decimation_marquee(
         marquee: &mut MarqueeSelect,
         slot: usize,
-        pick_tile_ids: &[u32],
+        layout: &ScrollableTilePickerLayout<DecimationAction>,
         selected: &mut Vec<u32>,
         bus: &mut crate::game::event_bus::EventBus,
     ) {
         if slot == marquee.current_slot {
             return;
         }
-        marquee.advance_to(slot, pick_tile_ids.len());
-        let mut mask = pick_selection_mask(selected, pick_tile_ids);
-        let (added, removed) = marquee.apply_capped(&mut mask, PLAYER_PICKS);
-        apply_pick_selection_mask(selected, pick_tile_ids, &mask);
+        marquee.set_current_slot(slot);
+        let swept = grid_marquee_swept_slots(
+            marquee.start_slot,
+            marquee.current_slot,
+            SCROLLABLE_GRID_COLS,
+            &layout.sections,
+        );
+        let mut mask = pick_selection_mask(selected, &layout.pick_tile_ids);
+        let (added, removed) = marquee.apply_capped_swept(&mut mask, PLAYER_PICKS, &swept);
+        apply_pick_selection_mask(selected, &layout.pick_tile_ids, &mask);
         if added > 0 {
             bus.push(GameEvent::UiSound(SfxId::TilePlace));
         } else if removed > 0 {
@@ -873,7 +880,7 @@ impl StairwayScene {
         if let (Some(m), Some(idx)) = (self.marquee.as_mut(), marquee_slot)
             && idx != m.current_slot
         {
-            Self::apply_decimation_marquee(m, idx, &layout.pick_tile_ids, &mut selected, ctx.bus);
+            Self::apply_decimation_marquee(m, idx, &layout, &mut selected, ctx.bus);
         }
 
         let mut tree_actions: Vec<UiAction> = Vec::new();
@@ -1004,7 +1011,7 @@ impl StairwayScene {
         if let (Some(m), Some(idx)) = (self.marquee.as_mut(), marquee_slot)
             && idx != m.current_slot
         {
-            Self::apply_decimation_marquee(m, idx, &layout.pick_tile_ids, &mut selected, ctx.bus);
+            Self::apply_decimation_marquee(m, idx, &layout, &mut selected, ctx.bus);
         }
 
         if let Some(DecimationFocus::Tile(idx)) = self.focus {

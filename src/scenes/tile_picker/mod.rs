@@ -854,6 +854,63 @@ pub fn apply_pick_selection_mask(
     }
 }
 
+fn section_for_slot<'a>(
+    slot: usize,
+    sections: &'a [TilePickerSectionMeta],
+) -> Option<&'a TilePickerSectionMeta> {
+    sections.iter().find(|s| {
+        slot >= s.first_pick_index && slot < s.first_pick_index + s.pick_count
+    })
+}
+
+/// Pick slots covered by a 2D grid marquee between `start` and `current`.
+///
+/// When both endpoints share a section, selection is the axis-aligned
+/// rectangle in row-major grid coordinates. Cross-section drags fall back to
+/// the inclusive linear index span.
+pub fn grid_marquee_swept_slots(
+    start: usize,
+    current: usize,
+    cols: usize,
+    sections: &[TilePickerSectionMeta],
+) -> Vec<usize> {
+    if start == current {
+        return vec![start];
+    }
+    let cols = cols.max(1);
+    match (
+        section_for_slot(start, sections),
+        section_for_slot(current, sections),
+    ) {
+        (Some(section), Some(other)) if section.first_pick_index == other.first_pick_index => {
+            let base = section.first_pick_index;
+            let local_start = start - base;
+            let local_current = current - base;
+            let (r0, c0) = (local_start / cols, local_start % cols);
+            let (r1, c1) = (local_current / cols, local_current % cols);
+            let r_lo = r0.min(r1);
+            let r_hi = r0.max(r1);
+            let c_lo = c0.min(c1);
+            let c_hi = c0.max(c1);
+            let mut out = Vec::new();
+            for r in r_lo..=r_hi {
+                for c in c_lo..=c_hi {
+                    let local = r * cols + c;
+                    if local < section.pick_count {
+                        out.push(base + local);
+                    }
+                }
+            }
+            out
+        }
+        _ => {
+            let lo = start.min(current);
+            let hi = start.max(current);
+            (lo..=hi).collect()
+        }
+    }
+}
+
 fn placement_style(
     hl: TileHighlight,
     hovered: bool,
@@ -1157,5 +1214,23 @@ mod tests {
             layout.sections[1].first_pick_index,
             layout.sections[0].pick_count
         );
+    }
+
+    #[test]
+    fn grid_marquee_selects_axis_aligned_rectangle() {
+        let sections = [TilePickerSectionMeta {
+            drawer: SuitDrawer::Manzu,
+            header_content_y: 0.0,
+            first_pick_index: 0,
+            pick_count: 28,
+        }];
+        let swept = grid_marquee_swept_slots(26, 2, 14, &sections);
+        let mut expected = Vec::new();
+        for r in 0..=1 {
+            for c in 2..=12 {
+                expected.push(r * 14 + c);
+            }
+        }
+        assert_eq!(swept, expected);
     }
 }
