@@ -29,6 +29,9 @@ pub struct ScreenshotCli {
     /// Drive shop focus to a specific prop or item before capture (shop scene only).
     #[arg(long)]
     pub shop_focus: Option<String>,
+    /// Drive archive/collection focus before capture (`humility`, `relic:42`, …).
+    #[arg(long)]
+    pub collection_focus: Option<String>,
     /// Override `RoomEnvLightingTune::gltf_emissive_scale` for this capture.
     #[arg(long)]
     pub gltf_emissive_scale: Option<f32>,

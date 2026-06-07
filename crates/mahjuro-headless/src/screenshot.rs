@@ -43,9 +43,6 @@ pub fn run(cli: ScreenshotCli) -> anyhow::Result<()> {
         screenshot_progress,
     )?;
 
-    if cli.item_inspect {
-        push_item_inspect_overlay(&mut app, &cli)?;
-    }
     if (cli.shop_focus.is_some() && matches!(cli.scene.as_str(), "shop"))
         || (cli.item_inspect && collection_screenshot_tab_for_overlay(&cli.scene))
     {
@@ -59,6 +56,15 @@ pub fn run(cli: ScreenshotCli) -> anyhow::Result<()> {
     }
     if setup.unlock_collection {
         app.unlock_all_for_collection_screenshot();
+    }
+    if let Some(slug) = cli.collection_focus.as_deref() {
+        if let Scene::Archive(coll) = &mut app.scene {
+            coll.set_focus_for_screenshot(slug, &app.progress)
+                .map_err(anyhow::Error::msg)?;
+        }
+    }
+    if cli.item_inspect {
+        push_item_inspect_overlay(&mut app, &cli)?;
     }
     if setup.force_relic_modal {
         app.force_relic_unlock_modal();
