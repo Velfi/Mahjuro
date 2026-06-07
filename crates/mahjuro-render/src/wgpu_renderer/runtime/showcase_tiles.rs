@@ -221,7 +221,7 @@ impl WgpuRenderer {
                 }
 
                 if p.outline {
-                    const OUTLINE_GROW: f32 = 1.07;
+                    const OUTLINE_GROW: f32 = 1.11;
                     let outline_scale = scale * OUTLINE_GROW;
                     let outline_model = translate_rot_scale(center, oriented, outline_scale);
                     let mut outline_bcf = sc_bcf;

@@ -501,6 +501,16 @@ impl<'a> GameEngine<'a> {
         GameplayCoreState::with_run_mut(run, |core| core.apply_marquee_selection(marquee, index))
     }
 
+    pub fn apply_marquee_selection_pointer(
+        run: &mut RunState,
+        marquee: &mut MarqueeSelect,
+        index: usize,
+    ) -> Option<(u32, u32)> {
+        GameplayCoreState::with_run_mut(run, |core| {
+            core.apply_marquee_selection_pointer(marquee, index)
+        })
+    }
+
     pub fn swap_active_relics(run: &mut RunState, from_idx: usize, to_idx: usize) -> bool {
         if from_idx == to_idx
             || to_idx >= run.relics.active.len()

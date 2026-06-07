@@ -703,14 +703,14 @@ fn prompt_items(w: f32, h: f32) -> Vec<FlatItem<PromptAction>> {
     let y0 = bottom_y - btn_h - gap;
     vec![
         FlatItem::new(
-            PromptAction::Decimate.id(),
+            PromptAction::Descend.id(),
             [x0, y0, btn_w, btn_h],
-            PromptAction::Decimate,
+            PromptAction::Descend,
         ),
         FlatItem::new(
-            PromptAction::Descend.id(),
+            PromptAction::Decimate.id(),
             [x0, y0 + btn_h + gap, btn_w, btn_h],
-            PromptAction::Descend,
+            PromptAction::Decimate,
         ),
     ]
 }

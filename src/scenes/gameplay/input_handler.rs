@@ -189,11 +189,12 @@ pub(super) fn process_focus_and_actions(
     }
 
     // Marquee multi-select drag: while LMB is held, the cursor's hovered
-    // hand tile drives `current_slot` every frame. Same logic the focus
-    // path runs for keyboard/gamepad — kept here so cursor sweeps don't
-    // require a Focus action to fire.
+    // hand tile drives `current_slot` every frame. The pointer variant always
+    // selects the contiguous span between the press tile and the hovered tile,
+    // so erratic cursor motion can't trigger a wrap-around arc (those stay a
+    // keyboard/gamepad affordance via the focus path below).
     if let (Some(m), Some(FocusTarget::HandTile(idx))) = (scene.marquee.as_mut(), scene.focus)
-        && let Some((added, removed)) = GameEngine::apply_marquee_selection(ctx.run, m, idx)
+        && let Some((added, removed)) = GameEngine::apply_marquee_selection_pointer(ctx.run, m, idx)
         && (added > 0 || removed > 0)
     {
         play_select_sfx(ctx.bus, added, removed);

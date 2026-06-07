@@ -130,6 +130,28 @@ impl GameplayCoreState {
         Some(marquee.apply(&mut self.selected))
     }
 
+    /// Pointer-driven marquee update (mouse drag). Always selects the contiguous
+    /// linear span between the press tile and the hovered tile, so erratic cursor
+    /// motion or direction reversals can't trigger a wrap-around arc.
+    pub fn apply_marquee_selection_pointer(
+        &mut self,
+        marquee: &mut MarqueeSelect,
+        index: usize,
+    ) -> Option<(u32, u32)> {
+        if self.hand.is_empty() {
+            return None;
+        }
+        let idx = index.min(self.hand.len() - 1);
+        if idx == marquee.current_slot {
+            return Some((0, 0));
+        }
+        marquee.advance_to_pointer(idx);
+        if self.selected.len() < self.hand.len() {
+            self.selected.resize(self.hand.len(), false);
+        }
+        Some(marquee.apply(&mut self.selected))
+    }
+
     /// Remove the currently-selected tiles from the hand, decrement the
     /// discards counter, and reset selection. Returns the removed tiles in
     /// hand-order (not reversed). Caller is responsible for wall refill and

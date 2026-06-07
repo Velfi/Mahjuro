@@ -109,7 +109,9 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let key = normalize(vec3<f32>(0.25, 1.0, 0.35));
     let ndl = max(dot(n_local, key), 0.0);
     var base_shade = 0.45 + 0.55 * ndl;
-    if (is_decimation || is_selected) {
+    if (is_decimation) {
+        base_shade = 0.50 + 0.30 * ndl;
+    } else if (is_selected) {
         base_shade = 0.72 + 0.33 * ndl;
     } else if (is_house_claim) {
         base_shade = 0.55 + 0.38 * ndl;
@@ -141,7 +143,11 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let nl = max(dot(n_world, l_dir), 0.0);
         // Diffuse floor + sharper specular-ish term for the metallic look.
         var metal = 0.30 + 1.60 * pow(nl, 1.8);
-        if (is_decimation || is_selected) {
+        if (is_decimation) {
+            // Keep the candle wash low so the crimson rim stays saturated
+            // rather than blowing the red channel into ACES white-out.
+            metal = 0.28 + 0.70 * pow(nl, 1.9);
+        } else if (is_selected) {
             metal = 0.35 + 2.05 * pow(nl, 1.65);
         } else if (is_house_claim) {
             metal = 0.32 + 1.55 * pow(nl, 1.72);
@@ -156,10 +162,16 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     var lit = base_color * base_shade + base_color * contrib;
     // Emissive + chroma punch so ACES/HDR does not wash rims to grey/white.
     lit = lit + select(vec3<f32>(0.0), base_color * 0.16, is_hovered);
-    lit = lit + select(vec3<f32>(0.0), base_color * 0.26, is_selected || is_decimation);
+    lit = lit + select(vec3<f32>(0.0), base_color * 0.26, is_selected);
+    lit = lit + select(vec3<f32>(0.0), base_color * 0.20, is_decimation);
     lit = lit + select(vec3<f32>(0.0), base_color * 0.18, is_house_claim);
     lit = lit + select(vec3<f32>(0.0), base_color * 0.23, is_combo);
-    if (is_decimation || is_selected) {
+    if (is_decimation) {
+        let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let sat = 2.10;
+        lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
+        lit = max(lit, vec3<f32>(0.0));
+    } else if (is_selected) {
         let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
         let sat = 1.75;
         lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
@@ -181,14 +193,16 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         lit = max(lit, vec3<f32>(0.0));
     }
     var gain = 1.0;
-    if (is_decimation || is_selected) {
+    if (is_selected) {
+        gain = 5.52;
+    } else if (is_decimation) {
         gain = 1.38;
     } else if (is_house_claim) {
         gain = 1.12;
     } else if (is_hovered) {
-        gain = 1.20;
+        gain = 4.80;
     } else if (is_combo) {
-        gain = 1.32;
+        gain = 5.28;
     }
     lit = lit * gain;
     let inv_g = 1.0 / max(lights.extras.x, 0.01);

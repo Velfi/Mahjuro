@@ -164,16 +164,33 @@ impl MarqueeSelect {
     }
 
     /// Steps `current_slot` toward `next` and records sweep direction from the move.
+    ///
+    /// Intended for keyboard/gamepad stepping, where each move is adjacent and a
+    /// run of same-direction steps off either end establishes a wrap-around arc.
     pub fn advance_to(&mut self, next: usize, hand_len: usize) {
         let prev = self.current_slot;
         if prev != next && hand_len > 0 {
             if let Some(fwd) = infer_adjacent_step_forward(prev, next, hand_len) {
                 self.sweep_forward = Some(fwd);
+            } else {
+                // A non-adjacent jump means the cursor teleported (e.g. mouse, or
+                // a focus jump). A direction inferred from an earlier adjacent step
+                // is now stale: keeping it would make `swept_slots` follow a circular
+                // wrap arc the long way around. Clear it so the linear index span is
+                // used instead.
+                self.sweep_forward = None;
             }
-            // Non-adjacent cursor jumps leave `sweep_forward` unset so
-            // `swept_slots` uses the linear index span. Wrap-around arcs are
-            // established only by adjacent keyboard/gamepad steps.
         }
+        self.current_slot = next;
+    }
+
+    /// Pointer-driven update: the cursor jumps directly to `next`, so the swept
+    /// selection is always the contiguous linear span between `start_slot` and
+    /// `next`. Never establishes a wrap-around arc (those are keyboard/gamepad
+    /// affordances); this keeps mouse drags stable when the cursor moves
+    /// erratically or reverses direction.
+    pub fn advance_to_pointer(&mut self, next: usize) {
+        self.sweep_forward = None;
         self.current_slot = next;
     }
 
@@ -744,6 +761,58 @@ mod tests {
                 true, true, false
             ]
         );
+    }
+
+    #[test]
+    fn marquee_jump_after_adjacent_step_clears_stale_wrap_direction() {
+        // Press at 5, step forward to 6 (establishes forward sweep), then the
+        // cursor jumps to 3 (non-adjacent). The stale forward direction must be
+        // cleared so the selection is the linear span [3,5], not a wrap arc that
+        // sweeps 5→6→…→15→0→…→3.
+        let mut sel = vec![false; 16];
+        let hand_len = sel.len();
+        let mut m = MarqueeSelect::new(5, vec![false; 16]);
+        m.advance_to(6, hand_len);
+        m.advance_to(3, hand_len);
+        m.apply(&mut sel);
+        let selected: Vec<usize> = sel
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &s)| s.then_some(i))
+            .collect();
+        assert_eq!(selected, vec![3, 4, 5]);
+    }
+
+    #[test]
+    fn marquee_pointer_reverse_drag_stays_linear() {
+        // Mouse path: press at 5, drag forward to 10, then reverse to 8. Each
+        // step goes through the pointer API, so the result is always the linear
+        // span [5,8] — never a wrap arc from a reversed sweep direction.
+        let mut sel = vec![false; 16];
+        let mut m = MarqueeSelect::new(5, vec![false; 16]);
+        for next in [6, 7, 8, 9, 10, 9, 8] {
+            m.advance_to_pointer(next);
+        }
+        m.apply(&mut sel);
+        let selected: Vec<usize> = sel
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &s)| s.then_some(i))
+            .collect();
+        assert_eq!(selected, vec![5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn marquee_pointer_never_wraps_across_ends() {
+        // Pointer drag from slot 1 to slot 14 selects the contiguous interior
+        // span, never the short wrap arc through the ends.
+        let mut sel = vec![false; 16];
+        let mut m = MarqueeSelect::new(1, vec![false; 16]);
+        m.advance_to_pointer(14);
+        m.apply(&mut sel);
+        let count = sel.iter().filter(|&&s| s).count();
+        assert_eq!(count, 14);
+        assert!(!sel[0] && !sel[15]);
     }
 
     #[test]
