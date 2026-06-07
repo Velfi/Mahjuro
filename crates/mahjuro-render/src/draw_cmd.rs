@@ -473,7 +473,7 @@ pub enum ImageQuadSource {
         sheet: &'static str,
         name: &'static str,
     },
-    /// Sub-rectangle of a Mahjuro `atlas.toml` + `atlas.png` grid (skip tags, …).
+    /// Sub-rectangle of a Mahjuro `atlas.toml` + `atlas.png` grid (temptations, …).
     /// `sheet` is the asset-relative PNG path; `name` is a layout cell id.
     PackedAtlas {
         sheet: &'static str,

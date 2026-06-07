@@ -8,7 +8,7 @@ API Name | Display name | Steam JPG (unlocked) | source
 -------- | ------------ | -------------------- | ------
 TUTORIAL_COMPLETE | Tutorial Graduate | TUTORIAL_COMPLETE_256_unlocked.jpg | assets/textures/relics/diligence_object.png
 FIRST_STRUCTURE | First Structure | FIRST_STRUCTURE_256_unlocked.jpg | assets/textures/relics/crown_of_patterns_object.png
-FIRST_BLIND_CLEARED | First Chamber | FIRST_BLIND_CLEARED_256_unlocked.jpg | assets/textures/skip_tags/processed/tag_treasure_chest.png
+FIRST_BLIND_CLEARED | First Chamber | FIRST_BLIND_CLEARED_256_unlocked.jpg | assets/textures/temptations/processed/tag_treasure_chest.png
 FIRST_BOSS_DEFEATED | Ordeal Down | FIRST_BOSS_DEFEATED_256_unlocked.jpg | assets/textures/ordeal_icons/processed/ordeal_hermit.png
 FIRST_RUN_COMPLETED | Run Won | FIRST_RUN_COMPLETED_256_unlocked.jpg | assets/textures/relics/gold_idol_object.png
 TEN_RUNS_PLAYED | Dedicated | TEN_RUNS_PLAYED_256_unlocked.jpg | assets/textures/relics/curio_cabinet_object.png

@@ -210,15 +210,15 @@ pub struct RunStats {
     pub yen_from_unused_plays: u32,
     pub yen_from_interest: u32,
     pub yen_from_clear_relics: u32,
-    pub yen_from_skip_tags: u32,
-    pub skip_tag_yen_value: u32,
+    pub yen_from_temptations: u32,
+    pub temptation_yen_value: u32,
     pub total_target_score: u64,
     pub total_overscore: u64,
     pub peak_chamber_score: u64,
     /// Filled when this run sets a new [`Self::peak_chamber_score`]: relics tray + per-play/structure points.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub peak_chamber_detail: Option<PeakChamberSnapshot>,
-    pub skipped_tags: std::collections::BTreeMap<&'static str, u32>,
+    pub temptations_taken: std::collections::BTreeMap<&'static str, u32>,
     pub relics_picked: std::collections::BTreeMap<&'static str, u32>,
     /// Shop buys with `run.wing <= RELIC_SHOP_TIMING_EARLY_WING_MAX` at purchase.
     pub relics_picked_shop_early: std::collections::BTreeMap<&'static str, u32>,
@@ -333,13 +333,13 @@ impl Default for RunStats {
             yen_from_unused_plays: 0,
             yen_from_interest: 0,
             yen_from_clear_relics: 0,
-            yen_from_skip_tags: 0,
-            skip_tag_yen_value: 0,
+            yen_from_temptations: 0,
+            temptation_yen_value: 0,
             total_target_score: 0,
             total_overscore: 0,
             peak_chamber_score: 0,
             peak_chamber_detail: None,
-            skipped_tags: std::collections::BTreeMap::new(),
+            temptations_taken: std::collections::BTreeMap::new(),
             relics_picked: std::collections::BTreeMap::new(),
             relics_picked_shop_early: std::collections::BTreeMap::new(),
             relics_picked_shop_late: std::collections::BTreeMap::new(),
@@ -409,8 +409,8 @@ pub struct AggregateStats {
     pub total_yen_from_unused_plays: u64,
     pub total_yen_from_interest: u64,
     pub total_yen_from_clear_relics: u64,
-    pub total_yen_from_skip_tags: u64,
-    pub total_skip_tag_yen_value: u64,
+    pub total_yen_from_temptations: u64,
+    pub total_temptation_yen_value: u64,
     pub total_target_score: u64,
     pub total_overscore: u64,
     pub peak_chamber_score: u64,
@@ -424,7 +424,7 @@ pub struct AggregateStats {
     pub bot_issues_by_reason: std::collections::BTreeMap<String, u32>,
     pub deaths_by_wing: std::collections::BTreeMap<u32, u32>,
     pub deaths_by_chamber: std::collections::BTreeMap<&'static str, u32>,
-    pub skipped_tags: std::collections::BTreeMap<&'static str, u32>,
+    pub temptations_taken: std::collections::BTreeMap<&'static str, u32>,
     pub relics_picked: std::collections::BTreeMap<&'static str, u32>,
     pub relics_picked_victories: std::collections::BTreeMap<&'static str, u32>,
     pub relics_picked_shop_early: std::collections::BTreeMap<&'static str, u32>,
@@ -538,8 +538,8 @@ impl AggregateStats {
         self.total_yen_from_unused_plays += s.yen_from_unused_plays as u64;
         self.total_yen_from_interest += s.yen_from_interest as u64;
         self.total_yen_from_clear_relics += s.yen_from_clear_relics as u64;
-        self.total_yen_from_skip_tags += s.yen_from_skip_tags as u64;
-        self.total_skip_tag_yen_value += s.skip_tag_yen_value as u64;
+        self.total_yen_from_temptations += s.yen_from_temptations as u64;
+        self.total_temptation_yen_value += s.temptation_yen_value as u64;
         self.total_yen_clear_green_luck += s.yen_clear_green_luck as u64;
         self.total_yen_clear_gold_idol += s.yen_clear_gold_idol as u64;
         self.total_yen_clear_jade_abacus += s.yen_clear_jade_abacus as u64;
@@ -572,8 +572,8 @@ impl AggregateStats {
                 None => {}
             }
         }
-        for (tag, count) in &s.skipped_tags {
-            *self.skipped_tags.entry(tag).or_insert(0) += *count;
+        for (tag, count) in &s.temptations_taken {
+            *self.temptations_taken.entry(tag).or_insert(0) += *count;
         }
         for (name, count) in &s.relics_picked {
             *self.relics_picked.entry(name).or_insert(0) += *count;
@@ -748,10 +748,10 @@ impl AggregateStats {
             pr.yen_spent
         );
         out!(
-            "avg gold earned:     {:.1} clears + {:.1} skip-tags = {:.1}",
+            "avg gold earned:     {:.1} clears + {:.1} temptations = {:.1}",
             pr.yen_from_clears,
-            pr.yen_from_skip_tags,
-            pr.yen_from_clears + pr.yen_from_skip_tags
+            pr.yen_from_temptations,
+            pr.yen_from_clears + pr.yen_from_temptations
         );
         out!(
             "avg clear payout:    {:.1} base + {:.1} plays + {:.1} interest + {:.1} relics",
@@ -784,9 +784,9 @@ impl AggregateStats {
             pr.relic_activations
         );
         out!(
-            "avg final yen:      {:.1} (avg skip-tag value taken: {:.1})",
+            "avg final yen:      {:.1} (avg temptation value taken: {:.1})",
             pr.final_yen,
-            pr.skip_tag_yen_value
+            pr.temptation_yen_value
         );
         out!(
             "avg targets faced:   {} (score/target {:.2}x, avg overscore {}, peak blind score {})",
@@ -876,9 +876,9 @@ impl AggregateStats {
             }
         }
 
-        if !d.skip_tags.is_empty() {
-            out!("\nskip tags taken:");
-            for row in &d.skip_tags {
+        if !d.temptations.is_empty() {
+            out!("\ntemptations taken:");
+            for row in &d.temptations {
                 out!(
                     "  {:<16} {:>4} ({:>5.1}%)",
                     row.name,

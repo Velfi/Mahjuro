@@ -1,9 +1,7 @@
-//! Guide — dense in-game reference for tiles, melds, flowers, scoring, and yaku.
+//! Guide — dense in-game reference for tiles, melds, flowers, scoring, economy, and yaku.
 //!
 //! Paginated 3D-tile diagrams with glossary-style definitions. Scoring basics
-//! on page 5, Tanuki's Tips on page 6; yaku detail pages follow. Does not
-//! teach run flow, shop, relics, bosses, or zodiac leveling beyond scoring
-//! references and tips.
+//! on page 4, economy on page 5, Tanuki's Tips on page 6; yaku detail pages follow.
 //!
 //! Opened from the gameplay-table guide book, the in-run `Help` shortcut
 //! (keyboard or controller Select / View / −), the tutorial summary, or
@@ -11,15 +9,28 @@
 //! the player presses Back.
 
 use crate::core::hand::{MeldKind, validate_selection};
+use crate::core::memorial_talisman::MemorialTalismanKind;
 use crate::core::progression::PlayerProgress;
+use crate::core::relic::{RelicId, all_relic_defs, relic_visual};
+use crate::core::tag::TagKind;
+use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
+use crate::core::tile_pack::{TilePackKind, PACK_ASPECT_W_OVER_H};
 use crate::core::yaku::{YakuKind, detect_yaku_with_wind};
+use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::persistence::TilePreset;
 use crate::render::decal::load_ui_font;
+use crate::render::consumable_prop_scale::for_sale_talisman_tablet_extent;
 use crate::render::draw_cmd::{
-    CameraParams, DrawCmd, ImageQuad, ImageQuadSource, SceneLighting, ShowcaseTilePlacement,
-    UiFrame,
+    CameraParams, DrawCmd, ImageQuad, ImageQuadSource, Object3d, Object3dKind, SceneLighting,
+    ShowcaseTilePlacement, UiFrame, camera_facing_euler_xyz_rad,
+};
+use crate::render::table_transform::{
+    compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad,
+};
+use crate::render::world_space::{
+    object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
 use crate::render::gameplay_glb;
 use crate::render::showcase_tile_layout::{
@@ -27,7 +38,7 @@ use crate::render::showcase_tile_layout::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, color_for_token, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::ui::styled_text::push_keyword_label;
 use crate::sfx_id::SfxId;
 use crate::ui::clip::intersect_rect;
@@ -39,10 +50,12 @@ use crate::ui::focus_nav;
 use crate::ui::input::UiAction;
 use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::chart_primitives::{ChartClip, push_yaku_pill, yaku_pill_width};
+use crate::ui::temptation_icons::temptation_icon_source;
 use crate::ui::widget::{self, wrap_text};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::archive_career::{yaku_pill_face, yaku_pill_ink, yaku_pill_rim};
+use super::economy_intro_copy;
 use super::flowers_intro_copy;
 use super::header_chrome::{HeaderChromeMetrics, HeaderTitleLayout};
 use super::melds_intro_copy;
@@ -51,6 +64,8 @@ use super::tanuki_tips_intro_copy;
 use super::tiles_intro_copy;
 use super::yaku_intro_copy;
 use super::{BackgroundId, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
+
+use glam::{Mat4, Quat, Vec3};
 
 // ── Page indices ──────────────────────────────────────────────────────────
 //
@@ -63,8 +78,9 @@ const PAGE_MELDS: usize = 1;
 const PAGE_YAKU: usize = 2;
 const PAGE_FLOWERS: usize = 3;
 const PAGE_SCORING: usize = 4;
-const PAGE_TANUKI_TIPS: usize = 5;
-const YAKU_PAGE_START: usize = 6;
+const PAGE_ECONOMY: usize = 5;
+const PAGE_TANUKI_TIPS: usize = 6;
+const YAKU_PAGE_START: usize = 7;
 /// How many yaku entries to stack on one guide page when they fit.
 fn yaku_needs_solo_guide_page(yk: YakuKind) -> bool {
     matches!(yk, YakuKind::Chiitoitsu | YakuKind::KokushiMusou)
@@ -147,6 +163,9 @@ impl GuideScene {
             tips_scroll: SmoothScroll::new(),
         }
     }
+
+    /// Guide page index for economy / storeroom reference.
+    pub const ECONOMY_PAGE: usize = PAGE_ECONOMY;
 
     fn reset_tips_scroll(&self) {
         self.tips_scroll.jump(0.0);
@@ -399,6 +418,16 @@ impl SceneBehavior for GuideScene {
                 h,
                 scale,
                 &groups,
+                content_top,
+                content_floor,
+            );
+        } else if self.page == PAGE_ECONOMY {
+            draw_economy_page(
+                &mut frame,
+                &layout,
+                w,
+                h,
+                &cam,
                 content_top,
                 content_floor,
             );
@@ -805,6 +834,7 @@ fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, Vec<Ti
                 ],
             )
         }
+        PAGE_ECONOMY => (economy_intro_copy::PAGE_TITLE, vec![]),
         PAGE_SCORING => (
             scoring_intro_copy::PAGE_TITLE,
             vec![
@@ -900,6 +930,7 @@ fn page_nav_subtitle(page: usize) -> Option<&'static str> {
         PAGE_YAKU => Some(yaku_intro_copy::PAGE_SUBTITLE),
         PAGE_FLOWERS => Some(flowers_intro_copy::PAGE_SUBTITLE),
         PAGE_SCORING => Some(scoring_intro_copy::SUBTITLE),
+        PAGE_ECONOMY => Some(economy_intro_copy::SUBTITLE),
         _ => None,
     }
 }
@@ -2005,7 +2036,7 @@ fn meld_groups(specs: &[MeldSpec]) -> Vec<TileGroup> {
         .collect()
 }
 
-// ── Scoring page (page 5) ─────────────────────────────────────────────────
+// ── Scoring page (page 4) ─────────────────────────────────────────────────
 
 const SCORING_FLOW_MELD: usize = 0;
 const SCORING_CHIP_GROUPS: &[usize] = &[1, 2, 3, 4];
@@ -2108,6 +2139,1240 @@ fn draw_scoring_page(
         small_font,
         pad,
     );
+}
+
+// ── Economy page (page 5) ─────────────────────────────────────────────────
+
+const ECONOMY_ITEM_COLS: usize = 3;
+const ECONOMY_ITEM_ROWS: usize = 2;
+const ECONOMY_ICON_COL_FRAC: f32 = 0.26;
+
+#[derive(Clone, Copy)]
+enum EconomyItemExample {
+    Relic(RelicId),
+    Zodiac(ZodiacKind),
+    Talisman(TalismanKind),
+    TilePack(TilePackKind),
+    Memorial(MemorialTalismanKind),
+    Temptation(TagKind),
+}
+
+const ECONOMY_ITEM_EXAMPLES: [EconomyItemExample; 6] = [
+    EconomyItemExample::Relic(RelicId::GoldIdol),
+    EconomyItemExample::Zodiac(ZodiacKind::Dog),
+    EconomyItemExample::Talisman(TalismanKind::Pearl),
+    EconomyItemExample::TilePack(TilePackKind::Flowers),
+    EconomyItemExample::Memorial(MemorialTalismanKind::Hoarder),
+    EconomyItemExample::Temptation(TagKind::GoldIngot),
+];
+
+fn draw_economy_page(
+    frame: &mut UiFrame,
+    layout: &GuideLayout,
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    content_top: f32,
+    content_floor: f32,
+) {
+    let gap = 10.0;
+    let pad = 10.0;
+    let body_font = typography::size(typography::H36, h);
+    let section_font = typography::size(typography::H28, h);
+    let small_font = typography::size(typography::H42, h);
+    let micro_font = typography::size(typography::H45, h);
+    let x = layout.content_x;
+    let full_w = layout.content_w;
+    let mut y = content_top;
+    let usable = (content_floor - y).max(1.0);
+    let top_row_h = usable * 0.50;
+    let items_h = usable - top_row_h - gap;
+
+    let panel_gap = gap;
+    let flow_header_h = section_font * 1.0 + 8.0;
+    let flow_content_h = (top_row_h - flow_header_h - 8.0).max(1.0);
+    let ring = economy_flow_ring_layout(h, small_font, pad, f32::MAX, flow_content_h);
+    let flow_w = economy_flow_panel_width(full_w, panel_gap, ring.ring_w);
+    let rules_w = full_w - panel_gap - flow_w;
+
+    let flow_content = scoring_panel_open(
+        frame,
+        [x, y, flow_w, top_row_h],
+        economy_intro_copy::SECTION_BETWEEN_CHAMBERS,
+        section_font,
+        ScoringPanelStyle::Diagram,
+    );
+    draw_between_chambers_band(
+        frame,
+        flow_content,
+        h,
+        body_font,
+        small_font,
+        micro_font,
+        pad,
+    );
+
+    let rules_content = scoring_panel_open(
+        frame,
+        [x + flow_w + panel_gap, y, rules_w, top_row_h],
+        economy_intro_copy::SECTION_ECONOMY_RULES,
+        section_font,
+        ScoringPanelStyle::Cards,
+    );
+    draw_economy_rules_band(frame, rules_content, body_font, micro_font, pad);
+    y += top_row_h + gap;
+
+    push_economy_item_cards(
+        frame,
+        layout,
+        w,
+        h,
+        cam,
+        [x, y, full_w, items_h.max(1.0)],
+        small_font,
+        body_font,
+        pad,
+        gap,
+    );
+}
+
+fn zodiac_icon_asset(kind: ZodiacKind) -> &'static str {
+    match kind {
+        ZodiacKind::Mouse => "textures/zodiacs/zodiac_mouse.png",
+        ZodiacKind::Rat => "textures/zodiacs/zodiac_rat.png",
+        ZodiacKind::Ox => "textures/zodiacs/zodiac_ox.png",
+        ZodiacKind::Tiger => "textures/zodiacs/zodiac_tiger.png",
+        ZodiacKind::Rabbit => "textures/zodiacs/zodiac_rabbit.png",
+        ZodiacKind::Dragon => "textures/zodiacs/zodiac_dragon.png",
+        ZodiacKind::Snake => "textures/zodiacs/zodiac_snake.png",
+        ZodiacKind::Horse => "textures/zodiacs/zodiac_horse.png",
+        ZodiacKind::Goat => "textures/zodiacs/zodiac_goat.png",
+        ZodiacKind::Monkey => "textures/zodiacs/zodiac_monkey.png",
+        ZodiacKind::Rooster => "textures/zodiacs/zodiac_rooster.png",
+        ZodiacKind::Dog => "textures/zodiacs/zodiac_dog.png",
+        ZodiacKind::Pig => "textures/zodiacs/zodiac_pig.png",
+        ZodiacKind::Qilin => "textures/zodiacs/zodiac_qilin.png",
+        ZodiacKind::Phoenix => "textures/zodiacs/zodiac_phoenix.png",
+        ZodiacKind::Crane => "textures/zodiacs/zodiac_crane.png",
+    }
+}
+
+fn economy_relic_extents(relic_id: RelicId, icon_span: f32) -> ([f32; 3], f32) {
+    let visual = relic_visual(relic_id);
+    let base = icon_span * 0.32;
+    let seed = (relic_id as u32).wrapping_mul(2654435761) ^ 0x9E3779B9;
+    let r0 = ((seed >> 8) & 0xFF) as f32 / 255.0;
+    let r2 = ((seed >> 24) & 0xFF) as f32 / 255.0;
+    let face = base * (0.65 + r0 * 0.45);
+    let thick = base * (0.04 + r2 * 0.02);
+    ([face * 2.0, thick * 2.0, face * 2.0], visual.ui_tilt_x_deg)
+}
+
+fn push_economy_icon_image(
+    frame: &mut UiFrame,
+    icon_rect: [f32; 4],
+    path: &'static str,
+    width_over_height: f32,
+) {
+    let [ix, iy, iw, ih] = icon_rect;
+    let icon_cx = ix + iw * 0.5;
+    let icon_cy = iy + ih * 0.5;
+    let max_w = iw * 0.86;
+    let max_h = ih * 0.88;
+    let (quad_w, quad_h) = if width_over_height >= max_w / max_h {
+        let w = max_w;
+        (w, w / width_over_height)
+    } else {
+        let h = max_h;
+        (h * width_over_height, h)
+    };
+    frame.image_quads(vec![ImageQuad {
+        inst: GpuInstance {
+            rect: [
+                icon_cx - quad_w * 0.5,
+                icon_cy - quad_h * 0.5,
+                quad_w,
+                quad_h,
+            ],
+            color: [1.0, 1.0, 1.0, 0.98],
+            user: 0,
+        },
+        source: ImageQuadSource::Asset { path },
+        clip_rect: Some(icon_rect),
+    }]);
+}
+
+fn economy_icon_object3d_pos(
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    icon_cx: f32,
+    icon_cy: f32,
+) -> [f32; 3] {
+    let world = world_on_camera_ray_plane_z(w, h, cam, icon_cx, icon_cy, 0.0);
+    object3d_pos_triple_for_world_center(w, h, world)
+}
+
+/// Orients a mesh face toward the guide camera (oblique views need more than pitch-only).
+fn economy_icon_face_camera_rotation(
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    icon_cx: f32,
+    icon_cy: f32,
+    local_normal: Vec3,
+) -> [f32; 3] {
+    let center = world_on_camera_ray_plane_z(w, h, cam, icon_cx, icon_cy, 0.0);
+    let eye = Vec3::from_array(cam.eye);
+    let mut toward_camera = eye - center;
+    if toward_camera.length_squared() < 1e-8 {
+        return camera_facing_euler_xyz_rad(cam.eye, cam.target);
+    }
+    toward_camera = toward_camera.normalize();
+    let normal = local_normal.normalize();
+    if toward_camera.dot(normal).abs() > 0.97 {
+        return camera_facing_euler_xyz_rad(cam.eye, cam.target);
+    }
+    let q = Quat::from_rotation_arc(normal, toward_camera);
+    mat4_to_euler_xyz_rad(Mat4::from_quat(q.normalize()))
+}
+
+fn economy_card_body_font(
+    available_h: f32,
+    inner_w: f32,
+    lines: &[&str],
+    start_font: f32,
+    min_font: f32,
+    row_gap: f32,
+) -> f32 {
+    let mut font = start_font;
+    loop {
+        let mut needed = 0.0f32;
+        for line in lines {
+            let wrapped = styled_text::wrap_colored_text_multiline(
+                line,
+                inner_w,
+                font / 0.99,
+                color::PARCHMENT,
+                true,
+                GlossaryMode::Prose,
+            );
+            needed += styled_text::colored_wrapped_rows_height(&wrapped, font) + row_gap;
+        }
+        if needed <= available_h || font <= min_font {
+            return font;
+        }
+        font *= 0.94;
+    }
+}
+
+fn push_economy_item_example(
+    frame: &mut UiFrame,
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    example: EconomyItemExample,
+    icon_rect: [f32; 4],
+    card_index: usize,
+) {
+    let [ix, iy, iw, ih] = icon_rect;
+    let icon_cx = ix + iw * 0.5;
+    let icon_cy = iy + ih * 0.5;
+    let icon_span = iw.min(ih);
+    let pos = economy_icon_object3d_pos(w, h, cam, icon_cx, icon_cy);
+    let anim_id = card_index as u64;
+
+    match example {
+        EconomyItemExample::Relic(relic_id) => {
+            let (extents, _) = economy_relic_extents(relic_id, icon_span);
+            let rarity = all_relic_defs()
+                .iter()
+                .find(|d| d.id == relic_id)
+                .map(|d| d.rarity)
+                .unwrap_or(crate::core::relic::Rarity::Common);
+            frame.object3d(Object3d {
+                pos,
+                extents,
+                rotation: economy_icon_face_camera_rotation(
+                    w,
+                    h,
+                    cam,
+                    icon_cx,
+                    icon_cy,
+                    Vec3::Y,
+                ),
+                color: color::rarity(rarity.tier()),
+                kind: Object3dKind::Relic {
+                    relic_id,
+                    glow: 0.12,
+                    silhouette: false,
+                    debuffed: false,
+                },
+                hover_target: 0.0,
+                anim_id,
+            });
+        }
+        EconomyItemExample::Zodiac(kind) => {
+            push_economy_icon_image(
+                frame,
+                icon_rect,
+                zodiac_icon_asset(kind),
+                1.0 / 3.0,
+            );
+        }
+        EconomyItemExample::Talisman(kind) => {
+            let accent = kind.accent_color();
+            let tablet = for_sale_talisman_tablet_extent(icon_span * 0.88);
+            let face_base = crate::render::talisman_mesh::talisman_face_camera_rotation(14.0);
+            let toward = economy_icon_face_camera_rotation(
+                w,
+                h,
+                cam,
+                icon_cx,
+                icon_cy,
+                Vec3::NEG_Y,
+            );
+            frame.object3d(Object3d {
+                pos,
+                extents: crate::render::talisman_mesh::talisman_object_extents(tablet),
+                rotation: compose_rotation_euler(
+                    rot_euler_xyz_rad(face_base[0], face_base[1], face_base[2]),
+                    [
+                        toward[0].to_degrees(),
+                        toward[1].to_degrees(),
+                        toward[2].to_degrees(),
+                    ],
+                ),
+                color: [
+                    (accent[0] * 1.15).min(1.0),
+                    (accent[1] * 1.15).min(1.0),
+                    (accent[2] * 1.15).min(1.0),
+                    1.0,
+                ],
+                kind: Object3dKind::Talisman { kind },
+                hover_target: 0.0,
+                anim_id,
+            });
+        }
+        EconomyItemExample::TilePack(kind) => {
+            let pack_h = ih * 0.68;
+            let pack_w = pack_h * PACK_ASPECT_W_OVER_H;
+            let pack_t = pack_h * 0.11;
+            frame.object3d(Object3d {
+                pos,
+                extents: [pack_w, pack_t, pack_h],
+                rotation: economy_icon_face_camera_rotation(
+                    w,
+                    h,
+                    cam,
+                    icon_cx,
+                    icon_cy,
+                    Vec3::NEG_Y,
+                ),
+                color: kind.foil_tint(),
+                kind: Object3dKind::Pack {
+                    kind,
+                    pick_id: None,
+                },
+                hover_target: 0.0,
+                anim_id,
+            });
+        }
+        EconomyItemExample::Memorial(kind) => {
+            let accent = kind.accent_color();
+            let tablet = for_sale_talisman_tablet_extent(icon_span * 0.88);
+            let face_base = crate::render::talisman_mesh::talisman_face_camera_rotation(14.0);
+            let toward = economy_icon_face_camera_rotation(
+                w,
+                h,
+                cam,
+                icon_cx,
+                icon_cy,
+                Vec3::NEG_Y,
+            );
+            frame.object3d(Object3d {
+                pos,
+                extents: crate::render::talisman_mesh::talisman_object_extents(tablet),
+                rotation: compose_rotation_euler(
+                    rot_euler_xyz_rad(face_base[0], face_base[1], face_base[2]),
+                    [
+                        toward[0].to_degrees(),
+                        toward[1].to_degrees(),
+                        toward[2].to_degrees(),
+                    ],
+                ),
+                color: [
+                    (accent[0] * 1.15).min(1.0),
+                    (accent[1] * 1.15).min(1.0),
+                    (accent[2] * 1.15).min(1.0),
+                    1.0,
+                ],
+                kind: Object3dKind::MemorialTalisman { kind },
+                hover_target: 0.0,
+                anim_id,
+            });
+        }
+        EconomyItemExample::Temptation(tag) => {
+            let max_side = icon_span * 0.72;
+            frame.image_quads(vec![ImageQuad {
+                inst: GpuInstance {
+                    rect: [
+                        icon_cx - max_side * 0.5,
+                        icon_cy - max_side * 0.5,
+                        max_side,
+                        max_side,
+                    ],
+                    color: [1.0, 1.0, 1.0, 0.98],
+                    user: 0,
+                },
+                source: temptation_icon_source(tag),
+                clip_rect: Some(icon_rect),
+            }]);
+        }
+    }
+}
+
+fn economy_measure_text_width(text: &str, font_px: f32) -> f32 {
+    let font_px = font_px.max(8.0);
+    if let Some(font) = load_ui_font() {
+        text.chars()
+            .map(|ch| font.metrics(ch, font_px).advance_width)
+            .sum()
+    } else {
+        font_px * 0.52 * text.chars().count().max(1) as f32
+    }
+}
+
+fn draw_economy_panel_header(
+    frame: &mut UiFrame,
+    x: f32,
+    y: f32,
+    w: f32,
+    row_h: f32,
+    text: &str,
+    font: f32,
+) {
+    frame.text(TextLabel {
+        rect: [x, y, w, row_h],
+        text: text.into(),
+        color: color::alpha(color::BRASS, 0.92),
+        align: TextAlign::Left,
+        font_px: Some(font),
+        bold: true,
+        ..Default::default()
+    });
+}
+
+fn draw_dot_leader_row(
+    frame: &mut UiFrame,
+    x: f32,
+    y: f32,
+    row_w: f32,
+    row_h: f32,
+    label: &str,
+    value: &str,
+    font: f32,
+    value_col_w: f32,
+    label_color: [f32; 4],
+    value_color: [f32; 4],
+) {
+    let label_w = economy_measure_text_width(label, font).max(1.0);
+    let gap = 4.0;
+    let dot_char_w = economy_measure_text_width(".", font).max(1.0);
+    let value_x = x + row_w - value_col_w;
+    let dots_x = x + label_w + gap;
+    let dots_w = (value_x - gap - dots_x).max(0.0);
+
+    frame.text(TextLabel {
+        rect: [x, y, label_w.min(row_w), row_h],
+        text: label.into(),
+        color: label_color,
+        align: TextAlign::Left,
+        font_px: Some(font),
+        ..Default::default()
+    });
+    if dots_w >= dot_char_w {
+        let dot_count = (dots_w / dot_char_w).floor() as usize;
+        frame.text(TextLabel {
+            rect: [dots_x, y, dots_w, row_h],
+            text: ".".repeat(dot_count.max(1)),
+            color: color::alpha(color::UMBER, 0.72),
+            align: TextAlign::Right,
+            font_px: Some(font),
+            ..Default::default()
+        });
+    }
+    frame.text(TextLabel {
+        rect: [value_x, y, value_col_w, row_h],
+        text: value.into(),
+        color: value_color,
+        align: TextAlign::Right,
+        font_px: Some(font),
+        mono: true,
+        ..Default::default()
+    });
+}
+
+fn draw_earning_note_row(
+    frame: &mut UiFrame,
+    x: f32,
+    y: f32,
+    w: f32,
+    row_h: f32,
+    label: &str,
+    line: &str,
+    font: f32,
+    label_color: [f32; 4],
+    line_color: [f32; 4],
+) -> f32 {
+    frame.text(TextLabel {
+        rect: [x, y, w, row_h],
+        text: label.into(),
+        color: label_color,
+        align: TextAlign::Left,
+        font_px: Some(font),
+        ..Default::default()
+    });
+    let indent = font * 0.35;
+    frame.text(TextLabel {
+        rect: [x + indent, y + row_h * 0.92, w - indent, row_h],
+        text: line.into(),
+        color: line_color,
+        align: TextAlign::Left,
+        font_px: Some(font * 0.96),
+        ..Default::default()
+    });
+    row_h * 1.85
+}
+
+fn economy_flow_block_inner_pad(pad: f32) -> f32 {
+    pad * 0.85
+}
+
+fn economy_flow_block_line_gap(pad: f32) -> f32 {
+    pad * 0.22
+}
+
+fn economy_flow_font_line_height(font_px: f32, italic: bool) -> f32 {
+    let base = load_ui_font()
+        .and_then(|font| font.horizontal_line_metrics(font_px))
+        .map(|lm| lm.new_line_size)
+        .unwrap_or(font_px * 1.25);
+    if italic {
+        base * 1.10
+    } else {
+        base
+    }
+}
+
+fn economy_flow_wrap_line_h(font_px: f32) -> f32 {
+    font_px / 0.99
+}
+
+fn economy_flow_wrapped_line_count(text: &str, text_w: f32, font_px: f32) -> usize {
+    wrap_text(text, text_w.max(1.0), economy_flow_wrap_line_h(font_px))
+        .len()
+        .max(1)
+}
+
+fn economy_flow_wrapped_text(text: &str, text_w: f32, font_px: f32) -> String {
+    wrap_text(text, text_w.max(1.0), economy_flow_wrap_line_h(font_px)).join("\n")
+}
+
+fn economy_flow_badge_size(label_font: f32) -> f32 {
+    label_font * 1.05
+}
+
+fn economy_flow_header_metrics(
+    step: &economy_intro_copy::FlowStep,
+    label_font: f32,
+    pad: f32,
+    block_w: f32,
+) -> (f32, f32, f32, f32) {
+    let inner_pad = economy_flow_block_inner_pad(pad);
+    let label_font_px = label_font * 0.86;
+    let badge = economy_flow_badge_size(label_font);
+    let badge_gap = inner_pad * 0.55;
+    let text_w = (block_w - inner_pad * 2.0).max(1.0);
+    let title_w = (text_w - badge - badge_gap).max(1.0);
+    let title_lines =
+        economy_flow_wrapped_line_count(step.label, title_w, label_font_px).max(1) as f32;
+    let title_h = economy_flow_font_line_height(label_font_px, false) * title_lines;
+    let header_h = title_h.max(badge);
+    (badge, badge_gap, title_w, header_h)
+}
+
+fn economy_flow_block_height_at_width(
+    step: &economy_intro_copy::FlowStep,
+    label_font: f32,
+    line_font: f32,
+    pad: f32,
+    block_w: f32,
+) -> f32 {
+    let inner_pad = economy_flow_block_inner_pad(pad);
+    let line_font_px = line_font * 0.92;
+    let text_w = (block_w - inner_pad * 2.0).max(1.0);
+    let (_, _, _, header_h) = economy_flow_header_metrics(step, label_font, pad, block_w);
+    let body_line_h = economy_flow_font_line_height(line_font_px, true);
+    let body_lines = economy_flow_wrapped_line_count(step.line, text_w, line_font_px).max(2) as f32;
+    inner_pad
+        + header_h
+        + economy_flow_block_line_gap(pad)
+        + body_line_h * body_lines
+        + inner_pad
+        + pad * 0.18
+}
+
+fn economy_flow_block_natural_width(
+    step: &economy_intro_copy::FlowStep,
+    label_font: f32,
+    line_font: f32,
+    pad: f32,
+) -> f32 {
+    let inner_pad = economy_flow_block_inner_pad(pad);
+    let label_font_px = label_font * 0.86;
+    let line_font_px = line_font * 0.92;
+    let badge = economy_flow_badge_size(label_font);
+    let badge_gap = inner_pad * 0.55;
+    let label_w = economy_measure_text_width(step.label, label_font_px);
+    let line_w = economy_measure_text_width(step.line, line_font_px);
+    let header_w = inner_pad + badge + badge_gap + label_w + inner_pad;
+    let body_w = inner_pad * 2.0 + line_w;
+    header_w.max(body_w).max(120.0)
+}
+
+fn draw_economy_flow_block(
+    frame: &mut UiFrame,
+    rect: [f32; 4],
+    step: &economy_intro_copy::FlowStep,
+    label_font: f32,
+    line_font: f32,
+    pad: f32,
+) {
+    let [x, y, w, h] = rect;
+    frame.quad(GpuInstance {
+        rect,
+        color: color::alpha(color::WALNUT_SOFT, 0.52),
+        user: 0,
+    });
+    push_guide_panel_stroke(frame, rect, color::alpha(color::BRASS, 0.42));
+
+    let inner_pad = economy_flow_block_inner_pad(pad);
+    let text_w = (w - inner_pad * 2.0).max(1.0);
+    let label_font_px = label_font * 0.86;
+    let (badge, badge_gap, title_w, header_h) =
+        economy_flow_header_metrics(step, label_font, pad, w);
+    let title_y = y + inner_pad;
+    let badge_rect = [x + inner_pad, title_y, badge, badge];
+    frame.quad(GpuInstance {
+        rect: badge_rect,
+        color: color::alpha(color::WALNUT_DEEP, 0.94),
+        user: 0,
+    });
+    push_guide_panel_stroke(frame, badge_rect, color::alpha(color::BRASS, 0.38));
+    frame.text(TextLabel {
+        rect: badge_rect,
+        text: step.num.to_string(),
+        color: color::CHAMPAGNE,
+        align: TextAlign::Center,
+        font_px: Some(label_font * 0.82),
+        bold: true,
+        ..Default::default()
+    });
+
+    let title_x = badge_rect[0] + badge + badge_gap;
+    let title_h = economy_flow_font_line_height(label_font_px, false)
+        * economy_flow_wrapped_line_count(step.label, title_w, label_font_px).max(1) as f32;
+    frame.text(TextLabel {
+        rect: [title_x, title_y, title_w, header_h.max(title_h)],
+        text: economy_flow_wrapped_text(step.label, title_w, label_font_px),
+        color: color::CHAMPAGNE,
+        align: TextAlign::Left,
+        block_vertical_align: TextBlockVerticalAlign::Top,
+        font_px: Some(label_font_px),
+        bold: true,
+        ..Default::default()
+    });
+
+    let line_font_px = line_font * 0.92;
+    let line_y = title_y + header_h + economy_flow_block_line_gap(pad);
+    let body_line_h = economy_flow_font_line_height(line_font_px, true);
+    let body_lines =
+        economy_flow_wrapped_line_count(step.line, text_w, line_font_px).max(2) as f32;
+    let body_content_h = body_line_h * body_lines;
+    let line_h = (y + h - inner_pad - line_y).max(body_content_h);
+    frame.text(TextLabel {
+        rect: [x + inner_pad, line_y, text_w, line_h],
+        text: economy_flow_wrapped_text(step.line, text_w, line_font_px),
+        color: color::alpha(color::STONE, 0.88),
+        align: TextAlign::Left,
+        block_vertical_align: TextBlockVerticalAlign::Top,
+        font_px: Some(line_font_px),
+        italic: true,
+        ..Default::default()
+    });
+}
+
+fn economy_flow_ring_block_sizes(label_font: f32, line_font: f32, pad: f32) -> [f32; 2] {
+    let block_w = economy_intro_copy::FLOW_STEPS
+        .iter()
+        .map(|step| economy_flow_block_natural_width(step, label_font, line_font, pad))
+        .fold(0.0f32, f32::max)
+        .max(1.0);
+    let block_h = economy_intro_copy::FLOW_STEPS
+        .iter()
+        .map(|step| economy_flow_block_height_at_width(step, label_font, line_font, pad, block_w))
+        .fold(0.0f32, f32::max)
+        .max(1.0);
+    [block_w, block_h]
+}
+
+struct EconomyFlowRingLayout {
+    label_font: f32,
+    line_font: f32,
+    block_w: f32,
+    block_h: f32,
+    ring_w: f32,
+    ring_h: f32,
+    arrow_font: f32,
+    h_gutter: f32,
+    v_gutter: f32,
+}
+
+fn economy_flow_ring_layout(
+    window_h: f32,
+    caption_font: f32,
+    pad: f32,
+    max_w: f32,
+    max_h: f32,
+) -> EconomyFlowRingLayout {
+    let arrow_font = typography::size(typography::H36, window_h).max(caption_font * 0.85);
+    let h_gutter = arrow_font * 1.15;
+    let v_gutter = arrow_font * 1.10;
+    let mut label_font = typography::size(typography::H36, window_h).max(caption_font * 0.92);
+    let mut line_font = caption_font * 0.84;
+    let [mut block_w, mut block_h] = economy_flow_ring_block_sizes(label_font, line_font, pad);
+    let mut ring_w = block_w * 2.0 + h_gutter;
+    let mut ring_h = block_h * 2.0 + v_gutter;
+    if ring_w > max_w || ring_h > max_h {
+        let scale = (max_w / ring_w).min(max_h / ring_h).min(1.0);
+        label_font *= scale;
+        line_font *= scale;
+        [block_w, block_h] = economy_flow_ring_block_sizes(label_font, line_font, pad);
+        ring_w = block_w * 2.0 + h_gutter;
+        ring_h = block_h * 2.0 + v_gutter;
+    }
+    EconomyFlowRingLayout {
+        label_font,
+        line_font,
+        block_w,
+        block_h,
+        ring_w,
+        ring_h,
+        arrow_font,
+        h_gutter,
+        v_gutter,
+    }
+}
+
+fn economy_flow_panel_width(
+    full_w: f32,
+    panel_gap: f32,
+    ring_w: f32,
+) -> f32 {
+    let available = (full_w - panel_gap).max(1.0);
+    let chrome_w = 32.0;
+    let min_w = available * 0.28;
+    let max_w = available * 0.50;
+    (ring_w + chrome_w).clamp(min_w, max_w)
+}
+
+fn push_economy_flow_ring_arrow(frame: &mut UiFrame, rect: [f32; 4], glyph: &str, font: f32) {
+    let [x, y, w, h] = rect;
+    let side = font * 1.05;
+    let cx = x + w * 0.5;
+    let cy = y + h * 0.5;
+    frame.text(TextLabel {
+        rect: [cx - side * 0.5, cy - side * 0.5, side, side],
+        text: glyph.into(),
+        color: color::alpha(color::CHAMPAGNE, 0.90),
+        align: TextAlign::Center,
+        font_px: Some(font),
+        ..Default::default()
+    });
+}
+
+fn draw_between_chambers_band(
+    frame: &mut UiFrame,
+    content: [f32; 4],
+    window_h: f32,
+    _body_font: f32,
+    caption_font: f32,
+    _micro_font: f32,
+    pad: f32,
+) {
+    let [cx, cy, cw, ch] = content;
+    let ring = economy_flow_ring_layout(window_h, caption_font, pad, cw, ch);
+
+    let origin_x = cx + (cw - ring.ring_w) * 0.5;
+    let origin_y = cy + (ch - ring.ring_h) * 0.5;
+    let x0 = origin_x;
+    let x1 = origin_x + ring.block_w + ring.h_gutter;
+    let y0 = origin_y;
+    let y1 = origin_y + ring.block_h + ring.v_gutter;
+
+    let block_rects = [
+        [x0, y0, ring.block_w, ring.block_h],
+        [x1, y0, ring.block_w, ring.block_h],
+        [x1, y1, ring.block_w, ring.block_h],
+        [x0, y1, ring.block_w, ring.block_h],
+    ];
+
+    push_economy_flow_ring_arrow(
+        frame,
+        [x0 + ring.block_w, y0, ring.h_gutter, ring.block_h],
+        "\u{27a1}",
+        ring.arrow_font,
+    );
+    push_economy_flow_ring_arrow(
+        frame,
+        [x1, y0 + ring.block_h, ring.block_w, ring.v_gutter],
+        "\u{2b07}",
+        ring.arrow_font,
+    );
+    push_economy_flow_ring_arrow(
+        frame,
+        [x0 + ring.block_w, y1, ring.h_gutter, ring.block_h],
+        "\u{2b05}",
+        ring.arrow_font,
+    );
+    push_economy_flow_ring_arrow(
+        frame,
+        [x0, y0 + ring.block_h, ring.block_w, ring.v_gutter],
+        "\u{2b06}",
+        ring.arrow_font,
+    );
+
+    for (step, block_rect) in economy_intro_copy::FLOW_STEPS
+        .iter()
+        .zip(block_rects)
+    {
+        draw_economy_flow_block(
+            frame,
+            block_rect,
+            step,
+            ring.label_font,
+            ring.line_font,
+            pad,
+        );
+    }
+}
+
+fn draw_skip_steps_column(
+    frame: &mut UiFrame,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    font: f32,
+    pad: f32,
+    body_color: [f32; 4],
+) {
+    let steps = economy_intro_copy::SKIP_PATH_STEPS;
+    let lines = economy_intro_copy::SKIP_LINES;
+    let n = steps.len().min(lines.len());
+    if n == 0 {
+        return;
+    }
+
+    let step_color = color::alpha(color::CHAMPAGNE, 0.92);
+    let label_font = font * 1.02;
+    let line_font = font * 0.96;
+    let label_h = label_font * 1.12;
+    let line_gap = pad * 0.14;
+    let block_h = (h / n as f32).max(label_h + line_font * 1.2 + line_gap);
+
+    for i in 0..n {
+        let block_y = y + i as f32 * block_h;
+        frame.text(TextLabel {
+            rect: [x, block_y, w, label_h],
+            text: steps[i].into(),
+            color: step_color,
+            align: TextAlign::Left,
+            font_px: Some(label_font),
+            bold: true,
+            ..Default::default()
+        });
+        frame.text(TextLabel {
+            rect: [x, block_y + label_h + line_gap, w, block_h - label_h - line_gap],
+            text: lines[i].into(),
+            color: body_color,
+            align: TextAlign::Left,
+            font_px: Some(line_font),
+            ..Default::default()
+        });
+    }
+}
+
+fn draw_economy_rules_band(
+    frame: &mut UiFrame,
+    content: [f32; 4],
+    caption_font: f32,
+    micro_font: f32,
+    pad: f32,
+) {
+    let [cx, cy, cw, ch] = content;
+    let inner_pad = pad * 0.6;
+    let mut body_font = caption_font;
+    let mut row_h = body_font * 1.12;
+    let header_h = micro_font * 1.02;
+    let body_color = color::alpha(color::PARCHMENT, 0.90);
+    let yen_color = color::keyword::GOLD;
+    let top_y = cy + inner_pad * 0.35;
+    let bottom_y = cy + ch - inner_pad;
+    let col_gap = pad * 0.48;
+    let col_w = ((cw - inner_pad * 2.0 - col_gap * 2.0) / 3.0).max(1.0);
+
+    let earning_x = cx + inner_pad;
+    let store_x = earning_x + col_w + col_gap;
+    let skip_x = store_x + col_w + col_gap;
+    let body_h = bottom_y - top_y;
+    let earn_body_h = body_h - header_h - pad * 0.14;
+    let earn_units = economy_intro_copy::EARNING_CLEAR_ROWS.len() as f32
+        + economy_intro_copy::EARNING_NOTE_ROWS.len() as f32 * 1.85;
+    let earn_needed = earn_units * row_h + pad * 0.06;
+    if earn_body_h > earn_needed {
+        row_h *= (earn_body_h / earn_needed).min(1.28);
+        body_font *= (earn_body_h / earn_needed).sqrt().min(1.12);
+    }
+
+    for div_x in [store_x - col_gap * 0.5, skip_x - col_gap * 0.5] {
+        frame.quad(GpuInstance {
+            rect: [div_x - 0.5, top_y, 1.0, body_h],
+            color: color::alpha(color::UMBER, 0.36),
+            user: 0,
+        });
+    }
+
+    // Panel 1 — Earning Yen
+    let earn_pad = pad * 0.35;
+    let earn_x = earning_x + earn_pad;
+    let earn_w = (col_w - earn_pad * 2.0).max(1.0);
+    draw_economy_panel_header(
+        frame,
+        earn_x,
+        top_y,
+        earn_w,
+        header_h,
+        economy_intro_copy::SECTION_EARNING,
+        micro_font,
+    );
+    let mut ey = top_y + header_h + pad * 0.14;
+    let earning_value_col_w = economy_intro_copy::EARNING_CLEAR_ROWS
+        .iter()
+        .map(|(_, value)| economy_measure_text_width(value, body_font))
+        .fold(0.0f32, f32::max)
+        .max(1.0);
+    for (label, value) in economy_intro_copy::EARNING_CLEAR_ROWS {
+        if ey + row_h > bottom_y {
+            break;
+        }
+        draw_dot_leader_row(
+            frame,
+            earn_x,
+            ey,
+            earn_w,
+            row_h,
+            label,
+            value,
+            body_font,
+            earning_value_col_w,
+            body_color,
+            yen_color,
+        );
+        ey += row_h;
+    }
+    ey += pad * 0.06;
+    for note in economy_intro_copy::EARNING_NOTE_ROWS {
+        if ey + row_h > bottom_y {
+            break;
+        }
+        let line_color = if note.label == "Interest" {
+            yen_color
+        } else {
+            body_color
+        };
+        ey += draw_earning_note_row(
+            frame,
+            earn_x,
+            ey,
+            earn_w,
+            row_h,
+            note.label,
+            note.line,
+            body_font,
+            body_color,
+            line_color,
+        );
+    }
+
+    // Panel 2 — The Storeroom
+    let store_pad = pad * 0.35;
+    let store_inner_x = store_x + store_pad;
+    let store_inner_w = (col_w - store_pad * 2.0).max(1.0);
+    draw_economy_panel_header(
+        frame,
+        store_inner_x,
+        top_y,
+        store_inner_w,
+        header_h,
+        economy_intro_copy::SECTION_STOREROOM,
+        micro_font,
+    );
+    let footer_h = row_h * 1.05;
+    let store_body_top = top_y + header_h + pad * 0.14;
+    let store_body_h = (bottom_y - footer_h - pad * 0.08 - store_body_top).max(row_h);
+    let store_line_count = economy_intro_copy::STOREROOM_LINES.len() as f32;
+    let store_row_h = if store_body_h > store_line_count * row_h {
+        store_body_h / store_line_count
+    } else {
+        row_h
+    };
+    let mut sty = store_body_top;
+    for line in economy_intro_copy::STOREROOM_LINES {
+        if sty + store_row_h > bottom_y - footer_h {
+            break;
+        }
+        frame.text(TextLabel {
+            rect: [store_inner_x, sty, store_inner_w, store_row_h],
+            text: (*line).into(),
+            color: body_color,
+            align: TextAlign::Left,
+            font_px: Some(body_font),
+            ..Default::default()
+        });
+        sty += store_row_h;
+    }
+    let footer_y = bottom_y - footer_h;
+    if footer_y > sty + pad * 0.08 {
+        frame.quad(GpuInstance {
+            rect: [store_inner_x, footer_y - pad * 0.08, store_inner_w, 1.0],
+            color: color::alpha(color::UMBER, 0.34),
+            user: 0,
+        });
+    }
+    frame.text(TextLabel {
+        rect: [store_inner_x, footer_y, store_inner_w, footer_h],
+        text: economy_intro_copy::STOREROOM_CAPACITY_FOOTER.into(),
+        color: color::alpha(color::PARCHMENT, 0.86),
+        align: TextAlign::Left,
+        font_px: Some(body_font * 0.94),
+        ..Default::default()
+    });
+
+    // Panel 3 — Skipping
+    let skip_pad = pad * 0.35;
+    let skip_inner_x = skip_x + skip_pad;
+    let skip_inner_w = (col_w - skip_pad * 2.0).max(1.0);
+    draw_economy_panel_header(
+        frame,
+        skip_inner_x,
+        top_y,
+        skip_inner_w,
+        header_h,
+        economy_intro_copy::SECTION_SKIPPING,
+        micro_font,
+    );
+    let skip_body_top = top_y + header_h + pad * 0.14;
+    let skip_body_h = bottom_y - skip_body_top;
+    draw_skip_steps_column(
+        frame,
+        skip_inner_x,
+        skip_body_top,
+        skip_inner_w,
+        skip_body_h,
+        body_font,
+        pad,
+        body_color,
+    );
+}
+
+fn economy_item_title_color(card_index: usize) -> [f32; 4] {
+    match card_index {
+        0 => color::BRASS,
+        1 => color::keyword::FLOWER,
+        2 => color::keyword::SEASON,
+        3 => color::keyword::TRIGGER,
+        4 => color::JADE,
+        _ => color::AMBER,
+    }
+}
+
+fn economy_item_role_label(card_index: usize) -> &'static str {
+    match card_index {
+        0 => "PAST PLAYER'S POWER",
+        1 => "YAKUS REWARD MORE",
+        2 => "REMAKE YOUR TILES",
+        3 => "BUILD THE WALL",
+        4 => "YOUR SAD REMAINS",
+        _ => "MAKE A CHOICE",
+    }
+}
+
+fn push_economy_item_cards(
+    frame: &mut UiFrame,
+    layout: &GuideLayout,
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    outer: [f32; 4],
+    small_font: f32,
+    title_font: f32,
+    pad: f32,
+    gap: f32,
+) {
+    let [_x, y, full_w, full_h] = outer;
+    let cell_w = (full_w - gap * (ECONOMY_ITEM_COLS - 1) as f32) / ECONOMY_ITEM_COLS as f32;
+    let cell_h = (full_h - gap * (ECONOMY_ITEM_ROWS - 1) as f32) / ECONOMY_ITEM_ROWS as f32;
+    let stroke = color::alpha(color::BRASS, 0.32);
+    let fill = color::alpha(color::WALNUT_RAISED, 0.28);
+    let body_color = color::alpha(color::PARCHMENT, 0.90);
+    let role_font = small_font * 0.78;
+    let content_x = layout.content_x;
+    let icon_col_w = cell_w * ECONOMY_ICON_COL_FRAC;
+    let text_pad = pad * 0.75;
+    let text_x_offset = icon_col_w + text_pad;
+
+    for (i, card) in economy_intro_copy::ITEMS.iter().enumerate() {
+        let col = i % ECONOMY_ITEM_COLS;
+        let row = i / ECONOMY_ITEM_COLS;
+        let cx = content_x + col as f32 * (cell_w + gap);
+        let cy = y + row as f32 * (cell_h + gap);
+        let rect = [cx, cy, cell_w, cell_h];
+
+        frame.quad(GpuInstance {
+            rect,
+            color: fill,
+            user: 0,
+        });
+        push_guide_panel_stroke(frame, rect, stroke);
+        push_guide_panel_stroke(
+            frame,
+            [
+                rect[0] + 2.0,
+                rect[1] + 2.0,
+                rect[2] - 4.0,
+                rect[3] - 4.0,
+            ],
+            color::alpha(color::BRASS, 0.14),
+        );
+
+        let icon_rect = [
+            cx + pad,
+            cy + pad,
+            (icon_col_w - pad * 1.25).max(1.0),
+            (cell_h - pad * 2.0).max(1.0),
+        ];
+        push_economy_item_example(
+            frame,
+            w,
+            h,
+            cam,
+            ECONOMY_ITEM_EXAMPLES[i],
+            icon_rect,
+            i,
+        );
+
+        let text_x = cx + text_x_offset;
+        let inner_w = (cell_w - text_x_offset - pad).max(1.0);
+        let title_color = economy_item_title_color(i);
+        let title_h = title_font * 1.08;
+        let role_h = role_font * 1.05;
+        let text_clip = intersect_rect(
+            [text_x, cy + pad, inner_w, cell_h - pad * 2.0],
+            rect,
+        )
+        .unwrap_or(rect);
+        let mut title_label = TextLabel {
+            rect: [text_clip[0], text_clip[1], text_clip[2], title_h],
+            text: card.title.to_uppercase(),
+            color: title_color,
+            align: TextAlign::Left,
+            font_px: Some(title_font * 0.96),
+            bold: true,
+            ..Default::default()
+        };
+        title_label.clip_rect = Some(text_clip);
+        frame.text(title_label);
+        let mut role_label = TextLabel {
+            rect: [
+                text_clip[0],
+                text_clip[1] + title_h,
+                text_clip[2],
+                role_h,
+            ],
+            text: economy_item_role_label(i).into(),
+            color: color::alpha(color::STONE, 0.78),
+            align: TextAlign::Left,
+            font_px: Some(role_font),
+            bold: true,
+            ..Default::default()
+        };
+        role_label.clip_rect = Some(text_clip);
+        frame.text(role_label);
+
+        let body_top = cy + pad + title_h + role_h + pad * 0.12;
+        let body_available = (cy + cell_h - pad - body_top).max(1.0);
+        let row_gap = pad * 0.14;
+        let min_font = typography::size(typography::H45, h) * 0.92;
+        let body_font = economy_card_body_font(
+            body_available,
+            inner_w,
+            card.lines,
+            small_font,
+            min_font,
+            row_gap,
+        );
+        let mut line_y = body_top;
+        let bottom = cy + cell_h - pad;
+        for line in card.lines {
+            if line_y >= bottom {
+                break;
+            }
+            let wrapped = styled_text::wrap_colored_text_multiline(
+                line,
+                inner_w,
+                body_font / 0.99,
+                body_color,
+                true,
+                GlossaryMode::Prose,
+            );
+            let block_h = styled_text::colored_wrapped_rows_height(&wrapped, body_font);
+            if line_y + block_h > bottom {
+                break;
+            }
+            let mut labels = Vec::new();
+            styled_text::push_colored_rows_left(
+                &mut labels,
+                styled_text::ColoredRowsLayout {
+                    text_left: text_x,
+                    top_y: line_y,
+                    inner_w,
+                    line_h: body_font,
+                    fallback_plain: line,
+                    fallback_color: body_color,
+                    italic: false,
+                    glossary: GlossaryMode::Prose,
+                },
+                &wrapped,
+            );
+            for label in &mut labels {
+                label.clip_rect = Some(text_clip);
+            }
+            frame.texts(labels);
+            line_y += block_h + row_gap;
+        }
+    }
 }
 
 // ── Tanuki's Tips page (page 6) ───────────────────────────────────────────

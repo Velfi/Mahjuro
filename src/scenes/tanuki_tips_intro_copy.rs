@@ -1,4 +1,4 @@
-//! Shared copy for the Guide Tanuki's Tips page (page 6).
+//! Shared copy for the Guide Tanuki's Tips page (page 6, after economy).
 
 pub const PAGE_TITLE: &str = "Tanuki's Tips";
 

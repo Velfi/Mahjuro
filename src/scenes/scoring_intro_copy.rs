@@ -1,4 +1,4 @@
-//! Shared copy for the Guide scoring basics page (page 5).
+//! Shared copy for the Guide scoring basics page (page 4).
 
 pub const PAGE_TITLE: &str = "Scoring Basics";
 pub const SUBTITLE: &str = "Select melds, Play to Structure, then Cash In to score.";

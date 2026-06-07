@@ -1,7 +1,7 @@
-"""Tests for pure helpers in generate_skip_tag_icons.py.
+"""Tests for pure helpers in generate_temptation_icons.py.
 
 Run:
-    python -m unittest scripts.tests.test_generate_skip_tag_icons
+    python -m unittest scripts.tests.test_generate_temptation_icons
 """
 
 import importlib.util
@@ -14,15 +14,15 @@ from PIL import Image
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-SCRIPT = REPO_ROOT / "scripts" / "generate_skip_tag_icons.py"
+SCRIPT = REPO_ROOT / "scripts" / "generate_temptation_icons.py"
 
 
 def _load_module():
     spec = importlib.util.spec_from_file_location(
-        "generate_skip_tag_icons", SCRIPT
+        "generate_temptation_icons", SCRIPT
     )
     module = importlib.util.module_from_spec(spec)
-    sys.modules["generate_skip_tag_icons"] = module
+    sys.modules["generate_temptation_icons"] = module
     spec.loader.exec_module(module)
     return module
 

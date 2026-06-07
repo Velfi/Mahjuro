@@ -1,6 +1,6 @@
-//! Skip-reward tags — Balatro-style one-time bonuses awarded when the player
-//! skips a Small or Big blind. Each ante rolls one tag per skippable blind;
-//! the tag is shown on the skip altar so the player can weigh skip vs play.
+//! Temptations — Balatro-style one-time bonuses awarded when the player
+//! skips a Small or Big blind. Each ante rolls one temptation per skippable blind;
+//! it is shown on the skip altar so the player can weigh skip vs play.
 //!
 //! Player-facing copy, rarity tier, pool gates, and bot yen equivalents live
 //! in `assets/data/tags.json`. Rolling (`roll_tag`) stays here.
@@ -147,7 +147,7 @@ impl TagKind {
         tag_presentation(self).yen_value
     }
 
-    /// Stable atlas / JSON id (`assets/data/tags.json`, `textures/skip_tags/atlas.toml`).
+    /// Stable atlas / JSON id (`assets/data/tags.json`, `textures/temptations/atlas.toml`).
     pub fn atlas_slug(self) -> &'static str {
         match self {
             TagKind::GoldIngot => "gold_ingot",

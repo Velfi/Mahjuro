@@ -25,7 +25,7 @@ mod tests;
 mod save_compat {
     use serde::Deserialize;
 
-    /// Older saves stored shop skip-tag stacks as booleans.
+    /// Older saves stored shop temptation stacks as booleans.
     pub fn u32_from_bool_or_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -211,12 +211,12 @@ pub struct RunState {
     pub wing: u32,
     pub plays_remaining: u32,
     /// Effective play peg row length for the current round after round-start
-    /// modifiers (bosses, skip tags, relic taxes) have been applied.
+    /// modifiers (bosses, temptations, relic taxes) have been applied.
     #[serde(default)]
     pub plays_max: u32,
     pub discards_remaining: u32,
     /// Effective discard peg row length for the current round after round-start
-    /// modifiers (bosses, skip tags, relic taxes) have been applied.
+    /// modifiers (bosses, temptations, relic taxes) have been applied.
     #[serde(default)]
     pub discards_max: u32,
     pub yen: i32,
@@ -366,7 +366,7 @@ pub struct RunState {
     #[serde(default)]
     pub joker_extra_faces: Vec<(crate::core::tile::Suit, u8)>,
 
-    // ── Skip-reward tags ──────────────────────────────────────────────
+    // ── Temptations ──────────────────────────────────────────────
     /// Tag assigned to the Small blind this ante.
     #[serde(default)]
     pub small_chamber_tag: Option<crate::core::tag::TagKind>,
@@ -391,7 +391,7 @@ pub struct RunState {
     /// Tag-granted bonus hand size for the next round.
     #[serde(default)]
     pub tag_bonus_hand_size: i32,
-    /// Pending zodiac activations from a ZodiacBlessing skip-reward tag.
+    /// Pending zodiac activations from a ZodiacBlessing temptation.
     /// Consumed one at a time by the pick-blind scene for celebration overlays.
     #[serde(skip)]
     pub pending_zodiac_celebrations: Vec<(
@@ -738,7 +738,7 @@ impl RunState {
         self.discards_max = self.discards_remaining;
     }
 
-    /// Consume skip-tag bonuses that apply to the next blind only.
+    /// Consume temptation bonuses that apply to the next blind only.
     fn apply_pending_round_resource_bonuses(&mut self) {
         if self.tag_bonus_plays > 0 {
             self.plays_remaining += self.tag_bonus_plays;
@@ -887,7 +887,7 @@ impl RunState {
             memorial_round: crate::core::memorial_talisman::MemorialRoundState::default(),
             defeat_memorial_kind: None,
         };
-        // Roll skip-reward tags for ante 1.
+        // Roll temptations for ante 1.
         state.roll_ante_tags();
         // Resolve the first ante's boss now so reactive variants are baked
         // in before pick_chamber ever reads `upcoming_ordeal_effect`.

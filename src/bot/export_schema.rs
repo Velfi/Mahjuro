@@ -1,4 +1,4 @@
-//! Serializable shapes for `mahjuro bot -o report.json` (export schema v6).
+//! Serializable shapes for `mahjuro bot -o report.json` (export schema v7).
 //! `aggregate` splits sums vs maps; `derived` holds precomputed dashboard / summary numbers.
 
 use serde::Serialize;
@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use super::stats::PeakChamberSnapshot;
 
-pub const EXPORT_SCHEMA_VERSION: u32 = 6;
+pub const EXPORT_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Serialize)]
 pub struct BotExportMeta {
@@ -34,8 +34,8 @@ pub struct AggregateSums {
     pub total_yen_from_unused_plays: u64,
     pub total_yen_from_interest: u64,
     pub total_yen_from_clear_relics: u64,
-    pub total_yen_from_skip_tags: u64,
-    pub total_skip_tag_yen_value: u64,
+    pub total_yen_from_temptations: u64,
+    pub total_temptation_yen_value: u64,
     pub total_target_score: u64,
     pub total_overscore: u64,
     pub peak_chamber_score: u64,
@@ -67,7 +67,7 @@ pub struct AggregateMaps {
     pub deaths_by_wing: BTreeMap<String, u32>,
     pub deaths_by_chamber: BTreeMap<String, u32>,
     pub deaths_by_wing_cause: BTreeMap<String, u32>,
-    pub skipped_tags: BTreeMap<String, u32>,
+    pub temptations_taken: BTreeMap<String, u32>,
     pub relics_picked: BTreeMap<String, u32>,
     pub relics_picked_victories: BTreeMap<String, u32>,
     pub relics_picked_shop_early: BTreeMap<String, u32>,
@@ -115,10 +115,10 @@ pub struct PerRunAverages {
     pub yen_from_clears: f64,
     /// `total_yen_from_clears / chambers_cleared_total` (batch ratio; 0 if no clears).
     pub yen_per_chamber_cleared: f64,
-    /// `(clears + skip-tags) / chambers_cleared_total`.
+    /// `(clears + temptations) / chambers_cleared_total`.
     pub yen_per_chamber_incl_skips: f64,
-    pub yen_from_skip_tags: f64,
-    pub skip_tag_yen_value: f64,
+    pub yen_from_temptations: f64,
+    pub temptation_yen_value: f64,
     pub yen_clear_base: f64,
     pub yen_clear_unused_plays: f64,
     pub yen_clear_interest: f64,
@@ -457,7 +457,7 @@ pub struct BotReportDerived {
     /// Per-ante boss round-score distribution across runs; `target` = boss blind target.
     pub ordeal_score_candles: Vec<DistributionCandleRow>,
     pub avg_turns_to_clear: Vec<AvgTurnsClearRow>,
-    pub skip_tags: Vec<NamedCountPct>,
+    pub temptations: Vec<NamedCountPct>,
     pub consumable_zodiacs: Vec<NamedCount>,
     pub consumable_talismans: Vec<NamedCount>,
     pub transformations_top: Vec<NamedCount>,
@@ -503,7 +503,7 @@ impl Default for BotReportDerived {
             surplus_candles: Vec::new(),
             ordeal_score_candles: Vec::new(),
             avg_turns_to_clear: Vec::new(),
-            skip_tags: Vec::new(),
+            temptations: Vec::new(),
             consumable_zodiacs: Vec::new(),
             consumable_talismans: Vec::new(),
             transformations_top: Vec::new(),

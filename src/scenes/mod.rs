@@ -11,6 +11,7 @@ pub mod celebration_overlay;
 pub mod credits;
 pub mod debug_visibility;
 mod defeat_tableau;
+pub(crate) mod economy_intro_copy;
 pub(crate) mod flowers_intro_copy;
 pub mod gameplay;
 pub mod guide;

@@ -795,7 +795,7 @@ mod cases {
     }
 
     #[test]
-    fn duplicate_skip_tags_stack() {
+    fn duplicate_temptations_stack() {
         use crate::core::tag::TagKind;
 
         let mut run = test_run();

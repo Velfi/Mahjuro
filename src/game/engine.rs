@@ -209,7 +209,7 @@ pub enum ShopCommandData {
         pack_kind: TilePackKind,
     },
     Restocked {
-        /// True for a skip-tag free restock (`cost == 0`) or when [RelicId::IGotAGuy] waived yen.
+        /// True for a temptation free restock (`cost == 0`) or when [RelicId::IGotAGuy] waived yen.
         skip_cost_escalation: bool,
     },
 }
@@ -325,7 +325,7 @@ pub struct HallwayReadModel {
     pub run_number: u32,
     pub base_target: u32,
     pub upcoming_target: u32,
-    pub skip_tag: Option<TagKind>,
+    pub temptation: Option<TagKind>,
     pub ordeal_kind: Option<OrdealKind>,
     pub ordeal_name: Option<String>,
     pub ordeal_description: Option<String>,
@@ -572,7 +572,7 @@ impl<'a> GameEngine<'a> {
             run_number: run.run_number,
             base_target: run.base_target,
             upcoming_target: run.chamber_score_target(run.upcoming_chamber),
-            skip_tag: run.tag_for_chamber(run.upcoming_chamber),
+            temptation: run.tag_for_chamber(run.upcoming_chamber),
             ordeal_kind,
             ordeal_name,
             ordeal_description,
@@ -750,7 +750,7 @@ impl<'a> GameEngine<'a> {
         run.upcoming_chamber
     }
 
-    /// Pick-blind skip on the hallway: apply the skip tag, advance the chamber
+    /// Pick-blind skip on the hallway: apply the temptation, advance the chamber
     /// cycle, and trigger the room brownout. Does not run round-end resolution
     /// (the hallway is between rounds, not inside one).
     pub fn skip_upcoming_chamber(run: &mut RunState, bus: &mut EventBus) -> Option<TagKind> {
@@ -1134,7 +1134,7 @@ impl<'a> GameEngine<'a> {
             }
             ShopCommand::RestockShop { cost } => {
                 let mut yen_cost = cost;
-                // Skip-tag free restock (`cost == 0`) and I Got A Guy waivers keep the listed price.
+                // Temptation free restock (`cost == 0`) and I Got A Guy waivers keep the listed price.
                 let mut skip_cost_escalation = cost == 0;
                 if yen_cost > 0
                     && self.run.relics.has(RelicId::IGotAGuy)

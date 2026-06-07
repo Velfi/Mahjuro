@@ -71,8 +71,8 @@ pub fn bot_aggregate_from(a: &AggregateStats) -> BotAggregate {
             total_yen_from_unused_plays: a.total_yen_from_unused_plays,
             total_yen_from_interest: a.total_yen_from_interest,
             total_yen_from_clear_relics: a.total_yen_from_clear_relics,
-            total_yen_from_skip_tags: a.total_yen_from_skip_tags,
-            total_skip_tag_yen_value: a.total_skip_tag_yen_value,
+            total_yen_from_temptations: a.total_yen_from_temptations,
+            total_temptation_yen_value: a.total_temptation_yen_value,
             total_target_score: a.total_target_score,
             total_overscore: a.total_overscore,
             peak_chamber_score: a.peak_chamber_score,
@@ -109,8 +109,8 @@ pub fn bot_aggregate_from(a: &AggregateStats) -> BotAggregate {
                 .map(|(k, v)| ((*k).to_string(), *v))
                 .collect(),
             deaths_by_wing_cause: a.deaths_by_wing_cause.clone(),
-            skipped_tags: a
-                .skipped_tags
+            temptations_taken: a
+                .temptations_taken
                 .iter()
                 .map(|(k, v)| ((*k).to_string(), *v))
                 .collect(),
@@ -567,11 +567,11 @@ pub fn derived_from_batch(
         yen_per_chamber_incl_skips: if a.chambers_cleared_total == 0 {
             0.0
         } else {
-            (a.total_yen_from_clears + a.total_yen_from_skip_tags) as f64
+            (a.total_yen_from_clears + a.total_yen_from_temptations) as f64
                 / a.chambers_cleared_total as f64
         },
-        yen_from_skip_tags: a.total_yen_from_skip_tags as f64 / r,
-        skip_tag_yen_value: a.total_skip_tag_yen_value as f64 / r,
+        yen_from_temptations: a.total_yen_from_temptations as f64 / r,
+        temptation_yen_value: a.total_temptation_yen_value as f64 / r,
         yen_clear_base: a.total_yen_from_clear_base as f64 / r,
         yen_clear_unused_plays: a.total_yen_from_unused_plays as f64 / r,
         yen_clear_interest: a.total_yen_from_interest as f64 / r,
@@ -788,8 +788,8 @@ pub fn derived_from_batch(
         aggregate_stats_slot_sort_key(&x.slot).cmp(&aggregate_stats_slot_sort_key(&y.slot))
     });
 
-    let mut skip_tags: Vec<NamedCountPct> = a
-        .skipped_tags
+    let mut temptations: Vec<NamedCountPct> = a
+        .temptations_taken
         .iter()
         .map(|(tag, count)| NamedCountPct {
             name: (*tag).to_string(),
@@ -797,7 +797,7 @@ pub fn derived_from_batch(
             pct_of_runs: *count as f64 * 100.0 / r,
         })
         .collect();
-    skip_tags.sort_by(|x, y| y.count.cmp(&x.count).then_with(|| x.name.cmp(&y.name)));
+    temptations.sort_by(|x, y| y.count.cmp(&x.count).then_with(|| x.name.cmp(&y.name)));
 
     let mut zod: Vec<NamedCount> = a
         .total_zodiacs_used
@@ -1296,7 +1296,7 @@ pub fn derived_from_batch(
         surplus_candles,
         ordeal_score_candles,
         avg_turns_to_clear,
-        skip_tags,
+        temptations,
         consumable_zodiacs: zod,
         consumable_talismans: tal,
         transformations_top,

@@ -234,7 +234,7 @@ impl RunState {
         self.tag_bonus_hand_size = 0;
 
         if was_boss {
-            // Roll fresh skip-reward tags for the new wing. Shop-oriented
+            // Roll fresh temptations for the new wing. Shop-oriented
             // rewards must survive into the post-boss shop, but any
             // one-blind combat bonuses should expire at the wing boundary.
             self.roll_ante_tags();

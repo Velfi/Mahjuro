@@ -2795,11 +2795,11 @@ fn visit_shop(
 /// Strategy-sweep data (200 runs/strategy, full pool) shows `never-skip` (37.5%)
 /// beats `baseline` (35%) beats `always-skip` (33.5%). Clearing a "trivially easy"
 /// blind yields ¥4–5 base + unused-play bonus + interest ≈ ¥7–10, while the
-/// expected skip-tag value is ~¥6.75 (weighted average across the tag pool) —
+/// expected temptation value is ~¥6.75 (weighted average across the tag pool) —
 /// so clearing is usually better on raw yen AND accumulates per-play relic stacks.
 ///
 /// We only skip when BOTH conditions hold:
-/// 1. The skip tag's yen_value beats the estimated clear value (tag is worth it).
+/// 1. The temptation's yen_value beats the estimated clear value (tag is worth it).
 /// 2. The projected score exceeds `skip_threshold_multiplier` × target (we're
 ///    comfortably ahead and don't need the plays).
 ///
@@ -2933,9 +2933,9 @@ fn play_run_with_options(
                 run.apply_tag(tag, Some(&mut bus));
                 let yen_after = run.yen;
                 let realized_yen = yen_after.saturating_sub(yen_before).max(0) as u32;
-                stats.yen_from_skip_tags += realized_yen;
-                stats.skip_tag_yen_value += tag.yen_value();
-                *stats.skipped_tags.entry(tag.name()).or_insert(0) += 1;
+                stats.yen_from_temptations += realized_yen;
+                stats.temptation_yen_value += tag.yen_value();
+                *stats.temptations_taken.entry(tag.name()).or_insert(0) += 1;
                 for (zodiac, _, _) in &run.pending_zodiac_celebrations {
                     *stats.zodiacs_picked.entry(zodiac.name()).or_insert(0) += 1;
                 }

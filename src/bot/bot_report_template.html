@@ -2031,18 +2031,18 @@
       (pr.discards ?? 0).toFixed(2) + ' (' + (pr.strategic_discards ?? 0).toFixed(2) + ' strategic, ' + (pr.random_discards ?? 0).toFixed(2) + ' random)',
       'Strategic = a chosen scoring line included discards; random = scored line without a discard choice (see bot scoring policy).');
     row('Avg blinds skipped', prField('chambers_skipped', 'blinds_skipped').toFixed(2),
-      'Mean blinds skipped per run using skip tags.');
+      'Mean blinds skipped per run using temptations.');
     row('Avg relics bought', prField('relics_bought').toFixed(2) + ' (avg gold spent: ' + prField('yen_spent', 'gold_spent').toFixed(1) + ')',
       'Shop relic purchases per run and average gold spent in shops (all shop spending aggregated).');
     row('Avg gold earned',
-      prField('yen_from_clears', 'gold_from_clears').toFixed(1) + ' clears + ' + prField('yen_from_skip_tags', 'gold_from_skip_tags').toFixed(1) + ' skip-tags = ' +
-      (prField('yen_from_clears', 'gold_from_clears') + prField('yen_from_skip_tags', 'gold_from_skip_tags')).toFixed(1),
-      'Gold from chamber clears vs skip-tag payouts (value when you take a tag’s gold instead of skipping).');
+      prField('yen_from_clears', 'gold_from_clears').toFixed(1) + ' clears + ' + prField('yen_from_temptations', 'gold_from_temptations', 'yen_from_skip_tags', 'gold_from_skip_tags').toFixed(1) + ' temptations = ' +
+      (prField('yen_from_clears', 'gold_from_clears') + prField('yen_from_temptations', 'gold_from_temptations', 'yen_from_skip_tags', 'gold_from_skip_tags')).toFixed(1),
+      'Gold from chamber clears vs temptation payouts (value when you take a tag’s gold instead of skipping).');
     const goldPerBlindClear = prField('yen_per_chamber_cleared', 'gold_per_chamber_cleared');
     const goldPerBlindInclSkips = prField('yen_per_chamber_incl_skips', 'gold_per_chamber_incl_skips');
     row('Avg gold per chamber cleared',
-      goldPerBlindClear.toFixed(1) + ' (clears only) · ' + goldPerBlindInclSkips.toFixed(1) + ' incl. skip-tags',
-      'Batch ratio: total gold earned ÷ total blinds cleared. “Round” = one chamber (small / big / boss). Skip-tag gold is optional income on top of clear payouts.');
+      goldPerBlindClear.toFixed(1) + ' (clears only) · ' + goldPerBlindInclSkips.toFixed(1) + ' incl. temptations',
+      'Batch ratio: total gold earned ÷ total blinds cleared. “Round” = one chamber (small / big / boss). Temptation gold is optional income on top of clear payouts.');
     row('Avg clear payout',
       prField('yen_clear_base', 'gold_clear_base').toFixed(1) + ' base + ' + prField('yen_clear_unused_plays', 'gold_clear_unused_plays').toFixed(1) + ' plays + ' +
       prField('yen_clear_interest', 'gold_clear_interest').toFixed(1) + ' interest + ' + prField('yen_clear_relics', 'gold_clear_relics').toFixed(1) + ' relics',
@@ -2065,8 +2065,8 @@
       (pr.tiles_destroyed ?? 0).toFixed(2) + '/run | ' + (pr.relic_activations ?? 0).toFixed(0) + '/run',
       'Averages per run: tiles removed by effects, and relic activations triggered.');
     row('Avg final gold',
-      prField('final_yen', 'final_gold').toFixed(1) + ' (avg skip-tag value taken: ' + prField('skip_tag_yen_value', 'skip_tag_gold_value').toFixed(1) + ')',
-      'Gold when the run ended; skip-tag figure is average gold taken when choosing a tag’s payout.');
+      prField('final_yen', 'final_gold').toFixed(1) + ' (avg temptation value taken: ' + prField('temptation_yen_value', 'temptation_gold_value', 'skip_tag_yen_value', 'skip_tag_gold_value').toFixed(1) + ')',
+      'Gold when the run ended; temptation figure is average gold taken when choosing a tag’s payout.');
     row('Avg targets faced',
       fmtCompact(pr.target_score_faced ?? 0) + ' (score/target ' + (pr.score_to_target_ratio ?? 0).toFixed(2) + 'x, avg overscore ' +
       fmtCompact(pr.overscore ?? 0) + ', peak chamber score ' + fmtCompact(sums.peak_chamber_score ?? 0) + ')',
@@ -2191,9 +2191,10 @@
     }
 
     const hasTurns = (d.avg_turns_to_clear || []).length;
-    const hasSkips = (d.skip_tags || []).length;
+    const temptationRows = d.temptations || d.skip_tags || [];
+    const hasSkips = temptationRows.length;
     if (hasTurns || hasSkips) {
-      const pace = card('Chamber pacing', 'Turns to clear and skip-tag uptake.');
+      const pace = card('Chamber pacing', 'Turns to clear and temptation uptake.');
       if (hasTurns) {
         pace.body.appendChild(el('h3', 'dash-card__subhead', 'Avg turns to clear'));
         renderSlotMetricBars(pace.body, d.avg_turns_to_clear, 'avg_turns', {
@@ -2202,8 +2203,8 @@
         });
       }
       if (hasSkips) {
-        pace.body.appendChild(el('h3', 'dash-card__subhead', 'Skip tags'));
-        renderHorizontalBars(pace.body, d.skip_tags.map((row) => ({
+        pace.body.appendChild(el('h3', 'dash-card__subhead', 'Temptations'));
+        renderHorizontalBars(pace.body, temptationRows.map((row) => ({
           name: row.name,
           v: row.pct_of_runs,
           display: row.pct_of_runs.toFixed(1) + '% (' + row.count + ')',

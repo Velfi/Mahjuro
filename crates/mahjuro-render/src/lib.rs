@@ -83,7 +83,7 @@ pub mod text_shadow_lab;
 pub mod shop_bell_mesh;
 pub mod showcase_decal_atlas;
 pub mod showcase_tile_layout;
-pub mod skip_tag_atlas;
+pub mod temptation_atlas;
 pub mod staircase_glb;
 pub mod startup_profile;
 pub mod table_transform;
