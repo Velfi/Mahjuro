@@ -8,11 +8,10 @@ publish.workspace = true
 default = []
 steam = ["dep:steamworks"]
 macos-store = []
-windows-store = ["dep:cxx"]
+windows-store = []
 
 [dependencies]
 mahjuro-core.workspace = true
-cxx = { version = "1.0", optional = true }
 dirs.workspace = true
 enum_dispatch.workspace = true
 log.workspace = true
