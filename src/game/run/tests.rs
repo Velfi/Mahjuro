@@ -86,6 +86,7 @@ mod cases {
             selected,
             target_score: mode.base_target,
             tile_enhancements: BTreeMap::new(),
+            transformed_tiles: BTreeMap::new(),
             global_buff_enhancement: None,
             removed_tile_ids: rustc_hash::FxHashSet::default(),
             decimations_used: 0,
@@ -1511,6 +1512,77 @@ mod cases {
     // ── Brocade Pouch: global-buff enhancement ──────────────────────────
 
     #[test]
+    fn souzu_talisman_transform_persists_across_round() {
+        use crate::core::consumable::Consumable;
+        use crate::core::deck::Wall;
+        use crate::core::talisman::TalismanKind;
+
+        let mut run = test_run();
+        let mut bus = bus();
+
+        let number_tile = run
+            .hand
+            .iter()
+            .find(|t| t.is_number_tile())
+            .copied()
+            .expect("opening hand should include a number tile");
+        let original_rank = number_tile.rank;
+
+        run.consumables
+            .try_push(Consumable::Talisman(TalismanKind::Souzu));
+        run.use_consumable(0, &mut bus);
+
+        assert!(run.removed_tile_ids.contains(&number_tile.id));
+        assert_eq!(
+            run.transformed_tiles
+                .get(&number_tile.id)
+                .map(|t| t.suit),
+            Some(crate::core::tile::Suit::Souzu)
+        );
+        assert_eq!(
+            run.hand
+                .iter()
+                .find(|t| t.id == number_tile.id)
+                .map(|t| t.suit),
+            Some(crate::core::tile::Suit::Souzu)
+        );
+
+        run.advance_round(&mut bus);
+
+        let preview = Wall::preview_composition(
+            &run.removed_tile_ids,
+            &run.tile_packs,
+            &run.tile_enhancements,
+            &run.transformed_tiles,
+            false,
+            &run.joker_extra_faces,
+        );
+        let baked = preview
+            .all_tiles()
+            .iter()
+            .find(|t| t.id == number_tile.id)
+            .expect("transformed tile should remain in next-round wall");
+        assert_eq!(baked.suit, crate::core::tile::Suit::Souzu);
+        assert_eq!(baked.rank, original_rank);
+
+        let mut wall = Wall::from_filtered_with_packs(
+            &run.removed_tile_ids,
+            &run.tile_packs,
+            &run.tile_enhancements,
+            &run.transformed_tiles,
+            false,
+            &run.joker_extra_faces,
+        );
+        let drawn = wall
+            .all_tiles()
+            .iter()
+            .find(|t| t.id == number_tile.id)
+            .copied()
+            .expect("transformed tile should be injectable into a fresh wall");
+        assert_eq!(drawn.suit, crate::core::tile::Suit::Souzu);
+        assert_eq!(drawn.rank, original_rank);
+    }
+
     fn brocade_pouch_stamps_tiles_drawn_after_talisman_use() {
         use crate::core::consumable::Consumable;
         use crate::core::talisman::TalismanKind;

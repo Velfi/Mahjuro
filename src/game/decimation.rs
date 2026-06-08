@@ -19,6 +19,7 @@ pub fn decimation_preview_tiles(run: &RunState) -> Vec<Tile> {
         &run.removed_tile_ids,
         &run.tile_packs,
         &run.tile_enhancements,
+        &run.transformed_tiles,
         overflow,
         &run.joker_extra_faces,
     )
@@ -77,6 +78,7 @@ pub fn apply_decimation(
     for id in player_ids.iter().chain(house_ids.iter()) {
         run.removed_tile_ids.insert(*id);
         run.tile_enhancements.remove(id);
+        run.transformed_tiles.remove(id);
     }
     run.decimations_used = run.decimations_used.saturating_add(1);
     if emit_destroyed_event {

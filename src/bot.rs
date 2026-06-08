@@ -1837,6 +1837,7 @@ fn sample_random_hand_with_extra_pack(
         &run.removed_tile_ids,
         &packs,
         &run.tile_enhancements,
+        &run.transformed_tiles,
         run.relics.has(RelicId::StrengthInNumbers),
         &run.joker_extra_faces,
     );
@@ -2385,6 +2386,7 @@ fn pack_marginal_value(run: &RunState, kind: TilePackKind, strategy: &BotStrateg
             &run.removed_tile_ids,
             &run.tile_packs,
             &run.tile_enhancements,
+            &run.transformed_tiles,
             run.relics.has(RelicId::StrengthInNumbers),
             &run.joker_extra_faces,
         );

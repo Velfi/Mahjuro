@@ -2,10 +2,9 @@
 //! current hand at once.
 //!
 //! Every talisman applies to the **whole hand** in one click — buff stamps or
-//! suit transforms across all tiles at once. The enhancement lives on each
-//! [`crate::core::tile::Tile`]
-//! while it sits in the hand and is dropped when the tile leaves (played or
-//! discarded).
+//! suit transforms across all tiles at once. Stamps and transforms are keyed
+//! by tombstoning the original wall copy and injecting the transformed tile
+//! back into every round wall for the rest of the run.
 //!
 //! Talismans live in the same inventory as Zodiacs (see
 //! [`crate::core::consumable::ConsumableInventory`]) — they share slot space

@@ -92,6 +92,7 @@ pub fn read_wall_ledger(run: &RunState, mode: WallLedgerMode) -> WallLedgerReadM
                 &run.removed_tile_ids,
                 &run.tile_packs,
                 &run.tile_enhancements,
+                &run.transformed_tiles,
                 overflow,
                 &run.joker_extra_faces,
             );

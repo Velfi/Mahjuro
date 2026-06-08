@@ -41,6 +41,7 @@ pub(crate) struct ChamberPlanCheckpoint {
     tiles_discarded: u32,
     times_restocked: u32,
     tile_enhancements: std::collections::BTreeMap<u32, TileEnhancement>,
+    transformed_tiles: std::collections::BTreeMap<u32, Tile>,
     global_buff_enhancement: Option<TileEnhancement>,
     yaku_levels: YakuLevels,
     consumables: crate::core::consumable::ConsumableInventory,
@@ -66,6 +67,7 @@ impl ChamberPlanCheckpoint {
             tiles_discarded: run.tiles_discarded,
             times_restocked: run.times_restocked,
             tile_enhancements: run.tile_enhancements.clone(),
+            transformed_tiles: run.transformed_tiles.clone(),
             global_buff_enhancement: run.global_buff_enhancement,
             yaku_levels: run.yaku_levels.clone(),
             consumables: run.consumables.clone(),
@@ -86,6 +88,7 @@ impl ChamberPlanCheckpoint {
         run.tiles_discarded = self.tiles_discarded;
         run.times_restocked = self.times_restocked;
         run.tile_enhancements = self.tile_enhancements.clone();
+        run.transformed_tiles = self.transformed_tiles.clone();
         run.global_buff_enhancement = self.global_buff_enhancement;
         run.yaku_levels = self.yaku_levels.clone();
         run.consumables = self.consumables.clone();

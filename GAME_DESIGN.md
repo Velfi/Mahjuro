@@ -43,7 +43,7 @@ Mahjuro is a mahjong-inspired roguelite that makes mahjong approachable for west
 * **Gilded** — +¥1 per scored meld containing the tile (separate from the chips × mult total)
 * **Polychrome** — +0.25 mult (additive) per scored meld containing the tile (→ ×1.25 when that is the only mult source on the hand)
 
-Additional talismans **transform** selected tiles (suit shifts, honors, flowers, conformity, etc.).
+Additional talismans **transform** every tile in hand at use time (suit shifts, honors, flowers, conformity, etc.); each affected wall copy is tombstoned and replaced with the transformed tile for the rest of the run.
 
 ### **C. Meld Types & Base Scoring**
 

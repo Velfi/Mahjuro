@@ -216,6 +216,7 @@ impl Wall {
         removed: &rustc_hash::FxHashSet<u32>,
         packs: &[crate::core::tile_pack::TilePackKind],
         enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
+        transformed: &std::collections::BTreeMap<u32, Tile>,
         overflow: bool,
         joker_extras: &[(Suit, u8)],
     ) -> Vec<Tile> {
@@ -239,6 +240,7 @@ impl Wall {
         if !removed.is_empty() {
             tiles.retain(|t| !removed.contains(&t.id));
         }
+        tiles.extend(transformed.values().copied());
         tiles
     }
 
@@ -246,6 +248,7 @@ impl Wall {
         removed: &rustc_hash::FxHashSet<u32>,
         packs: &[crate::core::tile_pack::TilePackKind],
         enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
+        transformed: &std::collections::BTreeMap<u32, Tile>,
         overflow: bool,
         joker_extras: &[(Suit, u8)],
     ) -> Self {
@@ -253,6 +256,7 @@ impl Wall {
             removed,
             packs,
             enhancements,
+            transformed,
             overflow,
             joker_extras,
         ))
@@ -263,6 +267,7 @@ impl Wall {
         removed: &rustc_hash::FxHashSet<u32>,
         packs: &[crate::core::tile_pack::TilePackKind],
         enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
+        transformed: &std::collections::BTreeMap<u32, Tile>,
         overflow: bool,
         joker_extras: &[(Suit, u8)],
     ) -> Self {
@@ -270,6 +275,7 @@ impl Wall {
             removed,
             packs,
             enhancements,
+            transformed,
             overflow,
             joker_extras,
         ))
@@ -283,6 +289,19 @@ impl Wall {
     /// Index of the next tile that would be drawn.
     pub fn draw_cursor(&self) -> usize {
         self.cursor
+    }
+
+    /// Drop the undrawn wall tile with `id`, if any. Drawn tiles are untouched.
+    pub fn remove_undrawn_by_id(&mut self, id: u32) -> bool {
+        let tiles = Arc::make_mut(&mut self.tiles);
+        let Some(pos) = tiles[self.cursor..]
+            .iter()
+            .position(|t| t.id == id)
+        else {
+            return false;
+        };
+        tiles.remove(self.cursor + pos);
+        true
     }
 
     /// Insert `tile` into the undrawn portion of the wall at a random position.

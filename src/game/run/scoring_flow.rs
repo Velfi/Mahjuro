@@ -347,6 +347,7 @@ impl RunState {
                 if matches!(tile.suit, Suit::Wind | Suit::Dragon) {
                     self.removed_tile_ids.insert(tile.id);
                     self.tile_enhancements.remove(&tile.id);
+                    self.transformed_tiles.remove(&tile.id);
                     devoured += 1;
                 }
             }
@@ -369,6 +370,7 @@ impl RunState {
                     if tile.suit == suit {
                         self.removed_tile_ids.insert(tile.id);
                         self.tile_enhancements.remove(&tile.id);
+                        self.transformed_tiles.remove(&tile.id);
                         destroyed += 1;
                     }
                 }
