@@ -29,6 +29,7 @@ jobs:
 
     env:
       MSSTORE_BUILD_NUMBER: ${{ inputs.build_number }}
+      HAS_MSSTORE_SIGNING: ${{ secrets.MSSTORE_SIGNING_PFX_BASE64 != '' }}
 
     steps:
       - uses: actions/checkout@v6
@@ -60,7 +61,7 @@ jobs:
           Add-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP)
 
       - name: Restore signing certificate
-        if: inputs.sign && secrets.MSSTORE_SIGNING_PFX_BASE64 != ''
+        if: inputs.sign && env.HAS_MSSTORE_SIGNING == 'true'
         shell: pwsh
         run: |
           $pfx = Join-Path $env:RUNNER_TEMP "msstore-signing.pfx"
