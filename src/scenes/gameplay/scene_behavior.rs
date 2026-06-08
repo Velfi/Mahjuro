@@ -1778,7 +1778,7 @@ impl SceneBehavior for GameplayScene {
                                 color::AMBER,
                             ),
                         };
-                        let desc = format!("You have {remaining} {label} remaining.");
+                        let desc = format!("You have {remaining} {label} remaining.\n\nYou can {label} multiple {} at once.", (if label == "discard" { "tiles" } else { "melds" }));
                         push_focus_tooltip_panel_2d(
                             &mut inspect_tooltip_quads,
                             &mut inspect_tooltip_texts,
