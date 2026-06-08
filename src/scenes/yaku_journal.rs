@@ -1401,6 +1401,7 @@ fn draw_plaque(
                     scale: 1.0,
                     size_px: hand_tile,
                     brightness,
+                    opacity: 1.0,
                     selected: false,
                     hovered: false,
                     outline: false,

@@ -173,6 +173,7 @@ pub struct WgpuRenderer {
     tile_pipeline_opaque_cull: wgpu::RenderPipeline,
     tile_pipeline_blend_double: wgpu::RenderPipeline,
     tile_pipeline_blend_cull: wgpu::RenderPipeline,
+    tile_pipeline_ghost_cull: wgpu::RenderPipeline,
     /// shop.glb only — glTF punctual + metallic-roughness + ACES (`room_glb.wgsl`).
     shop_pipeline_opaque_cull: wgpu::RenderPipeline,
     shop_pipeline_blend_double: wgpu::RenderPipeline,
@@ -308,6 +309,7 @@ pub struct WgpuRenderer {
     tile_3d_instance_buffer: wgpu::Buffer,
     tile_3d_instances_staging: Vec<Tile3dInstance>,
     tile_3d_batch_ranges: Vec<(u32, u32)>,
+    tile_3d_batch_blend_ranges: Vec<(u32, u32)>,
     tile_shadow_instance_buffer: wgpu::Buffer,
     tile_shadow_frame_uniform_buffer: wgpu::Buffer,
     tile_shadow_frame_bind_group: wgpu::BindGroup,

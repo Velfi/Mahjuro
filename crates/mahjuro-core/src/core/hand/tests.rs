@@ -513,6 +513,90 @@ fn tricky_kokushi_musou_decomposed() {
 }
 
 #[test]
+fn staging_preview_three_pairs_plus_lone_flower() {
+    use super::staging_preview_melds;
+    let tiles = vec![
+        t(Suit::Manzu, 3, 0),
+        t(Suit::Manzu, 3, 1),
+        t(Suit::Souzu, 3, 2),
+        t(Suit::Souzu, 3, 3),
+        t(Suit::Pinzu, 3, 4),
+        t(Suit::Pinzu, 3, 5),
+        t(Suit::Flower, 4, 100),
+    ];
+    let (melds, bad) = staging_preview_melds(&tiles, &[]);
+    // Full validation consumes the flower as a wildcard in one triplet + two pairs.
+    assert_eq!(melds.len(), 3);
+    assert!(melds.iter().any(|m| {
+        m.kind == MeldKind::Triplet && m.tile_ids.contains(&100)
+    }));
+    assert!(bad.is_empty());
+}
+
+#[test]
+fn staging_preview_flower_pair_on_invalid_mixed() {
+    use super::staging_preview_melds;
+    // Two flowers + stray numbered tile — preview should still lift the flower pair.
+    let tiles = vec![
+        t(Suit::Flower, 1, 100),
+        t(Suit::Flower, 2, 101),
+        t(Suit::Souzu, 7, 2),
+    ];
+    let (melds, bad) = staging_preview_melds(&tiles, &[]);
+    assert_eq!(melds.len(), 1);
+    assert_eq!(melds[0].kind, MeldKind::Pair);
+    assert_eq!(melds[0].tile_ids, vec![100, 101]);
+    assert_eq!(bad, vec![2]);
+}
+
+#[test]
+fn staging_preview_flower_wildcard_triplet() {
+    use super::staging_preview_melds;
+    let tiles = vec![
+        t(Suit::Manzu, 3, 0),
+        t(Suit::Manzu, 3, 1),
+        t(Suit::Flower, 1, 100),
+        t(Suit::Pinzu, 8, 2),
+    ];
+    let (melds, bad) = staging_preview_melds(&tiles, &[]);
+    assert_eq!(melds.len(), 1);
+    assert_eq!(melds[0].kind, MeldKind::Triplet);
+    assert_eq!(melds[0].tile_ids, vec![0, 1, 100]);
+    assert_eq!(bad, vec![2]);
+}
+
+#[test]
+fn staging_preview_flower_pair_plus_numbered_pair() {
+    use super::staging_preview_melds;
+    let tiles = vec![
+        t(Suit::Manzu, 3, 0),
+        t(Suit::Manzu, 3, 1),
+        t(Suit::Flower, 1, 100),
+        t(Suit::Flower, 2, 101),
+        t(Suit::Pinzu, 8, 2),
+    ];
+    let (melds, bad) = staging_preview_melds(&tiles, &[]);
+    assert_eq!(melds.len(), 2);
+    assert!(melds.iter().any(|m| m.kind == MeldKind::Pair && m.tile_ids == vec![100, 101]));
+    assert!(melds.iter().any(|m| m.kind == MeldKind::Pair && m.tile_ids == vec![0, 1]));
+    assert_eq!(bad, vec![2]);
+}
+
+#[test]
+fn staging_preview_valid_flower_triplet() {
+    use super::staging_preview_melds;
+    let tiles = vec![
+        t(Suit::Flower, 1, 100),
+        t(Suit::Flower, 2, 101),
+        t(Suit::Flower, 3, 102),
+    ];
+    let (melds, bad) = staging_preview_melds(&tiles, &[]);
+    assert_eq!(melds.len(), 1);
+    assert_eq!(melds[0].kind, MeldKind::Triplet);
+    assert!(bad.is_empty());
+}
+
+#[test]
 fn non_contributing_empty_on_valid_pair() {
     let tiles = vec![t(Suit::Souzu, 3, 0), t(Suit::Souzu, 3, 1)];
     assert!(non_contributing_tile_ids(&tiles, &[]).is_empty());

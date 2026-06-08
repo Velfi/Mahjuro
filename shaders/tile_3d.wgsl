@@ -255,7 +255,8 @@ struct VsOut {
     @location(10) tile_mat_col0: vec4<f32>,
     @location(11) tile_mat_col1: vec4<f32>,
     @location(12) tile_mat_col2: vec4<f32>,
-    @location(13) tile_material_seed: f32,
+    /// x = per-tile material seed, y = opacity (1 = opaque).
+    @location(13) tile_seed_opacity: vec2<f32>,
 };
 
 @vertex
@@ -272,7 +273,7 @@ fn vs_main(
     @location(9) inst_model_c3: vec4<f32>,
     @location(10) inst_visual: vec4<f32>,
     @location(11) inst_decal_uv: vec4<f32>,
-    @location(12) inst_seed: f32,
+    @location(12) inst_seed_opacity: vec2<f32>,
 ) -> VsOut {
     let model = mat4x4<f32>(inst_model_c0, inst_model_c1, inst_model_c2, inst_model_c3);
 
@@ -311,7 +312,7 @@ fn vs_main(
     o.tile_mat_col0 = inst_model_c0;
     o.tile_mat_col1 = inst_model_c1;
     o.tile_mat_col2 = inst_model_c2;
-    o.tile_material_seed = inst_seed;
+    o.tile_seed_opacity = inst_seed_opacity;
     return o;
 }
 
@@ -397,7 +398,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
         // ── Tortoise shell (mat 2) ──────────────────────────────────────
         let tortoise_body =
-            tortoise_albedo(in.local_pos, in.tile_material_seed, normalize(in.local_n));
+            tortoise_albedo(in.local_pos, in.tile_seed_opacity.x, normalize(in.local_n));
         let honey_mean = vec3<f32>(0.72, 0.48, 0.18);
         // Keep most of the shell mottle on the face — heavy flattening made every tile read identical.
         let tortoise_face = mix(tortoise_body, honey_mean, 0.06);
@@ -686,7 +687,9 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let brightness = in.tile_visual_params.x;
     if (brightness < 0.99) {
         let lum = dot(lit_rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
-        lit_rgb = mix(lit_rgb, vec3<f32>(lum), 0.35) * brightness;
+        // Staging / blocked tiles: extra desaturate below ~0.35 so previews read ghostly.
+        let desat = select(0.35, 0.72, brightness < 0.35);
+        lit_rgb = mix(lit_rgb, vec3<f32>(lum), desat) * brightness;
     }
 
     // ── Hover / selection fresnel ───────────────────────────────────
@@ -730,5 +733,18 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         // Legacy non-HDR scenes still apply the user gamma slider in-shader.
         out_rgb = pow(lit_rgb, vec3<f32>(inv_g));
     }
+
+    // Staging meld previews (per-instance opacity < 1): cool additive ghost keyed
+    // off decal albedo — standard alpha left only specular highlights visible.
+    let ghost_opacity = clamp(in.tile_seed_opacity.y, 0.0, 1.0);
+    if (ghost_opacity < 0.999) {
+        let decal_body = mix(vec3<f32>(0.20, 0.30, 0.46), rgb, 0.78);
+        let lum = dot(out_rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let soft_lit = mix(vec3<f32>(lum), out_rgb, 0.32);
+        let ghost_rgb = mix(decal_body, soft_lit, 0.40) + vec3<f32>(0.06);
+        let ghost_a = ghost_opacity * 0.48;
+        return vec4(clamp(ghost_rgb, vec3<f32>(0.0), vec3<f32>(0.68)), ghost_a);
+    }
+    out_alpha = out_alpha * ghost_opacity;
     return vec4<f32>(out_rgb, out_alpha);
 }

@@ -94,16 +94,41 @@ fn ign(p: vec2<f32>) -> f32 {
 // Animated diagonal band tint for extruded score-pop glyphs. Polychrome
 // extruded glyphs pass spec_power >= 40 (see object3d_placement.rs); talisman
 // tablets use ~32 and keep the legacy rainbow polychrome look.
+const POLYCHROME_LIGHT_GOLD: vec3<f32> = vec3<f32>(1.0, 0.68, 0.08);
+const POLYCHROME_SATURATION: f32 = 1.42;
+
+fn saturate_rgb(rgb: vec3<f32>, amount: f32) -> vec3<f32> {
+    let luma = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return mix(vec3<f32>(luma), rgb, amount);
+}
+
+fn is_house_polychrome_base(base: vec3<f32>) -> bool {
+    return base.r > 0.75 && base.g < 0.25 && base.b < 0.20;
+}
+
 fn score_glyph_band_albedo(local_pos: vec3<f32>, base: vec3<f32>, time: f32) -> vec3<f32> {
     let drift = time * 0.8;
     let warp = sin(time * 2.2 + local_pos.y * 7.0) * 0.28
              + sin(time * 1.4 + local_pos.x * 5.5) * 0.18;
     let coord = local_pos.x * 5.0 + local_pos.y * 3.2 + warp + drift;
     let wave = 0.5 + 0.5 * sin(coord * 6.28318);
-    let band = smoothstep(0.32, 0.68, wave);
-    let bright = min(base * 1.55 + vec3<f32>(0.12), vec3<f32>(1.0));
-    let dark = base * 0.42;
-    return mix(dark, bright, band);
+    let house = is_house_polychrome_base(base);
+    let band = select(smoothstep(0.32, 0.68, wave), smoothstep(0.26, 0.74, wave), house);
+    let bright = select(
+        min(base * 1.55 + vec3<f32>(0.12), vec3<f32>(1.0)),
+        saturate_rgb(min(POLYCHROME_LIGHT_GOLD * 1.08, vec3<f32>(1.0)), POLYCHROME_SATURATION),
+        house,
+    );
+    let dark = select(
+        base * 0.42,
+        saturate_rgb(base * 0.58, POLYCHROME_SATURATION * 1.08),
+        house,
+    );
+    var albedo = mix(dark, bright, band);
+    if (house) {
+        albedo = saturate_rgb(albedo, 1.12);
+    }
+    return albedo;
 }
 
 // Slab test: returns true if the segment from light_pos along `dir` (with
@@ -1670,8 +1695,8 @@ fn fs_main(
     } else if (is_poly) {
         // Polychrome: cool violet-pink glow (talisman tablets); score glyphs
         // override sss_tint with their own base colour below.
-        wrap = 0.45;
-        sss_strength = 0.30;
+        wrap = select(0.45, 0.18, is_score_glyph);
+        sss_strength = select(0.30, 0.06, is_score_glyph);
         sss_tint = select(vec3<f32>(0.75, 0.55, 0.95), mesh.base_color.rgb * 1.1, is_score_glyph);
     } else if (is_chitin) {
         wrap = select(0.50, 0.54, talisman_lustrous);
@@ -1733,7 +1758,7 @@ fn fs_main(
         back_scale = 0.35;
         back_tint = vec3<f32>(1.0, 0.82, 0.40);
     } else if (is_poly) {
-        back_scale = 0.9;
+        back_scale = select(0.9, 0.20, is_score_glyph);
         back_tint = select(vec3<f32>(0.70, 0.50, 0.90), mesh.base_color.rgb * 1.15, is_score_glyph);
     } else if (is_chitin) {
         back_scale = 0.45;
@@ -1960,7 +1985,7 @@ fn fs_main(
                 }
             } else if (is_chitin) {
                 // Nacre sheen is in the talisman block below.
-            } else {
+            } else if (!is_score_glyph) {
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis;
             }
         }
@@ -2112,7 +2137,7 @@ fn fs_main(
                     let sheen_tint = mesh.base_color.rgb * (1.2 + band * 0.8);
                     let fresnel = 0.15 + 0.55 * pow(1.0 - ndv, 2.2);
                     let lobe = pow(nh, 12.0) * (0.5 + band * 0.6) + broad * 0.2;
-                    sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * sheen_tint;
+                    sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * sheen_tint * 0.32;
                 } else {
                     // Polychrome: holographic thin-film iridescence — rainbow
                     // hue driven by the normal-to-half angle so the spectrum
@@ -2337,6 +2362,11 @@ fn fs_main(
         // body warm and luminous rather than dark.
         diffuse_scale = 0.18;
     }
+    if (is_score_glyph) {
+        // HUD score / structure callouts: band-swept albedo should read
+        // self-lit; candle punctual would otherwise warm-shift cool tints.
+        diffuse_scale = 0.10;
+    }
     if (is_chitin) {
         diffuse_scale = select(0.48, 0.30, talisman_lustrous);
     }
@@ -2480,9 +2510,17 @@ fn fs_main(
     if (is_score_glyph) {
         let time = lights.extras.y;
         albedo = score_glyph_band_albedo(in.local_pos, mesh.base_color.rgb, time);
+        let house = is_house_polychrome_base(mesh.base_color.rgb);
         let edge = 1.0 - ndv_view;
-        let rim = pow(edge, 1.8) * 0.35;
-        let rim_tint = mesh.base_color.rgb * 1.4 + vec3<f32>(0.08);
+        let rim = pow(edge, 1.8) * select(0.22, 0.30, house);
+        let rim_tint = select(
+            mesh.base_color.rgb * 1.4 + vec3<f32>(0.08),
+            saturate_rgb(
+                mix(mesh.base_color.rgb * 0.58, POLYCHROME_LIGHT_GOLD, 0.62),
+                POLYCHROME_SATURATION,
+            ),
+            house,
+        );
         albedo = mix(albedo, rim_tint, rim);
     }
     if (is_enamel) {
@@ -2683,7 +2721,10 @@ fn fs_main(
     // Skip the emissive floor for tablets so shop tokens stay lit by the
     // scene instead of blowing out with bloom.
     var emissive = vec3<f32>(0.0);
-    if (is_poly && mesh.material_params.z >= 40.0) {
+    if (is_score_glyph) {
+        let house = is_house_polychrome_base(mesh.base_color.rgb);
+        emissive = albedo * select(0.98, 1.20, house);
+    } else if (is_poly && mesh.material_params.z >= 40.0) {
         emissive = mesh.base_color.rgb * 0.85;
     }
     if (is_emissive) {

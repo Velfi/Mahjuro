@@ -47,6 +47,20 @@ use hand_layout::hand_slots_for_count;
 
 use crate::ui::focus_nav::push_focus_ring;
 
+#[derive(Default, Clone, Debug)]
+pub(crate) struct StagingZoneLayout {
+    pub prev_selected: Vec<bool>,
+    pub staging_offset_slots: Vec<f32>,
+    pub target_staging_offset_slots: Vec<f32>,
+    pub staging_lift_z: Vec<f32>,
+    pub target_staging_lift_z: Vec<f32>,
+    pub has_capacity_error: bool,
+    pub is_valid_meld: bool,
+    pub valid_meld_tiles: Vec<bool>,
+    /// Hand indices grouped by preview meld; used to place lifted copies on the structure rail.
+    pub meld_index_groups: Vec<Vec<usize>>,
+}
+
 pub struct GameplayScene {
     /// Queue of scoring cascade animations. The front entry is the active
     /// cascade; when it finishes, it is popped and the next starts
@@ -226,6 +240,8 @@ pub struct GameplayScene {
     tutorial_panel_wiggle_at: Option<Instant>,
     /// Cached each `update`: selection is invalid only because of boss rules.
     boss_rule_feedback_live: bool,
+    /// Layout tracking for the Staging Zone (grouped melds when tiles are selected).
+    staging_layout: StagingZoneLayout,
 }
 
 /// How long after the opening deal before the candles begin sparking on.
@@ -261,6 +277,10 @@ const TUTORIAL_PANEL_WIGGLE_SECS: f32 = 0.55;
 const STRUCTURE_CASH_IN_WIGGLE_PX: f32 = 3.0;
 /// Fixed wiggle angular speed (rad/s); meld count only scales amplitude.
 const STRUCTURE_CASH_IN_WIGGLE_OMEGA: f32 = 11.0;
+/// Peak horizontal vibration (screen px) while hold-to-cash-in is charging.
+const CASH_IN_HOLD_VIBRATE_PX: f32 = 2.0;
+/// Hold vibration angular speed (rad/s) — faster than the idle structure wiggle.
+const CASH_IN_HOLD_VIBRATE_OMEGA: f32 = 28.0;
 /// Fullscreen gold tint on the cascade's final beat (see `gold_flash_at`).
 const GOLD_FLASH_SECS: f32 = 0.4;
 
@@ -549,6 +569,11 @@ impl GameplayScene {
             * (self.candle_time * STRUCTURE_CASH_IN_WIGGLE_OMEGA).sin()
     }
 
+    /// Instantaneous horizontal vibration (screen px) while hold-to-cash-in charges.
+    pub(super) fn cash_in_hold_vibration_px(&self) -> f32 {
+        CASH_IN_HOLD_VIBRATE_PX * (self.candle_time * CASH_IN_HOLD_VIBRATE_OMEGA).sin()
+    }
+
     /// `(glow 0..1, wiggle px)` for boss-icon feedback.
     pub(super) fn boss_rule_feedback(&self, now: Instant, live_blocked: bool) -> (f32, f32) {
         let (reject_glow, reject_wiggle) = self.invalid_boss_flash_phase(now);
@@ -663,6 +688,7 @@ impl GameplayScene {
             invalid_boss_flash_at: None,
             tutorial_panel_wiggle_at: None,
             boss_rule_feedback_live: false,
+            staging_layout: StagingZoneLayout::default(),
         }
     }
 
@@ -1052,6 +1078,203 @@ impl GameplayScene {
             true
         } else {
             false
+        }
+    }
+
+    pub(super) fn tick_staging_zone(&mut self, run: &crate::game::run::RunState, dt: f32) {
+        let hand_len = run.hand().len();
+
+        if !crate::persistence::load_settings().structure_meld_preview {
+            if self.staging_layout.prev_selected.len() != hand_len {
+                self.staging_layout.prev_selected.resize(hand_len, false);
+            }
+            self.staging_layout.staging_offset_slots.resize(hand_len, 0.0);
+            self.staging_layout.target_staging_offset_slots.resize(hand_len, 0.0);
+            self.staging_layout.staging_lift_z.resize(hand_len, 0.0);
+            self.staging_layout.target_staging_lift_z.resize(hand_len, 0.0);
+            self.staging_layout.valid_meld_tiles.resize(hand_len, false);
+            self.staging_layout.meld_index_groups.clear();
+            self.staging_layout.has_capacity_error = false;
+            self.staging_layout.is_valid_meld = false;
+            return;
+        }
+
+        let current_selected = run.selected_slice().to_vec();
+        
+        if self.staging_layout.prev_selected.len() != hand_len {
+            self.staging_layout.prev_selected.clear();
+            self.staging_layout.prev_selected.resize(hand_len, false);
+            self.staging_layout.staging_offset_slots.clear();
+            self.staging_layout.staging_offset_slots.resize(hand_len, 0.0);
+            self.staging_layout.target_staging_offset_slots.clear();
+            self.staging_layout.target_staging_offset_slots.resize(hand_len, 0.0);
+            self.staging_layout.staging_lift_z.clear();
+            self.staging_layout.staging_lift_z.resize(hand_len, 0.0);
+            self.staging_layout.target_staging_lift_z.clear();
+            self.staging_layout.target_staging_lift_z.resize(hand_len, 0.0);
+            self.staging_layout.valid_meld_tiles.clear();
+            self.staging_layout.valid_meld_tiles.resize(hand_len, false);
+        }
+
+        let selection_changed = self.staging_layout.prev_selected != current_selected;
+
+        if selection_changed {
+            self.staging_layout.prev_selected = current_selected.clone();
+            self.staging_layout.valid_meld_tiles.resize(hand_len, false);
+            self.staging_layout.valid_meld_tiles.fill(false);
+            
+            let selected_tiles: Vec<_> = run.hand().iter().zip(current_selected.iter()).filter(|&(_, &s)| s).map(|(t, _)| *t).collect();
+            
+            let mut has_capacity_error = false;
+            let mut bad_ids = rustc_hash::FxHashSet::default();
+            let mut meld_index_groups: Vec<Vec<usize>> = Vec::new();
+            let mut selection_valid = false;
+            
+            if !selected_tiles.is_empty() {
+                let id_to_index: rustc_hash::FxHashMap<u32, usize> = run
+                    .hand()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| (t.id, i))
+                    .collect();
+                let (preview_melds, bad_vec, is_valid) =
+                    run.preview_selection_melds(&selected_tiles);
+                selection_valid = is_valid;
+                for &id in &bad_vec {
+                    bad_ids.insert(id);
+                }
+                meld_index_groups = preview_melds
+                    .iter()
+                    .map(|meld| {
+                        let mut group: Vec<usize> = meld
+                            .tile_ids
+                            .iter()
+                            .filter_map(|id| id_to_index.get(id).copied())
+                            .collect();
+                        group.sort_unstable();
+                        group
+                    })
+                    .filter(|group: &Vec<usize>| !group.is_empty())
+                    .collect();
+                meld_index_groups.sort_by_key(|group| group[0]);
+
+                if is_valid {
+                    if let Some((sets, scoring_tiles)) =
+                        run.try_validate_with_wildcards(&selected_tiles)
+                    {
+                        let kongs_after = run
+                            .structure_sets()
+                            .iter()
+                            .chain(sets.iter())
+                            .filter(|s| s.kind == crate::core::hand::MeldKind::Kong)
+                            .count();
+                        use crate::game::game_mode::HAND_SIZE;
+                        if run.structure_tiles().len() + scoring_tiles.len()
+                            > HAND_SIZE + kongs_after
+                            || run.plays_remaining == 0
+                        {
+                            has_capacity_error = true;
+                        }
+                    }
+                } else if !preview_melds.is_empty() {
+                    let contributing_tiles: Vec<_> = selected_tiles
+                        .iter()
+                        .filter(|t| !bad_ids.contains(&t.id))
+                        .copied()
+                        .collect();
+                    if let Some((sets, scoring_tiles)) =
+                        run.try_validate_with_wildcards(&contributing_tiles)
+                    {
+                        let kongs_after = run
+                            .structure_sets()
+                            .iter()
+                            .chain(sets.iter())
+                            .filter(|s| s.kind == crate::core::hand::MeldKind::Kong)
+                            .count();
+                        use crate::game::game_mode::HAND_SIZE;
+                        if run.structure_tiles().len() + scoring_tiles.len()
+                            > HAND_SIZE + kongs_after
+                            || run.plays_remaining == 0
+                        {
+                            has_capacity_error = true;
+                        }
+                    }
+                }
+            }
+
+            self.staging_layout.is_valid_meld = selection_valid;
+            self.staging_layout.has_capacity_error = has_capacity_error;
+            self.staging_layout.meld_index_groups = meld_index_groups.clone();
+            
+            for group in &meld_index_groups {
+                for &idx in group {
+                    if idx < hand_len {
+                        self.staging_layout.valid_meld_tiles[idx] = true;
+                    }
+                }
+            }
+            
+            const INTRA_MELD_GAP: f32 = 0.88;
+            const INTER_MELD_GAP: f32 = 1.35;
+            
+            if meld_index_groups.is_empty() {
+                for i in 0..hand_len {
+                    self.staging_layout.target_staging_lift_z[i] = 0.0;
+                    self.staging_layout.target_staging_offset_slots[i] = 0.0;
+                }
+            } else {
+                let all_indices: Vec<usize> = meld_index_groups.iter().flat_map(|g| g.iter().copied()).collect();
+                let center_idx = all_indices.iter().sum::<usize>() as f32 / all_indices.len() as f32;
+                let total_width: f32 = meld_index_groups
+                    .iter()
+                    .map(|group| {
+                        if group.len() <= 1 {
+                            0.0
+                        } else {
+                            (group.len() as f32 - 1.0) * INTRA_MELD_GAP
+                        }
+                    })
+                    .sum::<f32>()
+                    + meld_index_groups.len().saturating_sub(1) as f32 * INTER_MELD_GAP;
+                let mut virtual_cursor = -total_width * 0.5;
+                
+                for i in 0..hand_len {
+                    self.staging_layout.target_staging_lift_z[i] = 0.0;
+                    self.staging_layout.target_staging_offset_slots[i] = 0.0;
+                }
+                
+                for group in &meld_index_groups {
+                    let group_width = if group.len() <= 1 {
+                        0.0
+                    } else {
+                        (group.len() as f32 - 1.0) * INTRA_MELD_GAP
+                    };
+                    let group_center_virtual = virtual_cursor + group_width * 0.5;
+                    let intra_start = -((group.len() as f32 - 1.0) * 0.5);
+                    for (ti, &idx) in group.iter().enumerate() {
+                        let virtual_pos =
+                            group_center_virtual + (intra_start + ti as f32) * INTRA_MELD_GAP;
+                        self.staging_layout.target_staging_lift_z[idx] = 1.0;
+                        self.staging_layout.target_staging_offset_slots[idx] =
+                            (center_idx + virtual_pos) - idx as f32;
+                    }
+                    virtual_cursor += group_width + INTER_MELD_GAP;
+                }
+            }
+        }
+        
+        let spring_factor = (dt * 15.0).clamp(0.0, 1.0);
+        for i in 0..hand_len {
+            if !current_selected.get(i).copied().unwrap_or(false) {
+                self.staging_layout.target_staging_lift_z[i] = 0.0;
+                self.staging_layout.target_staging_offset_slots[i] = 0.0;
+                self.staging_layout.staging_lift_z[i] = 0.0;
+                self.staging_layout.staging_offset_slots[i] = 0.0;
+                self.staging_layout.valid_meld_tiles[i] = false;
+                continue;
+            }
+            self.staging_layout.staging_offset_slots[i] += (self.staging_layout.target_staging_offset_slots[i] - self.staging_layout.staging_offset_slots[i]) * spring_factor;
+            self.staging_layout.staging_lift_z[i] += (self.staging_layout.target_staging_lift_z[i] - self.staging_layout.staging_lift_z[i]) * spring_factor;
         }
     }
 }

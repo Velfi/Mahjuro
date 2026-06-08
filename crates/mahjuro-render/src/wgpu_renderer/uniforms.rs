@@ -89,7 +89,8 @@ pub(crate) struct Tile3dInstance {
     pub tile_visual_params: [f32; 4],
     pub tile_decal_atlas_uv: [f32; 4],
     pub tile_material_seed: f32,
-    pub _pad: [f32; 3],
+    pub tile_opacity: f32,
+    pub _pad: [f32; 2],
 }
 
 /// One shadow-caster instance (model only) for instanced tile outline draws.

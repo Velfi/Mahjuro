@@ -150,6 +150,7 @@ pub(super) struct ShadersAndPipelinesInit {
     pub tile_shadow_frame_bind_group: wgpu::BindGroup,
     pub shadow_pipeline_instanced: wgpu::RenderPipeline,
     pub tile_pipeline_blend_cull: wgpu::RenderPipeline,
+    pub tile_pipeline_ghost_cull: wgpu::RenderPipeline,
     pub tile_pipeline_blend_double: wgpu::RenderPipeline,
     pub tile_pipeline_opaque_cull: wgpu::RenderPipeline,
     pub tile_sampler: wgpu::Sampler,
@@ -1666,7 +1667,7 @@ pub(super) fn init_shaders_and_pipelines(
             wgpu::VertexAttribute {
                 offset: 96,
                 shader_location: 12,
-                format: wgpu::VertexFormat::Float32,
+                format: wgpu::VertexFormat::Float32x2,
             },
         ],
     };
@@ -1723,6 +1724,25 @@ pub(super) fn init_shaders_and_pipelines(
     let tile_pipeline_blend_cull = mk_tile_pipeline(
         "tile-blend-cull",
         Some(wgpu::BlendState::ALPHA_BLENDING),
+        &depth_3d_blend,
+        true,
+    );
+    // Staging previews: additive haze (SrcAlpha, One) so decal body reads through,
+    // not just specular highlights like standard alpha over a dark table.
+    let tile_pipeline_ghost_cull = mk_tile_pipeline(
+        "tile-ghost-cull",
+        Some(wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Zero,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        }),
         &depth_3d_blend,
         true,
     );
@@ -3041,6 +3061,7 @@ pub(super) fn init_shaders_and_pipelines(
         tile_shadow_frame_bind_group,
         shadow_pipeline_instanced,
         tile_pipeline_blend_cull,
+        tile_pipeline_ghost_cull,
         tile_pipeline_blend_double,
         tile_pipeline_opaque_cull,
         tile_sampler,

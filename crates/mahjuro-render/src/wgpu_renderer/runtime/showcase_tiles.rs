@@ -2,6 +2,13 @@ use crate::table_transform::{rot_euler_xyz_rad, translate_rot_scale};
 
 use super::*;
 
+struct PendingShowcaseTile {
+    instance: Tile3dInstance,
+    translucent: bool,
+    casts_shadow: bool,
+    shadow_model: [f32; 16],
+}
+
 impl WgpuRenderer {
     /// Showcase tile placement pre-pass: build instanced tile + shadow buffers,
     /// pick rects, and outline instances for all `ShowcaseTileBatch` draws.
@@ -48,6 +55,7 @@ impl WgpuRenderer {
 
         self.tile_3d_instances_staging.clear();
         self.tile_3d_batch_ranges.clear();
+        self.tile_3d_batch_blend_ranges.clear();
         self.tile_shadow_instances_staging.clear();
         self.tile_shadow_batch_ranges.clear();
         self.tile_outline_instances_staging.clear();
@@ -103,9 +111,10 @@ impl WgpuRenderer {
             let batch_3d_start = self.tile_3d_instances_staging.len() as u32;
             let batch_shadow_start = self.tile_shadow_instances_staging.len() as u32;
             let outline_batch_start = self.tile_outline_instances_staging.len() as u32;
+            let mut pending = Vec::with_capacity(batch.len());
 
             for p in batch.iter() {
-                if self.tile_3d_instances_staging.len() >= MAX_SHOWCASE_TILE_SLOTS {
+                if pending.len() >= MAX_SHOWCASE_TILE_SLOTS {
                     break;
                 }
                 let center = crate::world_space::layout_anchor_to_world(
@@ -205,20 +214,23 @@ impl WgpuRenderer {
                 };
                 sc_bcf[2] = p.tile.enhancement.map_or(0.0, |e| e.shader_id());
 
-                let casts_shadow = !frame.showcase_render_hints.zodiac_celebration_no_shadow;
-                self.tile_3d_instances_staging.push(Tile3dInstance {
-                    model: model.to_cols_array(),
-                    tile_visual_params: sc_bcf,
-                    tile_decal_atlas_uv: self.decal_atlas_uv_for(&p.tile),
-                    tile_material_seed: p.tile.id as f32,
-                    _pad: [0.0; 3],
+                let opacity = p.opacity.clamp(0.0, 1.0);
+                let translucent = opacity < 0.999;
+                let casts_shadow = !frame.showcase_render_hints.zodiac_celebration_no_shadow
+                    && !translucent;
+                pending.push(PendingShowcaseTile {
+                    instance: Tile3dInstance {
+                        model: model.to_cols_array(),
+                        tile_visual_params: sc_bcf,
+                        tile_decal_atlas_uv: self.decal_atlas_uv_for(&p.tile),
+                        tile_material_seed: p.tile.id as f32,
+                        tile_opacity: opacity,
+                        _pad: [0.0; 2],
+                    },
+                    translucent,
+                    casts_shadow,
+                    shadow_model: model.to_cols_array(),
                 });
-                if casts_shadow {
-                    self.tile_shadow_instances_staging
-                        .push(TileShadowInstance {
-                            model: model.to_cols_array(),
-                        });
-                }
 
                 if p.outline {
                     const OUTLINE_GROW: f32 = 1.11;
@@ -235,8 +247,26 @@ impl WgpuRenderer {
                 }
             }
 
-            let batch_3d_n = self.tile_3d_instances_staging.len() as u32 - batch_3d_start;
-            self.tile_3d_batch_ranges.push((batch_3d_start, batch_3d_n));
+            let opaque_start = self.tile_3d_instances_staging.len() as u32;
+            for tile in pending.iter().filter(|t| !t.translucent) {
+                self.tile_3d_instances_staging.push(tile.instance);
+                if tile.casts_shadow {
+                    self.tile_shadow_instances_staging.push(TileShadowInstance {
+                        model: tile.shadow_model,
+                    });
+                }
+            }
+            let opaque_n = self.tile_3d_instances_staging.len() as u32 - opaque_start;
+
+            let blend_start = self.tile_3d_instances_staging.len() as u32;
+            for tile in pending.iter().filter(|t| t.translucent) {
+                self.tile_3d_instances_staging.push(tile.instance);
+            }
+            let blend_n = self.tile_3d_instances_staging.len() as u32 - blend_start;
+
+            self.tile_3d_batch_ranges.push((opaque_start, opaque_n));
+            self.tile_3d_batch_blend_ranges.push((blend_start, blend_n));
+
             let batch_shadow_n =
                 self.tile_shadow_instances_staging.len() as u32 - batch_shadow_start;
             self.tile_shadow_batch_ranges.push((batch_shadow_start, batch_shadow_n));
@@ -244,6 +274,8 @@ impl WgpuRenderer {
                 self.tile_outline_instances_staging.len() as u32 - outline_batch_start;
             self.tile_outline_batch_ranges
                 .push((outline_batch_start, outline_n));
+
+            let _ = batch_3d_start;
         }
 
         // Append coin instances after showcase batches.
@@ -273,14 +305,13 @@ impl WgpuRenderer {
             );
         }
         if !self.tile_shadow_instances_staging.is_empty() {
+            *shadow_uniforms_changed = true;
             self.queue.write_buffer(
                 &self.tile_shadow_instance_buffer,
                 0,
                 bytemuck::cast_slice(&self.tile_shadow_instances_staging),
             );
-            *shadow_uniforms_changed = true;
         }
-
         if !self.tile_outline_instances_staging.is_empty() {
             self.queue.write_buffer(
                 &self.tile_outline_instance_buffer,

@@ -307,15 +307,18 @@ impl WgpuRenderer {
 
     fn gameplay_cash_in_wiggle_prim_deltas(
         &self,
-        wiggle_px: f32,
+        wiggle_x_px: f32,
+        wiggle_y_px: f32,
     ) -> rustc_hash::FxHashMap<usize, glam::Mat4> {
         let mut deltas = rustc_hash::FxHashMap::default();
-        if wiggle_px.abs() < 1e-4 || self.gameplay_cash_in_prim_indices.is_empty() {
+        if (wiggle_x_px.abs() < 1e-4 && wiggle_y_px.abs() < 1e-4)
+            || self.gameplay_cash_in_prim_indices.is_empty()
+        {
             return deltas;
         }
         // Map screen-space wiggle into gameplay.glb document units (world Z-up).
-        let doc_shift = wiggle_px * 0.003;
-        let delta = Mat4::from_translation(glam::Vec3::new(0.0, 0.0, doc_shift));
+        let doc_shift = glam::Vec3::new(wiggle_x_px * 0.003, 0.0, wiggle_y_px * 0.003);
+        let delta = Mat4::from_translation(doc_shift);
         for &pi in &self.gameplay_cash_in_prim_indices {
             deltas.insert(pi, delta);
         }
@@ -327,7 +330,10 @@ impl WgpuRenderer {
         frame: &crate::draw_cmd::UiFrame,
     ) -> rustc_hash::FxHashMap<usize, glam::Mat4> {
         let mut deltas = self.gameplay_score_roller_prim_deltas(frame);
-        for (pi, delta) in self.gameplay_cash_in_wiggle_prim_deltas(frame.gameplay_cash_in_wiggle) {
+        for (pi, delta) in self.gameplay_cash_in_wiggle_prim_deltas(
+            frame.gameplay_cash_in_wiggle_x,
+            frame.gameplay_cash_in_wiggle,
+        ) {
             deltas.insert(pi, delta);
         }
         deltas

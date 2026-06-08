@@ -308,6 +308,8 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let band_coord = in.world_pos.xy * 0.02;
         albedo = score_glyph_band_albedo_uv(HOUSE_BASE_RGB, band_coord, in.uv, cam.room_post_params.w);
     }
+    let is_house_polychrome = (pbr.flags & GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME) != 0u
+        && cam.room_post_params.w > 0.0;
 
     // Animation-lab false shading: albedo × simple N·L (skips punctual PBR / shadows).
     if (cam.room_debug_params.y > 0.5) {
@@ -531,7 +533,12 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     lit_hdr = lit_hdr * sample_contact_ao(in.world_pos);
     // Per-light projected shadows are applied in the punctual / spot loops above.
     let emissive_out = emissive * boss_light_rgb_mul;
-    let hdr = lit_hdr + emissive_out;
+    var hdr = lit_hdr + emissive_out;
+    if (is_house_polychrome) {
+        // House ordeal cash-in: keep band colours stable under candle swing.
+        let self_lit = albedo * 0.90;
+        hdr = mix(lit_hdr, self_lit, 0.62) + emissive_out;
+    }
     return ShopShaded(hdr, emissive_out, out_alpha);
 }
 

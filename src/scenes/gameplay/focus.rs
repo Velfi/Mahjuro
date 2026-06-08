@@ -105,23 +105,81 @@ pub(super) fn rebuild_focus_nav(
 pub(super) fn gameplay_nav_edges(
     focus_rects: &[(FocusTarget, [f32; 4])],
 ) -> Vec<(FocusTarget, crate::ui::focus_nav::FocusDir, FocusTarget)> {
-    use crate::ui::focus_nav::FocusDir;
+    use crate::ui::focus_nav::{FocusDir, rect_center};
 
     let mut edges = Vec::new();
+
+    fn target_rect(focus_rects: &[(FocusTarget, [f32; 4])], target: FocusTarget) -> Option<[f32; 4]> {
+        focus_rects
+            .iter()
+            .find(|(t, _)| *t == target)
+            .map(|(_, r)| *r)
+    }
+
+    fn x_nearest_target(
+        focus_rects: &[(FocusTarget, [f32; 4])],
+        anchor_x: f32,
+        pred: impl Fn(&FocusTarget) -> bool,
+    ) -> Option<FocusTarget> {
+        focus_rects
+            .iter()
+            .filter(|(t, _)| pred(t))
+            .min_by(|(_, a), (_, b)| {
+                (rect_center(*a).0 - anchor_x)
+                    .abs()
+                    .partial_cmp(&(rect_center(*b).0 - anchor_x).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(t, _)| *t)
+    }
+
+    fn hand_tile_count(focus_rects: &[(FocusTarget, [f32; 4])]) -> usize {
+        focus_rects
+            .iter()
+            .filter_map(|(t, _)| match t {
+                FocusTarget::HandTile(i) => Some(*i + 1),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn is_plinth_row_target(t: &FocusTarget) -> bool {
+        matches!(
+            t,
+            FocusTarget::Dora | FocusTarget::RoundWind | FocusTarget::Ordeal | FocusTarget::Gold
+        )
+    }
+
+    let mut plinth_row: Vec<(FocusTarget, [f32; 4])> = focus_rects
+        .iter()
+        .filter(|(t, _)| is_plinth_row_target(t))
+        .copied()
+        .collect();
+    plinth_row.sort_by(|(_, a), (_, b)| {
+        rect_center(*a)
+            .0
+            .partial_cmp(&rect_center(*b).0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for pair in plinth_row.windows(2) {
+        let (left, _) = pair[0];
+        let (right, _) = pair[1];
+        edges.push((left, FocusDir::Right, right));
+        edges.push((right, FocusDir::Left, left));
+    }
 
     let mut relic_indices = focus_rects.iter().filter_map(|(target, _)| match *target {
         FocusTarget::Relic(i) => Some(i),
         _ => None,
     });
-    if let Some(last_idx) = relic_indices.next_back()
-        && focus_rects
-            .iter()
-            .any(|(t, _)| matches!(t, FocusTarget::Dora))
+    if let (Some(last_idx), Some(&(first_plinth, _))) =
+        (relic_indices.next_back(), plinth_row.first())
     {
         edges.push((
             FocusTarget::Relic(last_idx),
             FocusDir::Right,
-            FocusTarget::Dora,
+            first_plinth,
         ));
     }
 
@@ -173,6 +231,110 @@ pub(super) fn gameplay_nav_edges(
         edges.push((first, FocusDir::Left, last));
         edges.push((last, FocusDir::Right, first));
     }
+
+    // Left-column stack: left-half hand → relics → talismans → score roller.
+    let hand_count = hand_tile_count(focus_rects);
+    let left_half_end = hand_count / 2;
+    let consumables_present = focus_rects
+        .iter()
+        .any(|(t, _)| matches!(t, FocusTarget::Consumable(_)));
+    let relic_targets: Vec<FocusTarget> = focus_rects
+        .iter()
+        .filter_map(|(t, _)| matches!(t, FocusTarget::Relic(_)).then_some(*t))
+        .collect();
+    let consumable_targets: Vec<FocusTarget> = focus_rects
+        .iter()
+        .filter_map(|(t, _)| matches!(t, FocusTarget::Consumable(_)).then_some(*t))
+        .collect();
+    let score_targets: Vec<FocusTarget> = focus_rects
+        .iter()
+        .filter_map(|(t, _)| matches!(t, FocusTarget::ScoreRoller(_)).then_some(*t))
+        .collect();
+
+    for i in 0..left_half_end {
+        let hand = FocusTarget::HandTile(i);
+        let Some(hand_rect) = target_rect(focus_rects, hand) else {
+            continue;
+        };
+        if let Some(relic) = x_nearest_target(
+            focus_rects,
+            rect_center(hand_rect).0,
+            |t| matches!(t, FocusTarget::Relic(_)),
+        ) {
+            edges.push((hand, FocusDir::Up, relic));
+        }
+    }
+
+    for relic in relic_targets {
+        let Some(relic_rect) = target_rect(focus_rects, relic) else {
+            continue;
+        };
+        let anchor_x = rect_center(relic_rect).0;
+        if consumables_present {
+            if let Some(consumable) = x_nearest_target(
+                focus_rects,
+                anchor_x,
+                |t| matches!(t, FocusTarget::Consumable(_)),
+            ) {
+                edges.push((relic, FocusDir::Up, consumable));
+            }
+        } else if let Some(score) = x_nearest_target(
+            focus_rects,
+            anchor_x,
+            |t| matches!(t, FocusTarget::ScoreRoller(_)),
+        ) {
+            edges.push((relic, FocusDir::Up, score));
+        }
+        if let Some(hand) = x_nearest_target(focus_rects, anchor_x, |t| {
+            matches!(t, FocusTarget::HandTile(i) if *i < left_half_end)
+        }) {
+            edges.push((relic, FocusDir::Down, hand));
+        }
+    }
+
+    for consumable in consumable_targets {
+        let Some(consumable_rect) = target_rect(focus_rects, consumable) else {
+            continue;
+        };
+        let anchor_x = rect_center(consumable_rect).0;
+        if let Some(score) = x_nearest_target(
+            focus_rects,
+            anchor_x,
+            |t| matches!(t, FocusTarget::ScoreRoller(_)),
+        ) {
+            edges.push((consumable, FocusDir::Up, score));
+        }
+        if let Some(relic) = x_nearest_target(
+            focus_rects,
+            anchor_x,
+            |t| matches!(t, FocusTarget::Relic(_)),
+        ) {
+            edges.push((consumable, FocusDir::Down, relic));
+        }
+    }
+
+    for score in score_targets {
+        let Some(score_rect) = target_rect(focus_rects, score) else {
+            continue;
+        };
+        let anchor_x = rect_center(score_rect).0;
+        if consumables_present {
+            if let Some(consumable) = x_nearest_target(
+                focus_rects,
+                anchor_x,
+                |t| matches!(t, FocusTarget::Consumable(_)),
+            ) {
+                edges.push((score, FocusDir::Down, consumable));
+            }
+        } else if let Some(relic) = x_nearest_target(
+            focus_rects,
+            anchor_x,
+            |t| matches!(t, FocusTarget::Relic(_)),
+        ) {
+            edges.push((score, FocusDir::Down, relic));
+        }
+    }
+
     if let Some(&(last_hand, _)) = hand_entries.last() {
         // Explicit QoL hop: from the rightmost hand tile, Up should first hit
         // cash-in when that control is visible; otherwise jump to the yen pile.
@@ -433,6 +595,51 @@ mod tests {
         )
     }
 
+    fn is_plinth_row_target(t: FocusTarget) -> bool {
+        matches!(
+            t,
+            FocusTarget::Dora | FocusTarget::RoundWind | FocusTarget::Ordeal | FocusTarget::Gold
+        )
+    }
+
+    fn plinth_row_order_ltr(rects: &[(FocusTarget, [f32; 4])]) -> Vec<FocusTarget> {
+        use crate::ui::focus_nav::rect_center;
+
+        let mut row: Vec<(FocusTarget, [f32; 4])> = rects
+            .iter()
+            .filter(|(t, _)| is_plinth_row_target(*t))
+            .copied()
+            .collect();
+        row.sort_by(|(_, a), (_, b)| {
+            rect_center(*a)
+                .0
+                .partial_cmp(&rect_center(*b).0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        row.into_iter().map(|(t, _)| t).collect()
+    }
+
+    fn assert_plinth_row_only(path: &[FocusTarget]) {
+        assert!(
+            path.iter().all(|&t| is_plinth_row_target(t)),
+            "plinth-row walk must stay on plinths and yen counter: {path:?}"
+        );
+    }
+
+    fn assert_plinth_row_focus_order(
+        nav: &mut FocusNavState<FocusTarget>,
+        start: FocusTarget,
+        dir: FocusDir,
+        expected: &[FocusTarget],
+    ) {
+        let path = walk_focus_order(nav, start, dir, expected.len().saturating_sub(1));
+        assert_plinth_row_only(&path);
+        assert_eq!(
+            path, expected,
+            "plinth-row focus order from {start:?} via {dir:?}"
+        );
+    }
+
     fn assert_bottom_row_only(path: &[FocusTarget]) {
         assert!(
             path.iter().all(|&t| is_bottom_row_target(t)),
@@ -558,11 +765,44 @@ mod tests {
     }
 
     #[test]
-    fn explicit_edges_relic_to_dora_only_from_last_relic_right() {
+    fn plinth_row_focus_order_left_to_right_live_glb() {
+        let rects = live_gameplay_focus_rects(14);
+        let expected = plinth_row_order_ltr(&rects);
+        assert!(
+            expected.len() >= 3,
+            "expected at least dora, round wind, and yen counter: {expected:?}"
+        );
+        let mut nav = load_nav(&rects);
+        assert_plinth_row_focus_order(
+            &mut nav,
+            *expected.first().expect("plinth row start"),
+            FocusDir::Right,
+            &expected,
+        );
+    }
+
+    #[test]
+    fn plinth_row_focus_order_right_to_left_live_glb() {
+        let rects = live_gameplay_focus_rects(14);
+        let mut expected = plinth_row_order_ltr(&rects);
+        expected.reverse();
+        let mut nav = load_nav(&rects);
+        assert_plinth_row_focus_order(
+            &mut nav,
+            *expected.first().expect("plinth row end"),
+            FocusDir::Left,
+            &expected,
+        );
+    }
+
+    #[test]
+    fn explicit_edges_relic_to_first_plinth_row_only_from_last_relic_right() {
         let rects = [
             (FocusTarget::Relic(0), [0.0, 0.0, 10.0, 10.0]),
             (FocusTarget::Relic(1), [20.0, 0.0, 10.0, 10.0]),
             (FocusTarget::Dora, [200.0, 0.0, 10.0, 10.0]),
+            (FocusTarget::RoundWind, [240.0, 40.0, 10.0, 10.0]),
+            (FocusTarget::Gold, [280.0, 80.0, 10.0, 10.0]),
         ];
         let mut nav = load_nav(&rects);
         assert_eq!(
@@ -574,6 +814,14 @@ mod tests {
             Some(FocusTarget::Dora)
         );
         assert_eq!(nav.pick(FocusTarget::Relic(1), FocusDir::Left), Some(FocusTarget::Relic(0)));
+        assert_eq!(
+            nav.pick(FocusTarget::Dora, FocusDir::Right),
+            Some(FocusTarget::RoundWind)
+        );
+        assert_eq!(
+            nav.pick(FocusTarget::RoundWind, FocusDir::Right),
+            Some(FocusTarget::Gold)
+        );
     }
 
     #[test]
@@ -701,6 +949,37 @@ mod tests {
     }
 
     #[test]
+    fn left_half_hand_up_traverses_relics_talismans_score_roller() {
+        let rects = live_gameplay_focus_rects(14);
+        let mut nav = load_nav(&rects);
+        for i in 0..7 {
+            let hand = FocusTarget::HandTile(i);
+            let relic = nav
+                .pick(hand, FocusDir::Up)
+                .expect("left-half hand Up should reach relics");
+            assert!(
+                matches!(relic, FocusTarget::Relic(_)),
+                "HandTile({i}) Up should land on relic row, got {relic:?}"
+            );
+            let talisman = nav
+                .pick(relic, FocusDir::Up)
+                .expect("relic Up should reach talismans");
+            assert!(
+                matches!(talisman, FocusTarget::Consumable(_)),
+                "Relic Up from left column should reach talisman row, got {talisman:?}"
+            );
+            let score = nav
+                .pick(talisman, FocusDir::Up)
+                .expect("talisman Up should reach score roller");
+            assert_eq!(
+                score,
+                FocusTarget::ScoreRoller(ScoreRollerBank::Score),
+                "talisman Up should reach round-score roller"
+            );
+        }
+    }
+
+    #[test]
     fn last_hand_tile_up_falls_back_to_gold_when_cash_in_hidden() {
         let mut rects = live_gameplay_focus_rects(14);
         rects.retain(|(t, _)| !matches!(t, FocusTarget::Button(GameplayButton::Trigger)));
@@ -712,3 +991,4 @@ mod tests {
         );
     }
 }
+

@@ -342,6 +342,7 @@ fn push_cell_tile(
         scale: if exhausted { DRAWN_SCALE } else { 1.0 },
         size_px: tile_size,
         brightness: if exhausted { DRAWN_BRIGHTNESS } else { 1.0 },
+        opacity: 1.0,
         selected: false,
         hovered: false,
         outline: false,

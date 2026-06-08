@@ -83,6 +83,8 @@ pub(super) enum RenderOp {
     ClearSceneDepth,
     // Skeuomorphic gameplay HUD (phase 1).
     ShowcaseTileBatch(usize), // index into `showcase_tile_batches`
+    /// Alpha-blended showcase tiles (staging previews) after all opaque batches.
+    ShowcaseTileTranslucent,
     Object3dBatch {
         start: usize,
         end: usize,

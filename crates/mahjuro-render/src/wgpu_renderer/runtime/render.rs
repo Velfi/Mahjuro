@@ -1215,6 +1215,16 @@ impl WgpuRenderer {
             &mut tile_glows,
             &mut shadow_uniforms_changed,
         );
+        if self
+            .tile_3d_batch_blend_ranges
+            .iter()
+            .any(|(_, count)| *count > 0)
+            && let Some(pos) = ops
+                .iter()
+                .rposition(|op| matches!(op, RenderOp::ShowcaseTileBatch(_)))
+        {
+            ops.insert(pos + 1, RenderOp::ShowcaseTileTranslucent);
+        }
 
         if self.active_lab_baked_shadow {
             self.write_active_room_baked_shadow_globals(
