@@ -5,7 +5,7 @@
 
 use std::sync::{
     OnceLock,
-    atomic::{AtomicU8, Ordering},
+    atomic::{AtomicU32, AtomicU8, Ordering},
 };
 
 /// Pressure tier for eager (non-scene-critical) room GPU warm-up.
@@ -42,6 +42,9 @@ impl GpuMemoryPressure {
 /// Allocator pressure defaults used when the room resident cap is 2 (Low memory mode).
 const LOW_MEMORY_CONSTRAINED_ALLOC_MIB: u64 = 2200;
 const LOW_MEMORY_CRITICAL_ALLOC_MIB: u64 = 2800;
+/// Integrated-GPU low-memory defaults — shared-memory parts OOM far below the discrete floor.
+const INTEGRATED_LOW_MEMORY_CONSTRAINED_ALLOC_MIB: u64 = 384;
+const INTEGRATED_LOW_MEMORY_CRITICAL_ALLOC_MIB: u64 = 640;
 /// Allocator pressure defaults used when the room resident cap is 6 (Performance/Visuals).
 ///
 /// High-VRAM adapters should not enter "constrained"/"critical" at ~2-3 GiB usage.
@@ -51,6 +54,7 @@ const CONSTRAINED_ALLOC_ENV: &str = "MAHJURO_GPU_MEM_CONSTRAINED_MIB";
 const CRITICAL_ALLOC_ENV: &str = "MAHJURO_GPU_MEM_CRITICAL_MIB";
 
 static LAST_LOGGED: AtomicU8 = AtomicU8::new(0);
+static LAST_EAGER_PRELOAD_LOG: AtomicU32 = AtomicU32::new(u32::MAX);
 static CONSTRAINED_ALLOC_OVERRIDE_MIB: OnceLock<Option<u64>> = OnceLock::new();
 static CRITICAL_ALLOC_OVERRIDE_MIB: OnceLock<Option<u64>> = OnceLock::new();
 
@@ -83,13 +87,14 @@ pub fn classify(
     device: &wgpu::Device,
     room_gpu_residents: usize,
     max_room_gpu_residents: usize,
+    integrated_gpu: bool,
 ) -> PressureSnapshot {
     let report = device.generate_allocator_report();
     let allocated_bytes = report.as_ref().map(|r| r.total_allocated_bytes);
     let reserved_bytes = report.as_ref().map(|r| r.total_reserved_bytes);
 
     let (constrained_alloc_mib, critical_alloc_mib) =
-        allocator_pressure_thresholds_mib(max_room_gpu_residents);
+        allocator_pressure_thresholds_mib(max_room_gpu_residents, integrated_gpu);
     let pressure = if let Some(allocated) = allocated_bytes {
         let mib = allocated / (1024 * 1024);
         if mib >= critical_alloc_mib {
@@ -112,9 +117,12 @@ pub fn classify(
     }
 }
 
-fn allocator_pressure_thresholds_mib(max_room_gpu_residents: usize) -> (u64, u64) {
+fn allocator_pressure_thresholds_mib(
+    max_room_gpu_residents: usize,
+    integrated_gpu: bool,
+) -> (u64, u64) {
     let (mut constrained, mut critical) =
-        default_allocator_pressure_thresholds_mib(max_room_gpu_residents);
+        default_allocator_pressure_thresholds_mib(max_room_gpu_residents, integrated_gpu);
     if let Some(v) = *CONSTRAINED_ALLOC_OVERRIDE_MIB.get_or_init(|| env_override_mib(CONSTRAINED_ALLOC_ENV)) {
         constrained = v;
     }
@@ -124,9 +132,18 @@ fn allocator_pressure_thresholds_mib(max_room_gpu_residents: usize) -> (u64, u64
     ordered_allocator_thresholds_mib(constrained, critical)
 }
 
-fn default_allocator_pressure_thresholds_mib(max_room_gpu_residents: usize) -> (u64, u64) {
+fn default_allocator_pressure_thresholds_mib(
+    max_room_gpu_residents: usize,
+    integrated_gpu: bool,
+) -> (u64, u64) {
     // Low-memory preset currently caps room residents at 2.
     if max_room_gpu_residents <= 2 {
+        if integrated_gpu {
+            return (
+                INTEGRATED_LOW_MEMORY_CONSTRAINED_ALLOC_MIB,
+                INTEGRATED_LOW_MEMORY_CRITICAL_ALLOC_MIB,
+            );
+        }
         (LOW_MEMORY_CONSTRAINED_ALLOC_MIB, LOW_MEMORY_CRITICAL_ALLOC_MIB)
     } else {
         (HIGH_CAP_CONSTRAINED_ALLOC_MIB, HIGH_CAP_CRITICAL_ALLOC_MIB)
@@ -192,6 +209,20 @@ pub fn log_eager_preload(action: &'static str, room: &'static str, pressure: Gpu
     if !crate::gpu_memory_profile::enabled() {
         return;
     }
+    // Paused lines repeat every frame under critical pressure — log once per (action, room, tier).
+    let key = (action.as_bytes()[0] as u32)
+        .wrapping_mul(31)
+        .wrapping_add(room.as_bytes().get(0).copied().unwrap_or(0) as u32)
+        .wrapping_mul(31)
+        .wrapping_add(pressure as u32);
+    if action == "paused"
+        && LAST_EAGER_PRELOAD_LOG.swap(key, Ordering::Relaxed) == key
+    {
+        return;
+    }
+    if action == "paused" {
+        LAST_EAGER_PRELOAD_LOG.store(key, Ordering::Relaxed);
+    }
     log::info!(
         "gpu mem profile: eager preload {action} {room} (pressure={pressure})",
         action = action,
@@ -248,11 +279,18 @@ mod tests {
     #[test]
     fn default_allocator_thresholds_follow_resident_cap() {
         assert_eq!(
-            default_allocator_pressure_thresholds_mib(2),
+            default_allocator_pressure_thresholds_mib(2, false),
             (LOW_MEMORY_CONSTRAINED_ALLOC_MIB, LOW_MEMORY_CRITICAL_ALLOC_MIB)
         );
         assert_eq!(
-            default_allocator_pressure_thresholds_mib(6),
+            default_allocator_pressure_thresholds_mib(2, true),
+            (
+                INTEGRATED_LOW_MEMORY_CONSTRAINED_ALLOC_MIB,
+                INTEGRATED_LOW_MEMORY_CRITICAL_ALLOC_MIB
+            )
+        );
+        assert_eq!(
+            default_allocator_pressure_thresholds_mib(6, false),
             (HIGH_CAP_CONSTRAINED_ALLOC_MIB, HIGH_CAP_CRITICAL_ALLOC_MIB)
         );
     }

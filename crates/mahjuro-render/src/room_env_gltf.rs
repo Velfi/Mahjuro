@@ -74,10 +74,15 @@ impl RoomPrimitiveTextureSources {
 
 /// Longest edge for shop / hallway / archive / main-menu room glTF textures (tiles stay 256).
 pub const ROOM_ENV_TEXTURE_MAX_DIMENSION: u32 = 1024;
+/// Low-memory preset: quarter-area vs 1024² to fit integrated-GPU shared memory budgets.
+pub const ROOM_ENV_TEXTURE_MAX_DIMENSION_LOW_MEMORY: u32 = 512;
 
 /// Decode every embedded image once (cap + mips). Room env walks index into this table.
 pub fn cap_room_gltf_images(images: &[gltf::image::Data]) -> Vec<Option<CappedGltfImage>> {
-    cap_gltf_images(images, ROOM_ENV_TEXTURE_MAX_DIMENSION)
+    cap_gltf_images(
+        images,
+        crate::room_preload::room_env_texture_max_dimension(),
+    )
 }
 
 // Room-env special cases are now explicit per-primitive flags in `GltfPbrUniform`

@@ -2100,6 +2100,9 @@ impl WgpuRenderer {
             return false;
         }
         if self.shop_room_gpu_upload.is_none() {
+            if !self.preflight_room_gpu_headroom_for_upload(true) {
+                return false;
+            }
             let ctx = self.room_gpu_upload_ctx();
             self.shop_room_gpu_upload = begin_incremental_room_env_gpu_upload(
                 IncrementalRoomEnvKind::Shop,
@@ -2272,6 +2275,9 @@ impl WgpuRenderer {
             return false;
         }
         if self.hallway_room_gpu_upload.is_none() {
+            if !self.preflight_room_gpu_headroom_for_upload(true) {
+                return false;
+            }
             let ctx = self.room_gpu_upload_ctx();
             self.hallway_room_gpu_upload = begin_incremental_room_env_gpu_upload(
                 IncrementalRoomEnvKind::Hallway,
@@ -3294,6 +3300,10 @@ impl WgpuRenderer {
         if *done {
             return;
         }
+        // One resident slot on integrated GPUs — warm only during black-frame transitions.
+        if self.integrated_low_memory_gpu() {
+            return;
+        }
         let snapshot = self.gpu_memory_pressure_snapshot();
         let pressure =
             crate::gpu_memory_pressure::eager_warm_pressure(&snapshot, self.graphics_mode);
@@ -3396,6 +3406,12 @@ impl WgpuRenderer {
     fn drive_pending_scene_room_gpu_at_black(&mut self, pending: &str) {
         let budget = TRANSITION_BLACK_ROOM_GPU_UPLOAD_BUDGET_MS;
         let key = scene_keys::normalize_scene_key(pending);
+        let dest_bit = Self::room_gpu_bit_for_scene_key(key);
+        if self.integrated_low_memory_gpu() {
+            if let Some(bit) = dest_bit {
+                self.evict_room_gpu_residents_except(bit);
+            }
+        }
         match key {
             scene_keys::MAIN_MENU => {
                 self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::MainMenu);
@@ -3510,6 +3526,12 @@ impl WgpuRenderer {
     ) {
         if *done || !ready || self.rooms_gpu_loaded & bit != 0 {
             return;
+        }
+        if self.integrated_low_memory_gpu() {
+            let protected = self.room_gpu_evict_protected_bits();
+            if protected != 0 && protected & bit == 0 {
+                return;
+            }
         }
         if !self.preflight_room_gpu_headroom_for_upload(true) {
             return;

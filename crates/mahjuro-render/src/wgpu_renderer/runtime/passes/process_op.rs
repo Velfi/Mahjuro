@@ -37,6 +37,10 @@ pub(super) struct ProcessOpCtx<'a> {
     /// (`Rgba16Float`): Pass A (`scene_color_view`), journal scene, or HDR
     /// swapchain text overlay.
     pub scene_hdr_attachment: bool,
+    /// Color attachment width for this pass (`render_size` in Pass A, window `size` in overlay).
+    pub pass_target_w: u32,
+    /// Color attachment height for this pass.
+    pub pass_target_h: u32,
 }
 
 impl WgpuRenderer {
@@ -150,14 +154,23 @@ impl WgpuRenderer {
         let relic_debuff_markers = ctx.relic_debuff_markers;
         let relic_debuff_buffer = ctx.relic_debuff_buffer;
         let scene_hdr_attachment = ctx.scene_hdr_attachment;
-        let full_scissor = [0, 0, self.size.width.max(1), self.size.height.max(1)];
+        // UI layout uses window `size`; Pass A targets `render_size`, overlay pass the swapchain.
+        let rs_w = ctx.pass_target_w.max(1);
+        let rs_h = ctx.pass_target_h.max(1);
+        let full_scissor = [0, 0, rs_w, rs_h];
         let to_scissor = |rect: [f32; 4]| -> Option<[u32; 4]> {
             let [x, y, w, h] = rect;
             if !(w > 0.0 && h > 0.0) {
                 return None;
             }
-            let max_w = self.size.width.max(1) as f32;
-            let max_h = self.size.height.max(1) as f32;
+            let sx = rs_w as f32 / self.size.width.max(1) as f32;
+            let sy = rs_h as f32 / self.size.height.max(1) as f32;
+            let x = x * sx;
+            let y = y * sy;
+            let w = w * sx;
+            let h = h * sy;
+            let max_w = rs_w as f32;
+            let max_h = rs_h as f32;
             let x0 = x.max(0.0).min(max_w);
             let y0 = y.max(0.0).min(max_h);
             let x1 = (x + w).max(0.0).min(max_w);

@@ -144,6 +144,15 @@ pub fn set_prefetch_graphics_mode(mode: GraphicsMode) {
     PREFETCH_GRAPHICS_MODE.store(tag, Ordering::Relaxed);
 }
 
+/// Longest edge for room-environment glTF textures during CPU decode.
+pub fn room_env_texture_max_dimension() -> u32 {
+    if prefetch_graphics_mode() == GraphicsMode::LowMemory {
+        crate::room_env_gltf::ROOM_ENV_TEXTURE_MAX_DIMENSION_LOW_MEMORY
+    } else {
+        crate::room_env_gltf::ROOM_ENV_TEXTURE_MAX_DIMENSION
+    }
+}
+
 fn prefetch_graphics_mode() -> GraphicsMode {
     match PREFETCH_GRAPHICS_MODE.load(Ordering::Relaxed) {
         1 => GraphicsMode::Performance,

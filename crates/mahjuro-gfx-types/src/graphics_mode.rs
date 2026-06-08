@@ -247,6 +247,8 @@ fn adapter_name_suggests_sub_4gb_vram(name: &str) -> bool {
         "intel hd",
         "intel uhd",
         "intel iris",
+        "intel(r) graphics",
+        "intel graphics",
         "radeon vega 3",
         "radeon vega 5",
         "radeon vega 6",
@@ -339,6 +341,10 @@ mod tests {
             false
         ));
         assert!(!GraphicsMode::adapter_meets_minimum_support("Intel Iris Xe", true));
+        assert!(!GraphicsMode::adapter_meets_minimum_support(
+            "Intel(R) Graphics",
+            true
+        ));
         assert!(GraphicsMode::adapter_meets_minimum_support("Apple M4 Max", true));
         assert!(GraphicsMode::adapter_meets_minimum_support(
             "AMD Radeon RX 7900 XT",

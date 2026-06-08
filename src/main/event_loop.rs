@@ -96,6 +96,9 @@ impl App {
             }
             {
                 let _scope = crate::startup_profile::scope("startup.pre_wgpu.main_menu_prefetch");
+                crate::render::room_preload::set_prefetch_graphics_mode(
+                    crate::persistence::load_settings().graphics_mode,
+                );
                 crate::render::room_preload::start_main_menu_cpu_prefetch();
             }
 
