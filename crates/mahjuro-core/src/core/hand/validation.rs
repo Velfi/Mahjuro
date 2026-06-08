@@ -2,10 +2,10 @@
 //!
 //! Decomposition logic lives in [`super::decomposition`].
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::core::rules::RuleModifier;
-use crate::core::tile::Tile;
+use crate::core::tile::{Suit, Tile};
 
 use super::decomposition;
 use super::{DetectedMeld, MeldKind};
@@ -163,6 +163,124 @@ pub fn non_contributing_tile_ids(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<
         out = tiles.iter().map(|t| t.id).collect();
     }
     out
+}
+
+/// Non-overlapping meld groups for invalid partial selections in the staging-zone preview.
+///
+/// Valid selections should go through [`validate_selection_with_rules`] (or the run's
+/// `try_validate_with_wildcards` + decomposition pick) instead — this is only the fallback
+/// when the full selection cannot be played as-is.
+pub fn staging_preview_melds(
+    tiles: &[Tile],
+    rules: &[RuleModifier],
+) -> (Vec<DetectedMeld>, Vec<u32>) {
+    if tiles.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    if let Some(sets) = validate_selection_with_rules(tiles, rules) {
+        return (sets, Vec::new());
+    }
+
+    let melds = greedy_staging_preview_melds(tiles, rules);
+    let used: FxHashSet<u32> = melds
+        .iter()
+        .flat_map(|s| s.tile_ids.iter().copied())
+        .collect();
+    let bad: Vec<u32> = tiles
+        .iter()
+        .filter(|t| !used.contains(&t.id))
+        .map(|t| t.id)
+        .collect();
+    (melds, bad)
+}
+
+/// Greedy partial meld packing when neither the full selection nor its contributing
+/// subset validates cleanly.
+fn greedy_staging_preview_melds(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<DetectedMeld> {
+    let mut remaining: FxHashSet<u32> = tiles.iter().map(|t| t.id).collect();
+    let tile_by_id =
+        |id: u32| -> Option<Tile> { tiles.iter().find(|t| t.id == id).copied() };
+    let mut picked = Vec::new();
+
+    let mut flower_ids: Vec<u32> = tiles
+        .iter()
+        .filter(|t| t.is_flower())
+        .map(|t| t.id)
+        .collect();
+    flower_ids.sort_unstable();
+    while flower_ids.len() >= 3 {
+        let group: Vec<u32> = flower_ids.drain(..3).collect();
+        for id in &group {
+            remaining.remove(id);
+        }
+        picked.push(DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: group,
+        });
+    }
+    if flower_ids.len() >= 2 {
+        let group: Vec<u32> = flower_ids.drain(..2).collect();
+        for id in &group {
+            remaining.remove(id);
+        }
+        picked.push(DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: group,
+        });
+    }
+    let mut leftover_flowers = flower_ids;
+
+    if !rules.contains(&RuleModifier::NoFlowerWildcards) && !leftover_flowers.is_empty() {
+        let mut face_map: FxHashMap<(Suit, u8), Vec<u32>> = FxHashMap::default();
+        for &id in &remaining {
+            if let Some(t) = tile_by_id(id)
+                && !t.is_flower()
+            {
+                face_map.entry((t.suit, t.rank)).or_default().push(id);
+            }
+        }
+        let mut faces: Vec<(Suit, u8)> = face_map.keys().copied().collect();
+        faces.sort_by_key(|face| std::cmp::Reverse(face_map[face].len()));
+        for face in faces {
+            let ids = face_map.get_mut(&face).expect("face key");
+            while ids.len() >= 2 && !leftover_flowers.is_empty() {
+                let flower = leftover_flowers.pop().expect("flower available");
+                let id2 = ids.pop().expect("second tile");
+                let id1 = ids.pop().expect("first tile");
+                remaining.remove(&id1);
+                remaining.remove(&id2);
+                remaining.remove(&flower);
+                picked.push(DetectedMeld {
+                    kind: MeldKind::Triplet,
+                    tile_ids: vec![id1, id2, flower],
+                });
+            }
+        }
+    }
+
+    let remaining_tiles: Vec<Tile> = remaining
+        .iter()
+        .filter_map(|&id| tile_by_id(id))
+        .collect();
+    let mut regular_melds = decomposition::detect_all_sets(&remaining_tiles);
+    regular_melds.sort_by(|a, b| {
+        b.tile_ids
+            .len()
+            .cmp(&a.tile_ids.len())
+            .then_with(|| a.kind.cmp(&b.kind))
+    });
+    let mut used = FxHashSet::default();
+    for meld in regular_melds {
+        if meld.tile_ids.iter().all(|id| remaining.contains(id) && !used.contains(id)) {
+            for &id in &meld.tile_ids {
+                used.insert(id);
+                remaining.remove(&id);
+            }
+            picked.push(meld);
+        }
+    }
+
+    picked
 }
 
 /// Short player-facing copy for why a selection cannot be played as a meld.

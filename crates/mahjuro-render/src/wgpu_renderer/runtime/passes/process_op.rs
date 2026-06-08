@@ -84,6 +84,38 @@ impl WgpuRenderer {
         }
     }
 
+    /// Translucent showcase tiles (per-instance opacity) via the alpha-blended pipeline.
+    fn draw_tile_gltf_instanced_translucent<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        primitives: &'a [TilePrimitiveGpu],
+        instance_start: u32,
+        instance_count: u32,
+    ) {
+        if instance_count == 0 {
+            return;
+        }
+        pass.set_pipeline(&self.tile_pipeline_ghost_cull);
+        pass.set_vertex_buffer(1, self.tile_3d_instance_buffer.slice(..));
+        for (pi, prim) in primitives.iter().enumerate() {
+            let Some(bg) = prim.material_bind_group.as_ref() else {
+                continue;
+            };
+            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+            pass.set_index_buffer(
+                prim.index_buffer.slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
+            pass.set_bind_group(0, bg, &[]);
+            pass.draw_indexed(
+                0..prim.index_count,
+                0,
+                instance_start..instance_start + instance_count,
+            );
+            let _ = pi;
+        }
+    }
+
     /// Dispatch a single render op into a render pass. Used by every
     /// scene-rendering pass (Pass A) so they all
     /// share the same op-dispatch table.
@@ -531,7 +563,8 @@ impl WgpuRenderer {
                             );
                         }
 
-                        // Pass B: regular textured tile meshes (opaque before blend).
+                        // Pass B: regular textured tile meshes (opaque instances only;
+                        // translucent staging previews are drawn in ShowcaseTileTranslucent).
                         self.draw_tile_gltf_instanced(
                             pass,
                             &self.active_tile_mesh().primitives,
@@ -539,6 +572,50 @@ impl WgpuRenderer {
                             batch_count,
                         );
                     }
+                }
+                pass.set_scissor_rect(
+                    full_scissor[0],
+                    full_scissor[1],
+                    full_scissor[2],
+                    full_scissor[3],
+                );
+            }
+            RenderOp::ShowcaseTileTranslucent => {
+                if self.active_tile_mesh().primitives.is_empty() {
+                    return;
+                }
+                let any_blend = self
+                    .tile_3d_batch_blend_ranges
+                    .iter()
+                    .any(|(_, count)| *count > 0);
+                if !any_blend {
+                    return;
+                }
+                pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
+                pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
+                for (batch_idx, &(blend_start, blend_count)) in self
+                    .tile_3d_batch_blend_ranges
+                    .iter()
+                    .enumerate()
+                {
+                    if blend_count == 0 {
+                        continue;
+                    }
+                    if let Some(sc) = showcase_tile_batch_clips
+                        .get(batch_idx)
+                        .copied()
+                        .flatten()
+                        .and_then(to_scissor)
+                    {
+                        pass.set_scissor_rect(sc[0], sc[1], sc[2], sc[3]);
+                    }
+                    self.draw_tile_gltf_instanced_translucent(
+                        pass,
+                        &self.active_tile_mesh().primitives,
+                        blend_start,
+                        blend_count,
+                    );
                 }
                 pass.set_scissor_rect(
                     full_scissor[0],

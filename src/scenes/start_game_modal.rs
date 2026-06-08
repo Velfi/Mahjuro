@@ -936,6 +936,7 @@ impl SceneBehavior for TileSelectScene {
                         scale: 1.0,
                         size_px: sw,
                         brightness: 1.0,
+                        opacity: 1.0,
                         selected: false,
                         hovered: false,
                         outline: false,

@@ -400,6 +400,7 @@ fn layout_single_tile_group(
             scale: 1.0,
             size_px: tile_size,
             brightness: 1.08,
+            opacity: 1.0,
             selected: false,
             hovered: false,
             outline: false,

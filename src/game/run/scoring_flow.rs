@@ -869,7 +869,9 @@ impl RunState {
     ///
     /// Ties on full hands fall back to affinity, then to the first
     /// decomposition found.
-    fn pick_best_decomposition(
+    /// Picks the decomposition that commit and staging preview should use when
+    /// several valid splits exist for the same tile selection.
+    pub(crate) fn pick_best_decomposition(
         &self,
         default_sets: Vec<DetectedMeld>,
         scoring_tiles: &[Tile],

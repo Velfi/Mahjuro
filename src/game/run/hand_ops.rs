@@ -84,6 +84,24 @@ impl RunState {
             .is_some()
     }
 
+    /// Meld decomposition for the staging-zone preview. Uses the same validation
+    /// and decomposition pick as [`Self::commit_selection_to_structure`].
+    pub fn preview_selection_melds(
+        &self,
+        tiles: &[Tile],
+    ) -> (Vec<DetectedMeld>, Vec<u32>, bool) {
+        if tiles.is_empty() {
+            return (Vec::new(), Vec::new(), false);
+        }
+        if let Some((sets, scoring_tiles)) = self.try_validate_with_wildcards(tiles) {
+            let sets = self.pick_best_decomposition(sets, &scoring_tiles, tiles);
+            return (sets, Vec::new(), true);
+        }
+        let rules = self.validation_rules_for_structure_commits();
+        let (melds, bad) = crate::core::hand::staging_preview_melds(tiles, &rules);
+        (melds, bad, false)
+    }
+
     /// Toggle whether a hand tile is marked for discard.
     pub fn toggle_select(&mut self, index: usize) {
         if index < self.selected.len() {
@@ -161,11 +179,48 @@ impl RunState {
             .filter(|s| s.kind == MeldKind::Kong)
             .count();
         if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
-            return Some(
-                "Your structure can't hold that many tiles — cash in first.".to_string(),
-            );
+            return self.play_rejection_callout().map(str::to_string);
         }
         None
+    }
+
+    /// Floating callout when Play is rejected for structure capacity (not bad melds).
+    pub fn play_rejection_callout(&self) -> Option<&'static str> {
+        let selected_tiles: Vec<Tile> = self
+            .hand
+            .iter()
+            .zip(self.selected.iter())
+            .filter(|&(_, &sel)| sel)
+            .map(|(t, _)| *t)
+            .collect();
+        if selected_tiles.is_empty() {
+            return None;
+        }
+        let Some((sets, scoring_tiles)) = self.try_validate_with_wildcards(&selected_tiles) else {
+            return None;
+        };
+        use crate::core::hand::MeldKind;
+        use crate::game::game_mode::HAND_SIZE;
+        let kongs_after = self
+            .structure_sets
+            .iter()
+            .chain(sets.iter())
+            .filter(|s| s.kind == MeldKind::Kong)
+            .count();
+        if self.structure_tiles.len() + scoring_tiles.len() <= HAND_SIZE + kongs_after {
+            return None;
+        }
+        let kongs_now = self
+            .structure_sets
+            .iter()
+            .filter(|s| s.kind == MeldKind::Kong)
+            .count();
+        let capacity = HAND_SIZE + kongs_now;
+        if self.structure_tiles.len() >= capacity {
+            Some("It's already full")
+        } else {
+            Some("Too many melds")
+        }
     }
 
     /// Discard all selected tiles (costs 1 discard), then auto-draw back to HAND_SIZE.

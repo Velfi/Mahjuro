@@ -402,6 +402,9 @@ pub struct ShowcaseTilePlacement {
     /// Brightness multiplier: `1.0` = normal, `< 1.0` = dimmed (e.g. blocked
     /// tiles in solitaire). Passed to the tile shader via `base_color_factor.x`.
     pub brightness: f32,
+    /// Overall opacity (`1.0` = opaque). Values below `1.0` use alpha blending
+    /// (e.g. uncommitted meld previews on the structure rail).
+    pub opacity: f32,
     /// Whether this tile is currently selected (e.g. first pick in solitaire).
     /// Drives a warm gold fresnel rim via `base_color_factor.y = 1.0`.
     pub selected: bool,
@@ -995,6 +998,8 @@ pub struct UiFrame {
     pub gameplay_cash_in_overlay_lighting: Option<SceneLighting>,
     /// Sustained pulse (0..1) for the cash-in control; scales with played meld count.
     pub gameplay_cash_in_glow: f32,
+    /// Horizontal wiggle (screen px) for hold-to-cash-in vibration.
+    pub gameplay_cash_in_wiggle_x: f32,
     /// Vertical wiggle (screen px) for the cash-in control; scales with played meld count.
     pub gameplay_cash_in_wiggle: f32,
     /// The House ordeal: animate `btn_cash_in` with glossary polychrome bands until discards are spent.
@@ -1055,6 +1060,7 @@ impl UiFrame {
             gameplay_cash_in_overlay_camera: None,
             gameplay_cash_in_overlay_lighting: None,
             gameplay_cash_in_glow: 0.0,
+            gameplay_cash_in_wiggle_x: 0.0,
             gameplay_cash_in_wiggle: 0.0,
             gameplay_cash_in_blocked: false,
             shop_gltf_anim_samples: Vec::new(),

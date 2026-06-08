@@ -416,6 +416,7 @@ impl TilePackPresenter {
                         scale,
                         size_px: row.tile_size,
                         brightness: 1.0,
+                        opacity: 1.0,
                         selected: false,
                         hovered: false,
                         outline: false,

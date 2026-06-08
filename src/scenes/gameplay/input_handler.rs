@@ -11,7 +11,6 @@ use super::focus::{FocusTarget, GameplayButton, default_hand_tile_focus, focus_a
     focus_kind, focus_kind_sfx, play_select_sfx, rebuild_focus_nav,
 };
 use crate::core::relic::relic_visual;
-use crate::core::scoring::StepKind;
 use crate::game::engine::{CommandData, GameCommand, GameEngine};
 use crate::game::run::DiscardUndoSnapshot;
 use crate::render::animation::ENTITY_SCORE_PANEL;
@@ -29,6 +28,30 @@ use crate::ui::input::{UiAction, apply_ui_actions};
 const SCORE_WAVE_YAKU_MM: f32 = 4.0;
 const SCORE_WAVE_STRUCTURE_TILE_MM: f32 = 5.0;
 const RELIC_SCORE_VERTICAL_MM: f32 = 3.5;
+const STRUCTURE_CALLOUT_DOWN_MM: f32 = 28.0;
+
+fn spawn_structure_status_callout(
+    scene: &mut GameplayScene,
+    layout: &crate::ui::layout::LayoutResult,
+    run: &crate::game::run::RunState,
+    label: &str,
+    fly_to_score: bool,
+) {
+    let (score_px, score_py) = layout.fallback_score_center();
+    let source = structure_strip_callout_anchor(layout, run).unwrap_or(
+        crate::render::world_space::LayoutAnchorPx {
+            px: score_px,
+            py: score_py + 40.0 + layout.mm(STRUCTURE_CALLOUT_DOWN_MM),
+            lift_z: crate::render::score_popups::TABLE_POPUP_LIFT_Z,
+        },
+    );
+    scene.score_popups.spawn_structure_callout(
+        label,
+        source,
+        (score_px, score_py),
+        fly_to_score,
+    );
+}
 
 /// Advances journal cover-open + zoom; pushes [`YakuJournalScene`] when the
 /// forward animation completes. Returns `true` when the overlay was pushed
@@ -188,12 +211,13 @@ pub(super) fn process_focus_and_actions(
         scene.focus = new_focus;
     }
 
-    // Marquee multi-select drag: while LMB is held, the cursor's hovered
-    // hand tile drives `current_slot` every frame. The pointer variant always
-    // selects the contiguous span between the press tile and the hovered tile,
-    // so erratic cursor motion can't trigger a wrap-around arc (those stay a
-    // keyboard/gamepad affordance via the focus path below).
-    if let (Some(m), Some(FocusTarget::HandTile(idx))) = (scene.marquee.as_mut(), scene.focus)
+    // Marquee multi-select drag (cursor only): while LMB is held, the cursor's
+    // hovered hand tile drives `current_slot` every frame. The pointer variant
+    // always selects the contiguous linear span between the press tile and the
+    // hovered tile. Keyboard/gamepad marquee uses `advance_to` via the focus
+    // path below so wrap-around arcs stay available.
+    if ctx.input_mode == crate::ui::input::InputMode::Cursor
+        && let (Some(m), Some(FocusTarget::HandTile(idx))) = (scene.marquee.as_mut(), scene.focus)
         && let Some((added, removed)) = GameEngine::apply_marquee_selection_pointer(ctx.run, m, idx)
         && (added > 0 || removed > 0)
     {
@@ -742,6 +766,9 @@ pub(super) fn process_focus_and_actions(
                     ctx.run.onboarding_notify_invalid_play();
                     ctx.anim
                         .shake(crate::render::animation::ENTITY_HAND_STRIP, 8.0, 200);
+                    if let Some(msg) = ctx.run.play_rejection_callout() {
+                        spawn_structure_status_callout(scene, ctx.layout, ctx.run, msg, false);
+                    }
                 } else {
                     scene.invalid_meld_flash_at = None;
                     scene.invalid_meld_flash_slots.clear();
@@ -757,28 +784,20 @@ pub(super) fn process_focus_and_actions(
                         if d > 0 {
                             let structure_is_complete =
                                 GameEngine::read(ctx.run).structure_complete;
-                            let (px, py) = ctx.layout.fallback_score_center();
-                            let py = py + 40.0;
                             let is_final_tiles = !structure_was_complete && structure_is_complete;
                             if is_final_tiles {
                                 scene.final_tiles_fov_pop_at = Some(Instant::now());
                             }
-                            scene.score_popups.spawn(
+                            spawn_structure_status_callout(
+                                scene,
+                                ctx.layout,
+                                ctx.run,
                                 if is_final_tiles {
-                                    "The final tiles!".to_string()
+                                    "The final tiles!"
                                 } else {
-                                    "Structure grows".to_string()
+                                    "Structure grows"
                                 },
-                                crate::render::world_space::LayoutAnchorPx {
-                                    px,
-                                    py,
-                                    lift_z: crate::render::score_popups::TABLE_POPUP_LIFT_Z,
-                                },
-                                (px, py),
-                                None,
-                                StepKind::Chips,
-                                d as f32,
-                                crate::render::score_popups::PopupMotionTiming::shipping_default(),
+                                !is_final_tiles,
                             );
                         }
                     }
@@ -1392,6 +1411,172 @@ pub(super) fn median_layout_anchor(
     }
 }
 
+/// Target pose for a hand tile lifted onto the structure strip (after committed melds).
+pub(super) struct StagingPreviewAnchor {
+    pub center_pos: [f32; 3],
+    pub rotation: [f32; 3],
+    pub size_px: f32,
+}
+
+fn structure_strip_gaps(layout_scale: f32) -> (f32, f32) {
+    ((3.0 * layout_scale).max(2.0), (10.0 * layout_scale).max(7.0))
+}
+
+/// Minimum structure-tile width before gap compression kicks in.
+const STRUCTURE_TILE_MIN_PX: f32 = 11.0;
+
+pub(super) struct StructureStripLayout {
+    pub tile_size: f32,
+    pub layout_span: f32,
+    pub intra_gap: f32,
+    pub inter_gap: f32,
+}
+
+fn structure_strip_counts(
+    committed_sets: &[crate::core::hand::DetectedMeld],
+    preview_groups: &[Vec<usize>],
+) -> (usize, usize, usize) {
+    let total_tiles = committed_sets.iter().map(|s| s.tile_ids.len()).sum::<usize>()
+        + preview_groups.iter().map(|g| g.len()).sum::<usize>();
+    let intra_count = committed_sets
+        .iter()
+        .map(|s| s.tile_ids.len().saturating_sub(1))
+        .sum::<usize>()
+        + preview_groups
+            .iter()
+            .map(|g| g.len().saturating_sub(1))
+            .sum::<usize>();
+    let mut inter_count = committed_sets.len().saturating_sub(1);
+    if !committed_sets.is_empty() && !preview_groups.is_empty() {
+        inter_count += 1;
+    }
+    inter_count += preview_groups.len().saturating_sub(1);
+    (total_tiles, intra_count, inter_count)
+}
+
+/// Tile size + gaps for the full structure strip (committed melds + staging preview).
+fn compute_structure_strip_layout(
+    span: f32,
+    layout_scale: f32,
+    committed_sets: &[crate::core::hand::DetectedMeld],
+    preview_groups: &[Vec<usize>],
+) -> StructureStripLayout {
+    let layout_span = span.max(8.0);
+    let max_tile = (44.0 * layout_scale).max(28.0);
+    let (base_intra, base_inter) = structure_strip_gaps(layout_scale);
+    let (total_tiles, intra_count, inter_count) =
+        structure_strip_counts(committed_sets, preview_groups);
+
+    if total_tiles == 0 {
+        return StructureStripLayout {
+            tile_size: max_tile,
+            layout_span,
+            intra_gap: base_intra,
+            inter_gap: base_inter,
+        };
+    }
+
+    let mut intra_gap = base_intra;
+    let mut inter_gap = base_inter;
+    let mut tile_size;
+    for _ in 0..4 {
+        let gap_space = intra_count as f32 * intra_gap + inter_count as f32 * inter_gap;
+        let available = (layout_span - gap_space).max(0.0);
+        tile_size = (available / total_tiles as f32).min(max_tile);
+        if tile_size >= STRUCTURE_TILE_MIN_PX {
+            break;
+        }
+        let scale = (tile_size / STRUCTURE_TILE_MIN_PX).clamp(0.35, 1.0);
+        intra_gap = (base_intra * scale).max(1.0);
+        inter_gap = (base_inter * scale).max(2.0);
+    }
+    let gap_space = intra_count as f32 * intra_gap + inter_count as f32 * inter_gap;
+    let available = (layout_span - gap_space).max(0.0);
+    tile_size = (available / total_tiles as f32).clamp(8.0, max_tile);
+
+    StructureStripLayout {
+        tile_size,
+        layout_span,
+        intra_gap,
+        inter_gap,
+    }
+}
+
+fn structure_strip_cursor_after_committed(
+    strip: &StructureStripLayout,
+    committed_sets: &[crate::core::hand::DetectedMeld],
+) -> f32 {
+    let mut cursor = 0.0f32;
+    for (mi, set) in committed_sets.iter().enumerate() {
+        for _ in &set.tile_ids {
+            cursor += strip.tile_size + strip.intra_gap;
+        }
+        if mi + 1 < committed_sets.len() {
+            cursor += strip.inter_gap - strip.intra_gap;
+        }
+    }
+    cursor
+}
+
+/// Layout anchors for staging previews appended after tiles already in structure.
+pub(super) fn staging_preview_anchors_for_groups(
+    structure_marker_poses: &[crate::render::gameplay_glb::GameplayMarkerPose; 2],
+    layout: &crate::ui::layout::LayoutResult,
+    layout_scale: f32,
+    env_h: f32,
+    committed_sets: &[crate::core::hand::DetectedMeld],
+    preview_groups: &[Vec<usize>],
+) -> rustc_hash::FxHashMap<usize, StagingPreviewAnchor> {
+    use crate::render::gameplay_glb::{lerp_marker_anchor, lerp_marker_rotation_rad, marker_pair_span_px};
+
+    let mut out = rustc_hash::FxHashMap::default();
+    if preview_groups.is_empty() {
+        return out;
+    }
+
+    let a_l = structure_marker_poses[0].anchor;
+    let a_r = structure_marker_poses[1].anchor;
+    let rot_l = structure_marker_poses[0].rotation_rad;
+    let rot_r = structure_marker_poses[1].rotation_rad;
+    let structure_scale = structure_marker_poses[0].uniform_author_scale(layout.window_h, env_h);
+    let span = marker_pair_span_px(a_l, a_r);
+    let strip = compute_structure_strip_layout(span, layout_scale, committed_sets, preview_groups);
+    let size_px = strip.tile_size * structure_scale;
+
+    let mut cursor = structure_strip_cursor_after_committed(&strip, committed_sets);
+    if !committed_sets.is_empty() && !preview_groups.is_empty() {
+        cursor += strip.inter_gap - strip.intra_gap;
+    }
+
+    for (gi, group) in preview_groups.iter().enumerate() {
+        for (ti, &hand_idx) in group.iter().enumerate() {
+            let t = if strip.layout_span > 0.0 {
+                (cursor + strip.tile_size * 0.5) / strip.layout_span
+            } else {
+                0.5
+            };
+            let t = t.clamp(0.0, 1.0);
+            let mut anchor = lerp_marker_anchor(a_l, a_r, t);
+            let lift_mm = ti as f32 * 1.2 + gi as f32 * 0.15;
+            anchor[2] += layout.mm(lift_mm);
+            out.insert(
+                hand_idx,
+                StagingPreviewAnchor {
+                    center_pos: anchor,
+                    rotation: lerp_marker_rotation_rad(rot_l, rot_r, t),
+                    size_px,
+                },
+            );
+            cursor += strip.tile_size + strip.intra_gap;
+        }
+        if gi + 1 < preview_groups.len() {
+            cursor += strip.inter_gap - strip.intra_gap;
+        }
+    }
+
+    out
+}
+
 /// Median center for structure showcase tiles (matches [`build_yaku_panel_and_tablets`] layout).
 pub(super) fn structure_showcase_tile_popup_center(
     structure_marker_poses: &[crate::render::gameplay_glb::GameplayMarkerPose; 2],
@@ -1406,26 +1591,13 @@ pub(super) fn structure_showcase_tile_popup_center(
     let a_r = structure_marker_poses[1].anchor;
     let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
     let _ = (has_structure, cascade_showcase_active);
-    let intra_gap = (3.0 * layout_scale).max(2.0);
-    let inter_gap = (10.0 * layout_scale).max(7.0);
-    let total_tiles: usize = showcase.sets.iter().map(|s| s.tile_ids.len()).sum();
-    let intra_count: usize = showcase
-        .sets
-        .iter()
-        .map(|s| s.tile_ids.len().saturating_sub(1))
-        .sum();
-    let inter_count = showcase.sets.len().saturating_sub(1);
-    let layout_span = span.max(8.0);
-    let available_span =
-        layout_span - intra_count as f32 * intra_gap - inter_count as f32 * inter_gap;
-    let tile_size =
-        (available_span / total_tiles.max(1) as f32).clamp(22.0, (44.0 * layout_scale).max(28.0));
+    let strip = compute_structure_strip_layout(span, layout_scale, &showcase.sets, &[]);
     let mut cursor = 0.0f32;
     let mut centers: Vec<[f32; 3]> = Vec::new();
     for (mi, set) in showcase.sets.iter().enumerate() {
         for (ti, &tid) in set.tile_ids.iter().enumerate() {
-            let t = if layout_span > 0.0 {
-                (cursor + tile_size * 0.5) / layout_span
+            let t = if strip.layout_span > 0.0 {
+                (cursor + strip.tile_size * 0.5) / strip.layout_span
             } else {
                 0.5
             };
@@ -1436,19 +1608,81 @@ pub(super) fn structure_showcase_tile_popup_center(
                 anchor[2] += layout.mm(lift_mm);
                 centers.push(anchor);
             }
-            cursor += tile_size + intra_gap;
+            cursor += strip.tile_size + strip.intra_gap;
         }
         if mi + 1 < showcase.sets.len() {
-            cursor += inter_gap - intra_gap;
+            cursor += strip.inter_gap - strip.intra_gap;
         }
     }
     (!centers.is_empty()).then(|| median_layout_anchor(&centers))
 }
 
+/// Spawn point for structure growth / capacity callouts — just above the
+/// committed structure tile row (falls back to the strip midpoint).
+pub(super) fn structure_strip_callout_anchor(
+    layout: &crate::ui::layout::LayoutResult,
+    run: &crate::game::run::RunState,
+) -> Option<crate::render::world_space::LayoutAnchorPx> {
+    use super::cascade_hud::CascadeShowcase;
+    use crate::game::engine::GameEngine;
+
+    let interaction = GameEngine::read_interaction(run);
+    let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
+    let anchors = super::glb_anchors::try_resolve_gameplay_glb_anchors(
+        layout,
+        interaction.hand_len,
+        env_h,
+    )?;
+    let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
+    let structure_marker_poses = &anchors.structure_marker_poses;
+    let a_l = structure_marker_poses[0].anchor;
+    let a_r = structure_marker_poses[1].anchor;
+    let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
+    let structure_scale = structure_marker_poses[0]
+        .uniform_author_scale(layout.window_h, env_h);
+    let strip_center = crate::render::gameplay_glb::lerp_marker_anchor(a_l, a_r, 0.5);
+
+    let gameplay = GameEngine::read(run);
+    let sets = gameplay.structure_sets.clone();
+    let strip = compute_structure_strip_layout(span, layout_scale, &sets, &[]);
+    let tile_h = strip.tile_size * structure_scale;
+
+    let base = if gameplay.has_structure {
+        let showcase = CascadeShowcase {
+            tiles: GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run),
+            sets,
+        };
+        let tile_ids: Vec<u32> = showcase.tiles.iter().map(|t| t.id).collect();
+        structure_showcase_tile_popup_center(
+            structure_marker_poses,
+            layout,
+            layout_scale,
+            &showcase,
+            &tile_ids,
+            true,
+            false,
+        )?
+    } else {
+        crate::render::world_space::LayoutAnchorPx {
+            px: strip_center[0],
+            py: strip_center[1],
+            lift_z: strip_center[2],
+        }
+    };
+
+    // Table-surface lift (not TABLE_POPUP_LIFT_Z): object_popup_source_triple adds
+    // glyph clearance above tile geometry. py nudges down toward the strip row.
+    Some(crate::render::world_space::LayoutAnchorPx {
+        px: base.px,
+        py: strip_center[1] + tile_h * 0.05 + layout.mm(STRUCTURE_CALLOUT_DOWN_MM),
+        lift_z: base.lift_z,
+    })
+}
+
 /// Build the yaku progress panel (previews, structure showcase tiles) and yaku tablets.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_yaku_panel_and_tablets(
-    _scene: &GameplayScene,
+    scene: &GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
     run: &crate::game::run::RunState,
     ctx: &crate::scenes::DrawCtx<'_>,
@@ -1576,20 +1810,14 @@ pub(super) fn build_yaku_panel_and_tablets(
         let structure_scale = structure_marker_poses[0]
             .uniform_author_scale(layout.window_h, ctx.room_gltf_height_scale);
         let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
-        let intra_gap = (3.0 * layout_scale).max(2.0);
-        let inter_gap = (10.0 * layout_scale).max(7.0);
-        let total_tiles: usize = showcase.sets.iter().map(|s| s.tile_ids.len()).sum();
-        let intra_count: usize = showcase
-            .sets
-            .iter()
-            .map(|s| s.tile_ids.len().saturating_sub(1))
-            .sum();
-        let inter_count = showcase.sets.len().saturating_sub(1);
-        let layout_span = span.max(8.0);
-        let available_span =
-            layout_span - intra_count as f32 * intra_gap - inter_count as f32 * inter_gap;
-        let n_t = total_tiles.max(1);
-        let tile_size = (available_span / n_t as f32).clamp(22.0, (44.0 * layout_scale).max(28.0));
+        let preview_groups: &[Vec<usize>] = if crate::persistence::load_settings().structure_meld_preview
+        {
+            &scene.staging_layout.meld_index_groups
+        } else {
+            &[]
+        };
+        let strip =
+            compute_structure_strip_layout(span, layout_scale, &showcase.sets, preview_groups);
         let mut cursor = 0.0f32;
         let active_tile_ids = cascade_frame
             .as_ref()
@@ -1600,8 +1828,8 @@ pub(super) fn build_yaku_panel_and_tablets(
                 let Some(tile) = showcase.tiles.iter().find(|t| t.id == tid).copied() else {
                     continue;
                 };
-                let t = if layout_span > 0.0 {
-                    (cursor + tile_size * 0.5) / layout_span
+                let t = if strip.layout_span > 0.0 {
+                    (cursor + strip.tile_size * 0.5) / strip.layout_span
                 } else {
                     0.5
                 };
@@ -1628,8 +1856,9 @@ pub(super) fn build_yaku_panel_and_tablets(
                         rot_l, rot_r, t,
                     ),
                     scale,
-                    size_px: tile_size * structure_scale,
+                    size_px: strip.tile_size * structure_scale,
                     brightness,
+                    opacity: 1.0,
                     selected: false,
                     hovered: false,
                     outline: false,
@@ -1643,10 +1872,10 @@ pub(super) fn build_yaku_panel_and_tablets(
                     pick_id: None,
                     overlay_rect_group: None,
                 });
-                cursor += tile_size + intra_gap;
+                cursor += strip.tile_size + strip.intra_gap;
             }
             if mi + 1 < showcase.sets.len() {
-                cursor += inter_gap - intra_gap;
+                cursor += strip.inter_gap - strip.intra_gap;
             }
         }
     }

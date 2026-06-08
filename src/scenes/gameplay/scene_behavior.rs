@@ -312,6 +312,8 @@ impl SceneBehavior for GameplayScene {
             return t;
         }
 
+        self.tick_staging_zone(ctx.run, dt);
+
         // Terminal predicates can become true without another discard refill (dead hand
         // with plays/discards exhausted). Reconcile once per idle frame like the bot loop.
         if !self.is_animating() && self.pending_chamber.is_none() {
@@ -685,7 +687,11 @@ impl SceneBehavior for GameplayScene {
         } else {
             (0.0, 0.0)
         };
-        let cash_in_wiggle = self.structure_cash_in_wiggle_px(cash_in_wiggle_amp);
+        let (cash_in_wiggle_x, cash_in_wiggle_y) = if self.cash_in_hold_in_progress() {
+            (self.cash_in_hold_vibration_px(), 0.0)
+        } else {
+            (0.0, self.structure_cash_in_wiggle_px(cash_in_wiggle_amp))
+        };
         let btn_rects = [discard_btn_rect, play_hit_rect, trigger_btn_rect];
         input_handler::push_action_button_focus_rects(
             &btn_rects,
@@ -788,7 +794,8 @@ impl SceneBehavior for GameplayScene {
         };
         frame.gameplay_cash_in_button_visible = cash_in_visible;
         frame.gameplay_cash_in_glow = cash_in_glow;
-        frame.gameplay_cash_in_wiggle = cash_in_wiggle;
+        frame.gameplay_cash_in_wiggle_x = cash_in_wiggle_x;
+        frame.gameplay_cash_in_wiggle = cash_in_wiggle_y;
         frame.gameplay_cash_in_blocked = cash_in_blocked;
         frame.gameplay_action_picks = Some(crate::render::draw_cmd::GameplayActionPickProxies {
             bowl: discard_bowl_placement.clone(),
@@ -811,8 +818,8 @@ impl SceneBehavior for GameplayScene {
                 let alpha = 0.10 + 0.22 * cash_in_glow;
                 frame.gradient_quads([GradientQuadInstance {
                     rect: [
-                        trigger_rect[0] - pad,
-                        trigger_rect[1] - pad + cash_in_wiggle,
+                        trigger_rect[0] - pad + cash_in_wiggle_x,
+                        trigger_rect[1] - pad + cash_in_wiggle_y,
                         trigger_rect[2] + pad * 2.0,
                         trigger_rect[3] + pad * 2.0,
                     ],
@@ -908,8 +915,21 @@ impl SceneBehavior for GameplayScene {
             let hand_scale_mul =
                 glb_anchors.hand_marker_poses[0].uniform_author_scale(layout.window_h, env_h);
             // Hand tile placements (dora gold overlay comes from renderer merge rects).
+            let meld_preview = crate::persistence::load_settings().structure_meld_preview;
             let mut hand_placements: Vec<crate::render::draw_cmd::ShowcaseTilePlacement> =
                 Vec::with_capacity(hand.len());
+            let staging_preview_anchors = if meld_preview {
+                input_handler::staging_preview_anchors_for_groups(
+                    &glb_anchors.structure_marker_poses,
+                    layout,
+                    layout_scale,
+                    env_h,
+                    &gameplay.structure_sets,
+                    &self.staging_layout.meld_index_groups,
+                )
+            } else {
+                rustc_hash::FxHashMap::default()
+            };
             let (invalid_flash, invalid_elapsed) = self.invalid_meld_flash_phase(now);
             for (i, &tile) in hand.iter().enumerate() {
                 let tile = Self::display_tile(tile, run);
@@ -938,26 +958,101 @@ impl SceneBehavior for GameplayScene {
                     hand.len(),
                     hand_scale_mul,
                 );
-                let (cx, cy, lift) = (px + slide_x_px + reject_shake_x, py + pop_offset, lift_z);
+                
+                let staging_lift = self.staging_layout.staging_lift_z.get(i).copied().unwrap_or(0.0);
+                let _staging_offset = self.staging_layout.staging_offset_slots.get(i).copied().unwrap_or(0.0);
+                
+                if meld_preview && staging_lift > 0.01 {
+                    // Ghost on the hand rail: selection shell + hit target stay here.
+                    hand_placements.push(crate::render::draw_cmd::ShowcaseTilePlacement {
+                        tile,
+                        center_pos: [px + slide_x_px, py + pop_offset, lift_z],
+                        rotation: hand_rot,
+                        scale: slide_y_frac.max(0.05),
+                        size_px,
+                        brightness: 0.15,
+                        opacity: 1.0,
+                        selected: is_selected && !is_invalid_flash,
+                        hovered: is_focused && !is_invalid_flash,
+                        outline: (is_selected || is_focused) && !is_invalid_flash,
+                        glow: is_selected && !self.staging_layout.is_valid_meld,
+                        glow_color: None,
+                        outline_sel: None,
+                        pick_id: Some(i),
+                        overlay_rect_group: None,
+                    });
+                }
+                
+                let hand_x = px + slide_x_px + reject_shake_x;
+                let hand_y = py + pop_offset;
+                let (cx, cy, lift, preview_rot, preview_size_px) =
+                    if meld_preview && staging_lift > 0.01 {
+                        if let Some(target) = staging_preview_anchors.get(&i) {
+                            let t = staging_lift;
+                            let cx = hand_x + (target.center_pos[0] - hand_x) * t;
+                            let cy = hand_y + (target.center_pos[1] - hand_y) * t;
+                            let lift = lift_z + (target.center_pos[2] - lift_z) * t;
+                            let rot = [
+                                hand_rot[0] + (target.rotation[0] - hand_rot[0]) * t,
+                                hand_rot[1] + (target.rotation[1] - hand_rot[1]) * t,
+                                hand_rot[2] + (target.rotation[2] - hand_rot[2]) * t,
+                            ];
+                            let preview_size =
+                                size_px + (target.size_px - size_px) * t;
+                            (cx, cy, lift, rot, preview_size)
+                        } else {
+                            (
+                                hand_x,
+                                hand_y,
+                                lift_z,
+                                hand_rot,
+                                size_px,
+                            )
+                        }
+                    } else {
+                        (hand_x, hand_y, lift_z, hand_rot, size_px)
+                    };
+                
+                let is_valid_group = self.staging_layout.valid_meld_tiles.get(i).copied().unwrap_or(false);
+                let capacity_error = is_valid_group && self.staging_layout.has_capacity_error;
+                let is_staged_preview = meld_preview && staging_lift > 0.01;
+                let preview_opacity = if is_staged_preview {
+                    0.55 + 0.12 * staging_lift
+                } else {
+                    1.0
+                };
+                let preview_brightness = if is_invalid_flash { 1.12 } else { 1.0 };
+                let preview_scale = if is_staged_preview {
+                    slide_y_frac.max(0.05) * 0.96
+                } else {
+                    slide_y_frac.max(0.05)
+                };
+                
                 hand_placements.push(crate::render::draw_cmd::ShowcaseTilePlacement {
                     tile,
                     center_pos: [cx, cy, lift],
-                    rotation: hand_rot,
-                    scale: slide_y_frac.max(0.05),
-                    size_px,
-                    brightness: if is_invalid_flash { 1.12 } else { 1.0 },
-                    // Suppress gold selection rim on straggler tiles so red reads clearly.
-                    selected: is_selected && !is_invalid_flash,
-                    hovered: is_focused && !is_invalid_flash,
-                    outline: (is_selected || is_focused) && !is_invalid_flash,
-                    glow: is_invalid_flash || is_selected,
-                    glow_color: if is_invalid_flash {
+                    rotation: preview_rot,
+                    scale: preview_scale,
+                    size_px: preview_size_px,
+                    brightness: preview_brightness,
+                    opacity: preview_opacity,
+                    selected: if is_staged_preview { false } else { is_selected && !is_invalid_flash },
+                    hovered: if is_staged_preview { false } else { is_focused && !is_invalid_flash },
+                    outline: if is_staged_preview { false } else { (is_selected || is_focused) && !is_invalid_flash },
+                    glow: if is_staged_preview {
+                        false
+                    } else {
+                        is_invalid_flash || is_selected || is_valid_group
+                    },
+                    glow_color: if is_invalid_flash || capacity_error {
                         Some([1.00, 0.14, 0.08, 0.72 + 0.28 * invalid_flash])
+                    } else if is_valid_group && !is_staged_preview {
+                        Some([1.0, 0.9, 0.3, 0.8])
                     } else {
                         None
                     },
                     outline_sel: None,
-                    pick_id: Some(i),
+                    pick_id: if is_staged_preview { None } else { Some(i) },
                     overlay_rect_group: None,
                 });
             }

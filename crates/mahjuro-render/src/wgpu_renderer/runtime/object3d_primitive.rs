@@ -307,7 +307,8 @@ impl WgpuRenderer {
                 ],
                 tile_decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
                 tile_material_seed: 0.0,
-                _pad: [0.0; 3],
+                tile_opacity: 1.0,
+                _pad: [0.0; 2],
             },
             casts_shadow: true,
         });

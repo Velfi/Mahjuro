@@ -98,6 +98,7 @@ enum Row {
     XyQuickAction,
     HoldToSellRumble,
     AutoCashInOnFullStructure,
+    StructureMeldPreview,
     GlyphPrompts,
     ExportPlayStats,
     Credits,
@@ -135,6 +136,7 @@ const ROWS: &[Row] = &[
     Row::XyQuickAction,
     Row::HoldToSellRumble,
     Row::AutoCashInOnFullStructure,
+    Row::StructureMeldPreview,
     Row::UndoDiscard,
     Row::GlyphPrompts,
     Row::ExportPlayStats,
@@ -169,6 +171,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::XyQuickAction),
     ContentSlot::Row(Row::HoldToSellRumble),
     ContentSlot::Row(Row::AutoCashInOnFullStructure),
+    ContentSlot::Row(Row::StructureMeldPreview),
     ContentSlot::Header(Section::Accessibility),
     ContentSlot::Row(Row::UndoDiscard),
     ContentSlot::Row(Row::GlyphPrompts),
@@ -362,6 +365,9 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
         Row::AutoCashInOnFullStructure => {
             ("Auto cash-in", on_off(scene.auto_cash_in_on_full_structure))
         }
+        Row::StructureMeldPreview => {
+            ("Structure meld preview", on_off(scene.structure_meld_preview))
+        }
         Row::GlyphPrompts => ("Button glyphs", scene.glyph_prompt.label().into()),
         Row::UndoDiscard => ("Discard undo", on_off(scene.discard_undo_enabled)),
         Row::ExportPlayStats => ("Export play stats", String::new()),
@@ -539,6 +545,7 @@ pub struct OptionsScene {
     pub xy_quick_action: bool,
     pub hold_to_sell_rumble: bool,
     pub auto_cash_in_on_full_structure: bool,
+    pub structure_meld_preview: bool,
     pub discard_undo_enabled: bool,
     pub glyph_prompt: crate::persistence::GlyphPromptSetting,
     /// Last cursor position (updated each [`Self::update_input`] for arrow hover).
@@ -599,6 +606,7 @@ impl OptionsScene {
             xy_quick_action: settings.xy_quick_action,
             hold_to_sell_rumble: settings.hold_to_sell_rumble,
             auto_cash_in_on_full_structure: settings.auto_cash_in_on_full_structure,
+            structure_meld_preview: settings.structure_meld_preview,
             discard_undo_enabled: settings.discard_undo_enabled,
             glyph_prompt: settings.glyph_prompt,
             cursor_pos: (0.0, 0.0),
@@ -644,6 +652,7 @@ impl OptionsScene {
         settings.xy_quick_action = self.xy_quick_action;
         settings.hold_to_sell_rumble = self.hold_to_sell_rumble;
         settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
+        settings.structure_meld_preview = self.structure_meld_preview;
         settings.discard_undo_enabled = self.discard_undo_enabled;
         settings.glyph_prompt = self.glyph_prompt;
         let _ = crate::persistence::save_settings(&settings);
@@ -847,6 +856,9 @@ impl OptionsScene {
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
+            Row::StructureMeldPreview => {
+                self.structure_meld_preview = !self.structure_meld_preview
+            }
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.next(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             Row::ExportPlayStats | Row::Credits => return,
@@ -885,6 +897,9 @@ impl OptionsScene {
             Row::HoldToSellRumble => self.hold_to_sell_rumble = !self.hold_to_sell_rumble,
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
+            }
+            Row::StructureMeldPreview => {
+                self.structure_meld_preview = !self.structure_meld_preview
             }
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.prev(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
@@ -960,6 +975,10 @@ impl OptionsScene {
             }
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure;
+                self.save_settings();
+            }
+            Row::StructureMeldPreview => {
+                self.structure_meld_preview = !self.structure_meld_preview;
                 self.save_settings();
             }
             Row::GlyphPrompts => {

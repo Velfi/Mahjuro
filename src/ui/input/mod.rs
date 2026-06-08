@@ -171,7 +171,13 @@ impl MarqueeSelect {
         let prev = self.current_slot;
         if prev != next && hand_len > 0 {
             if let Some(fwd) = infer_adjacent_step_forward(prev, next, hand_len) {
-                self.sweep_forward = Some(fwd);
+                match self.sweep_forward {
+                    Some(current_sweep) if fwd != current_sweep && prev != self.start_slot => {
+                        // Stepping back along an established wrap/arc — keep direction
+                        // so shortening the sweep doesn't fall back to a linear span.
+                    }
+                    _ => self.sweep_forward = Some(fwd),
+                }
             } else {
                 // A non-adjacent jump means the cursor teleported (e.g. mouse, or
                 // a focus jump). A direction inferred from an earlier adjacent step
@@ -761,6 +767,27 @@ mod tests {
                 true, true, false
             ]
         );
+    }
+
+    #[test]
+    fn marquee_shorten_wrap_arc_keeps_wrap_direction() {
+        let hand_len = 16;
+        let mut sel = vec![false; hand_len];
+        let mut m = MarqueeSelect::new(0, vec![false; hand_len]);
+        // Wrap once off the left end: endpoints 0 and 15.
+        m.advance_to(15, hand_len);
+        m.apply(&mut sel);
+        assert!(sel[0] && sel[15] && !sel[14]);
+
+        // Extend one step along the backward wrap arc.
+        m.advance_to(14, hand_len);
+        m.apply(&mut sel);
+        assert!(sel[14]);
+
+        // Shorten back toward the wrap endpoint — must not flip to a linear span.
+        m.advance_to(15, hand_len);
+        m.apply(&mut sel);
+        assert!(sel[0] && sel[15] && !sel[14]);
     }
 
     #[test]

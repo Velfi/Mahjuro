@@ -56,8 +56,9 @@ const OBJECT_POPUP_CLEARANCE_BASE: f32 = 18.0;
 /// Table-hover Z for modifier-strip / screen-layout popup sources (no 3D object).
 pub const TABLE_POPUP_LIFT_Z: f32 = LIFT_BASE;
 
-/// Vivid electric blue for Chips score pops (#00a0ff).
-const CHIPS_COLOR: [f32; 4] = [0.0, 160.0 / 255.0, 1.0, 1.0];
+/// **The House** crimson base for structure callouts — polychrome band sweep
+/// matches glossary / cash-in ordeal glyphs (`score_glyph_band_albedo` in lit_mesh).
+const STRUCTURE_CALLOUT_COLOR: [f32; 4] = crate::theme::color::keyword::HOUSE;
 /// Vivid scarlet for Mult score pops (#ff0034).
 const MULT_COLOR: [f32; 4] = [1.0, 0.0, 52.0 / 255.0, 1.0];
 /// Warm gold base tint for Yen popups.
@@ -79,6 +80,8 @@ struct ScorePopup {
     motion: PopupMotion,
     material: GlyphMaterial,
     timing: PopupMotionTiming,
+    /// Brighter extruded-glyph halo (structure growth / capacity callouts).
+    boost_polychrome_halo: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,6 +101,37 @@ impl ScorePopupSystem {
         Self { popups: Vec::new() }
     }
 
+    /// Structure growth / capacity callout — **The House** polychrome band sweep.
+    pub fn spawn_structure_callout(
+        &mut self,
+        label: impl Into<Arc<str>>,
+        source: LayoutAnchorPx,
+        dest_xy: (f32, f32),
+        fly_to_score: bool,
+    ) {
+        let scale = 92.0;
+        let mut rng = rand::rng();
+        let yaw = (rng.random::<f32>() - 0.5) * YAW_JITTER;
+        self.popups.push(ScorePopup {
+            label: label.into(),
+            born_at: Instant::now(),
+            source_pos: object_popup_source_triple(source, scale),
+            dest_xy,
+            dest_lift: TABLE_POPUP_LIFT_Z,
+            base_scale: scale,
+            color: STRUCTURE_CALLOUT_COLOR,
+            yaw,
+            motion: if fly_to_score {
+                PopupMotion::FlyToReel
+            } else {
+                PopupMotion::Shake
+            },
+            material: GlyphMaterial::Polychrome,
+            timing: PopupMotionTiming::shipping_default(),
+            boost_polychrome_halo: true,
+        });
+    }
+
     /// Spawn a score popup that grows from zero, loiters at the source, then
     /// flies into the score roller.
     pub fn spawn(
@@ -111,7 +145,10 @@ impl ScorePopupSystem {
         timing: PopupMotionTiming,
     ) {
         let (color, material) = match kind {
-            StepKind::Chips => (CHIPS_COLOR, GlyphMaterial::Polychrome),
+            StepKind::Chips => (
+                [0.0, 160.0 / 255.0, 1.0, 1.0],
+                GlyphMaterial::Polychrome,
+            ),
             StepKind::Mult => (MULT_COLOR, GlyphMaterial::Polychrome),
             StepKind::Yen => (GOLD_COLOR, GlyphMaterial::Polychrome),
             StepKind::Final => (FINAL_COLOR, GlyphMaterial::Polychrome),
@@ -132,6 +169,7 @@ impl ScorePopupSystem {
             motion: PopupMotion::FlyToReel,
             material,
             timing,
+            boost_polychrome_halo: false,
         });
     }
 
@@ -154,6 +192,7 @@ impl ScorePopupSystem {
             motion: PopupMotion::Shake,
             material: GlyphMaterial::Polychrome,
             timing: PopupMotionTiming::shipping_default(),
+            boost_polychrome_halo: false,
         });
     }
 
@@ -207,7 +246,10 @@ impl ScorePopupSystem {
         self.popups
             .iter()
             .map(|p| {
-                let (px, py, lift_z, scale_mul, alpha, emissive) = popup_frame_sample(p, now);
+                let (px, py, lift_z, scale_mul, alpha, mut emissive) = popup_frame_sample(p, now);
+                if p.boost_polychrome_halo {
+                    emissive = emissive.max(1.12);
+                }
 
                 let mut color = p.color;
                 color[3] *= alpha;
@@ -341,7 +383,7 @@ fn shake_sample(p: &ScorePopup, age: f32) -> (f32, f32, f32, f32, f32, f32) {
         let local = (t - 0.85) / 0.15;
         ((1.0 - local).max(0.0), (1.0 - local).max(0.0))
     };
-    (px, py, p.source_pos[2], scale_mul, alpha, 0.9)
+    (px, py, p.source_pos[2], scale_mul, alpha, 1.0)
 }
 
 impl Default for ScorePopupSystem {
