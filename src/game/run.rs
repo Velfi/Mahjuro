@@ -345,6 +345,11 @@ pub struct RunState {
     /// (so id 5 is always the same suit+rank, even after a reshuffle).
     #[serde(default)]
     pub tile_enhancements: BTreeMap<u32, TileEnhancement>,
+    /// Tombstoned-and-replaced tiles from transform talismans. Each entry's key
+    /// is removed from the standard wall via `removed_tile_ids`; the stored
+    /// [`Tile`] (same id, new face) is injected into every round wall.
+    #[serde(default)]
+    pub transformed_tiles: BTreeMap<u32, Tile>,
     /// When Brocade Pouch is owned, the last-used buff talisman's enhancement
     /// is recorded here and stamped onto every drawn tile (not just the 14
     /// in hand at use time). Per-tile entries in `tile_enhancements` still win
@@ -854,6 +859,7 @@ impl RunState {
             best_hand_tiles: Vec::new(),
             score_after_wing: Vec::new(),
             tile_enhancements: BTreeMap::new(),
+            transformed_tiles: BTreeMap::new(),
             global_buff_enhancement: None,
             removed_tile_ids: rustc_hash::FxHashSet::default(),
             decimations_used: 0,

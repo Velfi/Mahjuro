@@ -93,6 +93,7 @@ impl RunState {
             &self.removed_tile_ids,
             &self.tile_packs,
             &self.tile_enhancements,
+            &self.transformed_tiles,
             overflow,
             &self.joker_extra_faces,
         );

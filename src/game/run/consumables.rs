@@ -146,6 +146,20 @@ impl RunState {
         }
     }
 
+    /// Tombstone a wall tile id and persist its transformed replacement for the
+    /// rest of the run. The hand tile is rewritten in place; any undrawn copy
+    /// in the live wall is swapped for the replacement immediately.
+    fn commit_hand_tile_transform(&mut self, index: usize, face: crate::core::tile::TileFace) {
+        self.hand[index].set_face(face);
+        let replacement = self.hand[index];
+        let id = replacement.id;
+        self.removed_tile_ids.insert(id);
+        self.transformed_tiles.insert(id, replacement);
+        if self.wall.remove_undrawn_by_id(id) {
+            self.wall.inject_into_remaining(replacement);
+        }
+    }
+
     /// Rewrite every tile in the current hand per a transform talisman.
     fn apply_talisman_transform(&mut self, kind: crate::core::talisman::TalismanKind) {
         use crate::core::talisman::TalismanKind;
@@ -164,41 +178,48 @@ impl RunState {
                     TalismanKind::Manzu => Suit::Manzu,
                     _ => unreachable!(),
                 };
-                for tile in &mut self.hand {
-                    if tile.is_number_tile() {
-                        tile.suit = target;
+                for i in 0..self.hand.len() {
+                    if self.hand[i].is_number_tile() {
+                        let face = crate::core::tile::TileFace {
+                            suit: target,
+                            rank: self.hand[i].rank,
+                        };
+                        self.commit_hand_tile_transform(i, face);
                     }
                 }
             }
             TalismanKind::Honors => {
                 let mut rng = rand::rng();
                 let honor_suits = [Suit::Wind, Suit::Dragon];
-                for tile in &mut self.hand {
-                    if !tile.is_number_tile() {
+                for i in 0..self.hand.len() {
+                    if !self.hand[i].is_number_tile() {
                         continue;
                     }
                     let suit = honor_suits[rng.random_range(0..honor_suits.len())];
-                    tile.suit = suit;
-                    tile.rank = if suit == Suit::Wind {
+                    let rank = if suit == Suit::Wind {
                         rng.random_range(1..=4)
                     } else {
                         rng.random_range(1..=3)
                     };
+                    let face = crate::core::tile::TileFace { suit, rank };
+                    self.commit_hand_tile_transform(i, face);
                 }
             }
             TalismanKind::Wildflower => {
                 let mut rng = rand::rng();
-                for tile in &mut self.hand {
-                    tile.suit = Suit::Flower;
-                    tile.rank = rng.random_range(1..=4);
+                for i in 0..self.hand.len() {
+                    let face = crate::core::tile::TileFace {
+                        suit: Suit::Flower,
+                        rank: rng.random_range(1..=4),
+                    };
+                    self.commit_hand_tile_transform(i, face);
                 }
             }
             TalismanKind::Conformity => {
                 let mut rng = rand::rng();
-                let template = self.hand[rng.random_range(0..self.hand.len())];
-                for tile in &mut self.hand {
-                    tile.suit = template.suit;
-                    tile.rank = template.rank;
+                let template = self.hand[rng.random_range(0..self.hand.len())].face();
+                for i in 0..self.hand.len() {
+                    self.commit_hand_tile_transform(i, template);
                 }
             }
             TalismanKind::Pearl | TalismanKind::Gilded | TalismanKind::Polychrome => {

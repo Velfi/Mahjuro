@@ -37,11 +37,10 @@ impl Suit {
 
 /// A talisman-applied enhancement attached to an individual tile. The
 /// enhancement is recorded against the tile's id in
-/// [`crate::game::run::RunState::tile_enhancements`] and re-stamped onto the
-/// hand whenever tiles are drawn, so it persists for the rest of the run
-/// (across plays, discards, refills, and new-round redeals). See
-/// [`crate::core::talisman`] for the consumables that stamp these onto every
-/// hand tile at once.
+/// run-persisted enhancement map keyed by tile id and re-stamped onto the
+/// hand whenever tiles are drawn (across plays, discards, refills, and
+/// new-round redeals). See [`crate::core::talisman`] for the consumables that
+/// stamp these onto every hand tile at once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TileEnhancement {
@@ -80,6 +79,13 @@ impl TileEnhancement {
     }
 }
 
+/// Persistent suit/rank override keyed by tile id (transform talismans).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct TileFace {
+    pub suit: Suit,
+    pub rank: u8,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Tile {
     pub suit: Suit,
@@ -108,6 +114,18 @@ impl Tile {
             enhancement: None,
             debuffed_visual: false,
         }
+    }
+
+    pub fn face(self) -> TileFace {
+        TileFace {
+            suit: self.suit,
+            rank: self.rank,
+        }
+    }
+
+    pub fn set_face(&mut self, face: TileFace) {
+        self.suit = face.suit;
+        self.rank = face.rank;
     }
 
     /// Face-only copy for chronicle / showcase (stable across runs).
@@ -140,6 +158,7 @@ impl Tile {
         matches!(self.suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu)
     }
 
+    /// Apply run-persisted talisman transforms and enhancement stamps.
     /// Returns `true` for bonus flower tiles.
     pub fn is_flower(&self) -> bool {
         self.suit == Suit::Flower
