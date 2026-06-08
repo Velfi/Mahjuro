@@ -10,11 +10,10 @@ pub const SECTION_HONOR_SUITS: &str = "HONOR SUITS";
 pub const SECTION_FLOWERS: &str = "FLOWERS";
 pub const SECTION_RANK_TERMS: &str = "RANK TERMS";
 
-// Tutorial campaign still references these heading names for layout.
+// Tutorial campaign page 1 mirrors the guide tiles page left panels.
 pub const NUMBER_SUITS_HEADING: &str = SECTION_NUMBER_SUITS;
 pub const HONOR_SUITS_HEADING: &str = SECTION_HONOR_SUITS;
-pub const RANK_TERMS_HEADING: &str = SECTION_RANK_TERMS;
-pub const SEQUENCE_RULES_HEADING: &str = "SEQUENCE RULES";
+pub const FLOWERS_HEADING: &str = SECTION_FLOWERS;
 
 pub const NUMBER_SUIT_LINES: &[&str] = &[
     "Manzu — ranks 1–9.",
@@ -36,9 +35,3 @@ pub const RANK_TERM_LINES: &[&str] = &[
     "Honors — Winds and Dragons; no rank.",
 ];
 
-/// Tutorial campaign page 1 still teaches sequence rules inline.
-pub const SEQUENCE_RULE_LINES: &[&str] = &[
-    "Only number suits can form sequences.",
-    "Sequences must stay in one suit.",
-    "Honors cannot form sequences.",
-];

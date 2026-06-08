@@ -27,8 +27,13 @@ use crate::ui::styled_text;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
+use super::melds_intro_copy;
+use super::scoring_intro_copy;
 use super::tiles_intro_copy;
 use super::{BackgroundId, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
+
+/// Gaps between intro + three left-panel sections on Part 1 (see guide tiles page).
+const TUTORIAL_TILES_COPY_SECTION_GAPS: usize = 3;
 
 const TUTORIAL_TILE_ROTATION: [f32; 3] = [0.0, 0.0, std::f32::consts::PI];
 
@@ -194,18 +199,6 @@ const PART1_TILE_GROUPS: &[TileGroup] = &[
         debuffed_visual: false,
     },
     TileGroup {
-        label: "3-4-5 Manzu",
-        accent: [0.35, 0.70, 0.85, 0.9],
-        tiles: &[(Suit::Manzu, 3), (Suit::Manzu, 4), (Suit::Manzu, 5)],
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Mixed suits",
-        accent: color::STONE,
-        tiles: &[(Suit::Manzu, 3), (Suit::Souzu, 4), (Suit::Pinzu, 5)],
-        debuffed_visual: false,
-    },
-    TileGroup {
         label: "Winds",
         accent: Suit::Wind.keyword_color(),
         tiles: &[
@@ -222,12 +215,23 @@ const PART1_TILE_GROUPS: &[TileGroup] = &[
         tiles: &[(Suit::Dragon, 1), (Suit::Dragon, 2), (Suit::Dragon, 3)],
         debuffed_visual: false,
     },
+    TileGroup {
+        label: "Flowers",
+        accent: Suit::Flower.keyword_color(),
+        tiles: &[
+            (Suit::Flower, 1),
+            (Suit::Flower, 2),
+            (Suit::Flower, 3),
+            (Suit::Flower, 4),
+        ],
+        debuffed_visual: false,
+    },
 ];
 
 /// Part 2 — How to Score (0-based index into `PAGES`).
 const TUTORIAL_PAGE_SCORING: usize = 1;
 
-const SCORING_MELDS_HEADING: &str = "Melds";
+const SCORING_MELDS_HEADING: &str = melds_intro_copy::PAGE_TITLE;
 
 const SCORING_DEMO_GROUPS: &[TileGroup] = &[
     TileGroup {
@@ -238,14 +242,41 @@ const SCORING_DEMO_GROUPS: &[TileGroup] = &[
     },
     TileGroup {
         label: "Sequence",
-        accent: color::CHAMPAGNE,
-        tiles: &[(Suit::Manzu, 3), (Suit::Manzu, 4), (Suit::Manzu, 5)],
+        accent: [0.35, 0.70, 0.85, 0.9],
+        tiles: &[(Suit::Manzu, 4), (Suit::Manzu, 5), (Suit::Manzu, 6)],
         debuffed_visual: false,
     },
     TileGroup {
         label: "Triplet",
         accent: color::CHAMPAGNE,
         tiles: &[(Suit::Souzu, 7), (Suit::Souzu, 7), (Suit::Souzu, 7)],
+        debuffed_visual: false,
+    },
+    TileGroup {
+        label: "Kong",
+        accent: [0.85, 0.65, 0.20, 0.9],
+        tiles: &[
+            (Suit::Wind, 1),
+            (Suit::Wind, 1),
+            (Suit::Wind, 1),
+            (Suit::Wind, 1),
+        ],
+        debuffed_visual: false,
+    },
+];
+
+/// Valid / invalid sequence examples — same captions as the guide melds page.
+const SCORING_SEQUENCE_GROUPS: &[TileGroup] = &[
+    TileGroup {
+        label: "Valid sequence",
+        accent: [0.35, 0.70, 0.85, 0.9],
+        tiles: &[(Suit::Manzu, 3), (Suit::Manzu, 4), (Suit::Manzu, 5)],
+        debuffed_visual: false,
+    },
+    TileGroup {
+        label: "Invalid sequence",
+        accent: color::STONE,
+        tiles: &[(Suit::Manzu, 3), (Suit::Souzu, 4), (Suit::Pinzu, 5)],
         debuffed_visual: false,
     },
 ];
@@ -255,23 +286,25 @@ const PAGES: &[TutorialPage] = &[
         title: "Part 1 — The Tiles",
         subtitle: "",
         glossary: &[],
-        callout: Some("Next: basic melds and how to score."),
+        callout: Some("Next: melds and how to score."),
         try_it_demo: false,
         groups: PART1_TILE_GROUPS,
     },
     TutorialPage {
-        title: "Part 2 — How to Score",
-        subtitle: "**Play** melds, **Discard** tiles you don't need, then **Cash In** to score. Score equals **chips** × **mult**.",
+        title: "Part 2 — Melds & Scoring",
+        subtitle: scoring_intro_copy::SUBTITLE,
         glossary: &[
-            "Melds — valid groups of tiles (pairs, sequences, triplets, kongs).",
+            melds_intro_copy::PAGE_SUBTITLE,
+            "Only number suits can form sequences.",
+            "Sequences must stay in one suit.",
+            "Honors cannot form sequences.",
             "Structure — played melds that will score when you cash in.",
             "Discard — remove unwanted tiles from your hand. Discards are a limited resource.",
             "Play — play melds to your structure. Plays are a limited resource.",
-            "Cash In — Pressing this button scores your structure.",
-            "Chips — base points",
-            "Mult — multiplier on chips",
+            scoring_intro_copy::FLOW_REMINDER,
+            scoring_intro_copy::FINAL_EQUATION,
         ],
-        callout: Some("Your actions are limited, make them count."),
+        callout: Some("Your actions are limited — make them count."),
         try_it_demo: true,
         groups: SCORING_DEMO_GROUPS,
     },
@@ -280,11 +313,8 @@ const PAGES: &[TutorialPage] = &[
 struct TutorialDemoLayoutPlan {
     terminals_size: f32,
     honor_size: f32,
-    /// Gap after the number-suit row, before the sequence comparison cards.
+    /// Gap after the number-suit row, before Winds / Dragons / Flowers.
     row_gap: f32,
-    /// Extra breathing room before the honor-suit row — sequence cards read as a
-    /// distinct block and should not crowd the Winds / Dragons row below.
-    sequence_to_honors_gap: f32,
     stack_top: f32,
 }
 
@@ -681,19 +711,11 @@ impl TutorialCampaignScene {
             natural_h += block(line, typography::H32, color::PARCHMENT);
         }
         natural_h += block(
-            tiles_intro_copy::RANK_TERMS_HEADING,
+            tiles_intro_copy::FLOWERS_HEADING,
             typography::H28,
             color::CHAMPAGNE,
         );
-        for line in tiles_intro_copy::RANK_TERM_LINES {
-            natural_h += block(line, typography::H32, color::PARCHMENT);
-        }
-        natural_h += block(
-            tiles_intro_copy::SEQUENCE_RULES_HEADING,
-            typography::H28,
-            color::CHAMPAGNE,
-        );
-        for line in tiles_intro_copy::SEQUENCE_RULE_LINES {
+        for line in tiles_intro_copy::FLOWER_LINES {
             natural_h += block(line, typography::H32, color::PARCHMENT);
         }
         natural_h
@@ -738,13 +760,12 @@ impl TutorialCampaignScene {
         copy_floor: f32,
         h: f32,
     ) -> TutorialTilesCopyLayout {
-        const SECTION_GAPS: usize = 6;
         const MIN_LINE_MUL: f32 = 0.55;
         const MAX_LINE_MUL: f32 = 3.0;
         let section_gap = h * 0.006;
         let copy_bottom_pad = h * 0.008;
         let available = (copy_floor - content_top - copy_bottom_pad).max(1.0);
-        let gap_stack = section_gap * SECTION_GAPS as f32;
+        let gap_stack = section_gap * TUTORIAL_TILES_COPY_SECTION_GAPS as f32;
         let text_budget = (available - gap_stack).max(1.0);
 
         let line_mul = Self::tutorial_tiles_copy_line_mul_for_budget(
@@ -893,39 +914,13 @@ impl TutorialCampaignScene {
             copy_x,
             cursor,
             copy_w,
-            tiles_intro_copy::RANK_TERMS_HEADING,
+            tiles_intro_copy::FLOWERS_HEADING,
             typography::H28,
             color::CHAMPAGNE,
             h,
             line_mul,
         );
-        for line in tiles_intro_copy::RANK_TERM_LINES {
-            cursor += Self::push_tutorial_tiles_copy_line(
-                texts,
-                copy_x,
-                cursor,
-                copy_w,
-                line,
-                typography::H32,
-                color::PARCHMENT,
-                h,
-                line_mul,
-            );
-        }
-        cursor += section_gap;
-
-        cursor += Self::push_tutorial_tiles_copy_line(
-            texts,
-            copy_x,
-            cursor,
-            copy_w,
-            tiles_intro_copy::SEQUENCE_RULES_HEADING,
-            typography::H28,
-            color::CHAMPAGNE,
-            h,
-            line_mul,
-        );
-        for line in tiles_intro_copy::SEQUENCE_RULE_LINES {
+        for line in tiles_intro_copy::FLOWER_LINES {
             cursor += Self::push_tutorial_tiles_copy_line(
                 texts,
                 copy_x,
@@ -1084,7 +1079,7 @@ impl TutorialCampaignScene {
     }
 
     fn layout_sequence_comparison_cards(
-        page: &TutorialPage,
+        groups: &[TileGroup],
         col_x: f32,
         col_w: f32,
         card_top_y: f32,
@@ -1105,7 +1100,7 @@ impl TutorialCampaignScene {
         let valid_accent = [0.35, 0.70, 0.85, 0.9];
         let invalid_accent = [0.65, 0.35, 0.35, 0.9];
         const VALID_HEADER: &str = "Valid sequence";
-        const INVALID_HEADER: &str = "Invalid mix";
+        const INVALID_HEADER: &str = "Invalid sequence";
 
         struct SeqCardSpec<'a> {
             group: &'a TileGroup,
@@ -1122,7 +1117,7 @@ impl TutorialCampaignScene {
         let specs = if stack_vertical {
             vec![
                 SeqCardSpec {
-                    group: &page.groups[3],
+                    group: &groups[0],
                     card_x: col_x + col_w * 0.04,
                     header: VALID_HEADER,
                     caption: "3-4-5 Manzu",
@@ -1131,10 +1126,10 @@ impl TutorialCampaignScene {
                     inter_gap: card_tile_size * 0.06,
                 },
                 SeqCardSpec {
-                    group: &page.groups[4],
+                    group: &groups[1],
                     card_x: col_x + col_w * 0.04,
                     header: INVALID_HEADER,
-                    caption: "3 Manzu - 4 Souzu - 5 Pinzu",
+                    caption: "3 Manzu / 4 Souzu / 5 Pinzu",
                     fill: color::alpha(color::STONE, 0.12),
                     border: invalid_accent,
                     inter_gap: card_tile_size * 0.12,
@@ -1143,7 +1138,7 @@ impl TutorialCampaignScene {
         } else {
             vec![
                 SeqCardSpec {
-                    group: &page.groups[3],
+                    group: &groups[0],
                     card_x: valid_x,
                     header: VALID_HEADER,
                     caption: "3-4-5 Manzu",
@@ -1152,10 +1147,10 @@ impl TutorialCampaignScene {
                     inter_gap: card_tile_size * 0.06,
                 },
                 SeqCardSpec {
-                    group: &page.groups[4],
+                    group: &groups[1],
                     card_x: invalid_x,
                     header: INVALID_HEADER,
-                    caption: "3 Manzu - 4 Souzu - 5 Pinzu",
+                    caption: "3 Manzu / 4 Souzu / 5 Pinzu",
                     fill: color::alpha(color::STONE, 0.12),
                     border: invalid_accent,
                     inter_gap: card_tile_size * 0.12,
@@ -1269,28 +1264,6 @@ impl TutorialCampaignScene {
         (card_w, card_tile_size)
     }
 
-    fn sequence_cards_block_height(
-        col_w: f32,
-        h: f32,
-        scale: f32,
-        max_tile: f32,
-        stack_vertical: bool,
-    ) -> f32 {
-        let spacing = SequenceCardSpacing::new(scale, h);
-        let (card_w, card_tile_size) =
-            Self::sequence_card_tile_metrics(col_w, h, scale, max_tile, stack_vertical);
-        let caption_block_h = ["3-4-5 Manzu", "3 Manzu / 4 Souzu / 5 Pinzu"]
-            .iter()
-            .map(|caption| Self::colored_copy_block_height(caption, card_w, typography::H36, h))
-            .fold(0.0_f32, f32::max);
-        let card_h = spacing.card_height(card_tile_size, caption_block_h);
-        if stack_vertical {
-            card_h * 2.0 + h * 0.018
-        } else {
-            card_h
-        }
-    }
-
     fn plan_tutorial_demo_layout(
         page: &TutorialPage,
         col_w: f32,
@@ -1301,24 +1274,19 @@ impl TutorialCampaignScene {
     ) -> TutorialDemoLayoutPlan {
         let available = (content_floor - content_top).max(h * 0.30);
         let row_gap = (14.0 * scale).max(h * 0.016);
-        let sequence_to_honors_gap = (26.0 * scale).max(h * 0.030);
-        let stack_vertical = h < 760.0;
-        let mut max_tile = (available / 4.4).min(h * 0.054).max(20.0);
+        let mut max_tile = (available / 2.8).min(h * 0.054).max(20.0);
 
         for _ in 0..28 {
             let terminals_size = Self::tutorial_row_tile_size(page, &[0, 1, 2], col_w, max_tile);
-            let honor_size = Self::tutorial_row_tile_size(page, &[5, 6], col_w, max_tile);
+            let honor_size = Self::tutorial_row_tile_size(page, &[3, 4, 5], col_w, max_tile);
             let terminals_block_h = Self::tutorial_labeled_row_height(terminals_size, scale, h);
-            let seq_block_h =
-                Self::sequence_cards_block_height(col_w, h, scale, max_tile, stack_vertical);
             let honor_block_h = Self::tutorial_labeled_row_height(honor_size, scale, h);
-            let blocks_total = terminals_block_h + seq_block_h + honor_block_h;
-            if blocks_total + row_gap + sequence_to_honors_gap <= available {
+            let blocks_total = terminals_block_h + row_gap + honor_block_h;
+            if blocks_total <= available {
                 return TutorialDemoLayoutPlan {
                     terminals_size,
                     honor_size,
                     row_gap,
-                    sequence_to_honors_gap,
                     stack_top: content_top,
                 };
             }
@@ -1326,12 +1294,11 @@ impl TutorialCampaignScene {
         }
 
         let terminals_size = Self::tutorial_row_tile_size(page, &[0, 1, 2], col_w, 20.0);
-        let honor_size = Self::tutorial_row_tile_size(page, &[5, 6], col_w, 20.0);
+        let honor_size = Self::tutorial_row_tile_size(page, &[3, 4, 5], col_w, 20.0);
         TutorialDemoLayoutPlan {
             terminals_size,
             honor_size,
             row_gap,
-            sequence_to_honors_gap,
             stack_top: content_top,
         }
     }
@@ -1347,13 +1314,9 @@ impl TutorialCampaignScene {
         content_top: f32,
         content_floor: f32,
         scale: f32,
-        fg_quads: &mut Vec<GpuInstance>,
-        texts: &mut Vec<TextLabel>,
     ) -> (Vec<ShowcaseTilePlacement>, Vec<TilesPageLabel>, f32, f32) {
-        let stack_vertical = h < 760.0;
         let plan =
             Self::plan_tutorial_demo_layout(page, col_w, h, scale, content_top, content_floor);
-        let max_tile = plan.terminals_size.max(plan.honor_size);
 
         let mut placements = Vec::new();
         let mut labels = Vec::new();
@@ -1378,27 +1341,11 @@ impl TutorialCampaignScene {
         labels.extend(row_labels);
         cursor = terminals_bottom + plan.row_gap;
 
-        let (seq_placements, seq_bottom) = Self::layout_sequence_comparison_cards(
-            page,
-            col_x,
-            col_w,
-            cursor,
-            h,
-            scale,
-            max_tile,
-            stack_vertical,
-            &mut next_id,
-            fg_quads,
-            texts,
-        );
-        placements.extend(seq_placements);
-        cursor = seq_bottom + plan.sequence_to_honors_gap;
-
         let honor_center = cursor + plan.honor_size * 0.5;
         let (honor_placements, honor_labels, honor_bottom) = Self::layout_tutorial_tile_row(
             cam,
             page,
-            &[5, 6],
+            &[3, 4, 5],
             col_x,
             window_w,
             col_w,
@@ -1770,8 +1717,6 @@ impl SceneBehavior for TutorialCampaignScene {
                 tile_area_top,
                 content_floor,
                 scale,
-                &mut fg_quads,
-                &mut texts,
             );
             Self::draw_tiles_page_group_labels(&mut texts, &mut fg_quads, &labels, scale, h);
             (placements, light_y, bottom)
@@ -1796,7 +1741,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 font_px: Some(typography::size(typography::H36, h)),
                 ..Default::default()
             });
-            let (placements, labels, pair_bottom) = Self::layout_demo_page_tiles(
+            let (placements, labels, meld_bottom) = Self::layout_demo_page_tiles(
                 page,
                 w,
                 h,
@@ -1805,12 +1750,30 @@ impl SceneBehavior for TutorialCampaignScene {
                 scoring.pair_row_top,
                 scale,
             );
-            let glossary_y = pair_bottom + 12.0 * scale;
+            let stack_vertical = h < 760.0;
+            let max_tile = h * 0.065;
+            let mut seq_tile_id = 40_000u32;
+            let mut showcase_tiles = placements;
+            let (seq_placements, seq_bottom) = Self::layout_sequence_comparison_cards(
+                SCORING_SEQUENCE_GROUPS,
+                scoring.left_col_x,
+                scoring.left_col_w,
+                meld_bottom + 10.0 * scale,
+                h,
+                scale,
+                max_tile,
+                stack_vertical,
+                &mut seq_tile_id,
+                &mut fg_quads,
+                &mut texts,
+            );
+            showcase_tiles.extend(seq_placements);
+            let content_bottom = seq_bottom.max(meld_bottom);
             let gutter_bottom = scoring
                 .callout_rect
                 .map(|r| r[1] + r[3])
                 .unwrap_or(scoring.try_it.content_floor_y)
-                .max(glossary_y + scoring.glossary_block_h);
+                .max(content_bottom + 12.0 * scale + scoring.glossary_block_h);
             fg_quads.push(GpuInstance {
                 rect: [
                     gutter_mid - (0.5 * scale).max(1.0),
@@ -1822,7 +1785,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 user: 0,
             });
             Self::draw_tiles_page_group_labels(&mut texts, &mut fg_quads, &labels, scale, h);
-            (placements, scoring.pair_tile_light_y, pair_bottom)
+            (showcase_tiles, scoring.pair_tile_light_y, content_bottom)
         } else {
             unreachable!("scoring page uses scoring_layout")
         };
@@ -2256,7 +2219,7 @@ mod tests {
             TutorialCampaignScene::tutorial_tiles_copy_natural_height(copy_w, h, layout.line_mul);
         let copy_bottom_pad = h * 0.008;
         let available = copy_floor - content_top - copy_bottom_pad;
-        let total = natural_h + layout.section_gap * 6.0;
+        let total = natural_h + layout.section_gap * TUTORIAL_TILES_COPY_SECTION_GAPS as f32;
         let fill = total / available;
         assert!(
             total <= available + 1.0,

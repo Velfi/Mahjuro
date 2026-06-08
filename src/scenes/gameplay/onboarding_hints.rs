@@ -1,6 +1,7 @@
 //! Guided onboarding prompts during the Lessons blind.
 
 use crate::game::onboarding::finale_intro_message;
+use crate::game::onboarding_intro_copy as copy;
 use crate::game::run::RunState;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, metrics, typography};
@@ -42,7 +43,7 @@ pub fn push_lessons_banner(
     let scale = metrics::scene_scale(w, h);
     let prompt = onboarding.lessons_prompt(run);
     let show_river_tip = onboarding.step >= 3 && onboarding.discard_river_tooltip_shown;
-    let river_tip = "Discarded tiles sit in the river — they don't score.";
+    let river_tip = copy::LESSONS_RIVER_TIP;
 
     let pad = (16.0 * scale).max(12.0);
     let panel_w = (w * 0.36).min(440.0 * scale).max(240.0 * scale);
