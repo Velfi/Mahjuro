@@ -128,7 +128,8 @@ pub fn export_via_save_panel(default_name: &str) -> Option<PathBuf> {
             if dialog.Show(None).is_ok() {
                 let item = dialog.GetResult().ok()?;
                 let path = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
-                return Some(PathBuf::from(path.to_string()));
+                let path_str = unsafe { path.to_string().ok()? };
+                return Some(PathBuf::from(path_str));
             }
         }
         return None;
