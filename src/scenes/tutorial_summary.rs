@@ -16,6 +16,7 @@ use crate::ui::styled_text::styled_line_block_height_at_font_px;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
+use crate::game::onboarding_intro_copy;
 use super::guide::GuideScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
@@ -117,13 +118,7 @@ impl SceneBehavior for TutorialSummaryScene {
         } else {
             "You reached the finale but faltered against The Iconoclast. Perhaps you'll fare better next time."
         };
-        let bullets = [
-            "Play melds into your structure to form yaku. Cash in your structure to score (chips × mult).",
-            "Discarding tiles is essential to building large structures and scoring big.",
-            "Any time during gameplay: open the Guide book on the table for a review of mechanics, melds, and yaku.",
-            "Full Hand and Chiitoitsu are good yaku to memorize first.",
-            "The more you play, the more the house will reveal to you. How far will you go?",
-        ];
+        let bullets = onboarding_intro_copy::SUMMARY_BULLETS;
 
         let mut frame = UiFrame::new();
         frame.quad(GpuInstance {
@@ -139,7 +134,7 @@ impl SceneBehavior for TutorialSummaryScene {
         }
 
         let card_w = (620.0 * scale).min(w * 0.88);
-        let card_h = (430.0 * scale).min(h * 0.80);
+        let card_h = (480.0 * scale).min(h * 0.82);
         let card_x = (w - card_w) * 0.5;
         let card_y = (h - card_h) * 0.5;
         let border = (2.0 * scale).max(1.0);
