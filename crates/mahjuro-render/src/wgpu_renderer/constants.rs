@@ -17,15 +17,20 @@ pub(crate) fn scaled_render_size(
     w = w.clamp(1, window.width);
     h = h.clamp(1, window.height);
 
-    let min_w = mahjuro_gfx_types::MIN_RENDER_WIDTH.min(window.width);
-    let min_h = mahjuro_gfx_types::MIN_RENDER_HEIGHT.min(window.height);
-    if w < min_w {
-        w = min_w;
-        h = (w as f32 / aspect).round().clamp(1.0, window.height as f32) as u32;
-    }
-    if h < min_h {
-        h = min_h;
-        w = (h as f32 * aspect).round().clamp(1.0, window.width as f32) as u32;
+    // The 1280×720 floor targets 1080p-class displays. On 768p laptops (1366×768)
+    // upscaling to the floor wastes VRAM and desyncs overlay layout from the window.
+    const MIN_FLOOR_WINDOW_H: u32 = 900;
+    if window.height >= MIN_FLOOR_WINDOW_H {
+        let min_w = mahjuro_gfx_types::MIN_RENDER_WIDTH.min(window.width);
+        let min_h = mahjuro_gfx_types::MIN_RENDER_HEIGHT.min(window.height);
+        if w < min_w {
+            w = min_w;
+            h = (w as f32 / aspect).round().clamp(1.0, window.height as f32) as u32;
+        }
+        if h < min_h {
+            h = min_h;
+            w = (h as f32 * aspect).round().clamp(1.0, window.width as f32) as u32;
+        }
     }
 
     if w != window.width || h != window.height {
@@ -87,6 +92,14 @@ mod tests {
         let rs = scaled_render_size(window, 0.75);
         assert_eq!(rs.width, 1440);
         assert_eq!(rs.height, 810);
+    }
+
+    #[test]
+    fn scaled_render_size_075_at_768p_laptop() {
+        let window = crate::physical_size::PhysicalSize::new(1366, 768);
+        let rs = scaled_render_size(window, 0.75);
+        assert_eq!(rs.width, 1024);
+        assert_eq!(rs.height, 576);
     }
 
     #[test]

@@ -98,19 +98,44 @@ impl WgpuRenderer {
         crate::room_gpu_resident::RoomGpuResidentId::bit_for_scene_key(key)
     }
 
-    fn pinned_room_gpu_bit(&self) -> Option<u8> {
-        self.poll_pinned_room_gpu_bit
+    #[inline]
+    pub(super) fn integrated_low_memory_gpu(&self) -> bool {
+        self.integrated_gpu && self.graphics_mode == mahjuro_gfx_types::GraphicsMode::LowMemory
+    }
+
+    /// Room bits that must not be evicted: active scene plus any in-flight GPU upload.
+    pub(super) fn room_gpu_evict_protected_bits(&self) -> u8 {
+        let mut bits = self.poll_pinned_room_gpu_bit.unwrap_or(0);
+        if self.shop_room_gpu_upload.is_some() {
+            bits |= ROOM_SHOP;
+        }
+        if self.hallway_room_gpu_upload.is_some() {
+            bits |= ROOM_HALLWAY;
+        }
+        if self.gameplay_room_gpu_upload.is_some() {
+            bits |= ROOM_GAMEPLAY;
+        }
+        bits
+    }
+
+    fn effective_room_gpu_cap(&self) -> usize {
+        let cap = self.graphics_mode.max_room_gpu_residents();
+        if self.integrated_gpu && self.graphics_mode == mahjuro_gfx_types::GraphicsMode::LowMemory {
+            1
+        } else {
+            cap
+        }
     }
 
     pub(super) fn trim_room_gpu_residency(&mut self) {
-        let cap = self.graphics_mode.max_room_gpu_residents();
-        let pin = self.pinned_room_gpu_bit();
+        let cap = self.effective_room_gpu_cap();
+        let protected = self.room_gpu_evict_protected_bits();
         while self.room_gpu_lru.len() > cap {
             let Some(bit) = self
                 .room_gpu_lru
                 .iter()
                 .rev()
-                .find(|&&b| pin != Some(b))
+                .find(|&&b| protected & b == 0)
                 .copied()
             else {
                 break;
@@ -129,7 +154,8 @@ impl WgpuRenderer {
         crate::gpu_memory_pressure::classify(
             &self.device,
             self.room_gpu_lru.len(),
-            self.graphics_mode.max_room_gpu_residents(),
+            self.effective_room_gpu_cap(),
+            self.integrated_gpu,
         )
     }
 
@@ -154,9 +180,31 @@ impl WgpuRenderer {
             if self.room_gpu_lru.len() < before {
                 return true;
             }
+            // Integrated shared memory: do not stack a second room while the active scene
+            // (or an in-flight upload) holds the only residency slot.
+            if self.integrated_low_memory_gpu() && at_cap {
+                return false;
+            }
             return allow_when_full;
         }
         true
+    }
+
+    /// Drop GPU residents other than `keep_bit` so a scene transition can upload on integrated GPUs.
+    pub(super) fn evict_room_gpu_residents_except(&mut self, keep_bit: u8) {
+        let loaded = self.rooms_gpu_loaded;
+        for bit in [
+            ROOM_MAIN_MENU,
+            ROOM_SHOP,
+            ROOM_HALLWAY,
+            ROOM_ARCHIVE,
+            ROOM_STAIRCASE,
+            ROOM_GAMEPLAY,
+        ] {
+            if bit != keep_bit && loaded & bit != 0 {
+                self.evict_room_gpu_inner(bit, true);
+            }
+        }
     }
 
     pub(super) fn note_room_gpu_resident(&mut self, bit: u8) {
@@ -168,7 +216,20 @@ impl WgpuRenderer {
     }
 
     pub(super) fn evict_room_gpu(&mut self, bit: u8) {
+        self.evict_room_gpu_inner(bit, false);
+    }
+
+    fn evict_room_gpu_inner(&mut self, bit: u8, force: bool) {
         if self.rooms_gpu_loaded & bit == 0 {
+            return;
+        }
+        if !force {
+            let protected = self.room_gpu_evict_protected_bits();
+            if protected & bit != 0 {
+                return;
+            }
+        } else if self.room_gpu_evict_protected_bits() & bit != 0 {
+            // Never tear down a room that is mid-upload during a forced transition evict.
             return;
         }
         if let Some(id) = crate::room_gpu_resident::RoomGpuResidentId::from_bit(bit) {

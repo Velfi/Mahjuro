@@ -1194,6 +1194,7 @@ pub(super) fn build_renderer_new(
         overlay_depth_view,
         graphics_mode: suggested_graphics_mode,
         suggested_graphics_mode,
+        integrated_gpu,
         room_gpu_lru: std::collections::VecDeque::new(),
         tile_anim_y: Vec::new(),
         tile_anim_x: Vec::new(),

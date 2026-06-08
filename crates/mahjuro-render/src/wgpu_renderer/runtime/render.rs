@@ -1566,6 +1566,8 @@ impl WgpuRenderer {
             relic_debuff_markers: &relic_debuff_markers,
             relic_debuff_buffer: relic_debuff_buffer.as_ref(),
             scene_hdr_attachment: true,
+            pass_target_w: self.render_size.width,
+            pass_target_h: self.render_size.height,
         };
         // Text overlay loads the final `view` (swapchain or journal), not
         // `scene_color_view`; match that attachment's format for 2D pipelines.
@@ -1600,6 +1602,8 @@ impl WgpuRenderer {
             relic_debuff_markers: &relic_debuff_markers,
             relic_debuff_buffer: relic_debuff_buffer.as_ref(),
             scene_hdr_attachment: overlay_hdr,
+            pass_target_w: self.size.width,
+            pass_target_h: self.size.height,
         };
 
         // ── Pre-pass: shooting-star cascade into half-res offscreen ─────
@@ -2826,6 +2830,8 @@ impl WgpuRenderer {
                 relic_debuff_markers: &relic_debuff_markers,
                 relic_debuff_buffer: relic_debuff_buffer.as_ref(),
                 scene_hdr_attachment: overlay_hdr,
+                pass_target_w: self.size.width,
+                pass_target_h: self.size.height,
             };
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("debug-overlay-pass"),

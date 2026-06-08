@@ -379,6 +379,7 @@ pub struct WgpuRenderer {
     pub(super) graphics_mode: mahjuro_gfx_types::GraphicsMode,
     /// Heuristic preset from adapter name / class at init (see [`Self::suggested_graphics_mode`]).
     suggested_graphics_mode: mahjuro_gfx_types::GraphicsMode,
+    integrated_gpu: bool,
     /// LRU order of [`room_gpu_load`] room bits (front = most recent).
     room_gpu_lru: std::collections::VecDeque<u8>,
     /// Per-tile Y animation offset (positive = below rest position). Lerped toward 0 each frame.
