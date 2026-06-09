@@ -26,6 +26,7 @@ pub mod relic;
 pub mod room_gi;
 pub mod room_shadow;
 pub mod room_slugs;
+pub mod shader_program;
 pub mod showcase_decal;
 
 /// FNV-1a 64-bit (stable across toolchains for build stamps).
@@ -442,6 +443,50 @@ mod tests {
     #[test]
     fn room_shadow_hash_matches_committed_stamp() {
         assert_stamp_matches::<RoomShadow>();
+    }
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    fn hash_of(repo: &Path, paths: &[PathBuf]) -> String {
+        let mut h = Fnv64::new();
+        hash_paths(&mut h, repo, paths);
+        h.finish_hex()
+    }
+
+    /// A prepended/composed WGSL file must be in the stamp input list *and* its
+    /// bytes must move the hash, so editing it invalidates the committed bake.
+    fn assert_input_contributes<K: BakeKind>(rel: &str) {
+        let repo = repo_root();
+        let target = repo.join(rel);
+        let all = K::stamp_input_paths(&repo);
+        assert!(
+            all.iter().filter(|p| **p == target).count() == 1,
+            "{rel} must appear exactly once in {} stamp inputs",
+            K::LABEL
+        );
+        let reduced: Vec<PathBuf> = all.iter().filter(|p| **p != target).cloned().collect();
+        assert_ne!(
+            hash_of(&repo, &all),
+            hash_of(&repo, &reduced),
+            "{rel} must contribute to the {} stamp hash",
+            K::LABEL
+        );
+    }
+
+    #[test]
+    fn room_shadow_hash_includes_prepended_wgsl() {
+        for rel in crate::shader_program::SHADOW {
+            assert_input_contributes::<RoomShadow>(rel);
+        }
+    }
+
+    #[test]
+    fn room_gi_hash_includes_prepended_wgsl() {
+        for rel in crate::shader_program::scene_pbr_with_hallway_warp("shaders/room_glb.wgsl") {
+            assert_input_contributes::<RoomGi>(rel);
+        }
     }
 
     #[test]

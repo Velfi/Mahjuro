@@ -44,8 +44,13 @@ impl BakeKind for RoomShadow {
     }
 }
 
-pub fn rerun_if_changed_paths() -> &'static [&'static str] {
-    &[
+pub fn rerun_if_changed_paths() -> Vec<&'static str> {
+    // The shadow shader the renderer actually runs is `embedded_wgsl::SHADOW`,
+    // i.e. `hallway_vertex_warp.wgsl` prepended before `shadow.wgsl`; sourcing
+    // those from `shader_program::SHADOW` keeps this list from drifting out of
+    // sync with the shader embedding (a `hallway_vertex_warp.wgsl` edit must
+    // invalidate the committed `.msh` stamp).
+    let mut paths = vec![
         "assets/3d/Shop.glb",
         "assets/3d/hallway.glb",
         "assets/3d/archive.glb",
@@ -57,7 +62,8 @@ pub fn rerun_if_changed_paths() -> &'static [&'static str] {
         "crates/mahjuro-render/src/room_shadow_bake.rs",
         "crates/mahjuro-render/src/wgpu_renderer/runtime/shop_environment.rs",
         "crates/mahjuro-render/src/wgpu_renderer/runtime/shadow_setup.rs",
-        "shaders/shadow.wgsl",
         "shaders/room_glb.wgsl",
-    ]
+    ];
+    paths.extend_from_slice(crate::shader_program::SHADOW);
+    paths
 }

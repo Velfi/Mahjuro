@@ -82,6 +82,56 @@ pub const EMISSIVE_PROBE_UPDATE: &str = wgsl_file!("emissive_probe_update.wgsl")
 pub const EMISSIVE_PROBE_APPLY: &str = wgsl_file!("emissive_probe_apply.wgsl");
 pub const EMISSIVE_GI_COMPOSITE: &str = wgsl_file!("emissive_gi_composite.wgsl");
 
+#[cfg(test)]
+mod composition_drift {
+    //! Guards against the offline bake stamps (`mahjuro_bake_stamp`) drifting out
+    //! of sync with the shaders embedded here. If a prepended dependency is added
+    //! to a macro below but not to the matching `shader_program` list (or vice
+    //! versa), these tests fail — that list is what the room shadow / GI
+    //! `.inputs_stamp` hashes, so the mismatch would otherwise let a stale bake
+    //! ship after a shader change.
+    use std::path::PathBuf;
+
+    /// Concatenate repo-relative WGSL files with the same `"\n"` separator the
+    /// `concat!` macros use, reproducing the embedded program byte-for-byte.
+    fn compose(files: &[&str]) -> String {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        files
+            .iter()
+            .map(|rel| {
+                std::fs::read_to_string(repo.join(rel))
+                    .unwrap_or_else(|e| panic!("read {rel}: {e}"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn shadow_matches_shader_program_list() {
+        assert_eq!(
+            super::SHADOW,
+            compose(mahjuro_bake_stamp::shader_program::SHADOW),
+            "embedded_wgsl::SHADOW drifted from shader_program::SHADOW; \
+             update both the macro and the bake stamp input list together"
+        );
+    }
+
+    #[test]
+    fn shop_glb_matches_shader_program_list() {
+        assert_eq!(
+            super::SHOP_GLB,
+            compose(
+                &mahjuro_bake_stamp::shader_program::scene_pbr_with_hallway_warp(
+                    "shaders/room_glb.wgsl"
+                )
+            ),
+            "embedded_wgsl::SHOP_GLB drifted from \
+             shader_program::scene_pbr_with_hallway_warp; update both the macro \
+             and the bake stamp input list together"
+        );
+    }
+}
+
 // Scene shaders all write linear HDR to `scene_color` now —
 // `tonemap_composite.wgsl` owns the single ACES pass, so `scene_hdr_tonemap.wgsl`
 // no longer needs to be prepended here.

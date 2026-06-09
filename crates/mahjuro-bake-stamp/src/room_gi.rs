@@ -49,8 +49,13 @@ impl BakeKind for RoomGi {
     }
 }
 
-pub fn rerun_if_changed_paths() -> &'static [&'static str] {
-    &[
+pub fn rerun_if_changed_paths() -> Vec<&'static str> {
+    // The lit room shader is `scene_pbr_with_hallway_warp!("room_glb.wgsl")`,
+    // which wraps the room body in hallway warp + scene PBR lights + rainbow
+    // swirl + moon phase + projected shadow. Sourcing that full composition from
+    // `shader_program` keeps this list in lockstep with the shader embedding, so
+    // editing any prepended shader invalidates the committed `.mgi` stamp.
+    let mut paths = vec![
         "assets/3d/Shop.glb",
         "assets/3d/hallway.glb",
         "assets/3d/archive.glb",
@@ -61,6 +66,9 @@ pub fn rerun_if_changed_paths() -> &'static [&'static str] {
         "shaders/emissive_probe_update.wgsl",
         "shaders/emissive_probe_apply.wgsl",
         "shaders/emissive_gi_composite.wgsl",
+    ];
+    paths.extend(crate::shader_program::scene_pbr_with_hallway_warp(
         "shaders/room_glb.wgsl",
-    ]
+    ));
+    paths
 }
