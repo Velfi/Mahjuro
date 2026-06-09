@@ -320,18 +320,13 @@ impl HintStyle {
 
 fn inspect_exit_bind(input_mode: InputMode) -> HintBind {
     match input_mode {
-        InputMode::Controller => HintBind::alternatives(
-            "exit",
-            vec![HintKey::Action(UiAction::NorthFacePress)],
-        ),
-        InputMode::Cursor => HintBind::alternatives(
-            "exit",
-            vec![HintKey::Keyboard("mouse_right")],
-        ),
-        InputMode::Keyboard => HintBind::alternatives(
-            "exit",
-            vec![HintKey::Keyboard("keyboard_e")],
-        ),
+        InputMode::Controller => {
+            HintBind::alternatives("exit", vec![HintKey::Action(UiAction::NorthFacePress)])
+        }
+        InputMode::Cursor => HintBind::alternatives("exit", vec![HintKey::Keyboard("mouse_right")]),
+        InputMode::Keyboard => {
+            HintBind::alternatives("exit", vec![HintKey::Keyboard("keyboard_e")])
+        }
     }
 }
 
@@ -470,36 +465,31 @@ fn section_bind() -> HintBind {
 fn help_bind(input_mode: InputMode) -> HintBind {
     match input_mode {
         InputMode::Controller => HintBind::alternatives("guide", vec![HintKey::SystemHelp]),
-        InputMode::Keyboard | InputMode::Cursor => HintBind::alternatives(
-            "guide",
-            vec![HintKey::Keyboard("keyboard_question")],
-        ),
+        InputMode::Keyboard | InputMode::Cursor => {
+            HintBind::alternatives("guide", vec![HintKey::Keyboard("keyboard_question")])
+        }
     }
 }
 
 fn inspect_bind(input_mode: InputMode) -> HintBind {
     match input_mode {
-        InputMode::Controller => HintBind::alternatives(
-            "inspect",
-            vec![HintKey::Action(UiAction::NorthFacePress)],
-        ),
-        InputMode::Cursor => HintBind::alternatives(
-            "inspect",
-            vec![HintKey::Keyboard("mouse_right")],
-        ),
-        InputMode::Keyboard => HintBind::alternatives(
-            "inspect",
-            vec![HintKey::Keyboard("keyboard_e")],
-        ),
+        InputMode::Controller => {
+            HintBind::alternatives("inspect", vec![HintKey::Action(UiAction::NorthFacePress)])
+        }
+        InputMode::Cursor => {
+            HintBind::alternatives("inspect", vec![HintKey::Keyboard("mouse_right")])
+        }
+        InputMode::Keyboard => {
+            HintBind::alternatives("inspect", vec![HintKey::Keyboard("keyboard_e")])
+        }
     }
 }
 
 fn hold_sell_bind(input_mode: InputMode) -> HintBind {
     match input_mode {
-        InputMode::Cursor => HintBind::alternatives(
-            "hold sell",
-            vec![HintKey::Keyboard("mouse_left")],
-        ),
+        InputMode::Cursor => {
+            HintBind::alternatives("hold sell", vec![HintKey::Keyboard("mouse_left")])
+        }
         _ => HintBind::alternatives(
             "hold sell",
             vec![HintKey::for_input(
@@ -513,10 +503,7 @@ fn hold_sell_bind(input_mode: InputMode) -> HintBind {
 
 fn buy_bind(input_mode: InputMode) -> HintBind {
     match input_mode {
-        InputMode::Cursor => HintBind::alternatives(
-            "buy",
-            vec![HintKey::Keyboard("mouse_left")],
-        ),
+        InputMode::Cursor => HintBind::alternatives("buy", vec![HintKey::Keyboard("mouse_left")]),
         _ => HintBind::alternatives(
             "hold buy",
             vec![HintKey::for_input(
@@ -530,18 +517,15 @@ fn buy_bind(input_mode: InputMode) -> HintBind {
 
 fn gameplay_select_bind(input_mode: InputMode) -> HintBind {
     match input_mode {
-        InputMode::Cursor => HintBind::alternatives(
-            "select",
-            vec![HintKey::Keyboard("mouse_left")],
-        ),
-        InputMode::Controller => HintBind::alternatives(
-            "select",
-            vec![HintKey::Action(UiAction::Confirm)],
-        ),
-        InputMode::Keyboard => HintBind::alternatives(
-            "select",
-            vec![HintKey::Keyboard("keyboard_space")],
-        ),
+        InputMode::Cursor => {
+            HintBind::alternatives("select", vec![HintKey::Keyboard("mouse_left")])
+        }
+        InputMode::Controller => {
+            HintBind::alternatives("select", vec![HintKey::Action(UiAction::Confirm)])
+        }
+        InputMode::Keyboard => {
+            HintBind::alternatives("select", vec![HintKey::Keyboard("keyboard_space")])
+        }
     }
 }
 
@@ -636,9 +620,7 @@ pub fn gameplay_footer_row(
     if show_cash_in {
         row = row.sep().push(gameplay_cash_in_bind(input_mode).into());
     }
-    row.sep()
-        .push(help_bind(input_mode).into())
-        .into_segments()
+    row.sep().push(help_bind(input_mode).into()).into_segments()
 }
 
 /// Hub / modal menus: move focus, then confirm the highlighted row.
@@ -745,9 +727,7 @@ pub fn tile_stress_lab_footer_row(
     if pickable && matches!(input_mode, InputMode::Controller | InputMode::Keyboard) {
         let nav_label = if tiles_focused { "tiles" } else { "footer" };
         row = row.push(match input_mode {
-            InputMode::Controller => {
-                HintBind::alternatives(nav_label, vec![HintKey::Dpad]).into()
-            }
+            InputMode::Controller => HintBind::alternatives(nav_label, vec![HintKey::Dpad]).into(),
             InputMode::Keyboard | InputMode::Cursor => {
                 HintBind::alternatives(nav_label, vec![HintKey::Keyboard("keyboard_arrows")]).into()
             }
@@ -1064,7 +1044,10 @@ fn shrink_hint_style_to_fit_width(
         style.icon_px = (style.icon_px * 0.94).max(HINT_FIT_MIN_ICON_PX);
         style.font_px = (style.font_px * 0.94).max(HINT_FIT_MIN_FONT_PX);
         style.gap_after_icon = style.icon_px * 0.18;
-        style.line_h = style.line_h.min(style.icon_px * 1.06).max(style.font_px * 1.05);
+        style.line_h = style
+            .line_h
+            .min(style.icon_px * 1.06)
+            .max(style.font_px * 1.05);
     }
 }
 
@@ -1137,12 +1120,7 @@ fn emit_inline_row(
         match *seg {
             InlineSegmentRef::Sep => {
                 let w = measure_text(style.font_px, INLINE_SEP);
-                push_outlined_inline_text_label(
-                    texts,
-                    [x, text_y, w, line_h],
-                    INLINE_SEP,
-                    style,
-                );
+                push_outlined_inline_text_label(texts, [x, text_y, w, line_h], INLINE_SEP, style);
                 x += w;
             }
             InlineSegmentRef::PlainText(text) => {
@@ -1311,7 +1289,12 @@ fn inline_text_label(rect: [f32; 4], text: &str, style: HintStyle) -> TextLabel 
     }
 }
 
-fn push_outlined_inline_text_label(texts: &mut Vec<TextLabel>, rect: [f32; 4], text: &str, style: HintStyle) {
+fn push_outlined_inline_text_label(
+    texts: &mut Vec<TextLabel>,
+    rect: [f32; 4],
+    text: &str,
+    style: HintStyle,
+) {
     let label = inline_text_label(rect, text, style);
     let outline = [0.0, 0.0, 0.0, style.text_color[3].min(0.95)];
     for (dx, dy) in hint_text_outline_offsets(style.font_px) {
@@ -1364,7 +1347,8 @@ mod tests {
             );
             let mut scratch = Vec::new();
             let segs = inline_segment_refs(&mut scratch, &row);
-            let width = measure_inline_row(glyphs, PromptInputSurface::MouseOrKeyboard, style, segs);
+            let width =
+                measure_inline_row(glyphs, PromptInputSurface::MouseOrKeyboard, style, segs);
             assert!(
                 width <= max_w + 0.5,
                 "gameplay footer overflow at {w}x{h}: {width:.1}px > {max_w:.1}px"

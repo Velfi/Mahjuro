@@ -172,8 +172,7 @@ impl WgpuRenderer {
         }
         let new_size = super::super::clamp_render_physical_size(new_size);
         self.size = new_size;
-        self.render_size =
-            super::super::constants::scaled_render_size(new_size, self.render_scale);
+        self.render_size = super::super::constants::scaled_render_size(new_size, self.render_scale);
         let rs = self.render_size;
         self.config.width = new_size.width;
         self.config.height = new_size.height;
@@ -196,21 +195,13 @@ impl WgpuRenderer {
         self.overlay_depth_texture = odt;
         self.overlay_depth_view = odv;
         self.ssr_prev_depth_texture.destroy();
-        let (sdt, sdv) = create_depth_r32_snapshot(
-            &self.device,
-            rs.width,
-            rs.height,
-            "ssr-prev-depth",
-        );
+        let (sdt, sdv) =
+            create_depth_r32_snapshot(&self.device, rs.width, rs.height, "ssr-prev-depth");
         self.ssr_prev_depth_texture = sdt;
         self.ssr_prev_depth_view = sdv;
         self.depth_r32_snapshot_texture.destroy();
-        let (drt, drv) = create_depth_r32_snapshot(
-            &self.device,
-            rs.width,
-            rs.height,
-            "depth-r32-snapshot",
-        );
+        let (drt, drv) =
+            create_depth_r32_snapshot(&self.device, rs.width, rs.height, "depth-r32-snapshot");
         self.depth_r32_snapshot_texture = drt;
         self.depth_r32_snapshot_view = drv;
         self.depth_copy_staging_buffer.destroy();
@@ -223,46 +214,25 @@ impl WgpuRenderer {
         // SSR sampler reads via normalised UVs so size-mismatch with
         // `ssr_prev_depth_view` is fine.
         self.scene_prev_texture.destroy();
-        let (scene_prev_w, scene_prev_h) =
-            scene_prev_size(rs.width.max(1), rs.height.max(1));
+        let (scene_prev_w, scene_prev_h) = scene_prev_size(rs.width.max(1), rs.height.max(1));
         let (spt, spv) =
             create_scene_prev(&self.device, SCENE_HDR_FORMAT, scene_prev_w, scene_prev_h);
         self.scene_prev_texture = spt;
         self.scene_prev_view = spv;
         self.scene_color_texture.destroy();
-        let (sct, scv) = create_scene_color(
-            &self.device,
-            SCENE_HDR_FORMAT,
-            rs.width,
-            rs.height,
-        );
+        let (sct, scv) = create_scene_color(&self.device, SCENE_HDR_FORMAT, rs.width, rs.height);
         self.scene_color_texture = sct;
         self.scene_color_view = scv;
         self.room_emissive_texture.destroy();
-        let (re_t, re_v) = create_scene_color(
-            &self.device,
-            SCENE_HDR_FORMAT,
-            rs.width,
-            rs.height,
-        );
+        let (re_t, re_v) = create_scene_color(&self.device, SCENE_HDR_FORMAT, rs.width, rs.height);
         self.room_emissive_texture = re_t;
         self.room_emissive_view = re_v;
         self.post_bloom_texture.destroy();
-        let (pbt, pbv) = create_scene_color(
-            &self.device,
-            SCENE_HDR_FORMAT,
-            rs.width,
-            rs.height,
-        );
+        let (pbt, pbv) = create_scene_color(&self.device, SCENE_HDR_FORMAT, rs.width, rs.height);
         self.post_bloom_texture = pbt;
         self.post_bloom_view = pbv;
         self.journal_scene_texture.destroy();
-        let (jst, jsv) = create_journal_scene(
-            &self.device,
-            SCENE_HDR_FORMAT,
-            rs.width,
-            rs.height,
-        );
+        let (jst, jsv) = create_journal_scene(&self.device, SCENE_HDR_FORMAT, rs.width, rs.height);
         self.journal_scene_texture = jst;
         self.journal_scene_view = jsv;
         // Bump the journal-scene view generation so any cached bind
@@ -273,12 +243,8 @@ impl WgpuRenderer {
         // label has been destroyed."
         self.journal_scene_view_generation = self.journal_scene_view_generation.wrapping_add(1);
         self.cascade_offscreen_texture.destroy();
-        let (cot, cov) = create_cascade_offscreen(
-            &self.device,
-            SCENE_HDR_FORMAT,
-            rs.width,
-            rs.height,
-        );
+        let (cot, cov) =
+            create_cascade_offscreen(&self.device, SCENE_HDR_FORMAT, rs.width, rs.height);
         self.cascade_offscreen_texture = cot;
         self.cascade_offscreen_view = cov;
         self.cascade_composite_bind_group =

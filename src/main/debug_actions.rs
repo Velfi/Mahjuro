@@ -1,15 +1,20 @@
-use crate::ui::modal::{Modal, ModalTheme};
-use crate::{App, OrdealKindExt, audio, main_draw, persistence};
 use crate::core::tile_pack::TilePackKind;
 use crate::debug_menu::DebugAction;
-use crate::debug_overlays::{CameraDebugOverlay, DebugVisibilityOverlay, HallwayDistortionDebugOverlay, SceneLookDebugOverlay, SfxTestOverlay, TuningOverlay};
+use crate::debug_overlays::{
+    CameraDebugOverlay, DebugVisibilityOverlay, HallwayDistortionDebugOverlay,
+    SceneLookDebugOverlay, SfxTestOverlay, TuningOverlay,
+};
 use crate::game::engine::GameEngine;
 use crate::scene_transition::SceneTag;
 use crate::scenes::shop::PackCelebration;
 use crate::scenes::{
-    AnimationLabScene, ButtonAabbLabScene, CascadeLabScene, MaterialViewerScene, RollerLabScene, RumbleLabScene, Scene, ShadowAoLabScene, ShowcasePresenter, ShowcaseScene, TextShadowLabScene, TileAnchorLabScene, TilePackPresenter, TileStressLabScene, TransitionPlaygroundScene
+    AnimationLabScene, ButtonAabbLabScene, CascadeLabScene, MaterialViewerScene, RollerLabScene,
+    RumbleLabScene, Scene, ShadowAoLabScene, ShowcasePresenter, ShowcaseScene, TextShadowLabScene,
+    TileAnchorLabScene, TilePackPresenter, TileStressLabScene, TransitionPlaygroundScene,
 };
 use crate::trailer_mode::TrailerMode;
+use crate::ui::modal::{Modal, ModalTheme};
+use crate::{App, OrdealKindExt, audio, main_draw, persistence};
 use mahjuro_types::UiAction;
 use rand::RngExt;
 

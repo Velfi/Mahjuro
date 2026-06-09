@@ -100,12 +100,7 @@ impl WgpuRenderer {
     }
 
     pub(super) fn decal_atlas_uv_for(&self, tile: &Tile) -> [f32; 4] {
-        let key = (
-            tile.suit,
-            tile.rank,
-            tile.enhancement,
-            tile.debuffed_visual,
-        );
+        let key = (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual);
         self.showcase_decal_atlas
             .as_ref()
             .and_then(|a| a.lookup.get(&key).copied())
@@ -254,16 +249,15 @@ impl WgpuRenderer {
         const EXTRACT_SCALE: f32 = 0.85;
         const STRENGTH_NON_ROOM: f32 = 0.28;
 
-        let strength =
-            if let Some(gain) = Self::room_env_linear_hdr_gain(frame, env_tune) {
-                // glTF emissive is absolute HDR; lit surfaces use tile linear exposure
-                // (often ≪ 1). Scale bloom down in crushed rooms so candle halos stay
-                // tight instead of fogging the frame.
-                let ev = gain.max(1e-8).log2();
-                ((ev + 8.5) * 0.045 + 0.14).clamp(0.12, 0.36)
-            } else {
-                STRENGTH_NON_ROOM
-            };
+        let strength = if let Some(gain) = Self::room_env_linear_hdr_gain(frame, env_tune) {
+            // glTF emissive is absolute HDR; lit surfaces use tile linear exposure
+            // (often ≪ 1). Scale bloom down in crushed rooms so candle halos stay
+            // tight instead of fogging the frame.
+            let ev = gain.max(1e-8).log2();
+            ((ev + 8.5) * 0.045 + 0.14).clamp(0.12, 0.36)
+        } else {
+            STRENGTH_NON_ROOM
+        };
 
         (THRESHOLD, strength, EXTRACT_SCALE)
     }
@@ -395,11 +389,7 @@ impl WgpuRenderer {
             bytemuck::bytes_of(&point_lights_buf),
         );
 
-        let spot_cam = if use_ray_plane {
-            ray_plane_cam
-        } else {
-            None
-        };
+        let spot_cam = if use_ray_plane { ray_plane_cam } else { None };
         self.queue.write_buffer(
             &self.spot_lights_buffer,
             0,

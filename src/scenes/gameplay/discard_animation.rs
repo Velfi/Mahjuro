@@ -783,7 +783,7 @@ pub fn sinking_placements(
                 outline: false,
                 glow: false,
                 glow_color: None,
-                    outline_sel: None,
+                outline_sel: None,
                 pick_id: None,
                 overlay_rect_group: None,
             })
@@ -888,7 +888,7 @@ pub fn in_flight_placements(
             outline: false,
             glow: false,
             glow_color: None,
-                    outline_sel: None,
+            outline_sel: None,
             pick_id: None,
             overlay_rect_group: None,
         });
@@ -936,7 +936,7 @@ pub fn settled_placements(
                 outline: false,
                 glow: false,
                 glow_color: None,
-                    outline_sel: None,
+                outline_sel: None,
                 pick_id: None,
                 overlay_rect_group: None,
             },

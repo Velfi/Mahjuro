@@ -62,9 +62,7 @@ fn shop_chrome_rects(rects: &[(ShopFocus, [f32; 4])]) -> Vec<(ShopFocus, [f32; 4
 }
 
 fn rect_for_focus(rects: &[(ShopFocus, [f32; 4])], focus: ShopFocus) -> Option<[f32; 4]> {
-    rects
-        .iter()
-        .find_map(|(f, r)| (*f == focus).then_some(*r))
+    rects.iter().find_map(|(f, r)| (*f == focus).then_some(*r))
 }
 
 fn shop_pool_nav_pick(
@@ -149,15 +147,18 @@ pub(in crate::scenes::shop) fn shop_inspect_nav_pick(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::pick_ids::PICK_JOURNAL_BOOK;
     use super::super::shared::shop_focus_inspectable;
+    use super::*;
     use crate::core::relic::RelicId;
     use crate::game::game_mode::GameMode;
     use crate::game::run::RunState;
     use crate::ui::focus_nav::rect_center;
 
-    fn projected_rects(scene: &super::super::ShopScene, run: &RunState) -> Vec<(ShopFocus, [f32; 4])> {
+    fn projected_rects(
+        scene: &super::super::ShopScene,
+        run: &RunState,
+    ) -> Vec<(ShopFocus, [f32; 4])> {
         super::super::view::projected_shop_focus_rects(scene, 1920.0, 1080.0, run)
     }
 
@@ -326,7 +327,11 @@ mod tests {
         );
         let rects = projected_rects(&scene, &run);
         let mut rail = right_rail_plaques(&rects);
-        assert_eq!(rail.len(), 3, "expected three right-rail plaques, got {rail:?}");
+        assert_eq!(
+            rail.len(),
+            3,
+            "expected three right-rail plaques, got {rail:?}"
+        );
         rail.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut nav = FocusNavState::new();

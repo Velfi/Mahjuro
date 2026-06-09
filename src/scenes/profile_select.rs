@@ -11,9 +11,7 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use crate::render::draw_cmd::UiFrame;
 
-use super::{
-    DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx, archive_career,
-};
+use super::{DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx, archive_career};
 
 const PROFILE_COUNT: usize = 3;
 /// Max stat lines in a populated column (scores, collection counts, saved run).

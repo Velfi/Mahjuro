@@ -467,9 +467,7 @@ pub fn yaku_after_pool_filter(
     } else {
         all.into_iter()
             .filter(|y| {
-                *y == YakuKind::KokushiMusou
-                    || *y == YakuKind::ChickenHand
-                    || available.contains(y)
+                *y == YakuKind::KokushiMusou || *y == YakuKind::ChickenHand || available.contains(y)
             })
             .collect()
     }
@@ -1842,13 +1840,11 @@ mod tests {
         ];
         let sets = validate_selection(&tiles).expect("complete hand");
         let available = vec![YakuKind::Tanyao];
-        assert!(!detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Tanyao));
+        assert!(
+            !detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Tanyao)
+        );
         assert!(would_inject_chicken_hand(
-            &tiles,
-            &sets,
-            None,
-            None,
-            &available,
+            &tiles, &sets, None, None, &available,
         ));
     }
 
@@ -1918,14 +1914,11 @@ mod tests {
             },
         ];
         let available: Vec<YakuKind> = YakuKind::all().to_vec();
-        assert!(would_inject_chicken_hand(&tiles, &sets, None, None, &available));
+        assert!(would_inject_chicken_hand(
+            &tiles, &sets, None, None, &available
+        ));
         assert!(would_show_chicken_tablet(
-            &tiles,
-            &sets,
-            None,
-            None,
-            None,
-            &available,
+            &tiles, &sets, None, None, None, &available,
         ));
     }
 
@@ -1950,14 +1943,11 @@ mod tests {
         let sets = validate_selection(&tiles).expect("complete hand");
         let available: Vec<YakuKind> = YakuKind::all().to_vec();
         assert!(!would_show_chicken_tablet(
-            &tiles,
-            &sets,
-            None,
-            None,
-            None,
-            &available,
+            &tiles, &sets, None, None, None, &available,
         ));
-        assert!(!would_inject_chicken_hand(&tiles, &sets, None, None, &available));
+        assert!(!would_inject_chicken_hand(
+            &tiles, &sets, None, None, &available
+        ));
     }
 
     #[test]
@@ -1981,12 +1971,7 @@ mod tests {
         let sets = validate_selection(&tiles).expect("tanyao hand");
         let available: Vec<YakuKind> = YakuKind::all().to_vec();
         assert!(!would_show_chicken_tablet(
-            &tiles,
-            &sets,
-            None,
-            None,
-            None,
-            &available,
+            &tiles, &sets, None, None, None, &available,
         ));
     }
 }

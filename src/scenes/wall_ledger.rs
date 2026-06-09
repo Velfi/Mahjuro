@@ -153,7 +153,12 @@ struct LedgerLayout {
     row_gap: f32,
 }
 
-fn grid_row_metrics(w: f32, h: f32, jr: f32, content_h: f32) -> (f32, f32, f32, f32, f32, f32, f32) {
+fn grid_row_metrics(
+    w: f32,
+    h: f32,
+    jr: f32,
+    content_h: f32,
+) -> (f32, f32, f32, f32, f32, f32, f32) {
     let grid_top_pad = (h * GRID_TOP_PAD_FRAC).max(10.0 * jr);
     let grid_bottom_pad = (h * GRID_BOTTOM_PAD_FRAC).max(18.0 * jr);
     let label_col_w = w * 0.09;
@@ -241,13 +246,7 @@ fn header_band_metrics(
     }
 }
 
-fn ledger_layout(
-    w: f32,
-    h: f32,
-    jr: f32,
-    pack_row_count: usize,
-    subtitle: &str,
-) -> LedgerLayout {
+fn ledger_layout(w: f32, h: f32, jr: f32, pack_row_count: usize, subtitle: &str) -> LedgerLayout {
     let back = HeaderChromeMetrics::from_window(w, h).back_rect_left();
     let header = header_band_metrics(back, w, h, jr, subtitle);
     let bottom_safe = screen_footer_reserve(w, h);
@@ -320,7 +319,10 @@ fn cell_tile_and_counter_areas(
 fn representative_entry<'a>(
     entries: &'a [crate::game::wall_ledger::WallTileEntry],
 ) -> Option<&'a crate::game::wall_ledger::WallTileEntry> {
-    entries.iter().find(|e| !e.drawn).or_else(|| entries.first())
+    entries
+        .iter()
+        .find(|e| !e.drawn)
+        .or_else(|| entries.first())
 }
 
 fn push_cell_tile(
@@ -486,8 +488,7 @@ impl SceneBehavior for WallLedgerScene {
                     self.target_scroll_px = (self.target_scroll_px - scroll_step).max(0.0);
                 }
                 UiAction::FocusDown => {
-                    self.target_scroll_px =
-                        (self.target_scroll_px + scroll_step).min(max_scroll);
+                    self.target_scroll_px = (self.target_scroll_px + scroll_step).min(max_scroll);
                 }
                 _ => {}
             }
@@ -543,12 +544,7 @@ impl SceneBehavior for WallLedgerScene {
             widget::wrap_text(&ledger.subtitle, subtitle_max_w(w), header.sub_px / 0.99);
         frame.texts([
             TextLabel {
-                rect: [
-                    header.copy_x,
-                    header.title_y,
-                    w * 0.55,
-                    header.title_line_h,
-                ],
+                rect: [header.copy_x, header.title_y, w * 0.55, header.title_line_h],
                 text: "Wall Ledger".into(),
                 color: color::CHAMPAGNE,
                 font_px: Some(header.title_px),
@@ -598,12 +594,7 @@ impl SceneBehavior for WallLedgerScene {
             user: 0,
         });
         frame.quad(GpuInstance {
-            rect: [
-                panel_rect[0] + 1.0,
-                panel_rect[1],
-                panel_rect[2] - 2.0,
-                1.0,
-            ],
+            rect: [panel_rect[0] + 1.0, panel_rect[1], panel_rect[2] - 2.0, 1.0],
             color: color::alpha(color::STONE, 0.35),
             user: 0,
         });

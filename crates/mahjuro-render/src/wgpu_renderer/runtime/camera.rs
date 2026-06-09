@@ -183,10 +183,7 @@ impl CameraFrame {
 
 impl WgpuRenderer {
     /// Per-frame embedded glTF punctual intensity for `tile_3d` (not `lit_mesh` `extras.w`).
-    pub(super) fn tile_punctual_tuning(
-        &self,
-        frame: &crate::draw_cmd::UiFrame,
-    ) -> [f32; 4] {
+    pub(super) fn tile_punctual_tuning(&self, frame: &crate::draw_cmd::UiFrame) -> [f32; 4] {
         self.tile_punctual_tuning_for(frame.foreground_scene_lighting())
     }
 
@@ -259,7 +256,10 @@ impl WgpuRenderer {
             || table_like
             || k == Some(scene_keys::VICTORY)
             || k == Some(scene_keys::DEFEAT)
-            || frame.cmds.iter().any(|c| matches!(c, DrawCmd::MainMenuEnvironment));
+            || frame
+                .cmds
+                .iter()
+                .any(|c| matches!(c, DrawCmd::MainMenuEnvironment));
         if !hdr_active {
             return [0.0; 4];
         }
@@ -269,7 +269,12 @@ impl WgpuRenderer {
         } else {
             1.0
         };
-        [1.0, tune.linear_exposure * linear_base, tune.ambient_scale, 0.0]
+        [
+            1.0,
+            tune.linear_exposure * linear_base,
+            tune.ambient_scale,
+            0.0,
+        ]
     }
 
     fn lit_mesh_ssr_globals(

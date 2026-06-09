@@ -32,8 +32,8 @@ use crate::river_mesh::{RIVER_LOCAL_CENTER_Y, RIVER_LOCAL_HALF};
 use crate::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
 use crate::table_transform::{
-    apply_rotation_deg_to_model, compose_rotation_euler, mat4_to_euler_xyz_rad,
-    rot_euler_xyz_rad, tile_mesh_local_to_world, translate_rot_scale,
+    apply_rotation_deg_to_model, compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad,
+    tile_mesh_local_to_world, translate_rot_scale,
 };
 use crate::wgpu_renderer::{PointLight, SpotLight};
 use crate::world_space::{
@@ -838,7 +838,13 @@ pub fn gameplay_tally_fan_screen_rect(
     let spread_rad = spread_deg.to_radians();
     let fan_width = stick_len * (spread_rad * 0.5).sin() * 2.0 + stick_wide;
     let fan_height = stick_len + stick_wide * 0.5;
-    let fan_center = pixel_to_world(win_w, win_h, anchor[0], anchor[1], anchor[2] + stick_len * 0.5);
+    let fan_center = pixel_to_world(
+        win_w,
+        win_h,
+        anchor[0],
+        anchor[1],
+        anchor[2] + stick_len * 0.5,
+    );
     let fan_yaw = Mat4::from_rotation_z(rotation_y_deg.to_radians());
     let fan_model = apply_rotation_deg_to_model(
         translate_rot_scale(
@@ -1474,8 +1480,8 @@ mod tests {
         let win_h = 1080.0_f32;
         let env_h = 1.0_f32;
         let target = [820.0, 318.0, 168.0, 52.0];
-        let cam =
-            gameplay_cash_in_camera_for_screen_rect(win_w, win_h, env_h, &cpu, target).expect("cam");
+        let cam = gameplay_cash_in_camera_for_screen_rect(win_w, win_h, env_h, &cpu, target)
+            .expect("cam");
         let corners = cash_in_bounds_corners_world(&cpu, win_h, env_h).expect("corners");
         let projected = project_world_corners_screen(&cam, win_w, win_h, &corners);
         let px = projected[0].max(target[0]);

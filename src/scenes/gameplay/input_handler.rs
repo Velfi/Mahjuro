@@ -7,8 +7,9 @@ use std::time::Instant;
 
 use super::GameplayScene;
 use super::cascade_hud::CascadeShowcase;
-use super::focus::{FocusTarget, GameplayButton, default_hand_tile_focus, focus_after_consumable_use,
-    focus_kind, focus_kind_sfx, play_select_sfx, rebuild_focus_nav,
+use super::focus::{
+    FocusTarget, GameplayButton, default_hand_tile_focus, focus_after_consumable_use, focus_kind,
+    focus_kind_sfx, play_select_sfx, rebuild_focus_nav,
 };
 use crate::core::relic::relic_visual;
 use crate::game::engine::{CommandData, GameCommand, GameEngine};
@@ -45,12 +46,9 @@ fn spawn_structure_status_callout(
             lift_z: crate::render::score_popups::TABLE_POPUP_LIFT_Z,
         },
     );
-    scene.score_popups.spawn_structure_callout(
-        label,
-        source,
-        (score_px, score_py),
-        fly_to_score,
-    );
+    scene
+        .score_popups
+        .spawn_structure_callout(label, source, (score_px, score_py), fly_to_score);
 }
 
 /// Advances journal cover-open + zoom; pushes [`YakuJournalScene`] when the
@@ -198,12 +196,9 @@ pub(super) fn process_focus_and_actions(
     if ctx.input_mode == crate::ui::input::InputMode::Cursor {
         let (cx, cy) = ctx.cursor_pos;
         let hand_rects = scene.last_hand_tile_pick_rects.borrow();
-        let new_focus = if let Some(idx) = super::hand_layout::hand_tile_pick_at_cursor(
-            ctx.picked_hand_tile,
-            &hand_rects,
-            cx,
-            cy,
-        ) {
+        let new_focus = if let Some(idx) =
+            super::hand_layout::hand_tile_pick_at_cursor(ctx.picked_hand_tile, &hand_rects, cx, cy)
+        {
             Some(FocusTarget::HandTile(idx))
         } else {
             focus_non_hand_target_at_cursor(&focus_rects, cx, cy)
@@ -291,11 +286,7 @@ pub(super) fn process_focus_and_actions(
                     .find_map(|(t, r)| matches!(t, FocusTarget::HandTile(_)).then_some(*r))
             });
             if let Some(rect) = start_rect {
-                rebuild_focus_nav(
-                    &mut scene.focus_nav,
-                    &focus_rects,
-                    scene.pause_menu.paused,
-                );
+                rebuild_focus_nav(&mut scene.focus_nav, &focus_rects, scene.pause_menu.paused);
                 let current_target = scene.focus.or_else(|| {
                     focus_rects
                         .iter()
@@ -405,17 +396,15 @@ pub(super) fn process_focus_and_actions(
                         // Cash in is hold-to-confirm (see `cash_in_hold_started`):
                         // charging the timer commits; releasing early cancels.
                         let gameplay = GameEngine::read(ctx.run);
-                        if gameplay.trigger_enabled
-                            || gameplay.cash_in_blocked_until_discards_spent
+                        if gameplay.trigger_enabled || gameplay.cash_in_blocked_until_discards_spent
                         {
                             if scene.cash_in_hold_started.is_none() {
-                                scene.cash_in_hold_started = Some(
-                                    crate::ui::prompt_hold_ring::begin_hold(
+                                scene.cash_in_hold_started =
+                                    Some(crate::ui::prompt_hold_ring::begin_hold(
                                         now,
                                         ctx.bus,
                                         gameplay.trigger_enabled,
-                                    ),
-                                );
+                                    ));
                             }
                         } else {
                             // Nothing to cash in: fire immediately so the
@@ -595,13 +584,11 @@ pub(super) fn process_focus_and_actions(
                 let gameplay = GameEngine::read(ctx.run);
                 if gameplay.trigger_enabled || gameplay.cash_in_blocked_until_discards_spent {
                     if scene.cash_in_hold_started.is_none() {
-                        scene.cash_in_hold_started = Some(
-                            crate::ui::prompt_hold_ring::begin_hold(
-                                now,
-                                ctx.bus,
-                                gameplay.trigger_enabled,
-                            ),
-                        );
+                        scene.cash_in_hold_started = Some(crate::ui::prompt_hold_ring::begin_hold(
+                            now,
+                            ctx.bus,
+                            gameplay.trigger_enabled,
+                        ));
                     }
                 } else {
                     // Nothing to cash in: fire immediately so the rejection
@@ -1419,7 +1406,10 @@ pub(super) struct StagingPreviewAnchor {
 }
 
 fn structure_strip_gaps(layout_scale: f32) -> (f32, f32) {
-    ((3.0 * layout_scale).max(2.0), (10.0 * layout_scale).max(7.0))
+    (
+        (3.0 * layout_scale).max(2.0),
+        (10.0 * layout_scale).max(7.0),
+    )
 }
 
 /// Minimum structure-tile width before gap compression kicks in.
@@ -1436,7 +1426,10 @@ fn structure_strip_counts(
     committed_sets: &[crate::core::hand::DetectedMeld],
     preview_groups: &[Vec<usize>],
 ) -> (usize, usize, usize) {
-    let total_tiles = committed_sets.iter().map(|s| s.tile_ids.len()).sum::<usize>()
+    let total_tiles = committed_sets
+        .iter()
+        .map(|s| s.tile_ids.len())
+        .sum::<usize>()
         + preview_groups.iter().map(|g| g.len()).sum::<usize>();
     let intra_count = committed_sets
         .iter()
@@ -1527,7 +1520,9 @@ pub(super) fn staging_preview_anchors_for_groups(
     committed_sets: &[crate::core::hand::DetectedMeld],
     preview_groups: &[Vec<usize>],
 ) -> rustc_hash::FxHashMap<usize, StagingPreviewAnchor> {
-    use crate::render::gameplay_glb::{lerp_marker_anchor, lerp_marker_rotation_rad, marker_pair_span_px};
+    use crate::render::gameplay_glb::{
+        lerp_marker_anchor, lerp_marker_rotation_rad, marker_pair_span_px,
+    };
 
     let mut out = rustc_hash::FxHashMap::default();
     if preview_groups.is_empty() {
@@ -1628,18 +1623,14 @@ pub(super) fn structure_strip_callout_anchor(
 
     let interaction = GameEngine::read_interaction(run);
     let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
-    let anchors = super::glb_anchors::try_resolve_gameplay_glb_anchors(
-        layout,
-        interaction.hand_len,
-        env_h,
-    )?;
+    let anchors =
+        super::glb_anchors::try_resolve_gameplay_glb_anchors(layout, interaction.hand_len, env_h)?;
     let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
     let structure_marker_poses = &anchors.structure_marker_poses;
     let a_l = structure_marker_poses[0].anchor;
     let a_r = structure_marker_poses[1].anchor;
     let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
-    let structure_scale = structure_marker_poses[0]
-        .uniform_author_scale(layout.window_h, env_h);
+    let structure_scale = structure_marker_poses[0].uniform_author_scale(layout.window_h, env_h);
     let strip_center = crate::render::gameplay_glb::lerp_marker_anchor(a_l, a_r, 0.5);
 
     let gameplay = GameEngine::read(run);
@@ -1695,8 +1686,7 @@ fn combined_complete_hand_preview(
 )> {
     use crate::core::yaku::{detect_yaku_best_decomposition, is_complete_winning_hand};
 
-    let mut combined: Vec<crate::core::tile::Tile> =
-        structure_tiles.iter().copied().collect();
+    let mut combined: Vec<crate::core::tile::Tile> = structure_tiles.iter().copied().collect();
     combined.extend(extra_tiles.iter().copied());
     if combined.is_empty() {
         return None;
@@ -1781,8 +1771,7 @@ pub(super) fn build_yaku_panel_and_tablets(
             bonus_round_wind_for_yaku,
         ) {
             yaku_preview_original_tiles = GameplayScene::display_tiles(combined, run);
-            yaku_preview_effective_tiles =
-                GameplayScene::display_tiles(scoring_tiles, run);
+            yaku_preview_effective_tiles = GameplayScene::display_tiles(scoring_tiles, run);
             yaku_preview_sets = sets;
         } else {
             yaku_preview_original_tiles = base_structure_tiles.clone();
@@ -1856,12 +1845,12 @@ pub(super) fn build_yaku_panel_and_tablets(
         let structure_scale = structure_marker_poses[0]
             .uniform_author_scale(layout.window_h, ctx.room_gltf_height_scale);
         let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
-        let preview_groups: &[Vec<usize>] = if crate::persistence::load_settings().structure_meld_preview
-        {
-            &scene.staging_layout.meld_index_groups
-        } else {
-            &[]
-        };
+        let preview_groups: &[Vec<usize>] =
+            if crate::persistence::load_settings().structure_meld_preview {
+                &scene.staging_layout.meld_index_groups
+            } else {
+                &[]
+            };
         let strip =
             compute_structure_strip_layout(span, layout_scale, &showcase.sets, preview_groups);
         let mut cursor = 0.0f32;
@@ -1976,43 +1965,45 @@ pub(super) fn build_yaku_panel_and_tablets(
         let tablet_step_t = ((card_w + card_gap) / span).clamp(0.0, 1.0);
         let tablet_thickness = (8.0 * layout_scale).max(6.0) * yaku_scale;
         let tablet_depth = panel_h * yaku_scale;
-        let mut push_tablet = |i: usize,
-                               label: std::borrow::Cow<'static, str>,
-                               active: bool,
-                               kind: Option<crate::core::yaku::YakuKind>| {
-            let t = (i as f32 * tablet_step_t).clamp(0.0, 1.0);
-            let mut pos = crate::render::gameplay_glb::lerp_marker_anchor(a_l, a_r, t);
-            let rotation = crate::render::gameplay_glb::lerp_marker_rotation_rad(rot_l, rot_r, t);
-            let yaku_wave = active_yaku.is_some_and(|name| {
-                kind.is_some_and(|yk| yk.name() == name) || label.contains(name)
-            });
-            if yaku_wave {
-                pos[2] += layout.mm(SCORE_WAVE_YAKU_MM * wave_t);
-            }
-            let hovered_now = matches!(
-                ctx.picked_gameplay_object,
-                Some(crate::render::wgpu_renderer::GameplayPick::YakuTablet(j)) if j == i
-            );
-            yaku_tablet_placements.push(Object3d {
-                pos,
-                extents: [card_w, tablet_thickness, tablet_depth],
-                rotation,
-                color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::YakuTablet {
-                    label,
-                    active: active || yaku_wave,
-                    hover: if hovered_now { 1.0 } else { 0.0 },
-                },
-                hover_target: 0.0,
-                anim_id: 0,
-            });
-        };
+        let mut push_tablet =
+            |i: usize,
+             label: std::borrow::Cow<'static, str>,
+             active: bool,
+             kind: Option<crate::core::yaku::YakuKind>| {
+                let t = (i as f32 * tablet_step_t).clamp(0.0, 1.0);
+                let mut pos = crate::render::gameplay_glb::lerp_marker_anchor(a_l, a_r, t);
+                let rotation =
+                    crate::render::gameplay_glb::lerp_marker_rotation_rad(rot_l, rot_r, t);
+                let yaku_wave = active_yaku.is_some_and(|name| {
+                    kind.is_some_and(|yk| yk.name() == name) || label.contains(name)
+                });
+                if yaku_wave {
+                    pos[2] += layout.mm(SCORE_WAVE_YAKU_MM * wave_t);
+                }
+                let hovered_now = matches!(
+                    ctx.picked_gameplay_object,
+                    Some(crate::render::wgpu_renderer::GameplayPick::YakuTablet(j)) if j == i
+                );
+                yaku_tablet_placements.push(Object3d {
+                    pos,
+                    extents: [card_w, tablet_thickness, tablet_depth],
+                    rotation,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    kind: Object3dKind::YakuTablet {
+                        label,
+                        active: active || yaku_wave,
+                        hover: if hovered_now { 1.0 } else { 0.0 },
+                    },
+                    hover_target: 0.0,
+                    anim_id: 0,
+                });
+            };
         if is_chicken_hand {
             push_tablet(
                 0,
-                std::borrow::Cow::Borrowed(crate::core::yaku::YakuKind::ChickenHand.gameplay_tablet_label(
-                    true,
-                )),
+                std::borrow::Cow::Borrowed(
+                    crate::core::yaku::YakuKind::ChickenHand.gameplay_tablet_label(true),
+                ),
                 true,
                 Some(crate::core::yaku::YakuKind::ChickenHand),
             );
@@ -2025,9 +2016,8 @@ pub(super) fn build_yaku_panel_and_tablets(
                     .copied()
                     .unwrap_or(0)
                     >= 1;
-                let tablet_label = std::borrow::Cow::Borrowed(
-                    p.kind.gameplay_tablet_label(yaku_discovered),
-                );
+                let tablet_label =
+                    std::borrow::Cow::Borrowed(p.kind.gameplay_tablet_label(yaku_discovered));
                 push_tablet(i, tablet_label, p.active, Some(p.kind));
             }
         }

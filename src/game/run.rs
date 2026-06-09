@@ -475,7 +475,9 @@ impl RunState {
     }
 
     pub(crate) fn can_afford_shop_restock(&self, restock_cost: u32) -> bool {
-        restock_cost == 0 || self.yen >= restock_cost as i32 || self.i_got_a_guy_restock_charges() > 0
+        restock_cost == 0
+            || self.yen >= restock_cost as i32
+            || self.i_got_a_guy_restock_charges() > 0
     }
 
     pub fn hand(&self) -> &[Tile] {

@@ -24,7 +24,9 @@ use crate::ui::ordeal_icons::ordeal_icon_source;
 
 use super::cascade_lab_click::LabClick;
 use super::gameplay::{GameplayScene, relic_tray_slot_screen_center};
-use super::{ButtonAction, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
+use super::{
+    ButtonAction, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx,
+};
 
 const RELIC_SLOT_COUNT: usize = PLAYER_RELIC_MARKERS.len();
 

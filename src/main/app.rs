@@ -1,10 +1,10 @@
 use std::time::Instant;
 
-use crate::steam::DistributionBackend;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 use crate::game::scene_look_tuning::SceneLookTuningSet;
 use crate::scenes::{Scene, SceneBehavior};
+use crate::steam::DistributionBackend;
 use sdl3::keyboard::{Mod, Scancode};
 
 impl crate::App {

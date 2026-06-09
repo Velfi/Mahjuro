@@ -175,7 +175,11 @@ impl WgpuRenderer {
         self.main_menu_moon_prim_indices.clone()
     }
 
-    pub(super) fn main_menu_env_skip_prim(&self, pi: usize, frame: &crate::draw_cmd::UiFrame) -> bool {
+    pub(super) fn main_menu_env_skip_prim(
+        &self,
+        pi: usize,
+        frame: &crate::draw_cmd::UiFrame,
+    ) -> bool {
         if !frame.main_menu_env_moon_only {
             return false;
         }
@@ -539,10 +543,7 @@ impl WgpuRenderer {
             0.0
         };
         let (exposure, ambient_x) = if embedded_gltf_punctual {
-            (
-                env_tune.room_glb_linear_hdr_gain(),
-                env_tune.ambient_scale,
-            )
+            (env_tune.room_glb_linear_hdr_gain(), env_tune.ambient_scale)
         } else {
             (0.0, 0.0)
         };

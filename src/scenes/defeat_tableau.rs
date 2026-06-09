@@ -90,8 +90,7 @@ pub fn push_defeat_memorial_tableau(
     // Nudge toward the bottom edge so the slab reads as a floor receding into the black above.
     board_py += h * 0.08;
     let wood_plane_z = target_w.z * 0.22;
-    let wood_world =
-        world_on_camera_ray_plane_z(w, h, &cam, board_px, board_py, wood_plane_z);
+    let wood_world = world_on_camera_ray_plane_z(w, h, &cam, board_px, board_py, wood_plane_z);
     let wood_pos = object3d_pos_for_screen_at_world_z(w, h, &cam, board_px, board_py, wood_plane_z);
     let wood_board = Object3d {
         pos: wood_pos,

@@ -263,11 +263,7 @@ impl MarqueeSelect {
             .enumerate()
             .map(|(i, _)| {
                 let snap = self.snapshot.get(i).copied().unwrap_or(false);
-                if swept_set.contains(&i) {
-                    !snap
-                } else {
-                    snap
-                }
+                if swept_set.contains(&i) { !snap } else { snap }
             })
             .collect();
 
@@ -662,9 +658,7 @@ pub fn apply_ui_actions(
             | UiAction::TabPrev
             | UiAction::PageNext
             | UiAction::PagePrev => {}
-            UiAction::NorthFacePress
-            | UiAction::WestFacePress
-            | UiAction::WestFaceRelease => {}
+            UiAction::NorthFacePress | UiAction::WestFacePress | UiAction::WestFaceRelease => {}
             UiAction::CancelRelease => {}
         }
     }

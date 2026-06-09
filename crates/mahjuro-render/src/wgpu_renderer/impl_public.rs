@@ -167,10 +167,7 @@ impl WgpuRenderer {
 
     /// Evict one unpinned LRU resident when at cap or under critical pressure.
     /// Returns `false` when no headroom could be freed and `allow_when_full` is false.
-    pub(super) fn preflight_room_gpu_headroom_for_upload(
-        &mut self,
-        allow_when_full: bool,
-    ) -> bool {
+    pub(super) fn preflight_room_gpu_headroom_for_upload(&mut self, allow_when_full: bool) -> bool {
         let snapshot = self.gpu_memory_pressure_snapshot();
         self.gpu_memory_pressure = snapshot.pressure;
         let at_cap = snapshot.room_gpu_residents >= snapshot.max_room_gpu_residents;

@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 use std::thread::{self, JoinHandle};
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum LoaderPriority {

@@ -22,7 +22,6 @@ pub mod lamp_moths;
 pub mod main_menu;
 pub mod material_viewer;
 pub(crate) mod melds_intro_copy;
-pub(crate) mod yaku_intro_copy;
 pub mod object3d_inspect;
 pub mod options;
 pub mod pause_menu;
@@ -33,7 +32,6 @@ pub mod run_summary;
 mod run_summary_panel;
 pub mod scene_intent;
 pub(crate) mod scoring_intro_copy;
-pub(crate) mod tanuki_tips_intro_copy;
 pub mod shadow_ao_lab;
 pub mod shop;
 pub mod showcase;
@@ -41,6 +39,7 @@ pub mod showcase_stage;
 pub mod splash;
 pub mod stairway;
 pub mod start_game_modal;
+pub(crate) mod tanuki_tips_intro_copy;
 pub mod text_shadow_lab;
 pub mod tile_anchor_lab;
 pub mod tile_picker;
@@ -50,6 +49,7 @@ pub mod transition_playground;
 pub mod tutorial_campaign;
 pub mod tutorial_summary;
 pub mod wall_ledger;
+pub(crate) mod yaku_intro_copy;
 pub mod yaku_journal;
 pub use animation_lab::AnimationLabScene;
 pub use archive::ArchiveScene;
@@ -407,11 +407,10 @@ impl<'a> DrawCtx<'a> {
         label: impl Fn(T) -> String,
     ) {
         if self.focus_nav_debug {
-            *self.focus_nav_snapshot_out = Some(
-                crate::ui::focus_nav::debug_snapshot_from_candidates(
+            *self.focus_nav_snapshot_out =
+                Some(crate::ui::focus_nav::debug_snapshot_from_candidates(
                     candidates, edges, current, memory, label,
-                ),
-            );
+                ));
         }
     }
 

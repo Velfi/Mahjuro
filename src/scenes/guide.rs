@@ -15,41 +15,45 @@ use crate::core::relic::{RelicId, all_relic_defs, relic_visual};
 use crate::core::tag::TagKind;
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
-use crate::core::tile_pack::{TilePackKind, PACK_ASPECT_W_OVER_H};
+use crate::core::tile_pack::{PACK_ASPECT_W_OVER_H, TilePackKind};
 use crate::core::yaku::{YakuKind, detect_yaku_with_wind};
 use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::persistence::TilePreset;
-use crate::render::decal::load_ui_font;
 use crate::render::consumable_prop_scale::for_sale_talisman_tablet_extent;
+use crate::render::decal::load_ui_font;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, ImageQuad, ImageQuadSource, Object3d, Object3dKind, SceneLighting,
     ShowcaseTilePlacement, UiFrame, camera_facing_euler_xyz_rad,
-};
-use crate::render::table_transform::{
-    compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad,
-};
-use crate::render::world_space::{
-    object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
 use crate::render::gameplay_glb;
 use crate::render::showcase_tile_layout::{
     ShowcaseTileLabelGaps, showcase_tile_group_label_anchor, showcase_tile_merge_projected_group,
 };
+use crate::render::table_transform::{
+    compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad,
+};
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
-use crate::render::vocabulary_colors::{GlossaryMode, color_for_token, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextBlockVerticalAlign, TextLabel};
-use crate::ui::styled_text::push_keyword_label;
+use crate::render::vocabulary_colors::{
+    GlossaryMode, color_for_token, text_effect_for_glossary_tint,
+};
+use crate::render::wgpu_renderer::{
+    GpuInstance, PointLight, TextAlign, TextBlockVerticalAlign, TextLabel,
+};
+use crate::render::world_space::{
+    object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
+};
 use crate::sfx_id::SfxId;
+use crate::ui::chart_primitives::{ChartClip, push_yaku_pill, yaku_pill_width};
 use crate::ui::clip::intersect_rect;
-use crate::ui::styled_text;
 use crate::ui::controller_hints::{
     HintStyle, guide_footer_row, push_screen_footer_hint, screen_footer_reserve,
 };
 use crate::ui::focus_nav;
 use crate::ui::input::UiAction;
 use crate::ui::smooth_scroll::SmoothScroll;
-use crate::ui::chart_primitives::{ChartClip, push_yaku_pill, yaku_pill_width};
+use crate::ui::styled_text;
+use crate::ui::styled_text::push_keyword_label;
 use crate::ui::temptation_icons::temptation_icon_source;
 use crate::ui::widget::{self, wrap_text};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -422,33 +426,15 @@ impl SceneBehavior for GuideScene {
                 content_floor,
             );
         } else if self.page == PAGE_ECONOMY {
-            draw_economy_page(
-                &mut frame,
-                &layout,
-                w,
-                h,
-                &cam,
-                content_top,
-                content_floor,
-            );
+            draw_economy_page(&mut frame, &layout, w, h, &cam, content_top, content_floor);
         } else if self.page == PAGE_TANUKI_TIPS {
-            let (content_top, content_floor) = guide_content_band(
-                w,
-                h,
-                layout.header_chrome().back,
-                subtitle,
-            );
+            let (content_top, content_floor) =
+                guide_content_band(w, h, layout.header_chrome().back, subtitle);
             let tips_layout = tanuki_tips_scroll_layout(&layout, content_top, content_floor);
             self.tips_scroll
                 .set_max(tips_layout.max_scroll_px.ceil() as u32);
             let scroll_px = self.tips_scroll.tick();
-            draw_tanuki_tips_page(
-                &mut frame,
-                &layout,
-                h,
-                &tips_layout,
-                scroll_px,
-            );
+            draw_tanuki_tips_page(&mut frame, &layout, h, &tips_layout, scroll_px);
         } else if let Some(chunk) = yaku_chunk_for_page(self.page, progress) {
             draw_yaku_guide_page(
                 &mut frame,
@@ -550,8 +536,7 @@ fn guide_example_is_invalid(group: &TileGroup) -> bool {
 }
 
 fn guide_invalid_tile_rotation(tile_i: usize) -> [f32; 3] {
-    let wobble = GUIDE_INVALID_TILE_WOBBLE
-        [tile_i % GUIDE_INVALID_TILE_WOBBLE.len()];
+    let wobble = GUIDE_INVALID_TILE_WOBBLE[tile_i % GUIDE_INVALID_TILE_WOBBLE.len()];
     [
         GUIDE_TILE_ROTATION[0],
         GUIDE_TILE_ROTATION[1],
@@ -869,12 +854,7 @@ fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, Vec<Ti
                 {
                     let mut tile = t(Suit::Pinzu, 1, 12);
                     tile.debuffed_visual = true;
-                    tile_group_with_subtitle(
-                        "Debuffed tile",
-                        "+0 chips",
-                        vec![tile],
-                        color::STONE,
-                    )
+                    tile_group_with_subtitle("Debuffed tile", "+0 chips", vec![tile], color::STONE)
                 },
             ],
         ),
@@ -1422,7 +1402,9 @@ fn draw_yaku_entry(
         0.98,
     );
     if !placements.is_empty() {
-        frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements.into()));
+        frame
+            .cmds
+            .push(DrawCmd::ShowcaseTileBatch(placements.into()));
     }
     push_tile_group_labels(frame, &labels, h, scale, false);
 
@@ -2393,14 +2375,7 @@ fn push_economy_item_example(
             frame.object3d(Object3d {
                 pos,
                 extents,
-                rotation: economy_icon_face_camera_rotation(
-                    w,
-                    h,
-                    cam,
-                    icon_cx,
-                    icon_cy,
-                    Vec3::Y,
-                ),
+                rotation: economy_icon_face_camera_rotation(w, h, cam, icon_cx, icon_cy, Vec3::Y),
                 color: color::rarity(rarity.tier()),
                 kind: Object3dKind::Relic {
                     relic_id,
@@ -2413,25 +2388,14 @@ fn push_economy_item_example(
             });
         }
         EconomyItemExample::Zodiac(kind) => {
-            push_economy_icon_image(
-                frame,
-                icon_rect,
-                zodiac_icon_asset(kind),
-                1.0 / 3.0,
-            );
+            push_economy_icon_image(frame, icon_rect, zodiac_icon_asset(kind), 1.0 / 3.0);
         }
         EconomyItemExample::Talisman(kind) => {
             let accent = kind.accent_color();
             let tablet = for_sale_talisman_tablet_extent(icon_span * 0.88);
             let face_base = crate::render::talisman_mesh::talisman_face_camera_rotation(14.0);
-            let toward = economy_icon_face_camera_rotation(
-                w,
-                h,
-                cam,
-                icon_cx,
-                icon_cy,
-                Vec3::NEG_Y,
-            );
+            let toward =
+                economy_icon_face_camera_rotation(w, h, cam, icon_cx, icon_cy, Vec3::NEG_Y);
             frame.object3d(Object3d {
                 pos,
                 extents: crate::render::talisman_mesh::talisman_object_extents(tablet),
@@ -2482,14 +2446,8 @@ fn push_economy_item_example(
             let accent = kind.accent_color();
             let tablet = for_sale_talisman_tablet_extent(icon_span * 0.88);
             let face_base = crate::render::talisman_mesh::talisman_face_camera_rotation(14.0);
-            let toward = economy_icon_face_camera_rotation(
-                w,
-                h,
-                cam,
-                icon_cx,
-                icon_cy,
-                Vec3::NEG_Y,
-            );
+            let toward =
+                economy_icon_face_camera_rotation(w, h, cam, icon_cx, icon_cy, Vec3::NEG_Y);
             frame.object3d(Object3d {
                 pos,
                 extents: crate::render::talisman_mesh::talisman_object_extents(tablet),
@@ -2658,11 +2616,7 @@ fn economy_flow_font_line_height(font_px: f32, italic: bool) -> f32 {
         .and_then(|font| font.horizontal_line_metrics(font_px))
         .map(|lm| lm.new_line_size)
         .unwrap_or(font_px * 1.25);
-    if italic {
-        base * 1.10
-    } else {
-        base
-    }
+    if italic { base * 1.10 } else { base }
 }
 
 fn economy_flow_wrap_line_h(font_px: f32) -> f32 {
@@ -2797,8 +2751,7 @@ fn draw_economy_flow_block(
     let line_font_px = line_font * 0.92;
     let line_y = title_y + header_h + economy_flow_block_line_gap(pad);
     let body_line_h = economy_flow_font_line_height(line_font_px, true);
-    let body_lines =
-        economy_flow_wrapped_line_count(step.line, text_w, line_font_px).max(2) as f32;
+    let body_lines = economy_flow_wrapped_line_count(step.line, text_w, line_font_px).max(2) as f32;
     let body_content_h = body_line_h * body_lines;
     let line_h = (y + h - inner_pad - line_y).max(body_content_h);
     frame.text(TextLabel {
@@ -2875,11 +2828,7 @@ fn economy_flow_ring_layout(
     }
 }
 
-fn economy_flow_panel_width(
-    full_w: f32,
-    panel_gap: f32,
-    ring_w: f32,
-) -> f32 {
+fn economy_flow_panel_width(full_w: f32, panel_gap: f32, ring_w: f32) -> f32 {
     let available = (full_w - panel_gap).max(1.0);
     let chrome_w = 32.0;
     let min_w = available * 0.28;
@@ -2953,10 +2902,7 @@ fn draw_between_chambers_band(
         ring.arrow_font,
     );
 
-    for (step, block_rect) in economy_intro_copy::FLOW_STEPS
-        .iter()
-        .zip(block_rects)
-    {
+    for (step, block_rect) in economy_intro_copy::FLOW_STEPS.iter().zip(block_rects) {
         draw_economy_flow_block(
             frame,
             block_rect,
@@ -3004,7 +2950,12 @@ fn draw_skip_steps_column(
             ..Default::default()
         });
         frame.text(TextLabel {
-            rect: [x, block_y + label_h + line_gap, w, block_h - label_h - line_gap],
+            rect: [
+                x,
+                block_y + label_h + line_gap,
+                w,
+                block_h - label_h - line_gap,
+            ],
             text: lines[i].into(),
             color: body_color,
             align: TextAlign::Left,
@@ -3103,15 +3054,7 @@ fn draw_economy_rules_band(
             body_color
         };
         ey += draw_earning_note_row(
-            frame,
-            earn_x,
-            ey,
-            earn_w,
-            row_h,
-            note.label,
-            note.line,
-            body_font,
-            body_color,
+            frame, earn_x, ey, earn_w, row_h, note.label, note.line, body_font, body_color,
             line_color,
         );
     }
@@ -3258,12 +3201,7 @@ fn push_economy_item_cards(
         push_guide_panel_stroke(frame, rect, stroke);
         push_guide_panel_stroke(
             frame,
-            [
-                rect[0] + 2.0,
-                rect[1] + 2.0,
-                rect[2] - 4.0,
-                rect[3] - 4.0,
-            ],
+            [rect[0] + 2.0, rect[1] + 2.0, rect[2] - 4.0, rect[3] - 4.0],
             color::alpha(color::BRASS, 0.14),
         );
 
@@ -3273,26 +3211,15 @@ fn push_economy_item_cards(
             (icon_col_w - pad * 1.25).max(1.0),
             (cell_h - pad * 2.0).max(1.0),
         ];
-        push_economy_item_example(
-            frame,
-            w,
-            h,
-            cam,
-            ECONOMY_ITEM_EXAMPLES[i],
-            icon_rect,
-            i,
-        );
+        push_economy_item_example(frame, w, h, cam, ECONOMY_ITEM_EXAMPLES[i], icon_rect, i);
 
         let text_x = cx + text_x_offset;
         let inner_w = (cell_w - text_x_offset - pad).max(1.0);
         let title_color = economy_item_title_color(i);
         let title_h = title_font * 1.08;
         let role_h = role_font * 1.05;
-        let text_clip = intersect_rect(
-            [text_x, cy + pad, inner_w, cell_h - pad * 2.0],
-            rect,
-        )
-        .unwrap_or(rect);
+        let text_clip =
+            intersect_rect([text_x, cy + pad, inner_w, cell_h - pad * 2.0], rect).unwrap_or(rect);
         let mut title_label = TextLabel {
             rect: [text_clip[0], text_clip[1], text_clip[2], title_h],
             text: card.title.to_uppercase(),
@@ -3305,12 +3232,7 @@ fn push_economy_item_cards(
         title_label.clip_rect = Some(text_clip);
         frame.text(title_label);
         let mut role_label = TextLabel {
-            rect: [
-                text_clip[0],
-                text_clip[1] + title_h,
-                text_clip[2],
-                role_h,
-            ],
+            rect: [text_clip[0], text_clip[1] + title_h, text_clip[2], role_h],
             text: economy_item_role_label(i).into(),
             color: color::alpha(color::STONE, 0.78),
             align: TextAlign::Left,
@@ -3416,8 +3338,7 @@ fn tanuki_tips_scroll_layout(
     let tip_count = tanuki_tips_intro_copy::TIPS.len();
     let cols = tip_count.div_ceil(ROWS).max(1);
     let min_cell_w = (260.0 * scale).min(full_w * 0.24);
-    let fill_cell_w =
-        (full_w - gap * (cols.saturating_sub(1)) as f32) / cols as f32;
+    let fill_cell_w = (full_w - gap * (cols.saturating_sub(1)) as f32) / cols as f32;
     let scroll_cell_w = (full_w - gap * (VISIBLE_COLS - 1.0)) / VISIBLE_COLS;
     let total_fill_w = cols as f32 * fill_cell_w + cols.saturating_sub(1) as f32 * gap;
     let cell_w = if total_fill_w <= full_w {
@@ -3473,8 +3394,8 @@ fn draw_tanuki_tips_page(
 
         let inner_w = (cell_w - pad * 2.0).max(1.0);
         let inner_h = (cell_h - pad * 2.0).max(1.0);
-        let text_clip = intersect_rect([cx + pad, cy + pad, inner_w, inner_h], viewport)
-            .unwrap_or(viewport);
+        let text_clip =
+            intersect_rect([cx + pad, cy + pad, inner_w, inner_h], viewport).unwrap_or(viewport);
         let quote_text = tanuki_tips_intro_copy::quoted(tip);
 
         frame.quad(GpuInstance {
@@ -3687,13 +3608,7 @@ struct ScoringFlowDiagramLayout {
 }
 
 impl ScoringFlowDiagramLayout {
-    fn new(
-        content: [f32; 4],
-        body_font: f32,
-        caption_font: f32,
-        pad: f32,
-        tile_max: f32,
-    ) -> Self {
+    fn new(content: [f32; 4], body_font: f32, caption_font: f32, pad: f32, tile_max: f32) -> Self {
         let [cx, cy, cw, ch] = content;
         let reminder_font = caption_font * 0.96;
         let reminder_h = reminder_font * 1.28;
@@ -3708,7 +3623,8 @@ impl ScoringFlowDiagramLayout {
         let arrow_img_w = arrow_h * SCORING_FLOW_ARROW_ASPECT;
         let arrow_slot_w = arrow_img_w + pad * 0.55;
         let lane_gap = pad * 0.40;
-        let lane_w = (cw - lane_gap * (SCORING_FLOW_STAGES - 1) as f32
+        let lane_w = (cw
+            - lane_gap * (SCORING_FLOW_STAGES - 1) as f32
             - arrow_slot_w * (SCORING_FLOW_STAGES - 1) as f32)
             / SCORING_FLOW_STAGES as f32;
         let lane_pad_x = pad * 0.30;
@@ -3820,9 +3736,12 @@ fn push_scoring_gameplay_cash_in_env(
     cash_in_visual: [f32; 4],
 ) -> bool {
     let env_h = ctx.room_gltf_height_scale.max(0.01);
-    let Some(cam) =
-        gameplay_glb::gameplay_cash_in_camera_for_screen_rect_if_present(w, h, env_h, cash_in_visual)
-    else {
+    let Some(cam) = gameplay_glb::gameplay_cash_in_camera_for_screen_rect_if_present(
+        w,
+        h,
+        env_h,
+        cash_in_visual,
+    ) else {
         return false;
     };
 
@@ -3980,7 +3899,9 @@ fn push_scoring_flow_panel(
     }
 
     if !placements.is_empty() {
-        frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements.into()));
+        frame
+            .cmds
+            .push(DrawCmd::ShowcaseTileBatch(placements.into()));
     }
 
     frame.text(TextLabel {
@@ -4006,9 +3927,8 @@ fn push_scoring_structure_slots(
     tile_size: f32,
 ) {
     let gap = 4.0;
-    let slot_w =
-        (rect[2] - gap * (SCORING_STRUCTURE_SLOT_COUNT.saturating_sub(1)) as f32)
-            / SCORING_STRUCTURE_SLOT_COUNT as f32;
+    let slot_w = (rect[2] - gap * (SCORING_STRUCTURE_SLOT_COUNT.saturating_sub(1)) as f32)
+        / SCORING_STRUCTURE_SLOT_COUNT as f32;
     let slot_h = rect[3];
     for slot_i in 0..SCORING_STRUCTURE_SLOT_COUNT {
         let slot = [
@@ -4081,12 +4001,7 @@ fn push_scoring_cash_in_plaque(frame: &mut UiFrame, rect: [f32; 4], body_font: f
     }
 }
 
-fn push_scoring_formula_colored(
-    frame: &mut UiFrame,
-    rect: [f32; 4],
-    text: &str,
-    font_px: f32,
-) {
+fn push_scoring_formula_colored(frame: &mut UiFrame, rect: [f32; 4], text: &str, font_px: f32) {
     let mut labels = Vec::new();
     let line_h = font_px;
     let drawn_h = styled_text::push_colored_line_left(
@@ -4137,12 +4052,7 @@ fn push_scoring_tile_values_panel(
             continue;
         };
         let col_x = cx + i as f32 * (col_w + col_gap);
-        let tile_area = [
-            col_x + pad * 0.10,
-            examples_top,
-            col_w - pad * 0.20,
-            tile_h,
-        ];
+        let tile_area = [col_x + pad * 0.10, examples_top, col_w - pad * 0.20, tile_h];
         let tile_px = scoring_tile_size_for_cell(tile_area, 1, tile_size);
         placements.extend(layout_scoring_group_tiles(
             groups, gi, tile_area, tile_px, 0.50, false,
@@ -4170,7 +4080,9 @@ fn push_scoring_tile_values_panel(
         }
     }
     if !placements.is_empty() {
-        frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements.into()));
+        frame
+            .cmds
+            .push(DrawCmd::ShowcaseTileBatch(placements.into()));
     }
 }
 
@@ -4303,13 +4215,7 @@ fn push_scoring_final_score_panel(
     caption_font: f32,
     pad: f32,
 ) {
-    let content = scoring_panel_open(
-        frame,
-        rect,
-        title,
-        section_font,
-        ScoringPanelStyle::Formula,
-    );
+    let content = scoring_panel_open(frame, rect, title, section_font, ScoringPanelStyle::Formula);
     let [x, y, w, h] = content;
     let eq_font = typography::size(typography::H24, window_h).max(body_font * 1.08);
     let detail_font = caption_font * 0.90;
@@ -4469,11 +4375,21 @@ fn draw_tiles_page(
         1.12,
     );
 
-    let (placements, labels, panels) =
-        layout_tiles_page_grid(cam, groups, right_x, right_w, w, h, content_top, columns_bottom);
+    let (placements, labels, panels) = layout_tiles_page_grid(
+        cam,
+        groups,
+        right_x,
+        right_w,
+        w,
+        h,
+        content_top,
+        columns_bottom,
+    );
     push_tiles_example_panels(frame, groups, &panels);
     if !placements.is_empty() {
-        frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements.into()));
+        frame
+            .cmds
+            .push(DrawCmd::ShowcaseTileBatch(placements.into()));
     }
     push_tiles_example_labels(frame, groups, &labels, h, scale);
 }
@@ -4534,7 +4450,9 @@ fn draw_melds_page(
     );
     push_tiles_example_panels(frame, groups, &panels);
     if !placements.is_empty() {
-        frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements.into()));
+        frame
+            .cmds
+            .push(DrawCmd::ShowcaseTileBatch(placements.into()));
     }
     push_tiles_example_labels(frame, groups, &labels, h, scale);
 }
@@ -4654,7 +4572,10 @@ fn guide_yaku_shared_tile_px(
     if min_px == f32::MAX {
         tightest_fit.min(floor).max(24.0)
     } else {
-        min_px.max(floor.min(tightest_fit)).min(tightest_fit).max(24.0)
+        min_px
+            .max(floor.min(tightest_fit))
+            .min(tightest_fit)
+            .max(24.0)
     }
 }
 
@@ -4720,7 +4641,9 @@ fn draw_yaku_intro_page(
         yaku_cell_layout,
     );
     if !placements.is_empty() {
-        frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements.into()));
+        frame
+            .cmds
+            .push(DrawCmd::ShowcaseTileBatch(placements.into()));
     }
     push_tiles_example_labels(frame, groups, &labels, h, scale);
     for cell in &cells {
@@ -4830,7 +4753,9 @@ fn draw_flowers_page(
     );
     push_tiles_example_panels(frame, groups, &panels);
     if !placements.is_empty() {
-        frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements.into()));
+        frame
+            .cmds
+            .push(DrawCmd::ShowcaseTileBatch(placements.into()));
     }
     push_tiles_example_labels(frame, groups, &labels, h, scale);
 }
@@ -5450,11 +5375,7 @@ fn layout_tile_group_cell(
     cell_layout: GuideExampleCellLayout,
 ) -> (Vec<ShowcaseTilePlacement>, Option<TilesExampleLabel>, f32) {
     let [cx, cy, cw, ch] = cell;
-    let pad = if group.framed {
-        12.0
-    } else {
-        4.0
-    };
+    let pad = if group.framed { 12.0 } else { 4.0 };
     let title_font = typography::size(typography::H28, window_h);
     let sub_font = typography::size(typography::H45, window_h);
     let inner_w = (cw - pad * 2.0).max(1.0);
@@ -5745,7 +5666,7 @@ fn layout_tile_groups_with_max(
                 outline: false,
                 glow: false,
                 glow_color: None,
-                    outline_sel: None,
+                outline_sel: None,
                 pick_id: None,
                 overlay_rect_group: None,
             });

@@ -362,8 +362,8 @@ mod tests {
             let origin = Vec3::new(ox, oy, 10.0);
             let dir = Vec3::new(0.0, 0.0, -1.0);
             let max_t = 100.0;
-            let brute = ray_hit_trimesh(&tris, model, origin, dir)
-                .filter(|h| h.t > 1e-5 && h.t <= max_t);
+            let brute =
+                ray_hit_trimesh(&tris, model, origin, dir).filter(|h| h.t > 1e-5 && h.t <= max_t);
             let fast = bvh.segment_hit(&tris, origin, dir, dir, model, max_t);
             match (brute, fast) {
                 (Some(b), Some(f)) => {

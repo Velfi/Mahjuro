@@ -45,8 +45,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::clip::intersect_rect;
 use crate::ui::focus_nav::{
-    FocusDir, FocusNavDebugSnapshot, FocusNavState, debug_snapshot_from_candidates,
-    push_focus_ring,
+    FocusDir, FocusNavDebugSnapshot, FocusNavState, debug_snapshot_from_candidates, push_focus_ring,
 };
 use crate::ui::input::UiAction;
 use crate::ui::smooth_scroll::SmoothScroll;

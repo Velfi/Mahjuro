@@ -4,8 +4,7 @@ pub const PAGE_TITLE: &str = "Scoring Basics";
 pub const SUBTITLE: &str = "Select melds, Play to Structure, then Cash In to score.";
 
 pub const SECTION_FLOW: &str = "THE FLOW";
-pub const FLOW_REMINDER: &str =
-    "Played melds do not score immediately. Cash In scores everything in your Structure and then empties it.";
+pub const FLOW_REMINDER: &str = "Played melds do not score immediately. Cash In scores everything in your Structure and then empties it.";
 
 pub const FLOW_STEP_SELECT: &str = "Select melds";
 pub const FLOW_SELECT_CAPTION: &str = "Pick melds from your hand.";
@@ -18,7 +17,8 @@ pub const FLOW_CASH_IN_CAPTION: &str = "Cash in to score your structure.";
 pub const FLOW_CASH_IN_BUTTON: &str = "Cash In";
 
 pub const FLOW_STEP_SCORE: &str = "Score";
-pub const FLOW_SCORE_CAPTION: &str = "Once your score meets or exceeds the target, you win the round.";
+pub const FLOW_SCORE_CAPTION: &str =
+    "Once your score meets or exceeds the target, you win the round.";
 pub const FLOW_SCORE_FORMULA: &str = "score = chips x mult";
 
 pub const SECTION_TILE_VALUES: &str = "TILE VALUES";
@@ -36,8 +36,7 @@ pub const YAKU_TABLE_RELIC_ROW: &str = "Relic bonus";
 
 pub const SECTION_FINAL_SCORE: &str = "FINAL SCORE";
 pub const FINAL_EQUATION: &str = "score = chips x mult";
-pub const FINAL_CHIPS_LINE: &str =
-    "Chips = tile values + meld bonuses + yaku chips + relic chips";
+pub const FINAL_CHIPS_LINE: &str = "Chips = tile values + meld bonuses + yaku chips + relic chips";
 pub const FINAL_MULT_LINE: &str = "Mult = 1.0 + yaku mult + relic mult + boss rules";
 pub const FINAL_EXAMPLE: &str = "200 chips x 3.0 mult = 600 score";
 

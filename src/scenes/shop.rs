@@ -179,14 +179,11 @@ impl ShopScene {
         Some(
             (now.saturating_duration_since(started).as_secs_f32()
                 / crate::ui::prompt_hold_ring::hold_act_seconds())
-                .clamp(0.0, 1.0),
+            .clamp(0.0, 1.0),
         )
     }
 
-    pub(crate) fn sell_hold_valid_for(
-        &self,
-        shop: &crate::game::engine::ShopReadModel,
-    ) -> bool {
+    pub(crate) fn sell_hold_valid_for(&self, shop: &crate::game::engine::ShopReadModel) -> bool {
         shared::focused_sell_action(
             self.focus,
             self.items.len(),
@@ -211,7 +208,7 @@ impl ShopScene {
         Some(
             (now.saturating_duration_since(started).as_secs_f32()
                 / crate::ui::prompt_hold_ring::hold_act_seconds())
-                .clamp(0.0, 1.0),
+            .clamp(0.0, 1.0),
         )
     }
 
@@ -270,10 +267,7 @@ impl ShopScene {
     }
 
     /// Abandon all hold prompts (focus change, cancel, scene exit).
-    pub(crate) fn cancel_all_hold_prompts(
-        &mut self,
-        bus: &mut crate::game::event_bus::EventBus,
-    ) {
+    pub(crate) fn cancel_all_hold_prompts(&mut self, bus: &mut crate::game::event_bus::EventBus) {
         self.cancel_west_sell_hold(bus);
         self.cancel_confirm_buy_hold(bus);
     }

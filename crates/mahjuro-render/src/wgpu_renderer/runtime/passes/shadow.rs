@@ -183,10 +183,8 @@ impl WgpuRenderer {
             shadow_pass.set_pipeline(&self.shadow_pipeline_instanced);
             shadow_pass.set_bind_group(0, &self.tile_shadow_frame_bind_group, &[]);
             shadow_pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
-            shadow_pass.set_vertex_buffer(
-                0,
-                self.active_tile_mesh().outline_vertex_buffer.slice(..),
-            );
+            shadow_pass
+                .set_vertex_buffer(0, self.active_tile_mesh().outline_vertex_buffer.slice(..));
             shadow_pass.set_vertex_buffer(1, self.tile_shadow_instance_buffer.slice(..));
             shadow_pass.set_index_buffer(
                 self.active_tile_mesh().outline_index_buffer.slice(..),
@@ -214,10 +212,8 @@ impl WgpuRenderer {
             shadow_pass.set_vertex_buffer(1, self.tile_shadow_instance_buffer.slice(..));
             for prim in &self.coin_glb_primitives {
                 shadow_pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                shadow_pass.set_index_buffer(
-                    prim.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint32,
-                );
+                shadow_pass
+                    .set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 shadow_pass.draw_indexed(
                     0..prim.index_count,
                     0,

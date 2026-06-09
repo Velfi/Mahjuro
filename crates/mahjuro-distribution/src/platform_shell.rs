@@ -13,8 +13,10 @@ pub fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
         use objc2_app_kit::NSWorkspace;
         use objc2_foundation::{NSArray, NSURL};
         let path_str = path.to_string_lossy();
-        let url =
-            NSURL::fileURLWithPath_isDirectory(&objc2_foundation::NSString::from_str(&path_str), true);
+        let url = NSURL::fileURLWithPath_isDirectory(
+            &objc2_foundation::NSString::from_str(&path_str),
+            true,
+        );
         let urls = NSArray::from_retained_slice(std::slice::from_ref(&url));
         let workspace = NSWorkspace::sharedWorkspace();
         workspace.activateFileViewerSelectingURLs(&urls);
@@ -24,8 +26,8 @@ pub fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
     #[cfg(all(feature = "windows-store", target_os = "windows"))]
     {
         use std::os::windows::ffi::OsStrExt;
-        use windows::core::PCWSTR;
         use windows::Win32::UI::Shell::{ILCreateFromPathW, SHOpenFolderAndSelectItems};
+        use windows::core::PCWSTR;
 
         let wide: Vec<u16> = path
             .as_os_str()
@@ -52,9 +54,7 @@ pub fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
         if status.success() {
             return Ok(());
         }
-        return Err(std::io::Error::other(format!(
-            "open exited with {status}"
-        )));
+        return Err(std::io::Error::other(format!("open exited with {status}")));
     }
     #[cfg(all(target_os = "windows", not(feature = "windows-store")))]
     {
@@ -103,19 +103,18 @@ pub fn export_via_save_panel(default_name: &str) -> Option<PathBuf> {
 
     #[cfg(all(feature = "windows-store", target_os = "windows"))]
     {
-        use windows::core::{w, HSTRING};
         use windows::Win32::System::Com::{
-            CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+            CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
         };
         use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
         use windows::Win32::UI::Shell::{
-            FileSaveDialog, FOS_OVERWRITEPROMPT, IFileSaveDialog, SIGDN_FILESYSPATH,
+            FOS_OVERWRITEPROMPT, FileSaveDialog, IFileSaveDialog, SIGDN_FILESYSPATH,
         };
+        use windows::core::{HSTRING, w};
 
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-        let dialog: IFileSaveDialog = unsafe {
-            CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER).ok()?
-        };
+        let dialog: IFileSaveDialog =
+            unsafe { CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER).ok()? };
         let filter = COMDLG_FILTERSPEC {
             pszName: w!("HTML"),
             pszSpec: w!("*.html"),

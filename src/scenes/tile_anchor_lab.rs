@@ -13,7 +13,9 @@ use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel
 use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer_hint};
 use crate::ui::input::UiAction;
 
-use super::{BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
+use super::{
+    BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx,
+};
 
 const CLICK_BACK: u32 = 0xE010;
 const TILE_ROTATION: [f32; 3] = [0.0, 0.0, std::f32::consts::PI];
@@ -308,7 +310,9 @@ impl SceneBehavior for TileAnchorLabScene {
         }
 
         if !placements.is_empty() {
-            frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements.into()));
+            frame
+                .cmds
+                .push(DrawCmd::ShowcaseTileBatch(placements.into()));
         }
 
         let btn_font = typography::size(typography::H36, h);
@@ -406,7 +410,7 @@ fn layout_single_tile_group(
             outline: false,
             glow: false,
             glow_color: None,
-                    outline_sel: None,
+            outline_sel: None,
             pick_id: None,
             overlay_rect_group: None,
         });

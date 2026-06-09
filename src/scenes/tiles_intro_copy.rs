@@ -34,4 +34,3 @@ pub const RANK_TERM_LINES: &[&str] = &[
     "Terminals — ranks 1 and 9.",
     "Honors — Winds and Dragons; no rank.",
 ];
-

@@ -33,14 +33,16 @@ use crate::ui::controller_hints::{
     HintSegment, HintStyle, archive_browse_footer_row, inspect_camera_hint_row,
     push_inline_hint_rows, push_screen_footer_hint, screen_footer_reserve, screen_footer_top,
 };
-use crate::ui::inspect_plaque::push_relic_flavor_inspect_panel;
 use crate::ui::focus_nav::{FocusDir, FocusNavState, push_focus_ring};
 use crate::ui::input::{InputMode, UiAction};
+use crate::ui::inspect_plaque::push_relic_flavor_inspect_panel;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use glam::{Mat4, Quat, Vec3};
 
 use super::archive_career;
-use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
+use super::{
+    DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx,
+};
 use crate::scenes::object3d_inspect::{
     InspectDolly, InspectRig, ItemInspectOrbitState, inspect_orbit_camera, lerp_camera,
     prepend_inspect_orbit_subject_rotation, tick_inspect_dolly,
@@ -1295,11 +1297,7 @@ impl ArchiveScene {
             && let Some(def) = all_relic_defs().iter().find(|d| d.id == *rid)
             && !def.flavor.is_empty()
         {
-            let extra_bottom_reserve = if hint_line_count > 0 {
-                h - hint_y
-            } else {
-                0.0
-            };
+            let extra_bottom_reserve = if hint_line_count > 0 { h - hint_y } else { 0.0 };
             let mut flavor_quads = Vec::new();
             let mut flavor_texts = Vec::new();
             push_relic_flavor_inspect_panel(
@@ -2001,13 +1999,11 @@ fn inspect_preview_event(
                 None
             }
         }
-        Tab::Yaku => {
-            yaku_at_catalog_index(progress, idx).and_then(|yk| {
-                let sfx = crate::sfx_id::SfxId::for_yaku(yk);
-                crate::scenes::object3d_inspect::sfx_asset_exists(sfx)
-                    .then_some(GameEvent::UiSound(sfx))
-            })
-        }
+        Tab::Yaku => yaku_at_catalog_index(progress, idx).and_then(|yk| {
+            let sfx = crate::sfx_id::SfxId::for_yaku(yk);
+            crate::scenes::object3d_inspect::sfx_asset_exists(sfx)
+                .then_some(GameEvent::UiSound(sfx))
+        }),
         Tab::Ordeals | Tab::Talismans | Tab::Chronicle => None,
     }
 }
@@ -2921,8 +2917,7 @@ fn archive_nav_edges_for_candidates(
     archive_nav_edges(items)
         .into_iter()
         .filter(|(from, _, to)| {
-            candidates.iter().any(|(a, _)| *a == *from)
-                && candidates.iter().any(|(a, _)| *a == *to)
+            candidates.iter().any(|(a, _)| *a == *from) && candidates.iter().any(|(a, _)| *a == *to)
         })
         .collect()
 }
@@ -3521,7 +3516,10 @@ mod tests {
         );
         let max_face = archive_artifact_face_size(cell, true);
         for (idx, rect) in artifact_rects {
-            assert!(flat_rect_xywh_is_finite(rect), "artifact {idx} rect should be finite");
+            assert!(
+                flat_rect_xywh_is_finite(rect),
+                "artifact {idx} rect should be finite"
+            );
             let [_, _, rw, rh] = rect;
             assert!(
                 rw <= max_face + 0.5 && rh <= max_face + 0.5,
@@ -3548,7 +3546,12 @@ mod tests {
         );
 
         assert_eq!(
-            collection_spatial_artifact_step(&mut FocusNavState::new(), &items, Some(0), FocusDir::Right),
+            collection_spatial_artifact_step(
+                &mut FocusNavState::new(),
+                &items,
+                Some(0),
+                FocusDir::Right
+            ),
             Some(1),
             "Right from the first slot should reach its row neighbour, not skip ahead"
         );

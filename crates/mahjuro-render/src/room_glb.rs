@@ -1011,8 +1011,10 @@ mod tests {
         metal_ramp * dark_ramp
     }
 
-    const ROOM_GLB_WGSL: &str =
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../shaders/room_glb.wgsl"));
+    const ROOM_GLB_WGSL: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../shaders/room_glb.wgsl"
+    ));
 
     #[test]
     fn gold_f0_boost_is_continuous_near_old_threshold() {
@@ -1048,7 +1050,8 @@ mod tests {
 
     #[test]
     fn shop_gold_text_has_bright_warm_albedo_not_alpha_mask() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/3d/Shop.glb");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/3d/Shop.glb");
         let data = std::fs::read(&path).expect("Shop.glb");
         let cpu = crate::room_glb::load_shop_glb_from_bytes(&data).expect("load shop");
         for name in ["Text", "SHOP"] {

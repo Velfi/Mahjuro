@@ -198,8 +198,7 @@ pub fn staging_preview_melds(
 /// subset validates cleanly.
 fn greedy_staging_preview_melds(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<DetectedMeld> {
     let mut remaining: FxHashSet<u32> = tiles.iter().map(|t| t.id).collect();
-    let tile_by_id =
-        |id: u32| -> Option<Tile> { tiles.iter().find(|t| t.id == id).copied() };
+    let tile_by_id = |id: u32| -> Option<Tile> { tiles.iter().find(|t| t.id == id).copied() };
     let mut picked = Vec::new();
 
     let mut flower_ids: Vec<u32> = tiles
@@ -258,10 +257,7 @@ fn greedy_staging_preview_melds(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<D
         }
     }
 
-    let remaining_tiles: Vec<Tile> = remaining
-        .iter()
-        .filter_map(|&id| tile_by_id(id))
-        .collect();
+    let remaining_tiles: Vec<Tile> = remaining.iter().filter_map(|&id| tile_by_id(id)).collect();
     let mut regular_melds = decomposition::detect_all_sets(&remaining_tiles);
     regular_melds.sort_by(|a, b| {
         b.tile_ids
@@ -271,7 +267,11 @@ fn greedy_staging_preview_melds(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<D
     });
     let mut used = FxHashSet::default();
     for meld in regular_melds {
-        if meld.tile_ids.iter().all(|id| remaining.contains(id) && !used.contains(id)) {
+        if meld
+            .tile_ids
+            .iter()
+            .all(|id| remaining.contains(id) && !used.contains(id))
+        {
             for &id in &meld.tile_ids {
                 used.insert(id);
                 remaining.remove(&id);
@@ -306,10 +306,8 @@ pub fn selection_rejection_hint(tiles: &[Tile], rules: &[RuleModifier]) -> Strin
                 "These tiles aren't a run — pick three consecutive tiles in the same suit."
                     .to_string()
             }
-            _ => {
-                "These tiles don't form a valid meld — try a pair, triplet, or three-in-a-row."
-                    .to_string()
-            }
+            _ => "These tiles don't form a valid meld — try a pair, triplet, or three-in-a-row."
+                .to_string(),
         };
     }
     if !bad_ids.is_empty() {

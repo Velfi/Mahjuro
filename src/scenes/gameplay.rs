@@ -411,9 +411,8 @@ impl GameplayScene {
     }
 
     fn gold_flash_active(&self, now: Instant) -> bool {
-        self.gold_flash_at.is_some_and(|t0| {
-            now.saturating_duration_since(t0).as_secs_f32() < GOLD_FLASH_SECS
-        })
+        self.gold_flash_at
+            .is_some_and(|t0| now.saturating_duration_since(t0).as_secs_f32() < GOLD_FLASH_SECS)
     }
 
     /// Whether the cascade is actively animating (for redraw requests).
@@ -548,8 +547,7 @@ impl GameplayScene {
         meld_count: usize,
         structure_complete: bool,
     ) -> (f32, f32) {
-        let wiggle_amp =
-            Self::structure_cash_in_wiggle_intensity(meld_count, structure_complete);
+        let wiggle_amp = Self::structure_cash_in_wiggle_intensity(meld_count, structure_complete);
         let glow_i = Self::structure_cash_in_glow_intensity(meld_count, structure_complete);
         if wiggle_amp <= 0.0 && glow_i <= 0.0 {
             return (0.0, 0.0);
@@ -996,11 +994,7 @@ impl GameplayScene {
     /// Normalized hold-to-cash-in progress for the HUD ring + rumble (0..=1).
     /// Stays at 0 while cash-in is not allowed.
     #[inline]
-    pub(crate) fn cash_in_hold_progress(
-        &self,
-        now: Instant,
-        trigger_enabled: bool,
-    ) -> Option<f32> {
+    pub(crate) fn cash_in_hold_progress(&self, now: Instant, trigger_enabled: bool) -> Option<f32> {
         let started = self.cash_in_hold_started?;
         if !trigger_enabled {
             return Some(0.0);
@@ -1088,10 +1082,16 @@ impl GameplayScene {
             if self.staging_layout.prev_selected.len() != hand_len {
                 self.staging_layout.prev_selected.resize(hand_len, false);
             }
-            self.staging_layout.staging_offset_slots.resize(hand_len, 0.0);
-            self.staging_layout.target_staging_offset_slots.resize(hand_len, 0.0);
+            self.staging_layout
+                .staging_offset_slots
+                .resize(hand_len, 0.0);
+            self.staging_layout
+                .target_staging_offset_slots
+                .resize(hand_len, 0.0);
             self.staging_layout.staging_lift_z.resize(hand_len, 0.0);
-            self.staging_layout.target_staging_lift_z.resize(hand_len, 0.0);
+            self.staging_layout
+                .target_staging_lift_z
+                .resize(hand_len, 0.0);
             self.staging_layout.valid_meld_tiles.resize(hand_len, false);
             self.staging_layout.meld_index_groups.clear();
             self.staging_layout.has_capacity_error = false;
@@ -1100,18 +1100,24 @@ impl GameplayScene {
         }
 
         let current_selected = run.selected_slice().to_vec();
-        
+
         if self.staging_layout.prev_selected.len() != hand_len {
             self.staging_layout.prev_selected.clear();
             self.staging_layout.prev_selected.resize(hand_len, false);
             self.staging_layout.staging_offset_slots.clear();
-            self.staging_layout.staging_offset_slots.resize(hand_len, 0.0);
+            self.staging_layout
+                .staging_offset_slots
+                .resize(hand_len, 0.0);
             self.staging_layout.target_staging_offset_slots.clear();
-            self.staging_layout.target_staging_offset_slots.resize(hand_len, 0.0);
+            self.staging_layout
+                .target_staging_offset_slots
+                .resize(hand_len, 0.0);
             self.staging_layout.staging_lift_z.clear();
             self.staging_layout.staging_lift_z.resize(hand_len, 0.0);
             self.staging_layout.target_staging_lift_z.clear();
-            self.staging_layout.target_staging_lift_z.resize(hand_len, 0.0);
+            self.staging_layout
+                .target_staging_lift_z
+                .resize(hand_len, 0.0);
             self.staging_layout.valid_meld_tiles.clear();
             self.staging_layout.valid_meld_tiles.resize(hand_len, false);
         }
@@ -1122,16 +1128,21 @@ impl GameplayScene {
             self.staging_layout.prev_selected = current_selected.clone();
             self.staging_layout.valid_meld_tiles.resize(hand_len, false);
             self.staging_layout.valid_meld_tiles.fill(false);
-            
-            let selected_tiles: Vec<_> = run.hand().iter().zip(current_selected.iter()).filter(|&(_, &s)| s).map(|(t, _)| *t).collect();
-            
+
+            let selected_tiles: Vec<_> = run
+                .hand()
+                .iter()
+                .zip(current_selected.iter())
+                .filter(|&(_, &s)| s)
+                .map(|(t, _)| *t)
+                .collect();
+
             let mut has_capacity_error = false;
             let mut meld_index_groups: Vec<Vec<usize>> = Vec::new();
             let mut selection_valid = false;
 
             if !selected_tiles.is_empty() {
-                let (preview_melds, _, is_valid) =
-                    run.preview_selection_melds(&selected_tiles);
+                let (preview_melds, _, is_valid) = run.preview_selection_melds(&selected_tiles);
                 selection_valid = is_valid;
 
                 if is_valid {
@@ -1179,7 +1190,7 @@ impl GameplayScene {
             self.staging_layout.is_valid_meld = selection_valid;
             self.staging_layout.has_capacity_error = has_capacity_error;
             self.staging_layout.meld_index_groups = meld_index_groups.clone();
-            
+
             for group in &meld_index_groups {
                 for &idx in group {
                     if idx < hand_len {
@@ -1187,18 +1198,22 @@ impl GameplayScene {
                     }
                 }
             }
-            
+
             const INTRA_MELD_GAP: f32 = 0.88;
             const INTER_MELD_GAP: f32 = 1.35;
-            
+
             if meld_index_groups.is_empty() {
                 for i in 0..hand_len {
                     self.staging_layout.target_staging_lift_z[i] = 0.0;
                     self.staging_layout.target_staging_offset_slots[i] = 0.0;
                 }
             } else {
-                let all_indices: Vec<usize> = meld_index_groups.iter().flat_map(|g| g.iter().copied()).collect();
-                let center_idx = all_indices.iter().sum::<usize>() as f32 / all_indices.len() as f32;
+                let all_indices: Vec<usize> = meld_index_groups
+                    .iter()
+                    .flat_map(|g| g.iter().copied())
+                    .collect();
+                let center_idx =
+                    all_indices.iter().sum::<usize>() as f32 / all_indices.len() as f32;
                 let total_width: f32 = meld_index_groups
                     .iter()
                     .map(|group| {
@@ -1211,12 +1226,12 @@ impl GameplayScene {
                     .sum::<f32>()
                     + meld_index_groups.len().saturating_sub(1) as f32 * INTER_MELD_GAP;
                 let mut virtual_cursor = -total_width * 0.5;
-                
+
                 for i in 0..hand_len {
                     self.staging_layout.target_staging_lift_z[i] = 0.0;
                     self.staging_layout.target_staging_offset_slots[i] = 0.0;
                 }
-                
+
                 for group in &meld_index_groups {
                     let group_width = if group.len() <= 1 {
                         0.0
@@ -1236,7 +1251,7 @@ impl GameplayScene {
                 }
             }
         }
-        
+
         let spring_factor = (dt * 15.0).clamp(0.0, 1.0);
         for i in 0..hand_len {
             if !current_selected.get(i).copied().unwrap_or(false) {
@@ -1247,8 +1262,13 @@ impl GameplayScene {
                 self.staging_layout.valid_meld_tiles[i] = false;
                 continue;
             }
-            self.staging_layout.staging_offset_slots[i] += (self.staging_layout.target_staging_offset_slots[i] - self.staging_layout.staging_offset_slots[i]) * spring_factor;
-            self.staging_layout.staging_lift_z[i] += (self.staging_layout.target_staging_lift_z[i] - self.staging_layout.staging_lift_z[i]) * spring_factor;
+            self.staging_layout.staging_offset_slots[i] +=
+                (self.staging_layout.target_staging_offset_slots[i]
+                    - self.staging_layout.staging_offset_slots[i])
+                    * spring_factor;
+            self.staging_layout.staging_lift_z[i] += (self.staging_layout.target_staging_lift_z[i]
+                - self.staging_layout.staging_lift_z[i])
+                * spring_factor;
         }
     }
 }
@@ -1272,9 +1292,10 @@ fn insert_structure_before_hand(
         .position(|c| matches!(c, DrawCmd::ShowcaseTileBatch(_)));
     let insert_at = pos.unwrap_or(frame.cmds.len());
     if !structure_showcase.is_empty() {
-        frame
-            .cmds
-            .insert(insert_at, DrawCmd::ShowcaseTileBatch(structure_showcase.into()));
+        frame.cmds.insert(
+            insert_at,
+            DrawCmd::ShowcaseTileBatch(structure_showcase.into()),
+        );
     }
     frame
 }

@@ -70,8 +70,14 @@ fn projected_shadow_wgsl_stays_compare_level_only() {
 #[test]
 fn main_material_shaders_do_not_use_implicit_compare_sampling() {
     let tile_3d = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/tile_3d.wgsl"));
-    let room_glb = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/room_glb.wgsl"));
-    let lit_mesh = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/lit_mesh.wgsl"));
+    let room_glb = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/shaders/room_glb.wgsl"
+    ));
+    let lit_mesh = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/shaders/lit_mesh.wgsl"
+    ));
     assert_no_implicit_compare_sampling("tile_3d.wgsl", tile_3d);
     assert_no_implicit_compare_sampling("room_glb.wgsl", room_glb);
     assert_no_implicit_compare_sampling("lit_mesh.wgsl", lit_mesh);

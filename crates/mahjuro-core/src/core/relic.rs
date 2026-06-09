@@ -832,10 +832,7 @@ fn load_relic_defs() -> Vec<RelicDef> {
                         italic: s.italic,
                     })
                     .collect();
-                if v.is_empty()
-                    || v.iter()
-                        .all(|s| s.text.chars().all(char::is_whitespace))
-                {
+                if v.is_empty() || v.iter().all(|s| s.text.chars().all(char::is_whitespace)) {
                     &[]
                 } else {
                     Box::leak(v.into_boxed_slice())
@@ -1228,9 +1225,9 @@ pub struct ScoreContext<'a> {
 mod tests {
     use super::{
         KINDLING_MULT_CAP, KINDLING_STACK_CAP, RelicFlavorSpan, RelicId, RelicState,
-        SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP, all_relic_defs,
-        apply_merchants_eye_discount, golden_engine_mult_bonus, kindling_mult_bonus,
-        relic_buy_price, relic_shop_price, snowball_score_chips,
+        SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP, all_relic_defs, apply_merchants_eye_discount,
+        golden_engine_mult_bonus, kindling_mult_bonus, relic_buy_price, relic_shop_price,
+        snowball_score_chips,
     };
 
     #[test]

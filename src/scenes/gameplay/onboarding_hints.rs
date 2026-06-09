@@ -5,9 +5,9 @@ use crate::game::onboarding_intro_copy as copy;
 use crate::game::run::RunState;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, metrics, typography};
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::DrawCtx;
-use crate::render::vocabulary_colors::GlossaryMode;
 use crate::ui::styled_text;
 use crate::ui::widget::{self, TextStyle};
 
@@ -25,12 +25,7 @@ pub fn sync_onboarding_step(run: &mut RunState) {
     }
 }
 
-pub fn push_lessons_banner(
-    frame: &mut UiFrame,
-    ctx: &DrawCtx<'_>,
-    run: &RunState,
-    wiggle_x: f32,
-) {
+pub fn push_lessons_banner(frame: &mut UiFrame, ctx: &DrawCtx<'_>, run: &RunState, wiggle_x: f32) {
     let Some(ref onboarding) = run.onboarding else {
         return;
     };
@@ -79,12 +74,7 @@ pub fn push_lessons_banner(
     let panel_rect = [panel_x, panel_y, panel_w, panel_h];
 
     let mut quads = Vec::new();
-    widget::push_panel_colored(
-        &mut quads,
-        panel_rect,
-        color::WALNUT_SOFT,
-        color::BRASS,
-    );
+    widget::push_panel_colored(&mut quads, panel_rect, color::WALNUT_SOFT, color::BRASS);
 
     let mut texts = Vec::new();
     let mut text_y = panel_y + pad;

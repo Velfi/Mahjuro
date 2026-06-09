@@ -1,8 +1,8 @@
 //! Game Center backend (Mac App Store).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use mahjuro_core::core::progression::PlayerProgress;
 

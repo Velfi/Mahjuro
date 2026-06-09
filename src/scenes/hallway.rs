@@ -20,18 +20,20 @@ use crate::render::theme::{color, metrics, typography};
 use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
-use crate::ui::styled_text;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
 use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
-use crate::ui::score_format::format_score;
 use crate::ui::ordeal_icons::ordeal_icon_source;
+use crate::ui::score_format::format_score;
+use crate::ui::styled_text;
 use crate::ui::temptation_icons::temptation_icon_source;
 use crate::ui::widget::wrap_text;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::pause_menu::PauseMenu;
-use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
+use super::{
+    BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ChamberAction {

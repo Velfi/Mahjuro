@@ -132,9 +132,21 @@ mod tests {
         let mut bus = EventBus::default();
         let before = decimation_preview_tiles(&run).len();
         let eligible = decimation_eligible_tiles(&run);
-        let player: [u32; 5] = eligible.iter().take(5).map(|t| t.id).collect::<Vec<_>>().try_into().unwrap();
+        let player: [u32; 5] = eligible
+            .iter()
+            .take(5)
+            .map(|t| t.id)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
         let pool = decimation_house_pool(&run, &player);
-        let house: [u32; 5] = pool.iter().take(5).copied().collect::<Vec<_>>().try_into().unwrap();
+        let house: [u32; 5] = pool
+            .iter()
+            .take(5)
+            .copied()
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
         apply_decimation(&mut run, player, house, &mut bus, true);
         let after = decimation_preview_tiles(&run).len();
         assert_eq!(before - after, 10);

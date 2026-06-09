@@ -536,9 +536,10 @@ impl ShopScene {
         }
         let season = run.mode.season;
         let mut engine_bus = crate::game::event_bus::EventBus::default();
-        let outcome = GameEngine::new(run, &mut engine_bus).dispatch_shop(ShopCommand::RestockShop {
-            cost: self.restock_cost(season),
-        });
+        let outcome =
+            GameEngine::new(run, &mut engine_bus).dispatch_shop(ShopCommand::RestockShop {
+                cost: self.restock_cost(season),
+            });
         if outcome.rejection.is_some() {
             return;
         }

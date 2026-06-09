@@ -20,7 +20,6 @@ use crate::render::wgpu_renderer::{
     GpuInstance, PointLight, TextAlign, TextBlockVerticalAlign, TextLabel,
 };
 use crate::sfx_id::SfxId;
-use crate::ui::styled_text;
 use crate::ui::controller_hints::{
     HintStyle, decimation_footer_row, hint_style_with_alpha, push_screen_footer_hint,
     screen_footer_reserve, stairway_prompt_footer_row,
@@ -28,6 +27,7 @@ use crate::ui::controller_hints::{
 use crate::ui::focus_nav::{self, FocusDir, FocusNavState};
 use crate::ui::input::{InputMode, MarqueeSelect, UiAction};
 use crate::ui::inspect_plaque::{estimated_flavor_line_count, flavor_spans_layout_width};
+use crate::ui::styled_text;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::header_chrome::HeaderTitleLayout;
@@ -36,8 +36,7 @@ use super::tile_picker::{
     SCROLLABLE_GRID_COLS, ScrollableTilePickerConfig, ScrollableTilePickerLayout,
     apply_pick_selection_mask, camera_params, compute_decimation_reveal_layout,
     compute_scrollable_tile_picker_layout, footer_button_rects, grid_marquee_swept_slots,
-    pick_selection_mask,
-    picker_header_chrome, picker_seal_button_rect, push_tile_picker_scrollbar,
+    pick_selection_mask, picker_header_chrome, picker_seal_button_rect, push_tile_picker_scrollbar,
     tile_picker_scroll_y_from_cursor, tile_picker_scrollbar,
 };
 use super::{

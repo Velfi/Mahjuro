@@ -86,7 +86,12 @@ impl FloatingFlavorCaptionLayout {
     }
 
     pub fn content_rect(&self) -> [f32; 4] {
-        [self.content_left, self.content_top, self.content_w, self.content_h]
+        [
+            self.content_left,
+            self.content_top,
+            self.content_w,
+            self.content_h,
+        ]
     }
 
     pub fn gradient_quad(&self, tuning: &FloatingFlavorShadowTuning) -> GradientQuadInstance {
@@ -156,9 +161,7 @@ pub fn layout_floating_flavor_caption_for_spans(
         min_font_px,
     );
     let ideal_band_h = metrics_at_target.text_block_h + target_font_px * 0.5;
-    let band_h = ideal_band_h
-        .min(window_h * 0.25)
-        .max(target_font_px * 2.0);
+    let band_h = ideal_band_h.min(window_h * 0.25).max(target_font_px * 2.0);
     let metrics = if ideal_band_h <= band_h + 0.5 {
         metrics_at_target
     } else {
@@ -374,13 +377,14 @@ impl TuningField {
                 tuning.pad_bottom_band = (tuning.pad_bottom_band + delta).clamp(0.0, 0.45)
             }
             Self::PadXFrac => tuning.pad_x_frac = (tuning.pad_x_frac + delta).clamp(0.0, 0.25),
-            Self::ShadowAlpha => tuning.shadow_alpha = (tuning.shadow_alpha + delta).clamp(0.0, 1.0),
+            Self::ShadowAlpha => {
+                tuning.shadow_alpha = (tuning.shadow_alpha + delta).clamp(0.0, 1.0)
+            }
             Self::FeatherX => tuning.feather_x = (tuning.feather_x + delta).clamp(0.02, 0.95),
             Self::FeatherY => tuning.feather_y = (tuning.feather_y + delta).clamp(0.0, 1.0),
             Self::FeatherZ => tuning.feather_z = (tuning.feather_z + delta).clamp(0.02, 0.95),
             Self::BottomMarginFrac => {
-                tuning.bottom_margin_frac =
-                    (tuning.bottom_margin_frac + delta).clamp(0.02, 0.14)
+                tuning.bottom_margin_frac = (tuning.bottom_margin_frac + delta).clamp(0.02, 0.14)
             }
         }
     }
@@ -408,15 +412,8 @@ mod tests {
         let tuning = FloatingFlavorShadowTuning::DEFAULT;
         let body_px = 32.0;
         let line_step = body_px * 1.22;
-        let layout = layout_floating_flavor_caption(
-            1920.0,
-            1080.0,
-            body_px,
-            line_step,
-            1,
-            0.0,
-            &tuning,
-        );
+        let layout =
+            layout_floating_flavor_caption(1920.0, 1080.0, body_px, line_step, 1, 0.0, &tuning);
         let text_bottom = layout.band_top + layout.band_h;
         assert!(
             layout.content_top + layout.content_h <= text_bottom + 0.5,
@@ -438,24 +435,10 @@ mod tests {
         let tuning = FloatingFlavorShadowTuning::DEFAULT;
         let body_px = 32.0;
         let line_step = body_px * 1.22;
-        let one_line = layout_floating_flavor_caption(
-            1920.0,
-            1080.0,
-            body_px,
-            line_step,
-            1,
-            0.0,
-            &tuning,
-        );
-        let three_lines = layout_floating_flavor_caption(
-            1920.0,
-            1080.0,
-            body_px,
-            line_step,
-            3,
-            0.0,
-            &tuning,
-        );
+        let one_line =
+            layout_floating_flavor_caption(1920.0, 1080.0, body_px, line_step, 1, 0.0, &tuning);
+        let three_lines =
+            layout_floating_flavor_caption(1920.0, 1080.0, body_px, line_step, 3, 0.0, &tuning);
         assert!(
             three_lines.shadow_rect[3] > one_line.shadow_rect[3],
             "taller copy should produce a taller shadow"

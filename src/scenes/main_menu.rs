@@ -25,15 +25,17 @@ use crate::render::wgpu_renderer::{
     GpuInstance, MAIN_MENU_PICK_MOON, PointLight, SpotLight, TextAlign, TextLabel,
 };
 use crate::sfx_id::SfxId;
-use crate::ui::styled_text;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
 use crate::ui::focus_nav::{self, FocusDir, FocusNavState};
 use crate::ui::input::UiAction;
+use crate::ui::styled_text;
 use crate::ui::tooltip;
 
 use super::lamp_moths::{self, BUG_COUNT};
 use super::shop::ShopScene;
-use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
+use super::{
+    BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx,
+};
 
 const MAIN_MENU_LOGO_ASSET: &str = "textures/main_menu_logo.png";
 
@@ -432,7 +434,7 @@ fn push_moon_quip_bubble(
         max_inner_w,
         GlossaryMode::Prose,
     )
-        .clamp(72.0, max_inner_w);
+    .clamp(72.0, max_inner_w);
     let lines = styled_text::wrap_colored_text_multiline(
         message,
         inner_w,

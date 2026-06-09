@@ -13,8 +13,8 @@ use crate::{
         rules::{ChamberKind, RuleModifier},
         scoring::{EffectiveRelics, ScoreBreakdown, score_sets_with_original, tile_is_debuffed},
         structure::{
-            StructureTriggerKind, StructureTriggerMeta, can_trigger_structure, played_meld_chips,
-            is_winning_structure_shape, star_tile_yaku_pool,
+            StructureTriggerKind, StructureTriggerMeta, can_trigger_structure,
+            is_winning_structure_shape, played_meld_chips, star_tile_yaku_pool,
         },
         tile::{Suit, Tile},
     },

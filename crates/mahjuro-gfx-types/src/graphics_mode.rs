@@ -164,10 +164,7 @@ impl GraphicsMode {
             return Self::LowMemory;
         }
         let model = GraphicsMemoryModel::classify_adapter(name, integrated_gpu);
-        if matches!(
-            model,
-            GraphicsMemoryModel::UnifiedMemory { .. }
-        ) {
+        if matches!(model, GraphicsMemoryModel::UnifiedMemory { .. }) {
             if adapter_name_suggests_sub_4gb_vram(name)
                 && !adapter_name_suggests_apple_silicon(name)
                 && !adapter_name_suggests_steam_deck(name)
@@ -193,9 +190,7 @@ impl GraphicsMode {
                 }
                 !adapter_name_suggests_sub_4gb_vram(name)
             }
-            GraphicsMemoryModel::DedicatedVram { .. } => {
-                !adapter_name_suggests_sub_4gb_vram(name)
-            }
+            GraphicsMemoryModel::DedicatedVram { .. } => !adapter_name_suggests_sub_4gb_vram(name),
             GraphicsMemoryModel::Unknown => false,
         }
     }
@@ -340,12 +335,18 @@ mod tests {
             "NVIDIA GeForce MX250",
             false
         ));
-        assert!(!GraphicsMode::adapter_meets_minimum_support("Intel Iris Xe", true));
+        assert!(!GraphicsMode::adapter_meets_minimum_support(
+            "Intel Iris Xe",
+            true
+        ));
         assert!(!GraphicsMode::adapter_meets_minimum_support(
             "Intel(R) Graphics",
             true
         ));
-        assert!(GraphicsMode::adapter_meets_minimum_support("Apple M4 Max", true));
+        assert!(GraphicsMode::adapter_meets_minimum_support(
+            "Apple M4 Max",
+            true
+        ));
         assert!(GraphicsMode::adapter_meets_minimum_support(
             "AMD Radeon RX 7900 XT",
             false

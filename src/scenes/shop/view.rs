@@ -1113,12 +1113,10 @@ pub(crate) fn render_shop_frame(
         let show_hold_sell_hint =
             inspect.is_none() && (shop.west_sell_hold_started.is_some() || hover_sellable);
         let show_buy_hint = inspect.is_none() && hover_buyable;
-        let show_inspect_hint =
-            inspect.is_none() && shop.focus.is_some_and(shop_focus_inspectable);
+        let show_inspect_hint = inspect.is_none() && shop.focus.is_some_and(shop_focus_inspectable);
 
         let hint_style = HintStyle::standard(w, h);
-        let show_inspect_preview =
-            inspect_active && shop.shop_inspect_preview_available(ctx.run);
+        let show_inspect_preview = inspect_active && shop.shop_inspect_preview_available(ctx.run);
         let hint_row = if inspect_active {
             inspect_camera_hint_row(ctx.input_mode, show_inspect_preview)
         } else {
@@ -1169,9 +1167,7 @@ pub(crate) fn render_shop_frame(
         {
             let sell_invalid =
                 shop.west_sell_hold_started.is_some() && !shop.sell_hold_valid_for(&shop_rm);
-            let progress = shop
-                .sell_hold_progress(now, &shop_rm)
-                .unwrap_or(0.0);
+            let progress = shop.sell_hold_progress(now, &shop_rm).unwrap_or(0.0);
             push_hold_ring(&mut frame, icon_rect, progress, sell_invalid);
         }
 
@@ -1278,9 +1274,7 @@ fn hover_tooltip_content(
     };
     let restock_cost = scene.restock_cost(mode.season);
     let restock_affordable = matches!(scene.mode, ShopMode::Standard)
-        && (restock_cost == 0
-            || shop.yen >= restock_cost as i32
-            || i_got_a_guy_charges > 0);
+        && (restock_cost == 0 || shop.yen >= restock_cost as i32 || i_got_a_guy_charges > 0);
 
     let tuple_opt = match hit {
         ShopHit::Relic(i) if i < n_for_sale_relics => {
@@ -1828,7 +1822,7 @@ fn sell_hold_wobble_euler_rad(scene: &ShopScene, slot_focus: ShopFocus) -> [f32;
         .saturating_duration_since(started)
         .as_secs_f32()
         / crate::ui::prompt_hold_ring::hold_act_seconds())
-        .clamp(0.0, 1.0);
+    .clamp(0.0, 1.0);
     if progress <= 0.0 {
         return [0.0; 3];
     }

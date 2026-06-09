@@ -1528,7 +1528,10 @@ fn push_career_pane(h: f32, _w: f32, draw: ChroniclePaneDraw<'_>) {
             archive_career::format_chips_compact(personal_best)
         )
     } else {
-        format!("Peak {}", archive_career::format_chips_compact(personal_best))
+        format!(
+            "Peak {}",
+            archive_career::format_chips_compact(personal_best)
+        )
     };
     push_label_clipped(
         emit.labels,

@@ -212,10 +212,7 @@ pub(super) fn tick_active_cascade(
                 return Some(None);
             }
         } else {
-            let skip_request = ctx
-                .actions
-                .iter()
-                .any(|a| action_skips_cascade(*a));
+            let skip_request = ctx.actions.iter().any(|a| action_skips_cascade(*a));
             if skip_request {
                 scene.displayed_score = GameEngine::read(ctx.run).round_score;
                 scene.score_reel.set_score(scene.displayed_score, now);

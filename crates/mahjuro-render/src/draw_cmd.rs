@@ -1243,10 +1243,11 @@ impl UiFrame {
         placements: Vec<ShowcaseTilePlacement>,
         clip_rect: Option<[f32; 4]>,
     ) {
-        self.cmds.push(DrawCmd::ShowcaseTileBatch(ShowcaseTileBatchCmd {
-            placements,
-            clip_rect,
-        }));
+        self.cmds
+            .push(DrawCmd::ShowcaseTileBatch(ShowcaseTileBatchCmd {
+                placements,
+                clip_rect,
+            }));
     }
     pub fn tile_face_quads<I: IntoIterator<Item = TileFaceQuad>>(&mut self, iter: I) {
         self.cmds

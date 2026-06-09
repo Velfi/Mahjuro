@@ -527,11 +527,12 @@ impl WgpuRenderer {
                 (bg, Some(tex))
             };
 
-            let packed_effect = if flatten_time_text_fx && lbl.text_effect.flattened_when_effects_low() {
-                crate::text_effect::TextEffectId::Flat
-            } else {
-                lbl.text_effect
-            };
+            let packed_effect =
+                if flatten_time_text_fx && lbl.text_effect.flattened_when_effects_low() {
+                    crate::text_effect::TextEffectId::Flat
+                } else {
+                    lbl.text_effect
+                };
             let inst = GpuInstance {
                 rect: lbl.rect,
                 color: lbl.color,

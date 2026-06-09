@@ -77,8 +77,14 @@ impl App {
             return true;
         }
         matches!(
-            (SceneTag::from(&self.scene), self.pending_scene_intent.as_ref()),
-            (SceneTag::Stairway, Some(crate::scenes::SceneIntent::ShopFromRun))
+            (
+                SceneTag::from(&self.scene),
+                self.pending_scene_intent.as_ref()
+            ),
+            (
+                SceneTag::Stairway,
+                Some(crate::scenes::SceneIntent::ShopFromRun)
+            )
         )
     }
 
@@ -905,9 +911,7 @@ impl App {
         }
 
         // Splash: LMB dismisses the production logo (same as Confirm/Cancel).
-        if matches!(self.scene, Scene::Splash(_))
-            && self.mouse_clicked
-            && !self.modals.is_active()
+        if matches!(self.scene, Scene::Splash(_)) && self.mouse_clicked && !self.modals.is_active()
         {
             crate::render::wgpu_renderer::loading_screen::request_skip();
         }
@@ -944,9 +948,10 @@ impl App {
         let active_tileset = self.gfx.tileset_name.clone();
         let loading_done = match &self.scene {
             // Splash stays up until showcase atlases and main_menu.glb are on the GPU.
-            Scene::Splash(_) => self.renderer.as_ref().is_some_and(|r| {
-                r.splash_hub_boot_ready(&active_tileset)
-            }),
+            Scene::Splash(_) => self
+                .renderer
+                .as_ref()
+                .is_some_and(|r| r.splash_hub_boot_ready(&active_tileset)),
             _ => self.renderer.as_ref().is_none_or(|r| !r.is_loading()),
         };
         let tutorial_eligible =
@@ -982,7 +987,8 @@ impl App {
             .overlay_stack
             .last()
             .is_some_and(|s| matches!(s, Scene::TileStressLab(_)));
-        let stairway_tile_pick = matches!(&self.scene, Scene::Stairway(s) if s.wants_hand_tile_pick());
+        let stairway_tile_pick =
+            matches!(&self.scene, Scene::Stairway(s) if s.wants_hand_tile_pick());
         self.frame_picks = if let Some(r) = self.renderer.as_mut() {
             r.poll_room_prefetch_gpu_uploads(
                 scene_key,
@@ -1359,8 +1365,7 @@ impl App {
                 Scene::Gameplay(g) => {
                     let trigger_enabled =
                         crate::game::engine::GameEngine::read(&self.run).trigger_enabled;
-                    g.cash_in_hold_progress(now, trigger_enabled)
-                        .unwrap_or(0.0)
+                    g.cash_in_hold_progress(now, trigger_enabled).unwrap_or(0.0)
                 }
                 _ => 0.0,
             };

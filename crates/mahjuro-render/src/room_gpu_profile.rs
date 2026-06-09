@@ -377,7 +377,9 @@ fn collect_texture_audit_row(
     let content_hash = content_hash_bytes(base, mip_chain);
     let source_meta = env_prim.texture_sources.for_usage(usage);
     let source_label = source_identity_for_slot(source_meta, usage, *width, *height, content_hash);
-    let source_format = source_meta.and_then(|m| m.source_format).unwrap_or("unknown");
+    let source_format = source_meta
+        .and_then(|m| m.source_format)
+        .unwrap_or("unknown");
     let key = TextureAuditDedupeKey {
         source_identity: source_label.clone(),
         usage,
@@ -423,14 +425,22 @@ pub fn log_room_texture_audit(
             env_prim,
             RoomTextureUsageClass::BaseColorSrgb,
             env_prim.mesh.albedo_rgba.as_deref(),
-            env_prim.mesh.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
+            env_prim
+                .mesh
+                .albedo_mip_chain
+                .as_deref()
+                .map(|c| c.as_slice()),
         );
         collect_texture_audit_row(
             &mut rows,
             env_prim,
             RoomTextureUsageClass::NormalLinear,
             env_prim.mesh.normal_rgba.as_deref(),
-            env_prim.mesh.normal_mip_chain.as_deref().map(|c| c.as_slice()),
+            env_prim
+                .mesh
+                .normal_mip_chain
+                .as_deref()
+                .map(|c| c.as_slice()),
         );
         collect_texture_audit_row(
             &mut rows,
@@ -448,7 +458,11 @@ pub fn log_room_texture_audit(
             env_prim,
             RoomTextureUsageClass::EmissiveSrgb,
             env_prim.mesh.emissive_rgba.as_deref(),
-            env_prim.mesh.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
+            env_prim
+                .mesh
+                .emissive_mip_chain
+                .as_deref()
+                .map(|c| c.as_slice()),
         );
     }
 
@@ -488,10 +502,7 @@ pub fn log_room_texture_audit(
     }
 
     log::info!("room texture audit: {room}");
-    log::info!(
-        "  material texture refs: {}",
-        summary.material_texture_refs
-    );
+    log::info!("  material texture refs: {}", summary.material_texture_refs);
     log::info!("  unique image sources: {}", summary.unique_image_sources);
     log::info!("  unique dedupe keys: {}", summary.unique_dedupe_keys);
     log::info!("  deduped refs: {}", summary.deduped_refs);
