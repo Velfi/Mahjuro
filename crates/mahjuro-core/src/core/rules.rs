@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 pub enum RuleModifier {
     /// 7-8-9 and 8-9-1 style wraps for sequences.
     SequenceWrap,
-    /// Pair base score ×2.
-    PairDoubleScore,
     /// Only triplets and pairs allowed — sequences are rejected.
     NoSequences,
     /// Plays per round reduced from 4 to 3.
@@ -41,7 +39,6 @@ impl RuleModifier {
     pub fn name(self) -> &'static str {
         match self {
             RuleModifier::SequenceWrap => "Sequence Wrap",
-            RuleModifier::PairDoubleScore => "Pair Double",
             RuleModifier::NoSequences => "No Sequences",
             RuleModifier::ReducedPlays => "Reduced Plays",
             RuleModifier::HonorTripleScore => "Honor Triple",
@@ -59,7 +56,6 @@ impl RuleModifier {
     pub fn description(self) -> &'static str {
         match self {
             RuleModifier::SequenceWrap => "Sequences can wrap: 8-9-1, 9-1-2",
-            RuleModifier::PairDoubleScore => "Pair base score ×2",
             RuleModifier::NoSequences => "Sequences are not allowed",
             RuleModifier::ReducedPlays => "Only 3 plays this round",
             RuleModifier::HonorTripleScore => "Honor triplets score ×3",

@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::chamber_target::DEFAULT_BASE_TARGET;
 use crate::core::relic::RelicId;
-use crate::core::rules::RuleModifier;
 use crate::core::season::Season;
 use crate::core::yaku::YakuKind;
 use crate::persistence::TileMaterial;
@@ -24,7 +23,6 @@ pub struct GameMode {
     pub hand_size: usize,
     pub base_target: u32,
     pub starting_relics: Vec<RelicId>,
-    pub starting_rules: Vec<RuleModifier>,
     pub starting_yaku: Vec<YakuKind>,
     /// Base consumable inventory capacity (before relic bonuses).
     pub consumable_capacity: usize,
@@ -89,7 +87,6 @@ impl GameMode {
             hand_size: HAND_SIZE,
             base_target,
             starting_relics: vec![],
-            starting_rules: vec![RuleModifier::PairDoubleScore],
             starting_yaku: crate::core::yaku::YakuKind::all().to_vec(),
             consumable_capacity: CONSUMABLE_CAPACITY,
             tile_material: material,

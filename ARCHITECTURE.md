@@ -85,8 +85,8 @@ enum RelicEffect {
 ```rust
 enum RuleModifier {
     SequenceWrap,
-    DuplicateTilesAllowed,
-    PairDoubleScore,
+    NoSequences,
+    HonorTripleScore,
 }
 ```
 
@@ -97,7 +97,6 @@ enum RuleModifier {
 
 ```rust
 struct PlayerProgress {
-    unlocked_rules: HashSet<RuleModifier>,
     unlocked_relics: HashSet<Relic>,
     permanent_upgrades: Vec<Upgrade>,
 }

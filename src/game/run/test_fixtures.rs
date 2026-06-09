@@ -53,7 +53,6 @@ pub fn winning_structure() -> (Vec<Tile>, Vec<DetectedMeld>) {
 pub fn test_run() -> RunState {
     let mode = GameMode {
         starting_yen: 0,
-        starting_rules: vec![],
         starting_yaku: vec![],
         ..GameMode::standard()
     };

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::consumable::Consumable;
 use crate::core::ordeal_kind::OrdealKind;
 use crate::core::relic::RelicId;
-use crate::core::rules::{ChamberKind, RuleModifier};
+use crate::core::rules::ChamberKind;
 use crate::core::season::Season;
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
@@ -21,7 +21,6 @@ pub const SHOP_EYEBALL_MILESTONE_SECS: f64 = 15.0 * 60.0;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PlayerProgress {
     pub unlocked_relics: HashSet<RelicId>,
-    pub unlocked_rules: HashSet<RuleModifier>,
     pub high_scores: Vec<u64>,
     /// Total runs completed (drives profile stats/achievements).
     #[serde(default)]
@@ -280,10 +279,8 @@ impl PlayerProgress {
         // treats starter content as a newly-earned unlock.
         let l1 = unlocks_for_level(1);
         let unlocked_relics: HashSet<RelicId> = l1.relics.into_iter().collect();
-        let unlocked_rules: HashSet<RuleModifier> = l1.rules.into_iter().collect();
         Self {
             unlocked_relics,
-            unlocked_rules,
             high_scores: Vec::new(),
             runs_completed: 0,
             level_progress_points: 0,
@@ -489,14 +486,6 @@ impl PlayerProgress {
                 changed = true;
             }
         }
-        let mut new_rules = Vec::new();
-        for rule in unlocks.rules {
-            if self.unlocked_rules.insert(rule) {
-                new_rules.push(rule);
-                changed = true;
-            }
-        }
-
         // Yaku and dora are level-gated (not tracked in a HashSet), so they
         // are always "new" for their unlock level.
         if !unlocks.yaku.is_empty() || unlocks.dora {
@@ -507,7 +496,6 @@ impl PlayerProgress {
             Some(LevelUpResult {
                 new_level: level,
                 relics: new_relics,
-                rules: new_rules,
             })
         } else {
             None
@@ -599,16 +587,6 @@ impl PlayerProgress {
         }
     }
 
-    /// Rules available for this player's progression level.
-    pub fn available_rules(&self) -> Vec<RuleModifier> {
-        let level = self.current_level();
-        let mut available = Vec::new();
-        for l in 1..=level {
-            available.extend(unlocks_for_level(l).rules);
-        }
-        available
-    }
-
     /// Yaku the run may surface in previews and reference UI.
     ///
     /// Kokushi Musō stays **secret** until the first time it is cashed in and
@@ -682,7 +660,6 @@ impl PlayerProgress {
 
 struct LevelUnlocks {
     relics: Vec<RelicId>,
-    rules: Vec<RuleModifier>,
     yaku: Vec<YakuKind>,
     dora: bool,
 }
@@ -691,7 +668,6 @@ struct LevelUnlocks {
 pub struct LevelUpResult {
     pub new_level: u32,
     pub relics: Vec<RelicId>,
-    pub rules: Vec<RuleModifier>,
 }
 
 /// Every relic defined in `relics.json` that no earlier level unlocks. Keeps
@@ -722,12 +698,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Kindling,
                 RelicId::KanDrum,
             ],
-            rules: vec![
-                RuleModifier::PairDoubleScore,
-                RuleModifier::SequenceWrap,
-                RuleModifier::NoSequenceBonus,
-                RuleModifier::HonorTripleScore,
-            ],
             yaku: vec![],
             dora: false,
         },
@@ -741,7 +711,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::HighTide,
                 RelicId::EvenKeel,
             ],
-            rules: vec![],
             yaku: vec![],
             dora: false,
         },
@@ -755,7 +724,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Sweepstakes,
                 RelicId::PlainDealing,
             ],
-            rules: vec![],
             yaku: vec![YakuKind::Toitoi, YakuKind::Tanyao],
             dora: false,
         },
@@ -770,7 +738,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::GardenKeeper,
                 RelicId::GlassCannon,
             ],
-            rules: vec![],
             yaku: vec![],
             dora: false,
         },
@@ -784,7 +751,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::TurtleShell,
                 RelicId::Ikebana,
             ],
-            rules: vec![],
             yaku: vec![YakuKind::Iipeikou, YakuKind::Honitsu],
             dora: false,
         },
@@ -799,7 +765,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::WallWeaver,
                 RelicId::LotusBloom,
             ],
-            rules: vec![],
             yaku: vec![YakuKind::Chinitsu, YakuKind::Chiitoitsu],
             dora: true,
         },
@@ -814,7 +779,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::BigHands,
                 RelicId::TinyHands,
             ],
-            rules: vec![],
             yaku: vec![],
             dora: false,
         },
@@ -830,7 +794,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Bonfire,
                 RelicId::StarTile,
             ],
-            rules: vec![],
             yaku: vec![YakuKind::SanshokuDoujun, YakuKind::Honroutou],
             dora: false,
         },
@@ -844,7 +807,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::RiverRunner,
                 RelicId::GhostHand,
             ],
-            rules: vec![],
             yaku: vec![YakuKind::Junchan, YakuKind::Ittsu],
             dora: false,
         },
@@ -857,7 +819,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::TeaCeremony,
                 RelicId::XxxlEgg,
             ],
-            rules: vec![],
             yaku: vec![],
             dora: false,
         },
@@ -870,7 +831,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::VoiceOfTheElite,
                 RelicId::Chrysalis,
             ],
-            rules: vec![],
             yaku: vec![],
             dora: false,
         },
@@ -886,7 +846,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::ChowLine,
                 RelicId::Disgust,
             ],
-            rules: vec![RuleModifier::NoSequences, RuleModifier::ReducedPlays],
             yaku: vec![],
             dora: false,
         },
@@ -898,20 +857,17 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Snowball,
                 RelicId::Obsession,
             ],
-            rules: vec![],
             yaku: vec![],
             dora: false,
         },
         // ── L14: Capstones (legendaries + the most chaotic rares) ────────
         14 => LevelUnlocks {
             relics: level_14_relics(),
-            rules: vec![],
             yaku: vec![],
             dora: false,
         },
         _ => LevelUnlocks {
             relics: vec![],
-            rules: vec![],
             yaku: vec![],
             dora: false,
         },
