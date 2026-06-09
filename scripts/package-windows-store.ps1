@@ -41,6 +41,7 @@ $Publisher = if ($env:MSSTORE_PUBLISHER) { $env:MSSTORE_PUBLISHER } else { $null
 Write-Host "MS Store versions: short=$MSSTORE_SHORT_VERSION build=$MSSTORE_BUILD_NUMBER quad=$MSSTORE_VERSION_QUAD"
 
 Write-Host "Building mahjuro ($Configuration, dist-msstore)..."
+.\scripts\fetch-dxc-redist.ps1
 cargo build --$Configuration.ToLower() --no-default-features --features "game,dist-msstore" --target x86_64-pc-windows-msvc
 
 $Stage = Join-Path $RepoRoot "target\msix-stage"
@@ -54,6 +55,14 @@ if (-not (Test-Path $Bin)) {
     throw "Binary not found: $Bin"
 }
 Copy-Item $Bin $Layout
+$BinDir = Split-Path -Parent $Bin
+foreach ($dll in @("dxcompiler.dll", "dxil.dll")) {
+    $src = Join-Path $BinDir $dll
+    if (-not (Test-Path $src)) {
+        throw "Missing $dll next to mahjuro.exe — run scripts/fetch-dxc-redist.ps1 and rebuild"
+    }
+    Copy-Item $src $Layout
+}
 
 $BakeOut = Join-Path $RepoRoot "target\mahjuro-bake-packs"
 if (Test-Path $BakeOut) { Remove-Item -Recurse -Force $BakeOut }

@@ -53,6 +53,7 @@ Headless tools (`mahjuro-bake`, `mahjuro-screenshot`) and bot/sweep always skip 
 | `MAHJURO_SKIP_SHOWCASE_DECAL_BAKE` | Skip only showcase decal atlas stamp check. |
 | `MAHJURO_SKIP_RELIC_BAKE` | Skip only relic RLC1 stamp check. |
 | `MAHJURO_DEBUG_MENU` | Compile release with debug menubar (`build.rs`). |
+| `MAHJURO_DXC_REDIST` | Directory containing `dxcompiler.dll` + `dxil.dll` for `build.rs` to copy on Windows (see [windows-build.md](windows-build.md)). |
 
 Asset-pack details: [tools/bake_assets/README.md](../../tools/bake_assets/README.md).
 

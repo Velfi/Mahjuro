@@ -153,10 +153,13 @@ also copies the dylib into `Mahjuro.app/Contents/MacOS/` next to the
 binary — required because Steam's dylib has install_name
 `@loader_path/libsteam_api.dylib`.
 
-The Windows release zip and NSIS installer must include `steam_api64.dll`
-next to `mahjuro.exe` (see [.github/workflows/release-windows.yml](../.github/workflows/release-windows.yml)).
-Without it the process fails in the Windows loader **before** `main()` runs —
-no `MAHJURO_LOG_FILE` output and no Rust panic crash log.
+The Windows release zip and NSIS installer must include `steam_api64.dll`,
+`dxcompiler.dll`, and `dxil.dll` next to `mahjuro.exe` (see
+[.github/workflows/release-windows.yml](../.github/workflows/release-windows.yml)
+and [docs/agents/windows-build.md](agents/windows-build.md)).
+Without `steam_api64.dll` the process fails in the Windows loader **before**
+`main()` runs — no `MAHJURO_LOG_FILE` output and no Rust panic crash log.
+Without the DXC pair, DX12 may fall back to FXC (`d3dcompiler_47.dll`) at runtime.
 
 ## Achievements
 

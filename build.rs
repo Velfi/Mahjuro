@@ -29,9 +29,13 @@
 //! missing bakers are compiled into `target/offline-bake-tools/` (nested `cargo` with a
 //! separate target dir — see rust-lang/cargo#6412). CI (`CI=true`) and cross-compiles
 //! still panic. Set `MAHJURO_SKIP_AUTO_OFFLINE_BAKE=1` to disable.
-//! `mahjuro` is built with `headless-screenshot` or `offline-bake-support`,
+//! - `mahjuro` is built with `headless-screenshot` or `offline-bake-support`,
 //! `MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1`, `MAHJURO_SKIP_OFFLINE_BAKES=1`, or a per-bake
 //! `MAHJURO_SKIP_*_BAKE=1`.
+//!
+//! **Windows DXC:** on MSVC x64, copies `dxcompiler.dll` + `dxil.dll` from
+//! `third_party/dxc-redist/x64/` (see `scripts/fetch-dxc-redist.ps1`), `$MAHJURO_DXC_REDIST`,
+//! or the Windows SDK redist next to the binary so DX12 uses DXC instead of FXC.
 
 #[path = "build/asset_pack_bake.rs"]
 mod asset_pack_bake;
@@ -47,6 +51,8 @@ mod room_gpu_bake;
 mod room_shadow_bake;
 #[path = "build/showcase_decal_bake.rs"]
 mod showcase_decal_bake;
+#[path = "build/dxc_redist.rs"]
+mod dxc_redist;
 
 use std::env;
 use std::fs;
@@ -95,6 +101,8 @@ fn main() {
     if env::var("CARGO_FEATURE_DIST_STEAM").is_ok() {
         copy_steam_redistributable_next_to_binary();
     }
+
+    dxc_redist::copy_dxc_redist_next_to_binary();
 }
 
 fn copy_steam_redistributable_next_to_binary() {

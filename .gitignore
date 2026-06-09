@@ -1,4 +1,5 @@
 /target
+/third_party/dxc-redist/x64/*.dll
 /.claude
 /.cursor
 /.pycache

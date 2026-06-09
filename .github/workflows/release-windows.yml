@@ -116,6 +116,10 @@ jobs:
       # Do not set RUSTFLAGS with /LINKREPRO (or /VERBOSE) for the whole workspace:
       # cargo runs many link.exe jobs in parallel; they share one output dir and clobber
       # each other, which can fail the `mahjuro` lib link with exit 101 before the bin.
+      - name: Fetch DXC redist (Windows)
+        shell: pwsh
+        run: .\scripts\fetch-dxc-redist.ps1
+
       - name: Build release
         shell: bash
         run: |
@@ -186,6 +190,8 @@ jobs:
           New-Item -ItemType Directory -Force $stage | Out-Null
           Copy-Item "target\x86_64-pc-windows-msvc\release\mahjuro.exe" "$stage\"
           Copy-Item "target\x86_64-pc-windows-msvc\release\steam_api64.dll" "$stage\"
+          Copy-Item "target\x86_64-pc-windows-msvc\release\dxcompiler.dll" "$stage\"
+          Copy-Item "target\x86_64-pc-windows-msvc\release\dxil.dll" "$stage\"
           Copy-Item "baked-packs\pack_manifest.json" "$stage\"
           Copy-Item "baked-packs\mahjuro-pack-shared.zip" "$stage\"
           Copy-Item "baked-packs\mahjuro-pack-rooms.zip" "$stage\"
@@ -240,7 +246,7 @@ jobs:
           ARCHIVE="mahjuro-${RELEASE_TAG}-windows-x86_64.zip"
           ROOT="$PWD"
           cd "target/x86_64-pc-windows-msvc/release"
-          7z a "$ROOT/${ARCHIVE}" mahjuro.exe steam_api64.dll \
+          7z a "$ROOT/${ARCHIVE}" mahjuro.exe steam_api64.dll dxcompiler.dll dxil.dll \
             "$ROOT/baked-packs/pack_manifest.json" \
             "$ROOT/baked-packs/mahjuro-pack-shared.zip" \
             "$ROOT/baked-packs/mahjuro-pack-rooms.zip" \
