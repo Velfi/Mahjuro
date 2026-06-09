@@ -41,7 +41,13 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-VERSION="$(awk -F'"' '/^\[package\]/{p=1} p && /^version/{print $2; exit}' Cargo.toml)"
+# shellcheck source=scripts/mas-version.sh
+source "$REPO_ROOT/scripts/mas-version.sh"
+VERSION="$(resolve_crate_version)"
+if [[ -z "$VERSION" ]]; then
+    echo "error: could not resolve crate version; aborting before writing Info.plist / DMG name" >&2
+    exit 1
+fi
 TAG="v${VERSION}"
 
 # ─────────────────────────── Build binary ───────────────────────────
