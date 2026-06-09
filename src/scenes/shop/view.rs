@@ -175,7 +175,7 @@ pub(super) fn shop_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
                 eye: [0.0 * cs, -1517.6 * cs, 1557.2 * cs],
                 target: [0.0, 0.0, 0.0],
                 up: [0.0, 0.0, 1.0],
-                fovy_deg: 58.0,
+                projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: 58.0 },
                 clip_near: None,
                 clip_far: None,
             }

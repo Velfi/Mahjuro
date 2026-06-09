@@ -710,7 +710,7 @@ fn hallway_camera_resolve(
             eye: [0.0, -h * 1.25, h * 0.50],
             target: [0.0, h * 0.05, h * 0.18],
             up: [0.0, 0.0, 1.0],
-            fovy_deg: 55.0,
+            projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: 55.0 },
             clip_near: None,
             clip_far: None,
         });

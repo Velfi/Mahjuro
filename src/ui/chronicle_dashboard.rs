@@ -1,7 +1,8 @@
 //! Split-pane Chronicle ledger for the Archive tab: run log (left) + career stats (right).
 
 use crate::core::progression::{PlayerProgress, RunRecord};
-use crate::render::draw_cmd::{ImageQuad, ImageQuadSource};
+use crate::render::doc_tile_camera::TOP_DOWN_TILE_ROTATION;
+use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, ShowcaseTilePlacement};
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
 use crate::scenes::archive_career;
@@ -326,6 +327,7 @@ struct ChronicleEmit<'a> {
     squircle_quads: &'a mut Vec<GpuInstance>,
     labels: &'a mut Vec<TextLabel>,
     images: &'a mut Vec<ImageQuad>,
+    showcase_tiles: &'a mut Vec<ShowcaseTilePlacement>,
 }
 
 struct ChroniclePaneDraw<'a> {
@@ -356,24 +358,43 @@ struct RunLogReceiptLayout {
     boss_w: f32,
     score_x: f32,
     score_w: f32,
+    /// Single row font size shared by all receipt columns.
+    row_font_px: f32,
 }
+
+const RUN_LOG_ID_SAMPLE: &str = "99 Loss";
+const RUN_LOG_SCORE_SAMPLE: &str = "999. M cp";
 
 fn run_log_receipt_layout(
     base_x: f32,
     pane_w: f32,
     row_inset: f32,
-    row_font_px: f32,
+    target_font_px: f32,
 ) -> RunLogReceiptLayout {
     let inner_x = base_x + row_inset;
     let inner_w = (pane_w - row_inset * 2.0).max(80.0);
-    let col_gap = 4.0;
+    let col_gap = 5.0;
+    let min_px = 8.0_f32;
 
-    let score_w = (inner_w * 0.22).clamp(48.0, 72.0);
+    let mut row_font_px = target_font_px.max(min_px);
+    let mut score_w = chart_primitives::measure_text_width(RUN_LOG_SCORE_SAMPLE, row_font_px, true)
+        + 6.0;
+    let mut id_w =
+        chart_primitives::measure_text_width(RUN_LOG_ID_SAMPLE, row_font_px, true) + 4.0;
+    while row_font_px > min_px
+        && (score_w > inner_w * 0.38 || id_w > inner_w * 0.26 || score_w + id_w + col_gap * 2.0 + 28.0 > inner_w)
+    {
+        row_font_px -= 0.5;
+        score_w = chart_primitives::measure_text_width(RUN_LOG_SCORE_SAMPLE, row_font_px, true) + 6.0;
+        id_w = chart_primitives::measure_text_width(RUN_LOG_ID_SAMPLE, row_font_px, true) + 4.0;
+    }
+
+    score_w = score_w.clamp(54.0, 78.0).min(inner_w * 0.38);
+    id_w = id_w.clamp(44.0, 56.0).min(inner_w * 0.26);
     let score_x = inner_x + inner_w - score_w;
-    let id_w = (row_font_px * 3.4).clamp(44.0, 60.0);
     let id_x = inner_x;
     let boss_x = id_x + id_w + col_gap;
-    let boss_w = (score_x - boss_x - col_gap).max(48.0);
+    let boss_w = (score_x - boss_x - col_gap).max(24.0);
 
     RunLogReceiptLayout {
         id_x,
@@ -382,6 +403,7 @@ fn run_log_receipt_layout(
         boss_w,
         score_x,
         score_w,
+        row_font_px,
     }
 }
 
@@ -792,33 +814,30 @@ fn push_tile_strip(
     let n = tiles.len().min(TILE_STRIP_MAX_COUNT) as f32;
     let tw = ((w - TILE_STRIP_GAP * (n - 1.0)) / n).clamp(TILE_STRIP_MIN_W, TILE_STRIP_MAX_W);
     let th = tw * TILE_STRIP_ASPECT;
+    let tile_size = tw * 0.92;
+    let center_y = y + th * 0.5;
     for (i, tile) in tiles.iter().take(TILE_STRIP_MAX_COUNT).enumerate() {
         let tx = x + i as f32 * (tw + TILE_STRIP_GAP);
-        if let Some(source) = archive_career::tile_image_source(tile) {
-            let clip_rect = [tx, clip.top, tw, (clip.bottom - clip.top).max(0.0)];
-            let tile_rect = [tx, y, tw, th];
-            if y + th <= clip.bottom
-                && y >= clip.top
-                && intersect_rect(tile_rect, clip_rect).is_some()
-            {
-                emit.images.push(ImageQuad {
-                    inst: GpuInstance {
-                        rect: [tx, y, tw, th],
-                        color: [1.0, 1.0, 1.0, 1.0],
-                        user: 0,
-                    },
-                    source,
-                    clip_rect: None,
-                });
-            }
-        } else {
-            push_quad_clipped(
-                emit.quads,
-                [tx, y, tw, th],
-                clip,
-                color::alpha(color::PARCHMENT, 0.75),
-            );
+        if y + th > clip.bottom || y + th < clip.top {
+            continue;
         }
+        emit.showcase_tiles.push(ShowcaseTilePlacement {
+            tile: *tile,
+            center_pos: [tx + tw * 0.5, center_y, 0.0],
+            rotation: TOP_DOWN_TILE_ROTATION,
+            scale: 1.0,
+            size_px: tile_size,
+            brightness: 1.0,
+            opacity: 1.0,
+            selected: false,
+            hovered: false,
+            outline: false,
+            glow: false,
+            glow_color: None,
+            outline_sel: None,
+            pick_id: None,
+            overlay_rect_group: None,
+        });
     }
 }
 
@@ -865,7 +884,6 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
     let indices = archive_career::chronicle_indices_recent_first(progress);
     let run_count = indices.len();
     let entry_count = archive_career::chronicle_list_entry_count(progress);
-    let row_font_px = body;
     let cap_h = rhythm::line_h(caption_px);
     let list_clip = run_log_list_clip(panes);
     let clip = list_clip;
@@ -921,7 +939,7 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
         panes.left_content_x(),
         panes.left_content_w(),
         row_inset,
-        row_font_px,
+        caption_px,
     );
     let hdr = color::alpha(color::STONE, 0.72);
     for (hx, hw, label, align) in [
@@ -1000,14 +1018,15 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
             continue;
         }
         let selected = focused == Some(list_i);
-        let row_text_h = (row_h - row_pad * 0.5).max(rhythm::line_h(row_font_px));
-        let text_y = row_y + row_pad * 0.25;
         let receipt = run_log_receipt_layout(
             panes.left_content_x(),
             panes.left_content_w(),
             row_inset,
-            row_font_px,
+            caption_px,
         );
+        let row_font_px = receipt.row_font_px;
+        let row_text_h = (row_h - row_pad * 0.5).max(rhythm::line_h(row_font_px));
+        let text_y = row_y + row_pad * 0.25;
 
         if selected {
             push_quad_clipped(
@@ -1100,6 +1119,12 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
         if let Some(boss) = archive_career::chronicle_run_log_ordeal_line(rec) {
             let mut boss_x = receipt.boss_x;
             let mut boss_w = receipt.boss_w;
+            let boss = chart_primitives::truncate_text_to_width(
+                &boss,
+                boss_w.max(1.0),
+                row_font_px,
+                false,
+            );
             if run_is_new {
                 let stamp = (row_font_px * 0.95).max(10.0);
                 chronicle_charts::push_discovery_stamp(
@@ -2067,6 +2092,7 @@ pub fn push_chronicle_dashboard(
     out_squircle_quads: &mut Vec<GpuInstance>,
     out_labels: &mut Vec<TextLabel>,
     out_images: &mut Vec<ImageQuad>,
+    out_showcase_tiles: &mut Vec<ShowcaseTilePlacement>,
 ) {
     let panes = chronicle_pane_layout(w, h, panel);
     let metrics = layout_constants(h);
@@ -2113,6 +2139,7 @@ pub fn push_chronicle_dashboard(
         squircle_quads: out_squircle_quads,
         labels: out_labels,
         images: out_images,
+        showcase_tiles: out_showcase_tiles,
     };
 
     push_run_log(
@@ -2127,6 +2154,7 @@ pub fn push_chronicle_dashboard(
                 squircle_quads: emit.squircle_quads,
                 labels: emit.labels,
                 images: emit.images,
+                showcase_tiles: emit.showcase_tiles,
             },
         },
         view.focused_run,

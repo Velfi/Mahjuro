@@ -29,6 +29,26 @@ use std::sync::Arc;
 /// and the renderer’s perspective matrix. glTF room verts scale ~with `window_h`, so long corridors need >12×.
 pub const SCENE_PERSPECTIVE_FAR_MUL: f32 = 32.0;
 
+/// View projection for [`CameraParams`].
+#[derive(Clone, Copy, Debug)]
+pub enum CameraProjection {
+    Perspective {
+        /// Vertical field of view in degrees.
+        fovy_deg: f32,
+    },
+    Orthographic {
+        /// World-unit half-extent of the vertical frustum.
+        half_height: f32,
+    },
+}
+
+impl CameraProjection {
+    #[inline]
+    pub fn perspective(fovy_deg: f32) -> Self {
+        Self::Perspective { fovy_deg }
+    }
+}
+
 /// Per-frame camera override supplied by a scene that wants to draw the 3D
 /// world from a perspective other than the renderer's default "person at the
 /// table" camera. When `UiFrame.camera_override` is `None`, the renderer
@@ -41,11 +61,10 @@ pub struct CameraParams {
     pub target: [f32; 3],
     /// Up vector (typically `[0, 0, 1]` for Z-up world space).
     pub up: [f32; 3],
-    /// Vertical field of view in degrees.
-    pub fovy_deg: f32,
-    /// Perspective near plane in **world units**. `None` → `1.0` (table / legacy default).
+    pub projection: CameraProjection,
+    /// Near plane in **world units**. `None` → `1.0` (table / legacy default).
     pub clip_near: Option<f32>,
-    /// Perspective far plane in **world units**. `None` → `window_h ×`
+    /// Far plane in **world units**. `None` → `window_h ×`
     /// [`SCENE_PERSPECTIVE_FAR_MUL`] (table / legacy default).
     pub clip_far: Option<f32>,
 }
@@ -154,6 +173,8 @@ pub struct ShowcaseRenderHints {
     /// light but should not cast a drop shadow on the black void (same as pack
     /// celebration tiles / pack mesh).
     pub zodiac_celebration_no_shadow: bool,
+    /// Guide / tutorial doc tiles on a black void — skip punctual drop shadows.
+    pub doc_tile_no_shadow: bool,
 }
 
 impl ShowcaseRenderHints {
@@ -210,7 +231,34 @@ impl ShowcaseRenderHints {
 }
 
 impl CameraParams {
-    /// `(near, far)` for [`glam::Mat4::perspective_rh`], in world units.
+    /// Vertical FOV in degrees when perspective; equivalent derived FOV when orthographic.
+    #[inline]
+    pub fn fovy_deg(&self) -> f32 {
+        match self.projection {
+            CameraProjection::Perspective { fovy_deg } => fovy_deg,
+            CameraProjection::Orthographic { half_height } => {
+                let eye = glam::Vec3::from_array(self.eye);
+                let target = glam::Vec3::from_array(self.target);
+                let d = (target - eye).length().max(1e-6);
+                (2.0 * (half_height / d).atan()).to_degrees()
+            }
+        }
+    }
+
+    #[inline]
+    pub fn set_fovy_deg(&mut self, fovy_deg: f32) {
+        self.projection = CameraProjection::Perspective { fovy_deg };
+    }
+
+    #[inline]
+    pub fn view_matrix(&self) -> glam::Mat4 {
+        let eye = glam::Vec3::from_array(self.eye);
+        let target = glam::Vec3::from_array(self.target);
+        let up = glam::Vec3::from_array(self.up);
+        glam::Mat4::look_at_rh(eye, target, up)
+    }
+
+    /// `(near, far)` clip planes in world units.
     #[inline]
     pub fn clip_planes(&self, window_h: f32) -> (f32, f32) {
         let h = window_h.max(1e-6);
@@ -220,6 +268,37 @@ impl CameraParams {
             .unwrap_or(h * SCENE_PERSPECTIVE_FAR_MUL)
             .max(near + 1.0);
         (near, far)
+    }
+
+    pub fn projection_matrix(&self, window_w: f32, window_h: f32) -> glam::Mat4 {
+        let aspect = window_w / window_h.max(1e-6);
+        let (near, far) = self.clip_planes(window_h);
+        match self.projection {
+            CameraProjection::Perspective { fovy_deg } => {
+                glam::Mat4::perspective_rh(fovy_deg.to_radians(), aspect, near, far)
+            }
+            CameraProjection::Orthographic { half_height } => {
+                let half_h = half_height.max(1e-6);
+                let half_w = half_h * aspect;
+                glam::Mat4::orthographic_rh(-half_w, half_w, -half_h, half_h, near, far)
+            }
+        }
+    }
+
+    pub fn view_proj(&self, window_w: f32, window_h: f32) -> glam::Mat4 {
+        self.projection_matrix(window_w, window_h) * self.view_matrix()
+    }
+
+    /// Orthographic `half_height` matching a perspective camera at eye→target distance.
+    pub fn ortho_half_height_from_perspective(
+        fovy_deg: f32,
+        eye: [f32; 3],
+        target: [f32; 3],
+    ) -> f32 {
+        let eye = glam::Vec3::from_array(eye);
+        let target = glam::Vec3::from_array(target);
+        let d = (target - eye).length();
+        d * (fovy_deg.to_radians() * 0.5).tan()
     }
 
     /// Default "person at the table" camera when [`UiFrame::camera_override`] is
@@ -236,7 +315,7 @@ impl CameraParams {
             eye: [0.0 * cs, -2104.0 * cs, 1157.2 * cs],
             target: [0.0 * cs, -39.6 * cs, 105.2 * cs],
             up: [0.0, 0.0, 1.0],
-            fovy_deg: 55.0,
+            projection: CameraProjection::Perspective { fovy_deg: 55.0 },
             clip_near: None,
             clip_far: None,
         }
@@ -269,15 +348,8 @@ pub struct ScreenProjector {
 
 impl ScreenProjector {
     pub fn new(cam: &CameraParams, window_w: f32, window_h: f32) -> Self {
-        let aspect = window_w / window_h.max(1e-6);
-        let eye = glam::Vec3::from_array(cam.eye);
-        let target = glam::Vec3::from_array(cam.target);
-        let up = glam::Vec3::from_array(cam.up);
-        let view = glam::Mat4::look_at_rh(eye, target, up);
-        let (near, far) = cam.clip_planes(window_h);
-        let proj = glam::Mat4::perspective_rh(cam.fovy_deg.to_radians(), aspect, near, far);
         Self {
-            view_proj: proj * view,
+            view_proj: cam.view_proj(window_w, window_h),
             window_w,
             window_h,
         }
@@ -1344,7 +1416,7 @@ pub fn apply_modal_relic_staging(
         eye: [0.0, -h * 3.0, 0.0],
         target: [0.0, 0.0, 0.0],
         up: [0.0, 0.0, 1.0],
-        fovy_deg: 20.0,
+        projection: CameraProjection::Perspective { fovy_deg: 20.0 },
         clip_near: None,
         clip_far: None,
     });

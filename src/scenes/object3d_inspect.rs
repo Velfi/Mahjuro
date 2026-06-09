@@ -187,7 +187,7 @@ pub fn inspect_orbit_camera(ins: &ItemInspectOrbitState, rig: &InspectRig) -> Ca
         eye: new_eye.to_array(),
         target: ins.target_world,
         up,
-        fovy_deg: rig.fovy_deg,
+        projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: rig.fovy_deg },
         clip_near: Some(clip_near),
         clip_far: Some(clip_far),
     }
@@ -254,7 +254,9 @@ pub fn lerp_camera(a: &CameraParams, b: &CameraParams, t: f32, window_h: f32) ->
         eye: lerp3(a.eye, b.eye, t),
         target: lerp3(a.target, b.target, t),
         up: a.up,
-        fovy_deg: a.fovy_deg + (b.fovy_deg - a.fovy_deg) * t,
+        projection: crate::render::draw_cmd::CameraProjection::Perspective {
+            fovy_deg: a.fovy_deg() + (b.fovy_deg() - a.fovy_deg()) * t,
+        },
         clip_near: Some(near),
         clip_far: Some(far),
     }

@@ -1100,7 +1100,7 @@ impl CameraDebugOverlay {
             eye: cam.eye,
             target: cam.target,
             up: cam.up,
-            fovy_deg: cam.fovy_deg,
+            fovy_deg: cam.fovy_deg(),
             last_window_h: 0.0,
             pointer: DebugPointerState::default(),
         }
@@ -1111,7 +1111,7 @@ impl CameraDebugOverlay {
             eye: self.eye,
             target: self.target,
             up: self.up,
-            fovy_deg: self.fovy_deg,
+            projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: self.fovy_deg },
             clip_near: None,
             clip_far: None,
         }

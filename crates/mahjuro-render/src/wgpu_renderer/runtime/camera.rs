@@ -25,37 +25,13 @@ impl CameraFrame {
     ) -> Self {
         let w = size.width.max(1) as f32;
         let h = size.height.max(1) as f32;
-        let aspect = w / h;
-        let (cam_pos, look_target, fov_y) = if let Some(c) = override_cam {
-            (
-                glam::Vec3::from_array(c.eye),
-                glam::Vec3::from_array(c.target),
-                c.fovy_deg.to_radians(),
-            )
-        } else {
-            let c = crate::draw_cmd::CameraParams::default_table_camera(h);
-            (
-                glam::Vec3::from_array(c.eye),
-                glam::Vec3::from_array(c.target),
-                c.fovy_deg.to_radians(),
-            )
-        };
-        let up_v = override_cam
-            .map(|c| glam::Vec3::from_array(c.up))
-            .or_else(|| {
-                frame
-                    .camera_override
-                    .as_ref()
-                    .map(|c| glam::Vec3::from_array(c.up))
-            })
-            .unwrap_or(glam::Vec3::Z);
-        let view_mat = Mat4::look_at_rh(cam_pos, look_target, up_v);
-        let (near, far) = override_cam
-            .map(|c| c.clip_planes(h))
-            .or_else(|| frame.camera_override.as_ref().map(|c| c.clip_planes(h)))
-            .unwrap_or((1.0, h * crate::draw_cmd::SCENE_PERSPECTIVE_FAR_MUL));
-        let proj = Mat4::perspective_rh(fov_y, aspect, near, far);
-        let view_proj = proj * view_mat;
+        let cam_params = override_cam
+            .copied()
+            .or_else(|| frame.camera_override.as_ref().copied())
+            .unwrap_or_else(|| crate::draw_cmd::CameraParams::default_table_camera(h));
+        let cam_pos = glam::Vec3::from_array(cam_params.eye);
+        let look_target = glam::Vec3::from_array(cam_params.target);
+        let view_proj = cam_params.view_proj(w, h);
         let view_proj_arr = view_proj.to_cols_array();
         Self {
             cam_pos,

@@ -35,7 +35,7 @@
 //! **Saved props** use [`crate::ui::placement::Placement`] — see
 //! `docs/agents/world-space.md`.
 
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Vec3, Vec4};
 
 use crate::draw_cmd::CameraParams;
 
@@ -96,15 +96,7 @@ pub fn world_on_camera_ray_plane_z(
 ) -> Vec3 {
     let w = window_w.max(1e-6);
     let h = window_h.max(1e-6);
-    let aspect = (w / h).max(1e-6);
-    let eye = Vec3::from_array(cam.eye);
-    let target = Vec3::from_array(cam.target);
-    let up = Vec3::from_array(cam.up);
-    let fov_y = cam.fovy_deg.to_radians();
-    let view_mat = Mat4::look_at_rh(eye, target, up);
-    let (near, far) = cam.clip_planes(h);
-    let proj = Mat4::perspective_rh(fov_y, aspect, near, far);
-    let view_proj = proj * view_mat;
+    let view_proj = cam.view_proj(w, h);
     let inv_vp = view_proj.inverse();
 
     let ndc_x = (px / w) * 2.0 - 1.0;

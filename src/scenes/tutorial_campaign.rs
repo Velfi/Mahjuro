@@ -5,6 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::core::tile::{Suit, Tile};
 use crate::game::event_bus::GameEvent;
 use crate::persistence::TilePreset;
+use crate::render::doc_tile_camera::{DOC_TILE_ROTATION, doc_tile_camera};
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
     camera_facing_euler_xyz_rad,
@@ -34,20 +35,6 @@ use super::{BackgroundId, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, 
 
 /// Gaps between intro + three left-panel sections on Part 1 (see guide tiles page).
 const TUTORIAL_TILES_COPY_SECTION_GAPS: usize = 3;
-
-const TUTORIAL_TILE_ROTATION: [f32; 3] = [0.0, 0.0, std::f32::consts::PI];
-
-fn tutorial_camera_params(h: f32) -> CameraParams {
-    let cam_scale = h / 1600.0;
-    CameraParams {
-        eye: [0.0, -220.0 * cam_scale, 1960.0 * cam_scale],
-        target: [0.0, -40.0 * cam_scale, 0.0],
-        up: [0.0, 0.0, 1.0],
-        fovy_deg: 45.0,
-        clip_near: None,
-        clip_far: None,
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TutorialNav {
@@ -558,7 +545,7 @@ impl TutorialCampaignScene {
         let center_y = area_top_y + tile_size * 0.5 + h * 0.006;
         let mut next_id = 30_000u32;
         Self::layout_tutorial_tile_row(
-            &tutorial_camera_params(h),
+            &doc_tile_camera(h),
             page,
             &indices,
             col_x,
@@ -1406,7 +1393,7 @@ impl TutorialCampaignScene {
                 placements.push(ShowcaseTilePlacement {
                     tile,
                     center_pos: [px, center_y, 0.0],
-                    rotation: TUTORIAL_TILE_ROTATION,
+                    rotation: DOC_TILE_ROTATION,
                     scale: 1.0,
                     size_px: tile_size,
                     brightness: 1.08,
@@ -1430,7 +1417,7 @@ impl TutorialCampaignScene {
                 window_w,
                 window_h,
                 TilePreset::Chinese,
-                TUTORIAL_TILE_ROTATION,
+                DOC_TILE_ROTATION,
                 1.0,
                 tile_size,
                 0.0,
@@ -1579,9 +1566,10 @@ impl SceneBehavior for TutorialCampaignScene {
         if ctx.effect_layers.golden_dust {
             frame.golden_dust();
         }
-        let cam = tutorial_camera_params(h);
+        let cam = doc_tile_camera(h);
         frame.camera_override = Some(cam);
         frame.showcase_render_hints.layout_use_ray_plane_z = true;
+        frame.showcase_render_hints.doc_tile_no_shadow = true;
 
         let panel_x = w * 0.06;
         let panel_y = h * 0.07;

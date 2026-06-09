@@ -22,6 +22,7 @@ use crate::game::event_bus::GameEvent;
 use crate::persistence::TilePreset;
 use crate::render::consumable_prop_scale::for_sale_talisman_tablet_extent;
 use crate::render::decal::load_ui_font;
+use crate::render::doc_tile_camera::{DOC_TILE_ROTATION, doc_tile_camera};
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, ImageQuad, ImageQuadSource, Object3d, Object3dKind, SceneLighting,
     ShowcaseTilePlacement, UiFrame, camera_facing_euler_xyz_rad,
@@ -318,16 +319,9 @@ impl SceneBehavior for GuideScene {
         frame.background(BackgroundId::Black);
 
         // ── Camera ────────────────────────────────────────────────
-        let cam_scale = h / 1600.0;
-        frame.camera_override = Some(CameraParams {
-            eye: [0.0, -200.0 * cam_scale, 2040.0 * cam_scale],
-            target: [0.0, -50.0 * cam_scale, 0.0],
-            up: [0.0, 0.0, 1.0],
-            fovy_deg: 45.0,
-            clip_near: None,
-            clip_far: None,
-        });
+        frame.camera_override = Some(doc_tile_camera(h));
         frame.showcase_render_hints.layout_use_ray_plane_z = true;
+        frame.showcase_render_hints.doc_tile_no_shadow = true;
 
         // ── Lights ────────────────────────────────────────────────
         // Match the Yaku Journal: one soft, high, wide-radius fill. Multiple
@@ -527,7 +521,6 @@ struct MeldLabel {
     color: [f32; 4],
 }
 
-const GUIDE_TILE_ROTATION: [f32; 3] = [0.0, 0.0, std::f32::consts::PI];
 /// Per-tile yaw wobble for invalid guide examples (melds invalid-sequence pattern).
 const GUIDE_INVALID_TILE_WOBBLE: [f32; 3] = [0.14, -0.11, 0.09];
 
@@ -538,9 +531,9 @@ fn guide_example_is_invalid(group: &TileGroup) -> bool {
 fn guide_invalid_tile_rotation(tile_i: usize) -> [f32; 3] {
     let wobble = GUIDE_INVALID_TILE_WOBBLE[tile_i % GUIDE_INVALID_TILE_WOBBLE.len()];
     [
-        GUIDE_TILE_ROTATION[0],
-        GUIDE_TILE_ROTATION[1],
-        GUIDE_TILE_ROTATION[2] + wobble,
+        DOC_TILE_ROTATION[0],
+        DOC_TILE_ROTATION[1],
+        DOC_TILE_ROTATION[2] + wobble,
     ]
 }
 
@@ -4313,7 +4306,7 @@ fn layout_tiles_in_cell(
         .map(|(i, tile)| ShowcaseTilePlacement {
             tile: *tile,
             center_pos: [start_x + size * (i as f32 + 0.5), center_y, 0.0],
-            rotation: GUIDE_TILE_ROTATION,
+            rotation: DOC_TILE_ROTATION,
             scale: 1.0,
             size_px: size,
             brightness: 1.0,
@@ -5158,7 +5151,7 @@ fn push_guide_tile_placements(
         placements.push(ShowcaseTilePlacement {
             tile: *tile,
             center_pos: [px, center_y, 0.0],
-            rotation: GUIDE_TILE_ROTATION,
+            rotation: DOC_TILE_ROTATION,
             scale: 1.0,
             size_px: tile_size,
             brightness: 1.0,
@@ -5445,7 +5438,7 @@ fn layout_tile_group_cell(
             rotation: if invalid {
                 guide_invalid_tile_rotation(tile_i)
             } else {
-                GUIDE_TILE_ROTATION
+                DOC_TILE_ROTATION
             },
             scale: 1.0,
             size_px: max_tile,
@@ -5656,7 +5649,7 @@ fn layout_tile_groups_with_max(
             placements.push(ShowcaseTilePlacement {
                 tile: *tile,
                 center_pos: [px, center_y, 0.0],
-                rotation: GUIDE_TILE_ROTATION,
+                rotation: DOC_TILE_ROTATION,
                 scale: 1.0,
                 size_px: tile_size,
                 brightness: 1.0,
@@ -5679,7 +5672,7 @@ fn layout_tile_groups_with_max(
             window_w,
             window_h,
             TilePreset::Chinese,
-            GUIDE_TILE_ROTATION,
+            DOC_TILE_ROTATION,
             1.0,
             tile_size,
             0.0,

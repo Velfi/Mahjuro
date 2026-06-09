@@ -517,12 +517,18 @@ pub fn push_ordeal_record_rows(
     row_h: f32,
     rows: &[OrdealRecordRow],
     caption_px: f32,
-    body_px: f32,
+    _body_px: f32,
 ) {
     let gutter = 6.0;
-    let score_w = (w * 0.22).clamp(56.0, 88.0);
-    let wl_w = (caption_px * 5.5).max(48.0).min(w * 0.22);
-    let name_w = (w - score_w - wl_w - gutter * 2.0).max(48.0);
+    let row_font_px = caption_px;
+    let wl_font_px = caption_px * 0.9;
+    let score_w = (chart_primitives::measure_text_width("999. M cp", row_font_px, true) + 6.0)
+        .clamp(54.0, 78.0)
+        .min(w * 0.34);
+    let wl_w = (chart_primitives::measure_text_width("99W · 99L", wl_font_px, true) + 4.0)
+        .clamp(52.0, 72.0)
+        .min(w * 0.24);
+    let name_w = (w - score_w - wl_w - gutter * 2.0).max(40.0);
     let wl_x = x + name_w + gutter;
     let score_x = x + w - score_w;
     for (i, row) in rows.iter().take(5).enumerate() {
@@ -533,11 +539,17 @@ pub fn push_ordeal_record_rows(
             clip,
             color::alpha(color::BRASS, 0.12),
         );
+        let ordeal_name = chart_primitives::truncate_text_to_width(
+            row.ordeal.name(),
+            name_w,
+            caption_px,
+            false,
+        );
         push_colored_label_clipped(
             labels,
             [x, ry, name_w, row_h],
             clip,
-            row.ordeal.name(),
+            &ordeal_name,
             color::alpha(color::PARCHMENT, 0.92),
             caption_px,
             TextAlign::Left,
@@ -566,7 +578,7 @@ pub fn push_ordeal_record_rows(
             clip,
             &score_text,
             archive_career::chronicle_chips_color(),
-            body_px * 0.92,
+            row_font_px,
             TextAlign::Right,
             true,
         );

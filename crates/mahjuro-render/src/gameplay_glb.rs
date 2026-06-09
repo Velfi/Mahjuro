@@ -1329,7 +1329,7 @@ fn nudge_camera_screen_delta(
     let right = forward.cross(up).normalize_or_zero();
     let cam_up = right.cross(forward).normalize_or_zero();
     let depth = (target - eye).length().max(1.0);
-    let world_per_px_y = 2.0 * depth * (cam.fovy_deg.to_radians() * 0.5).tan() / win_h.max(1.0);
+    let world_per_px_y = 2.0 * depth * (cam.fovy_deg().to_radians() * 0.5).tan() / win_h.max(1.0);
     let world_per_px_x = world_per_px_y * (win_w / win_h.max(1.0));
     let shift = right * (-dx_px * world_per_px_x) + cam_up * (dy_px * world_per_px_y);
     cam.eye = (eye + shift).to_array();
@@ -1394,7 +1394,7 @@ pub fn gameplay_cash_in_camera_for_screen_rect(
             eye: (focus + view_dir * dist).to_array(),
             target: focus.to_array(),
             up: base.up,
-            fovy_deg: base.fovy_deg,
+            projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: base.fovy_deg() },
             clip_near: Some((dist * 0.02).max(0.25)),
             clip_far: Some(dist * 40.0),
         };
@@ -1415,7 +1415,7 @@ pub fn gameplay_cash_in_camera_for_screen_rect(
         eye: (focus + view_dir * dist).to_array(),
         target: focus.to_array(),
         up: base.up,
-        fovy_deg: base.fovy_deg,
+        projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: base.fovy_deg() },
         clip_near: Some((dist * 0.02).max(0.25)),
         clip_far: Some(dist * 40.0),
     };

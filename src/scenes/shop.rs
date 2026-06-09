@@ -155,16 +155,6 @@ impl ShopScene {
         }
     }
 
-    #[inline]
-    pub(crate) fn sell_hold_in_progress(&self) -> bool {
-        self.west_sell_hold_started.is_some()
-    }
-
-    #[inline]
-    pub(crate) fn buy_hold_in_progress(&self) -> bool {
-        self.confirm_buy_hold_started.is_some()
-    }
-
     /// Normalized hold progress for rumble / HUD ring (0..=1). Stays at 0 while invalid.
     #[inline]
     pub(crate) fn sell_hold_progress(
@@ -194,6 +184,11 @@ impl ShopScene {
         .is_some()
     }
 
+    #[inline]
+    pub(crate) fn sell_hold_in_progress(&self) -> bool {
+        self.west_sell_hold_started.is_some()
+    }
+
     /// Normalized hold progress for rumble / HUD ring (0..=1). Stays at 0 while invalid.
     pub(crate) fn buy_hold_progress(
         &self,
@@ -210,6 +205,11 @@ impl ShopScene {
                 / crate::ui::prompt_hold_ring::hold_act_seconds())
             .clamp(0.0, 1.0),
         )
+    }
+
+    #[inline]
+    pub(crate) fn buy_hold_in_progress(&self) -> bool {
+        self.confirm_buy_hold_started.is_some()
     }
 
     pub(crate) fn buy_hold_valid_for(

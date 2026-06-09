@@ -6,6 +6,7 @@ use crate::game::run::RunState;
 use crate::game::wall_stats::{
     abundance_color, abundance_state, AbundanceState, ModifierBreakdown, SelectedTileDetails,
 };
+use crate::render::doc_tile_camera::TOP_DOWN_TILE_ROTATION;
 use crate::render::draw_cmd::{ShowcaseTilePlacement, UiFrame};
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign};
@@ -83,7 +84,7 @@ pub fn draw_wall_detail_panel(
                 preview_rect[1] + preview_rect[3] * 0.52,
                 0.0,
             ],
-            rotation: [0.0, 0.0, std::f32::consts::PI],
+            rotation: TOP_DOWN_TILE_ROTATION,
             scale: 1.0,
             size_px: preview_rect[2].min(preview_rect[3]) * 0.82,
             brightness: if exhausted { 0.40 } else { 1.0 },

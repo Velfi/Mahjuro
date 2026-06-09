@@ -14,6 +14,7 @@ pub mod consumable_prop_scale;
 pub mod cpu_profiler;
 pub mod debug_overlay_ui;
 pub mod decal;
+pub mod doc_tile_camera;
 pub mod draw_cmd;
 #[cfg(feature = "windowed")]
 pub mod flame_debug_overlay;

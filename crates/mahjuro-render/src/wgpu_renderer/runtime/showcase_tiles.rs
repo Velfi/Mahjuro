@@ -216,8 +216,9 @@ impl WgpuRenderer {
 
                 let opacity = p.opacity.clamp(0.0, 1.0);
                 let translucent = opacity < 0.999;
-                let casts_shadow =
-                    !frame.showcase_render_hints.zodiac_celebration_no_shadow && !translucent;
+                let casts_shadow = !frame.showcase_render_hints.zodiac_celebration_no_shadow
+                    && !frame.showcase_render_hints.doc_tile_no_shadow
+                    && !translucent;
                 pending.push(PendingShowcaseTile {
                     instance: Tile3dInstance {
                         model: model.to_cols_array(),

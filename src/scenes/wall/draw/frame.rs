@@ -1,7 +1,8 @@
 //! Full strategic Wall frame assembly.
 
 use crate::game::wall_stats::selected_tile_details;
-use crate::render::draw_cmd::{CameraParams, UiFrame};
+use crate::render::doc_tile_camera::wall_ledger_camera;
+use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::scenes::{BackgroundId, DrawCtx};
@@ -34,15 +35,7 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, ctx: DrawCtx<'_>) -> UiF
         user: 0,
     });
 
-    let cam_scale = h / 1600.0;
-    frame.camera_override = Some(CameraParams {
-        eye: [0.0, 0.0, 2040.0 * cam_scale],
-        target: [0.0, 0.0, 0.0],
-        up: [0.0, 1.0, 0.0],
-        fovy_deg: 45.0,
-        clip_near: None,
-        clip_far: None,
-    });
+    frame.camera_override = Some(wall_ledger_camera(h));
     frame.scene_lighting.push_smooth(PointLight {
         pos: [w * 0.5, h * -0.10, h * 1.40],
         radius: h * 3.0,

@@ -16,6 +16,9 @@ use crate::core::yaku::YakuKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::archive_glb;
+use crate::render::doc_tile_camera::wall_ledger_camera;
+use crate::render::draw_cmd::ShowcaseTilePlacement;
+use crate::render::wgpu_renderer::PointLight;
 use crate::render::draw_cmd::{
     CameraParams, Object3d, Object3dKind, UiFrame, camera_facing_euler_xyz_rad,
 };
@@ -665,6 +668,16 @@ impl ArchiveScene {
             _ => base_cam,
         };
         frame.camera_override = Some(final_cam);
+        if chronicle_dashboard {
+            frame.camera_override = Some(wall_ledger_camera(h));
+            frame.showcase_render_hints.doc_tile_no_shadow = true;
+            frame.scene_lighting.set_smooth_points(vec![PointLight {
+                pos: [w * 0.5, h * -0.10, h * 1.40],
+                radius: h * 3.0,
+                color: color::rgb(color::PARCHMENT),
+                intensity: 1.2,
+            }]);
+        }
 
         frame.fisheye_strength = 0.0;
 
@@ -1002,6 +1015,7 @@ impl ArchiveScene {
             let mut chart_quads: Vec<GpuInstance> = Vec::new();
             let mut chart_squircle_quads: Vec<GpuInstance> = Vec::new();
             let mut chart_images: Vec<crate::render::draw_cmd::ImageQuad> = Vec::new();
+            let mut chronicle_tiles: Vec<ShowcaseTilePlacement> = Vec::new();
             crate::ui::chronicle_dashboard::push_chronicle_dashboard(
                 w,
                 h,
@@ -1018,6 +1032,7 @@ impl ArchiveScene {
                 &mut chart_squircle_quads,
                 text_labels,
                 &mut chart_images,
+                &mut chronicle_tiles,
             );
             frame.gradient_quads(std::iter::once(dim));
             frame.quads(chart_quads);
@@ -1026,6 +1041,9 @@ impl ArchiveScene {
             }
             if !chart_images.is_empty() {
                 frame.image_quads(chart_images);
+            }
+            if !chronicle_tiles.is_empty() {
+                frame.showcase_tile_batch(chronicle_tiles);
             }
         }
         if !hud_plaques.is_empty() {
@@ -3444,15 +3462,7 @@ fn archive_tab_hit_rects(w: f32, h: f32, env_h: f32, cam: &CameraParams) -> Vec<
 fn camera_view_proj(w: f32, h: f32, cam: &CameraParams) -> glam::Mat4 {
     let w = w.max(1.0);
     let h = h.max(1.0);
-    let aspect = w / h;
-    let view = glam::Mat4::look_at_rh(
-        glam::Vec3::from_array(cam.eye),
-        glam::Vec3::from_array(cam.target),
-        glam::Vec3::from_array(cam.up),
-    );
-    let (near, far) = cam.clip_planes(h);
-    let proj = glam::Mat4::perspective_rh(cam.fovy_deg.to_radians(), aspect, near, far);
-    proj * view
+    cam.view_proj(w, h)
 }
 
 /// Project a world-space point to screen pixels.

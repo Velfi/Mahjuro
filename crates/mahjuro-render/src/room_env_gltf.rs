@@ -379,7 +379,7 @@ impl RoomGltfEmbeddedCamera {
             eye: ((self.eye - center_doc) * s).to_array(),
             target: ((self.target - center_doc) * s).to_array(),
             up: up.to_array(),
-            fovy_deg: self.fovy_deg,
+            projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: self.fovy_deg },
             clip_near: None,
             clip_far: None,
         }
@@ -755,11 +755,11 @@ pub fn room_camera_fit_fovy_for_corners(
         true
     };
 
-    if projects_ok(cam.fovy_deg) {
+    if projects_ok(cam.fovy_deg()) {
         return cam;
     }
 
-    let mut lo = cam.fovy_deg;
+    let mut lo = cam.fovy_deg();
     let mut hi = 170.0_f32;
     if !projects_ok(hi) {
         return cam;
@@ -776,7 +776,7 @@ pub fn room_camera_fit_fovy_for_corners(
             lo = mid;
         }
     }
-    cam.fovy_deg = hi;
+    cam.set_fovy_deg(hi);
     cam
 }
 

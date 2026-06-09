@@ -2,7 +2,6 @@
 
 use crate::core::tile::Suit;
 use crate::render::theme::{metrics, typography};
-use crate::ui::controller_hints::screen_footer_reserve;
 use crate::ui::widget::PLAIN_TEXT_LINE_STEP_MUL;
 
 use crate::scenes::header_chrome::{HeaderChromeMetrics, HeaderTitleLayout};
@@ -26,9 +25,10 @@ pub fn read_boost(window_w: f32, window_h: f32) -> f32 {
     (window_w.min(window_h) / 720.0).clamp(1.0, 1.38)
 }
 
-/// Reserve space for the standard control-hint footer row.
-pub fn wall_footer_reserve(w: f32, h: f32) -> f32 {
-    screen_footer_reserve(w, h) + h * 0.006
+/// Reserve space for the wall screen's text-only help strip (no icon hints).
+pub fn wall_footer_reserve(_w: f32, h: f32) -> f32 {
+    let font_px = typography::size(typography::H42, h);
+    text_line_h(font_px) + h * 0.012
 }
 
 pub struct WallLayout {

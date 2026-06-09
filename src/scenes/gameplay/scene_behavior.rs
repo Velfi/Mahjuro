@@ -662,7 +662,7 @@ impl SceneBehavior for GameplayScene {
         let mut frame = UiFrame::new();
         let fov_pop_offset = self.final_tiles_fov_pop_offset_deg(now);
         // Keep authored GLB framing at rest; only apply temporary pop animation.
-        scene_camera.fovy_deg = (scene_camera.fovy_deg - fov_pop_offset).max(1.0);
+        scene_camera.set_fovy_deg((scene_camera.fovy_deg() - fov_pop_offset).max(1.0));
         frame.camera_override = Some(scene_camera);
         (discard_btn_rect, play_btn_rect, trigger_btn_rect) =
             super::glb_anchors::reproject_action_button_rects(
