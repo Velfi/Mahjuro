@@ -451,8 +451,33 @@ pub fn is_complete_winning_hand(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
     is_full_hand(tiles, sets) || is_chiitoitsu(sets) || is_kokushi_musou(sets, tiles)
 }
 
-/// True when a structure cash-in would inject Chicken Hand: complete shape and
-/// no detected yaku in the player's unlocked pool.
+/// Yaku that would score on cash-in after applying the run's unlocked pool
+/// (mirrors [`crate::core::scoring::dora_yaku_layer`] filtering).
+pub fn yaku_after_pool_filter(
+    tiles: &[Tile],
+    sets: &[DetectedMeld],
+    round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
+    original_tiles: Option<&[Tile]>,
+    available: &[YakuKind],
+) -> Vec<YakuKind> {
+    let all = detect_yaku_with_wind(tiles, sets, round_wind, bonus_round_wind, original_tiles);
+    if available.is_empty() {
+        all
+    } else {
+        all.into_iter()
+            .filter(|y| {
+                *y == YakuKind::KokushiMusou
+                    || *y == YakuKind::ChickenHand
+                    || available.contains(y)
+            })
+            .collect()
+    }
+}
+
+/// True when a structure cash-in would inject Chicken Hand: no detected yaku
+/// in the player's unlocked pool after filtering (same gate as
+/// [`crate::core::scoring::dora_yaku_layer`]).
 pub fn would_inject_chicken_hand(
     tiles: &[Tile],
     sets: &[DetectedMeld],
@@ -460,14 +485,58 @@ pub fn would_inject_chicken_hand(
     bonus_round_wind: Option<u8>,
     available: &[YakuKind],
 ) -> bool {
-    if sets.is_empty() || !is_complete_winning_hand(tiles, sets) {
+    would_inject_chicken_hand_with_original(
+        tiles,
+        sets,
+        round_wind,
+        bonus_round_wind,
+        None,
+        available,
+    )
+}
+
+/// Like [`would_inject_chicken_hand`], but honors pre-wildcard tiles for
+/// composition yaku (WildWinds, etc.).
+pub fn would_inject_chicken_hand_with_original(
+    tiles: &[Tile],
+    sets: &[DetectedMeld],
+    round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
+    original_tiles: Option<&[Tile]>,
+    available: &[YakuKind],
+) -> bool {
+    if sets.is_empty() {
         return false;
     }
-    let detected = detect_yaku_with_wind(tiles, sets, round_wind, bonus_round_wind, None);
-    if available.is_empty() {
-        return detected.is_empty();
-    }
-    detected.iter().all(|y| !available.contains(y))
+    yaku_after_pool_filter(
+        tiles,
+        sets,
+        round_wind,
+        bonus_round_wind,
+        original_tiles,
+        available,
+    )
+    .is_empty()
+}
+
+/// Whether the in-play bone tablet row should show the chicken-hand selector.
+/// Same gate as a manual structure cash-in ([`would_inject_chicken_hand_with_original`]).
+pub fn would_show_chicken_tablet(
+    tiles: &[Tile],
+    sets: &[DetectedMeld],
+    round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
+    original_tiles: Option<&[Tile]>,
+    available: &[YakuKind],
+) -> bool {
+    would_inject_chicken_hand_with_original(
+        tiles,
+        sets,
+        round_wind,
+        bonus_round_wind,
+        original_tiles,
+        available,
+    )
 }
 
 /// Kokushi Musō: twelve [`MeldKind::Single`] and one [`MeldKind::Pair`], using exactly
@@ -1828,5 +1897,96 @@ mod tests {
             18,
             "YakuKind::all() must list every variant — update if you added one"
         );
+    }
+
+    #[test]
+    fn would_show_chicken_tablet_for_partial_two_pair_structure() {
+        let tiles = vec![
+            t(Suit::Pinzu, 5, 0),
+            t(Suit::Pinzu, 5, 1),
+            t(Suit::Dragon, 1, 2),
+            t(Suit::Dragon, 1, 3),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![0, 1],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![2, 3],
+            },
+        ];
+        let available: Vec<YakuKind> = YakuKind::all().to_vec();
+        assert!(would_inject_chicken_hand(&tiles, &sets, None, None, &available));
+        assert!(would_show_chicken_tablet(
+            &tiles,
+            &sets,
+            None,
+            None,
+            None,
+            &available,
+        ));
+    }
+
+    #[test]
+    fn would_show_chicken_tablet_false_for_full_hand_only() {
+        let tiles = vec![
+            t(Suit::Manzu, 1, 0),
+            t(Suit::Manzu, 2, 1),
+            t(Suit::Manzu, 3, 2),
+            t(Suit::Manzu, 4, 3),
+            t(Suit::Manzu, 5, 4),
+            t(Suit::Manzu, 6, 5),
+            t(Suit::Manzu, 7, 6),
+            t(Suit::Manzu, 8, 7),
+            t(Suit::Manzu, 9, 8),
+            t(Suit::Pinzu, 2, 9),
+            t(Suit::Pinzu, 3, 10),
+            t(Suit::Pinzu, 4, 11),
+            t(Suit::Pinzu, 5, 12),
+            t(Suit::Pinzu, 5, 13),
+        ];
+        let sets = validate_selection(&tiles).expect("complete hand");
+        let available: Vec<YakuKind> = YakuKind::all().to_vec();
+        assert!(!would_show_chicken_tablet(
+            &tiles,
+            &sets,
+            None,
+            None,
+            None,
+            &available,
+        ));
+        assert!(!would_inject_chicken_hand(&tiles, &sets, None, None, &available));
+    }
+
+    #[test]
+    fn would_show_chicken_tablet_false_when_pattern_yaku_active() {
+        let tiles = vec![
+            t(Suit::Manzu, 2, 0),
+            t(Suit::Manzu, 3, 1),
+            t(Suit::Manzu, 4, 2),
+            t(Suit::Manzu, 5, 3),
+            t(Suit::Manzu, 6, 4),
+            t(Suit::Manzu, 7, 5),
+            t(Suit::Souzu, 3, 6),
+            t(Suit::Souzu, 4, 7),
+            t(Suit::Souzu, 5, 8),
+            t(Suit::Pinzu, 6, 9),
+            t(Suit::Pinzu, 7, 10),
+            t(Suit::Pinzu, 8, 11),
+            t(Suit::Manzu, 5, 12),
+            t(Suit::Manzu, 5, 13),
+        ];
+        let sets = validate_selection(&tiles).expect("tanyao hand");
+        let available: Vec<YakuKind> = YakuKind::all().to_vec();
+        assert!(!would_show_chicken_tablet(
+            &tiles,
+            &sets,
+            None,
+            None,
+            None,
+            &available,
+        ));
     }
 }

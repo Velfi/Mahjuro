@@ -1126,64 +1126,38 @@ impl GameplayScene {
             let selected_tiles: Vec<_> = run.hand().iter().zip(current_selected.iter()).filter(|&(_, &s)| s).map(|(t, _)| *t).collect();
             
             let mut has_capacity_error = false;
-            let mut bad_ids = rustc_hash::FxHashSet::default();
             let mut meld_index_groups: Vec<Vec<usize>> = Vec::new();
             let mut selection_valid = false;
-            
+
             if !selected_tiles.is_empty() {
-                let id_to_index: rustc_hash::FxHashMap<u32, usize> = run
-                    .hand()
-                    .iter()
-                    .enumerate()
-                    .map(|(i, t)| (t.id, i))
-                    .collect();
-                let (preview_melds, bad_vec, is_valid) =
+                let (preview_melds, _, is_valid) =
                     run.preview_selection_melds(&selected_tiles);
                 selection_valid = is_valid;
-                for &id in &bad_vec {
-                    bad_ids.insert(id);
-                }
-                meld_index_groups = preview_melds
-                    .iter()
-                    .map(|meld| {
-                        let mut group: Vec<usize> = meld
-                            .tile_ids
-                            .iter()
-                            .filter_map(|id| id_to_index.get(id).copied())
-                            .collect();
-                        group.sort_unstable();
-                        group
-                    })
-                    .filter(|group: &Vec<usize>| !group.is_empty())
-                    .collect();
-                meld_index_groups.sort_by_key(|group| group[0]);
 
                 if is_valid {
+                    let id_to_index: rustc_hash::FxHashMap<u32, usize> = run
+                        .hand()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, t)| (t.id, i))
+                        .collect();
+                    meld_index_groups = preview_melds
+                        .iter()
+                        .map(|meld| {
+                            let mut group: Vec<usize> = meld
+                                .tile_ids
+                                .iter()
+                                .filter_map(|id| id_to_index.get(id).copied())
+                                .collect();
+                            group.sort_unstable();
+                            group
+                        })
+                        .filter(|group: &Vec<usize>| !group.is_empty())
+                        .collect();
+                    meld_index_groups.sort_by_key(|group| group[0]);
+
                     if let Some((sets, scoring_tiles)) =
                         run.try_validate_with_wildcards(&selected_tiles)
-                    {
-                        let kongs_after = run
-                            .structure_sets()
-                            .iter()
-                            .chain(sets.iter())
-                            .filter(|s| s.kind == crate::core::hand::MeldKind::Kong)
-                            .count();
-                        use crate::game::game_mode::HAND_SIZE;
-                        if run.structure_tiles().len() + scoring_tiles.len()
-                            > HAND_SIZE + kongs_after
-                            || run.plays_remaining == 0
-                        {
-                            has_capacity_error = true;
-                        }
-                    }
-                } else if !preview_melds.is_empty() {
-                    let contributing_tiles: Vec<_> = selected_tiles
-                        .iter()
-                        .filter(|t| !bad_ids.contains(&t.id))
-                        .copied()
-                        .collect();
-                    if let Some((sets, scoring_tiles)) =
-                        run.try_validate_with_wildcards(&contributing_tiles)
                     {
                         let kongs_after = run
                             .structure_sets()

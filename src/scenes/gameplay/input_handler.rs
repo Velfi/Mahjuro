@@ -1679,6 +1679,46 @@ pub(super) fn structure_strip_callout_anchor(
     })
 }
 
+/// When structure and rack (or selection) together form a complete winning hand,
+/// return the decomposition used for yaku tablets. Tries relic-aware validation
+/// first, then the same best-decomposition picker scoring uses on 14-tile hands.
+fn combined_complete_hand_preview(
+    run: &crate::game::run::RunState,
+    structure_tiles: &[crate::core::tile::Tile],
+    extra_tiles: &[crate::core::tile::Tile],
+    round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
+) -> Option<(
+    Vec<crate::core::hand::DetectedMeld>,
+    Vec<crate::core::tile::Tile>,
+    Vec<crate::core::tile::Tile>,
+)> {
+    use crate::core::yaku::{detect_yaku_best_decomposition, is_complete_winning_hand};
+
+    let mut combined: Vec<crate::core::tile::Tile> =
+        structure_tiles.iter().copied().collect();
+    combined.extend(extra_tiles.iter().copied());
+    if combined.is_empty() {
+        return None;
+    }
+
+    if let Some((sets, scoring_tiles)) = GameEngine::validate_with_wildcards(run, &combined)
+        && is_complete_winning_hand(&scoring_tiles, &sets)
+    {
+        return Some((sets, scoring_tiles, combined));
+    }
+
+    let rules = run.validation_rules_for_structure_commits();
+    if let Some((sets, _)) =
+        detect_yaku_best_decomposition(&combined, &rules, round_wind, bonus_round_wind, None)
+        && is_complete_winning_hand(&combined, &sets)
+    {
+        return Some((sets, combined.clone(), combined));
+    }
+
+    None
+}
+
 /// Build the yaku progress panel (previews, structure showcase tiles) and yaku tablets.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_yaku_panel_and_tablets(
@@ -1733,9 +1773,32 @@ pub(super) fn build_yaku_panel_and_tablets(
     };
 
     if selected_tiles_for_yaku.is_empty() {
-        yaku_preview_original_tiles = base_structure_tiles.clone();
-        yaku_preview_effective_tiles = base_structure_tiles;
-        yaku_preview_sets = base_structure_sets;
+        if let Some((sets, scoring_tiles, combined)) = combined_complete_hand_preview(
+            run,
+            run.structure_tiles(),
+            interaction.hand.as_slice(),
+            round_wind_for_yaku,
+            bonus_round_wind_for_yaku,
+        ) {
+            yaku_preview_original_tiles = GameplayScene::display_tiles(combined, run);
+            yaku_preview_effective_tiles =
+                GameplayScene::display_tiles(scoring_tiles, run);
+            yaku_preview_sets = sets;
+        } else {
+            yaku_preview_original_tiles = base_structure_tiles.clone();
+            yaku_preview_effective_tiles = base_structure_tiles;
+            yaku_preview_sets = base_structure_sets;
+        }
+    } else if let Some((sets, scoring_tiles, combined)) = combined_complete_hand_preview(
+        run,
+        run.structure_tiles(),
+        &selected_tiles_for_yaku,
+        round_wind_for_yaku,
+        bonus_round_wind_for_yaku,
+    ) {
+        yaku_preview_original_tiles = GameplayScene::display_tiles(combined, run);
+        yaku_preview_effective_tiles = GameplayScene::display_tiles(scoring_tiles, run);
+        yaku_preview_sets = sets;
     } else if let Some((selected_sets, selected_scoring_tiles)) = wildcard_result.as_ref() {
         yaku_preview_original_tiles = base_structure_tiles.clone();
         yaku_preview_original_tiles.extend(GameplayScene::display_tiles(
@@ -1749,23 +1812,6 @@ pub(super) fn build_yaku_panel_and_tablets(
         ));
         yaku_preview_sets = base_structure_sets;
         yaku_preview_sets.extend(selected_sets.iter().cloned());
-    }
-
-    // Played melds alone cover cash-in preview; when the row is still empty,
-    // treat structure + rack as one hand so a complete chicken shape shows its
-    // tablet before every tile is played to structure.
-    if yaku_preview_sets.is_empty() && selected_tiles_for_yaku.is_empty() {
-        let mut combined: Vec<crate::core::tile::Tile> =
-            run.structure_tiles().iter().copied().collect();
-        combined.extend(interaction.hand.iter().copied());
-        if combined.len() == run.mode.hand_size
-            && let Some((sets, scoring_tiles)) = GameEngine::validate_with_wildcards(run, &combined)
-        {
-            yaku_preview_original_tiles = GameplayScene::display_tiles(combined, run);
-            yaku_preview_effective_tiles =
-                GameplayScene::display_tiles(scoring_tiles, run);
-            yaku_preview_sets = sets;
-        }
     }
 
     let previews = if yaku_preview_sets.is_empty() {
@@ -1892,11 +1938,12 @@ pub(super) fn build_yaku_panel_and_tablets(
     // If the selection is a valid hand but triggers no yaku, show a
     // chicken-hand tablet so the player knows the hand is legal.
     let is_chicken_hand = !yaku_preview_sets.is_empty()
-        && crate::core::yaku::would_inject_chicken_hand(
+        && crate::core::yaku::would_show_chicken_tablet(
             &yaku_preview_effective_tiles,
             &yaku_preview_sets,
             round_wind_for_yaku,
             bonus_round_wind_for_yaku,
+            Some(yaku_preview_original_tiles.as_slice()),
             &gameplay.available_yaku,
         );
 
