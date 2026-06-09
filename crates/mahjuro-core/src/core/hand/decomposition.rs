@@ -473,6 +473,42 @@ fn collect_sequence_with_flower(
         found.pop();
         flower_pool.push(fid);
     }
+    // Wrapping sequences (8-9-1, 9-1-2) with a flower filling one missing rank.
+    if allow_wrap {
+        collect_wrap_sequence_with_flower(remaining, flower_pool, found, allow_wrap, first, on_found);
+    }
+}
+
+fn collect_wrap_sequence_with_flower(
+    remaining: &[Tile],
+    flower_pool: &mut Vec<u32>,
+    found: &mut Vec<DetectedMeld>,
+    allow_wrap: bool,
+    first: &Tile,
+    on_found: &mut dyn FnMut(&[DetectedMeld]),
+) {
+    for [present_rank, _flower_rank] in wrap_flower_partner_ranks(first.rank) {
+        let Some(present_offset) = remaining[1..]
+            .iter()
+            .position(|t| t.suit == first.suit && t.rank == present_rank)
+        else {
+            continue;
+        };
+        let present_idx = present_offset + 1;
+        let fid = flower_pool.pop().expect("flower pool exhausted");
+        found.push(DetectedMeld {
+            kind: MeldKind::Sequence,
+            tile_ids: vec![remaining[0].id, remaining[present_idx].id, fid],
+        });
+        let rest: Vec<Tile> = remaining
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| (i != 0 && i != present_idx).then_some(*t))
+            .collect();
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        found.pop();
+        flower_pool.push(fid);
+    }
 }
 
 /// Detect a Chiitoitsu (seven pairs) hand: exactly 14 tiles, decomposing into
@@ -948,5 +984,77 @@ fn try_sequence_with_flower(
         }
     }
 
+    // Wrapping sequences (8-9-1, 9-1-2) with a flower filling one missing rank.
+    if allow_wrap
+        && try_wrap_sequence_with_flower(remaining, flower_pool, found, allow_wrap, first)
+    {
+        return true;
+    }
+
     false
+}
+
+/// Try a wrapping sequence (8-9-1, 9-1-2) where a flower supplies one of the
+/// two ranks the player is missing; the partner rank must be present as a real
+/// tile in `remaining`.
+fn try_wrap_sequence_with_flower(
+    remaining: &[Tile],
+    flower_pool: &mut Vec<u32>,
+    found: &mut Vec<DetectedMeld>,
+    allow_wrap: bool,
+    first: &Tile,
+) -> bool {
+    for [present_rank, _flower_rank] in wrap_flower_partner_ranks(first.rank) {
+        let Some(present_offset) = remaining[1..]
+            .iter()
+            .position(|t| t.suit == first.suit && t.rank == present_rank)
+        else {
+            continue;
+        };
+        let present_idx = present_offset + 1;
+        let fid = flower_pool
+            .pop()
+            .expect("flower pool exhausted mid-backtrack");
+        let set = DetectedMeld {
+            kind: MeldKind::Sequence,
+            tile_ids: vec![remaining[0].id, remaining[present_idx].id, fid],
+        };
+        found.push(set);
+        let mut rest: Vec<Tile> = Vec::with_capacity(remaining.len() - 2);
+        for (i, t) in remaining.iter().enumerate() {
+            if i != 0 && i != present_idx {
+                rest.push(*t);
+            }
+        }
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+            return true;
+        }
+        found.pop();
+        flower_pool.push(fid);
+    }
+    false
+}
+
+/// For a wrapping sequence anchored at `rank`, enumerate `[present, flower]`
+/// rank pairs: the partner rank that must exist among the real tiles, and the
+/// rank a flower fills. Each wrap pattern (8-9-1, 9-1-2) contributes both ways
+/// of choosing which of its two non-anchor ranks the flower supplies.
+fn wrap_flower_partner_ranks(rank: u8) -> Vec<[u8; 2]> {
+    let wrap_patterns: &[[u8; 3]] = match rank {
+        1 => &[[9, 1, 2], [8, 9, 1]],
+        2 => &[[9, 1, 2]],
+        8 => &[[8, 9, 1]],
+        9 => &[[8, 9, 1], [9, 1, 2]],
+        _ => &[],
+    };
+    let mut out = Vec::new();
+    for pattern in wrap_patterns {
+        let others: Vec<u8> = pattern.iter().copied().filter(|&r| r != rank).collect();
+        if others.len() != 2 {
+            continue;
+        }
+        out.push([others[0], others[1]]);
+        out.push([others[1], others[0]]);
+    }
+    out
 }

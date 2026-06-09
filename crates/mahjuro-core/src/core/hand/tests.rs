@@ -393,6 +393,98 @@ fn sequence_wrap_912() {
 }
 
 #[test]
+fn sequence_wrap_flower_891_fills_eight() {
+    // 9m + 1m + flower under SequenceWrap → 8-9-1 (flower fills rank 8).
+    let tiles = vec![
+        t(Suit::Manzu, 9, 0),
+        t(Suit::Manzu, 1, 1),
+        t(Suit::Flower, 1, 100),
+    ];
+    // Without wrap there is no legal flower sequence for 1m + 9m.
+    assert!(validate_selection(&tiles).is_none());
+    let sets = validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
+    assert_eq!(sets.len(), 1);
+    assert_eq!(sets[0].kind, MeldKind::Sequence);
+    assert!(sets[0].tile_ids.contains(&100)); // flower consumed
+}
+
+#[test]
+fn sequence_wrap_flower_912_fills_one() {
+    // 9m + 2m + flower under SequenceWrap → 9-1-2 (flower fills rank 1).
+    let tiles = vec![
+        t(Suit::Manzu, 9, 0),
+        t(Suit::Manzu, 2, 1),
+        t(Suit::Flower, 1, 100),
+    ];
+    assert!(validate_selection(&tiles).is_none());
+    let sets = validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
+    assert_eq!(sets.len(), 1);
+    assert_eq!(sets[0].kind, MeldKind::Sequence);
+    assert!(sets[0].tile_ids.contains(&100));
+}
+
+#[test]
+fn sequence_wrap_flower_891_fills_nine() {
+    // 8m + 1m + flower under SequenceWrap → 8-9-1 (flower fills rank 9).
+    let tiles = vec![
+        t(Suit::Manzu, 8, 0),
+        t(Suit::Manzu, 1, 1),
+        t(Suit::Flower, 1, 100),
+    ];
+    assert!(validate_selection(&tiles).is_none());
+    let sets = validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
+    assert_eq!(sets.len(), 1);
+    assert_eq!(sets[0].kind, MeldKind::Sequence);
+    assert!(sets[0].tile_ids.contains(&100));
+}
+
+#[test]
+fn sequence_wrap_flower_requires_wrap_rule() {
+    // The wrapped flower hands above must stay invalid when wrap is off,
+    // even with NoFlowerWildcards absent — they only become legal under wrap.
+    let hands = [
+        vec![
+            t(Suit::Manzu, 9, 0),
+            t(Suit::Manzu, 1, 1),
+            t(Suit::Flower, 1, 100),
+        ],
+        vec![
+            t(Suit::Manzu, 9, 0),
+            t(Suit::Manzu, 2, 1),
+            t(Suit::Flower, 1, 100),
+        ],
+        vec![
+            t(Suit::Manzu, 8, 0),
+            t(Suit::Manzu, 1, 1),
+            t(Suit::Flower, 1, 100),
+        ],
+    ];
+    for hand in hands {
+        assert!(validate_selection_with_rules(&hand, &[]).is_none());
+    }
+}
+
+#[test]
+fn enumerate_finds_wrapped_flower_sequence() {
+    // The collect path (enumerate_decompositions) must surface the same
+    // wrapped flower sequences that validation now accepts.
+    let tiles = vec![
+        t(Suit::Manzu, 9, 0),
+        t(Suit::Manzu, 1, 1),
+        t(Suit::Flower, 1, 100),
+    ];
+    let alts = enumerate_decompositions(&tiles, &[RuleModifier::SequenceWrap]);
+    assert!(!alts.is_empty());
+    assert!(alts.iter().any(|decomp| {
+        decomp.len() == 1
+            && decomp[0].kind == MeldKind::Sequence
+            && decomp[0].tile_ids.contains(&100)
+    }));
+    // Without wrap, no decomposition exists.
+    assert!(enumerate_decompositions(&tiles, &[]).is_empty());
+}
+
+#[test]
 fn no_sequences_rejects_sequence() {
     let tiles = vec![
         t(Suit::Manzu, 1, 0),

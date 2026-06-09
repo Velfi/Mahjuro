@@ -410,3 +410,64 @@ fn wrap_sequence_needs(rank: u8) -> &'static [[u8; 2]] {
         _ => &[],
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::tile::Suit;
+
+    fn t(suit: Suit, rank: u8, id: u32) -> Tile {
+        Tile::new(suit, rank, id)
+    }
+
+    /// Every candidate mask the enumerator emits must validate under the same
+    /// rules — otherwise commits get offered then rejected. This previously
+    /// regressed for wrapped flower sequences under `SequenceWrap`.
+    fn assert_masks_validate(hand: &[Tile], rules: &[RuleModifier]) {
+        for mask in enumerate_candidate_play_masks(hand, rules) {
+            let tiles: Vec<Tile> = hand
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &tile)| (mask & (1 << i) != 0).then_some(tile))
+                .collect();
+            assert!(
+                validate_selection_with_rules(&tiles, rules).is_some(),
+                "candidate mask {mask:b} ({tiles:?}) failed validation under {rules:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn wrapped_flower_sequences_are_offered_and_valid() {
+        let rules = [RuleModifier::SequenceWrap];
+        // 9m + 1m + flower → 8-9-1 / 9-1-2; 9m + 2m + flower → 9-1-2;
+        // 8m + 1m + flower → 8-9-1.
+        let hands = [
+            vec![
+                t(Suit::Manzu, 9, 0),
+                t(Suit::Manzu, 1, 1),
+                t(Suit::Flower, 1, 100),
+            ],
+            vec![
+                t(Suit::Manzu, 9, 0),
+                t(Suit::Manzu, 2, 1),
+                t(Suit::Flower, 1, 100),
+            ],
+            vec![
+                t(Suit::Manzu, 8, 0),
+                t(Suit::Manzu, 1, 1),
+                t(Suit::Flower, 1, 100),
+            ],
+        ];
+        for hand in hands {
+            // The full-hand mask must be enumerated and must validate.
+            let masks = enumerate_candidate_play_masks(&hand, &rules);
+            let full: u32 = (1 << hand.len()) - 1;
+            assert!(
+                masks.contains(&full),
+                "expected wrapped flower sequence to be offered for {hand:?}",
+            );
+            assert_masks_validate(&hand, &rules);
+        }
+    }
+}
