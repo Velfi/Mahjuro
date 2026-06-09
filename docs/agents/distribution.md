@@ -20,7 +20,8 @@ cargo build --release
 cargo build --release --no-default-features --features game,dist-mas
 scripts/package-macos-store.sh [--universal] [--sign]
 
-# Microsoft Store
+# Microsoft Store (Windows)
+.\scripts\fetch-dxc-redist.ps1   # or rely on package-windows-store.ps1 (runs this automatically)
 cargo build --release --no-default-features --features game,dist-msstore --target x86_64-pc-windows-msvc
 pwsh scripts/package-windows-store.ps1 -Configuration Release
 ```

@@ -15,6 +15,7 @@ Short pointers to deeper context. Read the linked file before working in the are
 - [Memory / loading budgets](docs/agents/memory-loading-budgets.md) — Phase 0 baseline capture (`scripts/memory-loading-baseline.sh`), soak metrics, targets.
 - [Room shadows & baking](docs/agents/room-shadows-and-baking.md) — offline `.msh` / `.mgi`, live prop shadows, rebake commands, headless tools, relic RLC1.
 - [macOS dylibs / app bundle](docs/agents/macos-dylibs.md) — `libsteam_api.dylib`, static SDL3, `@loader_path` / `@rpath`, CI vs `package-macos.sh`.
+- [Windows build / DXC redist](docs/agents/windows-build.md) — `dxcompiler.dll` + `dxil.dll`, DX12 vs FXC, release packaging.
 - [Multi-store distribution](docs/agents/distribution.md) — `dist-steam` / `dist-mas` / `dist-msstore`, achievements, sandbox I/O, packaging.
 - [Mac App Store release](docs/agents/macos-app-store.md) — Connect alignment, signing, Transporter upload, review notes.
 - [Microsoft Store release](docs/agents/windows-app-store.md) — Partner Center, MSIX signing, upload.
