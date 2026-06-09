@@ -7,6 +7,30 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.6.1 — 2026-06-09
+
+### Changed
+- When you switch to controller or keyboard navigation, the mouse cursor hides and no longer affects focus or clicks until you move the mouse again.
+- When a play could be split into melds more than one way, the game now picks the grouping that would score highest with your current structure at cash-in, not just the first valid split.
+- The Wall Ledger visuals have been updated.
+- Skip tags are now called **Temptations** throughout the game — hallway rewards, guide, and related UI.
+- Room and gameplay 3D scenes now share texture data across repeated props (leaves, score rollers, shop shelves, and similar), cutting memory use during loading—especially on the main menu and shop.
+- Right-click an item in the shop or archive to inspect it, and right-click again to leave inspect mode.
+- In the shop, mouse players click to buy and hold to sell; controller and keyboard players hold Confirm to buy and hold West / Q to sell.
+- Shop restock fees now rise by the season's base restock cost each time you restock in one visit (e.g. ¥3 → ¥6 → ¥9 in Spring), instead of a flat +¥5 every time.
+- The Yaku Journal detail panel now puts level, name, rule, and payout on one header line, with the example hand directly underneath.
+
+### Fixed
+- The chicken-hand yaku tablet now appears when a cash-in would score Chicken Hand — including partial structures with no other yaku, such as two played pairs.
+- Credits can now be scrolled with the d-pad (and keyboard arrows), matching the on-screen hint.
+- Low memory mode on integrated GPUs (including Intel Graphics) no longer runs out of video memory when loading the main menu or shop, and the bottom of the UI is no longer clipped on 768p laptop displays.
+- Marquee drag-select now picks the tiles you actually swept over: rectangular blocks in the decimation picker, and a straight run along your hand when the cursor skips slots.
+- Marquee-selecting tiles across the ends of your hand now follows the wrap-around path instead of selecting every tile in between.
+- Inspect preview in the shop now plays an item's sound when one exists, and the preview hint is hidden for items without audio.
+- Transform talismans (Souzu, Pinzu, Manzu, Honors, Wildflower, Conformity) now permanently change the tiles in your hand for the rest of the run — those copies stay transformed when they show up again in later chambers.
+- The Back button on the Yaku Journal now responds to mouse clicks, not just keyboard or gamepad confirm.
+- Invalid tile selections no longer show a structure meld preview — only playable groupings are lifted onto the rail before you commit.
+
 ## 0.6.0 — 2026-06-07
 
 - maintenance, development, and bugfixes.
