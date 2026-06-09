@@ -24,7 +24,6 @@ pub(crate) struct ScoringLayerOut<'a> {
 
 /// Options for [`super::pre_yaku_layer::apply_pre_yaku_scoring`].
 pub(crate) struct PreYakuLayerOpts<'a> {
-    pub pair_double: bool,
     pub has_triplet_boost: bool,
     pub flower_yen: &'a mut i32,
 }

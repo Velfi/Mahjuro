@@ -39,13 +39,11 @@ mod cases {
         let selected = vec![false; hand.len()];
         let mode = GameMode {
             starting_yen: 0,
-            starting_rules: vec![],
             starting_yaku: vec![],
             ..GameMode::standard()
         };
         RunState {
             wing: 1,
-            available_rules: vec![],
             available_yaku: vec![],
             available_relics: default_available_relics(),
             base_target: mode.base_target,

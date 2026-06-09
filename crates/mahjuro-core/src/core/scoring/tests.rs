@@ -4,7 +4,6 @@ use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
     ScoreRoundBundle, ScoreTileBundle,
 };
-use crate::core::rules::RuleModifier;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 
 fn ctx_with(relics: &RelicState, scored_last_turn: bool) -> ScoreContext<'_> {
@@ -576,20 +575,6 @@ fn kindling_adds_mult_from_prior_cashins_this_chamber() {
     // 2 prior cash-ins × 0.4 = 0.8 → base 1.0 + 0.8 = 1.8
     assert_eq!(breakdown.final_mult, 1.8);
     assert!(breakdown.steps.iter().any(|s| s.source == "Kindling"));
-}
-
-#[test]
-fn pair_double_rule_adds_chips() {
-    let hand = vec![Tile::new(Suit::Pinzu, 5, 0), Tile::new(Suit::Pinzu, 5, 1)];
-    let sets = find_pairs_and_triplets(&hand);
-    let breakdown = score_sets(
-        &hand,
-        &sets,
-        &ctx_with(&RelicState::default(), false),
-        &[RuleModifier::PairDoubleScore],
-    );
-    assert_eq!(breakdown.final_chips, 55);
-    assert_eq!(breakdown.total, 55);
 }
 
 #[test]

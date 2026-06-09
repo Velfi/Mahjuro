@@ -230,8 +230,6 @@ pub struct RunState {
     pub last_breakdown: Option<ScoreBreakdown>,
     /// Yaku available at the player's progression level.
     pub available_yaku: Vec<crate::core::yaku::YakuKind>,
-    /// Rules available at the player's progression level.
-    pub available_rules: Vec<RuleModifier>,
     /// Relics that were unlocked when this run started. Shop rolls and
     /// random relic rewards use this snapshot so new unlocks wait until
     /// the next game.
@@ -804,7 +802,7 @@ impl RunState {
             ),
             base_target: mode.base_target,
             relics,
-            round_rules: mode.starting_rules.clone(),
+            round_rules: Vec::new(),
             run_number: 1,
             wing: 1,
             plays_remaining: starting_plays,
@@ -816,7 +814,6 @@ impl RunState {
             upcoming_chamber: ChamberKind::Small,
             last_breakdown: None,
             available_yaku: mode.starting_yaku.clone(),
-            available_rules: mode.starting_rules.clone(),
             available_relics: default_available_relics(),
             scored_last_turn: false,
             full_hand_played_this_round: false,
@@ -911,7 +908,6 @@ impl RunState {
 
     pub fn apply_progression(&mut self, progress: &crate::core::progression::PlayerProgress) {
         self.available_yaku = progress.available_yaku();
-        self.available_rules = progress.available_rules();
         self.available_relics = progress.available_relics();
         self.profile_yaku_scored = progress.yaku_times_scored.keys().copied().collect();
     }

@@ -24,7 +24,6 @@ impl RunState {
         let mut state = Self::new(mode.clone());
         state.mode = mode;
         state.available_yaku = Vec::new();
-        state.available_rules = state.mode.starting_rules.clone();
         state.base_target = LESSONS_TARGET;
         state.target_score = LESSONS_TARGET;
         state.yen = state.mode.starting_yen as i32;

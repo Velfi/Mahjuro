@@ -62,7 +62,6 @@ pub(crate) fn apply_pre_yaku_scoring(
     } = *input;
     let ScoringLayerOut { chips, mult, steps } = out;
     let PreYakuLayerOpts {
-        pair_double,
         has_triplet_boost,
         flower_yen,
     } = opts;
@@ -189,13 +188,6 @@ pub(crate) fn apply_pre_yaku_scoring(
                     push_chips(steps, chips, *mult, "High Tide", 10);
                 }
             }
-        }
-    }
-
-    if pair_double {
-        let pair_count = sets.iter().filter(|s| s.kind == MeldKind::Pair).count() as i32;
-        if pair_count > 0 {
-            push_chips(steps, chips, *mult, "Pair Double (rule)", 45 * pair_count);
         }
     }
 

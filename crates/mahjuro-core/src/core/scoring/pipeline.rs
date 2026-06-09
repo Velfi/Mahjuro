@@ -43,7 +43,6 @@ fn score_sets_inner(
     let mut mult: f64 = 1.0;
     let mut flower_yen: i32 = 0;
 
-    let pair_double = rules.contains(&RuleModifier::PairDoubleScore);
     let honor_triple = rules.contains(&RuleModifier::HonorTripleScore);
     let no_seq_bonus = rules.contains(&RuleModifier::NoSequenceBonus);
     let pairs_zero = rules.contains(&RuleModifier::PairsScoreZero);
@@ -97,7 +96,6 @@ fn score_sets_inner(
             steps: &mut steps,
         },
         super::layer_input::PreYakuLayerOpts {
-            pair_double,
             has_triplet_boost,
             flower_yen: &mut flower_yen,
         },
