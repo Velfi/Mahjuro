@@ -335,7 +335,7 @@ fn main_menu_camera_resolve(
             eye: [0.0, -h * 1.2, h * 0.45],
             target: [0.0, h * 0.04, h * 0.14],
             up: [0.0, 0.0, 1.0],
-            fovy_deg: 52.0,
+            projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: 52.0 },
             clip_near: None,
             clip_far: None,
         });
@@ -388,18 +388,11 @@ fn victory_moon_z_offset_for_uv_y(
         eye: [0.0, -standoff, 0.0],
         target: [0.0, 0.0, 0.0],
         up: [0.0, 0.0, 1.0],
-        fovy_deg,
+        projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg },
         clip_near: Some(0.01),
         clip_far: Some(window_h * crate::draw_cmd::SCENE_PERSPECTIVE_FAR_MUL),
     };
-    let aspect = window_w / window_h.max(1.0);
-    let cam_pos = glam::Vec3::from_array(cam.eye);
-    let look_target = glam::Vec3::from_array(cam.target);
-    let up_v = glam::Vec3::from_array(cam.up);
-    let view_mat = glam::Mat4::look_at_rh(cam_pos, look_target, up_v);
-    let (near, far) = cam.clip_planes(window_h);
-    let proj = glam::Mat4::perspective_rh(fovy_deg.to_radians(), aspect, near, far);
-    let view_proj = proj * view_mat;
+    let view_proj = cam.view_proj(window_w, window_h);
 
     let screen_y = |z: f32| {
         let clip = view_proj * glam::Vec4::new(0.0, 0.0, z, 1.0);
@@ -481,7 +474,7 @@ pub fn victory_summary_moon_setup(
                 eye: [0.0, -standoff, 0.0],
                 target: [0.0, 0.0, 0.0],
                 up: [0.0, 0.0, 1.0],
-                fovy_deg: FOVY_DEG,
+                projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: FOVY_DEG },
                 clip_near: Some(0.01),
                 clip_far: Some(window_h * crate::draw_cmd::SCENE_PERSPECTIVE_FAR_MUL),
             },
@@ -523,7 +516,7 @@ pub fn main_menu_moon_trailer_start_camera(
             eye: eye.to_array(),
             target: moon.to_array(),
             up: end_cam.up,
-            fovy_deg: end_cam.fovy_deg,
+            projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: end_cam.fovy_deg() },
             clip_near: end_cam.clip_near,
             clip_far: end_cam.clip_far,
         })

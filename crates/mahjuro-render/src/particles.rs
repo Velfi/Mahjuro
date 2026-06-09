@@ -87,7 +87,7 @@ fn rain_view_lateral(cam: &CameraParams, pos: Vec3) -> f32 {
 impl RainSpawnVolume {
     /// Horizontal half-width of the view frustum at `depth` along view forward (world units).
     pub fn frustum_lateral_half_at(cam: &CameraParams, depth: f32, aspect: f32) -> f32 {
-        depth.max(0.0) * (cam.fovy_deg.to_radians() * 0.5).tan() * aspect.max(1e-6)
+        depth.max(0.0) * (cam.fovy_deg().to_radians() * 0.5).tan() * aspect.max(1e-6)
     }
 
     fn random_pos_z(self) -> f32 {
@@ -276,7 +276,7 @@ mod rain_spawn_bias_tests {
             eye: [0.0, -200.0, 100.0],
             target: [0.0, 200.0, 100.0],
             up: [0.0, 0.0, 1.0],
-            fovy_deg: 50.0,
+            projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: 50.0 },
             clip_near: None,
             clip_far: None,
         }

@@ -38,6 +38,8 @@ pub struct ShowcaseTileProjectParams<'a> {
     pub rotation_xyz_rad: [f32; 3],
     pub placement_scale: f32,
     pub size_px: f32,
+    /// Guide / tutorial ray→`z=0`; wall ledger / yaku journal use [`pixel_to_world`].
+    pub use_ray_plane: bool,
 }
 
 /// Inputs for [`compute_pack_reveal_row_layout`].
@@ -129,6 +131,7 @@ pub fn showcase_tile_merge_projected_group(
             rotation_xyz_rad,
             placement_scale,
             size_px,
+            use_ray_plane: true,
         });
         merged = merged.merge(bounds);
     }
@@ -163,7 +166,7 @@ pub fn showcase_tile_projected_bounds_px(
         p.center_px[0],
         p.center_px[1],
         p.center_px[2],
-        true,
+        p.use_ray_plane,
     );
 
     let tile_short_px = p.size_px * 0.85 * p.placement_scale;
@@ -244,6 +247,7 @@ pub fn compute_pack_reveal_row_layout(p: &PackRevealRowLayoutParams<'_>) -> Pack
             rotation_xyz_rad: p.rotation_xyz_rad,
             placement_scale: 1.0,
             size_px: size,
+            use_ray_plane: true,
         })
     };
 

@@ -67,6 +67,7 @@ impl ShopInspectPresenter {
             collection_tonemap_context: false,
             modal_relic_staging: false,
             zodiac_celebration_no_shadow: false,
+            doc_tile_no_shadow: false,
         }
     }
 

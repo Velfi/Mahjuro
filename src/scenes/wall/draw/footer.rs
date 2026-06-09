@@ -16,7 +16,8 @@ pub fn draw_wall_footer_controls(
     input_mode: InputMode,
 ) {
     let reserve = wall_footer_reserve(w, h);
-    let line_h = reserve * 0.72;
+    let font_px = typography::tier_at_most(reserve * 0.42, h);
+    let line_h = text_line_h(font_px);
     let y = h - reserve + (reserve - line_h) * 0.5;
     frame.quad(crate::render::wgpu_renderer::GpuInstance {
         rect: [0.0, h - reserve, w, reserve],
@@ -29,7 +30,6 @@ pub fn draw_wall_footer_controls(
         user: 0,
     });
 
-    let font_px = typography::tier_at_most(reserve * 0.42, h);
     push_text(
         texts,
         [

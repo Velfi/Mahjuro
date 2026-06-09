@@ -5,6 +5,7 @@
 //! autoscale; keep ≤6 categorical colors from [`color::chart`](crate::render::theme::color::chart);
 //! precompute comparisons (avg line, numeric labels) instead of asking viewers to do visual math.
 
+use crate::render::decal::{load_mono_font, load_ui_font, measure_label_advances};
 use crate::render::theme::color;
 use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
@@ -326,6 +327,43 @@ pub fn push_chart_time_axis_labels(
             ..Default::default()
         },
     );
+}
+
+/// Measured advance width for a single-line label at `font_px`.
+pub fn measure_text_width(text: &str, font_px: f32, mono: bool) -> f32 {
+    let font = if mono {
+        load_mono_font().or_else(load_ui_font)
+    } else {
+        load_ui_font()
+    };
+    let Some(font) = font else {
+        return pill_label_width(text, font_px);
+    };
+    let h = font_px.max(8.0).round().max(1.0) as u32;
+    let (_, _, advances) = measure_label_advances(font, text, 8192, h, Some(font_px));
+    advances.iter().sum()
+}
+
+/// Trim `text` with an ellipsis when it would exceed `max_w` at `font_px`.
+pub fn truncate_text_to_width(text: &str, max_w: f32, font_px: f32, mono: bool) -> String {
+    if max_w <= 0.0 {
+        return String::new();
+    }
+    if measure_text_width(text, font_px, mono) <= max_w {
+        return text.to_string();
+    }
+    const ELLIPSIS: &str = "…";
+    if measure_text_width(ELLIPSIS, font_px, mono) > max_w {
+        return ELLIPSIS.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    for take in (0..chars.len()).rev() {
+        let candidate: String = chars.iter().take(take).collect::<String>() + ELLIPSIS;
+        if measure_text_width(&candidate, font_px, mono) <= max_w {
+            return candidate;
+        }
+    }
+    ELLIPSIS.to_string()
 }
 
 /// Heuristic width for a single-line pill or caption at `font_px`.
@@ -781,5 +819,24 @@ mod sparkline_tests {
         let tall_frac = (tall as f32 / max_v as f32).clamp(0.0, 1.0);
         assert!(tall_frac > frac);
         assert!((tall_frac - frac - 0.1).abs() < 0.001);
+    }
+}
+
+#[cfg(test)]
+mod text_fit_tests {
+    use super::*;
+
+    #[test]
+    fn truncate_text_to_width_keeps_short_copy() {
+        let out = truncate_text_to_width("Peak 77.6 k cp", 240.0, 14.0, true);
+        assert_eq!(out, "Peak 77.6 k cp");
+    }
+
+    #[test]
+    fn truncate_text_to_width_ellipsis_long_ordeal_name() {
+        let out = truncate_text_to_width("The Iconoclast", 48.0, 14.0, false);
+        assert!(out.ends_with('…'));
+        assert!(out.len() < "The Iconoclast".len());
+        assert!(measure_text_width(&out, 14.0, false) <= 48.0 + 0.5);
     }
 }

@@ -209,7 +209,7 @@ pub fn camera_params(h: f32) -> CameraParams {
         eye: [0.0, -200.0 * cam_scale, 2040.0 * cam_scale],
         target: [0.0, -50.0 * cam_scale, 0.0],
         up: [0.0, 0.0, 1.0],
-        fovy_deg: 45.0,
+        projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: 45.0 },
         clip_near: None,
         clip_far: None,
     }

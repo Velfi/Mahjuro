@@ -244,7 +244,7 @@ mod tests {
             eye: [0.0, -1.0, 0.5],
             target: [0.0, 0.0, 0.5],
             up: [0.0, 0.0, 1.0],
-            fovy_deg: 50.0,
+            projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: 50.0 },
             clip_near: None,
             clip_far: None,
         };
@@ -252,7 +252,7 @@ mod tests {
             eye: [0.0, -5.0, 1.0],
             target: [0.0, 0.0, 0.2],
             up: [0.0, 0.0, 1.0],
-            fovy_deg: 55.0,
+            projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: 55.0 },
             clip_near: None,
             clip_far: None,
         };

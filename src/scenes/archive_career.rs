@@ -863,15 +863,29 @@ pub fn format_chips(n: u64) -> String {
 }
 
 /// Compact score magnitude for narrow Chronicle columns and chart callouts.
+///
+/// Values over 999 use the three most significant digits with a `k` / `M` / `B` suffix
+/// (e.g. `1_000` → `1.00 k`, `1_000_000` → `1.00 M`).
 fn format_score_magnitude(n: u64) -> String {
-    if n >= 10_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
+    if n <= 999 {
+        return n.to_string();
+    }
+
+    let (divisor, suffix) = if n >= 1_000_000_000 {
+        (1_000_000_000.0, "B")
     } else if n >= 1_000_000 {
-        format!("{:.2}M", n as f64 / 1_000_000.0)
-    } else if n >= 100_000 {
-        format!("{:.0}k", n as f64 / 1_000.0)
+        (1_000_000.0, "M")
     } else {
-        format_score(n)
+        (1_000.0, "k")
+    };
+
+    let v = n as f64 / divisor;
+    if v >= 100.0 {
+        format!("{:.0} {suffix}", v.round())
+    } else if v >= 10.0 {
+        format!("{:.1} {suffix}", v)
+    } else {
+        format!("{:.2} {suffix}", v)
     }
 }
 
@@ -973,8 +987,12 @@ mod tests {
     #[test]
     fn chronicle_score_formatters_include_units() {
         assert_eq!(super::format_chips(40_368), "40,368 chips");
-        assert_eq!(super::format_run_log_score(347_000), "347k cp");
-        assert_eq!(super::format_chips_compact(1_500_000), "1.50M cp");
+        assert_eq!(super::format_run_log_score(999), "999 cp");
+        assert_eq!(super::format_run_log_score(1_000), "1.00 k cp");
+        assert_eq!(super::format_run_log_score(72_000), "72.0 k cp");
+        assert_eq!(super::format_run_log_score(347_000), "347 k cp");
+        assert_eq!(super::format_chips_compact(1_500_000), "1.50 M cp");
+        assert_eq!(super::format_run_log_score(1_000_000), "1.00 M cp");
         assert_eq!(super::format_wing(4), "W4");
         assert_eq!(super::format_han(206), "206 han");
     }

@@ -1261,6 +1261,31 @@ fn measure_tinted_run(font: &fontdue::Font, segments: &[(String, [f32; 4])], fon
         .sum()
 }
 
+/// Largest font size ≤ `target_px` so tinted segments fit `max_w`.
+fn fit_tinted_line_font_px(
+    font: &fontdue::Font,
+    segments: &[(String, [f32; 4])],
+    max_w: f32,
+    target_px: f32,
+) -> f32 {
+    let min_px = 8.0f32;
+    let target_px = target_px.max(min_px);
+    if max_w <= 0.0 || measure_tinted_run(font, segments, target_px) <= max_w {
+        return target_px;
+    }
+    let mut lo = min_px;
+    let mut hi = target_px;
+    for _ in 0..12 {
+        let mid = (lo + hi) * 0.5;
+        if measure_tinted_run(font, segments, mid) <= max_w {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
 fn push_tinted_segment_run(
     out: &mut Vec<TextLabel>,
     segments: &[(String, [f32; 4])],
@@ -1414,13 +1439,14 @@ pub fn push_colored_line_clipped(
         });
         return;
     };
-    let total_w = measure_tinted_run(font, &segments, font_px);
+    let fit_px = fit_tinted_line_font_px(font, &segments, clipped[2], font_px);
+    let total_w = measure_tinted_run(font, &segments, fit_px);
     let mut x = line_start_x(clipped[0], clipped[2], total_w, align);
     push_tinted_segment_run(
         out,
         &segments,
         font,
-        font_px,
+        fit_px,
         clipped[1],
         clipped[3],
         &mut x,

@@ -81,6 +81,7 @@ impl TilePackPresenter {
             collection_tonemap_context: false,
             modal_relic_staging: false,
             zodiac_celebration_no_shadow: false,
+            doc_tile_no_shadow: false,
         }
     }
 
@@ -920,7 +921,7 @@ pub(crate) fn pack_closeup_world_extents(
     let dist = (eye - center).length().max(1.0);
     let h = win_h.max(1e-6);
     let w = win_w.max(1e-6);
-    let fov_y = cam.fovy_deg.to_radians();
+    let fov_y = cam.fovy_deg().to_radians();
     let visible_h = 2.0 * dist * (fov_y * 0.5).tan();
     let visible_w = visible_h * (w / h);
     let world_h = (screen_h_px / h) * visible_h;
@@ -1032,14 +1033,7 @@ mod tests {
         let h = 1080.0_f32;
         let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
         let cam = shop_celebration_camera(w, h, env_h);
-        let aspect = w / h;
-        let eye = Vec3::from_array(cam.eye);
-        let target = Vec3::from_array(cam.target);
-        let up = Vec3::from_array(cam.up);
-        let view = Mat4::look_at_rh(eye, target, up);
-        let (near, far) = cam.clip_planes(h);
-        let proj = Mat4::perspective_rh(cam.fovy_deg.to_radians(), aspect, near, far);
-        let view_proj = proj * view;
+        let view_proj = cam.view_proj(w, h);
 
         let mut layout_engine = UiLayout::new();
         let layout = layout_engine.solve(w, h);

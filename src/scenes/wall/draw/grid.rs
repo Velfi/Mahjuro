@@ -9,6 +9,7 @@ use crate::game::wall_ledger::{WallLedgerFaceGroup, WallTileEntry};
 use crate::game::wall_stats::{
     abundance_color, abundance_state_for_display, AbundanceState, WallCountView, WallStats,
 };
+use crate::render::doc_tile_camera::TOP_DOWN_TILE_ROTATION;
 use crate::render::draw_cmd::ShowcaseTilePlacement;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign};
@@ -343,7 +344,7 @@ fn push_cell_tile_inner(
             tile_area[1] + tile_area[3] * 0.5,
             0.0,
         ],
-        rotation: [0.0, 0.0, std::f32::consts::PI],
+        rotation: TOP_DOWN_TILE_ROTATION,
         scale: if exhausted { EXHAUSTED_SCALE } else { 1.0 },
         size_px: tile_size,
         brightness: if exhausted { EXHAUSTED_BRIGHTNESS } else { 1.0 },

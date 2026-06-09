@@ -4,6 +4,10 @@
 
 use crate::core::tile::{Suit, Tile};
 use crate::persistence::TilePreset;
+use crate::render::doc_tile_camera::{
+    DOC_TILE_ROTATION, doc_tile_camera, legacy_guide_perspective_camera,
+    legacy_tutorial_perspective_camera,
+};
 use crate::render::draw_cmd::{CameraParams, DrawCmd, ShowcaseTilePlacement, UiFrame};
 use crate::render::showcase_tile_layout::{
     ShowcaseTileLabelGaps, showcase_tile_group_label_anchor, showcase_tile_merge_projected_group,
@@ -18,7 +22,6 @@ use super::{
 };
 
 const CLICK_BACK: u32 = 0xE010;
-const TILE_ROTATION: [f32; 3] = [0.0, 0.0, std::f32::consts::PI];
 
 struct TileGroupSpec {
     label: &'static str,
@@ -46,44 +49,33 @@ const DEMO_GROUPS: &[TileGroupSpec] = &[
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CameraPreset {
-    Guide,
-    Tutorial,
+    DocOrtho,
+    LegacyGuidePerspective,
+    LegacyTutorialPerspective,
 }
 
 impl CameraPreset {
     fn label(self) -> &'static str {
         match self {
-            Self::Guide => "Guide camera",
-            Self::Tutorial => "Tutorial camera",
+            Self::DocOrtho => "Doc ortho",
+            Self::LegacyGuidePerspective => "Legacy guide perspective",
+            Self::LegacyTutorialPerspective => "Legacy tutorial perspective",
         }
     }
 
     fn next(self) -> Self {
         match self {
-            Self::Guide => Self::Tutorial,
-            Self::Tutorial => Self::Guide,
+            Self::DocOrtho => Self::LegacyGuidePerspective,
+            Self::LegacyGuidePerspective => Self::LegacyTutorialPerspective,
+            Self::LegacyTutorialPerspective => Self::DocOrtho,
         }
     }
 
     fn params(self, h: f32) -> CameraParams {
-        let cam_scale = h / 1600.0;
         match self {
-            Self::Guide => CameraParams {
-                eye: [0.0, -200.0 * cam_scale, 2040.0 * cam_scale],
-                target: [0.0, -50.0 * cam_scale, 0.0],
-                up: [0.0, 0.0, 1.0],
-                fovy_deg: 45.0,
-                clip_near: None,
-                clip_far: None,
-            },
-            Self::Tutorial => CameraParams {
-                eye: [0.0, -220.0 * cam_scale, 1960.0 * cam_scale],
-                target: [0.0, -40.0 * cam_scale, 0.0],
-                up: [0.0, 0.0, 1.0],
-                fovy_deg: 45.0,
-                clip_near: None,
-                clip_far: None,
-            },
+            Self::DocOrtho => doc_tile_camera(h),
+            Self::LegacyGuidePerspective => legacy_guide_perspective_camera(h),
+            Self::LegacyTutorialPerspective => legacy_tutorial_perspective_camera(h),
         }
     }
 }
@@ -141,7 +133,7 @@ impl TileAnchorLabScene {
     pub fn new(has_suspended: bool) -> Self {
         Self {
             has_suspended,
-            camera: CameraPreset::Guide,
+            camera: CameraPreset::DocOrtho,
         }
     }
 
@@ -188,6 +180,7 @@ impl SceneBehavior for TileAnchorLabScene {
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
         frame.camera_override = Some(cam);
+        frame.showcase_render_hints.layout_use_ray_plane_z = true;
 
         frame.scene_lighting.push_smooth(PointLight {
             pos: [w * 0.5, h * 0.38, h * 1.35],
@@ -400,7 +393,7 @@ fn layout_single_tile_group(
         placements.push(ShowcaseTilePlacement {
             tile: Tile::new(suit, rank, *next_id),
             center_pos: [px, center_y, 0.0],
-            rotation: TILE_ROTATION,
+            rotation: DOC_TILE_ROTATION,
             scale: 1.0,
             size_px: tile_size,
             brightness: 1.08,
@@ -423,7 +416,7 @@ fn layout_single_tile_group(
         win_w,
         win_h,
         TilePreset::Chinese,
-        TILE_ROTATION,
+        DOC_TILE_ROTATION,
         1.0,
         tile_size,
         0.0,
@@ -527,10 +520,47 @@ mod tests {
     };
 
     #[test]
-    fn corner_projected_bounds_differ_from_screen_center() {
+    fn doc_ortho_corner_width_matches_center() {
         let w = 1920.0;
         let h = 1080.0;
-        let cam = CameraPreset::Guide.params(h);
+        let cam = doc_tile_camera(h);
+        let tile_size = 48.0;
+        let center_w = showcase_tile_projected_bounds_px(&ShowcaseTileProjectParams {
+            win_w: w,
+            win_h: h,
+            cam: &cam,
+            preset: TilePreset::Chinese,
+            center_px: [w * 0.5, h * 0.5, 0.0],
+            rotation_xyz_rad: DOC_TILE_ROTATION,
+            placement_scale: 1.0,
+            size_px: tile_size,
+            use_ray_plane: true,
+        })
+        .width();
+        let (corner_x, corner_y) = ScreenCorner::TopLeft.tile_center(w, h, tile_size);
+        let corner_w = showcase_tile_projected_bounds_px(&ShowcaseTileProjectParams {
+            win_w: w,
+            win_h: h,
+            cam: &cam,
+            preset: TilePreset::Chinese,
+            center_px: [corner_x, corner_y, 0.0],
+            rotation_xyz_rad: DOC_TILE_ROTATION,
+            placement_scale: 1.0,
+            size_px: tile_size,
+            use_ray_plane: true,
+        })
+        .width();
+        assert!(
+            (center_w - corner_w).abs() < 0.5,
+            "ortho width center {center_w} corner {corner_w}",
+        );
+    }
+
+    #[test]
+    fn legacy_guide_perspective_corner_width_differs_from_center() {
+        let w = 1920.0;
+        let h = 1080.0;
+        let cam = legacy_guide_perspective_camera(h);
         let tile_size = 48.0;
         let center_bounds = showcase_tile_projected_bounds_px(&ShowcaseTileProjectParams {
             win_w: w,
@@ -538,9 +568,10 @@ mod tests {
             cam: &cam,
             preset: TilePreset::Chinese,
             center_px: [w * 0.5, h * 0.5, 0.0],
-            rotation_xyz_rad: TILE_ROTATION,
+            rotation_xyz_rad: DOC_TILE_ROTATION,
             placement_scale: 1.0,
             size_px: tile_size,
+            use_ray_plane: true,
         });
         let (corner_x, corner_y) = ScreenCorner::TopLeft.tile_center(w, h, tile_size);
         let corner_bounds = showcase_tile_projected_bounds_px(&ShowcaseTileProjectParams {
@@ -549,14 +580,15 @@ mod tests {
             cam: &cam,
             preset: TilePreset::Chinese,
             center_px: [corner_x, corner_y, 0.0],
-            rotation_xyz_rad: TILE_ROTATION,
+            rotation_xyz_rad: DOC_TILE_ROTATION,
             placement_scale: 1.0,
             size_px: tile_size,
+            use_ray_plane: true,
         });
         assert!(
             (center_bounds.bottom() - corner_bounds.bottom()).abs() > 0.5
                 || (center_bounds.width() - corner_bounds.width()).abs() > 0.5,
-            "corner tile should project differently from center tile",
+            "legacy perspective corner should differ from center",
         );
     }
 }

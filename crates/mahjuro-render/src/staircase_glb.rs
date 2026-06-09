@@ -151,7 +151,7 @@ fn staircase_camera_resolve(
             eye: [0.0, -h * 1.1, h * 0.42],
             target: [0.0, h * 0.04, h * 0.22],
             up: [0.0, 0.0, 1.0],
-            fovy_deg: 52.0,
+            projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: 52.0 },
             clip_near: None,
             clip_far: None,
         });

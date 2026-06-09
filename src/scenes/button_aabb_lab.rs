@@ -214,7 +214,7 @@ impl SceneBehavior for ButtonAabbLabScene {
                         eye: [0.0, -h * 1.15, h * 0.48],
                         target: [0.0, h * 0.02, h * 0.12],
                         up: [0.0, 0.0, 1.0],
-                        fovy_deg: 50.0,
+                        projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: 50.0 },
                         clip_near: None,
                         clip_far: None,
                     }

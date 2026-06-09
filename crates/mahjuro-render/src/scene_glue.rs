@@ -38,7 +38,7 @@ pub fn shop_celebration_camera(_w: f32, h: f32, _env_h: f32) -> CameraParams {
         eye: [0.0, EYE_Y * cs, EYE_Z * cs],
         target: [0.0, TARGET_Y * cs, TARGET_Z * cs],
         up: [0.0, 0.0, 1.0],
-        fovy_deg: FOVY_DEG,
+        projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: FOVY_DEG },
         clip_near: None,
         clip_far: None,
     }
