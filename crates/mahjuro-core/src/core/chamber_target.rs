@@ -68,13 +68,13 @@ mod tests {
             score_for(1, ChamberKind::Small, DEFAULT_BASE_TARGET),
             DEFAULT_BASE_TARGET
         );
-        assert_eq!(score_for(1, ChamberKind::Big, DEFAULT_BASE_TARGET), 648);
-        assert_eq!(score_for(1, ChamberKind::Ordeal, DEFAULT_BASE_TARGET), 864);
+        assert_eq!(score_for(1, ChamberKind::Big, DEFAULT_BASE_TARGET), 1500);
+        assert_eq!(score_for(1, ChamberKind::Ordeal, DEFAULT_BASE_TARGET), 2000);
     }
 
     #[test]
     fn scales_exponentially_per_wing() {
-        assert_eq!(wing_chip_base(3, DEFAULT_BASE_TARGET), 1131);
-        assert_eq!(score_for(3, ChamberKind::Ordeal, DEFAULT_BASE_TARGET), 2262);
+        assert_eq!(wing_chip_base(3, DEFAULT_BASE_TARGET), 2618);
+        assert_eq!(score_for(3, ChamberKind::Ordeal, DEFAULT_BASE_TARGET), 5236);
     }
 }
