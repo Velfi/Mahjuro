@@ -221,8 +221,25 @@ impl SceneBehavior for CreditsScene {
             }
         }
 
+        let max_scroll = self.scroll.max();
         for action in ctx.actions {
             match action {
+                UiAction::FocusUp => {
+                    if self.back_focused && ctx.input_mode != InputMode::Cursor {
+                        self.back_focused = false;
+                    } else if max_scroll > 0.0 {
+                        self.scroll.scroll_by(-1.0);
+                    }
+                }
+                UiAction::FocusDown => {
+                    if self.back_focused && ctx.input_mode != InputMode::Cursor {
+                        // Keep focus on Back until the player moves up or confirms.
+                    } else if max_scroll > 0.0 && self.scroll.target() < max_scroll - 0.01 {
+                        self.scroll.scroll_by(1.0);
+                    } else if ctx.input_mode != InputMode::Cursor {
+                        self.back_focused = true;
+                    }
+                }
                 UiAction::FocusNext => {
                     if !self.back_focused && ctx.input_mode != InputMode::Cursor {
                         self.back_focused = true;

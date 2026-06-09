@@ -49,6 +49,26 @@ pub fn item_inspect_overlay_play_sound(action: UiAction) -> bool {
     matches!(action, UiAction::Confirm)
 }
 
+/// Whether a per-relic inspect preview stinger ships in the asset bundle.
+#[inline]
+pub fn relic_stinger_asset_exists(rid: crate::core::relic::RelicId) -> bool {
+    let slug = rid.asset_filename().trim_end_matches(".png");
+    let path = format!("audio/relics/{slug}.ogg");
+    crate::asset_path::get(&path).is_some()
+}
+
+/// Whether an [`crate::sfx_id::SfxId`] sample (or variant pool) is present in the asset bundle.
+pub fn sfx_asset_exists(id: crate::sfx_id::SfxId) -> bool {
+    if crate::asset_path::get(&format!("audio/{}", id.filename())).is_some() {
+        return true;
+    }
+    id.variant_filenames().is_some_and(|variants| {
+        variants
+            .iter()
+            .any(|f| crate::asset_path::get(&format!("audio/{f}")).is_some())
+    })
+}
+
 /// Orbit + zoom state for close-up inspection (right stick, triggers, scroll).
 #[derive(Clone, Copy, Debug)]
 pub struct ItemInspectOrbitState {

@@ -101,6 +101,15 @@ impl ShopInspectPresenter {
         const WHEEL_ZOOM: f32 = 0.11;
         self.orbit.zoom = (self.orbit.zoom + ctx.scroll_lines * WHEEL_ZOOM).clamp(ZMIN, ZMAX);
 
+        for &cid in ctx.button_clicks {
+            if cid == shop::SHOP_INSPECT_PREVIEW_ID {
+                if let Some(shop) = ctx.suspended_shop.as_deref() {
+                    shop.push_inspect_artifact_sound_if_present(ctx.run, ctx.bus);
+                }
+                continue;
+            }
+        }
+
         for a in ctx.actions {
             let dir = match a {
                 UiAction::FocusUp => Some(FocusDir::Up),

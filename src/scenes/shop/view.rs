@@ -53,8 +53,9 @@ use crate::scenes::options::OptionsScene;
 use crate::scenes::{ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
 use crate::scenes::{OverlayRequest, Scene, WallLedgerScene};
 use crate::ui::controller_hints::{
-    HintStyle, InlineHintIconSlot, inspect_camera_hint_row, is_hold_buy_hint_key,
-    is_hold_sell_hint_key, push_screen_footer_hint, screen_footer_top, shop_storeroom_footer_row,
+    HintStyle, InlineHintIconSlot, inspect_camera_hint_row, is_confirm_hint_key,
+    is_hold_sell_hint_key, is_shop_buy_hint_key, push_screen_footer_hint, screen_footer_top,
+    shop_storeroom_footer_row,
 };
 use crate::ui::focus_nav::{clamp_rect_to_viewport, push_focus_ring, rect_center};
 use crate::ui::input::InputMode;
@@ -1111,23 +1112,34 @@ pub(crate) fn render_shop_frame(
         });
         let show_hold_sell_hint =
             inspect.is_none() && (shop.west_sell_hold_started.is_some() || hover_sellable);
-        let show_hold_buy_hint =
-            inspect.is_none() && (shop.buy_hold_started.is_some() || hover_buyable);
+        let show_buy_hint = inspect.is_none() && hover_buyable;
         let show_inspect_hint =
             inspect.is_none() && shop.focus.is_some_and(shop_focus_inspectable);
 
         let hint_style = HintStyle::standard(w, h);
+        let show_inspect_preview =
+            inspect_active && shop.shop_inspect_preview_available(ctx.run);
         let hint_row = if inspect_active {
-            inspect_camera_hint_row(ctx.input_mode)
+            inspect_camera_hint_row(ctx.input_mode, show_inspect_preview)
         } else {
             shop_storeroom_footer_row(
                 ctx.input_mode,
-                show_hold_buy_hint,
+                show_buy_hint,
                 show_hold_sell_hint,
                 show_inspect_hint,
             )
         };
         let icon_slots = push_screen_footer_hint(&mut frame, &ctx, hint_row, hint_style);
+        if inspect_active
+            && show_inspect_preview
+            && let Some(InlineHintIconSlot { icon_rect, .. }) =
+                icon_slots.iter().find(|s| is_confirm_hint_key(s.key))
+        {
+            frame.buttons.push(ButtonDef::scene(
+                (icon_rect[0], icon_rect[1], icon_rect[2], icon_rect[3]),
+                super::SHOP_INSPECT_PREVIEW_ID,
+            ));
+        }
         let hint_band_top = screen_footer_top(h, hint_style);
 
         if inspect.is_none() {
@@ -1163,13 +1175,15 @@ pub(crate) fn render_shop_frame(
             push_hold_ring(&mut frame, icon_rect, progress, sell_invalid);
         }
 
+        let show_buy_hold_ring = ctx.input_mode != InputMode::Cursor
+            && (shop.confirm_buy_hold_started.is_some() || hover_buyable);
         if !inspect_active
-            && (shop.buy_hold_started.is_some() || hover_buyable)
+            && show_buy_hold_ring
             && let Some(InlineHintIconSlot { icon_rect, .. }) =
-                icon_slots.iter().find(|s| is_hold_buy_hint_key(s.key))
+                icon_slots.iter().find(|s| is_shop_buy_hint_key(s.key))
         {
-            let buy_invalid =
-                shop.buy_hold_started.is_some() && !shop.buy_hold_valid_for(ctx.run, &shop_rm);
+            let buy_invalid = shop.confirm_buy_hold_started.is_some()
+                && !shop.buy_hold_valid_for(ctx.run, &shop_rm);
             let progress = shop
                 .buy_hold_progress(now, ctx.run, &shop_rm)
                 .unwrap_or(0.0);
@@ -1262,9 +1276,10 @@ fn hover_tooltip_content(
     } else {
         0
     };
+    let restock_cost = scene.restock_cost(mode.season);
     let restock_affordable = matches!(scene.mode, ShopMode::Standard)
-        && (scene.restock_cost == 0
-            || shop.yen >= scene.restock_cost as i32
+        && (restock_cost == 0
+            || shop.yen >= restock_cost as i32
             || i_got_a_guy_charges > 0);
 
     let tuple_opt = match hit {
@@ -1408,7 +1423,7 @@ fn hover_tooltip_content(
                     String::new(),
                     color::CHAMPAGNE,
                 )
-            } else if scene.restock_cost == 0 {
+            } else if restock_cost == 0 {
                 (
                     "Restock".to_string(),
                     "Refresh the shop once at no gold cost.".to_string(),
@@ -1423,14 +1438,14 @@ fn hover_tooltip_content(
                     color::GOLD,
                 )
             } else {
-                let cta = if shop.yen >= scene.restock_cost as i32 {
-                    format!("¥{}", scene.restock_cost)
+                let cta = if shop.yen >= restock_cost as i32 {
+                    format!("¥{}", restock_cost)
                 } else {
-                    format!("${} (have ¥{})", scene.restock_cost, shop.display_yen)
+                    format!("${} (have ¥{})", restock_cost, shop.display_yen)
                 };
                 (
                     "Restock".to_string(),
-                    format!("Refresh shop for ¥{}", scene.restock_cost),
+                    format!("Refresh shop for ¥{}", restock_cost),
                     cta,
                     if restock_affordable {
                         color::GOLD

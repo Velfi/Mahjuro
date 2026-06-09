@@ -319,14 +319,20 @@ impl HintStyle {
 }
 
 fn inspect_exit_bind(input_mode: InputMode) -> HintBind {
-    HintBind::alternatives(
-        "exit",
-        vec![HintKey::for_input(
-            input_mode,
-            UiAction::NorthFacePress,
-            "keyboard_e",
-        )],
-    )
+    match input_mode {
+        InputMode::Controller => HintBind::alternatives(
+            "exit",
+            vec![HintKey::Action(UiAction::NorthFacePress)],
+        ),
+        InputMode::Cursor => HintBind::alternatives(
+            "exit",
+            vec![HintKey::Keyboard("mouse_right")],
+        ),
+        InputMode::Keyboard => HintBind::alternatives(
+            "exit",
+            vec![HintKey::Keyboard("keyboard_e")],
+        ),
+    }
 }
 
 fn inspect_orbit_bind(input_mode: InputMode) -> HintBind {
@@ -372,14 +378,15 @@ fn inspect_zoom_bind(input_mode: InputMode) -> HintBind {
 }
 
 /// Camera + exit controls while item inspect is active (item cycling uses normal focus nav).
-pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
-    HintRow::new()
+pub fn inspect_camera_hint_row(input_mode: InputMode, show_preview: bool) -> Vec<HintSegment> {
+    let mut row = HintRow::new()
         .push(inspect_orbit_bind(input_mode).into())
         .sep()
-        .push(inspect_zoom_bind(input_mode).into())
-        .sep()
-        .push(confirm_bind(input_mode, "preview").into())
-        .sep()
+        .push(inspect_zoom_bind(input_mode).into());
+    if show_preview {
+        row = row.sep().push(confirm_bind(input_mode, "preview").into());
+    }
+    row.sep()
         .push(inspect_exit_bind(input_mode).into())
         .into_segments()
 }
@@ -471,36 +478,54 @@ fn help_bind(input_mode: InputMode) -> HintBind {
 }
 
 fn inspect_bind(input_mode: InputMode) -> HintBind {
-    HintBind::alternatives(
-        "inspect",
-        vec![HintKey::for_input(
-            input_mode,
-            UiAction::NorthFacePress,
-            "keyboard_e",
-        )],
-    )
+    match input_mode {
+        InputMode::Controller => HintBind::alternatives(
+            "inspect",
+            vec![HintKey::Action(UiAction::NorthFacePress)],
+        ),
+        InputMode::Cursor => HintBind::alternatives(
+            "inspect",
+            vec![HintKey::Keyboard("mouse_right")],
+        ),
+        InputMode::Keyboard => HintBind::alternatives(
+            "inspect",
+            vec![HintKey::Keyboard("keyboard_e")],
+        ),
+    }
 }
 
 fn hold_sell_bind(input_mode: InputMode) -> HintBind {
-    HintBind::alternatives(
-        "hold sell",
-        vec![HintKey::for_input(
-            input_mode,
-            UiAction::WestFacePress,
-            "keyboard_q",
-        )],
-    )
+    match input_mode {
+        InputMode::Cursor => HintBind::alternatives(
+            "hold sell",
+            vec![HintKey::Keyboard("mouse_left")],
+        ),
+        _ => HintBind::alternatives(
+            "hold sell",
+            vec![HintKey::for_input(
+                input_mode,
+                UiAction::WestFacePress,
+                "keyboard_q",
+            )],
+        ),
+    }
 }
 
-fn hold_buy_bind(input_mode: InputMode) -> HintBind {
-    HintBind::alternatives(
-        "hold buy",
-        vec![HintKey::for_input(
-            input_mode,
-            UiAction::Confirm,
-            "keyboard_return",
-        )],
-    )
+fn buy_bind(input_mode: InputMode) -> HintBind {
+    match input_mode {
+        InputMode::Cursor => HintBind::alternatives(
+            "buy",
+            vec![HintKey::Keyboard("mouse_left")],
+        ),
+        _ => HintBind::alternatives(
+            "hold buy",
+            vec![HintKey::for_input(
+                input_mode,
+                UiAction::Confirm,
+                "keyboard_return",
+            )],
+        ),
+    }
 }
 
 fn gameplay_select_bind(input_mode: InputMode) -> HintBind {
@@ -564,16 +589,16 @@ fn gameplay_cash_in_bind(input_mode: InputMode) -> HintBind {
     )
 }
 
-/// Storeroom browse: optional hold-to-buy / hold-to-sell, then inspect when focused.
+/// Storeroom browse: optional buy / hold-to-sell, then inspect when focused.
 pub fn shop_storeroom_footer_row(
     input_mode: InputMode,
-    show_hold_buy: bool,
+    show_buy: bool,
     show_hold_sell: bool,
     show_inspect: bool,
 ) -> Vec<HintSegment> {
     let mut row = HintRow::new();
-    if show_hold_buy {
-        row = row.push(hold_buy_bind(input_mode).into());
+    if show_buy {
+        row = row.push(buy_bind(input_mode).into());
         if show_hold_sell || show_inspect {
             row = row.sep();
         }
@@ -1050,19 +1075,33 @@ pub struct InlineHintIconSlot {
     pub icon_rect: [f32; 4],
 }
 
-/// Whether `key` is the face/key glyph for shop hold-to-sell (West / Q).
+/// Whether `key` is the face/key glyph for shop hold-to-sell (West / Q / mouse hold).
 pub fn is_hold_sell_hint_key(key: HintKey) -> bool {
     matches!(
         key,
-        HintKey::Action(UiAction::WestFacePress) | HintKey::Keyboard("keyboard_q")
+        HintKey::Action(UiAction::WestFacePress)
+            | HintKey::Keyboard("keyboard_q")
+            | HintKey::Keyboard("mouse_left")
     )
 }
 
-/// Whether `key` is the face/key glyph for shop hold-to-buy (Confirm / Enter).
-pub fn is_hold_buy_hint_key(key: HintKey) -> bool {
+/// Whether `key` is the face/key glyph for shop buy (Confirm / Enter / click).
+pub fn is_shop_buy_hint_key(key: HintKey) -> bool {
     matches!(
         key,
-        HintKey::Action(UiAction::Confirm) | HintKey::Keyboard("keyboard_return")
+        HintKey::Action(UiAction::Confirm)
+            | HintKey::Keyboard("keyboard_return")
+            | HintKey::Keyboard("mouse_left")
+    )
+}
+
+/// Whether `key` is the face/key glyph for confirm (South / Enter / Space).
+pub fn is_confirm_hint_key(key: HintKey) -> bool {
+    matches!(
+        key,
+        HintKey::Action(UiAction::Confirm)
+            | HintKey::Keyboard("keyboard_return")
+            | HintKey::Keyboard("keyboard_space")
     )
 }
 

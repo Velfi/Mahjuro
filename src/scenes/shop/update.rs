@@ -73,7 +73,7 @@ impl ShopScene {
         if matches!(hit, ShopHit::Dish(id) if id == PICK_RESTOCK_PROP) {
             if !self.restock_exit_active()
                 && self.mode == ShopMode::Standard
-                && ctx.run.can_afford_shop_restock(self.restock_cost)
+                && ctx.run.can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
             {
                 self.restock(ctx.run, ctx.bus);
             }
@@ -91,6 +91,13 @@ impl ShopScene {
             &self.zodiac_items,
             &self.talisman_items,
             &shop,
+        ) && shop_buy_action_valid(
+            action,
+            ctx.run,
+            &self.items,
+            &self.zodiac_items,
+            &self.talisman_items,
+            &self.pack_items,
         ) {
             self.apply_buy_action(
                 action,
@@ -173,34 +180,75 @@ impl ShopScene {
         false
     }
 
-    /// Play the focused stock item's bespoke audio (Confirm / A), when a relic stinger exists.
+    /// Play the focused stock item's bespoke audio (Confirm / A), when a stinger exists.
+    pub(crate) fn shop_inspect_preview_available(&self, run: &crate::game::run::RunState) -> bool {
+        self.shop_inspect_preview_event(run).is_some()
+    }
+
     pub(crate) fn push_inspect_artifact_sound_if_present(
         &self,
         run: &crate::game::run::RunState,
         bus: &mut crate::game::event_bus::EventBus,
     ) {
-        let Some(focus) = self.focus else {
-            return;
-        };
-        let ShopFocus::Relic(idx) = focus else {
-            return;
-        };
+        if let Some(ev) = self.shop_inspect_preview_event(run) {
+            bus.push(ev);
+        }
+    }
+
+    fn shop_inspect_preview_event(
+        &self,
+        run: &crate::game::run::RunState,
+    ) -> Option<crate::game::event_bus::GameEvent> {
+        use crate::core::consumable::Consumable;
+        use crate::game::event_bus::GameEvent;
+        use crate::scenes::object3d_inspect::{relic_stinger_asset_exists, sfx_asset_exists};
+        use crate::sfx_id::SfxId;
+
+        let focus = self.focus?;
         let shop = GameEngine::read_shop(run);
-        let n_sale = self.items.len();
-        let rid = if idx < n_sale {
-            self.items.get(idx).map(|it| it.relic)
-        } else {
-            shop.owned_relics
-                .get(idx.saturating_sub(n_sale))
-                .copied()
-        };
-        let Some(rid) = rid else {
-            return;
-        };
-        let slug = rid.asset_filename().trim_end_matches(".png");
-        let path = format!("audio/relics/{slug}.ogg");
-        if crate::asset_path::get(&path).is_some() {
-            bus.push(crate::game::event_bus::GameEvent::PlayRelicStinger(rid));
+        match focus {
+            ShopFocus::Relic(idx) => {
+                let n_sale = self.items.len();
+                let rid = if idx < n_sale {
+                    self.items.get(idx).map(|it| it.relic)
+                } else {
+                    shop.owned_relics
+                        .get(idx.saturating_sub(n_sale))
+                        .copied()
+                }?;
+                relic_stinger_asset_exists(rid).then_some(GameEvent::PlayRelicStinger(rid))
+            }
+            ShopFocus::Ribbon(i) => {
+                let zodiac = if i < self.zodiac_items.len() {
+                    let Consumable::Zodiac(z) = self.zodiac_items.get(i)?.consumable else {
+                        return None;
+                    };
+                    z
+                } else {
+                    let inv_idx =
+                        super::layout::owned_ribbon_inventory_index(i, &self.zodiac_items, &shop)?;
+                    let Consumable::Zodiac(z) = run.consumables.items.get(inv_idx)? else {
+                        return None;
+                    };
+                    *z
+                };
+                let yk = zodiac.yaku();
+                sfx_asset_exists(SfxId::for_yaku(yk))
+                    .then_some(GameEvent::UiSound(SfxId::for_yaku(yk)))
+            }
+            ShopFocus::Talisman(i) => {
+                let sfx = if i < self.talisman_items.len() {
+                    SfxId::TalismanPurchased
+                } else {
+                    super::layout::owned_talisman_inventory_index(i, &self.talisman_items, &shop)?;
+                    SfxId::TalismanUsed
+                };
+                sfx_asset_exists(sfx).then_some(GameEvent::UiSound(sfx))
+            }
+            ShopFocus::Pack(_) => {
+                sfx_asset_exists(SfxId::PackBuy).then_some(GameEvent::UiSound(SfxId::PackBuy))
+            }
+            _ => None,
         }
     }
 
@@ -211,10 +259,34 @@ impl ShopScene {
         self.last_frame = now;
         self.age_secs += dt;
         self.tick_departing_stock(now, ctx.layout.window_h);
+        let sellable_focus = focused_sell_action(
+            self.focus,
+            self.items.len(),
+            &self.zodiac_items,
+            &self.talisman_items,
+            &shop,
+        )
+        .is_some();
+        if ctx.input_mode == InputMode::Cursor
+            && ctx.mouse_left_down
+            && sellable_focus
+            && self.west_sell_hold_started.is_none()
+        {
+            self.west_sell_hold_started = Some(crate::ui::prompt_hold_ring::begin_hold(
+                now,
+                ctx.bus,
+                self.sell_hold_valid_for(&shop),
+            ));
+        }
         let (stick_x, stick_y) = ctx.shop_storeroom_orbit_stick;
-        let orbit_active = ctx.mouse_left_down
-            || stick_x.abs() > 1e-4
-            || stick_y.abs() > 1e-4;
+        let sell_charge = self.west_sell_hold_started.is_some()
+            || (ctx.input_mode == InputMode::Cursor && ctx.mouse_left_down && sellable_focus);
+        let buy_charge = self.confirm_buy_hold_started.is_some();
+        let orbit_active = !sell_charge
+            && !buy_charge
+            && (ctx.mouse_left_down
+                || stick_x.abs() > 1e-4
+                || stick_y.abs() > 1e-4);
         if orbit_active {
             // Subtle pre-inspect peek — much slower and tighter than item-inspect orbit.
             const ORBIT: f32 = 0.55;
@@ -391,7 +463,7 @@ impl ShopScene {
             ctx.overlay_request,
             (w, h),
         );
-        self.try_complete_buy_hold(
+        self.try_complete_confirm_buy_hold(
             now,
             &shop,
             ctx.run,
@@ -419,7 +491,6 @@ impl ShopScene {
                 .is_some()
                     && self.west_sell_hold_started.is_none()
                 {
-                    self.cancel_buy_hold(ctx.bus);
                     self.west_sell_hold_started = Some(crate::ui::prompt_hold_ring::begin_hold(
                         now,
                         ctx.bus,
@@ -433,7 +504,21 @@ impl ShopScene {
                 continue;
             }
             if matches!(a, UiAction::ConfirmRelease) {
-                self.cancel_buy_hold(ctx.bus);
+                self.cancel_all_hold_prompts(ctx.bus);
+                continue;
+            }
+
+            // Keyboard / controller: start hold-to-buy on Confirm press.
+            if matches!(a, UiAction::Confirm)
+                && ctx.input_mode != InputMode::Cursor
+                && self.confirm_buy_hold_started.is_none()
+                && self.buy_hold_valid_for(ctx.run, &shop)
+            {
+                self.confirm_buy_hold_started = Some(crate::ui::prompt_hold_ring::begin_hold(
+                    now,
+                    ctx.bus,
+                    self.buy_hold_valid_for(ctx.run, &shop),
+                ));
                 continue;
             }
 
@@ -503,7 +588,8 @@ impl ShopScene {
                 continue;
             }
 
-            // Controller/keyboard Confirm on shop controls (cursor mode uses immediate picks).
+            // Controller/keyboard Confirm on shop controls. Cursor mode uses
+            // click-to-buy; keyboard/controller buyable stock uses hold-to-buy above.
             if matches!(a, UiAction::Confirm) {
                 if let Some(focus) = self.focus {
                     if matches!(focus, ShopFocus::NextRound) {
@@ -512,7 +598,7 @@ impl ShopScene {
                     if matches!(focus, ShopFocus::Restock)
                         && !self.restock_exit_active()
                         && self.mode == ShopMode::Standard
-                        && ctx.run.can_afford_shop_restock(self.restock_cost)
+                        && ctx.run.can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
                     {
                         self.restock(ctx.run, ctx.bus);
                         continue;
@@ -523,34 +609,40 @@ impl ShopScene {
                         )));
                         return None;
                     }
-                    if let Some(hit) = focus.to_hit() {
-                        if shop_action_for_hit(
-                            hit,
-                            &self.items,
-                            &self.zodiac_items,
-                            &self.talisman_items,
-                            &shop,
-                        )
-                        .is_some()
-                        {
-                            // Hold-to-buy: charging the timer commits the
-                            // purchase (see `try_complete_buy_hold`); a quick
-                            // tap-and-release is cancelled by `ConfirmRelease`.
-                            if self.buy_hold_started.is_none() {
-                                self.cancel_west_sell_hold(ctx.bus);
-                                self.buy_hold_started = Some(
-                                    crate::ui::prompt_hold_ring::begin_hold(
-                                        now,
-                                        ctx.bus,
-                                        self.buy_hold_valid_for(ctx.run, &shop),
-                                    ),
+                    if let Some(hit) = focus.to_hit()
+                        && matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK)
+                    {
+                        *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
+                            Scene::YakuJournal(YakuJournalScene::new()),
+                        )));
+                        return None;
+                    }
+                    if ctx.input_mode == InputMode::Cursor {
+                        if let Some(hit) = focus.to_hit() {
+                            if let Some(action) = shop_action_for_hit(
+                                hit,
+                                &self.items,
+                                &self.zodiac_items,
+                                &self.talisman_items,
+                                &shop,
+                            ) && shop_buy_action_valid(
+                                action,
+                                ctx.run,
+                                &self.items,
+                                &self.zodiac_items,
+                                &self.talisman_items,
+                                &self.pack_items,
+                            ) {
+                                self.cancel_all_hold_prompts(ctx.bus);
+                                self.apply_buy_action(
+                                    action,
+                                    ctx.run,
+                                    ctx.bus,
+                                    ctx.cursor_pos,
+                                    ctx.overlay_request,
+                                    (w, h),
                                 );
                             }
-                        } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
-                            *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
-                                Scene::YakuJournal(YakuJournalScene::new()),
-                            )));
-                            return None;
                         }
                     }
                 }
@@ -570,37 +662,13 @@ impl ShopScene {
             }
         }
         for &cid in ctx.button_clicks {
-            if (SHOP_SELL_RELIC_BASE..SHOP_SELL_RELIC_BASE + 64).contains(&cid) {
-                let idx = (cid - SHOP_SELL_RELIC_BASE) as usize;
-                self.apply_sell_action(
-                    ShopAction::SellRelic(idx),
-                    ctx.run,
-                    ctx.bus,
-                    ctx.cursor_pos,
-                    ctx.overlay_request,
-                    (w, h),
-                );
-                return None;
-            }
-            if (SHOP_SELL_CONSUMABLE_BASE..SHOP_SELL_CONSUMABLE_BASE + 32).contains(&cid) {
-                let idx = (cid - SHOP_SELL_CONSUMABLE_BASE) as usize;
-                self.apply_sell_action(
-                    ShopAction::SellConsumable(idx),
-                    ctx.run,
-                    ctx.bus,
-                    ctx.cursor_pos,
-                    ctx.overlay_request,
-                    (w, h),
-                );
-                return None;
-            }
             if cid == SHOP_NEXT_ROUND_ID {
                 return Some(self.continue_intent());
             }
             if cid == SHOP_RESTOCK_ID
                 && !self.restock_exit_active()
                 && self.mode == ShopMode::Standard
-                && ctx.run.can_afford_shop_restock(self.restock_cost)
+                && ctx.run.can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
             {
                 self.restock(ctx.run, ctx.bus);
                 return None;

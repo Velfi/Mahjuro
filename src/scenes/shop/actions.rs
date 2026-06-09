@@ -179,7 +179,6 @@ impl ShopScene {
         }
         let shop = GameEngine::read_shop(run);
         let extra_relics = GameEngine::shop_extra_relic_stock(run);
-        let season = run.mode.season;
         let (mut items, zodiac_items, talisman_items, pack_items) = if mode == ShopMode::Tutorial {
             tutorial_shop_stock(&run.mode)
         } else {
@@ -217,15 +216,6 @@ impl ShopScene {
 
         let consumed_tags = GameEngine::consume_shop_tags(run);
         let remaining_free_restocks = consumed_tags.free_restock;
-        // Restock base cost is driven by the run's season; tutorial and
-        // free-restock tags still override it.
-        let restock_cost = if mode == ShopMode::Tutorial {
-            u32::MAX
-        } else if remaining_free_restocks > 0 {
-            0
-        } else {
-            season.restock_base_cost()
-        };
 
         let focus = Some(default_shop_focus_for_stock(
             &items,
@@ -239,7 +229,7 @@ impl ShopScene {
             zodiac_items,
             talisman_items,
             pack_items,
-            restock_cost,
+            paid_restocks_this_visit: 0,
             remaining_free_restocks,
             pause_menu: PauseMenu::new(),
             focus,
@@ -260,7 +250,7 @@ impl ShopScene {
             }),
             last_inspect_cam: std::cell::Cell::new(None),
             west_sell_hold_started: None,
-            buy_hold_started: None,
+            confirm_buy_hold_started: None,
             storeroom_orbit_yaw: 0.0,
             storeroom_orbit_pitch: 0.0,
             gltf_anims: crate::render::room_gltf_anim::GltfAnimPlaybackSet::default(),
@@ -425,8 +415,8 @@ impl ShopScene {
     }
 
     /// Buy as soon as the Confirm hold-to-buy timer reaches its threshold (do not
-    /// wait for button release). Mirrors [`Self::try_complete_west_sell_hold`].
-    pub(super) fn try_complete_buy_hold(
+    /// wait for button release). Cursor mode uses click-to-buy instead.
+    pub(super) fn try_complete_confirm_buy_hold(
         &mut self,
         now: std::time::Instant,
         shop: &crate::game::engine::ShopReadModel,
@@ -436,7 +426,7 @@ impl ShopScene {
         overlay_request: &mut Option<OverlayRequest>,
         window_wh: (f32, f32),
     ) {
-        let Some(start) = self.buy_hold_started else {
+        let Some(start) = self.confirm_buy_hold_started else {
             return;
         };
         if now.saturating_duration_since(start).as_secs_f32()
@@ -444,29 +434,18 @@ impl ShopScene {
         {
             return;
         }
-        let Some(action) = self.focus.and_then(|f| f.to_hit()).and_then(|hit| {
-            super::shared::shop_action_for_hit(
-                hit,
-                &self.items,
-                &self.zodiac_items,
-                &self.talisman_items,
-                shop,
-            )
-        }) else {
-            self.cancel_buy_hold(bus);
-            return;
-        };
-        if !super::shared::shop_buy_action_valid(
-            action,
-            run,
+        let Some(action) = super::shared::focused_buy_action(
+            self.focus,
             &self.items,
             &self.zodiac_items,
             &self.talisman_items,
             &self.pack_items,
-        ) {
-            self.cancel_buy_hold(bus);
+            run,
+            shop,
+        ) else {
+            self.cancel_confirm_buy_hold(bus);
             return;
-        }
+        };
         self.apply_buy_action(action, run, bus, cursor_pos, overlay_request, window_wh);
     }
 
@@ -555,9 +534,10 @@ impl ShopScene {
         if self.mode == ShopMode::Tutorial || self.restock_exit_active() {
             return;
         }
+        let season = run.mode.season;
         let mut engine_bus = crate::game::event_bus::EventBus::default();
         let outcome = GameEngine::new(run, &mut engine_bus).dispatch_shop(ShopCommand::RestockShop {
-            cost: self.restock_cost,
+            cost: self.restock_cost(season),
         });
         if outcome.rejection.is_some() {
             return;
@@ -573,13 +553,11 @@ impl ShopScene {
                 if self.remaining_free_restocks > 0 {
                     self.remaining_free_restocks -= 1;
                 }
-                self.restock_cost = if self.remaining_free_restocks > 0 {
-                    0
-                } else {
-                    run.mode.season.restock_base_cost()
-                };
             }
-            _ => self.restock_cost += RESTOCK_COST_INCREMENT,
+            ShopCommandData::Restocked { .. } => {
+                self.paid_restocks_this_visit = self.paid_restocks_this_visit.saturating_add(1);
+            }
+            _ => {}
         }
         let shop = GameEngine::read_shop(run);
         let pending = self.pending_shop_stock_from_run(&shop, run);

@@ -1176,7 +1176,8 @@ impl ArchiveScene {
         let mut legend_rows: Vec<Vec<HintSegment>> = Vec::new();
 
         if inspect_open {
-            legend_rows.push(inspect_camera_hint_row(ctx.input_mode));
+            let show_preview = inspect_preview_available(self, ctx.progress);
+            legend_rows.push(inspect_camera_hint_row(ctx.input_mode, show_preview));
         } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint == 0 {
             legend_rows.push(vec![HintSegment::text(
                 "Finish a non-tutorial run to add folios here.",
@@ -1953,12 +1954,6 @@ fn push_relic_stinger_for(
     }
 }
 
-fn relic_stinger_asset_exists(rid: crate::core::relic::RelicId) -> bool {
-    let slug = rid.asset_filename().trim_end_matches(".png");
-    let path = format!("audio/relics/{slug}.ogg");
-    crate::asset_path::get(&path).is_some()
-}
-
 fn yaku_at_catalog_index(
     progress: &crate::core::progression::PlayerProgress,
     idx: usize,
@@ -1974,35 +1969,57 @@ fn inspect_artifact_index(scene: &ArchiveScene) -> usize {
     scene.focused_row.or(scene.selected_artifact).unwrap_or(0)
 }
 
-/// Play the focused catalog item's bespoke audio (Confirm / A), when a stinger exists.
-pub(crate) fn push_inspect_artifact_sound_if_present(
+fn relic_stinger_asset_exists(rid: crate::core::relic::RelicId) -> bool {
+    crate::scenes::object3d_inspect::relic_stinger_asset_exists(rid)
+}
+
+pub(crate) fn inspect_preview_available(
     scene: &ArchiveScene,
     progress: &crate::core::progression::PlayerProgress,
-    bus: &mut crate::game::event_bus::EventBus,
-) {
+) -> bool {
+    inspect_preview_event(scene, progress).is_some()
+}
+
+fn inspect_preview_event(
+    scene: &ArchiveScene,
+    progress: &crate::core::progression::PlayerProgress,
+) -> Option<GameEvent> {
     let chronicle_last_seen = scene.chronicle_last_seen.unwrap_or(0);
     let arts = tab_artifacts(scene.active_tab, progress, chronicle_last_seen);
     let idx = inspect_artifact_index(scene).min(arts.len().saturating_sub(1));
-    let Some(art) = arts.get(idx) else {
-        return;
-    };
+    let art = arts.get(idx)?;
     if !art.unlocked {
-        return;
+        return None;
     }
     match scene.active_tab {
         Tab::Relics => {
             if let ArtifactKind::Relic(rid) = art.kind
                 && relic_stinger_asset_exists(rid)
             {
-                bus.push(GameEvent::PlayRelicStinger(rid));
+                Some(GameEvent::PlayRelicStinger(rid))
+            } else {
+                None
             }
         }
         Tab::Yaku => {
-            if let Some(yk) = yaku_at_catalog_index(progress, idx) {
-                bus.push(GameEvent::UiSound(crate::sfx_id::SfxId::for_yaku(yk)));
-            }
+            yaku_at_catalog_index(progress, idx).and_then(|yk| {
+                let sfx = crate::sfx_id::SfxId::for_yaku(yk);
+                crate::scenes::object3d_inspect::sfx_asset_exists(sfx)
+                    .then_some(GameEvent::UiSound(sfx))
+            })
         }
-        Tab::Ordeals | Tab::Talismans | Tab::Chronicle => {}
+        Tab::Ordeals | Tab::Talismans | Tab::Chronicle => None,
+    }
+}
+
+/// Play the focused catalog item's bespoke audio (Confirm / A), when a stinger exists.
+pub(crate) fn push_inspect_artifact_sound_if_present(
+    scene: &ArchiveScene,
+    progress: &crate::core::progression::PlayerProgress,
+    bus: &mut crate::game::event_bus::EventBus,
+) {
+    if let Some(ev) = inspect_preview_event(scene, progress) {
+        bus.push(ev);
     }
 }
 
