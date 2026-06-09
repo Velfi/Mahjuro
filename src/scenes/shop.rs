@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn patron_gift_free_relic_blocked_when_inventory_full() {
-        use crate::core::relic::RelicId;
+        use crate::core::relic::{RelicId, all_relic_defs};
         use crate::game::event_bus::EventBus;
 
         let mut run = crate::game::run::RunState::new(GameMode::standard());
@@ -361,23 +361,32 @@ mod tests {
         ];
         run.recompute_capacities();
         assert!(run.relics.is_full());
-        run.tag_patron_gift = 1;
 
-        let mut shop = ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
-        let free_idx = shop
-            .items
+        // Patron gift zeroes a random shop relic; BrocadePouch is the one
+        // exception that can still be claimed when full. Use a fixed offer so
+        // this test does not depend on shop RNG.
+        let free_relic = RelicId::AntTrail;
+        assert_ne!(free_relic, RelicId::BrocadePouch);
+        let def = all_relic_defs()
             .iter()
-            .position(|item| item.price == 0)
-            .expect("patron gift should zero one relic");
-        let free_relic = shop.items[free_idx].relic;
+            .find(|d| d.id == free_relic)
+            .expect("AntTrail relic def");
+        let mut items = vec![ShopItem {
+            relic: def.id,
+            name: def.name,
+            description: def.description,
+            rarity: def.rarity,
+            price: 0,
+            sold: false,
+        }];
 
         let mut bus = EventBus::default();
         apply_shop_action(
-            ShopAction::BuyCard(free_idx),
-            &mut shop.items,
-            &mut shop.zodiac_items,
-            &mut shop.talisman_items,
-            &mut shop.pack_items,
+            ShopAction::BuyCard(0),
+            &mut items,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut [],
             &mut run,
             &mut bus,
         );
