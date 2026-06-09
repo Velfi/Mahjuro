@@ -806,9 +806,9 @@ impl InputState {
                 0
             };
             let sy = if y >= deadzone {
-                1
-            } else if y <= -deadzone {
                 -1
+            } else if y <= -deadzone {
+                1
             } else {
                 0
             };
