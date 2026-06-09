@@ -116,12 +116,6 @@ jobs:
       # Do not set RUSTFLAGS with /LINKREPRO (or /VERBOSE) for the whole workspace:
       # cargo runs many link.exe jobs in parallel; they share one output dir and clobber
       # each other, which can fail the `mahjuro` lib link with exit 101 before the bin.
-      - name: Build offline bake tools
-        uses: ./.github/actions/build-bake-tools
-        with:
-          target: x86_64-pc-windows-msvc
-          profile: release
-
       - name: Build release
         shell: bash
         run: |
