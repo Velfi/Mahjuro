@@ -1,4 +1,3 @@
-
 use super::uniforms::Tile3dInstance;
 
 /// Horizontal alignment of text inside its rect.

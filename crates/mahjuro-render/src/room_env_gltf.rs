@@ -14,8 +14,8 @@ use glam::{Mat4, Vec2, Vec3, Vec4};
 use crate::draw_cmd::CameraParams;
 use crate::gltf_helpers::{apply_texture_transform, sampler_cpu_from_material};
 use crate::tile_glb::{
-    CappedGltfImage, GltfAlphaMode, LoadedPrimitive, RgbaTextureCpu, TextureBakeCache,
-    Vertex3dTex, cap_gltf_images, capped_image_at, compute_vertex_tangents,
+    CappedGltfImage, GltfAlphaMode, LoadedPrimitive, RgbaTextureCpu, TextureBakeCache, Vertex3dTex,
+    cap_gltf_images, capped_image_at, compute_vertex_tangents,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1138,9 +1138,8 @@ pub fn decode_env_primitive(
             .index();
         bake_cache.normal_from_capped(img_index, img, normal_scale)
     });
-    let normal_mip_chain = normal_src.and_then(|c| {
-        (normal_scale == 1.0).then(|| Arc::clone(&c.mip_chain))
-    });
+    let normal_mip_chain =
+        normal_src.and_then(|c| (normal_scale == 1.0).then(|| Arc::clone(&c.mip_chain)));
 
     if normal_rgba.is_none() && material.normal_texture().is_some() {
         log::warn!(

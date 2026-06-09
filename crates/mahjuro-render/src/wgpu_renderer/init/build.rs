@@ -22,7 +22,9 @@ fn load_startup_tile_meshes(
     tile_glb_default_mr_view: &wgpu::TextureView,
     tile_glb_default_emissive_view: &wgpu::TextureView,
 ) -> [TileMeshGpuSet; crate::tile_glb::TILE_MATERIAL_MESH_COUNT] {
-    use crate::tile_glb::{load_glb_tile_from_bytes, normalize_mesh, tile_glb_asset_path, tile_material_index};
+    use crate::tile_glb::{
+        load_glb_tile_from_bytes, normalize_mesh, tile_glb_asset_path, tile_material_index,
+    };
     use mahjuro_gfx_types::TileMaterial;
 
     fn tile_mesh_material_scope(material: TileMaterial) -> &'static str {
@@ -114,7 +116,11 @@ fn build_primitive_mesh_registry(
     );
     primitive_meshes.insert(
         MeshId::BeveledSlab,
-        std::sync::Arc::new(LitMeshGpu::new(device, &build_plaque_mesh(), "primitive-slab")),
+        std::sync::Arc::new(LitMeshGpu::new(
+            device,
+            &build_plaque_mesh(),
+            "primitive-slab",
+        )),
     );
     primitive_meshes.insert(
         MeshId::CabinetColumn,
@@ -175,11 +181,19 @@ fn build_primitive_mesh_registry(
     );
     primitive_meshes.insert(
         MeshId::Ofuda,
-        std::sync::Arc::new(LitMeshGpu::new(device, &build_ofuda_mesh(), "primitive-ofuda")),
+        std::sync::Arc::new(LitMeshGpu::new(
+            device,
+            &build_ofuda_mesh(),
+            "primitive-ofuda",
+        )),
     );
     primitive_meshes.insert(
         MeshId::Abacus,
-        std::sync::Arc::new(LitMeshGpu::new(device, &build_abacus_mesh(), "primitive-abacus")),
+        std::sync::Arc::new(LitMeshGpu::new(
+            device,
+            &build_abacus_mesh(),
+            "primitive-abacus",
+        )),
     );
     primitive_meshes.insert(
         MeshId::AbacusHeavenBeads,
@@ -199,7 +213,11 @@ fn build_primitive_mesh_registry(
     );
     primitive_meshes.insert(
         MeshId::ShopBell,
-        std::sync::Arc::new(LitMeshGpu::new(device, &build_shop_bell_mesh(), "primitive-shop-bell")),
+        std::sync::Arc::new(LitMeshGpu::new(
+            device,
+            &build_shop_bell_mesh(),
+            "primitive-shop-bell",
+        )),
     );
     primitive_meshes.insert(
         MeshId::BellTassel,
@@ -268,10 +286,8 @@ fn init_render_scale_and_depth_resources(
     };
     let memory_model =
         mahjuro_gfx_types::GraphicsMemoryModel::classify_adapter(adapter_name, integrated_gpu);
-    if !mahjuro_gfx_types::GraphicsMode::adapter_meets_minimum_support(
-        adapter_name,
-        integrated_gpu,
-    ) {
+    if !mahjuro_gfx_types::GraphicsMode::adapter_meets_minimum_support(adapter_name, integrated_gpu)
+    {
         match memory_model {
             mahjuro_gfx_types::GraphicsMemoryModel::UnifiedMemory { .. } => log::warn!(
                 "adapter '{adapter_name}' reports unified memory and a constrained bandwidth/memory class; startup/upload budgets may need tuning"
@@ -426,7 +442,13 @@ pub(super) fn build_renderer_new(
     #[cfg(feature = "windowed")]
     let mut boot_poll_slot = boot_input_poll;
     #[cfg(feature = "windowed")]
-    present_boot_progress(&mut boot_splash, &target, &config, 0.06, &mut boot_poll_slot);
+    present_boot_progress(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.06,
+        &mut boot_poll_slot,
+    );
     let RenderScaleDepthResources {
         suggested_graphics_mode,
         render_scale,
@@ -463,8 +485,13 @@ pub(super) fn build_renderer_new(
         crate::offline_bakes::require_all_at_startup()?;
     }
     #[cfg(feature = "windowed")]
-    present_boot_progress(&mut boot_splash, &target, &config, 0.12, &mut boot_poll_slot);
-
+    present_boot_progress(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.12,
+        &mut boot_poll_slot,
+    );
 
     let super::shaders_and_pipelines::ShadersAndPipelinesInit {
         arc_ring_quad_pipeline,
@@ -629,14 +656,26 @@ pub(super) fn build_renderer_new(
     };
 
     #[cfg(feature = "windowed")]
-    present_boot_progress(&mut boot_splash, &target, &config, 0.48, &mut boot_poll_slot);
+    present_boot_progress(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.48,
+        &mut boot_poll_slot,
+    );
 
     let (ui_font, ui_font_italic, mono_font, emoji_font) = {
         let _phase = crate::startup_profile::scope("wgpu.renderer_new.fonts");
         load_startup_fonts_with_profile()
     };
     #[cfg(feature = "windowed")]
-    present_boot_progress(&mut boot_splash, &target, &config, 0.55, &mut boot_poll_slot);
+    present_boot_progress(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.55,
+        &mut boot_poll_slot,
+    );
 
     let quad_v: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
     let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -672,7 +711,13 @@ pub(super) fn build_renderer_new(
         )
     };
     #[cfg(feature = "windowed")]
-    present_boot_progress(&mut boot_splash, &target, &config, 0.66, &mut boot_poll_slot);
+    present_boot_progress(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.66,
+        &mut boot_poll_slot,
+    );
 
     // Deferred room GPU uploads — see `room_gpu_load.rs` (`ensure_*_room_gpu`).
     let shop_gltf_anim = crate::room_gltf_anim::RoomGltfAnimGpu::default();
@@ -732,7 +777,13 @@ pub(super) fn build_renderer_new(
         load_pack_textures(&device, &queue, &lit_mesh_relief_default_view)
     };
     #[cfg(feature = "windowed")]
-    present_boot_progress(&mut boot_splash, &target, &config, 0.72, &mut boot_poll_slot);
+    present_boot_progress(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.72,
+        &mut boot_poll_slot,
+    );
     let (background_load_start, background_rx) =
         if super::resources::ASYNC_LOADED_BACKGROUNDS.is_empty() {
             (None, None)
@@ -789,7 +840,8 @@ pub(super) fn build_renderer_new(
     // `MeshId`. Legacy named fields above still own their own
     // allocations during the migration window.
     let primitive_meshes = {
-        let _primitive_registry = crate::startup_profile::scope("wgpu.lit_meshes.primitive_registry");
+        let _primitive_registry =
+            crate::startup_profile::scope("wgpu.lit_meshes.primitive_registry");
         build_primitive_mesh_registry(&device)
     };
     let primitive_textures: rustc_hash::FxHashMap<
@@ -985,7 +1037,13 @@ pub(super) fn build_renderer_new(
     );
     crate::startup_profile::record("wgpu.lit_meshes_and_pools", t_lit_meshes.elapsed());
     #[cfg(feature = "windowed")]
-    present_boot_progress(&mut boot_splash, &target, &config, 0.92, &mut boot_poll_slot);
+    present_boot_progress(
+        &mut boot_splash,
+        &target,
+        &config,
+        0.92,
+        &mut boot_poll_slot,
+    );
 
     // Build the GPU profiler up-front while we still have a borrow of
     // device/queue (the struct literal below moves them).

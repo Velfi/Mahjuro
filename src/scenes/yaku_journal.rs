@@ -34,8 +34,8 @@ use crate::ui::widget;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use std::time::Instant;
 
-use super::{BackgroundId, DrawCtx, OverlayRequest, SceneBehavior, SceneTransition, UpdateCtx};
 use super::header_chrome::HeaderChromeMetrics;
+use super::{BackgroundId, DrawCtx, OverlayRequest, SceneBehavior, SceneTransition, UpdateCtx};
 
 const CLICK_ROW_BASE: u32 = 0xE100;
 
@@ -403,8 +403,7 @@ impl SceneBehavior for YakuJournalScene {
                         let page = table.visible_rows.max(1);
                         self.selected = self.selected.saturating_sub(page);
                         self.ensure_selected_visible(table.visible_rows, max_scroll);
-                        self.tree
-                            .set_focus(JournalNav::Row(self.selected).id());
+                        self.tree.set_focus(JournalNav::Row(self.selected).id());
                     }
                 }
                 UiAction::PageNext => {
@@ -412,8 +411,7 @@ impl SceneBehavior for YakuJournalScene {
                         let page = table.visible_rows.max(1);
                         self.selected = (self.selected + page).min(total_rows.saturating_sub(1));
                         self.ensure_selected_visible(table.visible_rows, max_scroll);
-                        self.tree
-                            .set_focus(JournalNav::Row(self.selected).id());
+                        self.tree.set_focus(JournalNav::Row(self.selected).id());
                     }
                 }
                 _ => {}
@@ -1393,5 +1391,4 @@ fn draw_plaque(
             cursor_x += hand_gap;
         }
     }
-
 }

@@ -213,8 +213,12 @@ pub fn push_focus_nav_debug_overlay(
 
     let arrow = (10.0 * scale).max(6.0);
     for &(from, dir, to) in &snap.edges {
-        let Some(a) = snap.nodes.get(from) else { continue };
-        let Some(b) = snap.nodes.get(to) else { continue };
+        let Some(a) = snap.nodes.get(from) else {
+            continue;
+        };
+        let Some(b) = snap.nodes.get(to) else {
+            continue;
+        };
         let (ax, ay) = rect_center(a.rect);
         let (bx, by) = rect_center(b.rect);
         let (dx, dy) = (bx - ax, by - ay);

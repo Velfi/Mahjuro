@@ -476,10 +476,7 @@ pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
     vec![
         CareerKpi {
             label: "Best run",
-            value: format!(
-                "{} · #{best_run_num}",
-                format_chips_compact(best_run)
-            ),
+            value: format!("{} · #{best_run_num}", format_chips_compact(best_run)),
         },
         CareerKpi {
             label: "Win rate",
@@ -674,9 +671,18 @@ pub fn run_detail_model(
 
     let mut score_lines = Vec::new();
     if let Some(snap) = rec.chronicle.terminal_score.as_ref() {
-        score_lines.push(format!("Base {} chips", format_score(snap.base_chips as u64)));
-        score_lines.push(format!("Yaku +{} chips", format_score(snap.yaku_chips as u64)));
-        score_lines.push(format!("Dora +{} chips", format_score(snap.dora_chips as u64)));
+        score_lines.push(format!(
+            "Base {} chips",
+            format_score(snap.base_chips as u64)
+        ));
+        score_lines.push(format!(
+            "Yaku +{} chips",
+            format_score(snap.yaku_chips as u64)
+        ));
+        score_lines.push(format!(
+            "Dora +{} chips",
+            format_score(snap.dora_chips as u64)
+        ));
         if snap.relic_chips > 0 {
             score_lines.push(format!(
                 "Relics +{} chips",

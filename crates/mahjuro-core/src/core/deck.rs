@@ -294,10 +294,7 @@ impl Wall {
     /// Drop the undrawn wall tile with `id`, if any. Drawn tiles are untouched.
     pub fn remove_undrawn_by_id(&mut self, id: u32) -> bool {
         let tiles = Arc::make_mut(&mut self.tiles);
-        let Some(pos) = tiles[self.cursor..]
-            .iter()
-            .position(|t| t.id == id)
-        else {
+        let Some(pos) = tiles[self.cursor..].iter().position(|t| t.id == id) else {
             return false;
         };
         tiles.remove(self.cursor + pos);

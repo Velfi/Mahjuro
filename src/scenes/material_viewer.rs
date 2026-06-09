@@ -14,7 +14,9 @@ use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel
 use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer_hint};
 use crate::ui::input::UiAction;
 
-use super::{BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
+use super::{
+    BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx,
+};
 
 const CLICK_BACK: u32 = 0xE001;
 

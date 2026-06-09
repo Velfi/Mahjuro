@@ -2,8 +2,7 @@
 
 pub const PAGE_TITLE: &str = "Yaku";
 
-pub const PAGE_SUBTITLE: &str =
-    "Play valid melds into your structure, then Cash In to score. Yaku are bonus patterns in your structure — they add chips and mult when you Cash In.";
+pub const PAGE_SUBTITLE: &str = "Play valid melds into your structure, then Cash In to score. Yaku are bonus patterns in your structure — they add chips and mult when you Cash In.";
 
 pub const SECTION_STRUCTURE: &str = "STRUCTURE";
 pub const STRUCTURE_LINES: &[&str] = &[

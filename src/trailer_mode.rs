@@ -2,15 +2,15 @@
 
 use std::time::Instant;
 
-use crate::render::draw_cmd::CameraParams;
-use crate::render::hallway_glb::HallwayDistortionDebugSnapshot;
-use crate::scenes::object3d_inspect::lerp_camera;
 #[cfg(debug_menu_enabled)]
 use crate::game::run::RunState;
+use crate::render::draw_cmd::CameraParams;
+use crate::render::hallway_glb::HallwayDistortionDebugSnapshot;
 #[cfg(debug_menu_enabled)]
 use crate::render::main_menu_glb::{self, main_menu_env_height_scale};
 #[cfg(debug_menu_enabled)]
 use crate::scenes::Scene;
+use crate::scenes::object3d_inspect::lerp_camera;
 
 const HALLWAY_DURATION_SECS: f32 = 5.0;
 const MAIN_MENU_DURATION_SECS: f32 = 7.0;

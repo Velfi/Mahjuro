@@ -216,7 +216,13 @@ impl RunSummaryPanelScroll {
         let (mx, my) = cursor;
 
         if self.dragging_scrollbar && mouse_left_down {
-            let px = scroll_px_from_cursor(my, self.scroll_drag_grab_y, track, thumb[3], layout.max_scroll_px);
+            let px = scroll_px_from_cursor(
+                my,
+                self.scroll_drag_grab_y,
+                track,
+                thumb[3],
+                layout.max_scroll_px,
+            );
             self.scroll.set_target(px);
             block_dismiss = true;
         } else if mouse_click {
@@ -615,8 +621,7 @@ impl RunSummaryPanelLayout {
         };
 
         let hint_base_y = (h - hint_stack_h - hint_h * 0.22).max(0.0);
-        let hint_flavor_rect = (!content.hint.is_empty())
-            .then_some([0.0, hint_base_y, w, hint_h]);
+        let hint_flavor_rect = (!content.hint.is_empty()).then_some([0.0, hint_base_y, w, hint_h]);
         let hint_rect = [
             0.0,
             hint_base_y
@@ -637,12 +642,7 @@ impl RunSummaryPanelLayout {
             [scroll_content_x, inner_y, scroll_inner_w, text_h]
         });
         let level_y = inner_y + pre_depth_text_h;
-        let level_rect = [
-            scroll_content_x,
-            level_y,
-            scroll_inner_w,
-            level_block_h,
-        ];
+        let level_rect = [scroll_content_x, level_y, scroll_inner_w, level_block_h];
         let level_inner_rect = [
             level_rect[0] + 3.0,
             level_rect[1] + 3.0,
@@ -1034,12 +1034,7 @@ pub fn push_run_summary_panel(
             ..Default::default()
         });
         frame.text(TextLabel {
-            rect: [
-                inner_x + inner_w * 0.50,
-                row_rect[1],
-                value_col_w,
-                row_h,
-            ],
+            rect: [inner_x + inner_w * 0.50, row_rect[1], value_col_w, row_h],
             text: value_lines.join("\n"),
             color: color::PARCHMENT,
             font_px: Some(row_font_px),

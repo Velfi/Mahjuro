@@ -225,15 +225,8 @@ pub(super) fn focused_buy_action(
 ) -> Option<ShopAction> {
     let hit = focus?.to_hit()?;
     let action = shop_action_for_hit(hit, items, zodiac_items, talisman_items, shop)?;
-    shop_buy_action_valid(
-        action,
-        run,
-        items,
-        zodiac_items,
-        talisman_items,
-        pack_items,
-    )
-    .then_some(action)
+    shop_buy_action_valid(action, run, items, zodiac_items, talisman_items, pack_items)
+        .then_some(action)
 }
 
 /// Map the currently focused `ShopFocus` to the sell action for that item,

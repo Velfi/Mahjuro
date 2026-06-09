@@ -17,10 +17,10 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use rustc_hash::FxHashMap;
 use glam::{Mat4, Vec2, Vec3};
 use gltf::image::Format;
 use mahjuro_gfx_types::TileMaterial;
+use rustc_hash::FxHashMap;
 
 pub use crate::gltf_helpers::{
     GltfAlphaMode, GltfSamplerCpu, apply_texture_transform, sampler_cpu_from_material,
@@ -951,9 +951,8 @@ fn decode_tile_primitive(
             .index();
         bake_cache.normal_from_capped(img_index, img, normal_scale)
     });
-    let normal_mip_chain = normal_src.and_then(|c| {
-        (normal_scale == 1.0).then(|| Arc::clone(&c.mip_chain))
-    });
+    let normal_mip_chain =
+        normal_src.and_then(|c| (normal_scale == 1.0).then(|| Arc::clone(&c.mip_chain)));
 
     if normal_rgba.is_none() && material.normal_texture().is_some() {
         log::warn!(

@@ -73,7 +73,9 @@ impl ShopScene {
         if matches!(hit, ShopHit::Dish(id) if id == PICK_RESTOCK_PROP) {
             if !self.restock_exit_active()
                 && self.mode == ShopMode::Standard
-                && ctx.run.can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
+                && ctx
+                    .run
+                    .can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
             {
                 self.restock(ctx.run, ctx.bus);
             }
@@ -166,12 +168,8 @@ impl ShopScene {
             return self.focus.is_some();
         }
         if let Some(cur) = self.focus
-            && let Some(next) = super::focus::shop_inspect_nav_pick(
-                &mut self.focus_nav,
-                &inspect_rects,
-                cur,
-                dir,
-            )
+            && let Some(next) =
+                super::focus::shop_inspect_nav_pick(&mut self.focus_nav, &inspect_rects, cur, dir)
             && Some(next) != self.focus
         {
             self.focus = Some(next);
@@ -212,9 +210,7 @@ impl ShopScene {
                 let rid = if idx < n_sale {
                     self.items.get(idx).map(|it| it.relic)
                 } else {
-                    shop.owned_relics
-                        .get(idx.saturating_sub(n_sale))
-                        .copied()
+                    shop.owned_relics.get(idx.saturating_sub(n_sale)).copied()
                 }?;
                 relic_stinger_asset_exists(rid).then_some(GameEvent::PlayRelicStinger(rid))
             }
@@ -284,9 +280,7 @@ impl ShopScene {
         let buy_charge = self.confirm_buy_hold_started.is_some();
         let orbit_active = !sell_charge
             && !buy_charge
-            && (ctx.mouse_left_down
-                || stick_x.abs() > 1e-4
-                || stick_y.abs() > 1e-4);
+            && (ctx.mouse_left_down || stick_x.abs() > 1e-4 || stick_y.abs() > 1e-4);
         if orbit_active {
             // Subtle pre-inspect peek — much slower and tighter than item-inspect orbit.
             const ORBIT: f32 = 0.55;
@@ -598,7 +592,9 @@ impl ShopScene {
                     if matches!(focus, ShopFocus::Restock)
                         && !self.restock_exit_active()
                         && self.mode == ShopMode::Standard
-                        && ctx.run.can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
+                        && ctx
+                            .run
+                            .can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
                     {
                         self.restock(ctx.run, ctx.bus);
                         continue;
@@ -668,7 +664,9 @@ impl ShopScene {
             if cid == SHOP_RESTOCK_ID
                 && !self.restock_exit_active()
                 && self.mode == ShopMode::Standard
-                && ctx.run.can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
+                && ctx
+                    .run
+                    .can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
             {
                 self.restock(ctx.run, ctx.bus);
                 return None;

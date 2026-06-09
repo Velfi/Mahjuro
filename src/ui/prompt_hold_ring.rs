@@ -17,9 +17,7 @@ static HOLD_ACT_SECONDS: OnceLock<f32> = OnceLock::new();
 /// falls back to [`HOLD_ACT_FALLBACK_SECONDS`] until then or when audio is missing.
 #[inline]
 pub fn hold_act_seconds() -> f32 {
-    *HOLD_ACT_SECONDS
-        .get()
-        .unwrap_or(&HOLD_ACT_FALLBACK_SECONDS)
+    *HOLD_ACT_SECONDS.get().unwrap_or(&HOLD_ACT_FALLBACK_SECONDS)
 }
 
 /// Called once after SFX clips are loaded so hold timers track `reel_up.ogg`.

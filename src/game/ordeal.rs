@@ -293,10 +293,7 @@ fn blight_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
         relic_debuffs: vec![],
         on_apply: None,
         on_play: None,
-        description_override: Some(format!(
-            "{} tiles are debuffed",
-            chosen.display_label()
-        )),
+        description_override: Some(format!("{} tiles are debuffed", chosen.display_label())),
     }
 }
 

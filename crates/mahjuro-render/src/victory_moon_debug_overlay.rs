@@ -146,8 +146,7 @@ impl VictoryMoonDebugOverlay {
         let (tx, _, tw, _) = layout.slider_track(row);
         let (_, min, max, _) = VICTORY_MOON_DEBUG_ROW_META[row];
         let t = ((mx - tx) / tw.max(1e-6)).clamp(0.0, 1.0);
-        self.debug
-            .set_debug_row_value(row, min + t * (max - min));
+        self.debug.set_debug_row_value(row, min + t * (max - min));
     }
 
     fn adjust_row(&mut self, dir: f32) {
@@ -185,7 +184,9 @@ impl VictoryMoonDebugOverlay {
     }
 
     fn commit_edit(&mut self) {
-        let row = self.cursor.min(VICTORY_MOON_DEBUG_SLIDER_COUNT.saturating_sub(1));
+        let row = self
+            .cursor
+            .min(VICTORY_MOON_DEBUG_SLIDER_COUNT.saturating_sub(1));
         if let Ok(v) = self.edit_buffer.trim().parse::<f32>() {
             self.debug.set_debug_row_value(row, v);
         }
@@ -214,9 +215,7 @@ impl VictoryMoonDebugOverlay {
                 ButtonVariant::Default,
             ),
             VICTORY_MOON_ACTION_NEW => ("New moon (0.00)", ButtonVariant::Default),
-            VICTORY_MOON_ACTION_FIRST_QUARTER => {
-                ("First quarter (0.25)", ButtonVariant::Default)
-            }
+            VICTORY_MOON_ACTION_FIRST_QUARTER => ("First quarter (0.25)", ButtonVariant::Default),
             VICTORY_MOON_ACTION_FULL => ("Full moon (0.50)", ButtonVariant::Default),
             VICTORY_MOON_ACTION_LAST_QUARTER => ("Last quarter (0.75)", ButtonVariant::Default),
             VICTORY_MOON_ACTION_COPY => ("Copy rotation Rust literal", ButtonVariant::Primary),
@@ -336,7 +335,9 @@ impl VictoryMoonDebugOverlay {
 
         if let Some((mx, my, clicked, held)) = mouse {
             for i in 0..VICTORY_MOON_DEBUG_ROW_COUNT {
-                if let Some(rect) = layout.hit_row_rect(i) && point_in_rect(mx, my, rect) {
+                if let Some(rect) = layout.hit_row_rect(i)
+                    && point_in_rect(mx, my, rect)
+                {
                     self.pointer.hover_row = Some(i);
                     if self.dragging_slider.is_none() {
                         self.cursor = i;
@@ -405,8 +406,8 @@ impl VictoryMoonDebugOverlay {
                     self.ensure_scroll();
                 }
                 UiAction::FocusUp => {
-                    self.cursor =
-                        (self.cursor + VICTORY_MOON_DEBUG_ROW_COUNT - 1) % VICTORY_MOON_DEBUG_ROW_COUNT;
+                    self.cursor = (self.cursor + VICTORY_MOON_DEBUG_ROW_COUNT - 1)
+                        % VICTORY_MOON_DEBUG_ROW_COUNT;
                     self.clear_edit();
                     self.ensure_scroll();
                 }
@@ -486,9 +487,7 @@ impl VictoryMoonDebugOverlay {
             .iter()
             .enumerate()
             .skip(self.scroll_row)
-            .take(VISIBLE_ROWS.min(
-                VICTORY_MOON_DEBUG_SLIDER_COUNT.saturating_sub(self.scroll_row),
-            ))
+            .take(VISIBLE_ROWS.min(VICTORY_MOON_DEBUG_SLIDER_COUNT.saturating_sub(self.scroll_row)))
         {
             let visual = DebugRowVisual::for_row(i, self.cursor, &self.pointer);
             let v = self.debug.debug_row_value(i);

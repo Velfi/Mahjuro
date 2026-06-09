@@ -2,8 +2,7 @@
 
 pub const PAGE_TITLE: &str = "Yen & The Storeroom";
 
-pub const SUBTITLE: &str =
-    "Win chambers for yen, then buy and sell advantages in the storeroom.";
+pub const SUBTITLE: &str = "Win chambers for yen, then buy and sell advantages in the storeroom.";
 
 pub const SECTION_BETWEEN_CHAMBERS: &str = "BETWEEN CHAMBERS";
 pub const SECTION_ECONOMY_RULES: &str = "ECONOMY RULES";

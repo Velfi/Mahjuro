@@ -958,10 +958,20 @@ impl SceneBehavior for GameplayScene {
                     hand.len(),
                     hand_scale_mul,
                 );
-                
-                let staging_lift = self.staging_layout.staging_lift_z.get(i).copied().unwrap_or(0.0);
-                let _staging_offset = self.staging_layout.staging_offset_slots.get(i).copied().unwrap_or(0.0);
-                
+
+                let staging_lift = self
+                    .staging_layout
+                    .staging_lift_z
+                    .get(i)
+                    .copied()
+                    .unwrap_or(0.0);
+                let _staging_offset = self
+                    .staging_layout
+                    .staging_offset_slots
+                    .get(i)
+                    .copied()
+                    .unwrap_or(0.0);
+
                 if meld_preview && staging_lift > 0.01 {
                     // Ghost on the hand rail: selection shell + hit target stay here.
                     hand_placements.push(crate::render::draw_cmd::ShowcaseTilePlacement {
@@ -982,7 +992,7 @@ impl SceneBehavior for GameplayScene {
                         overlay_rect_group: None,
                     });
                 }
-                
+
                 let hand_x = px + slide_x_px + reject_shake_x;
                 let hand_y = py + pop_offset;
                 let (cx, cy, lift, preview_rot, preview_size_px) =
@@ -997,23 +1007,21 @@ impl SceneBehavior for GameplayScene {
                                 hand_rot[1] + (target.rotation[1] - hand_rot[1]) * t,
                                 hand_rot[2] + (target.rotation[2] - hand_rot[2]) * t,
                             ];
-                            let preview_size =
-                                size_px + (target.size_px - size_px) * t;
+                            let preview_size = size_px + (target.size_px - size_px) * t;
                             (cx, cy, lift, rot, preview_size)
                         } else {
-                            (
-                                hand_x,
-                                hand_y,
-                                lift_z,
-                                hand_rot,
-                                size_px,
-                            )
+                            (hand_x, hand_y, lift_z, hand_rot, size_px)
                         }
                     } else {
                         (hand_x, hand_y, lift_z, hand_rot, size_px)
                     };
-                
-                let is_valid_group = self.staging_layout.valid_meld_tiles.get(i).copied().unwrap_or(false);
+
+                let is_valid_group = self
+                    .staging_layout
+                    .valid_meld_tiles
+                    .get(i)
+                    .copied()
+                    .unwrap_or(false);
                 let capacity_error = is_valid_group && self.staging_layout.has_capacity_error;
                 let is_staged_preview = meld_preview && staging_lift > 0.01;
                 let preview_opacity = if is_staged_preview {
@@ -1027,7 +1035,7 @@ impl SceneBehavior for GameplayScene {
                 } else {
                     slide_y_frac.max(0.05)
                 };
-                
+
                 hand_placements.push(crate::render::draw_cmd::ShowcaseTilePlacement {
                     tile,
                     center_pos: [cx, cy, lift],
@@ -1036,9 +1044,21 @@ impl SceneBehavior for GameplayScene {
                     size_px: preview_size_px,
                     brightness: preview_brightness,
                     opacity: preview_opacity,
-                    selected: if is_staged_preview { false } else { is_selected && !is_invalid_flash },
-                    hovered: if is_staged_preview { false } else { is_focused && !is_invalid_flash },
-                    outline: if is_staged_preview { false } else { (is_selected || is_focused) && !is_invalid_flash },
+                    selected: if is_staged_preview {
+                        false
+                    } else {
+                        is_selected && !is_invalid_flash
+                    },
+                    hovered: if is_staged_preview {
+                        false
+                    } else {
+                        is_focused && !is_invalid_flash
+                    },
+                    outline: if is_staged_preview {
+                        false
+                    } else {
+                        (is_selected || is_focused) && !is_invalid_flash
+                    },
                     glow: if is_staged_preview {
                         false
                     } else {
@@ -1474,13 +1494,15 @@ impl SceneBehavior for GameplayScene {
         // can find them. The button-bar and consumable strip already
         // pushed their entries inline above.
         // Hand rack: tile-sized projected bounds (same source as mouse picking).
-        let hand_scale_mul = glb_anchors.hand_marker_poses[0]
-            .uniform_author_scale(layout.window_h, env_h);
+        let hand_scale_mul =
+            glb_anchors.hand_marker_poses[0].uniform_author_scale(layout.window_h, env_h);
         for i in 0..interaction.hand_len {
-            let slot = hand_slots
-                .get(i)
-                .copied()
-                .unwrap_or((0.0, 0.0, layout.hand_slot_w, layout.hand_slot_h));
+            let slot = hand_slots.get(i).copied().unwrap_or((
+                0.0,
+                0.0,
+                layout.hand_slot_w,
+                layout.hand_slot_h,
+            ));
             let rect = super::hand_layout::hand_tile_screen_rect(
                 i,
                 slot,
@@ -1537,10 +1559,8 @@ impl SceneBehavior for GameplayScene {
             )
         {
             if score_rect[2] > 1.0 && score_rect[3] > 1.0 {
-                focus_rect_graph.push((
-                    FocusTarget::ScoreRoller(ScoreRollerBank::Score),
-                    score_rect,
-                ));
+                focus_rect_graph
+                    .push((FocusTarget::ScoreRoller(ScoreRollerBank::Score), score_rect));
             }
             if target_rect[2] > 1.0 && target_rect[3] > 1.0 {
                 focus_rect_graph.push((
@@ -1778,7 +1798,10 @@ impl SceneBehavior for GameplayScene {
                                 color::AMBER,
                             ),
                         };
-                        let desc = format!("You have {remaining} {label} remaining.\n\nYou can {label} multiple {} at once.", (if label == "discard" { "tiles" } else { "melds" }));
+                        let desc = format!(
+                            "You have {remaining} {label} remaining.\n\nYou can {label} multiple {} at once.",
+                            (if label == "discard" { "tiles" } else { "melds" })
+                        );
                         push_focus_tooltip_panel_2d(
                             &mut inspect_tooltip_quads,
                             &mut inspect_tooltip_texts,
@@ -2097,10 +2120,7 @@ impl SceneBehavior for GameplayScene {
             onboarding_hints::push_finale_intro_banner(&mut frame, &ctx, ctx.run);
         }
 
-        if !self.pause_menu.paused
-            && !ctx.modal_active
-            && self.cascade_queue.is_empty()
-        {
+        if !self.pause_menu.paused && !ctx.modal_active && self.cascade_queue.is_empty() {
             let settings = crate::persistence::load_settings();
             // Single combined footer: available table actions (discard / play /
             // cash in) plus the guide hint, so the controls never collide with
@@ -2117,8 +2137,7 @@ impl SceneBehavior for GameplayScene {
                 self.focus,
                 play_enabled,
             );
-            let show_cash_in =
-                gameplay.trigger_enabled || self.cash_in_hold_in_progress();
+            let show_cash_in = gameplay.trigger_enabled || self.cash_in_hold_in_progress();
             let icon_slots = push_screen_footer_hint(
                 &mut frame,
                 &ctx,

@@ -42,7 +42,9 @@ pub(crate) fn validate_screenshot_cli(
         anyhow::bail!("--shop-focus is only valid with --scene shop");
     }
     if s.collection_focus.is_some() && !collection_like {
-        anyhow::bail!("--collection-focus is only valid with --scene collection (or archive, chronicle, …)");
+        anyhow::bail!(
+            "--collection-focus is only valid with --scene collection (or archive, chronicle, …)"
+        );
     }
     let showcase_like = matches!(s.scene.as_str(), "showcase");
     let celebration_like =
@@ -304,16 +306,18 @@ pub(crate) fn resolve_screenshot_scene(
         "decimation" => {
             setup_shop_state(run);
             (
-                Scene::Stairway(mahjuro::scenes::StairwayScene::for_decimation_screenshot(run)),
+                Scene::Stairway(mahjuro::scenes::StairwayScene::for_decimation_screenshot(
+                    run,
+                )),
                 true,
             )
         }
         "decimation_revealed" => {
             setup_shop_state(run);
             (
-                Scene::Stairway(mahjuro::scenes::StairwayScene::for_decimation_revealed_screenshot(
-                    run,
-                )),
+                Scene::Stairway(
+                    mahjuro::scenes::StairwayScene::for_decimation_revealed_screenshot(run),
+                ),
                 true,
             )
         }

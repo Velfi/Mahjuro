@@ -33,7 +33,14 @@ pub(super) fn hand_slots_for_count(
             0.0
         };
         return (0..hand_len)
-            .map(|i| (strip_x + center_offset + i as f32 * slot_w, strip_y, slot_w, sh))
+            .map(|i| {
+                (
+                    strip_x + center_offset + i as f32 * slot_w,
+                    strip_y,
+                    slot_w,
+                    sh,
+                )
+            })
             .collect();
     }
 
@@ -127,11 +134,7 @@ pub(crate) fn hand_tile_screen_rect(
     projected: &[(usize, [f32; 4])],
 ) -> [f32; 4] {
     if let Some((_, rect)) = projected.iter().find(|(i, _)| *i == index) {
-        if rect[2] > 1.0
-            && rect[3] > 1.0
-            && rect[0].is_finite()
-            && rect[1].is_finite()
-        {
+        if rect[2] > 1.0 && rect[3] > 1.0 && rect[0].is_finite() && rect[1].is_finite() {
             return *rect;
         }
     }

@@ -14,10 +14,10 @@ use crate::render::showcase_tile_layout::{
 };
 use crate::render::table_transform;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::render::world_space::LayoutAnchorPx;
 use crate::sfx_id::SfxId;
-use crate::render::vocabulary_colors::GlossaryMode;
 use crate::ui::controller_hints::{
     HintStyle, menu_footer_row, push_screen_footer_hint, screen_footer_reserve,
 };
@@ -514,7 +514,8 @@ impl TutorialCampaignScene {
         let callout_rect = page.callout.map(|callout| {
             let callout_w = right_col_w - 8.0 * scale;
             let callout_x = right_col_x + 4.0 * scale;
-            let callout_h = Self::callout_box_height(callout, callout_w, scale, h, None, typography::H36);
+            let callout_h =
+                Self::callout_box_height(callout, callout_w, scale, h, None, typography::H36);
             let callout_y = nav_top - callout_h - 14.0 * scale;
             [callout_x, callout_y, callout_w, callout_h]
         });
@@ -657,9 +658,7 @@ impl TutorialCampaignScene {
         let callout_w = col_w - 8.0 * scale;
         LINES
             .iter()
-            .map(|line| {
-                Self::callout_box_height(line, callout_w, scale, h, None, typography::H42)
-            })
+            .map(|line| Self::callout_box_height(line, callout_w, scale, h, None, typography::H42))
             .fold(0.0f32, f32::max)
     }
 
@@ -1068,7 +1067,7 @@ impl TutorialCampaignScene {
                 outline: false,
                 glow: false,
                 glow_color: None,
-                    outline_sel: None,
+                outline_sel: None,
                 pick_id: None,
                 overlay_rect_group: None,
             });
@@ -1982,40 +1981,35 @@ impl SceneBehavior for TutorialCampaignScene {
         }
 
         if let Some(callout) = page.callout {
-            let (callout_x, callout_y, callout_w, callout_h) =
-                if let Some(rect) = scoring_layout.as_ref().and_then(|s| s.callout_rect) {
-                    (rect[0], rect[1], rect[2], rect[3])
+            let (callout_x, callout_y, callout_w, callout_h) = if let Some(rect) =
+                scoring_layout.as_ref().and_then(|s| s.callout_rect)
+            {
+                (rect[0], rect[1], rect[2], rect[3])
+            } else {
+                let callout_x = if self.page == TUTORIAL_PAGE_TILES {
+                    tile_col_x
                 } else {
-                    let callout_x = if self.page == TUTORIAL_PAGE_TILES {
-                        tile_col_x
-                    } else {
-                        panel_x + panel_w * 0.47
-                    };
-                    let callout_y = if self.page == TUTORIAL_PAGE_TILES {
-                        glossary_y
-                    } else {
-                        glossary_y + 6.0 * scale
-                    };
-                    let callout_w = if self.page == TUTORIAL_PAGE_TILES {
-                        tile_col_w
-                    } else {
-                        panel_w * 0.45
-                    };
-                    let min_h = if self.page == TUTORIAL_PAGE_TILES {
-                        None
-                    } else {
-                        Some(112.0 * scale)
-                    };
-                    let callout_h = Self::callout_box_height(
-                        callout,
-                        callout_w,
-                        scale,
-                        h,
-                        min_h,
-                        typography::H36,
-                    );
-                    (callout_x, callout_y, callout_w, callout_h)
+                    panel_x + panel_w * 0.47
                 };
+                let callout_y = if self.page == TUTORIAL_PAGE_TILES {
+                    glossary_y
+                } else {
+                    glossary_y + 6.0 * scale
+                };
+                let callout_w = if self.page == TUTORIAL_PAGE_TILES {
+                    tile_col_w
+                } else {
+                    panel_w * 0.45
+                };
+                let min_h = if self.page == TUTORIAL_PAGE_TILES {
+                    None
+                } else {
+                    Some(112.0 * scale)
+                };
+                let callout_h =
+                    Self::callout_box_height(callout, callout_w, scale, h, min_h, typography::H36);
+                (callout_x, callout_y, callout_w, callout_h)
+            };
             Self::push_cta_callout(
                 &mut fg_quads,
                 &mut texts,
@@ -2100,7 +2094,9 @@ impl SceneBehavior for TutorialCampaignScene {
 
         frame.quads(bg_quads);
         if !showcase_tiles.is_empty() {
-            frame.cmds.push(DrawCmd::ShowcaseTileBatch(showcase_tiles.into()));
+            frame
+                .cmds
+                .push(DrawCmd::ShowcaseTileBatch(showcase_tiles.into()));
         }
         if let Some(bowl) = bowl_placement {
             frame.object3d(bowl);

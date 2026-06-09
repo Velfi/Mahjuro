@@ -86,10 +86,7 @@ impl RunState {
 
     /// Meld decomposition for the staging-zone preview. Uses the same validation
     /// and decomposition pick as [`Self::commit_selection_to_structure`].
-    pub fn preview_selection_melds(
-        &self,
-        tiles: &[Tile],
-    ) -> (Vec<DetectedMeld>, Vec<u32>, bool) {
+    pub fn preview_selection_melds(&self, tiles: &[Tile]) -> (Vec<DetectedMeld>, Vec<u32>, bool) {
         if tiles.is_empty() {
             return (Vec::new(), Vec::new(), false);
         }

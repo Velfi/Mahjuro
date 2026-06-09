@@ -492,20 +492,18 @@ impl RoomEnvTextureCache {
         dedupe_hint: Option<&RoomEnvTextureDedupeHint>,
     ) -> wgpu::TextureView {
         match rgba {
-            Some((rgba, w, h)) => {
-                self.upload(
-                    device,
-                    queue,
-                    label,
-                    rgba,
-                    *w,
-                    *h,
-                    format,
-                    mips,
-                    mip_chain,
-                    dedupe_hint,
-                )
-            }
+            Some((rgba, w, h)) => self.upload(
+                device,
+                queue,
+                label,
+                rgba,
+                *w,
+                *h,
+                format,
+                mips,
+                mip_chain,
+                dedupe_hint,
+            ),
             None => fallback.clone(),
         }
     }

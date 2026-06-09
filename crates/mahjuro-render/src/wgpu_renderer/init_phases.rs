@@ -540,11 +540,8 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     };
 
     let render_size = super::constants::scaled_render_size(size, 1.0);
-    let (depth_texture, depth_view) = create_depth(
-        &device,
-        render_size.width.max(1),
-        render_size.height.max(1),
-    );
+    let (depth_texture, depth_view) =
+        create_depth(&device, render_size.width.max(1), render_size.height.max(1));
     let (ssr_prev_depth_texture, ssr_prev_depth_view) = create_depth_r32_snapshot(
         &device,
         render_size.width.max(1),

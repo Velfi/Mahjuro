@@ -297,7 +297,7 @@ pub(super) fn build_ambient_table_objects(
                 outline: false,
                 glow: false,
                 glow_color: None,
-                    outline_sel: None,
+                outline_sel: None,
                 pick_id: None,
                 overlay_rect_group: Some(
                     crate::render::draw_cmd::TileOverlayRectGroup::RoundWindTiles,

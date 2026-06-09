@@ -9,9 +9,7 @@ use crate::core::tile::Tile;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
-use crate::ui::controller_hints::{
-    HintStyle, push_screen_footer_hint, tile_stress_lab_footer_row,
-};
+use crate::ui::controller_hints::{HintStyle, push_screen_footer_hint, tile_stress_lab_footer_row};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget_tree::{TreeInput, TreeState};
 
@@ -176,7 +174,10 @@ impl SceneBehavior for TileStressLabScene {
                 }
                 UiAction::InvertSelection
                     if self.pickable
-                        && matches!(ctx.input_mode, InputMode::Controller | InputMode::Keyboard) =>
+                        && matches!(
+                            ctx.input_mode,
+                            InputMode::Controller | InputMode::Keyboard
+                        ) =>
                 {
                     self.input_focus = match self.input_focus {
                         LabInputFocus::Controls => {
@@ -205,8 +206,7 @@ impl SceneBehavior for TileStressLabScene {
                     self.refresh_display_tiles();
                 }
                 UiAction::PageNext => {
-                    self.tile_scroll_y = (self.tile_scroll_y
-                        + layout.scroll.viewport[3] * 0.85)
+                    self.tile_scroll_y = (self.tile_scroll_y + layout.scroll.viewport[3] * 0.85)
                         .min(layout.scroll.max_scroll_y);
                 }
                 UiAction::PagePrev => {

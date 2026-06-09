@@ -527,9 +527,11 @@ fn staging_preview_three_pairs_plus_lone_flower() {
     let (melds, bad) = staging_preview_melds(&tiles, &[]);
     // Full validation consumes the flower as a wildcard in one triplet + two pairs.
     assert_eq!(melds.len(), 3);
-    assert!(melds.iter().any(|m| {
-        m.kind == MeldKind::Triplet && m.tile_ids.contains(&100)
-    }));
+    assert!(
+        melds
+            .iter()
+            .any(|m| { m.kind == MeldKind::Triplet && m.tile_ids.contains(&100) })
+    );
     assert!(bad.is_empty());
 }
 
@@ -577,8 +579,16 @@ fn staging_preview_flower_pair_plus_numbered_pair() {
     ];
     let (melds, bad) = staging_preview_melds(&tiles, &[]);
     assert_eq!(melds.len(), 2);
-    assert!(melds.iter().any(|m| m.kind == MeldKind::Pair && m.tile_ids == vec![100, 101]));
-    assert!(melds.iter().any(|m| m.kind == MeldKind::Pair && m.tile_ids == vec![0, 1]));
+    assert!(
+        melds
+            .iter()
+            .any(|m| m.kind == MeldKind::Pair && m.tile_ids == vec![100, 101])
+    );
+    assert!(
+        melds
+            .iter()
+            .any(|m| m.kind == MeldKind::Pair && m.tile_ids == vec![0, 1])
+    );
     assert_eq!(bad, vec![2]);
 }
 

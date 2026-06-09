@@ -511,9 +511,8 @@ pub fn projected_gameplay_focus_rects_for_tests(
 ) -> Vec<(super::focus::FocusTarget, [f32; 4])> {
     use super::focus::{FocusTarget, GameplayButton, PegKind};
     use crate::render::gameplay_glb::{
-        self, load_gameplay_glb_from_bytes, validate_gameplay_glb,
-        gameplay_boss_ordeal_screen_rect, gameplay_journal_book_screen_rect,
-        gameplay_marker_screen_rect_resolved,
+        self, gameplay_boss_ordeal_screen_rect, gameplay_journal_book_screen_rect,
+        gameplay_marker_screen_rect_resolved, load_gameplay_glb_from_bytes, validate_gameplay_glb,
     };
     use crate::ui::layout::UiLayout;
 
@@ -526,16 +525,13 @@ pub fn projected_gameplay_focus_rects_for_tests(
     let layout = UiLayout::new().solve(w, h);
     let cam = gameplay_glb::gameplay_camera_from_cpu(&cpu, h, env_h).expect("gameplay camera");
     let layout_scale = (w.min(h)) / 600.0;
-    let anchors = resolve_gameplay_glb_anchors_from_cpu(
-        &cpu, &layout, hand_len, w, h, &cam, env_h,
-    )
-    .expect("anchors");
+    let anchors = resolve_gameplay_glb_anchors_from_cpu(&cpu, &layout, hand_len, w, h, &cam, env_h)
+        .expect("anchors");
 
     let mut rects = Vec::new();
 
-    let (discard, play_visual, trigger) = reproject_action_button_rects(
-        w, h, &cam, env_h, layout_scale, &anchors,
-    );
+    let (discard, play_visual, trigger) =
+        reproject_action_button_rects(w, h, &cam, env_h, layout_scale, &anchors);
     let play = gameplay_glb::gameplay_play_button_hit_rect(play_visual.into()).into();
     for (btn, r) in [
         (GameplayButton::Discard, discard),
@@ -668,8 +664,7 @@ pub fn projected_gameplay_focus_rects_for_tests(
         rects.push((FocusTarget::Gold, r));
     }
 
-    let wall_layout =
-        crate::render::wall_display::wall_hud_layout(w, h, 126);
+    let wall_layout = crate::render::wall_display::wall_hud_layout(w, h, 126);
     rects.push((FocusTarget::WallHud, wall_layout.block_rect));
 
     if let Some((score_rect, target_rect)) =

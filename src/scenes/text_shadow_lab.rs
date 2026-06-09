@@ -3,8 +3,8 @@
 //! Entered from Debug → Labs → Text Shadow Lab…
 
 use crate::core::relic::RelicFlavorSpan;
-use crate::render::draw_cmd::UiFrame;
 use crate::render::decal::{DecalFonts, load_ui_font, load_ui_font_italic};
+use crate::render::draw_cmd::UiFrame;
 use crate::render::text_shadow_lab::{
     FloatingFlavorShadowTuning, TuningField, layout_floating_flavor_caption_at_band_top_for_spans,
 };
@@ -14,7 +14,9 @@ use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer
 use crate::ui::input::UiAction;
 use crate::ui::inspect_plaque::estimated_flavor_line_count;
 
-use super::{BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
+use super::{
+    BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx,
+};
 
 const CLICK_BACK: u32 = 0xE011;
 const CLICK_RESET: u32 = 0xE012;
@@ -176,15 +178,8 @@ impl SceneBehavior for TextShadowLabScene {
         let btn_h = (40.0 * scale).max(30.0);
         let footer_h = HintStyle::standard(w, h).line_h + h * 0.028;
         let toolbar_y = h - footer_h - btn_h - gap;
-        let header_h = margin
-            + title_h
-            + gap
-            + body_line_h * 3.0
-            + gap
-            + field_h
-            + gap
-            + metrics_line_h
-            + gap;
+        let header_h =
+            margin + title_h + gap + body_line_h * 3.0 + gap + field_h + gap + metrics_line_h + gap;
         let stage_top = header_h;
         let stage_h = (toolbar_y - gap - stage_top).max(body_font * 4.0);
         let stage_left = w * 0.12;
@@ -211,8 +206,7 @@ impl SceneBehavior for TextShadowLabScene {
         } else {
             let line_step = typography::size(typography::H32, h) * 1.4;
             let band_w = (w - 2.0 * w * self.tuning.margin_x_frac).min(self.tuning.band_max_w);
-            let content_lines =
-                estimated_flavor_line_count(sample.flavor, band_w, body_px, 8);
+            let content_lines = estimated_flavor_line_count(sample.flavor, band_w, body_px, 8);
             let preview_band_h = (line_step * content_lines as f32 + body_px * 0.5)
                 .min(stage_h * 0.45)
                 .max(body_px * 2.0);

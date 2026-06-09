@@ -1444,9 +1444,7 @@ mod tests {
 
         assert_eq!(
             outcome.data,
-            CommandData::DiscardSelection {
-                count: HAND_SIZE
-            }
+            CommandData::DiscardSelection { count: HAND_SIZE }
         );
         assert_eq!(outcome.after.hand_len, 0);
         assert!(

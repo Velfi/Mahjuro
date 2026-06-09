@@ -23,11 +23,7 @@ pub enum GlossaryMode {
 impl GlossaryMode {
     #[inline]
     pub fn from_legacy_glossary_tint(on: bool) -> Self {
-        if on {
-            Self::Prose
-        } else {
-            Self::Off
-        }
+        if on { Self::Prose } else { Self::Off }
     }
 
     #[inline]
@@ -132,9 +128,7 @@ fn is_house_word(token: &str) -> bool {
     if core.eq_ignore_ascii_case("house") {
         return true;
     }
-    core.len() >= 6
-        && core.as_bytes()[5] == b'\''
-        && core[..5].eq_ignore_ascii_case("house")
+    core.len() >= 6 && core.as_bytes()[5] == b'\'' && core[..5].eq_ignore_ascii_case("house")
 }
 
 /// Marks `The` + `House` proper-noun tokens (case-sensitive article; possessive
@@ -159,9 +153,7 @@ fn is_moon_word(token: &str) -> bool {
     if core.eq_ignore_ascii_case("moon") {
         return true;
     }
-    core.len() >= 6
-        && core.as_bytes()[4] == b'\''
-        && core[..4].eq_ignore_ascii_case("moon")
+    core.len() >= 6 && core.as_bytes()[4] == b'\'' && core[..4].eq_ignore_ascii_case("moon")
 }
 
 /// Marks `The` + `Moon` proper-noun tokens (case-sensitive article; possessive

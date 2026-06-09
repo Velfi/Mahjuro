@@ -1,8 +1,8 @@
 //! Player-installed tileset mods under the platform config directory.
 
+use image::GenericImageView;
 use std::fs;
 use std::path::{Path, PathBuf};
-use image::GenericImageView;
 
 use crate::atlas_toml::parse_atlas_toml;
 
@@ -65,15 +65,11 @@ pub fn mod_tileset_cache_root(folder_name: &str) -> PathBuf {
 /// Cached offline showcase decal atlas for a mod tileset.
 pub fn mod_showcase_cache_path(tileset_id: &str) -> Option<PathBuf> {
     let folder = mod_folder_name(tileset_id)?;
-    Some(
-        mod_tileset_cache_root(folder)
-            .join("showcase_decal_atlas.png"),
-    )
+    Some(mod_tileset_cache_root(folder).join("showcase_decal_atlas.png"))
 }
 
 pub fn mod_showcase_cache_exists(tileset_id: &str) -> bool {
-    mod_showcase_cache_path(tileset_id)
-        .is_some_and(|p| p.is_file())
+    mod_showcase_cache_path(tileset_id).is_some_and(|p| p.is_file())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -92,7 +88,9 @@ pub fn is_mod_tileset(tileset_id: &str) -> bool {
 
 /// Folder name from a mod tileset id (`mod:my_theme` → `my_theme`).
 pub fn mod_folder_name(tileset_id: &str) -> Option<&str> {
-    tileset_id.strip_prefix(MOD_PREFIX).filter(|s| !s.is_empty())
+    tileset_id
+        .strip_prefix(MOD_PREFIX)
+        .filter(|s| !s.is_empty())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,7 +102,9 @@ pub enum TilesetId<'a> {
 pub fn parse_tileset_id(tileset_id: &str) -> Option<TilesetId<'_>> {
     if let Some(folder) = mod_folder_name(tileset_id) {
         if is_valid_mod_folder_name(folder) {
-            return Some(TilesetId::Mod { folder_name: folder });
+            return Some(TilesetId::Mod {
+                folder_name: folder,
+            });
         }
         return None;
     }
@@ -128,7 +128,8 @@ fn is_valid_mod_folder_name(name: &str) -> bool {
         && !name.contains('/')
         && !name.contains('\\')
         && !name.contains(':')
-        && name != "." && name != ".."
+        && name != "."
+        && name != ".."
 }
 
 /// Folders reserved for docs/templates — never offered as playable tilesets.
@@ -222,7 +223,10 @@ pub enum ModTilesetValidationError {
     AtlasTomlParseFailed,
     AtlasTomlInvalidDimensions,
     AtlasPngDecodeFailed,
-    AtlasPngDimensionMismatch { expected: (u32, u32), actual: (u32, u32) },
+    AtlasPngDimensionMismatch {
+        expected: (u32, u32),
+        actual: (u32, u32),
+    },
 }
 
 impl std::fmt::Display for ModTilesetValidationError {
@@ -263,15 +267,16 @@ pub fn validate_mod_tileset(dir: &Path) -> Result<(), ModTilesetValidationError>
         return Err(ModTilesetValidationError::MissingAtlasPng);
     }
 
-    let toml_src = fs::read_to_string(&toml_path)
-        .map_err(|_| ModTilesetValidationError::AtlasTomlNotUtf8)?;
-    let (tile_w, tile_h, columns, layout) = parse_atlas_toml(&toml_src)
-        .ok_or(ModTilesetValidationError::AtlasTomlParseFailed)?;
+    let toml_src =
+        fs::read_to_string(&toml_path).map_err(|_| ModTilesetValidationError::AtlasTomlNotUtf8)?;
+    let (tile_w, tile_h, columns, layout) =
+        parse_atlas_toml(&toml_src).ok_or(ModTilesetValidationError::AtlasTomlParseFailed)?;
     if tile_w == 0 || tile_h == 0 || columns == 0 {
         return Err(ModTilesetValidationError::AtlasTomlInvalidDimensions);
     }
 
-    let png_bytes = fs::read(&png_path).map_err(|_| ModTilesetValidationError::AtlasPngDecodeFailed)?;
+    let png_bytes =
+        fs::read(&png_path).map_err(|_| ModTilesetValidationError::AtlasPngDecodeFailed)?;
     let img = image::ImageReader::new(std::io::Cursor::new(&png_bytes))
         .with_guessed_format()
         .map_err(|_| ModTilesetValidationError::AtlasPngDecodeFailed)?
@@ -340,8 +345,9 @@ pub fn read_mod_file(tileset_id: &str, filename: &str) -> Option<Vec<u8>> {
 
 /// Write bytes to the mod showcase cache (creates parent dirs).
 pub fn write_mod_showcase_cache(tileset_id: &str, png_bytes: &[u8]) -> std::io::Result<()> {
-    let path = mod_showcase_cache_path(tileset_id)
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a mod tileset"))?;
+    let path = mod_showcase_cache_path(tileset_id).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a mod tileset")
+    })?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -439,10 +445,8 @@ mod tests {
 
     #[test]
     fn write_bytes_if_changed_skips_identical_content() {
-        let path = std::env::temp_dir().join(format!(
-            "mahjuro_tileset_mod_hash_{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("mahjuro_tileset_mod_hash_{}", std::process::id()));
         let _ = fs::remove_file(&path);
         write_bytes_if_changed(&path, b"same").unwrap();
         let before = fs::read(&path).unwrap();
@@ -455,10 +459,8 @@ mod tests {
 
     #[test]
     fn incomplete_mod_folder_gets_readme() {
-        let base = std::env::temp_dir().join(format!(
-            "mahjuro_tileset_mod_readme_{}",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("mahjuro_tileset_mod_readme_{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         set_mod_tilesets_root_for_tests(base.clone());
 

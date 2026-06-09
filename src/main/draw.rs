@@ -2,16 +2,16 @@
 use super::*;
 
 #[cfg(feature = "game")]
+use crate::core;
+#[cfg(feature = "game")]
 use crate::game::engine::GameEngine;
+use crate::render;
+#[cfg(feature = "game")]
+use crate::render::vocabulary_colors::GlossaryMode;
 #[cfg(feature = "game")]
 use crate::scene_transition::{PendingSceneDestination, SceneTag, overlay_kind_for_transition};
 #[cfg(feature = "game")]
 use crate::scenes::SceneIntent;
-#[cfg(feature = "game")]
-use crate::core;
-#[cfg(feature = "game")]
-use crate::render::vocabulary_colors::GlossaryMode;
-use crate::render;
 use crate::ui::modal::{Modal, ModalTheme, UnlockPage};
 #[cfg(feature = "game")]
 use crate::ui::score_format::format_score;
@@ -122,9 +122,13 @@ impl App {
                                 format_score(cleared_round_score),
                                 format_score(cleared_target_score as u64)
                             )];
-                            lines.push("Well done — you have overcome your first chamber".to_string());
+                            lines.push(
+                                "Well done — you have overcome your first chamber".to_string(),
+                            );
                             lines.push("Remember: Play melds, build a structure, then cash in to score. Bigger structures score more".to_string());
-                            lines.push("Next: buy supplies from the shop, then face an ordeal".to_string());
+                            lines.push(
+                                "Next: buy supplies from the shop, then face an ordeal".to_string(),
+                            );
                             self.modals.push(
                                 Modal::new(
                                     "Lesson Complete!",
@@ -769,14 +773,13 @@ impl App {
                 let max_tooltip_w =
                     crate::render::theme::metrics::tooltip_max_panel_px(w, h) * 0.72;
                 let max_inner_w = (max_tooltip_w - 2.0 * pad).max(40.0);
-                let preferred_inner_w =
-                    crate::ui::styled_text::colored_paragraph_preferred_width(
-                        label.as_ref(),
-                        line_h,
-                        max_inner_w,
-                        GlossaryMode::Prose,
-                    )
-                    .max(40.0);
+                let preferred_inner_w = crate::ui::styled_text::colored_paragraph_preferred_width(
+                    label.as_ref(),
+                    line_h,
+                    max_inner_w,
+                    GlossaryMode::Prose,
+                )
+                .max(40.0);
                 let tooltip_w = (preferred_inner_w + 2.0 * pad).clamp(72.0, max_tooltip_w);
                 let (bx, by, bw, bh) = btn.rect;
                 let cx = bx + bw * 0.5;

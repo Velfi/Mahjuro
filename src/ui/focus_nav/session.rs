@@ -63,11 +63,7 @@ impl<T: Copy + PartialEq> FocusNavState<T> {
     }
 
     /// Replace the graph for this frame from explicit rects and optional edges.
-    pub fn load_candidates(
-        &mut self,
-        candidates: &[(T, [f32; 4])],
-        edges: &[(T, FocusDir, T)],
-    ) {
+    pub fn load_candidates(&mut self, candidates: &[(T, [f32; 4])], edges: &[(T, FocusDir, T)]) {
         self.begin_frame();
         self.clear_edges();
         for &(target, rect) in candidates {

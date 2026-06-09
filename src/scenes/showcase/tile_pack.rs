@@ -422,13 +422,15 @@ impl TilePackPresenter {
                         outline: false,
                         glow,
                         glow_color: if glow { Some(palette.seal) } else { None },
-                    outline_sel: None,
+                        outline_sel: None,
                         pick_id: None,
                         overlay_rect_group: None,
                     });
                 }
 
-                frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements.into()));
+                frame
+                    .cmds
+                    .push(DrawCmd::ShowcaseTileBatch(placements.into()));
 
                 if celeb.fully_settled() {
                     push_confirm_continue_footer(frame, ctx, content_alpha, deal_elapsed);

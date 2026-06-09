@@ -2593,14 +2593,8 @@ pub fn measure_flavor_spans_layout(
     target_font_px: f32,
     min_font_px: f32,
 ) -> FlavorCaptionMetrics {
-    let font_px = resolve_flavor_spans_font_px(
-        fonts,
-        spans,
-        band_w,
-        band_h,
-        target_font_px,
-        min_font_px,
-    );
+    let font_px =
+        resolve_flavor_spans_font_px(fonts, spans, band_w, band_h, target_font_px, min_font_px);
     let raster_spans = relic_spans_to_raster_spans(spans);
     let soft_lines = build_flavor_soft_lines(fonts, &raster_spans, band_w, font_px);
     let line_count = soft_lines.len().max(1);
@@ -2859,7 +2853,8 @@ mod flavor_layout_tests {
             italic: true,
             underline: false,
         }];
-        let resolved = resolve_raster_spans_font_px(&fonts, spans, width, height, Some(font_px), 8.0);
+        let resolved =
+            resolve_raster_spans_font_px(&fonts, spans, width, height, Some(font_px), 8.0);
         let soft = build_flavor_soft_lines(&fonts, spans, width, resolved);
         let (asc, desc) = flavor_line_vertical_extents(&fonts, &soft[0], resolved);
         let text_block_h = asc + desc;
@@ -2923,7 +2918,8 @@ mod flavor_layout_tests {
         let band_w = 1040u32;
         let target_px = 32.0;
         let floor_px = 24.0;
-        let metrics = measure_flavor_spans_layout(&fonts, spans, band_w, u32::MAX, target_px, floor_px);
+        let metrics =
+            measure_flavor_spans_layout(&fonts, spans, band_w, u32::MAX, target_px, floor_px);
         assert!(
             metrics.line_count >= 2,
             "long flavor should wrap at target size, got {} lines",
@@ -2951,8 +2947,7 @@ mod flavor_layout_tests {
             italic: false,
         }];
         let band_w = 520u32;
-        let metrics =
-            measure_flavor_spans_layout(&fonts, spans, band_w, u32::MAX, 32.0, 12.0);
+        let metrics = measure_flavor_spans_layout(&fonts, spans, band_w, u32::MAX, 32.0, 12.0);
         let raster_spans = relic_spans_to_raster_spans(spans);
         let soft_lines = build_flavor_soft_lines(&fonts, &raster_spans, band_w, metrics.font_px);
         assert_eq!(

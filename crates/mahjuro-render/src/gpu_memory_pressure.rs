@@ -5,7 +5,7 @@
 
 use std::sync::{
     OnceLock,
-    atomic::{AtomicU32, AtomicU8, Ordering},
+    atomic::{AtomicU8, AtomicU32, Ordering},
 };
 
 /// Pressure tier for eager (non-scene-critical) room GPU warm-up.
@@ -123,10 +123,14 @@ fn allocator_pressure_thresholds_mib(
 ) -> (u64, u64) {
     let (mut constrained, mut critical) =
         default_allocator_pressure_thresholds_mib(max_room_gpu_residents, integrated_gpu);
-    if let Some(v) = *CONSTRAINED_ALLOC_OVERRIDE_MIB.get_or_init(|| env_override_mib(CONSTRAINED_ALLOC_ENV)) {
+    if let Some(v) =
+        *CONSTRAINED_ALLOC_OVERRIDE_MIB.get_or_init(|| env_override_mib(CONSTRAINED_ALLOC_ENV))
+    {
         constrained = v;
     }
-    if let Some(v) = *CRITICAL_ALLOC_OVERRIDE_MIB.get_or_init(|| env_override_mib(CRITICAL_ALLOC_ENV)) {
+    if let Some(v) =
+        *CRITICAL_ALLOC_OVERRIDE_MIB.get_or_init(|| env_override_mib(CRITICAL_ALLOC_ENV))
+    {
         critical = v;
     }
     ordered_allocator_thresholds_mib(constrained, critical)
@@ -144,7 +148,10 @@ fn default_allocator_pressure_thresholds_mib(
                 INTEGRATED_LOW_MEMORY_CRITICAL_ALLOC_MIB,
             );
         }
-        (LOW_MEMORY_CONSTRAINED_ALLOC_MIB, LOW_MEMORY_CRITICAL_ALLOC_MIB)
+        (
+            LOW_MEMORY_CONSTRAINED_ALLOC_MIB,
+            LOW_MEMORY_CRITICAL_ALLOC_MIB,
+        )
     } else {
         (HIGH_CAP_CONSTRAINED_ALLOC_MIB, HIGH_CAP_CRITICAL_ALLOC_MIB)
     }
@@ -215,9 +222,7 @@ pub fn log_eager_preload(action: &'static str, room: &'static str, pressure: Gpu
         .wrapping_add(room.as_bytes().get(0).copied().unwrap_or(0) as u32)
         .wrapping_mul(31)
         .wrapping_add(pressure as u32);
-    if action == "paused"
-        && LAST_EAGER_PRELOAD_LOG.swap(key, Ordering::Relaxed) == key
-    {
+    if action == "paused" && LAST_EAGER_PRELOAD_LOG.swap(key, Ordering::Relaxed) == key {
         return;
     }
     if action == "paused" {
@@ -237,18 +242,9 @@ mod tests {
 
     #[test]
     fn resident_fallback_tiers() {
-        assert_eq!(
-            resident_fallback(0, 6),
-            GpuMemoryPressure::Normal
-        );
-        assert_eq!(
-            resident_fallback(6, 6),
-            GpuMemoryPressure::Constrained
-        );
-        assert_eq!(
-            resident_fallback(7, 6),
-            GpuMemoryPressure::Critical
-        );
+        assert_eq!(resident_fallback(0, 6), GpuMemoryPressure::Normal);
+        assert_eq!(resident_fallback(6, 6), GpuMemoryPressure::Constrained);
+        assert_eq!(resident_fallback(7, 6), GpuMemoryPressure::Critical);
     }
 
     #[test]
@@ -280,7 +276,10 @@ mod tests {
     fn default_allocator_thresholds_follow_resident_cap() {
         assert_eq!(
             default_allocator_pressure_thresholds_mib(2, false),
-            (LOW_MEMORY_CONSTRAINED_ALLOC_MIB, LOW_MEMORY_CRITICAL_ALLOC_MIB)
+            (
+                LOW_MEMORY_CONSTRAINED_ALLOC_MIB,
+                LOW_MEMORY_CRITICAL_ALLOC_MIB
+            )
         );
         assert_eq!(
             default_allocator_pressure_thresholds_mib(2, true),

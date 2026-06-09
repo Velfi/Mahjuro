@@ -892,12 +892,16 @@ mod cases {
             TileDebuff::Suit(Suit::Souzu),
             TileDebuff::Class(TileDebuffClass::Honors),
         ];
-        run.relics.set_debuffed([crate::core::relic::RelicId::MirrorTile]);
+        run.relics
+            .set_debuffed([crate::core::relic::RelicId::MirrorTile]);
 
         run.advance_round(&mut bus);
 
         assert!(run.tile_debuffs.is_empty());
-        assert!(!run.relics.is_debuffed(crate::core::relic::RelicId::MirrorTile));
+        assert!(
+            !run.relics
+                .is_debuffed(crate::core::relic::RelicId::MirrorTile)
+        );
     }
 
     #[test]
@@ -1223,8 +1227,8 @@ mod cases {
     #[test]
     fn decimation_removes_ten_tiles_from_shop_preview() {
         use crate::game::decimation::{
-            apply_decimation, decimation_eligible_tiles, decimation_house_pool, pick_house_tiles,
-            HOUSE_PICKS, PLAYER_PICKS,
+            HOUSE_PICKS, PLAYER_PICKS, apply_decimation, decimation_eligible_tiles,
+            decimation_house_pool, pick_house_tiles,
         };
         use crate::game::wall_ledger::shop_wall_hud_count;
 
@@ -1532,9 +1536,7 @@ mod cases {
 
         assert!(run.removed_tile_ids.contains(&number_tile.id));
         assert_eq!(
-            run.transformed_tiles
-                .get(&number_tile.id)
-                .map(|t| t.suit),
+            run.transformed_tiles.get(&number_tile.id).map(|t| t.suit),
             Some(crate::core::tile::Suit::Souzu)
         );
         assert_eq!(

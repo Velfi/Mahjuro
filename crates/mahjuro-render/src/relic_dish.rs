@@ -1441,14 +1441,8 @@ fn append_side_wall_strip_from_ring(
         let normal = ring_vertex_wall_normal(ring, i, solid, grid_w, grid_h, bounds, kind);
         let uv = pixel_to_albedo_uv(x, y, bounds);
         let (back, front) = match kind {
-            CapExtrudeKind::RelicPinY => (
-                [lx, -half_thick, ly],
-                [lx, half_thick, ly],
-            ),
-            CapExtrudeKind::TalismanZ => (
-                [lx, ly, -half_thick],
-                [lx, ly, half_thick],
-            ),
+            CapExtrudeKind::RelicPinY => ([lx, -half_thick, ly], [lx, half_thick, ly]),
+            CapExtrudeKind::TalismanZ => ([lx, ly, -half_thick], [lx, ly, half_thick]),
         };
         vertices.push(Vertex3dTex {
             position: back,
@@ -1873,8 +1867,7 @@ mod extruded_tests {
             let fnorm = face.normalize();
             let all_top = p.iter().all(|v| v.z > half_z - 1e-4);
             let all_bot = p.iter().all(|v| v.z < -half_z + 1e-4);
-            let spans_z = p.iter().map(|v| v.z).fold(f32::INFINITY, f32::min)
-                < half_z - 1e-4
+            let spans_z = p.iter().map(|v| v.z).fold(f32::INFINITY, f32::min) < half_z - 1e-4
                 && p.iter().map(|v| v.z).fold(f32::NEG_INFINITY, f32::max) > -half_z + 1e-4;
             if all_top || all_bot {
                 let edges = [
@@ -2490,8 +2483,12 @@ mod silhouette_tests {
             let h = img.height() as usize;
             let mut solid = silhouette_solid_luma(img.as_raw(), w, h);
             keep_largest_solid_component(&mut solid, w, h);
-            let loops =
-                filter_border_noise_loops(trace_silhouette_contours(&solid, w as i32, h as i32), w as f32, h as f32, path);
+            let loops = filter_border_noise_loops(
+                trace_silhouette_contours(&solid, w as i32, h as i32),
+                w as f32,
+                h as f32,
+                path,
+            );
             let polys = group_contours_into_polygons(loops);
             assert_eq!(
                 polys.len(),

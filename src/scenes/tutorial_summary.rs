@@ -16,9 +16,9 @@ use crate::ui::styled_text::styled_line_block_height_at_font_px;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use crate::game::onboarding_intro_copy;
 use super::guide::GuideScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
+use crate::game::onboarding_intro_copy;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SummaryAction {

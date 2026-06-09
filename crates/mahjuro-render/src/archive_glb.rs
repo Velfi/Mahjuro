@@ -278,7 +278,10 @@ fn is_archive_marker_name(name: &str) -> bool {
     is_archive_button_node(name)
         || matches!(
             name,
-            SIGN_DESCRIPTION_LEFT | SIGN_DESCRIPTION_RIGHT | INSPECT_PLAQUE | ARCHIVE_SPAWN_FOCUSED_ITEM
+            SIGN_DESCRIPTION_LEFT
+                | SIGN_DESCRIPTION_RIGHT
+                | INSPECT_PLAQUE
+                | ARCHIVE_SPAWN_FOCUSED_ITEM
         )
         || is_archive_spawn_item_name(name)
 }

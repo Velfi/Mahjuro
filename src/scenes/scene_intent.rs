@@ -27,7 +27,9 @@ pub enum SceneIntent {
     Archive,
     Options,
     ProfileSelectFromArchive,
-    TileSelect { tutorial: bool },
+    TileSelect {
+        tutorial: bool,
+    },
     Continue(ResumeScene),
     StartRunDefaultMaterialAndShop,
     StartRun {
@@ -44,7 +46,9 @@ pub enum SceneIntent {
     GameplayLessonsFirstChamber,
     GameplayRetryOnboarding(ChamberKind),
     Stairway,
-    TutorialSummary { won: bool },
+    TutorialSummary {
+        won: bool,
+    },
     Victory,
     Defeat(GameOverReason),
     CreditsFromOptions,
@@ -114,9 +118,9 @@ impl SceneIntent {
             Self::Stairway => Some(scene_keys::STAIRWAY),
             Self::Victory => Some(scene_keys::VICTORY),
             Self::Defeat(_) => Some(scene_keys::DEFEAT),
-            Self::ProfileSelectFromArchive | Self::TutorialSummary { .. } | Self::CreditsFromOptions => {
-                None
-            }
+            Self::ProfileSelectFromArchive
+            | Self::TutorialSummary { .. }
+            | Self::CreditsFromOptions => None,
         }
     }
 

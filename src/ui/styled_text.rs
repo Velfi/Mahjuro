@@ -24,11 +24,11 @@
 use crate::render::decal::{load_mono_font, load_ui_font, load_ui_font_italic};
 use crate::render::text_effect::TextEffectId;
 use crate::render::theme::{color, typography};
-use crate::render::vocabulary_colors::{
-    GlossaryMode, colored_token_segments, glossary_word_segments,
-    glossary_word_segments_forced, text_effect_for_glossary_tint,
-};
 pub use crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE;
+use crate::render::vocabulary_colors::{
+    GlossaryMode, colored_token_segments, glossary_word_segments, glossary_word_segments_forced,
+    text_effect_for_glossary_tint,
+};
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 use crate::ui::clip::intersect_rect;
 use crate::ui::text_wrap::{TextBreakUnit, break_units_kp};
@@ -446,22 +446,14 @@ fn runs_to_cells_with_glossary(
     let mut word_idx = 0usize;
 
     let flush_word = |cells: &mut Vec<Cell>,
-                          word: &mut String,
-                          run: &StyledRun,
-                          word_idx: &mut usize| {
+                      word: &mut String,
+                      run: &StyledRun,
+                      word_idx: &mut usize| {
         if word.is_empty() {
             return;
         }
         if *word_idx < all_words.len() {
-            push_glossary_word_cells(
-                cells,
-                word,
-                &all_words,
-                *word_idx,
-                run,
-                mode,
-                default_color,
-            );
+            push_glossary_word_cells(cells, word, &all_words, *word_idx, run, mode, default_color);
             *word_idx += 1;
         } else {
             for ch in word.chars() {
@@ -1315,7 +1307,11 @@ fn push_tinted_segment_run(
     }
 }
 
-fn colored_line_segments(text: &str, default: [f32; 4], glossary: GlossaryMode) -> Vec<(String, [f32; 4])> {
+fn colored_line_segments(
+    text: &str,
+    default: [f32; 4],
+    glossary: GlossaryMode,
+) -> Vec<(String, [f32; 4])> {
     let words: Vec<&str> = text.split_whitespace().collect();
     let mut segments = Vec::new();
     for (wi, _word) in words.iter().enumerate() {
@@ -1531,7 +1527,8 @@ mod tests {
         let font_px = 18.0;
         let w = 240.0;
         let color = crate::render::theme::color::PARCHMENT;
-        let block = StyledTextBlock::measure_at_font_px(text, w, font_px, GlossaryMode::Prose, color);
+        let block =
+            StyledTextBlock::measure_at_font_px(text, w, font_px, GlossaryMode::Prose, color);
         let visual =
             layout_styled_visual_lines_at_font_px(text, w, font_px, GlossaryMode::Prose, color);
         assert_eq!(block.line_count(), visual.len().max(1));

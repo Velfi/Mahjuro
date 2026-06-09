@@ -326,12 +326,7 @@ pub fn push_score_history_ledger(
         let stat_row_h_inner = cap_h.max(val_h);
         if let Some(avg) = avg_text {
             let panel_w = score_history_stat_panel_width(
-                "Avg.",
-                &avg,
-                caption_px,
-                body_px,
-                inset,
-                inline_gap,
+                "Avg.", &avg, caption_px, body_px, inset, inline_gap,
             );
             push_score_stat_panel(
                 quads,
@@ -351,12 +346,7 @@ pub fn push_score_history_ledger(
             stat_x += panel_w + panel_gap;
         }
         let peak_panel_w = score_history_stat_panel_width(
-            "Peak",
-            &peak_text,
-            caption_px,
-            body_px,
-            inset,
-            inline_gap,
+            "Peak", &peak_text, caption_px, body_px, inset, inline_gap,
         );
         push_score_stat_panel(
             quads,

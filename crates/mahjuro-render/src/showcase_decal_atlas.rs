@@ -235,15 +235,11 @@ fn load_builtin_showcase_decal_rgba(tileset: &str) -> anyhow::Result<Vec<u8>> {
 fn bake_mod_showcase_decal_rgba(tileset: &str) -> anyhow::Result<Vec<u8>> {
     let ui_font = crate::decal::load_ui_font().cloned();
     let emoji_font = crate::decal::load_noto_emoji_font();
-    let rgba = rasterize_showcase_decal_atlas_rgba(
-        ui_font.as_ref(),
-        emoji_font.as_ref(),
-        Some(tileset),
-    );
+    let rgba =
+        rasterize_showcase_decal_atlas_rgba(ui_font.as_ref(), emoji_font.as_ref(), Some(tileset));
     let (w, h) = atlas_dimensions();
-    let img = image::RgbaImage::from_raw(w, h, rgba.clone()).ok_or_else(|| {
-        anyhow::anyhow!("showcase decal bake buffer size mismatch for {tileset}")
-    })?;
+    let img = image::RgbaImage::from_raw(w, h, rgba.clone())
+        .ok_or_else(|| anyhow::anyhow!("showcase decal bake buffer size mismatch for {tileset}"))?;
     if let Some(path) = mahjuro_assets::tileset_mod::mod_showcase_cache_path(tileset) {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);

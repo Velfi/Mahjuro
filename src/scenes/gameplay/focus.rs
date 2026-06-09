@@ -109,7 +109,10 @@ pub(super) fn gameplay_nav_edges(
 
     let mut edges = Vec::new();
 
-    fn target_rect(focus_rects: &[(FocusTarget, [f32; 4])], target: FocusTarget) -> Option<[f32; 4]> {
+    fn target_rect(
+        focus_rects: &[(FocusTarget, [f32; 4])],
+        target: FocusTarget,
+    ) -> Option<[f32; 4]> {
         focus_rects
             .iter()
             .find(|(t, _)| *t == target)
@@ -176,19 +179,15 @@ pub(super) fn gameplay_nav_edges(
     if let (Some(last_idx), Some(&(first_plinth, _))) =
         (relic_indices.next_back(), plinth_row.first())
     {
-        edges.push((
-            FocusTarget::Relic(last_idx),
-            FocusDir::Right,
-            first_plinth,
-        ));
+        edges.push((FocusTarget::Relic(last_idx), FocusDir::Right, first_plinth));
     }
 
-    let score_roller = focus_rects.iter().any(|(t, _)| {
-        matches!(t, FocusTarget::ScoreRoller(ScoreRollerBank::Score))
-    });
-    let target_roller = focus_rects.iter().any(|(t, _)| {
-        matches!(t, FocusTarget::ScoreRoller(ScoreRollerBank::Target))
-    });
+    let score_roller = focus_rects
+        .iter()
+        .any(|(t, _)| matches!(t, FocusTarget::ScoreRoller(ScoreRollerBank::Score)));
+    let target_roller = focus_rects
+        .iter()
+        .any(|(t, _)| matches!(t, FocusTarget::ScoreRoller(ScoreRollerBank::Target)));
     if score_roller && target_roller {
         edges.push((
             FocusTarget::ScoreRoller(ScoreRollerBank::Score),
@@ -220,11 +219,8 @@ pub(super) fn gameplay_nav_edges(
         .filter(|(t, _)| matches!(t, FocusTarget::HandTile(_)))
         .copied()
         .collect();
-    hand_entries.sort_by(|(_, a), (_, b)| {
-        a[0]
-            .partial_cmp(&b[0])
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    hand_entries
+        .sort_by(|(_, a), (_, b)| a[0].partial_cmp(&b[0]).unwrap_or(std::cmp::Ordering::Equal));
     if let (Some(&(first, _)), Some(&(last, _))) = (hand_entries.first(), hand_entries.last())
         && first != last
     {
@@ -256,11 +252,9 @@ pub(super) fn gameplay_nav_edges(
         let Some(hand_rect) = target_rect(focus_rects, hand) else {
             continue;
         };
-        if let Some(relic) = x_nearest_target(
-            focus_rects,
-            rect_center(hand_rect).0,
-            |t| matches!(t, FocusTarget::Relic(_)),
-        ) {
+        if let Some(relic) = x_nearest_target(focus_rects, rect_center(hand_rect).0, |t| {
+            matches!(t, FocusTarget::Relic(_))
+        }) {
             edges.push((hand, FocusDir::Up, relic));
         }
     }
@@ -271,23 +265,21 @@ pub(super) fn gameplay_nav_edges(
         };
         let anchor_x = rect_center(relic_rect).0;
         if consumables_present {
-            if let Some(consumable) = x_nearest_target(
-                focus_rects,
-                anchor_x,
-                |t| matches!(t, FocusTarget::Consumable(_)),
-            ) {
+            if let Some(consumable) = x_nearest_target(focus_rects, anchor_x, |t| {
+                matches!(t, FocusTarget::Consumable(_))
+            }) {
                 edges.push((relic, FocusDir::Up, consumable));
             }
-        } else if let Some(score) = x_nearest_target(
-            focus_rects,
-            anchor_x,
-            |t| matches!(t, FocusTarget::ScoreRoller(_)),
-        ) {
+        } else if let Some(score) = x_nearest_target(focus_rects, anchor_x, |t| {
+            matches!(t, FocusTarget::ScoreRoller(_))
+        }) {
             edges.push((relic, FocusDir::Up, score));
         }
-        if let Some(hand) = x_nearest_target(focus_rects, anchor_x, |t| {
-            matches!(t, FocusTarget::HandTile(i) if *i < left_half_end)
-        }) {
+        if let Some(hand) = x_nearest_target(
+            focus_rects,
+            anchor_x,
+            |t| matches!(t, FocusTarget::HandTile(i) if *i < left_half_end),
+        ) {
             edges.push((relic, FocusDir::Down, hand));
         }
     }
@@ -297,18 +289,14 @@ pub(super) fn gameplay_nav_edges(
             continue;
         };
         let anchor_x = rect_center(consumable_rect).0;
-        if let Some(score) = x_nearest_target(
-            focus_rects,
-            anchor_x,
-            |t| matches!(t, FocusTarget::ScoreRoller(_)),
-        ) {
+        if let Some(score) = x_nearest_target(focus_rects, anchor_x, |t| {
+            matches!(t, FocusTarget::ScoreRoller(_))
+        }) {
             edges.push((consumable, FocusDir::Up, score));
         }
-        if let Some(relic) = x_nearest_target(
-            focus_rects,
-            anchor_x,
-            |t| matches!(t, FocusTarget::Relic(_)),
-        ) {
+        if let Some(relic) = x_nearest_target(focus_rects, anchor_x, |t| {
+            matches!(t, FocusTarget::Relic(_))
+        }) {
             edges.push((consumable, FocusDir::Down, relic));
         }
     }
@@ -319,18 +307,14 @@ pub(super) fn gameplay_nav_edges(
         };
         let anchor_x = rect_center(score_rect).0;
         if consumables_present {
-            if let Some(consumable) = x_nearest_target(
-                focus_rects,
-                anchor_x,
-                |t| matches!(t, FocusTarget::Consumable(_)),
-            ) {
+            if let Some(consumable) = x_nearest_target(focus_rects, anchor_x, |t| {
+                matches!(t, FocusTarget::Consumable(_))
+            }) {
                 edges.push((score, FocusDir::Down, consumable));
             }
-        } else if let Some(relic) = x_nearest_target(
-            focus_rects,
-            anchor_x,
-            |t| matches!(t, FocusTarget::Relic(_)),
-        ) {
+        } else if let Some(relic) = x_nearest_target(focus_rects, anchor_x, |t| {
+            matches!(t, FocusTarget::Relic(_))
+        }) {
             edges.push((score, FocusDir::Down, relic));
         }
     }
@@ -551,17 +535,32 @@ mod tests {
         let mut rects = vec![
             (FocusTarget::Consumable(0), [40.0, 890.0, 50.0, 60.0]),
             (FocusTarget::DiscardUndo, [55.0, 820.0, 80.0, 36.0]),
-            (FocusTarget::Button(GameplayButton::Discard), [100.0, 900.0, 120.0, 80.0]),
-            (FocusTarget::Peg(PegKind::Discards), [280.0, 880.0, 40.0, 100.0]),
+            (
+                FocusTarget::Button(GameplayButton::Discard),
+                [100.0, 900.0, 120.0, 80.0],
+            ),
+            (
+                FocusTarget::Peg(PegKind::Discards),
+                [280.0, 880.0, 40.0, 100.0],
+            ),
             (FocusTarget::Guidebook, [400.0, 870.0, 80.0, 90.0]),
         ];
         if include_journal {
             rects.push((FocusTarget::Journal, [520.0, 870.0, 80.0, 90.0]));
         }
         rects.extend([
-            (FocusTarget::Peg(PegKind::Hands), [720.0, 880.0, 40.0, 100.0]),
-            (FocusTarget::Button(GameplayButton::Play), [860.0, 900.0, 120.0, 80.0]),
-            (FocusTarget::Button(GameplayButton::Trigger), [1100.0, 900.0, 100.0, 70.0]),
+            (
+                FocusTarget::Peg(PegKind::Hands),
+                [720.0, 880.0, 40.0, 100.0],
+            ),
+            (
+                FocusTarget::Button(GameplayButton::Play),
+                [860.0, 900.0, 120.0, 80.0],
+            ),
+            (
+                FocusTarget::Button(GameplayButton::Trigger),
+                [1100.0, 900.0, 100.0, 70.0],
+            ),
         ]);
         for i in 0..14 {
             rects.push((
@@ -677,10 +676,7 @@ mod tests {
     ) {
         let path = walk_focus_order(nav, start, dir, expected.len().saturating_sub(1));
         assert_bottom_row_only(&path);
-        assert_eq!(
-            path, expected,
-            "focus order from {start:?} via {dir:?}"
-        );
+        assert_eq!(path, expected, "focus order from {start:?} via {dir:?}");
     }
 
     #[test]
@@ -813,7 +809,10 @@ mod tests {
             nav.pick(FocusTarget::Relic(1), FocusDir::Right),
             Some(FocusTarget::Dora)
         );
-        assert_eq!(nav.pick(FocusTarget::Relic(1), FocusDir::Left), Some(FocusTarget::Relic(0)));
+        assert_eq!(
+            nav.pick(FocusTarget::Relic(1), FocusDir::Left),
+            Some(FocusTarget::Relic(0))
+        );
         assert_eq!(
             nav.pick(FocusTarget::Dora, FocusDir::Right),
             Some(FocusTarget::RoundWind)
@@ -991,4 +990,3 @@ mod tests {
         );
     }
 }
-

@@ -445,21 +445,17 @@ pub fn victory_summary_moon_setup(
             env_height_scale,
             MAIN_MENU_MOON_MESH_NODE,
         )?;
-        let moon_radius = room_node_mesh_radius_world(
-            cpu,
-            window_h,
-            env_height_scale,
-            MAIN_MENU_MOON_MESH_NODE,
-        )
-        .unwrap_or(window_h * 0.015);
+        let moon_radius =
+            room_node_mesh_radius_world(cpu, window_h, env_height_scale, MAIN_MENU_MOON_MESH_NODE)
+                .unwrap_or(window_h * 0.015);
 
         let mut model_delta = glam::Mat4::from_translation(-moon);
 
         const FOVY_DEG: f32 = 45.0;
         let tan_half = (FOVY_DEG.to_radians() * 0.5).tan();
         let standoff = moon_radius * 3.5 + window_h * 0.02;
-        let fit_scale = moonlit_water_moon_diameter_screen_h() * standoff * tan_half
-            / moon_radius.max(1e-6);
+        let fit_scale =
+            moonlit_water_moon_diameter_screen_h() * standoff * tan_half / moon_radius.max(1e-6);
         let scale = fit_scale * VICTORY_MOON_EXTRA_SCALE;
         model_delta = glam::Mat4::from_scale(glam::Vec3::splat(scale)) * model_delta;
         if rotation_xyz != [0.0, 0.0, 0.0] {
@@ -477,7 +473,8 @@ pub fn victory_summary_moon_setup(
             FOVY_DEG,
             MOONLIT_WATER_MOON_CENTER_UV[1],
         );
-        model_delta = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, z_offset)) * model_delta;
+        model_delta =
+            glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, z_offset)) * model_delta;
 
         Some((
             CameraParams {

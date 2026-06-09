@@ -238,7 +238,10 @@ impl<T: Copy + PartialEq> FocusNav<T> {
 
     fn active_index(&self, target: T) -> Option<usize> {
         let layout = self.layout.as_ref()?;
-        layout.active.iter().position(|&node_i| self.nodes[node_i].target == target)
+        layout
+            .active
+            .iter()
+            .position(|&node_i| self.nodes[node_i].target == target)
     }
 
     fn layout(&self) -> Option<&InferredLayout> {
@@ -410,7 +413,11 @@ fn same_row(a: [f32; 4], b: [f32; 4], row_snap_px: f32) -> bool {
         || (rect_bottom(a) - rect_bottom(b)).abs() <= row_snap_px
 }
 
-fn cluster_rows(active: &[usize], rect_at: &impl Fn(usize) -> [f32; 4], row_snap_px: f32) -> Vec<Vec<usize>> {
+fn cluster_rows(
+    active: &[usize],
+    rect_at: &impl Fn(usize) -> [f32; 4],
+    row_snap_px: f32,
+) -> Vec<Vec<usize>> {
     cluster_by(
         active,
         &rect_at,
@@ -547,11 +554,7 @@ fn infer_groups(
 
 fn line_step(pos: usize, len: usize, backward: bool) -> Option<usize> {
     if backward {
-        if pos == 0 {
-            None
-        } else {
-            Some(pos - 1)
-        }
+        if pos == 0 { None } else { Some(pos - 1) }
     } else if pos + 1 >= len {
         None
     } else {
@@ -561,11 +564,7 @@ fn line_step(pos: usize, len: usize, backward: bool) -> Option<usize> {
 
 /// Contiguous left-to-right run within a row that shares one horizontal group
 /// (no large x-gap). Line stepping stays inside this run; beam search handles hops.
-fn horizontal_run_in_row<'a>(
-    line: &'a [usize],
-    pos: usize,
-    groups: &[u32],
-) -> &'a [usize] {
+fn horizontal_run_in_row<'a>(line: &'a [usize], pos: usize, groups: &[u32]) -> &'a [usize] {
     let group = groups[line[pos]];
     let mut start = pos;
     while start > 0 && groups[line[start - 1]] == group {
@@ -595,13 +594,7 @@ fn pick_inferred_line_neighbor<T: Copy + PartialEq>(
                 .find(|row| row.contains(&current_idx))?
                 .iter()
                 .copied()
-                .filter(|&i| {
-                    same_row(
-                        current_rect,
-                        nav.rect_at_node(layout.active[i]),
-                        row_snap,
-                    )
-                })
+                .filter(|&i| same_row(current_rect, nav.rect_at_node(layout.active[i]), row_snap))
                 .collect();
             if line.len() < 2 {
                 return None;
@@ -650,13 +643,7 @@ fn pick_inferred_grid_vertical<T: Copy + PartialEq>(
         }
         _ => unreachable!(),
     };
-    pick_from_row(
-        nav,
-        layout,
-        &layout.rows[target_row_idx],
-        col_idx,
-        anchor_x,
-    )
+    pick_from_row(nav, layout, &layout.rows[target_row_idx], col_idx, anchor_x)
 }
 
 fn pick_from_row<T: Copy + PartialEq>(
@@ -726,10 +713,30 @@ fn pick_beam_from_rect<T: Copy + PartialEq>(
         let dx = tcx - ccx;
         let dy = tcy - ccy;
         let (forward, secondary, in_dir, axis_overlap) = match dir {
-            FocusDir::Right => (dx, dy.abs(), dx > 0.0, vertical_overlap_ratio(current_rect, rect)),
-            FocusDir::Left => (-dx, dy.abs(), dx < 0.0, vertical_overlap_ratio(current_rect, rect)),
-            FocusDir::Down => (dy, dx.abs(), dy > 0.0, horizontal_overlap_ratio(current_rect, rect)),
-            FocusDir::Up => (-dy, dx.abs(), dy < 0.0, horizontal_overlap_ratio(current_rect, rect)),
+            FocusDir::Right => (
+                dx,
+                dy.abs(),
+                dx > 0.0,
+                vertical_overlap_ratio(current_rect, rect),
+            ),
+            FocusDir::Left => (
+                -dx,
+                dy.abs(),
+                dx < 0.0,
+                vertical_overlap_ratio(current_rect, rect),
+            ),
+            FocusDir::Down => (
+                dy,
+                dx.abs(),
+                dy > 0.0,
+                horizontal_overlap_ratio(current_rect, rect),
+            ),
+            FocusDir::Up => (
+                -dy,
+                dx.abs(),
+                dy < 0.0,
+                horizontal_overlap_ratio(current_rect, rect),
+            ),
         };
         if !in_dir || forward <= 0.0 {
             continue;
@@ -758,7 +765,8 @@ fn pick_beam_from_rect<T: Copy + PartialEq>(
             continue;
         };
 
-        let group_penalty = u32::from(current_group != u32::MAX && layout.groups[i] != current_group);
+        let group_penalty =
+            u32::from(current_group != u32::MAX && layout.groups[i] != current_group);
 
         let score = NavScore {
             tier,
@@ -844,7 +852,9 @@ fn pick_loose_from_rect<T: Copy + PartialEq>(
 
         let score = NavScore {
             tier: 7,
-            group_penalty: u32::from(current_group != u32::MAX && layout.groups[i] != current_group),
+            group_penalty: u32::from(
+                current_group != u32::MAX && layout.groups[i] != current_group,
+            ),
             secondary: f32_to_sort_key(memory_secondary),
             forward: f32_to_sort_key(forward),
             manhattan: f32_to_sort_key(dx.abs() + dy.abs()),
@@ -863,8 +873,8 @@ fn pick_loose_from_rect<T: Copy + PartialEq>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::session::FocusNavState;
+    use super::*;
 
     fn row(y: f32, xs: &[(u32, f32)]) -> Vec<(u32, [f32; 4])> {
         xs.iter()
@@ -872,10 +882,12 @@ mod tests {
             .collect()
     }
 
-    fn load_nav(candidates: &[(u32, [f32; 4])], edges: &[(u32, FocusDir, u32)]) -> FocusNavState<u32> {
+    fn load_nav(
+        candidates: &[(u32, [f32; 4])],
+        edges: &[(u32, FocusDir, u32)],
+    ) -> FocusNavState<u32> {
         let mut nav = FocusNavState::new();
-        let edge_triples: Vec<(u32, FocusDir, u32)> =
-            edges.iter().copied().collect();
+        let edge_triples: Vec<(u32, FocusDir, u32)> = edges.iter().copied().collect();
         nav.load_candidates(candidates, &edge_triples);
         nav
     }
@@ -913,12 +925,12 @@ mod tests {
     #[test]
     fn gameplay_action_bar_right_chain_inferred() {
         let mut items: Vec<(u32, [f32; 4])> = vec![
-            (100, [100.0, 900.0, 120.0, 80.0]),  // Discard
-            (101, [280.0, 880.0, 40.0, 100.0]),  // discard tally
+            (100, [100.0, 900.0, 120.0, 80.0]), // Discard
+            (101, [280.0, 880.0, 40.0, 100.0]), // discard tally
             (102, [400.0, 870.0, 80.0, 90.0]),  // Guide
             (103, [520.0, 870.0, 80.0, 90.0]),  // Journal
             (104, [720.0, 880.0, 40.0, 100.0]), // play tally
-            (105, [860.0, 900.0, 120.0, 80.0]),  // Play
+            (105, [860.0, 900.0, 120.0, 80.0]), // Play
         ];
         items.push((0, [400.0, 520.0, 58.0, 90.0])); // hand tile above
         let mut nav = load_nav(&items, &[]);

@@ -145,10 +145,7 @@ impl ScorePopupSystem {
         timing: PopupMotionTiming,
     ) {
         let (color, material) = match kind {
-            StepKind::Chips => (
-                [0.0, 160.0 / 255.0, 1.0, 1.0],
-                GlyphMaterial::Polychrome,
-            ),
+            StepKind::Chips => ([0.0, 160.0 / 255.0, 1.0, 1.0], GlyphMaterial::Polychrome),
             StepKind::Mult => (MULT_COLOR, GlyphMaterial::Polychrome),
             StepKind::Yen => (GOLD_COLOR, GlyphMaterial::Polychrome),
             StepKind::Final => (FINAL_COLOR, GlyphMaterial::Polychrome),

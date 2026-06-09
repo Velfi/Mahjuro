@@ -271,16 +271,16 @@ impl PauseMenu {
                             _active_profile,
                         )
                     {
-                    match crate::bot::export_play_history_html(&path, progress) {
-                        Ok(()) => bus.push(GameEvent::InfoModal {
-                            title: "Stats exported".into(),
-                            body: format!("Saved HTML report to:\n{}", path.display()),
-                        }),
-                        Err(e) => bus.push(GameEvent::InfoModal {
-                            title: "Export failed".into(),
-                            body: format!("{e:#}"),
-                        }),
-                    }
+                        match crate::bot::export_play_history_html(&path, progress) {
+                            Ok(()) => bus.push(GameEvent::InfoModal {
+                                title: "Stats exported".into(),
+                                body: format!("Saved HTML report to:\n{}", path.display()),
+                            }),
+                            Err(e) => bus.push(GameEvent::InfoModal {
+                                title: "Export failed".into(),
+                                body: format!("{e:#}"),
+                            }),
+                        }
                     }
                 }
                 #[cfg(any(feature = "game", feature = "headless-screenshot"))]

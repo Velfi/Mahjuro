@@ -58,9 +58,9 @@ pub mod main_render_settings;
 #[path = "main/room_gltf_brownout.rs"]
 mod main_room_gltf_brownout;
 pub mod persistence;
+pub mod sfx_id;
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 mod shell_open;
-pub mod sfx_id;
 #[cfg(feature = "game")]
 mod trailer_mode;
 pub use mahjuro_render::physical_size;
@@ -74,9 +74,9 @@ pub use mahjuro_render::startup_profile;
 pub mod steam;
 #[cfg(feature = "game")]
 pub(crate) use steam::DistributionBackend;
-pub mod ui;
 #[cfg(test)]
 mod shader_fxc_lints;
+pub mod ui;
 
 #[cfg(feature = "game")]
 #[path = "main/app.rs"]
@@ -271,21 +271,21 @@ fn init_env_logger() {
                 container.display()
             );
         } else {
-        let path = Path::new(&path_raw);
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match OpenOptions::new().create(true).append(true).open(path) {
-            Ok(f) => {
-                builder.target(env_logger::Target::Pipe(Box::new(LineWriter::new(f))));
+            let path = Path::new(&path_raw);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
             }
-            Err(e) => {
-                eprintln!(
-                    "Mahjuro: could not open MAHJURO_LOG_FILE {}: {e}",
-                    path.display()
-                );
+            match OpenOptions::new().create(true).append(true).open(path) {
+                Ok(f) => {
+                    builder.target(env_logger::Target::Pipe(Box::new(LineWriter::new(f))));
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Mahjuro: could not open MAHJURO_LOG_FILE {}: {e}",
+                        path.display()
+                    );
+                }
             }
-        }
         }
     }
     builder.init();
@@ -332,8 +332,8 @@ pub fn run() -> anyhow::Result<()> {
         asset_path::init();
         asset_path::log_all_assets();
     }
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        || -> anyhow::Result<()> {
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> anyhow::Result<()> {
             // Platform services init runs before the window (Steam hooks the
             // rendering surface as it's created). `--no-platform-services` /
             // `--no-steam` short-circuit for dev runs.
@@ -360,8 +360,7 @@ pub fn run() -> anyhow::Result<()> {
             };
             app.run_sdl_main(&mut shell)?;
             Ok(())
-        },
-    ));
+        }));
 
     match result {
         Ok(Ok(())) => Ok(()),

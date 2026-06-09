@@ -2,8 +2,7 @@
 
 pub const PAGE_TITLE: &str = "Flowers";
 
-pub const PAGE_SUBTITLE: &str =
-    "Flowers are wildcards — they can replace one tile in a three-tile meld. Flowers are useful for forming yaku, but this comes at a cost: they don't contribute to a meld's score.";
+pub const PAGE_SUBTITLE: &str = "Flowers are wildcards — they can replace one tile in a three-tile meld. Flowers are useful for forming yaku, but this comes at a cost: they don't contribute to a meld's score.";
 
 pub const SECTION_ALLOWED: &str = "ALLOWED";
 pub const ALLOWED_LINES: &[&str] = &[

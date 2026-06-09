@@ -229,7 +229,10 @@ impl DebugMenuBar {
         let _ = overlays_sub.append(&hide_2d_ui_item);
 
         let focus_nav_item = MenuItem::new("Focus Navigation", true, None);
-        mappings.push((focus_nav_item.id().clone(), DebugAction::ToggleFocusNavDebug));
+        mappings.push((
+            focus_nav_item.id().clone(),
+            DebugAction::ToggleFocusNavDebug,
+        ));
         let _ = overlays_sub.append(&focus_nav_item);
 
         let _ = overlays_sub.append(&PredefinedMenuItem::separator());
@@ -555,11 +558,7 @@ impl DebugMenuBar {
         mappings.push((defeat_item.id().clone(), DebugAction::ShowDefeatScreen));
         let _ = jump_sub.append(&defeat_item);
 
-        let trailer_item = MenuItem::new(
-            "Trailer Mode",
-            true,
-            Some(accel_cmd_shift(Code::KeyT)),
-        );
+        let trailer_item = MenuItem::new("Trailer Mode", true, Some(accel_cmd_shift(Code::KeyT)));
         mappings.push((trailer_item.id().clone(), DebugAction::TriggerTrailerMode));
         let _ = jump_sub.append(&trailer_item);
 

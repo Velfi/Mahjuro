@@ -276,8 +276,7 @@ pub fn push_relic_flavor_inspect_panel(
     let body_px = typography::size(typography::H32, window_h);
     let min_font_px = typography::readable_floor_px(window_h);
     let max_inner_w = (window_w * 0.46).clamp(440.0, 720.0);
-    let inner_w = flavor_spans_layout_width(flavor, body_px, max_inner_w)
-        .clamp(400.0, max_inner_w);
+    let inner_w = flavor_spans_layout_width(flavor, body_px, max_inner_w).clamp(400.0, max_inner_w);
     let inner_w_u = inner_w.max(1.0) as u32;
     let top_margin = window_h * 0.10;
     let bottom_margin = extra_bottom_reserve.max(0.0) + window_h * 0.02;
@@ -292,14 +291,8 @@ pub fn push_relic_flavor_inspect_panel(
             italic: load_ui_font_italic(),
             emoji: None,
         };
-        let metrics = measure_flavor_spans_layout(
-            &fonts,
-            flavor,
-            inner_w_u,
-            u32::MAX,
-            body_px,
-            min_font_px,
-        );
+        let metrics =
+            measure_flavor_spans_layout(&fonts, flavor, inner_w_u, u32::MAX, body_px, min_font_px);
         let metrics = if metrics.text_block_h > available_inner_h {
             measure_flavor_spans_layout(
                 &fonts,
@@ -315,8 +308,7 @@ pub fn push_relic_flavor_inspect_panel(
         (metrics.text_block_h.ceil(), metrics.font_px)
     } else {
         let line_step = styled_text::colored_row_line_step(body_px);
-        let content_lines =
-            estimated_flavor_line_count(flavor, inner_w, body_px, 64);
+        let content_lines = estimated_flavor_line_count(flavor, inner_w, body_px, 64);
         (line_step * content_lines as f32, body_px)
     };
 
@@ -651,6 +643,9 @@ mod tests {
 
         let wide_w = flavor_spans_layout_width(spans, body_px, 560.0);
         let wide_lines = estimated_flavor_line_count(spans, wide_w, body_px, 16);
-        assert_eq!(wide_lines, 5, "wide band should honor explicit newlines only");
+        assert_eq!(
+            wide_lines, 5,
+            "wide band should honor explicit newlines only"
+        );
     }
 }

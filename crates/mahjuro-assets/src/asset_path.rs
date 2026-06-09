@@ -5,9 +5,9 @@ use std::sync::Arc;
 use memmap2::Mmap;
 
 pub use crate::asset_sources::{
-    get, get_cached, get_mmap_loose, init, list_tilesets, log_all_assets, mount_pack_once,
-    prefetch_gameplay_bulk_pack_once, prefetch_lazy_packs, prefetch_lazy_packs_after_menu_once,
-    prefetch_rooms_pack_once, AssetFile,
+    AssetFile, get, get_cached, get_mmap_loose, init, list_tilesets, log_all_assets,
+    mount_pack_once, prefetch_gameplay_bulk_pack_once, prefetch_lazy_packs,
+    prefetch_lazy_packs_after_menu_once, prefetch_rooms_pack_once,
 };
 
 /// Load asset bytes, preferring `<path>.zst` when present (room offline bakes).

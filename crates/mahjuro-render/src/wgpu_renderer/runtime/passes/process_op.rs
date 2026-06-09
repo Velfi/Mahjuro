@@ -72,10 +72,7 @@ impl WgpuRenderer {
                 }
                 if textured_last_pi != Some(pi) {
                     pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                    pass.set_index_buffer(
-                        prim.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     textured_last_pi = Some(pi);
                 }
                 pass.set_bind_group(0, bg, &[]);
@@ -106,10 +103,7 @@ impl WgpuRenderer {
                 continue;
             };
             pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-            pass.set_index_buffer(
-                prim.index_buffer.slice(..),
-                wgpu::IndexFormat::Uint32,
-            );
+            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.set_bind_group(0, bg, &[]);
             pass.draw_indexed(
                 0..prim.index_count,
@@ -381,7 +375,10 @@ impl WgpuRenderer {
                         };
                         pass.set_bind_group(0, &inst.bind_group, &[]);
                         pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                        pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.set_index_buffer(
+                            mesh.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
                         pass.draw_indexed(0..mesh.index_count, 0, 0..1);
                         continue;
                     }
@@ -602,10 +599,8 @@ impl WgpuRenderer {
                 pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
                 pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
                 pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
-                for (batch_idx, &(blend_start, blend_count)) in self
-                    .tile_3d_batch_blend_ranges
-                    .iter()
-                    .enumerate()
+                for (batch_idx, &(blend_start, blend_count)) in
+                    self.tile_3d_batch_blend_ranges.iter().enumerate()
                 {
                     if blend_count == 0 {
                         continue;

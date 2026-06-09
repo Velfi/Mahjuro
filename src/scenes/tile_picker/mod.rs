@@ -1,12 +1,12 @@
 //! Shared tile grid layouts for stress lab (accordion drawers) and stairway decimation (scroll).
 
+use super::header_chrome::HeaderChromeMetrics;
 use crate::core::tile::{Suit, Tile};
 use crate::render::draw_cmd::{CameraParams, ShowcaseTilePlacement};
 use crate::render::theme::{metrics, typography};
 use crate::ui::controller_hints::screen_footer_reserve;
 use crate::ui::widget::PLAIN_TEXT_LINE_STEP_MUL;
 use crate::ui::widget_tree::{FlatItem, FocusId};
-use super::header_chrome::HeaderChromeMetrics;
 
 pub const TILE_ROTATION: [f32; 3] = [0.0, 0.0, std::f32::consts::PI];
 const GRID_GAP_FRAC: f32 = 0.08;
@@ -247,10 +247,7 @@ fn repeat_tiles(tiles: &[Tile], repeat: usize, id_salt: u32) -> Vec<Tile> {
     for r in 0..repeat {
         for (i, &t) in tiles.iter().enumerate() {
             let mut copy = t;
-            copy.id = STRESS_TILE_ID_BASE
-                + id_salt
-                + (r as u32) * tiles.len() as u32
-                + i as u32;
+            copy.id = STRESS_TILE_ID_BASE + id_salt + (r as u32) * tiles.len() as u32 + i as u32;
             out.push(copy);
         }
     }
@@ -264,14 +261,10 @@ pub fn compute_tile_picker_layout<A: Copy>(
 ) -> TilePickerLayout<A> {
     let scale = metrics::scene_scale(w, h);
     let margin = (14.0 * scale).max(8.0);
-    let title_font = crate::render::theme::typography::size(
-        crate::render::theme::typography::H20,
-        h,
-    );
-    let body_font = crate::render::theme::typography::size(
-        crate::render::theme::typography::H42,
-        h,
-    );
+    let title_font =
+        crate::render::theme::typography::size(crate::render::theme::typography::H20, h);
+    let body_font =
+        crate::render::theme::typography::size(crate::render::theme::typography::H42, h);
     let hint_reserve = screen_footer_reserve(w, h);
     let footer_y = h - hint_reserve - (36.0 * scale).max(28.0) - margin;
     let band = tile_band(
@@ -361,12 +354,7 @@ pub fn compute_tile_picker_layout<A: Copy>(
                 });
                 pick_tile_ids.push(tile.id);
                 let slot_h = size_px * config.face_aspect;
-                pick_tile_rects.push([
-                    cx - size_px * 0.5,
-                    cy - slot_h * 0.5,
-                    size_px,
-                    slot_h,
-                ]);
+                pick_tile_rects.push([cx - size_px * 0.5, cy - slot_h * 0.5, size_px, slot_h]);
                 pick_cursor += 1;
             }
             y += body_per_expanded;
@@ -422,10 +410,8 @@ pub fn compute_flat_tile_stress_layout<A: Copy>(
 ) -> FlatTileStressLayout<A> {
     let scale = metrics::scene_scale(w, h);
     let margin = (14.0 * scale).max(8.0);
-    let title_font = crate::render::theme::typography::size(
-        crate::render::theme::typography::H20,
-        h,
-    );
+    let title_font =
+        crate::render::theme::typography::size(crate::render::theme::typography::H20, h);
     let hint_reserve = screen_footer_reserve(w, h);
     let footer_y = h - hint_reserve - (36.0 * scale).max(28.0) - margin;
     let viewport = tile_band(w, margin, title_font * 3.2, footer_y - margin);
@@ -602,10 +588,8 @@ pub fn picker_seal_button_rect(window_w: f32, window_h: f32) -> [f32; 4] {
 fn legacy_scroll_viewport(w: f32, h: f32, content_top_extra: f32) -> [f32; 4] {
     let scale = metrics::scene_scale(w, h);
     let margin = (14.0 * scale).max(8.0);
-    let title_font = crate::render::theme::typography::size(
-        crate::render::theme::typography::H20,
-        h,
-    );
+    let title_font =
+        crate::render::theme::typography::size(crate::render::theme::typography::H20, h);
     let hint_reserve = screen_footer_reserve(w, h);
     let footer_y = h - hint_reserve - (36.0 * scale).max(28.0) - margin;
     tile_band(w, margin, title_font + content_top_extra, footer_y - margin)
@@ -617,11 +601,11 @@ pub fn compute_scrollable_tile_picker_layout<A: Copy>(
     config: ScrollableTilePickerConfig<'_, A>,
 ) -> ScrollableTilePickerLayout<A> {
     let scale = metrics::scene_scale(w, h);
-    let body_font = crate::render::theme::typography::size(
-        crate::render::theme::typography::H42,
-        h,
-    );
-    let viewport = config.viewport.unwrap_or_else(|| legacy_scroll_viewport(w, h, 0.0));
+    let body_font =
+        crate::render::theme::typography::size(crate::render::theme::typography::H42, h);
+    let viewport = config
+        .viewport
+        .unwrap_or_else(|| legacy_scroll_viewport(w, h, 0.0));
     let scroll_gutter = if config.show_scrollbar {
         picker_scrollbar_gutter(scale)
     } else {
@@ -761,8 +745,7 @@ pub fn compute_scrollable_tile_picker_layout<A: Copy>(
             let row = i / cols;
             let col = i % cols;
             let cx = grid_x + col as f32 * (tile_w + gap) + tile_w * 0.5;
-            let cy_content =
-                section.grid_content_y + row as f32 * (tile_h + gap) + tile_h * 0.5;
+            let cy_content = section.grid_content_y + row as f32 * (tile_h + gap) + tile_h * 0.5;
             let cy = tile_viewport[1] + cy_content - scroll_y;
             let screen_rect = [cx - tile_w * 0.5, cy - tile_h * 0.5, tile_w, tile_h];
 
@@ -861,9 +844,9 @@ fn section_for_slot<'a>(
     slot: usize,
     sections: &'a [TilePickerSectionMeta],
 ) -> Option<&'a TilePickerSectionMeta> {
-    sections.iter().find(|s| {
-        slot >= s.first_pick_index && slot < s.first_pick_index + s.pick_count
-    })
+    sections
+        .iter()
+        .find(|s| slot >= s.first_pick_index && slot < s.first_pick_index + s.pick_count)
 }
 
 /// Pick slots covered by a 2D grid marquee between `start` and `current`.
@@ -939,24 +922,8 @@ fn placement_style(
             1.0,
             selection_outline_sel,
         ),
-        TileHighlight::PlayerClaim => (
-            true,
-            hovered,
-            true,
-            false,
-            None,
-            1.0,
-            None,
-        ),
-        TileHighlight::HouseClaim => (
-            false,
-            hovered,
-            true,
-            false,
-            None,
-            1.0,
-            Some(3.0),
-        ),
+        TileHighlight::PlayerClaim => (true, hovered, true, false, None, 1.0, None),
+        TileHighlight::HouseClaim => (false, hovered, true, false, None, 1.0, Some(3.0)),
     }
 }
 
@@ -991,8 +958,7 @@ fn plan_tile_grid(count: usize, band: [f32; 4], face_aspect: f32) -> TileGridPla
         let rows = count.div_ceil(cols);
         let col_gaps = (cols.saturating_sub(1)) as f32 * GRID_GAP_FRAC;
         let row_gaps = (rows.saturating_sub(1)) as f32 * GRID_GAP_FRAC;
-        let size = (bw / (cols as f32 + col_gaps))
-            .min(bh / (rows as f32 * face_aspect + row_gaps));
+        let size = (bw / (cols as f32 + col_gaps)).min(bh / (rows as f32 * face_aspect + row_gaps));
         if size > best.size_px {
             best = TileGridPlan {
                 cols,
@@ -1075,22 +1041,17 @@ pub fn compute_decimation_reveal_layout<A: Copy>(
 ) -> DecimationRevealLayout<A> {
     let scale = metrics::scene_scale(w, h);
     let margin = (14.0 * scale).max(8.0);
-    let body_font = crate::render::theme::typography::size(
-        crate::render::theme::typography::H42,
-        h,
-    );
-    let title_font = crate::render::theme::typography::size(
-        crate::render::theme::typography::H20,
-        h,
-    );
+    let body_font =
+        crate::render::theme::typography::size(crate::render::theme::typography::H42, h);
+    let title_font =
+        crate::render::theme::typography::size(crate::render::theme::typography::H20, h);
     let group_gap = body_font * 2.0;
 
     let max_group_w = w * 0.88;
     let tile_count = player.len().max(1);
     let gap = max_group_w * 0.02;
-    let size_px =
-        ((max_group_w - gap * (tile_count.saturating_sub(1) as f32)) / tile_count as f32)
-            .min(h * 0.11);
+    let size_px = ((max_group_w - gap * (tile_count.saturating_sub(1) as f32)) / tile_count as f32)
+        .min(h * 0.11);
     let group_w = size_px * tile_count as f32 + gap * tile_count.saturating_sub(1) as f32;
     let group_x = (w - group_w) * 0.5;
 

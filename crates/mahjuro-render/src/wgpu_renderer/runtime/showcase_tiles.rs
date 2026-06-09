@@ -216,8 +216,8 @@ impl WgpuRenderer {
 
                 let opacity = p.opacity.clamp(0.0, 1.0);
                 let translucent = opacity < 0.999;
-                let casts_shadow = !frame.showcase_render_hints.zodiac_celebration_no_shadow
-                    && !translucent;
+                let casts_shadow =
+                    !frame.showcase_render_hints.zodiac_celebration_no_shadow && !translucent;
                 pending.push(PendingShowcaseTile {
                     instance: Tile3dInstance {
                         model: model.to_cols_array(),
@@ -240,10 +240,11 @@ impl WgpuRenderer {
                     if p.hovered && p.selected {
                         outline_bcf[1] = 1.5;
                     }
-                    self.tile_outline_instances_staging.push(TileOutlineInstance {
-                        model: outline_model.to_cols_array(),
-                        base_color_factor: outline_bcf,
-                    });
+                    self.tile_outline_instances_staging
+                        .push(TileOutlineInstance {
+                            model: outline_model.to_cols_array(),
+                            base_color_factor: outline_bcf,
+                        });
                 }
             }
 
@@ -269,9 +270,9 @@ impl WgpuRenderer {
 
             let batch_shadow_n =
                 self.tile_shadow_instances_staging.len() as u32 - batch_shadow_start;
-            self.tile_shadow_batch_ranges.push((batch_shadow_start, batch_shadow_n));
-            let outline_n =
-                self.tile_outline_instances_staging.len() as u32 - outline_batch_start;
+            self.tile_shadow_batch_ranges
+                .push((batch_shadow_start, batch_shadow_n));
+            let outline_n = self.tile_outline_instances_staging.len() as u32 - outline_batch_start;
             self.tile_outline_batch_ranges
                 .push((outline_batch_start, outline_n));
 
@@ -291,8 +292,7 @@ impl WgpuRenderer {
                 }
             }
             let coin_3d_n = self.tile_3d_instances_staging.len() as u32 - coin_3d_start;
-            let coin_shadow_n =
-                self.tile_shadow_instances_staging.len() as u32 - coin_shadow_start;
+            let coin_shadow_n = self.tile_shadow_instances_staging.len() as u32 - coin_shadow_start;
             self.coin_3d_batch_range = Some((coin_3d_start, coin_3d_n));
             self.coin_shadow_batch_range = Some((coin_shadow_start, coin_shadow_n));
         }
@@ -320,8 +320,8 @@ impl WgpuRenderer {
             );
         }
 
-        self.proj.dora_tile_rect = dora_tile_bounds
-            .map(|b| [b[0], b[1], (b[2] - b[0]).max(1.0), (b[3] - b[1]).max(1.0)]);
+        self.proj.dora_tile_rect =
+            dora_tile_bounds.map(|b| [b[0], b[1], (b[2] - b[0]).max(1.0), (b[3] - b[1]).max(1.0)]);
         self.proj.round_wind_tile_rect = round_wind_tile_bounds
             .map(|b| [b[0], b[1], (b[2] - b[0]).max(1.0), (b[3] - b[1]).max(1.0)]);
 
@@ -335,7 +335,9 @@ impl WgpuRenderer {
 
         self.proj.relic_rects.clear();
         for (model, _rid) in &self.last_relic_models {
-            self.proj.relic_rects.push(camera.project_unit_cube_rect(*model));
+            self.proj
+                .relic_rects
+                .push(camera.project_unit_cube_rect(*model));
         }
         self.proj.ribbon_rects.clear();
         for model in &self.last_ribbon_models {
@@ -345,9 +347,11 @@ impl WgpuRenderer {
         }
         self.proj.talisman_rects.clear();
         for model in &self.last_talisman_models {
-            self.proj
-                .talisman_rects
-                .push(camera.project_aabb_rect(*model, TALISMAN_LOCAL_HALF, 0.0));
+            self.proj.talisman_rects.push(camera.project_aabb_rect(
+                *model,
+                TALISMAN_LOCAL_HALF,
+                0.0,
+            ));
         }
         for (rect, pick_id) in &self.proj.pack_rects {
             self.proj.aux_dish_rects.push((*pick_id, *rect));

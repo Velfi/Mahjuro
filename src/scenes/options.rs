@@ -365,9 +365,10 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
         Row::AutoCashInOnFullStructure => {
             ("Auto cash-in", on_off(scene.auto_cash_in_on_full_structure))
         }
-        Row::StructureMeldPreview => {
-            ("Structure meld preview", on_off(scene.structure_meld_preview))
-        }
+        Row::StructureMeldPreview => (
+            "Structure meld preview",
+            on_off(scene.structure_meld_preview),
+        ),
         Row::GlyphPrompts => ("Button glyphs", scene.glyph_prompt.label().into()),
         Row::UndoDiscard => ("Discard undo", on_off(scene.discard_undo_enabled)),
         Row::ExportPlayStats => ("Export play stats", String::new()),
@@ -856,9 +857,7 @@ impl OptionsScene {
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
-            Row::StructureMeldPreview => {
-                self.structure_meld_preview = !self.structure_meld_preview
-            }
+            Row::StructureMeldPreview => self.structure_meld_preview = !self.structure_meld_preview,
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.next(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             Row::ExportPlayStats | Row::Credits => return,
@@ -898,9 +897,7 @@ impl OptionsScene {
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
-            Row::StructureMeldPreview => {
-                self.structure_meld_preview = !self.structure_meld_preview
-            }
+            Row::StructureMeldPreview => self.structure_meld_preview = !self.structure_meld_preview,
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.prev(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             Row::ExportPlayStats | Row::Credits => return,
@@ -1188,7 +1185,9 @@ impl OptionsScene {
                     self.open_tileset_mods_requested = true;
                     self.confirm_requested = true;
                 }
-                UiAction::Confirm | UiAction::CommitDiscard if self.bottom_focus == BottomFocus::Back => {
+                UiAction::Confirm | UiAction::CommitDiscard
+                    if self.bottom_focus == BottomFocus::Back =>
+                {
                     self.save_settings();
                     self.cancel_requested = true;
                     return true;
@@ -1332,8 +1331,7 @@ impl OptionsScene {
                     }
                 }
                 ContentSlot::Row(row) => {
-                    let is_focused =
-                        self.bottom_focus == BottomFocus::None && row == self.focused;
+                    let is_focused = self.bottom_focus == BottomFocus::None && row == self.focused;
                     self.draw_row(
                         instances,
                         text_labels,
@@ -1713,11 +1711,9 @@ impl SceneBehavior for OptionsScene {
         }
         #[cfg(any(feature = "game", feature = "headless-screenshot"))]
         if self.take_export_requested() {
-            let Some(path) =
-                mahjuro_distribution::PlatformShell::resolve_play_stats_export_path(
-                    ctx.active_profile,
-                )
-            else {
+            let Some(path) = mahjuro_distribution::PlatformShell::resolve_play_stats_export_path(
+                ctx.active_profile,
+            ) else {
                 return None;
             }; // user cancelled save panel
             match crate::bot::export_play_history_html(&path, ctx.progress) {

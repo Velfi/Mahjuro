@@ -198,8 +198,7 @@ fn active_cpu_room_ram_residents() -> usize {
 }
 
 fn cpu_prefetch_may_start() -> bool {
-    active_cpu_room_ram_residents()
-        < max_concurrent_cpu_room_decodes(prefetch_graphics_mode())
+    active_cpu_room_ram_residents() < max_concurrent_cpu_room_decodes(prefetch_graphics_mode())
 }
 
 /// Hub/run chain decodes must not compete with boot-critical `main_menu.glb` CPU work.

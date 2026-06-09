@@ -19,7 +19,9 @@ use crate::ui::widget_tree::FocusId;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::world_space::{LayoutAnchorPx, layout_px_py_from_norm};
 
-use super::{BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
+use super::{
+    BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ModalAction {
@@ -942,7 +944,7 @@ impl SceneBehavior for TileSelectScene {
                         outline: false,
                         glow: false,
                         glow_color: None,
-                    outline_sel: None,
+                        outline_sel: None,
                         pick_id: None,
                         overlay_rect_group: None,
                     }
@@ -989,13 +991,9 @@ impl SceneBehavior for TileSelectScene {
         let targets = self.focus_targets(w, h, ctx.progress, &self.positions);
         let candidates: Vec<(ModalAction, [f32; 4])> =
             targets.iter().map(|(a, r)| (*a, *r)).collect();
-        ctx.stash_focus_nav_graph(
-            &candidates,
-            &[],
-            self.focus,
-            self.focus_nav.memory(),
-            |a| format!("{a:?}"),
-        );
+        ctx.stash_focus_nav_graph(&candidates, &[], self.focus, self.focus_nav.memory(), |a| {
+            format!("{a:?}")
+        });
         frame
     }
 }
