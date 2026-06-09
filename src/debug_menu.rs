@@ -3,9 +3,8 @@
 
 //! Native OS menubar "Debug" menu using muda.
 //!
-//! Provides debug shortcuts grouped by purpose: overlays (flat + category dividers),
-//! tuning panels (by scene), profiling, run/profile cheats, standalone labs,
-//! and end screens.
+//! Provides debug shortcuts grouped by purpose: overlays, live-tweak panels,
+//! profiling, run/profile cheats, labs, and scene jumps.
 //!
 //! ## Cross-platform installation
 //!
@@ -229,14 +228,14 @@ impl DebugMenuBar {
         mappings.push((hide_2d_ui_item.id().clone(), DebugAction::ToggleHide2dUi));
         let _ = overlays_sub.append(&hide_2d_ui_item);
 
-        let focus_nav_item = MenuItem::new("Focus Nav Debug", true, None);
+        let focus_nav_item = MenuItem::new("Focus Navigation", true, None);
         mappings.push((focus_nav_item.id().clone(), DebugAction::ToggleFocusNavDebug));
         let _ = overlays_sub.append(&focus_nav_item);
 
         let _ = overlays_sub.append(&PredefinedMenuItem::separator());
         let _ = overlays_sub.append(&MenuItem::new("Gameplay", false, None));
 
-        let visibility_item = MenuItem::new("HUD Visibility...", true, None);
+        let visibility_item = MenuItem::new("HUD Elements...", true, None);
         mappings.push((
             visibility_item.id().clone(),
             DebugAction::OpenDebugVisibility,
@@ -250,82 +249,76 @@ impl DebugMenuBar {
         let _ = overlays_sub.append(&PredefinedMenuItem::separator());
         let _ = overlays_sub.append(&MenuItem::new("Dev", false, None));
 
-        let test_overlay_item = MenuItem::new("Test Modal Overlay", true, None);
+        let test_overlay_item = MenuItem::new("Test Modal...", true, None);
         mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
         let _ = overlays_sub.append(&test_overlay_item);
 
         let _ = debug_menu.append(&overlays_sub);
 
-        // ── Tuning ───────────────────────────────────────────────────────────
-        // Live parameter panels grouped by the scene(s) they affect.
-        let tuning_sub = Submenu::new("Tuning", true);
+        // ── Panels ───────────────────────────────────────────────────────────
+        // Live parameter overlays; one submenu with scene section headers (no
+        // single-item sub-submenus).
+        let panels_sub = Submenu::new("Panels", true);
 
-        let tuning_per_scene_sub = Submenu::new("Per Scene", true);
+        let _ = panels_sub.append(&MenuItem::new("All Scenes", false, None));
 
         let camera_item = MenuItem::new("Camera...", true, None);
         mappings.push((camera_item.id().clone(), DebugAction::OpenCameraDebug));
-        let _ = tuning_per_scene_sub.append(&camera_item);
+        let _ = panels_sub.append(&camera_item);
 
         let scene_look_item = MenuItem::new("Scene Look...", true, None);
         mappings.push((
             scene_look_item.id().clone(),
             DebugAction::OpenSceneLookDebug,
         ));
-        let _ = tuning_per_scene_sub.append(&scene_look_item);
+        let _ = panels_sub.append(&scene_look_item);
 
-        let _ = tuning_sub.append(&tuning_per_scene_sub);
-
-        let tuning_gameplay_sub = Submenu::new("Gameplay", true);
+        let _ = panels_sub.append(&PredefinedMenuItem::separator());
+        let _ = panels_sub.append(&MenuItem::new("Gameplay", false, None));
 
         let cascade_tuning_item = MenuItem::new("Score Cascade...", true, None);
         mappings.push((cascade_tuning_item.id().clone(), DebugAction::OpenTuning));
-        let _ = tuning_gameplay_sub.append(&cascade_tuning_item);
+        let _ = panels_sub.append(&cascade_tuning_item);
 
         let flame_item = MenuItem::new("Candle Flames...", true, None);
         mappings.push((flame_item.id().clone(), DebugAction::OpenFlameDebug));
-        let _ = tuning_gameplay_sub.append(&flame_item);
+        let _ = panels_sub.append(&flame_item);
 
-        let _ = tuning_sub.append(&tuning_gameplay_sub);
+        let _ = panels_sub.append(&PredefinedMenuItem::separator());
+        let _ = panels_sub.append(&MenuItem::new("Main Menu", false, None));
 
-        let tuning_main_menu_sub = Submenu::new("Main Menu", true);
-
-        let rain_item = MenuItem::new("Rain / Moon / Moths...", true, None);
+        let rain_item = MenuItem::new("Rain, Moon & Moths...", true, None);
         mappings.push((rain_item.id().clone(), DebugAction::OpenRainDebug));
-        let _ = tuning_main_menu_sub.append(&rain_item);
+        let _ = panels_sub.append(&rain_item);
 
-        let _ = tuning_sub.append(&tuning_main_menu_sub);
+        let _ = panels_sub.append(&PredefinedMenuItem::separator());
+        let _ = panels_sub.append(&MenuItem::new("Victory", false, None));
 
-        let tuning_end_screens_sub = Submenu::new("End Screens", true);
-
-        let victory_moon_item = MenuItem::new("Victory 3D Moon...", true, None);
+        let victory_moon_item = MenuItem::new("3D Moon...", true, None);
         mappings.push((
             victory_moon_item.id().clone(),
             DebugAction::OpenVictoryMoonDebug,
         ));
-        let _ = tuning_end_screens_sub.append(&victory_moon_item);
+        let _ = panels_sub.append(&victory_moon_item);
 
-        let _ = tuning_sub.append(&tuning_end_screens_sub);
-
-        let tuning_hallway_sub = Submenu::new("Hallway", true);
+        let _ = panels_sub.append(&PredefinedMenuItem::separator());
+        let _ = panels_sub.append(&MenuItem::new("Hallway", false, None));
 
         let hall_fx_item = MenuItem::new("Vertex Warp...", true, None);
         mappings.push((
             hall_fx_item.id().clone(),
             DebugAction::OpenHallwayHallFxDebug,
         ));
-        let _ = tuning_hallway_sub.append(&hall_fx_item);
+        let _ = panels_sub.append(&hall_fx_item);
 
-        let _ = tuning_sub.append(&tuning_hallway_sub);
-
-        let tuning_audio_sub = Submenu::new("Audio", true);
+        let _ = panels_sub.append(&PredefinedMenuItem::separator());
+        let _ = panels_sub.append(&MenuItem::new("Audio", false, None));
 
         let sfx_item = MenuItem::new("Sound Effects...", true, None);
         mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));
-        let _ = tuning_audio_sub.append(&sfx_item);
+        let _ = panels_sub.append(&sfx_item);
 
-        let _ = tuning_sub.append(&tuning_audio_sub);
-
-        let _ = debug_menu.append(&tuning_sub);
+        let _ = debug_menu.append(&panels_sub);
 
         // ── Profiling ────────────────────────────────────────────────────────
         let profiling_sub = Submenu::new("Profiling", true);
@@ -340,9 +333,9 @@ impl DebugMenuBar {
 
         let _ = debug_menu.append(&profiling_sub);
 
-        // ── Run & Profile ────────────────────────────────────────────────────
-        // Cheats grouped by persistence: current run only vs saved profile meta.
-        let run_profile_sub = Submenu::new("Run & Profile", true);
+        // ── Cheats ───────────────────────────────────────────────────────────
+        // Grouped by persistence: current run only vs saved profile meta.
+        let cheats_sub = Submenu::new("Cheats", true);
 
         let this_run_sub = Submenu::new("This Run", true);
 
@@ -426,9 +419,9 @@ impl DebugMenuBar {
         }
         let _ = this_run_sub.append(&add_zodiac_sub);
 
-        let _ = run_profile_sub.append(&this_run_sub);
+        let _ = cheats_sub.append(&this_run_sub);
 
-        let profile_sub = Submenu::new("Profile", true);
+        let profile_sub = Submenu::new("Save Profile", true);
 
         for lvl in 1..=14u32 {
             let item = MenuItem::new(
@@ -474,100 +467,103 @@ impl DebugMenuBar {
         }
         let _ = profile_sub.append(&chronicle_sub);
 
-        let _ = run_profile_sub.append(&profile_sub);
-        let _ = debug_menu.append(&run_profile_sub);
+        let _ = cheats_sub.append(&profile_sub);
+        let _ = debug_menu.append(&cheats_sub);
 
-        let _ = debug_menu.append(&PredefinedMenuItem::separator());
-
-        // ── Labs (direct entries) ────────────────────────────────────────────
+        // ── Labs ─────────────────────────────────────────────────────────────
         // Standalone pushdown scenes for layout, animation, and asset review.
-        let animation_lab_item = MenuItem::new("Animation Lab...", true, None);
+        let labs_sub = Submenu::new("Labs", true);
+
+        let animation_lab_item = MenuItem::new("Animation...", true, None);
         mappings.push((
             animation_lab_item.id().clone(),
             DebugAction::OpenAnimationLab,
         ));
-        let _ = debug_menu.append(&animation_lab_item);
+        let _ = labs_sub.append(&animation_lab_item);
 
-        let button_aabb_lab_item = MenuItem::new("Button AABB Lab...", true, None);
+        let button_aabb_lab_item = MenuItem::new("Button Hitboxes...", true, None);
         mappings.push((
             button_aabb_lab_item.id().clone(),
             DebugAction::OpenButtonAabbLab,
         ));
-        let _ = debug_menu.append(&button_aabb_lab_item);
+        let _ = labs_sub.append(&button_aabb_lab_item);
 
-        let material_viewer_item = MenuItem::new("Material Viewer...", true, None);
+        let material_viewer_item = MenuItem::new("Materials...", true, None);
         mappings.push((
             material_viewer_item.id().clone(),
             DebugAction::OpenMaterialViewer,
         ));
-        let _ = debug_menu.append(&material_viewer_item);
+        let _ = labs_sub.append(&material_viewer_item);
 
-        let roller_lab_item = MenuItem::new("Roller Lab...", true, None);
+        let roller_lab_item = MenuItem::new("Roller...", true, None);
         mappings.push((roller_lab_item.id().clone(), DebugAction::OpenRollerLab));
-        let _ = debug_menu.append(&roller_lab_item);
+        let _ = labs_sub.append(&roller_lab_item);
 
-        let cascade_lab_item = MenuItem::new("Cascade Lab...", true, None);
+        let cascade_lab_item = MenuItem::new("Cascade...", true, None);
         mappings.push((cascade_lab_item.id().clone(), DebugAction::OpenCascadeLab));
-        let _ = debug_menu.append(&cascade_lab_item);
+        let _ = labs_sub.append(&cascade_lab_item);
 
-        let rumble_lab_item = MenuItem::new("Rumble Lab...", true, None);
+        let rumble_lab_item = MenuItem::new("Rumble...", true, None);
         mappings.push((rumble_lab_item.id().clone(), DebugAction::OpenRumbleLab));
-        let _ = debug_menu.append(&rumble_lab_item);
+        let _ = labs_sub.append(&rumble_lab_item);
 
-        let shadow_ao_lab_item = MenuItem::new("Shadow & AO Lab...", true, None);
+        let shadow_ao_lab_item = MenuItem::new("Shadow & AO...", true, None);
         mappings.push((
             shadow_ao_lab_item.id().clone(),
             DebugAction::OpenShadowAoLab,
         ));
-        let _ = debug_menu.append(&shadow_ao_lab_item);
+        let _ = labs_sub.append(&shadow_ao_lab_item);
 
-        let text_shadow_lab_item = MenuItem::new("Text Shadow Lab...", true, None);
+        let text_shadow_lab_item = MenuItem::new("Text Shadow...", true, None);
         mappings.push((
             text_shadow_lab_item.id().clone(),
             DebugAction::OpenTextShadowLab,
         ));
-        let _ = debug_menu.append(&text_shadow_lab_item);
+        let _ = labs_sub.append(&text_shadow_lab_item);
 
-        let tile_anchor_lab_item = MenuItem::new("Tile Anchor Lab...", true, None);
+        let tile_anchor_lab_item = MenuItem::new("Tile Anchor...", true, None);
         mappings.push((
             tile_anchor_lab_item.id().clone(),
             DebugAction::OpenTileAnchorLab,
         ));
-        let _ = debug_menu.append(&tile_anchor_lab_item);
+        let _ = labs_sub.append(&tile_anchor_lab_item);
 
-        let tile_stress_lab_item = MenuItem::new("Tile Stress Lab...", true, None);
+        let tile_stress_lab_item = MenuItem::new("Tile Stress...", true, None);
         mappings.push((
             tile_stress_lab_item.id().clone(),
             DebugAction::OpenTileStressLab,
         ));
-        let _ = debug_menu.append(&tile_stress_lab_item);
+        let _ = labs_sub.append(&tile_stress_lab_item);
 
-        let transition_playground_item = MenuItem::new("Transition Playground...", true, None);
+        let transition_playground_item = MenuItem::new("Transitions...", true, None);
         mappings.push((
             transition_playground_item.id().clone(),
             DebugAction::OpenTransitionPlayground,
         ));
-        let _ = debug_menu.append(&transition_playground_item);
+        let _ = labs_sub.append(&transition_playground_item);
 
-        let _ = debug_menu.append(&PredefinedMenuItem::separator());
+        let _ = debug_menu.append(&labs_sub);
 
-        // ── Screens (direct entries) ─────────────────────────────────────────
-        // Jump to end-of-run presentation without playing through.
-        let victory_item = MenuItem::new("Victory", true, None);
+        // ── Jump To ──────────────────────────────────────────────────────────
+        let jump_sub = Submenu::new("Jump To", true);
+
+        let victory_item = MenuItem::new("Victory Screen", true, None);
         mappings.push((victory_item.id().clone(), DebugAction::ShowVictoryScreen));
-        let _ = debug_menu.append(&victory_item);
+        let _ = jump_sub.append(&victory_item);
 
-        let defeat_item = MenuItem::new("Defeat", true, None);
+        let defeat_item = MenuItem::new("Defeat Screen", true, None);
         mappings.push((defeat_item.id().clone(), DebugAction::ShowDefeatScreen));
-        let _ = debug_menu.append(&defeat_item);
+        let _ = jump_sub.append(&defeat_item);
 
         let trailer_item = MenuItem::new(
-            "Trigger Trailer Mode",
+            "Trailer Mode",
             true,
             Some(accel_cmd_shift(Code::KeyT)),
         );
         mappings.push((trailer_item.id().clone(), DebugAction::TriggerTrailerMode));
-        let _ = debug_menu.append(&trailer_item);
+        let _ = jump_sub.append(&trailer_item);
+
+        let _ = debug_menu.append(&jump_sub);
 
         let _ = menu.append(&debug_menu);
 
