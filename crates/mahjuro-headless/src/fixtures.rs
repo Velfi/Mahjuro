@@ -38,6 +38,22 @@ pub(crate) fn setup_hero_state(run: &mut RunState) {
 }
 
 #[cfg(feature = "screenshot")]
+pub(crate) fn setup_wall_ledger_screenshot_state(run: &mut RunState) {
+    use mahjuro::core::debuff::TileDebuff;
+    use mahjuro::core::deck::{Wall, build_wall};
+    use mahjuro::core::tile::Suit;
+    use mahjuro::core::tile_pack::TilePackKind;
+
+    setup_shop_state(run);
+    run.tile_packs.push(TilePackKind::Souzu);
+    run.wall = Wall::from_unshuffled(build_wall());
+    for _ in 0..88 {
+        run.wall.draw();
+    }
+    run.tile_debuffs.push(TileDebuff::Suit(Suit::Manzu));
+}
+
+#[cfg(feature = "screenshot")]
 pub(crate) fn setup_shop_state(run: &mut RunState) {
     crate::room_bake::setup_shop_state(run);
 }

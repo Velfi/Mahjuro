@@ -12,6 +12,7 @@ pub mod progression_run;
 pub mod run;
 pub mod state;
 pub mod wall_ledger;
+pub mod wall_stats;
 pub mod scene_look_tuning {
     pub use mahjuro_render::tuning::scene_look::*;
 }
