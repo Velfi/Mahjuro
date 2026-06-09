@@ -1546,10 +1546,33 @@ mod tests {
 
     #[test]
     fn wildflower_marginal_value_is_positive() {
-        let run = scoring_test_run();
+        let mut run = scoring_test_run();
+        // Scattered 14-tile hand: wildflower turns every tile into a flower wildcard
+        // and unlocks a much stronger play than the baseline melds.
+        *run.hand_mut() = vec![
+            t(Suit::Manzu, 3, 1),
+            t(Suit::Manzu, 5, 2),
+            t(Suit::Souzu, 1, 3),
+            t(Suit::Souzu, 3, 4),
+            t(Suit::Souzu, 6, 5),
+            t(Suit::Souzu, 8, 6),
+            t(Suit::Souzu, 9, 7),
+            t(Suit::Pinzu, 1, 8),
+            t(Suit::Pinzu, 2, 9),
+            t(Suit::Pinzu, 3, 10),
+            t(Suit::Pinzu, 7, 11),
+            t(Suit::Pinzu, 9, 12),
+            t(Suit::Wind, 1, 13),
+            t(Suit::Wind, 2, 14),
+        ];
+        run.hand_mut().sort();
+        let lift = super::transform_talisman_lift_on_hand(&run, run.hand(), TalismanKind::Wildflower)
+            .expect("wildflower should apply to a non-flower hand");
+        assert!(lift > 0, "wildflower should improve a scattered hand (lift={lift})");
+        let base = ShopMarginalBase::with_synthetic_samples(&run, 0, false);
         assert!(
-            talisman_marginal_value(&run, TalismanKind::Wildflower) > 0,
-            "wildflower should score well on sampled hands"
+            super::talisman_marginal_value_with_base(&run, TalismanKind::Wildflower, &base) > 0,
+            "wildflower shop value should be positive on a helpful hand"
         );
     }
 
