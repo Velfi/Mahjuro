@@ -401,7 +401,9 @@ impl App {
     fn dispatch_controller_event(&mut self, shell: &mut SdlShell, event: Event) {
         let gp_ctx = self.gamepad_poll_ctx();
         if let Some(input) = self.input.as_mut() {
-            let _ = input.handle_controller_event(shell, event, gp_ctx, &mut self.mouse_actions);
+            if input.handle_controller_event(shell, event, gp_ctx, &mut self.mouse_actions) {
+                shell.show_cursor(false);
+            }
         }
     }
 
@@ -418,15 +420,26 @@ impl App {
     }
 
     fn sdl_handle_right_button(&mut self, _shell: &mut SdlShell, down: bool) {
-        if down && self.shop_storeroom_face_active() {
+        if !self
+            .input
+            .as_ref()
+            .is_none_or(|i| i.mode == InputMode::Cursor)
+        {
+            return;
+        }
+        if down && self.item_inspect_rmb_active() {
             self.mouse_right_clicked = true;
-            if let Some(input) = self.input.as_mut() {
-                input.mode = InputMode::Cursor;
-            }
         }
     }
 
     fn sdl_handle_left_button(&mut self, _shell: &mut SdlShell, down: bool) {
+        if !self
+            .input
+            .as_ref()
+            .is_none_or(|i| i.mode == InputMode::Cursor)
+        {
+            return;
+        }
         let cursor = self
             .input
             .as_ref()
@@ -437,9 +450,6 @@ impl App {
         if down {
             self.mouse_left_down = true;
             self.mouse_clicked = true;
-            if let Some(input) = self.input.as_mut() {
-                input.mode = InputMode::Cursor;
-            }
             if defer_shop_click {
                 self.mouse_left_press_cursor = Some(cursor);
                 self.deferred_lmb_button_click = None;
@@ -546,7 +556,6 @@ impl App {
             }
         }
         if let Some(input) = self.input.as_mut() {
-            let prev_mode = input.mode;
             let dx = new_cursor.0 - input.last_cursor.0;
             let dy = new_cursor.1 - input.last_cursor.1;
             let dist_sq = dx * dx + dy * dy;
@@ -562,9 +571,12 @@ impl App {
             };
             if switch_to_cursor {
                 input.mode = InputMode::Cursor;
+                shell.show_cursor(true);
             }
-            let was_hidden = switch_to_cursor && prev_mode != InputMode::Cursor;
             input.last_cursor = new_cursor;
+            if input.mode != InputMode::Cursor {
+                return;
+            }
             let layout = self.layout_engine.solve(
                 self.last_drawable_px.width as f32,
                 self.last_drawable_px.height as f32,
@@ -602,9 +614,6 @@ impl App {
             // Update drag position if dragging.
             if let Some(ref mut drag) = input.drag {
                 drag.current_pos = input.last_cursor;
-            }
-            if was_hidden {
-                shell.show_cursor(true);
             }
         }
     }

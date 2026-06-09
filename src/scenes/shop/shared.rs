@@ -211,6 +211,31 @@ pub(super) fn shop_buy_action_valid(
     }
 }
 
+/// Map the currently focused `ShopFocus` to the buy/use action for that item,
+/// if the focused item can be purchased or used. Returns `None` when focus is
+/// missing, the item is not buyable, or validation fails.
+pub(super) fn focused_buy_action(
+    focus: Option<ShopFocus>,
+    items: &[ShopItem],
+    zodiac_items: &[ConsumableShopItem],
+    talisman_items: &[ConsumableShopItem],
+    pack_items: &[TilePackShopItem],
+    run: &RunState,
+    shop: &ShopReadModel,
+) -> Option<ShopAction> {
+    let hit = focus?.to_hit()?;
+    let action = shop_action_for_hit(hit, items, zodiac_items, talisman_items, shop)?;
+    shop_buy_action_valid(
+        action,
+        run,
+        items,
+        zodiac_items,
+        talisman_items,
+        pack_items,
+    )
+    .then_some(action)
+}
+
 /// Map the currently focused `ShopFocus` to the sell action for that item,
 /// if the focused item is an owned relic or consumable. Returns `None` if
 /// there is nothing focused or the focused item cannot be sold.

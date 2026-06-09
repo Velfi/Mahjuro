@@ -67,9 +67,8 @@ pub struct ShopScene {
     talisman_items: Vec<ConsumableShopItem>,
     /// Tile packs for sale this shop visit (always up to `N_TILE_PACKS`).
     pack_items: Vec<TilePackShopItem>,
-    /// Current restock cost — starts at `RESTOCK_BASE_COST` and increases by
-    /// `RESTOCK_COST_INCREMENT` each time the player restocks this shop visit.
-    restock_cost: u32,
+    /// Paid restocks already used this shop visit (drives [`Self::restock_cost`]).
+    paid_restocks_this_visit: u32,
     /// Temptation free restocks still owed this visit (consumed one at a time).
     remaining_free_restocks: u32,
     pause_menu: PauseMenu,
@@ -107,10 +106,10 @@ pub struct ShopScene {
     inspect_dolly: std::cell::Cell<InspectDolly>,
     /// Last orbit inspect camera — used to ease out after the showcase overlay pops.
     last_inspect_cam: std::cell::Cell<Option<CameraParams>>,
-    /// West-face hold-to-sell (gamepad West / **Q**): press time when a hold is in progress.
+    /// West-face hold-to-sell (gamepad West / **Q** / mouse hold on owned stock).
     west_sell_hold_started: Option<std::time::Instant>,
-    /// Confirm-face hold-to-buy (gamepad South / **Enter**): press time when a hold is in progress.
-    buy_hold_started: Option<std::time::Instant>,
+    /// Confirm hold-to-buy (gamepad South / Enter / Space). Cursor mode uses click-to-buy instead.
+    confirm_buy_hold_started: Option<std::time::Instant>,
     /// LMB-drag turntable on the storeroom camera (radians, applied around [`CameraParams::target`]).
     storeroom_orbit_yaw: f32,
     storeroom_orbit_pitch: f32,
@@ -128,19 +127,14 @@ const SHOP_HELP_BADGE_ID: u32 = 0x9100;
 /// Click id for the catch-all 3D-hit dispatcher. When clicked, the shop's
 /// update() routes the click based on `UpdateCtx::picked_shop_object`.
 pub const SHOP_3D_HIT_ID: u32 = 0x9200;
+/// Cursor-mode preview hint icon while item inspect is open.
+pub const SHOP_INSPECT_PREVIEW_ID: u32 = 0x9201;
 /// Click id for the Leave / advance 2D button (kept for focus-nav compat).
 const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
 /// Click id for the Restock 2D button (kept for focus-nav compat).
 const SHOP_RESTOCK_ID: u32 = 0x9400;
-/// Floating sell button for hovered owned relics.
-const SHOP_SELL_RELIC_BASE: u32 = 0x9500;
-/// Floating sell button for hovered owned consumables.
-const SHOP_SELL_CONSUMABLE_BASE: u32 = 0x9600;
 /// How long a relic glow + wiggle lasts after activation.
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
-/// How much the restock cost increases per use within a single shop visit.
-const RESTOCK_COST_INCREMENT: u32 = 5;
-
 /// Pitch relic cuboids toward the camera ([`crate::render::table_transform::rot_fixed_axes_deg`]).
 /// The relic front cap is at local +Y; pitching past 90° tilts it to face -Y
 /// (toward the camera). Camera is at (0, -0.72h, 0.34h); counter relics sit at
@@ -152,9 +146,23 @@ const SHOP_RELIC_LEAN_COUNTER: f32 = 158.0;
 const SHOP_RELIC_LEAN_INVENTORY: f32 = 138.0;
 
 impl ShopScene {
+    /// Listed yen cost for the next restock this visit (0 while free restocks remain).
+    pub(crate) fn restock_cost(&self, season: crate::core::season::Season) -> u32 {
+        if self.remaining_free_restocks > 0 {
+            0
+        } else {
+            season.shop_restock_cost(self.paid_restocks_this_visit)
+        }
+    }
+
     #[inline]
     pub(crate) fn sell_hold_in_progress(&self) -> bool {
         self.west_sell_hold_started.is_some()
+    }
+
+    #[inline]
+    pub(crate) fn buy_hold_in_progress(&self) -> bool {
+        self.confirm_buy_hold_started.is_some()
     }
 
     /// Normalized hold progress for rumble / HUD ring (0..=1). Stays at 0 while invalid.
@@ -189,20 +197,14 @@ impl ShopScene {
         .is_some()
     }
 
-    #[inline]
-    pub(crate) fn buy_hold_in_progress(&self) -> bool {
-        self.buy_hold_started.is_some()
-    }
-
-    /// Normalized buy-hold progress for rumble / HUD ring (0..=1). Stays at 0 while invalid.
-    #[inline]
+    /// Normalized hold progress for rumble / HUD ring (0..=1). Stays at 0 while invalid.
     pub(crate) fn buy_hold_progress(
         &self,
         now: std::time::Instant,
         run: &crate::game::run::RunState,
         shop: &crate::game::engine::ShopReadModel,
     ) -> Option<f32> {
-        let started = self.buy_hold_started?;
+        let started = self.confirm_buy_hold_started?;
         if !self.buy_hold_valid_for(run, shop) {
             return Some(0.0);
         }
@@ -218,60 +220,51 @@ impl ShopScene {
         run: &crate::game::run::RunState,
         shop: &crate::game::engine::ShopReadModel,
     ) -> bool {
-        let Some(action) = self.focus.and_then(|f| f.to_hit()).and_then(|hit| {
-            shared::shop_action_for_hit(
-                hit,
-                &self.items,
-                &self.zodiac_items,
-                &self.talisman_items,
-                shop,
-            )
-        }) else {
-            return false;
-        };
-        shared::shop_buy_action_valid(
-            action,
-            run,
+        shared::focused_buy_action(
+            self.focus,
             &self.items,
             &self.zodiac_items,
             &self.talisman_items,
             &self.pack_items,
+            run,
+            shop,
         )
+        .is_some()
     }
 
     /// Freeze hold timers while the targeted action cannot succeed.
     pub(crate) fn tick_hold_anchors(
         &mut self,
         now: std::time::Instant,
-        run: &crate::game::run::RunState,
+        _run: &crate::game::run::RunState,
         shop: &crate::game::engine::ShopReadModel,
     ) {
-        if let Some(start) = self.buy_hold_started {
-            let valid = self.buy_hold_valid_for(run, shop);
-            self.buy_hold_started = Some(crate::ui::prompt_hold_ring::freeze_hold_anchor(
-                start, now, valid,
-            ));
-        }
         if let Some(start) = self.west_sell_hold_started {
             let valid = self.sell_hold_valid_for(shop);
             self.west_sell_hold_started = Some(crate::ui::prompt_hold_ring::freeze_hold_anchor(
                 start, now, valid,
             ));
         }
+        if let Some(start) = self.confirm_buy_hold_started {
+            let valid = self.buy_hold_valid_for(_run, shop);
+            self.confirm_buy_hold_started = Some(crate::ui::prompt_hold_ring::freeze_hold_anchor(
+                start, now, valid,
+            ));
+        }
     }
 
-    /// Cancel an in-progress west-face sell hold and stop its windup when no buy hold remains.
+    /// Cancel an in-progress sell hold and stop its windup SFX.
     pub(crate) fn cancel_west_sell_hold(&mut self, bus: &mut crate::game::event_bus::EventBus) {
-        self.west_sell_hold_started = None;
-        if !self.buy_hold_in_progress() {
+        if self.west_sell_hold_started.is_some() {
+            self.west_sell_hold_started = None;
             crate::ui::prompt_hold_ring::end_hold(bus);
         }
     }
 
-    /// Cancel an in-progress buy hold and stop its windup when no sell hold remains.
-    pub(crate) fn cancel_buy_hold(&mut self, bus: &mut crate::game::event_bus::EventBus) {
-        self.buy_hold_started = None;
-        if !self.sell_hold_in_progress() {
+    /// Cancel an in-progress buy hold and stop its windup SFX.
+    pub(crate) fn cancel_confirm_buy_hold(&mut self, bus: &mut crate::game::event_bus::EventBus) {
+        if self.confirm_buy_hold_started.is_some() {
+            self.confirm_buy_hold_started = None;
             crate::ui::prompt_hold_ring::end_hold(bus);
         }
     }
@@ -281,12 +274,8 @@ impl ShopScene {
         &mut self,
         bus: &mut crate::game::event_bus::EventBus,
     ) {
-        let had = self.west_sell_hold_started.is_some() || self.buy_hold_started.is_some();
-        self.west_sell_hold_started = None;
-        self.buy_hold_started = None;
-        if had {
-            crate::ui::prompt_hold_ring::end_hold(bus);
-        }
+        self.cancel_west_sell_hold(bus);
+        self.cancel_confirm_buy_hold(bus);
     }
 
     /// Set focus from a stable slug — used by the screenshot CLI's

@@ -4,7 +4,8 @@
 //! no per-season relic or yaku pools. The three knobs are:
 //!
 //! * `base_target_mult` — scales `GameMode::base_target` once at `RunState::new`.
-//! * `restock_base_cost` — replaces `RESTOCK_BASE_COST` for the active run.
+//! * `restock_base_cost` — base shop restock price; each paid restock this visit
+//!   adds another `restock_base_cost` on top.
 //! * `ordeal_min_wing_floor` — reduces `OrdealDef::min_ante` in the filter in
 //!   `core::ordeal::pick_for_wing`, letting harder bosses appear earlier.
 //!
@@ -106,9 +107,18 @@ impl Season {
         season_presentation(self).base_target_mult
     }
 
-    /// Base restock cost in the shop. Increment-per-restock still applies on top.
+    /// Base restock cost in the shop — also the per-restock increment within a visit.
     pub fn restock_base_cost(self) -> u32 {
         season_presentation(self).restock_base_cost
+    }
+
+    /// Yen cost for the next shop restock this visit.
+    ///
+    /// `paid_restock_count` is how many restocks were already paid for this visit
+    /// (free restocks from tags or relic waivers do not count).
+    pub fn shop_restock_cost(self, paid_restock_count: u32) -> u32 {
+        let base = self.restock_base_cost();
+        base.saturating_mul(paid_restock_count.saturating_add(1))
     }
 
     /// Subtracted from a boss's `min_ante` in `pick_for_wing`, letting higher
@@ -177,6 +187,15 @@ mod tests {
         assert_eq!(Season::Summer.next(), Some(Season::Autumn));
         assert_eq!(Season::Autumn.next(), Some(Season::Winter));
         assert_eq!(Season::Winter.next(), None);
+    }
+
+    #[test]
+    fn shop_restock_cost_scales_with_visit_count() {
+        assert_eq!(Season::Spring.shop_restock_cost(0), 3);
+        assert_eq!(Season::Spring.shop_restock_cost(1), 6);
+        assert_eq!(Season::Spring.shop_restock_cost(2), 9);
+        assert_eq!(Season::Winter.shop_restock_cost(0), 5);
+        assert_eq!(Season::Winter.shop_restock_cost(2), 15);
     }
 
     #[test]

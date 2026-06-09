@@ -117,6 +117,27 @@ impl crate::App {
             && !self.scene.has_blocking_overlay()
     }
 
+    /// Archive grid browse (no showcase inspect overlay, not paused).
+    pub(crate) fn archive_browse_face_active(&self) -> bool {
+        self.overlay_stack.is_empty()
+            && matches!(self.scene, Scene::Archive(_))
+            && !self.scene.has_blocking_overlay()
+    }
+
+    /// Cursor RMB opens item inspect on shop storeroom or archive grid.
+    pub(crate) fn item_inspect_orbit_overlay_active(&self) -> bool {
+        self.overlay_stack
+            .last()
+            .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()))
+    }
+
+    /// Cursor RMB toggles item inspect: enter on browse face, exit on orbit overlay.
+    pub(crate) fn item_inspect_rmb_active(&self) -> bool {
+        self.item_inspect_orbit_overlay_active()
+            || self.shop_storeroom_face_active()
+            || self.archive_browse_face_active()
+    }
+
     /// Shop or item-inspect showcase: LMB drag orbits instead of firing clicks on press.
     pub(crate) fn shop_defer_lmb_clicks(&self) -> bool {
         self.shop_storeroom_face_active()

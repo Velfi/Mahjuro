@@ -441,7 +441,7 @@ impl App {
         actions.append(&mut self.mouse_actions);
         if self.mouse_right_clicked {
             self.mouse_right_clicked = false;
-            if self.shop_storeroom_face_active() {
+            if self.item_inspect_rmb_active() {
                 actions.push(crate::ui::input::UiAction::NorthFacePress);
             }
         }
@@ -471,36 +471,38 @@ impl App {
             }
             self.prev_controller_present = now_controller_present;
 
-            let size = self.last_drawable_px;
-            let layout = self
-                .layout_engine
-                .solve(size.width as f32, size.height as f32);
-            // Hit-test by raycasting from the camera through the
-            // cursor against each tile's OBB (last-frame snapshot).
-            // We feed `update_pointer_hover` synthetic slots so only
-            // the picked tile contains the cursor — the rest are
-            // collapsed off-screen so they can't compete.
-            let hand_slot_count = self.run.hand().len().max(layout.hand_slot_count);
-            let mut slots: Vec<(f32, f32, f32, f32)> =
-                vec![(-9999.0, -9999.0, 0.0, 0.0); hand_slot_count];
-            let picked = self
-                .renderer
-                .as_ref()
-                .and_then(|r| r.pick_hand_tile(input.last_cursor.0, input.last_cursor.1));
-            if let Some(idx) = picked {
-                if idx >= slots.len() {
-                    slots.resize(idx + 1, (-9999.0, -9999.0, 0.0, 0.0));
+            if input.mode == crate::ui::input::InputMode::Cursor {
+                let size = self.last_drawable_px;
+                let layout = self
+                    .layout_engine
+                    .solve(size.width as f32, size.height as f32);
+                // Hit-test by raycasting from the camera through the
+                // cursor against each tile's OBB (last-frame snapshot).
+                // We feed `update_pointer_hover` synthetic slots so only
+                // the picked tile contains the cursor — the rest are
+                // collapsed off-screen so they can't compete.
+                let hand_slot_count = self.run.hand().len().max(layout.hand_slot_count);
+                let mut slots: Vec<(f32, f32, f32, f32)> =
+                    vec![(-9999.0, -9999.0, 0.0, 0.0); hand_slot_count];
+                let picked = self
+                    .renderer
+                    .as_ref()
+                    .and_then(|r| r.pick_hand_tile(input.last_cursor.0, input.last_cursor.1));
+                if let Some(idx) = picked {
+                    if idx >= slots.len() {
+                        slots.resize(idx + 1, (-9999.0, -9999.0, 0.0, 0.0));
+                    }
+                    if let Some(s) = slots.get_mut(idx) {
+                        *s = (
+                            input.last_cursor.0 - 1.0,
+                            input.last_cursor.1 - 1.0,
+                            2.0,
+                            2.0,
+                        );
+                    }
                 }
-                if let Some(s) = slots.get_mut(idx) {
-                    *s = (
-                        input.last_cursor.0 - 1.0,
-                        input.last_cursor.1 - 1.0,
-                        2.0,
-                        2.0,
-                    );
-                }
+                input.update_pointer_hover(input.last_cursor, &slots);
             }
-            input.update_pointer_hover(input.last_cursor, &slots);
 
             // 3. Update focus slot (App-level, shared across scenes).
             for a in &actions {
