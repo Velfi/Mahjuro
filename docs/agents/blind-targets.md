@@ -20,7 +20,7 @@ target    = round(wing_base * chamber_multiplier)
 
 Where:
 
-- `TARGET_SCALING = 2.0`
+- `TARGET_SCALING = 1.618034` (golden ratio φ, [OEIS A001622](https://oeis.org/A001622))
 - `chamber_multiplier`:
   - Small = `1.0`
   - Big = `1.5`
@@ -38,8 +38,8 @@ Implementation details:
 
 From `core::chamber_target`:
 
-- `DEFAULT_BASE_TARGET = 500`
-- `TARGET_SCALING = 2.0`
+- `DEFAULT_BASE_TARGET = 1000`
+- `TARGET_SCALING = 1.618034` (golden ratio φ)
 - `SMALL_MULT = 1.0`
 - `BIG_MULT = 1.5`
 - `BOSS_MULT = 2.0`
@@ -58,26 +58,26 @@ Current season multipliers (`assets/data/seasons.json`):
 
 | Season | base_target_mult | Resulting base_target |
 |--------|------------------|-----------------------|
-| Spring | 1.00 | 500 |
-| Summer | 1.15 | 575 |
-| Autumn | 1.30 | 650 |
-| Winter | 1.50 | 750 |
+| Spring | 1.00 | 1000 |
+| Summer | 1.25 | 1250 |
+| Autumn | 1.50 | 1500 |
+| Winter | 2.00 | 2000 |
 
 ---
 
 ## Spring target table (current default run)
 
-With Spring (`base_target = 500`) and no boss-specific target modifier:
+With Spring (`base_target = 1000`) and no boss-specific target modifier:
 
 | Wing | Small (1.0x) | Big (1.5x) | Ordeal (2.0x) |
 |------|--------------|------------|---------------|
-| 1 | 500 | 750 | 1000 |
-| 2 | 1000 | 1500 | 2000 |
-| 3 | 2000 | 3000 | 4000 |
-| 4 | 4000 | 6000 | 8000 |
-| 5 | 8000 | 12000 | 16000 |
-| 6 | 16000 | 24000 | 32000 |
-| 7 | 32000 | 48000 | 64000 |
+| 1 | 1000 | 1500 | 2000 |
+| 2 | 1618 | 2427 | 3236 |
+| 3 | 2618 | 3927 | 5236 |
+| 4 | 4236 | 6354 | 8472 |
+| 5 | 6854 | 10281 | 13708 |
+| 6 | 11090 | 16635 | 22180 |
+| 7 | 17944 | 26916 | 35888 |
 
 `FINAL_WING` is currently `7`.
 
@@ -111,5 +111,5 @@ So Famine is effectively `wing_base * 4.0` for that round.
 ## One-line mental model
 
 ```text
-target = round(round((500 * season_mult) * 2^(wing-1)) * blind_mult), then boss hooks may modify it.
+target = round(round((1000 * season_mult) * φ^(wing-1)) * blind_mult), then boss hooks may modify it.
 ```
