@@ -1165,9 +1165,9 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "\"Those of us that travel The Way see the value in sacred numerology and the tiles illustrate it's truth to us every play.\" - Strange Foreigner.",
+        "text": "\"Those of us that travel The Way see the value in sacred numerology. The tiles illustrate their truth to us every play.\" - Strange Foreigner.",
         "bold": false,
-        "italic": true
+        "italic": true  
       }
     ]
   },
