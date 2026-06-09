@@ -837,6 +837,45 @@ fn kokushi_musou_scores_when_omitted_from_available_yaku() {
 }
 
 #[test]
+fn chicken_hand_scores_on_partial_two_pair_structure() {
+    use crate::core::structure::StructureTriggerMeta;
+    use crate::core::yaku::YakuKind;
+    let tiles = vec![
+        Tile::new(Suit::Pinzu, 5, 0),
+        Tile::new(Suit::Pinzu, 5, 1),
+        Tile::new(Suit::Dragon, 1, 2),
+        Tile::new(Suit::Dragon, 1, 3),
+    ];
+    let sets = vec![
+        DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: vec![0, 1],
+        },
+        DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: vec![2, 3],
+        },
+    ];
+    let r = RelicState::default();
+    let mut ctx = ctx_with(&r, false);
+    ctx.pattern.available_yaku = YakuKind::all()
+        .iter()
+        .copied()
+        .filter(|&y| y != YakuKind::KokushiMusou)
+        .collect();
+    ctx.structure = Some(StructureTriggerMeta {
+        meld_count: sets.len() as u32,
+        inject_chicken_if_no_yaku: true,
+    });
+    let breakdown = score_sets(&tiles, &sets, &ctx, &[]);
+    assert!(
+        breakdown.detected_yaku.contains(&YakuKind::ChickenHand),
+        "expected Chicken Hand on partial two-pair cash-in, got {:?}",
+        breakdown.detected_yaku
+    );
+}
+
+#[test]
 fn chicken_hand_scores_when_omitted_from_available_yaku() {
     use crate::core::hand::validate_selection;
     use crate::core::structure::StructureTriggerMeta;

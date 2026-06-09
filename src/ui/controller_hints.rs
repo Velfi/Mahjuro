@@ -774,7 +774,7 @@ pub fn guide_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
         .into_segments()
 }
 
-/// Yaku journal plaque brass footer: pick a row, page the catalog.
+/// Yaku journal screen footer: pick a row, page the catalog.
 pub fn journal_plaque_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
     HintRow::new()
         .push(navigate_bind(input_mode).into())

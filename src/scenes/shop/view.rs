@@ -60,7 +60,7 @@ use crate::ui::controller_hints::{
 use crate::ui::focus_nav::{clamp_rect_to_viewport, push_focus_ring, rect_center};
 use crate::ui::input::InputMode;
 use crate::ui::inspect_plaque::{
-    FocusTooltipPanelParams, push_floating_relic_flavor_labels, push_focus_tooltip_panel_2d,
+    FocusTooltipPanelParams, push_focus_tooltip_panel_2d, push_relic_flavor_inspect_panel,
 };
 
 /// Matches [`super::RELIC_GLOW_LIFETIME`] — keep glow envelope in sync.
@@ -1205,17 +1205,17 @@ pub(crate) fn render_shop_frame(
             if let Some(d) = def_opt
                 && !d.flavor.is_empty()
             {
-                let mut flavor_gradients = Vec::new();
+                let mut flavor_quads = Vec::new();
                 let mut flavor_texts = Vec::new();
-                push_floating_relic_flavor_labels(
-                    &mut flavor_gradients,
+                push_relic_flavor_inspect_panel(
+                    &mut flavor_quads,
                     &mut flavor_texts,
                     w,
                     h,
                     d.flavor,
                     h - hint_band_top,
                 );
-                frame.gradient_quads(flavor_gradients);
+                frame.quads(flavor_quads);
                 frame.texts(flavor_texts);
             }
         }

@@ -4,7 +4,7 @@ use crate::{
     core::{
         debuff::TileDebuff,
         hand::{DetectedMeld, MeldKind, enumerate_decompositions},
-        hand_intent::{DecompositionBias, decomposition_affinity, infer_decomposition_bias},
+        hand_intent::{decomposition_affinity, infer_decomposition_bias},
         ordeal::{self, OrdealKind},
         relic::{
             RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
@@ -862,17 +862,11 @@ impl RunState {
         earned
     }
 
-    /// When the submission could be a full winning hand (14+ tiles), enumerate
-    /// every valid meld decomposition and pick the highest-scoring one. For
-    /// shorter plays (partial structure commits), only re-rank when the
-    /// player's full hand reveals a clear pairs-vs-triplets lean — otherwise
-    /// the backtracker's first-found decomposition is fine and enumeration
-    /// overhead isn't worth it.
-    ///
-    /// Ties on full hands fall back to affinity, then to the first
-    /// decomposition found.
-    /// Picks the decomposition that commit and staging preview should use when
-    /// several valid splits exist for the same tile selection.
+    /// Enumerate every valid meld decomposition of the selection and pick the
+    /// one that would score best at cash-in. Full winning submissions score the
+    /// selection alone; partial commits score the merged structure (existing
+    /// melds plus the candidate split). Ties fall back to hand-shape affinity,
+    /// then the validator's first split.
     pub(crate) fn pick_best_decomposition(
         &self,
         default_sets: Vec<DetectedMeld>,
@@ -887,80 +881,86 @@ impl RunState {
         let is_full_hand =
             scoring_tiles.len() >= HAND_SIZE && scoring_tiles.len() == HAND_SIZE + kongs;
         let bias = infer_decomposition_bias(&self.hand);
-        // Partial submissions only need re-ranking when the player's hand
-        // reveals an intent the greedy backtracker would override (e.g.
-        // committing 1-1-1-1 as two pairs while building Chiitoitsu).
-        if !is_full_hand && matches!(bias, DecompositionBias::Neutral) {
-            return default_sets;
-        }
         let rules = self.validation_rules_for_structure_commits();
         let alternatives = enumerate_decompositions(scoring_tiles, &rules);
         if alternatives.len() <= 1 {
             return default_sets;
         }
-        if !is_full_hand {
-            // Affinity-only pick: no scoring engine for partial commits.
-            let mut best = default_sets;
-            let mut best_affinity = decomposition_affinity(&best, bias);
-            for candidate in alternatives {
-                let affinity = decomposition_affinity(&candidate, bias);
-                if affinity > best_affinity {
-                    best_affinity = affinity;
-                    best = candidate;
-                }
-            }
-            return best;
-        }
-        let scoring_tile_debuffs = self.scoring_tile_debuffs(scoring_tiles);
+
         let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
         let bonus_rw = self.bonus_round_wind_for_yaku();
-        let ctx = ScoreContext {
-            relic: ScoreRelicBundle {
-                roster: &self.relics,
-                counters: self.relic_counters.clone(),
-            },
-            tiles: ScoreTileBundle {
-                debuffs: &scoring_tile_debuffs,
-                hand_for_ghost: &self.hand,
-            },
-            round: ScoreRoundBundle {
-                scored_last_turn: self.scored_last_turn,
-                plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
-                round_wind: rw,
-                bonus_round_wind: bonus_rw,
-                played_yaku_this_round: self.played_yaku_this_round.clone(),
-                is_final_play: self.plays_remaining == 0,
-            },
-            pattern: ScorePatternBundle {
-                dora_faces: self.wall.dora_faces(),
-                available_yaku: self.available_yaku.clone(),
-                yaku_levels: Some(self.yaku_levels.clone()),
-            },
-            economy: ScoreEconomyBundle {
-                yen: self.yen,
-                total_score: self.total_score_earned,
-            },
-            structure: None,
+        let base_set_len = self.structure_sets.len();
+        let mut merged_sets = self.structure_sets.clone();
+        let mut merged_tiles = self.structure_tiles.clone();
+        if !is_full_hand {
+            merged_tiles.extend(scoring_tiles.iter().copied());
+        }
+        let score_tile_debuffs = if is_full_hand {
+            self.scoring_tile_debuffs(scoring_tiles)
+        } else {
+            self.scoring_tile_debuffs(&merged_tiles)
         };
-        let mut best = default_sets;
-        let mut best_total = score_sets_with_original(
-            scoring_tiles,
-            &best,
-            &ctx,
-            &self.round_rules,
-            original_tiles,
-        )
-        .total;
-        let mut best_affinity = decomposition_affinity(&best, bias);
-        for candidate in alternatives {
-            let total = score_sets_with_original(
-                scoring_tiles,
-                &candidate,
+
+        let mut score_decomp = |sets: &[DetectedMeld]| -> u64 {
+            let (tiles, structure_meta) = if is_full_hand {
+                (scoring_tiles, None)
+            } else {
+                merged_sets.truncate(base_set_len);
+                merged_sets.extend(sets.iter().cloned());
+                let meta = StructureTriggerMeta {
+                    meld_count: merged_sets.len() as u32,
+                    inject_chicken_if_no_yaku: true,
+                };
+                (merged_tiles.as_slice(), Some(meta))
+            };
+            let ctx = ScoreContext {
+                relic: ScoreRelicBundle {
+                    roster: &self.relics,
+                    counters: self.relic_counters.clone(),
+                },
+                tiles: ScoreTileBundle {
+                    debuffs: &score_tile_debuffs,
+                    hand_for_ghost: &self.hand,
+                },
+                round: ScoreRoundBundle {
+                    scored_last_turn: self.scored_last_turn,
+                    plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
+                    round_wind: rw,
+                    bonus_round_wind: bonus_rw,
+                    played_yaku_this_round: self.played_yaku_this_round.clone(),
+                    is_final_play: self.plays_remaining == 0,
+                },
+                pattern: ScorePatternBundle {
+                    dora_faces: self.wall.dora_faces(),
+                    available_yaku: self.available_yaku.clone(),
+                    yaku_levels: Some(self.yaku_levels.clone()),
+                },
+                economy: ScoreEconomyBundle {
+                    yen: self.yen,
+                    total_score: self.total_score_earned,
+                },
+                structure: structure_meta,
+            };
+            let sets_for_score = if is_full_hand {
+                sets
+            } else {
+                merged_sets.as_slice()
+            };
+            score_sets_with_original(
+                tiles,
+                sets_for_score,
                 &ctx,
                 &self.round_rules,
                 original_tiles,
             )
-            .total;
+            .total
+        };
+
+        let mut best = default_sets;
+        let mut best_total = score_decomp(&best);
+        let mut best_affinity = decomposition_affinity(&best, bias);
+        for candidate in alternatives {
+            let total = score_decomp(&candidate);
             let affinity = decomposition_affinity(&candidate, bias);
             let take = total > best_total || (total == best_total && affinity > best_affinity);
             if take {
