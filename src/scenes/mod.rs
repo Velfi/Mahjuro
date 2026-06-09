@@ -48,6 +48,7 @@ pub(crate) mod tiles_intro_copy;
 pub mod transition_playground;
 pub mod tutorial_campaign;
 pub mod tutorial_summary;
+pub mod wall;
 pub mod wall_ledger;
 pub(crate) mod yaku_intro_copy;
 pub mod yaku_journal;
@@ -84,7 +85,7 @@ pub use tile_stress_lab::TileStressLabScene;
 pub use transition_playground::TransitionPlaygroundScene;
 pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_summary::TutorialSummaryScene;
-pub use wall_ledger::WallLedgerScene;
+pub use wall::WallLedgerScene;
 pub use yaku_journal::YakuJournalScene;
 
 use crate::effect_layers::EffectLayers;

@@ -37,7 +37,6 @@ Headless tools (`mahjuro-bake`, `mahjuro-screenshot`) and bot/sweep always skip 
 | `MAHJURO_PRESENT_MODE` | WSI override: `fifo`, `mailbox`, `immediate`, `auto`, … |
 | `MAHJURO_SKIP_VULKAN_WSI_PROBE` | Force Vulkan without parent WSI smoke test. |
 | `MAHJURO_VULKAN_WIN_SURFACE_COPY` | Opt-in Windows Vulkan swapchain `COPY_SRC` (screenshots). |
-| `SteamTenfoot` | Set by Steam Deck / Big Picture; affects borderless launch. |
 
 `MAHJURO_DEBUG_MENU=1` at **compile** time enables the native debug menubar in release builds (always on in debug profile). See `build.rs`.
 

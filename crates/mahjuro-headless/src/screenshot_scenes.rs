@@ -9,7 +9,7 @@ use mahjuro::scenes::{
 use super::fixtures::{
     prime_shop_stock, setup_defeat_game_over_screenshot_state, setup_gameplay_screenshot_state,
     setup_gameplay_valid_play_screenshot_state, setup_hero_state, setup_shop_state,
-    setup_victory_game_over_screenshot_state,
+    setup_victory_game_over_screenshot_state, setup_wall_ledger_screenshot_state,
 };
 use super::slug::{parse_tile_pack_slug, parse_zodiac_slug};
 
@@ -278,8 +278,8 @@ pub(crate) fn resolve_screenshot_scene(
             )
         }
         "wall_ledger" => {
-            setup_shop_state(run);
-            (Scene::WallLedger(WallLedgerScene::shop_preview()), true)
+            setup_wall_ledger_screenshot_state(run);
+            (Scene::WallLedger(WallLedgerScene::live()), true)
         }
         "gameplay" | "gameplay_valid_play" => {
             if s.scene.as_str() == "gameplay_valid_play" {

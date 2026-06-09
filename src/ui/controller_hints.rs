@@ -754,6 +754,54 @@ pub fn guide_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
         .into_segments()
 }
 
+/// Wall ledger: back, navigate grid, cycle count view.
+pub fn wall_ledger_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    HintRow::new()
+        .push(
+            HintBind::alternatives(
+                "back",
+                vec![HintKey::for_input(
+                    input_mode,
+                    UiAction::Cancel,
+                    "keyboard_escape",
+                )],
+            )
+            .into(),
+        )
+        .sep()
+        .push(
+            HintBind::alternatives(
+                "select",
+                vec![HintKey::for_input(
+                    input_mode,
+                    UiAction::Confirm,
+                    "keyboard_return",
+                )],
+            )
+            .into(),
+        )
+        .sep()
+        .push(
+            HintBind::alternatives(
+                "navigate",
+                vec![HintKey::Dpad, HintKey::Keyboard("keyboard_arrows")],
+            )
+            .into(),
+        )
+        .sep()
+        .push(
+            HintBind::alternatives(
+                "view",
+                vec![
+                    HintKey::for_input(input_mode, UiAction::InvertSelection, "keyboard_z"),
+                    HintKey::for_input(input_mode, UiAction::Delete, "keyboard_x"),
+                ],
+            )
+            .into(),
+        )
+        .into_segments()
+}
+
 /// Yaku journal screen footer: pick a row, page the catalog.
 pub fn journal_plaque_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
     HintRow::new()
