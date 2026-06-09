@@ -3,7 +3,8 @@
 //! Replaces the old parchment overlay with its own scene: the player steps
 //! *onto* the table rather than into a book. Each yaku is rendered as a
 //! signature-tile icon in a grid on the lacquered wood surface; the focused
-//! yaku's full canonical 14-tile hand sits in a top-anchored plaque, with the
+//! yaku's canonical 14-tile hand sits in a top-anchored plaque beneath a
+//! single-line header (`[Lv N] Name: description` + payout), with the
 //! scrollable table beneath it. Margins tighten on short screens (e.g. Steam Deck),
 //! drawn from the same `yaku_page()` data the guide teaches with (so
 //! the plaque hand is guaranteed to score as its named yaku — see the
@@ -994,6 +995,16 @@ fn measure_payout_text_width(text: &str, font_px: f32) -> f32 {
     }
 }
 
+fn measure_ui_text_width(text: &str, font_px: f32) -> f32 {
+    let text_h_px = font_px.max(8.0).round().max(1.0) as u32;
+    if let Some(font) = load_ui_font() {
+        let (_, _, advances) = measure_label_advances(font, text, 8192, text_h_px, Some(font_px));
+        advances.iter().copied().sum()
+    } else {
+        (font_px * 0.52 * text.chars().count().max(1) as f32).max(8.0)
+    }
+}
+
 fn format_payout_value_col(raw: &str) -> String {
     if raw.len() >= PAYOUT_VALUE_COL_W {
         raw.to_string()
@@ -1088,9 +1099,8 @@ fn push_chips_mult_stat_line_right(
 /// module — so whatever renders here is guaranteed to score as the named
 /// yaku.
 ///
-/// Header hierarchy is **identity-first**: yaku name is the title, followed
-/// by explicit stat cards for level, chips, mult, and this-run scoring count.
-/// A thin champagne rule separates header from description.
+/// Header is one line — `[Lv N] Name: description` with chips/mult on the
+/// right — then the canonical hand tiles directly beneath.
 #[allow(clippy::too_many_arguments)]
 fn draw_plaque(
     frame: &mut UiFrame,
@@ -1178,49 +1188,38 @@ fn draw_plaque(
     let chips = yk.chip_bonus_at(lvl);
     let mult = yk.mult_bonus_at(lvl);
 
-    // ── Header ───────────────────────────────────────────────────
-    // Title + level pill (left); chips / mult strip (right).
+    // ── Header — one line: [Lv N] Name: description ··· payout ──
     let header_pad = ((18.0 * shadow_scale).max(12.0)) * pad_scale;
     let header_x = face_x + header_pad;
     let header_w = face_w - header_pad * 2.0;
     let header_y = face_y + header_pad * 0.6;
 
-    // Title — full name once cashed in; until then a `???` pill (matches
-    // gameplay bone tablets).
-    let title_font = typography::size(typography::H20, h);
-    let title_h = title_font * 1.05;
-    let title_lane_w = header_w * 0.52;
-    if matches!(state, ProgressionState::Unseen) {
-        let title_glyph = title_font * 1.02;
-        let title_pill_w = title_glyph * 2.38;
-        draw_mystery_name_pill(
-            frame,
-            MysteryNamePillStyle {
-                pill_center_x: header_x + title_pill_w * 0.5,
-                top_y: header_y + title_h * 0.02,
-                pill_h: title_h * 0.88,
-                font_px: title_glyph,
-                shadow_scale,
-                pill_bg: color::darken(bamboo_face, 0.28),
-                text_color: label_champagne_soft,
-            },
-        );
-    } else {
-        frame.text(TextLabel {
-            rect: [header_x, header_y, title_lane_w, title_h],
-            text: yk.name().into(),
-            color: label_champagne,
-            align: TextAlign::Left,
-            font_px: Some(title_font),
-            ..Default::default()
-        });
-    }
+    let line_font = typography::size(typography::H36, h);
+    let header_line_h = line_font * 1.15;
+    let inline_gap = header_pad * 0.35;
 
-    let pill_font = typography::size(typography::H45, h);
-    let pill_h = pill_font * 1.75;
-    let pill_w = pill_font * 5.6;
+    let stat_font = typography::size(typography::H24, h);
+    let stat_band_h = stat_font * 1.2;
+    let stat_font_px = stat_font * 0.95;
+    let payout_reserve = match state {
+        ProgressionState::Unseen => measure_ui_text_width("— — —", stat_font_px),
+        _ => chips_mult_stat_segments(chips, mult)
+            .iter()
+            .map(|(t, _)| measure_payout_text_width(t, stat_font_px))
+            .sum(),
+    };
+    let payout_gap = inline_gap;
+    let text_right = header_x + header_w - payout_reserve - payout_gap;
+
+    // Compact level pill — inline at the start of the header row.
+    let pill_font = typography::size(typography::H45, h) * 0.92;
+    let pill_label = format!("Lv {lvl}");
+    let pill_text_w = measure_ui_text_width(&pill_label, pill_font);
+    let pill_pad_x = pill_font * 0.55;
+    let pill_w = pill_text_w + pill_pad_x * 2.0;
+    let pill_h = header_line_h * 0.82;
     let pill_x = header_x;
-    let pill_y = header_y + title_h * 0.94;
+    let pill_y = header_y + (header_line_h - pill_h) * 0.5;
     let badge_ink = color::darken(color::WALNUT_INK, 0.12);
     let (pill_bg, pill_fg) = match state {
         ProgressionState::Leveled => (color::darken(color::GOLD, 0.06), badge_ink),
@@ -1243,30 +1242,80 @@ fn draw_plaque(
         user: 0,
     });
     frame.text(TextLabel {
-        rect: [pill_x, pill_y + pill_h * 0.18, pill_w, pill_h * 0.8],
-        text: format!("Lv  {lvl}"),
+        rect: [pill_x, pill_y + pill_h * 0.14, pill_w, pill_h * 0.82],
+        text: pill_label,
         color: pill_fg,
         align: TextAlign::Center,
-        font_px: Some(pill_font * 1.22),
+        font_px: Some(pill_font),
         ..Default::default()
     });
 
-    let stat_font = typography::size(typography::H24, h);
-    let stat_band_h = stat_font * 1.2;
-    let stat_y = header_y + (title_h - stat_band_h) * 0.45;
+    let (desc_text, groups) = super::guide::yaku_page(yk);
+    let body_text: String = match state {
+        ProgressionState::Unseen => "sealed — score this yaku to reveal its shape".into(),
+        _ => desc_text.into(),
+    };
+
+    let mut text_x = pill_x + pill_w + inline_gap;
+    let text_clip = [text_x, header_y, (text_right - text_x).max(0.0), header_line_h];
+
+    if matches!(state, ProgressionState::Unseen) {
+        let mystery_glyph = line_font * 1.02;
+        let mystery_pill_w = mystery_glyph * 2.38;
+        let mystery_pill_h = header_line_h * 0.88;
+        draw_mystery_name_pill(
+            frame,
+            MysteryNamePillStyle {
+                pill_center_x: text_x + mystery_pill_w * 0.5,
+                top_y: header_y + (header_line_h - mystery_pill_h) * 0.5,
+                pill_h: mystery_pill_h,
+                font_px: mystery_glyph,
+                shadow_scale,
+                pill_bg: color::darken(bamboo_face, 0.28),
+                text_color: label_champagne_soft,
+            },
+        );
+        text_x += mystery_pill_w + inline_gap * 0.35;
+    } else {
+        let name_w = measure_ui_text_width(yk.name(), line_font).min(text_right - text_x);
+        frame.text(TextLabel {
+            rect: [text_x, header_y, name_w, header_line_h],
+            text: yk.name().into(),
+            color: label_champagne,
+            align: TextAlign::Left,
+            font_px: Some(line_font),
+            clip_rect: Some(text_clip),
+            ..Default::default()
+        });
+        text_x += name_w;
+    }
+
+    let desc_x = text_x;
+    let desc_w = (text_right - desc_x).max(0.0);
+    frame.text(TextLabel {
+        rect: [desc_x, header_y, desc_w, header_line_h],
+        text: format!(": {body_text}"),
+        color: label_champagne_soft,
+        align: TextAlign::Left,
+        font_px: Some(line_font),
+        clip_rect: Some([desc_x, header_y, desc_w, header_line_h]),
+        ..Default::default()
+    });
+
+    let stat_y = header_y + (header_line_h - stat_band_h) * 0.5;
     match state {
         ProgressionState::Unseen => {
             frame.text(TextLabel {
                 rect: [
-                    header_x + header_w * 0.42,
+                    header_x + header_w - payout_reserve,
                     stat_y,
-                    header_w * 0.58,
+                    payout_reserve,
                     stat_band_h,
                 ],
                 text: "— — —".into(),
                 color: label_champagne_muted,
                 align: TextAlign::Right,
-                font_px: Some(stat_font * 0.95),
+                font_px: Some(stat_font_px),
                 ..Default::default()
             });
         }
@@ -1276,41 +1325,12 @@ fn draw_plaque(
                 header_x + header_w,
                 stat_y,
                 stat_band_h,
-                stat_font * 0.95,
+                stat_font_px,
                 chips,
                 mult,
             );
         }
     }
-
-    // Rule line under the header — clears the level pill bottom.
-    let header_bottom = (pill_y + pill_h).max(header_y + title_h);
-    let rule_y = header_bottom + header_pad * 0.4;
-    let rule_h = (1.5 * shadow_scale).max(1.0);
-    frame.quad(GpuInstance {
-        rect: [header_x, rule_y, header_w, rule_h],
-        color: color::alpha(color::CHAMPAGNE, 0.22),
-        user: 0,
-    });
-
-    // ── Description ──────────────────────────────────────────────
-    let desc_font = typography::size(typography::H36, h);
-    // Room for two wrapped lines; slightly shorter band on handheld → larger tile strip.
-    let desc_h = desc_font * (2.35 - 0.22 * jc);
-    let desc_y = rule_y + rule_h + header_pad * 0.35;
-    let (desc_text, groups) = super::guide::yaku_page(yk);
-    let body_text: String = match state {
-        ProgressionState::Unseen => "sealed — score this yaku to reveal its shape".into(),
-        _ => desc_text.into(),
-    };
-    frame.text(TextLabel {
-        rect: [header_x, desc_y, header_w, desc_h],
-        text: body_text,
-        color: label_champagne_soft,
-        align: TextAlign::Left,
-        font_px: Some(desc_font),
-        ..Default::default()
-    });
 
     // ── Canonical hand (or sealed placeholder) ───────────────────
     let hand_tiles: Vec<Tile> = groups
@@ -1321,7 +1341,7 @@ fn draw_plaque(
         return;
     }
 
-    let hand_top = desc_y + desc_h + header_pad * 0.35;
+    let hand_top = header_y + header_line_h + header_pad * 0.35;
     let hand_bot = face_y + face_h - header_pad * 0.2;
     let hand_band_h = (hand_bot - hand_top).max(0.0);
 
