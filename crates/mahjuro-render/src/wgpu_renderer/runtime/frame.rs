@@ -120,15 +120,10 @@ impl WgpuRenderer {
     ) {
         // Showcase decal atlas is loaded lazily in `run_showcase_tiles_placement` when
         // the frame actually draws `ShowcaseTileBatch`.
-        // `tile_3d.wgsl` reads `tile_visual_params.w`: procedural kinds 0–2 for the legacy
-        // procedural mesh; 4 = shop env (base map only); 5 = `tile.glb` + projected decal.
-        // Imported tile meshes must use kind 5 — procedural 0–2 assumes authored local frame
-        // (front-face + ivory band) and reads nearly black on GLB geometry (e.g. pack reveal).
-        self.tile_base_color_factor[3] = if self.active_tile_mesh().primitives.is_empty() {
-            crate::tile_body::TileBodyShaderKind::resolve(tile_material).id()
-        } else {
-            crate::tile_body::TEXTURED_TILE_GAMEPLAY_BODY_KIND
-        };
+        // `tile_3d.wgsl` reads `tile_visual_params.w`: 4 = shop env (base map only);
+        // 5 = `tile.glb` + projected decal. Tiles are always GLB meshes, so gameplay
+        // tiles always use kind 5 (per-material mesh selected by `active_tile_mesh`).
+        self.tile_base_color_factor[3] = crate::tile_body::TEXTURED_TILE_GAMEPLAY_BODY_KIND;
 
         if self.active_tile_material != tile_material {
             self.active_tile_material = tile_material;

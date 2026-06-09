@@ -177,8 +177,7 @@ impl WgpuRenderer {
             self.draw_object3d_shadow_entry(shadow_pass, frame, kind, slot_i);
         }
 
-        if !self.active_tile_mesh().primitives.is_empty()
-            && self.active_tile_mesh().outline_index_count > 0
+        if self.active_tile_mesh().outline_index_count > 0
             && !self.tile_shadow_batch_ranges.is_empty()
         {
             shadow_pass.set_pipeline(&self.shadow_pipeline_instanced);

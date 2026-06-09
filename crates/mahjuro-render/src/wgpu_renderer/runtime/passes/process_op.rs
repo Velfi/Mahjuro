@@ -521,70 +521,68 @@ impl WgpuRenderer {
                 {
                     pass.set_scissor_rect(sc[0], sc[1], sc[2], sc[3]);
                 }
-                if !self.active_tile_mesh().primitives.is_empty() {
-                    let batch = showcase_tile_batches[*batch_idx];
-                    if !batch.is_empty() {
-                        pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                        pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
-                        pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
-                        let Some(&(batch_start, batch_count)) =
-                            self.tile_3d_batch_ranges.get(*batch_idx)
-                        else {
-                            pass.set_scissor_rect(
-                                full_scissor[0],
-                                full_scissor[1],
-                                full_scissor[2],
-                                full_scissor[3],
-                            );
-                            return;
-                        };
+                let batch = showcase_tile_batches[*batch_idx];
+                if !batch.is_empty() {
+                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                    pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
+                    pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
+                    let Some(&(batch_start, batch_count)) =
+                        self.tile_3d_batch_ranges.get(*batch_idx)
+                    else {
+                        pass.set_scissor_rect(
+                            full_scissor[0],
+                            full_scissor[1],
+                            full_scissor[2],
+                            full_scissor[3],
+                        );
+                        return;
+                    };
 
-                        // Glow halos for selected hand tiles (additive, drawn before mesh).
-                        let has_glow = batch.iter().any(|p| p.glow);
-                        if has_glow && let Some(tgb) = tile_glow_buffer {
-                            pass.set_pipeline(&self.tile_glow_pipeline);
-                            pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                            pass.set_vertex_buffer(1, tgb.slice(..));
-                            pass.set_index_buffer(
-                                self.index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint16,
-                            );
-                            pass.draw_indexed(0..6, 0, 0..tile_glows.len() as u32);
-                        }
+                    // Glow halos for selected hand tiles (additive, drawn before mesh).
+                    let has_glow = batch.iter().any(|p| p.glow);
+                    if has_glow && let Some(tgb) = tile_glow_buffer {
+                        pass.set_pipeline(&self.tile_glow_pipeline);
+                        pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                        pass.set_vertex_buffer(1, tgb.slice(..));
+                        pass.set_index_buffer(
+                            self.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
+                        pass.draw_indexed(0..6, 0, 0..tile_glows.len() as u32);
+                    }
 
-                        // Pass A: gold outline shells — one instanced draw per batch.
-                        if let Some(&(base, cnt)) = self.tile_outline_batch_ranges.get(*batch_idx)
-                            && cnt > 0
-                            && self.active_tile_mesh().outline_index_count > 0
-                        {
-                            pass.set_pipeline(&self.tile_outline_pipeline);
-                            pass.set_bind_group(0, &self.tile_outline_frame_bind_group, &[]);
-                            pass.set_vertex_buffer(
-                                0,
-                                self.active_tile_mesh().outline_vertex_buffer.slice(..),
-                            );
-                            pass.set_vertex_buffer(1, self.tile_outline_instance_buffer.slice(..));
-                            pass.set_index_buffer(
-                                self.active_tile_mesh().outline_index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint32,
-                            );
-                            pass.draw_indexed(
-                                0..self.active_tile_mesh().outline_index_count,
-                                0,
-                                base..base + cnt,
-                            );
-                        }
-
-                        // Pass B: regular textured tile meshes (opaque instances only;
-                        // translucent staging previews are drawn in ShowcaseTileTranslucent).
-                        self.draw_tile_gltf_instanced(
-                            pass,
-                            &self.active_tile_mesh().primitives,
-                            batch_start,
-                            batch_count,
+                    // Pass A: gold outline shells — one instanced draw per batch.
+                    if let Some(&(base, cnt)) = self.tile_outline_batch_ranges.get(*batch_idx)
+                        && cnt > 0
+                        && self.active_tile_mesh().outline_index_count > 0
+                    {
+                        pass.set_pipeline(&self.tile_outline_pipeline);
+                        pass.set_bind_group(0, &self.tile_outline_frame_bind_group, &[]);
+                        pass.set_vertex_buffer(
+                            0,
+                            self.active_tile_mesh().outline_vertex_buffer.slice(..),
+                        );
+                        pass.set_vertex_buffer(1, self.tile_outline_instance_buffer.slice(..));
+                        pass.set_index_buffer(
+                            self.active_tile_mesh().outline_index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        pass.draw_indexed(
+                            0..self.active_tile_mesh().outline_index_count,
+                            0,
+                            base..base + cnt,
                         );
                     }
+
+                    // Pass B: regular textured tile meshes (opaque instances only;
+                    // translucent staging previews are drawn in ShowcaseTileTranslucent).
+                    self.draw_tile_gltf_instanced(
+                        pass,
+                        &self.active_tile_mesh().primitives,
+                        batch_start,
+                        batch_count,
+                    );
                 }
                 pass.set_scissor_rect(
                     full_scissor[0],
@@ -594,9 +592,6 @@ impl WgpuRenderer {
                 );
             }
             RenderOp::ShowcaseTileTranslucent => {
-                if self.active_tile_mesh().primitives.is_empty() {
-                    return;
-                }
                 let any_blend = self
                     .tile_3d_batch_blend_ranges
                     .iter()

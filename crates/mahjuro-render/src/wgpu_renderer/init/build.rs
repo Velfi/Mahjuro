@@ -50,39 +50,35 @@ fn load_startup_tile_meshes(
         let _material_scope = crate::startup_profile::scope(tile_mesh_material_scope(material));
         let path = tile_glb_asset_path(material);
         let label = format!("tile-{material:?}");
-        let empty = crate::tile_glb::LoadedTile {
-            primitives: Vec::new(),
-        };
-        let mesh_set = match mahjuro_assets::asset_path::get(path) {
-            Some(file) => match load_glb_tile_from_bytes(&file.data) {
-                Ok(mut mesh) => {
-                    normalize_mesh(&mut mesh);
-                    log::info!(
-                        "Loaded 3D tile {:?}: {} primitive(s) from {path}",
-                        material,
-                        mesh.primitives.len()
-                    );
-                    for (i, prim) in mesh.primitives.iter().enumerate() {
-                        log::info!(
-                            "  {:?} prim {i}: {} verts, {} idx, face={}",
-                            material,
-                            prim.vertices.len(),
-                            prim.indices.len(),
-                            prim.vertices.first().is_some_and(|v| v.color[3] > 0.5),
-                        );
-                    }
-                    crate::gltf_prop::upload_tile_mesh_gpu_set(&tile_glb_defaults, &label, &mesh)
-                }
-                Err(e) => {
-                    log::warn!("Could not load tile mesh GLB {path}: {e:#}");
-                    crate::gltf_prop::upload_tile_mesh_gpu_set(&tile_glb_defaults, &label, &empty)
-                }
-            },
-            None => {
-                log::warn!("Tile mesh GLB missing at {path} (packs or assets/)");
-                crate::gltf_prop::upload_tile_mesh_gpu_set(&tile_glb_defaults, &label, &empty)
-            }
-        };
+        // GLB tile meshes are mandatory — there is no procedural fallback. A missing
+        // or unparseable tile GLB is a hard packaging error, so fail loudly at startup
+        // instead of silently rendering invisible tiles.
+        let file = mahjuro_assets::asset_path::get(path).unwrap_or_else(|| {
+            panic!("required tile mesh GLB missing at {path} (packs or assets/)")
+        });
+        let mut mesh = load_glb_tile_from_bytes(&file.data)
+            .unwrap_or_else(|e| panic!("could not load required tile mesh GLB {path}: {e:#}"));
+        assert!(
+            !mesh.primitives.is_empty(),
+            "required tile mesh GLB {path} contains no primitives"
+        );
+        normalize_mesh(&mut mesh);
+        log::info!(
+            "Loaded 3D tile {:?}: {} primitive(s) from {path}",
+            material,
+            mesh.primitives.len()
+        );
+        for (i, prim) in mesh.primitives.iter().enumerate() {
+            log::info!(
+                "  {:?} prim {i}: {} verts, {} idx, face={}",
+                material,
+                prim.vertices.len(),
+                prim.indices.len(),
+                prim.vertices.first().is_some_and(|v| v.color[3] > 0.5),
+            );
+        }
+        let mesh_set =
+            crate::gltf_prop::upload_tile_mesh_gpu_set(&tile_glb_defaults, &label, &mesh);
         sets[tile_material_index(material)] = Some(mesh_set);
     }
     sets.map(|slot| slot.expect("tile mesh slot filled above"))
