@@ -52,17 +52,27 @@ MEMORIAL_DATA = ROOT / "assets" / "data" / "memorial_talismans.json"
 OUT_SIZE = 256
 
 CARVING_BASE = (
-    "Orthographic top-down grayscale heightmap of a jade relief carving. "
-    "Flat displacement field on a square canvas: tonal brightness equals carved height. "
-    "Straight-on view, even unlit stone, one continuous mid-gray jade plane (#808080).\n\n"
-    "Edge-to-edge composition: the figurative carving reaches the image margins — "
-    "petal tips, horns, coin rims, and wing tips shape the outer contour directly at the "
-    "canvas edge. Mid-gray jade continues behind the subject all the way to each side. "
-    "The subject silhouette is the only outer boundary on the square canvas.\n\n"
-    "Organic asymmetric silhouette, one clear figurative subject in deep relief, "
-    "readable at thumbnail size. Asymmetric composition with the top of the carving toward +Y.\n\n"
+    "Stone rubbing (拓本 taku-hon): orthographic top-down grayscale HEIGHTMAP of a "
+    "jade relief carving on a square canvas. Tonal brightness equals carved height only — "
+    "flat displacement field, no perspective, no directional lighting, no cast shadows, "
+    "no drop shadow, no studio backdrop.\n\n"
+    "Edge-to-edge jade plate: mid-gray (#808080) fills every pixel at the canvas border. "
+    "The figurative carving reaches the image margins — petal tips, horns, coin rims, "
+    "and wing tips shape the outer contour directly at the canvas edge. Mid-gray jade "
+    "continues behind the subject all the way to each side. The subject silhouette is "
+    "the only outer boundary; there is no black void, matte band, or vignette outside it.\n\n"
+    "One clear figurative subject carved into the jade plane — not a separate figurine "
+    "on a pedestal, base block, or circular medallion. Readable at thumbnail size. "
+    "Asymmetric composition with the top of the carving toward +Y.\n\n"
     "Height tones: white peaks (#ffffff), light gray secondary planes (#e0–#f0), "
     "mid-gray ground (#808080), dark gray grooves and undercuts (#30–#50)."
+)
+
+CARVING_NEGATIVE = (
+    "Do NOT draw: 3D clay/ZBrush render, photoreal product photo, centered statuette "
+    "floating on dark gray, circular lotus or octagonal medallion frame, decorative "
+    "bezel rim, bats, phoenixes, generic cloud-scroll filler, coin stacks, or any "
+    "subject other than the Subject line below."
 )
 
 SHOP_STYLE = (
@@ -72,7 +82,14 @@ SHOP_STYLE = (
 
 MEMORIAL_STYLE = (
     f"{CARVING_BASE}\n\n"
-    "Worn temple-rubbing jade, shallower relief, one chipped tip, solemn matte finish."
+    "Worn temple-rubbing jade: shallower relief, matte finish, fine crackle grooves "
+    "in the ground — still a flat heightfield, not a sculpted maquette."
+)
+
+MEMORIAL_NEGATIVE = (
+    "Memorial set — do NOT reuse across kinds: ofuda paper fans, money pouches, "
+    "three-legged toads, ox or bull heads, generic animal medallions, or identical "
+    "vertical blade shapes unless the Subject line names them."
 )
 
 SHOP_MOTIFS: dict[str, str] = {
@@ -122,52 +139,84 @@ SHOP_MOTIFS: dict[str, str] = {
 
 MEMORIAL_MOTIFS: dict[str, str] = {
     "exhausted": (
-        "Sleeping ox curled on ground, head on forelegs, dull horns. Back arc defines "
-        "the upper edge; one horn tip at the contour. Shallow worn carving."
+        "Silhouette: low horizontal kidney-blob, wider than tall (~1.35×).\n"
+        "Sleeping ox curled on bare ground, head on forelegs, dull horns — NOT standing, "
+        "NOT a bull-head emblem. Back arc defines the upper edge; one horn tip breaks "
+        "the left contour. Shallow worn carving; no bowl, pouch, or paper strips."
     ),
     "frozen_hand": (
-        "Crane standing on one leg, wing half-frozen; ice fracture lines radiating from "
-        "talon at base. S-curve neck breaks the top edge; jagged ice splinters on the lower edge."
+        "Silhouette: tall vertical S-curve (~1.25× height), narrow waist.\n"
+        "Crane standing on one leg, one wing half-frozen with radiating ice fracture lines "
+        "from the lifted talon — NOT a leaping fish, NOT wings fully spread. Neck crest "
+        "breaks the top edge; jagged ice splinters the lower-right edge."
     ),
     "skipper": (
-        "Carp leaping over stylized wave gate (鱼跃龙门), body arched mid-jump, whiskers "
-        "forward, splash at tail. Dynamic diagonal; open gap under belly."
+        "Silhouette: dynamic diagonal arc lower-left to upper-right, open gap under belly.\n"
+        "Carp leaping through a stylized wave gate (鱼跃龙门), body arched mid-jump, "
+        "whiskers forward, splash crest at tail — NOT a static fish, NOT a circular "
+        "dragon gate medallion. Gate posts break the lower corners."
     ),
     "hoarder": (
-        "Magpie (喜鹊) perched on a bulging silk money pouch, beak open, tail feather "
-        "sweeping left. Pouch knot and magpie wing-tip define the lumpy contour."
+        "Silhouette: lumpy asymmetric mound, magpie tail sweeping far left.\n"
+        "Magpie (喜鹊) perched on a bulging silk money pouch, beak open — NOT ofuda strips, "
+        "NOT a toad, NOT coins scattered around. Pouch drawstring knot lower-right; "
+        "magpie wing-tip and tail feather break the left edge."
     ),
     "full_dish": (
-        "Three-legged money toad (金蟾) on elliptical offering bowl rim, coin in mouth. "
-        "Toad bump, bowl rim, and coin tip at the edge."
+        "Silhouette: wide elliptical bowl arc (~1.2× width), low profile.\n"
+        "Three-legged money toad (金蟾) squatting on an elliptical offering bowl rim, "
+        "one coin held in mouth — NOT a magpie, NOT a flat dish seen from above only. "
+        "Toad dorsal bump, bowl rim, and coin rim break the contour."
     ),
     "discarded": (
-        "Butterfly over fallen plum blossom and half-buried blank tile. Asymmetric wings; "
-        "upper wing tip top-right, lower wing lower-left."
+        "Silhouette: diagonal butterfly wings spanning corner to corner.\n"
+        "Butterfly with asymmetric wings over one fallen plum blossom and a half-buried "
+        "blank mahjong tile — NOT a rectangular plaque base, NOT ofuda strips. Upper "
+        "wing tip top-right; lower wing and tile corner lower-left."
     ),
     "boss_mark": (
-        "Bent jian sword (剑) diagonal; crossguard bears taotie (饕餮) bronze mask with "
-        "horns; small house seal square on blade flat. Blade arc and taotie horns at the edge."
+        "Silhouette: single bent blade diagonal upper-right to lower-left.\n"
+        "Bent jian sword (剑); crossguard bears taotie (饕餮) bronze mask with horns; "
+        "small house seal square on the blade flat — NOT an ox or bull head, NOT a "
+        "straight vertical sword, NOT paper talismans. Taotie horns and blade tip at edge."
     ),
     "buff_saint": (
-        "Deer with branching antlers and lingzhi fungus clusters at the hooves. Antler "
-        "tips and snout break the upper contour; worn memorial grooves on the flank."
+        "Silhouette: vertical antler fan upper-center, body lower (~1.15× tall).\n"
+        "Deer in profile with branching antlers and lingzhi fungus clusters at the hooves "
+        "— NOT mushrooms on a separate base platform, NOT a fox. Antler tips and snout "
+        "break the upper contour; worn memorial grooves on the flank."
     ),
     "transformer": (
-        "Nine-tailed fox (九尾狐) mid-transformation: fox head upper-left, fan of tail tips "
-        "lower-right showing bushy, scaled, and feathered tail forms. S-curve body."
+        "Silhouette: fox head upper-left, wide tail-fan lower-right (~1.3× width).\n"
+        "Nine-tailed fox (九尾狐) mid-transformation: one fox head, fan of tail tips "
+        "showing bushy, scaled, and feathered forms — NOT a single bushy tail, NOT a "
+        "phoenix. S-curve body links head to tail fan."
     ),
     "tag_bearer": (
+        "Silhouette: radial paper fan from center nail, five rectangular strips — "
+        "no animal, no egg, no tortoise.\n"
         "Five paper ofuda strips fanning from a central nail head; cloud-shaped cutouts "
-        "along each strip edge. Strip corners at the silhouette perimeter."
+        "along each strip edge. Strip corners at the silhouette perimeter — NOT a sword, "
+        "NOT a bird, NOT cracked eggshell."
     ),
     "meld_mason": (
-        "Pair of swallows building a nest under a tile-shaped eave lip; one bird carries "
-        "a reed strand. Nest cup, wing arcs, and eave corner at the contour."
+        "Silhouette: horizontal shelf with nest cup under a tile eave lip.\n"
+        "Pair of swallows building a mud nest under a tile-shaped eave lip; one bird "
+        "carries a reed strand — NOT ofuda strips, NOT a single large bird. Nest cup, "
+        "wing arcs, and eave corner break the contour."
     ),
     "deep_walker": (
-        "Xuanwu (玄武) tortoise with snake entwined climbing three rock terraces. Snake head "
-        "highest; shell dome breaks left; tall aspect ~1.4×. Footprint pairs on lowest terrace."
+        "Silhouette: tall stacked terraces (~1.45× height), shell dome left.\n"
+        "Adult xuanwu (玄武): tortoise with snake entwined climbing three rock terraces "
+        "— NOT a hatchling, NOT an egg, NOT flat on one plane. Snake head highest; "
+        "shell dome breaks left; footprint pairs on lowest terrace."
+    ),
+    "dead_on_arrival": (
+        "Silhouette: oval eggshell dome upper arc, hatchling reaching lower-right — "
+        "no paper strips, no adult tortoise, no snake.\n"
+        "Young tortoise hatchling half-emerged from cracked egg shell, one front flipper "
+        "reaching forward — NOT ofuda strips, NOT xuanwu, NOT a coin or bowl. Jagged "
+        "shell arc across the top; egg shards at the lower edge."
     ),
 }
 
@@ -221,11 +270,22 @@ def load_memorial_entries() -> list[dict]:
 
 
 def build_prompt(entry: dict) -> str:
-    return (
-        f"{entry['style']}\n\n"
-        f"Subject — carve only this figurative scene:\n{entry['motif']}\n\n"
-        f"This subject is unique among all talismans; follow the Subject line exactly."
+    parts = [
+        entry["style"],
+        "",
+        f"Subject — carve only this figurative scene:\n{entry['motif']}",
+        "",
+        CARVING_NEGATIVE,
+    ]
+    if entry["prefix"] == "memorial":
+        parts.extend(["", MEMORIAL_NEGATIVE])
+    parts.extend(
+        [
+            "",
+            "This subject is unique among all talismans; follow the Subject line exactly.",
+        ]
     )
+    return "\n".join(parts)
 
 
 def write_mask_for_entry(entry: dict, *, mask_method: str = "auto") -> Path:

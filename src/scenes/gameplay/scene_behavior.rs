@@ -390,6 +390,10 @@ impl SceneBehavior for GameplayScene {
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
         let has_structure = gameplay.has_structure;
         let cascade_showcase_ref = self.cascade_queue.front().and_then(|(_, sc)| sc.as_ref());
+        let cascade_scored_yaku = self
+            .cascade_queue
+            .front()
+            .map(|(cascade, _)| cascade.breakdown.detected_yaku.as_slice());
         let glb_anchors = match super::glb_anchors::resolve_gameplay_glb_anchors(
             layout,
             interaction.hand_len,
@@ -484,6 +488,7 @@ impl SceneBehavior for GameplayScene {
                 &interaction,
                 cascade_showcase_ref,
                 cascade_frame.as_ref(),
+                cascade_scored_yaku,
                 has_structure,
                 layout_scale,
                 glb_anchors.structure_marker_poses,
@@ -1631,7 +1636,10 @@ impl SceneBehavior for GameplayScene {
                                 Consumable::Memorial(_) => "Remnant",
                             };
                             let title = format!("{} · {}", kind, c.name());
-                            let desc = gameplay_consumable_description_full(c);
+                            let desc = gameplay_consumable_description_full(
+                                c,
+                                run.memorial_snapshot.as_ref(),
+                            );
                             push_focus_tooltip_panel_2d(
                                 &mut inspect_tooltip_quads,
                                 &mut inspect_tooltip_texts,

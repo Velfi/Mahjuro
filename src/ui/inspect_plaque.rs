@@ -430,7 +430,10 @@ pub fn hand_tile_focus_tooltip(
 }
 
 /// Full ribbon/talisman body for gameplay focus panel (aligned with collection catalog tone).
-pub fn gameplay_consumable_description_full(c: Consumable) -> String {
+pub fn gameplay_consumable_description_full(
+    c: Consumable,
+    memorial_snapshot: Option<&crate::core::memorial_talisman::MemorialJournalSnapshot>,
+) -> String {
     match c {
         Consumable::Zodiac(z) => format!(
             "Levelled by the {} zodiac ribbon (+{:.2} mult, +{} chips per level).",
@@ -439,7 +442,7 @@ pub fn gameplay_consumable_description_full(c: Consumable) -> String {
             z.level_up_chips_per_level(),
         ),
         Consumable::Talisman(t) => t.description().to_string(),
-        Consumable::Memorial(m) => m.description().to_string(),
+        Consumable::Memorial(m) => m.description_live(memorial_snapshot),
     }
 }
 

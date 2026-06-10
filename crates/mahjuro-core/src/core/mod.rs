@@ -8,6 +8,7 @@ pub mod deck;
 pub mod hand;
 pub mod hand_intent;
 pub mod json_asset;
+pub mod memorial_desc_template;
 pub mod memorial_talisman;
 pub mod moon_quips;
 pub mod ordeal_kind;

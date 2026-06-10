@@ -2281,7 +2281,9 @@ fn description_for(
             None,
         ),
         ArtifactKind::Talisman(kind) => kind.description().to_string(),
-        ArtifactKind::MemorialTalisman(kind) => kind.description().to_string(),
+        ArtifactKind::MemorialTalisman(kind) => {
+            kind.description_live(run.memorial_snapshot.as_ref())
+        }
         ArtifactKind::Zodiac(kind) => format!(
             "Levelled by the {} zodiac ribbon (+{:.2} mult, +{} chips per level).",
             kind.name(),

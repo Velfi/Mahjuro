@@ -442,7 +442,10 @@ impl ConsumableShopItem {
     pub(super) fn name(&self) -> String {
         self.consumable.name()
     }
-    pub(super) fn description(&self) -> String {
+    pub(super) fn description(
+        &self,
+        memorial_snapshot: Option<&crate::core::memorial_talisman::MemorialJournalSnapshot>,
+    ) -> String {
         match self.consumable {
             Consumable::Zodiac(z) => {
                 let yk = z.yaku();
@@ -455,7 +458,7 @@ impl ConsumableShopItem {
                 )
             }
             Consumable::Talisman(t) => t.description().to_string(),
-            Consumable::Memorial(m) => m.description().to_string(),
+            Consumable::Memorial(m) => m.description_live(memorial_snapshot),
         }
     }
 }

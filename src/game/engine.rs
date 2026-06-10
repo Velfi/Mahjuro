@@ -314,6 +314,8 @@ pub struct ShopReadModel {
     pub wing: u32,
     /// Score target for the upcoming blind (per-ante scaling), for relic tooltips.
     pub next_chamber_target: u32,
+    /// Frozen defeat journal for live memorial talisman tooltips.
+    pub memorial_snapshot: Option<crate::core::memorial_talisman::MemorialJournalSnapshot>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -549,6 +551,7 @@ impl<'a> GameEngine<'a> {
             total_score_earned: run.total_score_earned,
             wing: run.wing,
             next_chamber_target: run.chamber_score_target(run.upcoming_chamber),
+            memorial_snapshot: run.memorial_snapshot.clone(),
         }
     }
 

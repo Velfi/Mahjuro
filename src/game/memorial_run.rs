@@ -22,5 +22,6 @@ pub fn snapshot_from_run(
         tiles_discarded: run.tiles_discarded,
         consumables_unused,
         dominant_yaku: dominant_yaku_from_run(&run.yaku_times_played),
+        run_number: Some(run.run_number),
     }
 }

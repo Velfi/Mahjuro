@@ -698,6 +698,11 @@ pub(super) fn process_focus_and_actions(
                         .collect();
                     GameEngine::validate_with_wildcards(ctx.run, &selected_tiles).map(
                         |(sets, scoring_tiles)| {
+                            let sets = ctx.run.pick_best_decomposition(
+                                sets,
+                                &scoring_tiles,
+                                &selected_tiles,
+                            );
                             let mut tiles = GameplayScene::display_tiles(
                                 gameplay.structure_tiles.iter().copied(),
                                 ctx.run,
@@ -1681,6 +1686,7 @@ pub(super) fn build_yaku_panel_and_tablets(
     interaction: &crate::game::engine::GameplayInteractionReadModel,
     cascade_showcase_ref: Option<&CascadeShowcase>,
     cascade_frame: Option<&crate::game::cascade::CascadeFrame>,
+    cascade_scored_yaku: Option<&[crate::core::yaku::YakuKind]>,
     has_structure: bool,
     layout_scale: f32,
     structure_marker_poses: [crate::render::gameplay_glb::GameplayMarkerPose; 2],
@@ -1870,8 +1876,19 @@ pub(super) fn build_yaku_panel_and_tablets(
     let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
     let panel_h = ((a_r[1] - a_l[1]).abs()).max((24.0 * layout_scale).max(18.0));
     let mut yaku_tablet_placements: Vec<Object3d> = Vec::new();
-    if !visible_previews.is_empty() || is_chicken_hand {
-        let tablet_count = if is_chicken_hand {
+    let cascade_tablet_yaku: Option<Vec<crate::core::yaku::YakuKind>> =
+        cascade_scored_yaku.filter(|yaku| !yaku.is_empty()).map(|yaku| {
+            let mut kinds: Vec<_> = yaku.to_vec();
+            kinds.sort();
+            kinds
+        });
+    let show_tablets = cascade_tablet_yaku.is_some()
+        || !visible_previews.is_empty()
+        || is_chicken_hand;
+    if show_tablets {
+        let tablet_count = if let Some(ref scored) = cascade_tablet_yaku {
+            scored.len()
+        } else if is_chicken_hand {
             1
         } else {
             visible_previews.len()
@@ -1916,7 +1933,20 @@ pub(super) fn build_yaku_panel_and_tablets(
                     anim_id: 0,
                 });
             };
-        if is_chicken_hand {
+        if let Some(scored) = cascade_tablet_yaku {
+            for (i, kind) in scored.iter().enumerate() {
+                let yaku_discovered = ctx
+                    .progress
+                    .yaku_times_scored
+                    .get(kind)
+                    .copied()
+                    .unwrap_or(0)
+                    >= 1;
+                let tablet_label =
+                    std::borrow::Cow::Borrowed(kind.gameplay_tablet_label(yaku_discovered));
+                push_tablet(i, tablet_label, true, Some(*kind));
+            }
+        } else if is_chicken_hand {
             push_tablet(
                 0,
                 std::borrow::Cow::Borrowed(
