@@ -61,23 +61,21 @@ pub fn score_roller_msd_slot_for_value(value: u64, bank: usize) -> usize {
 }
 
 /// Roller wheel pivot positions in authored doc space (from node bind poses).
+///
+/// Uses [`RoomGlbCpu::node_bind_poses`] rather than environment mesh names so pivots
+/// stay available after [`crate::room_glb::release_room_environment_primitives_cpu`].
 pub fn collect_score_roller_pivots_doc(
     cpu: &RoomGlbCpu,
 ) -> [[f32; 3]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT] {
     let mut pivots = [[0.0; 3]; GAMEPLAY_SCORE_ROLLER_SLOT_COUNT];
-    for env_prim in &cpu.environment_primitives {
-        let Some(name) = env_prim.gltf_node_name.as_deref() else {
-            continue;
-        };
+    for (name, bind) in &cpu.node_bind_poses {
         let Some(raw_idx) = gameplay_score_roller_raw_index(name) else {
             continue;
         };
         let Some(slot) = gameplay_score_roller_slot_remap(raw_idx) else {
             continue;
         };
-        if let Some(bind) = cpu.node_bind_poses.get(name) {
-            pivots[slot] = bind.bind_world_doc.w_axis.truncate().to_array();
-        }
+        pivots[slot] = bind.bind_world_doc.w_axis.truncate().to_array();
     }
     pivots
 }
@@ -262,5 +260,97 @@ mod tests {
         assert_eq!(gameplay_score_roller_raw_index("roller"), Some(0));
         assert_eq!(gameplay_score_roller_raw_index("Roller7"), Some(7));
         assert_eq!(gameplay_score_roller_raw_index("frame"), None);
+    }
+
+    #[test]
+    fn roller_pivots_survive_environment_mesh_release() {
+        use crate::gameplay_glb::{load_gameplay_glb_from_bytes, validate_gameplay_glb};
+        use crate::room_glb::release_room_environment_primitives_cpu;
+        let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
+        let mut cpu = validate_gameplay_glb(load_gameplay_glb_from_bytes(bytes).unwrap()).unwrap();
+        let before = collect_score_roller_pivots_doc(&cpu);
+        let before_count = before.iter().filter(|p| **p != [0.0, 0.0, 0.0]).count();
+        assert!(before_count >= 10, "expected pivots before release, found {before_count}");
+        release_room_environment_primitives_cpu(&mut cpu);
+        assert!(cpu.environment_primitives.is_empty());
+        let after = collect_score_roller_pivots_doc(&cpu);
+        let after_count = after.iter().filter(|p| **p != [0.0, 0.0, 0.0]).count();
+        assert_eq!(
+            after_count, before_count,
+            "roller pivots must survive env mesh CPU release"
+        );
+    }
+
+    #[test]
+    fn roller_bank_focus_rect_at_common_resolutions() {
+        use crate::gameplay_glb::{
+            gameplay_camera_from_cpu, load_gameplay_glb_from_bytes, validate_gameplay_glb, SCORE_FRAME,
+            gameplay_marker_screen_rect_resolved,
+        };
+        let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
+        let cpu = validate_gameplay_glb(load_gameplay_glb_from_bytes(bytes).unwrap()).unwrap();
+        let env_h = 1.0f32;
+        for (w, h) in [(1920.0, 1080.0), (2560.0, 1440.0), (1280.0, 720.0), (1440.0, 900.0)] {
+            let cam = gameplay_camera_from_cpu(&cpu, h, env_h).expect("camera");
+            let frame = gameplay_marker_screen_rect_resolved(
+                w, h, &cam, env_h, &cpu, SCORE_FRAME, 32.0, 16.0,
+            )
+            .expect("frame");
+            let pivots = collect_score_roller_pivots_doc(&cpu);
+            let score = score_roller_bank_screen_rect(w, h, &cam, env_h, &cpu, &pivots, 0);
+            let target = score_roller_bank_screen_rect(w, h, &cam, env_h, &cpu, &pivots, 1);
+            eprintln!(
+                "{w}x{h}: frame_h={:.0} score={:?} target={:?}",
+                frame[3],
+                score.map(|s| format!("h={:.0}", s[3])),
+                target.map(|t| format!("h={:.0}", t[3]))
+            );
+            let score = score.expect("score");
+            let target = target.expect("target");
+            assert!(
+                score[3] <= frame[3] * 0.45,
+                "{w}x{h} score bank too tall vs frame"
+            );
+            assert!(
+                target[3] <= frame[3] * 0.45,
+                "{w}x{h} target bank too tall vs frame"
+            );
+        }
+    }
+
+    #[test]
+    fn roller_bank_focus_rect_matches_frame_height() {
+        use crate::gameplay_glb::{
+            gameplay_camera_from_cpu, load_gameplay_glb_from_bytes, validate_gameplay_glb, SCORE_FRAME,
+            gameplay_marker_screen_rect_resolved,
+        };
+        let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
+        let cpu = validate_gameplay_glb(load_gameplay_glb_from_bytes(bytes).unwrap()).unwrap();
+        let w = 1920.0f32;
+        let h = 1080.0f32;
+        let env_h = 1.0f32;
+        let cam = gameplay_camera_from_cpu(&cpu, h, env_h).expect("camera");
+        let frame = gameplay_marker_screen_rect_resolved(
+            w, h, &cam, env_h, &cpu, SCORE_FRAME, 32.0, 16.0,
+        )
+        .expect("frame");
+        let pivots = collect_score_roller_pivots_doc(&cpu);
+        let score = score_roller_bank_screen_rect(w, h, &cam, env_h, &cpu, &pivots, 0)
+            .expect("score bank");
+        let target = score_roller_bank_screen_rect(w, h, &cam, env_h, &cpu, &pivots, 1);
+        let found = pivots.iter().filter(|p| **p != [0.0, 0.0, 0.0]).count();
+        eprintln!(
+            "pivots={found} frame h={:.1} score h={:.1} target={:?}",
+            frame[3],
+            score[3],
+            target.map(|t| format!("h={:.1}", t[3]))
+        );
+        assert!(target.is_some(), "target bank rect should resolve from pivots");
+        assert!(
+            score[3] <= frame[3] * 1.15,
+            "score bank focus rect too tall: h={} frame_h={}",
+            score[3],
+            frame[3]
+        );
     }
 }

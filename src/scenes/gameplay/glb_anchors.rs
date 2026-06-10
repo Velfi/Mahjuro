@@ -667,23 +667,21 @@ pub fn projected_gameplay_focus_rects_for_tests(
     let wall_layout = crate::render::wall_display::wall_hud_layout(w, h, 126);
     rects.push((FocusTarget::WallHud, wall_layout.block_rect));
 
-    if let Some((score_rect, target_rect)) =
+    let (score_rect, target_rect) =
         crate::scenes::gameplay::score_counter::resolve_score_roller_bank_focus_rects(
             w, h, &cam, env_h,
-        )
-    {
-        if score_rect[2] > 1.0 && score_rect[3] > 1.0 {
-            rects.push((
-                FocusTarget::ScoreRoller(super::focus::ScoreRollerBank::Score),
-                score_rect,
-            ));
-        }
-        if target_rect[2] > 1.0 && target_rect[3] > 1.0 {
-            rects.push((
-                FocusTarget::ScoreRoller(super::focus::ScoreRollerBank::Target),
-                target_rect,
-            ));
-        }
+        );
+    if score_rect[2] > 1.0 && score_rect[3] > 1.0 {
+        rects.push((
+            FocusTarget::ScoreRoller(super::focus::ScoreRollerBank::Score),
+            score_rect,
+        ));
+    }
+    if target_rect[2] > 1.0 && target_rect[3] > 1.0 {
+        rects.push((
+            FocusTarget::ScoreRoller(super::focus::ScoreRollerBank::Target),
+            target_rect,
+        ));
     }
 
     rects

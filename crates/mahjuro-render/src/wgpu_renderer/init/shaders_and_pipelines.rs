@@ -75,7 +75,9 @@ pub(super) struct ShadersAndPipelinesInit {
     pub emissive_probe_update_bind_group: wgpu::BindGroup,
     pub emissive_probe_update_bind_group_layout: wgpu::BindGroupLayout,
     pub emissive_probe_update_pipeline: wgpu::ComputePipeline,
+    pub flame_glow_pipeline: wgpu::RenderPipeline,
     pub flame_pipeline: wgpu::RenderPipeline,
+    pub flame_core_pipeline: wgpu::RenderPipeline,
     pub flame_view_bind_group: wgpu::BindGroup,
     pub flame_view_buffer: wgpu::Buffer,
     pub flame_volume_mesh: crate::lit_mesh::LitMeshGpu,
@@ -1300,59 +1302,82 @@ pub(super) fn init_shaders_and_pipelines(
         &crate::candle_flame_mesh::build_candle_flame_volume_mesh(),
         "candle-flame-volume",
     );
-    let flame_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("flame-pipeline"),
-        layout: Some(&flame_pl),
-        vertex: wgpu::VertexState {
-            module: &flame_shader,
-            entry_point: Some("vs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[flame_mesh_vertex_layout, flame_instance_layout],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &flame_shader,
-            entry_point: Some("fs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: scene_hdr_format,
-                // Additive blend so flames brighten whatever's behind them.
-                blend: Some(wgpu::BlendState {
-                    color: wgpu::BlendComponent {
-                        src_factor: wgpu::BlendFactor::SrcAlpha,
-                        dst_factor: wgpu::BlendFactor::One,
-                        operation: wgpu::BlendOperation::Add,
-                    },
-                    alpha: wgpu::BlendComponent {
-                        src_factor: wgpu::BlendFactor::One,
-                        dst_factor: wgpu::BlendFactor::One,
-                        operation: wgpu::BlendOperation::Add,
-                    },
-                }),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
+    let flame_blend_target = wgpu::ColorTargetState {
+        format: scene_hdr_format,
+        blend: Some(wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
         }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            // Billboards are symmetric so cull is a footgun (we'd
-            // have to care about wind-space normal orientation).
-            cull_mode: None,
-            ..Default::default()
-        },
-        // Depth-test Less + write off. Matches the `lit_mesh_blended`
-        // pattern: particles are occluded by opaque geometry in front
-        // of them (coin pile, wax body) but stack freely with each
-        // other in additive blend.
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: Some(false),
-            depth_compare: Some(wgpu::CompareFunction::Less),
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
-        multisample: wgpu::MultisampleState::default(),
-        multiview_mask: None,
-        cache: None,
-    });
+        write_mask: wgpu::ColorWrites::ALL,
+    };
+    let flame_depth = wgpu::DepthStencilState {
+        format: wgpu::TextureFormat::Depth32Float,
+        depth_write_enabled: Some(false),
+        depth_compare: Some(wgpu::CompareFunction::Less),
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState::default(),
+    };
+    let flame_layer_pipeline = |label: &str,
+                                vs_entry: &str,
+                                fs_entry: &str,
+                                mesh_layout: wgpu::VertexBufferLayout<'static>,
+                                inst_layout: wgpu::VertexBufferLayout<'static>|
+     -> wgpu::RenderPipeline {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(&flame_pl),
+            vertex: wgpu::VertexState {
+                module: &flame_shader,
+                entry_point: Some(vs_entry),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[mesh_layout, inst_layout],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &flame_shader,
+                entry_point: Some(fs_entry),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(flame_blend_target.clone())],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(flame_depth.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+    let flame_glow_pipeline = flame_layer_pipeline(
+        "flame-glow-pipeline",
+        "vs_glow",
+        "fs_glow",
+        flame_mesh_vertex_layout.clone(),
+        flame_instance_layout.clone(),
+    );
+    let flame_pipeline = flame_layer_pipeline(
+        "flame-body-pipeline",
+        "vs_main",
+        "fs_main",
+        flame_mesh_vertex_layout.clone(),
+        flame_instance_layout.clone(),
+    );
+    let flame_core_pipeline = flame_layer_pipeline(
+        "flame-core-pipeline",
+        "vs_core",
+        "fs_core",
+        flame_mesh_vertex_layout,
+        flame_instance_layout,
+    );
 
     let flame_view_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("flame-view-uniform"),
@@ -1360,7 +1385,7 @@ pub(super) fn init_shaders_and_pipelines(
             view_proj: Mat4::IDENTITY.to_cols_array(),
             view_pos: [0.0; 4],
             tuning: crate::flame_tuning::FlameTuning::load().shader_fields(),
-            _pad: [0.0; 3],
+            _pad: [0.0; 4],
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -3011,7 +3036,9 @@ pub(super) fn init_shaders_and_pipelines(
         emissive_probe_update_bind_group,
         emissive_probe_update_bind_group_layout,
         emissive_probe_update_pipeline,
+        flame_glow_pipeline,
         flame_pipeline,
+        flame_core_pipeline,
         flame_view_bind_group,
         flame_view_buffer,
         flame_volume_mesh,

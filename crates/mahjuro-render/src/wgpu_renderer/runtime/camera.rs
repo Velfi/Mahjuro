@@ -336,7 +336,7 @@ impl WgpuRenderer {
                 view_proj: cam.view_proj_arr,
                 view_pos: [cam.cam_pos.x, cam.cam_pos.y, cam.cam_pos.z, 1.0],
                 tuning: self.flame_tuning.shader_fields(),
-                _pad: [0.0; 3],
+                _pad: [0.0; 4],
             }),
         );
     }

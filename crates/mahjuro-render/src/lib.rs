@@ -8,6 +8,7 @@ pub mod bone_tablet_mesh;
 pub mod book_mesh;
 pub mod cabinet_mesh;
 pub mod candle_flame_mesh;
+pub mod plume_sim;
 pub mod cap_extrude;
 pub mod coin_glb;
 pub mod coin_mesh;
