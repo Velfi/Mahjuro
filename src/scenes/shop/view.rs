@@ -1332,7 +1332,7 @@ fn hover_tooltip_content(
             } else {
                 color::RUBY
             };
-            Some((item.name(), item.description(), cta, col))
+            Some((item.name(), item.description(shop.memorial_snapshot.as_ref()), cta, col))
         }
         ShopHit::Ribbon(i) => {
             let oi = i.checked_sub(n_for_sale_zodiacs)?;
@@ -1343,7 +1343,7 @@ fn hover_tooltip_content(
             };
             Some((
                 item.name(),
-                item.description(),
+                item.description(shop.memorial_snapshot.as_ref()),
                 "Use".to_string(),
                 color::CHAMPAGNE,
             ))
@@ -1367,7 +1367,7 @@ fn hover_tooltip_content(
             } else {
                 color::RUBY
             };
-            Some((item.name(), item.description(), cta, col))
+            Some((item.name(), item.description(shop.memorial_snapshot.as_ref()), cta, col))
         }
         ShopHit::Talisman(i) => {
             let oi = i.checked_sub(n_for_sale_talismans)?;
@@ -1378,7 +1378,7 @@ fn hover_tooltip_content(
             };
             Some((
                 item.name(),
-                item.description(),
+                item.description(shop.memorial_snapshot.as_ref()),
                 format!(
                     "Sell ¥{}",
                     consumable_sell_price_for_mode(c, mode, &shop.relic_state)

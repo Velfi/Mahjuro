@@ -518,16 +518,13 @@ pub fn relic_sell_price_live(
 }
 
 /// Return a live description for relics whose counters change their tooltip.
-/// Falls back to the static `RelicDef::description` when no counter applies.
 ///
 /// When `inventory_focus` is `Some((relics, slot_index))`, Mirror Tile and
-/// Shadow Hand append a short line about copy targets and (when relevant)
-/// the “extra copy for hand scoring” note.
+/// Shadow Hand append inventory help after the expanded template.
 ///
-/// Live counter readouts are only shown when `inventory_focus` is `Some` — i.e.
-/// during gameplay or shop. Callers that render archive/collection entries pass
-/// `None` and get the static description so locked/unowned relic entries don't
-/// leak run state.
+/// Live counter tokens in `assets/data/relics.json` are only filled from run
+/// state when `inventory_focus` is `Some` (gameplay / shop). Archive catalog
+/// passes `None` and gets design-time defaults so entries don't leak run state.
 pub fn relic_description_live(
     id: RelicId,
     counters: &std::collections::BTreeMap<RelicId, i32>,
@@ -536,255 +533,30 @@ pub fn relic_description_live(
     ghost_hand_chips_preview: Option<i32>,
     wing: Option<u32>,
 ) -> String {
+    use crate::core::relic_desc_template::{RelicDescContext, expand_relic_description_templates};
+
     let base = all_relic_defs()
         .iter()
         .find(|d| d.id == id)
         .map(|d| d.description)
         .unwrap_or("");
-    if inventory_focus.is_none() {
-        return base.to_string();
-    }
-    match id {
-        RelicId::MeltingIce => {
-            let remaining = counters
-                .get(&RelicId::MeltingIce)
-                .copied()
-                .unwrap_or(MELTING_ICE_START_CHIPS);
-            format!("{base} [{remaining} chips left]")
-        }
-        RelicId::Taotie => {
-            // Counter stores accumulated chips (TAOTIE_CHIPS_PER_DEVOURED per destroyed honor).
-            let chips = counters.get(&RelicId::Taotie).copied().unwrap_or(0);
-            let devoured = chips / TAOTIE_CHIPS_PER_DEVOURED;
-            format!("{base} [{devoured} honors destroyed, +{chips} chips]")
-        }
-        RelicId::SilkThread => {
-            let thread = counters.get(&RelicId::SilkThread).copied().unwrap_or(40);
-            format!("{base} [+{:.1} mult left]", thread as f64 / 10.0)
-        }
-        RelicId::SilkMoth => {
-            let paid = counters.get(&RelicId::SilkMoth).copied().unwrap_or(0);
-            format!("{base} [¥{paid} produced]")
-        }
-        RelicId::XxxlEgg => {
-            let charges = counters.get(&RelicId::XxxlEgg).copied().unwrap_or(3);
-            format!(
-                "{base} [{charges} charge{} left]",
-                if charges == 1 { "" } else { "s" }
-            )
-        }
-        RelicId::IGotAGuy => {
-            let n = counters.get(&RelicId::IGotAGuy).copied().unwrap_or(0);
-            format!(
-                "{base} [{n} free restock{} left]",
-                if n == 1 { "" } else { "s" }
-            )
-        }
-        RelicId::TeaCeremony => {
-            let phase = counters
-                .get(&RelicId::TeaCeremony)
-                .copied()
-                .unwrap_or(0)
-                .clamp(0, 3);
-            let names = ["Harmony", "Respect", "Purity", "Tranquility"];
-            let label = names[phase as usize];
-            let remain = 4 - phase;
-            format!(
-                "{base} [next: {label}, {remain} hand{}]",
-                if remain == 1 { "" } else { "s" }
-            )
-        }
-        RelicId::Rakuware => {
-            format!("{base} [Harmony · Respect · Purity · Tranquility]")
-        }
-        RelicId::Chrysalis => {
-            let excess = counters
-                .get(&RelicId::MonarchButterfly)
-                .copied()
-                .unwrap_or(0)
-                .max(0);
-            let need = CHRYSALIS_HATCH_EXCESS_THRESHOLD.max(1);
-            format!("{base} [{excess}/{need} absorbed toward hatch]")
-        }
-        RelicId::MonarchButterfly => {
-            let excess = counters
-                .get(&RelicId::MonarchButterfly)
-                .copied()
-                .unwrap_or(0)
-                .max(0);
-            let tier = monarch_butterfly_tier(excess);
-            let chips = monarch_butterfly_bonus_chips(excess);
-            let next = monarch_next_tier_excess_floor(excess)
-                .map(|n| format!("next tier ≥{n}"))
-                .unwrap_or_else(|| "max tier".to_string());
-            format!("{base} [tier {tier}, +{chips} chips, {excess} excess, {next}]")
-        }
-        RelicId::Humility => {
-            let streak = counters.get(&RelicId::Humility).copied().unwrap_or(0);
-            format!(
-                "{base} [streak: {streak}, +{:.1} mult]",
-                0.5 * streak as f64
-            )
-        }
-        RelicId::Temperance => {
-            let stacks = counters.get(&RelicId::Temperance).copied().unwrap_or(0);
-            format!(
-                "{base} [+{:.1} permanent mult, cap +10.0]",
-                (stacks as f64 / 8.0).min(10.0)
-            )
-        }
-        RelicId::Obsession => {
-            let rounds = counters.get(&RelicId::Obsession).copied().unwrap_or(0);
-            format!(
-                "{base} [{rounds} round{}, +{:.1} mult]",
-                if rounds == 1 { "" } else { "s" },
-                0.3 * rounds as f64
-            )
-        }
-        RelicId::Bonfire => {
-            let sold = counters.get(&RelicId::Bonfire).copied().unwrap_or(0);
-            format!("{base} [{sold} sold, +{:.1} mult]", 0.4 * sold as f64)
-        }
-        RelicId::HungryGhost => {
-            let perm = counters.get(&RelicId::HungryGhost).copied().unwrap_or(0);
-            format!(
-                "{base} [+{:.1} mult stored, cap +20.0]",
-                (perm as f64 / 10.0).min(20.0)
-            )
-        }
-        RelicId::NestEgg => {
-            let rounds = counters.get(&RelicId::NestEgg).copied().unwrap_or(0);
-            let sell = relic_sell_price_live(id, counters);
-            format!(
-                "{base} [held {rounds} round{}, sell ¥{sell}]",
-                if rounds == 1 { "" } else { "s" }
-            )
-        }
-        RelicId::Kindling => {
-            let total = counters
-                .get(&RelicId::Kindling)
-                .copied()
-                .unwrap_or(0)
-                .max(0);
-            format!(
-                "{base} [{total} cash-in{}, +{:.1} mult (cap +{:.1})]",
-                if total == 1 { "" } else { "s" },
-                kindling_mult_bonus(total),
-                KINDLING_MULT_CAP
-            )
-        }
-        RelicId::Snowball => {
-            let raw = counters.get(&RelicId::Snowball).copied().unwrap_or(0);
-            let stacks = raw.clamp(0, SNOWBALL_STACK_CAP);
-            let chips = snowball_score_chips(raw);
-            format!(
-                "{base} [{stacks}/{cap} clears, +{chips} chips this hand]",
-                cap = SNOWBALL_STACK_CAP
-            )
-        }
-        RelicId::Kintsugi => {
-            let broken = counters.get(&RelicId::Kintsugi).copied().unwrap_or(0);
-            format!("{base} [+{broken} mult]")
-        }
-        RelicId::Heirloom => {
-            let blinds = counters
-                .get(&RelicId::Heirloom)
-                .copied()
-                .unwrap_or(0)
-                .max(0);
-            format!(
-                "{base} [{blinds} blind{}, +{:.1} mult (cap +12.0)]",
-                if blinds == 1 { "" } else { "s" },
-                (blinds as f64).min(12.0)
-            )
-        }
-        RelicId::GoldenEngine => {
-            let held = gold.max(0);
-            let bonus = golden_engine_mult_bonus(gold);
-            format!("{base} [{held}g held, +{bonus} mult (cap +12)]")
-        }
-        RelicId::BeggarsCup => {
-            let ante = wing.unwrap_or(1).max(1);
-            format!("{base} [ante {ante}, +¥{ante} on clear]")
-        }
-        RelicId::WallWeaver => {
-            let added = counters
-                .get(&RelicId::WallWeaver)
-                .copied()
-                .unwrap_or(0)
-                .max(0);
-            let overflow = if inventory_focus
-                .is_some_and(|(relics, _)| relics.has(RelicId::StrengthInNumbers))
-            {
-                68
-            } else {
-                0
-            };
-            let excess = overflow + added;
-            if excess > 0 {
-                format!(
-                    "{base} [+{:.1} mult (cap +8.0)]",
-                    (0.35 * excess as f64).min(8.0)
-                )
-            } else {
-                base.to_string()
-            }
-        }
-        RelicId::CurioCabinet => {
-            if let Some((relics, _)) = inventory_focus {
-                let bonus: u32 = relics
-                    .active
-                    .iter()
-                    .copied()
-                    .filter(|&rid| rid != RelicId::CurioCabinet)
-                    .map(|rid| relic_sell_price_live(rid, counters))
-                    .sum();
-                format!("{base} [+{:.1} mult (cap +15.0)]", (bonus as f64).min(15.0))
-            } else {
-                base.to_string()
-            }
-        }
-        RelicId::SolitarySage => {
-            if let Some((relics, _)) = inventory_focus {
-                let empty = relics.max_slots.saturating_sub(relics.active.len());
-                format!(
-                    "{base} [{empty} empty slot{}, +{:.1} mult]",
-                    if empty == 1 { "" } else { "s" },
-                    1.5 * empty as f64
-                )
-            } else {
-                base.to_string()
-            }
-        }
-        RelicId::MultiplierMaster => {
-            if let Some((relics, _)) = inventory_focus {
-                let n = relics.len();
-                format!("{base} [+{:.1} mult]", n as f64 * 1.5)
-            } else {
-                base.to_string()
-            }
-        }
-        RelicId::RiverRunner => {
-            let chips = counters.get(&RelicId::RiverRunner).copied().unwrap_or(0);
-            format!("{base} [+{chips} chips]")
-        }
-        RelicId::GhostHand => {
-            if let Some(n) = ghost_hand_chips_preview {
-                format!("{base} [+{n} chips]")
-            } else {
-                base.to_string()
-            }
-        }
-        RelicId::LotusBloom => {
-            let blooms = counters.get(&RelicId::LotusBloom).copied().unwrap_or(0);
-            format!(
-                "{base} [{blooms} flower{}, +{:.1} mult (cap +12.0)]",
-                if blooms == 1 { "" } else { "s" },
-                (0.75 * blooms as f64).min(12.0)
-            )
-        }
-        RelicId::MirrorTile => {
-            let mut s = base.to_string();
+    let (relics, slot) = match inventory_focus {
+        Some((relics, slot)) => (Some(relics), Some(slot)),
+        None => (None, None),
+    };
+    let ctx = RelicDescContext {
+        id,
+        counters,
+        gold,
+        relics,
+        slot,
+        ghost_hand_chips_preview,
+        wing,
+        live: inventory_focus.is_some(),
+    };
+    let mut s = expand_relic_description_templates(base, &ctx);
+    if inventory_focus.is_some() {
+        if id == RelicId::MirrorTile {
             if let Some((relics, slot)) = inventory_focus {
                 let extra = format_mirror_tile_inventory_help(relics, slot);
                 if !extra.is_empty() {
@@ -792,10 +564,7 @@ pub fn relic_description_live(
                     s.push_str(&extra);
                 }
             }
-            s
-        }
-        RelicId::ShadowHand => {
-            let mut s = base.to_string();
+        } else if id == RelicId::ShadowHand {
             if let Some((relics, slot)) = inventory_focus {
                 let extra = format_shadow_hand_inventory_help(relics, slot);
                 if !extra.is_empty() {
@@ -803,10 +572,9 @@ pub fn relic_description_live(
                     s.push_str(&extra);
                 }
             }
-            s
         }
-        _ => base.to_string(),
     }
+    s
 }
 
 pub fn all_relic_defs() -> &'static [RelicDef] {

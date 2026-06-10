@@ -74,7 +74,6 @@ impl RunState {
         };
 
         let snapshot = self.memorial_snapshot.as_ref();
-        let journal_discards = snapshot.map(|s| s.tiles_discarded).unwrap_or(0);
 
         match kind {
             MemorialTalismanKind::Exhausted => {
@@ -89,9 +88,8 @@ impl RunState {
                 self.refill_hand(bus);
             }
             MemorialTalismanKind::Skipper => {
-                let bonus =
-                    4u32.saturating_add(snapshot.map(|s| s.journal.chambers_skipped).unwrap_or(0));
-                self.memorial_round.clear_yen_bonus = bonus.min(12);
+                self.memorial_round.clear_yen_bonus =
+                    crate::core::memorial_talisman::skipper_clear_yen_bonus(snapshot);
             }
             MemorialTalismanKind::Hoarder => {
                 self.apply_yen_reward(MemorialTalismanKind::HOARDER_YEN as i32, Some(bus));
@@ -101,7 +99,8 @@ impl RunState {
                 self.sync_round_resource_caps();
             }
             MemorialTalismanKind::Discarded => {
-                let extra = (journal_discards / 10).clamp(1, 3);
+                let extra =
+                    crate::core::memorial_talisman::discarded_extra_discards(snapshot);
                 self.discards_remaining = self.discards_remaining.saturating_add(extra);
                 self.sync_round_resource_caps();
             }
@@ -142,6 +141,11 @@ impl RunState {
             MemorialTalismanKind::DeepWalker => {
                 self.memorial_round.next_cashin_bonus_chips = 60;
                 self.memorial_round.next_cashin_yaku = None;
+            }
+            MemorialTalismanKind::DeadOnArrival => {
+                self.plays_remaining = self.plays_remaining.saturating_add(2);
+                self.discards_remaining = self.discards_remaining.saturating_add(1);
+                self.sync_round_resource_caps();
             }
         }
     }

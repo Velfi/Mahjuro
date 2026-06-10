@@ -41,7 +41,7 @@ Postprocess exaggeration: **2.4** (shop) / **2.0** (memorial) via `--exaggerate-
 
 - **Heightmap style:** orthographic top-down displacement plate — mid-gray (#808080) ground edge-to-edge; carving contour meets the canvas margin (no mat, frame, or bezel). Postprocess strips AI matte/frame bands before exaggeration.
 - **Shop:** moon rabbit, beetle on sycee, peacock, cicada on bamboo, coiled dragon (pinzu), pixiu, three honor dragons + east wind, lotus + kingfisher, twin mirror koi.
-- **Memorial:** ox, crane in ice, leaping carp, magpie on pouch, money toad, butterfly, bent jian + taotie, deer + lingzhi, nine-tailed fox, ofuda strips, nesting swallows, xuanwu on terraces.
+- **Memorial:** ox, crane in ice, leaping carp, magpie on pouch, money toad, butterfly, bent jian + taotie, deer + lingzhi, nine-tailed fox, ofuda strips, nesting swallows, xuanwu on terraces, dead-on-arrival tortoise hatchling in cracked egg.
 - **Motifs:** one unique figurative subject per kind (`SHOP_MOTIFS` / `MEMORIAL_MOTIFS`); prompts name the only scene to carve. Avoid repeating bats, coin stacks, phoenixes, lotus, or pixiu across kinds.
 - **In-game tint:** JSON `accent` tints nacre sheen; relief from heightmap (normal perturbation + iridescence); silhouette discard uses mask.
 

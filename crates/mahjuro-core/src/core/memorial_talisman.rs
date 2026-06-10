@@ -75,6 +75,8 @@ pub enum MemorialTalismanKind {
     TagBearer,
     MeldMason,
     DeepWalker,
+    /// Defeat in the first two chambers of a run (`run_number` ≤ 2).
+    DeadOnArrival,
 }
 
 impl MemorialTalismanKind {
@@ -92,6 +94,7 @@ impl MemorialTalismanKind {
             Self::TagBearer,
             Self::MeldMason,
             Self::DeepWalker,
+            Self::DeadOnArrival,
         ]
     }
 
@@ -113,8 +116,14 @@ impl MemorialTalismanKind {
         presentation(self).name
     }
 
+    /// Static template from JSON (may contain `{{token}}` placeholders).
     pub fn description(self) -> &'static str {
         presentation(self).description
+    }
+
+    /// Tooltip copy with live values from the frozen defeat journal.
+    pub fn description_live(self, snapshot: Option<&MemorialJournalSnapshot>) -> String {
+        crate::core::memorial_desc_template::memorial_description_live(self, snapshot)
     }
 
     pub fn accent_color(self) -> [f32; 4] {
@@ -136,6 +145,7 @@ impl MemorialTalismanKind {
             Self::TagBearer => "tag_bearer",
             Self::MeldMason => "meld_mason",
             Self::DeepWalker => "deep_walker",
+            Self::DeadOnArrival => "dead_on_arrival",
         }
     }
 
@@ -154,6 +164,7 @@ impl MemorialTalismanKind {
             Self::TagBearer => "textures/talismans/memorial_tag_bearer.png",
             Self::MeldMason => "textures/talismans/memorial_meld_mason.png",
             Self::DeepWalker => "textures/talismans/memorial_deep_walker.png",
+            Self::DeadOnArrival => "textures/talismans/memorial_dead_on_arrival.png",
         }
     }
 
@@ -208,6 +219,10 @@ impl MemorialTalismanKind {
                 "textures/talismans/memorial_deep_walker.png",
                 "memorial-deep-walker-hm",
             ),
+            (
+                "textures/talismans/memorial_dead_on_arrival.png",
+                "memorial-dead-on-arrival-hm",
+            ),
         ]
     }
 
@@ -226,6 +241,7 @@ impl MemorialTalismanKind {
             Self::TagBearer => "textures/talismans/memorial_tag_bearer_mask.png",
             Self::MeldMason => "textures/talismans/memorial_meld_mason_mask.png",
             Self::DeepWalker => "textures/talismans/memorial_deep_walker_mask.png",
+            Self::DeadOnArrival => "textures/talismans/memorial_dead_on_arrival_mask.png",
         }
     }
 
@@ -279,6 +295,10 @@ impl MemorialTalismanKind {
                 "textures/talismans/memorial_deep_walker_mask.png",
                 "memorial-deep-walker-mask",
             ),
+            (
+                "textures/talismans/memorial_dead_on_arrival_mask.png",
+                "memorial-dead-on-arrival-mask",
+            ),
         ]
     }
 
@@ -286,8 +306,11 @@ impl MemorialTalismanKind {
     /// auto-use order when the round would otherwise end.
     pub fn salvage_candidates(reason: GameOverReason) -> &'static [MemorialTalismanKind] {
         match reason {
-            GameOverReason::OutOfPlays => &[Self::Exhausted, Self::BossMark, Self::TagBearer],
+            GameOverReason::OutOfPlays => {
+                &[Self::DeadOnArrival, Self::Exhausted, Self::BossMark, Self::TagBearer]
+            }
             GameOverReason::NoActionsRemaining => &[
+                Self::DeadOnArrival,
                 Self::FrozenHand,
                 Self::FullDish,
                 Self::Discarded,
@@ -311,6 +334,7 @@ impl MemorialTalismanKind {
             Self::TagBearer => "You took every token the House offered.",
             Self::MeldMason => "One pattern ruled your run.",
             Self::DeepWalker => "Your reach exceeded your grasp.",
+            Self::DeadOnArrival => "You fell in the first halls.",
         }
     }
 }
@@ -375,6 +399,27 @@ pub struct MemorialJournalSnapshot {
     pub tiles_discarded: u32,
     pub consumables_unused: u32,
     pub dominant_yaku: Option<YakuKind>,
+    /// Chamber index within the run at defeat (1 = first chamber faced).
+    #[serde(default)]
+    pub run_number: Option<u32>,
+}
+
+/// Yen added on blind clear when using The Skipper (¥4 base + ¥1 per blind skipped last run).
+pub const SKIPPER_CLEAR_YEN_BASE: u32 = 4;
+pub const SKIPPER_CLEAR_YEN_CAP: u32 = 12;
+
+/// Bonus yen on blind clear from The Skipper.
+pub fn skipper_clear_yen_bonus(snapshot: Option<&MemorialJournalSnapshot>) -> u32 {
+    let skipped = snapshot.map(|s| s.journal.chambers_skipped).unwrap_or(0);
+    SKIPPER_CLEAR_YEN_BASE
+        .saturating_add(skipped)
+        .min(SKIPPER_CLEAR_YEN_CAP)
+}
+
+/// Extra discards from The Discarded (`tiles_discarded / 10`, clamped 1–3).
+pub fn discarded_extra_discards(snapshot: Option<&MemorialJournalSnapshot>) -> u32 {
+    let journal_discards = snapshot.map(|s| s.tiles_discarded).unwrap_or(0);
+    (journal_discards / 10).clamp(1, 3)
 }
 
 /// Per-blind state from memorial use; cleared when a new blind starts.
@@ -394,13 +439,24 @@ impl MemorialRoundState {
     }
 }
 
+/// Whether defeat happened in the first two chambers of the run.
+pub fn is_first_two_chambers(run_number: u32) -> bool {
+    run_number <= 2
+}
+
 /// Pick which remnant the player becomes / receives next run.
 ///
-/// Priority: boss death, then dominant habits, then loss reason fallback.
+/// Priority: boss death, early-chamber death, then dominant habits, then loss reason fallback.
 pub fn select_memorial(snapshot: &MemorialJournalSnapshot) -> MemorialTalismanKind {
     let j = &snapshot.journal;
     if snapshot.final_chamber == ChamberKind::Ordeal {
         return MemorialTalismanKind::BossMark;
+    }
+    if snapshot
+        .run_number
+        .is_some_and(|n| is_first_two_chambers(n))
+    {
+        return MemorialTalismanKind::DeadOnArrival;
     }
     if j.chambers_skipped >= 2 {
         return MemorialTalismanKind::Skipper;
@@ -484,7 +540,19 @@ mod tests {
             tiles_discarded: 0,
             consumables_unused: 0,
             dominant_yaku: None,
+            run_number: Some(3),
         }
+    }
+
+    #[test]
+    fn dead_on_arrival_when_first_two_chambers() {
+        let mut s = snapshot_with(RunDefeatJournal::default(), GameOverReason::OutOfPlays);
+        s.run_number = Some(1);
+        assert_eq!(select_memorial(&s), MemorialTalismanKind::DeadOnArrival);
+        s.run_number = Some(2);
+        assert_eq!(select_memorial(&s), MemorialTalismanKind::DeadOnArrival);
+        s.run_number = Some(3);
+        assert_eq!(select_memorial(&s), MemorialTalismanKind::Exhausted);
     }
 
     #[test]

@@ -14,7 +14,7 @@
   {
     "id": "skipper",
     "name": "The Skipper",
-    "description": "Use: +¥4 yen when you clear this blind.",
+    "description": "Use: +¥{{clear_yen}} yen when you clear this blind.",
     "accent": [0.72, 0.68, 0.42, 1.0]
   },
   {
@@ -32,7 +32,7 @@
   {
     "id": "discarded",
     "name": "The Discarded",
-    "description": "Use: +2 discards this blind.",
+    "description": "Use: +{{discards}} discards this blind.",
     "accent": [0.48, 0.42, 0.50, 1.0]
   },
   {
@@ -44,13 +44,13 @@
   {
     "id": "buff_saint",
     "name": "The Buff Saint",
-    "description": "Use: stamp every hand tile with your last run's favored enhancement.",
+    "description": "Use: stamp every hand tile with {{enhancement}}.",
     "accent": [0.94, 0.95, 0.98, 1.0]
   },
   {
     "id": "transformer",
     "name": "The Transformer",
-    "description": "Use: transform numbered tiles in hand to your last run's favored suit.",
+    "description": "Use: transform numbered tiles in hand to {{suit}}.",
     "accent": [0.62, 0.60, 0.68, 1.0]
   },
   {
@@ -62,7 +62,7 @@
   {
     "id": "meld_mason",
     "name": "The Meld Mason",
-    "description": "Use: next structure cash-in with your favored yaku gains +80 chips.",
+    "description": "Use: next structure cash-in with {{yaku}} gains +80 chips.",
     "accent": [0.82, 0.55, 0.38, 1.0]
   },
   {
@@ -70,5 +70,11 @@
     "name": "The Deep Walker",
     "description": "Use: next structure cash-in gains +60 chips.",
     "accent": [0.38, 0.42, 0.52, 1.0]
+  },
+  {
+    "id": "dead_on_arrival",
+    "name": "Dead On Arrival",
+    "description": "Use: +2 plays and +1 discard this blind.",
+    "accent": [0.52, 0.48, 0.44, 1.0]
   }
 ]

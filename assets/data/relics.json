@@ -80,7 +80,7 @@
   {
     "id": "kindling",
     "name": "Kindling",
-    "description": "Cashing in a structure: this relic accumulates +0.4 mult (max +10 mult)",
+    "description": "Cashing in a structure: +{{kindling_mult}} mult from {{kindling_cashins}} cash-ins (max +{{kindling_cap}} mult)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -158,7 +158,7 @@
   {
     "id": "multiplier_master",
     "name": "Multiplier Master",
-    "description": "+1.5 mult per relic held",
+    "description": "+{{multiplier_master_mult}} mult (+1.5 mult per relic held)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -478,7 +478,7 @@
   {
     "id": "i_got_a_guy",
     "name": "I Got A Guy",
-    "description": "The next 4 shop restocks are free",
+    "description": "The next {{restocks_left}} shop restocks are free",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -605,7 +605,7 @@
   {
     "id": "golden_engine",
     "name": "Golden Engine",
-    "description": "+1 mult per 3 yen held (max +12 mult)",
+    "description": "+{{golden_mult}} mult from ¥{{gold_held}} held (+1 mult per 3 yen, max +12 mult)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -638,7 +638,7 @@
   {
     "id": "snowball",
     "name": "Snowball",
-    "description": "+25 chips for each cleared chamber (max 15 clears)",
+    "description": "+{{snowball_chips}} chips from {{snowball_stacks}}/{{snowball_cap}} cleared chambers (+25 chips per clear)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -708,7 +708,7 @@
   {
     "id": "paper_lantern",
     "name": "Paper Lantern",
-    "description": "+4 mult; 1-in-5 chance to be destroyed at round end",
+    "description": "+4 mult; 1-in-{{ff_paper_destroy}} chance to be destroyed at round end",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -721,7 +721,7 @@
   {
     "id": "stone_lantern",
     "name": "Stone Lantern",
-    "description": "×3.0 final mult; 1-in-1000 chance to be destroyed at round end",
+    "description": "×3.0 final mult; 1-in-{{ff_stone_destroy}} chance to be destroyed at round end",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -814,7 +814,7 @@
   {
     "id": "xxxl_egg",
     "name": "XXXL Egg",
-    "description": "Cashing in a structure: retrigger all melds. Destroyed after 3 uses",
+    "description": "Cashing in a structure: retrigger all melds. {{egg_charges}} charges left (destroyed at 0)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -837,7 +837,7 @@
   {
     "id": "tea_ceremony",
     "name": "Tea Ceremony",
-    "description": "Activates four separate bonuses in turn (Harmony, Respect, Purity, Tranquility). Destroyed after the fourth activation",
+    "description": "Activates four separate bonuses in turn (Harmony, Respect, Purity, Tranquility). Next: {{tea_next}}, {{tea_hands_left}} hands left. Destroyed after the fourth activation",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -863,7 +863,7 @@
   {
     "id": "ghost_hand",
     "name": "Ghost Hand",
-    "description": "Cashing in a structure: +chips equal to the value of your current hand",
+    "description": "Cashing in a structure: +{{ghost_hand_chips}} chips from the value of your current hand",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -876,7 +876,7 @@
   {
     "id": "humility",
     "name": "Humility",
-    "description": "+0.75 mult per consecutive cash-in without honors",
+    "description": "+{{humility_mult}} mult from {{humility_streak}} consecutive honorless cash-ins (+0.5 mult per streak)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -889,7 +889,7 @@
   {
     "id": "obsession",
     "name": "Obsession",
-    "description": "Cashing in a structure without your most played yaku: this relic accumulates +0.5 mult. Resets if you cash in a structure with your most played yaku.",
+    "description": "Cashing in without your most played yaku: +0.5 mult. Currently +{{obsession_mult}} mult ({{obsession_rounds}} rounds). Resets if you cash in with your most played yaku.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -902,7 +902,7 @@
   {
     "id": "bonfire",
     "name": "Bonfire",
-    "description": "+0.6 mult per relic sold this run",
+    "description": "+{{bonfire_mult}} mult from {{bonfire_sold}} relics sold this run (+0.6 mult per sold)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -925,7 +925,7 @@
   {
     "id": "river_runner",
     "name": "River Runner",
-    "description": "Cashing in a structure with sequences: this relic accumulates +30 chips for each sequence",
+    "description": "+{{river_runner_chips}} chips from sequences this run (+30 chips per sequence in a cash-in)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -938,7 +938,7 @@
   {
     "id": "melting_ice",
     "name": "Melting Ice",
-    "description": "+120 chips. Loses 12 chips per play. At 0 it is destroyed",
+    "description": "+{{chips_left}} chips. Loses 12 chips per play. At 0 it is destroyed",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -951,7 +951,7 @@
   {
     "id": "taotie",
     "name": "Taotie",
-    "description": "+120 chips. Cashing in a structure: each honor tile in the structure is destroyed. For each honor tile destroyed this way, this relic accumulates +30 chips.",
+    "description": "+120 chips. Cashing in a structure: each honor tile in the structure is destroyed. For each honor destroyed: +30 chips ({{devoured}} devoured, +{{taotie_chips}} chips stored).",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -964,7 +964,7 @@
   {
     "id": "silk_thread",
     "name": "Silk Thread",
-    "description": "+6 mult. Loses 0.3 mult per discard. At 0 it is destroyed",
+    "description": "+{{silk_mult_left}} mult left. Loses 0.3 mult per discard. At 0 it is destroyed",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -977,7 +977,7 @@
   {
     "id": "silk_moth",
     "name": "Silk Moth",
-    "description": "+3 mult; +¥1 yen each time you discard",
+    "description": "+3 mult; +¥{{silk_moth_yen}} produced from discards (+¥1 per discard)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1003,7 +1003,7 @@
   {
     "id": "solitary_sage",
     "name": "Solitary Sage",
-    "description": "+2.5 mult per empty relic slot",
+    "description": "+{{sage_mult}} mult from {{sage_empty_slots}} empty relic slots (+2.5 mult per empty slot)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1057,7 +1057,7 @@
   {
     "id": "nest_egg",
     "name": "Nest Egg",
-    "description": "Chamber cleared: this relic accumulates +¥2 yen sell value",
+    "description": "Chamber cleared: sell value ¥{{nest_egg_sell}} (held {{nest_egg_rounds}} rounds; +¥2 per clear)",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1096,7 +1096,7 @@
   {
     "id": "temperance",
     "name": "Temperance",
-    "description": "Chamber cleared: this relic accumulates +0.5 mult per unused play (max +10 mult)",
+    "description": "+{{temperance_mult}} permanent mult from unused plays on clear (max +10 mult; +0.5 per unused play)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1213,7 +1213,7 @@
   {
     "id": "star_tile",
     "name": "Star Tile",
-    "description": "Cashing in a structure: 1-in-4 chance to level up a yaku present in the structure",
+    "description": "Cashing in a structure: {{ff_star_chance}} chance to level up a yaku present in the structure",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1226,7 +1226,7 @@
   {
     "id": "hungry_ghost",
     "name": "Hungry Ghost",
-    "description": "Round start: destroy the next relic in inventory. If a relic was destroyed this way, this relic accumulates +mult equal to the destroyed relic's sell value (max +20 mult)",
+    "description": "Round start: destroy the next relic in inventory. +{{hungry_ghost_mult}} mult stored from devoured relic sell value (max +20 mult)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1257,7 +1257,7 @@
   {
     "id": "curio_cabinet",
     "name": "Curio Cabinet",
-    "description": "+mult equal to the summed sell value of your other relics (max +15 mult)",
+    "description": "+{{curio_mult}} mult from other relic sell values (max +15 mult)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1270,7 +1270,7 @@
   {
     "id": "lotus_bloom",
     "name": "Lotus Bloom",
-    "description": "Drawing or scoring a flower tile: this relic accumulates +0.75 mult (max +12 mult)",
+    "description": "+{{lotus_mult}} mult from {{lotus_blooms}} flowers scored (max +12 mult; +0.75 per flower)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1283,7 +1283,7 @@
   {
     "id": "wall_weaver",
     "name": "Wall Weaver",
-    "description": "+0.35 mult per tile in the wall beyond 140 (max +8 mult)",
+    "description": "+{{wall_weaver_mult}} mult from wall size beyond 140 tiles (+0.35 per tile, max +8 mult)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1322,7 +1322,7 @@
   {
     "id": "sweepstakes",
     "name": "Sweepstakes",
-    "description": "Chamber entered: 25% +¥2, 25% +¥4, 50% nothing",
+    "description": "Chamber entered: {{ff_sweepstakes_odds}}",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1335,7 +1335,7 @@
   {
     "id": "beggars_cup",
     "name": "Beggar's Cup",
-    "description": "Chamber cleared: +¥1 yen multiplied by the current ante",
+    "description": "Chamber cleared: +¥{{beggar_yen}} yen (ante {{beggar_ante}})",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1371,7 +1371,7 @@
   {
     "id": "heirloom",
     "name": "Heirloom",
-    "description": "Chamber cleared: this relic accumulates +1 mult (max +12 mult).",
+    "description": "+{{heirloom_mult}} mult from {{heirloom_blinds}} blinds cleared (max +12 mult; +1 per clear).",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1412,7 +1412,7 @@
   {
     "id": "kintsugi",
     "name": "Kintsugi",
-    "description": "A relic is destroyed: this relic accumulates +1 mult",
+    "description": "+{{kintsugi_mult}} mult from relics destroyed this run (+1 mult per destroyed relic)",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -1548,7 +1548,7 @@
   {
     "id": "chrysalis",
     "name": "Chrysalis",
-    "description": "Chamber cleared: this relic absorbs excess score; Hatches after absorbing 10000 excess score.",
+    "description": "Chamber cleared: absorbs excess score. {{chrysalis_excess}}/{{chrysalis_need}} absorbed toward hatch.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1571,7 +1571,7 @@
   {
     "id": "monarch_butterfly",
     "name": "Monarch Butterfly",
-    "description": "Cashing in a structure: +chips from total absorbed excess. Excess score is absorbed each round.",
+    "description": "Cashing in a structure: +{{monarch_chips}} chips (tier {{monarch_tier}}, {{monarch_excess}} excess, {{monarch_next}}). Excess score is absorbed each round.",
     "rarity": "rare",
     "flavor_spans": [
       {
