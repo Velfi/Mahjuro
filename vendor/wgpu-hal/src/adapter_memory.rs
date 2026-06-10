@@ -21,3 +21,10 @@ impl AdapterMemoryCaps {
             .or(self.device_local_heap_bytes.filter(|&b| b > 0))
     }
 }
+
+/// OS-reported process GPU memory usage vs the current WDDM/Vulkan budget.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AdapterMemoryUsage {
+    pub current_bytes: u64,
+    pub budget_bytes: u64,
+}

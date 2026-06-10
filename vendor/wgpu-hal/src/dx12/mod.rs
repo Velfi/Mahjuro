@@ -800,6 +800,20 @@ impl Drop for Device {
 unsafe impl Send for Device {}
 unsafe impl Sync for Device {}
 
+impl Device {
+    /// WDDM local video-memory segment usage vs budget (includes untracked swapchain / driver bytes).
+    pub fn memory_usage(&self) -> Result<crate::adapter_memory::AdapterMemoryUsage, crate::DeviceError> {
+        let info = self
+            .shared
+            .adapter
+            .query_video_memory_info(Dxgi::DXGI_MEMORY_SEGMENT_GROUP_LOCAL)?;
+        Ok(crate::adapter_memory::AdapterMemoryUsage {
+            current_bytes: info.CurrentUsage,
+            budget_bytes: info.Budget,
+        })
+    }
+}
+
 pub struct Queue {
     raw: Direct3D12::ID3D12CommandQueue,
     temp_lists: Mutex<Vec<Option<Direct3D12::ID3D12CommandList>>>,
