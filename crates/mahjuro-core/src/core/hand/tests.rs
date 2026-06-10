@@ -145,6 +145,35 @@ fn validate_kong_four_of_a_kind() {
 }
 
 #[test]
+fn validate_five_tile_kong_requires_rule() {
+    let tiles = vec![
+        t(Suit::Souzu, 5, 0),
+        t(Suit::Souzu, 5, 1),
+        t(Suit::Souzu, 5, 2),
+        t(Suit::Souzu, 5, 3),
+        t(Suit::Souzu, 5, 4),
+    ];
+    let without = validate_selection_with_rules(&tiles, &[]).unwrap();
+    assert_eq!(without.len(), 2);
+    assert!(without.iter().all(|s| s.tile_ids.len() <= 3));
+
+    let with_rule = validate_selection_with_rules(&tiles, &[RuleModifier::FiveTileKong]).unwrap();
+    assert_eq!(with_rule.len(), 1);
+    assert_eq!(with_rule[0].kind, MeldKind::Kong);
+    assert_eq!(with_rule[0].tile_ids.len(), 5);
+}
+
+#[test]
+fn kong_structure_bonus_counts_five_tile_kong() {
+    use super::kong_structure_bonus;
+    let sets = vec![DetectedMeld {
+        kind: MeldKind::Kong,
+        tile_ids: vec![0, 1, 2, 3, 4],
+    }];
+    assert_eq!(kong_structure_bonus(&sets), 2);
+}
+
+#[test]
 fn find_pairs_and_triplets_emits_kong() {
     let tiles = vec![
         t(Suit::Pinzu, 7, 0),

@@ -319,6 +319,144 @@ fn even_keel_adds_chips_for_middle_ranks() {
 }
 
 #[test]
+fn blue_tiles_white_dragon_mults_structure_with_pinzu_and_white_dragon() {
+    use crate::core::structure::StructureTriggerMeta;
+    let hand = vec![
+        Tile::new(Suit::Pinzu, 5, 0),
+        Tile::new(Suit::Pinzu, 5, 1),
+        Tile::new(Suit::Pinzu, 5, 2),
+        Tile::new(Suit::Dragon, 3, 3),
+        Tile::new(Suit::Dragon, 3, 4),
+    ];
+    let sets = vec![
+        DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: vec![0, 1, 2],
+        },
+        DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: vec![3, 4],
+        },
+    ];
+    let r = relics(vec![RelicId::BlueTilesWhiteDragon]);
+    let mut ctx = ctx_with(&r, false);
+    ctx.structure = Some(StructureTriggerMeta {
+        meld_count: sets.len() as u32,
+        inject_chicken_if_no_yaku: false,
+    });
+    let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+    assert_eq!(breakdown.final_mult, 11.0);
+    assert!(
+        breakdown
+            .steps
+            .iter()
+            .any(|s| s.source == "Blue Tiles White Dragon")
+    );
+}
+
+#[test]
+fn blue_tiles_white_dragon_ignores_direct_plays() {
+    let hand = vec![
+        Tile::new(Suit::Pinzu, 5, 0),
+        Tile::new(Suit::Pinzu, 5, 1),
+        Tile::new(Suit::Pinzu, 5, 2),
+        Tile::new(Suit::Dragon, 3, 3),
+        Tile::new(Suit::Dragon, 3, 4),
+    ];
+    let sets = vec![
+        DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: vec![0, 1, 2],
+        },
+        DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: vec![3, 4],
+        },
+    ];
+    let r = relics(vec![RelicId::BlueTilesWhiteDragon]);
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+    assert_eq!(breakdown.final_mult, 5.0);
+    assert!(
+        !breakdown
+            .steps
+            .iter()
+            .any(|s| s.source == "Blue Tiles White Dragon")
+    );
+}
+
+#[test]
+fn green_tiles_green_dragon_mults_structure_with_souzu_and_green_dragon() {
+    use crate::core::structure::StructureTriggerMeta;
+    let hand = vec![
+        Tile::new(Suit::Souzu, 5, 0),
+        Tile::new(Suit::Souzu, 5, 1),
+        Tile::new(Suit::Souzu, 5, 2),
+        Tile::new(Suit::Dragon, 2, 3),
+        Tile::new(Suit::Dragon, 2, 4),
+    ];
+    let sets = vec![
+        DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: vec![0, 1, 2],
+        },
+        DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: vec![3, 4],
+        },
+    ];
+    let r = relics(vec![RelicId::GreenTilesGreenDragon]);
+    let mut ctx = ctx_with(&r, false);
+    ctx.structure = Some(StructureTriggerMeta {
+        meld_count: sets.len() as u32,
+        inject_chicken_if_no_yaku: false,
+    });
+    let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+    assert_eq!(breakdown.final_mult, 11.0);
+    assert!(
+        breakdown
+            .steps
+            .iter()
+            .any(|s| s.source == "Green Tiles Green Dragon")
+    );
+}
+
+#[test]
+fn red_tiles_red_dragon_mults_structure_with_manzu_and_red_dragon() {
+    use crate::core::structure::StructureTriggerMeta;
+    let hand = vec![
+        Tile::new(Suit::Manzu, 5, 0),
+        Tile::new(Suit::Manzu, 5, 1),
+        Tile::new(Suit::Manzu, 5, 2),
+        Tile::new(Suit::Dragon, 1, 3),
+        Tile::new(Suit::Dragon, 1, 4),
+    ];
+    let sets = vec![
+        DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: vec![0, 1, 2],
+        },
+        DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: vec![3, 4],
+        },
+    ];
+    let r = relics(vec![RelicId::RedTilesRedDragon]);
+    let mut ctx = ctx_with(&r, false);
+    ctx.structure = Some(StructureTriggerMeta {
+        meld_count: sets.len() as u32,
+        inject_chicken_if_no_yaku: false,
+    });
+    let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+    assert_eq!(breakdown.final_mult, 11.0);
+    assert!(
+        breakdown
+            .steps
+            .iter()
+            .any(|s| s.source == "Red Tiles Red Dragon")
+    );
+}
+
+#[test]
 fn chow_line_mults_three_sequences() {
     let hand = vec![
         Tile::new(Suit::Manzu, 1, 0),

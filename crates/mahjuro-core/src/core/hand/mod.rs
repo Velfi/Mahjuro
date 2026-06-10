@@ -16,6 +16,15 @@ pub use validation::{
     suggest_completions, validate_selection, validate_selection_with_rules,
 };
 
+/// Extra tile capacity granted by kongs in structure (standard 4-tile kong +1,
+/// 5-tile kong +2 vs a triplet's three tiles).
+pub fn kong_structure_bonus(sets: impl IntoIterator<Item = impl std::borrow::Borrow<DetectedMeld>>) -> usize {
+    sets.into_iter()
+        .filter(|s| s.borrow().kind == MeldKind::Kong)
+        .map(|s| s.borrow().tile_ids.len().saturating_sub(3))
+        .sum()
+}
+
 /// Player-facing meld variant. `Single` is a decomposition artefact (only
 /// produced by the Kokushi Musō layout: twelve singles + one pair) and is
 /// not a meld in any player-visible rule sense; it is kept here to avoid

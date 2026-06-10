@@ -523,6 +523,39 @@ RELICS = [
         "Cream porcelain body, polished ruby and carnelian scales, faceted ruby eyes, ivory tile with dark ink character, dark lacquer plinth, neutral studio backdrop.",
     ),
     (
+        "blue_tiles_white_dragon",
+        "Blue Tiles White Dragon",
+        "A soft-enamel pin of a dragon in a "
+        "dynamic roar — enormous head and compact muscular body, short thick "
+        "limbs with three-toed claws, swept-back head crest, small angular "
+        "wings, segmented tail curling behind. Pearlescent ice-blue and "
+        "silver-white enamel scales with bright white edge highlights and "
+        "deep sapphire enamel eyes; mouth open with small sharp white teeth.",
+        "Pearlescent ice-blue and silver-white scale enamel, sapphire blue eyes, bright white tooth and highlight enamel, cool moonlit chrome rim highlights.",
+    ),
+    (
+        "green_tiles_green_dragon",
+        "Green Tiles Green Dragon",
+        "A soft-enamel pin of a dragon in a "
+        "dynamic roar — enormous head and compact muscular body, short thick "
+        "limbs with three-toed claws, swept-back head crest, small angular "
+        "wings, segmented tail curling behind. Pearlescent jade-green and "
+        "silver-white enamel scales with bright white edge highlights and "
+        "emerald enamel eyes; mouth open with small sharp white teeth.",
+        "Pearlescent jade-green and silver-white scale enamel, emerald green eyes, bright white tooth enamel, cool moonlit chrome rim highlights.",
+    ),
+    (
+        "red_tiles_red_dragon",
+        "Red Tiles Red Dragon",
+        "A soft-enamel pin of a dragon in a "
+        "dynamic roar — enormous head and compact muscular body, short thick "
+        "limbs with three-toed claws, swept-back head crest, small angular "
+        "wings, segmented tail curling behind. Pearlescent crimson-ruby and "
+        "gold enamel scales with bright white edge highlights and ruby-red "
+        "enamel eyes; mouth open with small sharp white teeth.",
+        "Pearlescent crimson-ruby and gold scale enamel, ruby red eyes, bright white tooth enamel, warm gold chrome rim highlights.",
+    ),
+    (
         "lapis_serpent",
         "Lapis Serpent",
         "A glazed porcelain serpent figurine coiled around a single mahjong "
@@ -1284,6 +1317,15 @@ RELICS = [
         "together by a tight gold cord with a hanging coin tassel. Trophy-like "
         "with the square bundle defining the pin outline.",
         "Ivory tiles, dark ink faces, warm gold cord, polished coin tassel.",
+    ),
+    (
+        "king_kong",
+        "King Kong",
+        "A great ape bust wearing a tilted golden crown, broad shoulders and "
+        "fur rendered in soft enamel with raised metal outlines. The crown "
+        "sits rakishly to one side; the ape's stern profile defines the pin "
+        "silhouette. Crisp pin, everything sharp and in focus.",
+        "Dark brown fur enamel, warm gold tilted crown, ivory enamel highlights, muted bronze metal lines.",
     ),
     (
         "no_honor_but_wealth",

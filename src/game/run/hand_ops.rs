@@ -167,14 +167,13 @@ impl RunState {
                 &rules,
             ));
         };
-        use crate::core::hand::MeldKind;
+        use crate::core::hand::kong_structure_bonus;
         use crate::game::game_mode::HAND_SIZE;
-        let kongs_after = self
-            .structure_sets
-            .iter()
-            .chain(sets.iter())
-            .filter(|s| s.kind == MeldKind::Kong)
-            .count();
+        let kongs_after = kong_structure_bonus(
+            self.structure_sets
+                .iter()
+                .chain(sets.iter()),
+        );
         if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
             return self.play_rejection_callout().map(str::to_string);
         }
@@ -196,22 +195,17 @@ impl RunState {
         let Some((sets, scoring_tiles)) = self.try_validate_with_wildcards(&selected_tiles) else {
             return None;
         };
-        use crate::core::hand::MeldKind;
+        use crate::core::hand::kong_structure_bonus;
         use crate::game::game_mode::HAND_SIZE;
-        let kongs_after = self
-            .structure_sets
-            .iter()
-            .chain(sets.iter())
-            .filter(|s| s.kind == MeldKind::Kong)
-            .count();
+        let kongs_after = kong_structure_bonus(
+            self.structure_sets
+                .iter()
+                .chain(sets.iter()),
+        );
         if self.structure_tiles.len() + scoring_tiles.len() <= HAND_SIZE + kongs_after {
             return None;
         }
-        let kongs_now = self
-            .structure_sets
-            .iter()
-            .filter(|s| s.kind == MeldKind::Kong)
-            .count();
+        let kongs_now = kong_structure_bonus(self.structure_sets.iter());
         let capacity = HAND_SIZE + kongs_now;
         if self.structure_tiles.len() >= capacity {
             Some("It's already full")

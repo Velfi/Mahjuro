@@ -38,6 +38,7 @@ pub fn validate_selection_with_rules(
 
     let allow_wrap = rules.contains(&RuleModifier::SequenceWrap);
     let no_sequences = rules.contains(&RuleModifier::NoSequences);
+    let allow_five_tile_kong = rules.contains(&RuleModifier::FiveTileKong);
 
     // Try each way of splitting flowers into their own melds vs wildcards.
     // Flowers can form pairs (any 2) or triplets (any 3) with each other
@@ -59,6 +60,7 @@ pub fn validate_selection_with_rules(
             &mut wildcards,
             &mut result,
             allow_wrap,
+            allow_five_tile_kong,
         ) {
             if no_sequences && result.iter().any(|s| s.kind == MeldKind::Sequence) {
                 continue;

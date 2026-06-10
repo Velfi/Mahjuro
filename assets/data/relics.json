@@ -104,6 +104,45 @@
     ]
   },
   {
+    "id": "blue_tiles_white_dragon",
+    "name": "Blue Tiles White Dragon",
+    "description": "Cashing in a structure with a pinzu meld and a white dragon meld: +6 mult",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Blue tiles laid in a row, a blank dragon watching — the old players say this pairing opens the gate.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "green_tiles_green_dragon",
+    "name": "Green Tiles Green Dragon",
+    "description": "Cashing in a structure with a souzu meld and a green dragon meld: +6 mult",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Bamboo stalks and a green dragon crest — the pairing the old bamboo cutters swear by.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "red_tiles_red_dragon",
+    "name": "Red Tiles Red Dragon",
+    "description": "Cashing in a structure with a manzu meld and a red dragon meld: +6 mult",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Crimson characters and a red dragon seal — fortune favors the hand that holds both.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
     "id": "joker_tile",
     "name": "Joker Tile",
     "description": "Chamber entered: create a permanent copy of a random tile in your hand",
@@ -1303,6 +1342,19 @@
         "text": "The overwhelming urge to make every kong yours can no longer be abated!",
         "bold": false,
         "italic": false
+      }
+    ]
+  },
+  {
+    "id": "king_kong",
+    "name": "King Kong",
+    "description": "Kongs can contain 5 identical tiles",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "The crown sits askew, but the ape wears it like a throne.",
+        "bold": false,
+        "italic": true
       }
     ]
   },

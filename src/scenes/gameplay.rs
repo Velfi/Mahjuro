@@ -1170,12 +1170,11 @@ impl GameplayScene {
                     if let Some((sets, scoring_tiles)) =
                         run.try_validate_with_wildcards(&selected_tiles)
                     {
-                        let kongs_after = run
-                            .structure_sets()
-                            .iter()
-                            .chain(sets.iter())
-                            .filter(|s| s.kind == crate::core::hand::MeldKind::Kong)
-                            .count();
+                        let kongs_after = crate::core::hand::kong_structure_bonus(
+                            run.structure_sets()
+                                .iter()
+                                .chain(sets.iter()),
+                        );
                         use crate::game::game_mode::HAND_SIZE;
                         if run.structure_tiles().len() + scoring_tiles.len()
                             > HAND_SIZE + kongs_after

@@ -911,7 +911,11 @@ fn is_honroutou(tiles: &[Tile]) -> bool {
 /// the total (they substitute for regular tiles), plus unused flowers are
 /// allowed as extras.
 fn is_full_hand(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
-    let kongs = sets.iter().filter(|s| s.kind == MeldKind::Kong).count();
+    let kong_bonus: usize = sets
+        .iter()
+        .filter(|s| s.kind == MeldKind::Kong)
+        .map(|s| s.tile_ids.len().saturating_sub(3))
+        .sum();
     // Count tiles that are part of melds (includes flower substitutes).
     let tiles_in_sets: usize = sets.iter().map(|s| s.tile_ids.len()).sum();
     // The remaining tiles should be unused flowers.
@@ -922,7 +926,7 @@ fn is_full_hand(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
         .filter(|id| tiles.iter().any(|t| t.id == **id && t.is_flower()))
         .count();
     let unused_flowers = flower_count - flowers_in_sets;
-    let expected_set_tiles = 14 + kongs;
+    let expected_set_tiles = 14 + kong_bonus;
     if tiles_in_sets != expected_set_tiles {
         return false;
     }

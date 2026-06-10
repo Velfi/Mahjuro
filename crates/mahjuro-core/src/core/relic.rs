@@ -20,6 +20,7 @@ pub enum RelicId {
     AncestorEcho,
     AntTrail,
     BeggarsCup,
+    BlueTilesWhiteDragon,
     BigHands,
     Bonfire,
     BrocadePouch,
@@ -50,6 +51,7 @@ pub enum RelicId {
     GoldenEngine,
     GoldIdol,
     GreenLuck,
+    GreenTilesGreenDragon,
     Hanami,
     Heirloom,
     HighTide,
@@ -64,6 +66,7 @@ pub enum RelicId {
     KanDrum,
     Kindling,
     Kindness,
+    KingKong,
     Kintsugi,
     KongCollector,
     KongsBlessing,
@@ -93,6 +96,7 @@ pub enum RelicId {
     RiverRunner,
     #[serde(rename = "xxxl_egg")]
     XxxlEgg,
+    RedTilesRedDragon,
     RubySerpent,
     SecondWind,
     SequenceSurge,
@@ -175,6 +179,7 @@ impl RelicId {
             RelicId::HonorFury => "honor_fury.png",
             RelicId::DragonRage => "dragon_rage.png",
             RelicId::GreenLuck => "green_luck.png",
+            RelicId::GreenTilesGreenDragon => "green_tiles_green_dragon.png",
             RelicId::WhiteDragonsHush => "white_dragons_hush.png",
             RelicId::JokerTile => "joker_tile.png",
             RelicId::StrengthInNumbers => "strength_in_numbers.png",
@@ -256,9 +261,12 @@ impl RelicId {
             RelicId::LotusBloom => "lotus_bloom.png",
             RelicId::WallWeaver => "wall_weaver.png",
             RelicId::KongCollector => "kong_collector.png",
+            RelicId::KingKong => "king_kong.png",
             RelicId::NoHonorButWealth => "no_honor_but_wealth.png",
             RelicId::Sweepstakes => "sweepstakes.png",
             RelicId::BeggarsCup => "beggars_cup.png",
+            RelicId::BlueTilesWhiteDragon => "blue_tiles_white_dragon.png",
+            RelicId::RedTilesRedDragon => "red_tiles_red_dragon.png",
             RelicId::Cosmopolitan => "cosmopolitan.png",
             RelicId::Heirloom => "heirloom.png",
             RelicId::Tourist => "tourist.png",
@@ -855,6 +863,7 @@ fn relic_scoring_copy_dup_is_incompatible(target: RelicId) -> bool {
             | RelicId::Patience
             | RelicId::Kindling
             | RelicId::Kindness
+            | RelicId::KingKong
             | RelicId::Diligence
             | RelicId::Temperance
             | RelicId::Charity
@@ -1118,6 +1127,7 @@ mod tests {
                     | RelicId::HonorFury
                     | RelicId::DragonRage
                     | RelicId::GreenLuck
+                    | RelicId::GreenTilesGreenDragon
                     | RelicId::WhiteDragonsHush
                     | RelicId::JokerTile
                     | RelicId::StrengthInNumbers
@@ -1181,6 +1191,7 @@ mod tests {
                     | RelicId::Patience
                     | RelicId::Kindling
                     | RelicId::Kindness
+                    | RelicId::KingKong
                     | RelicId::Temperance
                     | RelicId::Chastity
                     | RelicId::ChowLine
@@ -1204,6 +1215,8 @@ mod tests {
                     | RelicId::NoHonorButWealth
                     | RelicId::Sweepstakes
                     | RelicId::BeggarsCup
+                    | RelicId::BlueTilesWhiteDragon
+                    | RelicId::RedTilesRedDragon
                     | RelicId::Cosmopolitan
                     | RelicId::Heirloom
                     | RelicId::Tourist
@@ -1227,6 +1240,7 @@ mod tests {
                 RelicId::HonorFury,
                 RelicId::DragonRage,
                 RelicId::GreenLuck,
+                RelicId::GreenTilesGreenDragon,
                 RelicId::WhiteDragonsHush,
                 RelicId::JokerTile,
                 RelicId::StrengthInNumbers,
@@ -1290,6 +1304,7 @@ mod tests {
                 RelicId::Patience,
                 RelicId::Kindling,
                 RelicId::Kindness,
+                RelicId::KingKong,
                 RelicId::Temperance,
                 RelicId::Chastity,
                 RelicId::ChowLine,
@@ -1313,6 +1328,8 @@ mod tests {
                 RelicId::NoHonorButWealth,
                 RelicId::Sweepstakes,
                 RelicId::BeggarsCup,
+                RelicId::BlueTilesWhiteDragon,
+                RelicId::RedTilesRedDragon,
                 RelicId::Cosmopolitan,
                 RelicId::Heirloom,
                 RelicId::Tourist,

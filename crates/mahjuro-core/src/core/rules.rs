@@ -33,6 +33,8 @@ pub enum RuleModifier {
     /// Flowers cannot substitute in triplets or sequences — only flower-only
     /// pairs and triplets count. (The Rot boss.)
     NoFlowerWildcards,
+    /// Kongs may use five identical tiles instead of four. (King Kong relic.)
+    FiveTileKong,
 }
 
 impl RuleModifier {
@@ -50,6 +52,7 @@ impl RuleModifier {
             RuleModifier::CensorRepeats => "Repeats Censored",
             RuleModifier::CashInRequiresNoDiscards => "No Cash-In With Discards",
             RuleModifier::NoFlowerWildcards => "Withered Flowers",
+            RuleModifier::FiveTileKong => "Five-Tile Kong",
         }
     }
 
@@ -69,6 +72,7 @@ impl RuleModifier {
             RuleModifier::NoFlowerWildcards => {
                 "Flowers cannot substitute in melds (flower pairs/triplets only)"
             }
+            RuleModifier::FiveTileKong => "Kongs can contain five identical tiles",
         }
     }
 }
