@@ -1162,6 +1162,14 @@ mod tests {
             "room height fog uniform missing from room_glb.wgsl"
         );
         assert!(
+            ROOM_GLB_WGSL.contains("room_height_fog_far_color"),
+            "room height fog far-color uniform missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("mix_fog_color_perceptual"),
+            "room height fog color gradient should use perceptual interpolation"
+        );
+        assert!(
             !ROOM_GLB_WGSL.contains("pbr.emissive_factor.w >"),
             "room_glb.wgsl should not overload emissive_factor.w as a feature tag"
         );

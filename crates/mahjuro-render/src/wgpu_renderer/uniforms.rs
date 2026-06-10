@@ -120,8 +120,10 @@ pub(crate) struct RoomEnvUniform {
     pub room_post_params: [f32; 4],
     /// x = floor z; y = height in world units; z = density per world unit; w = reserved.
     pub room_height_fog_params: [f32; 4],
-    /// xyz = linear HDR fog target color; w = reserved.
+    /// xyz = base linear HDR fog target color; w = tint gradient start distance in world units.
     pub room_height_fog_color: [f32; 4],
+    /// xyz = distance tint color; w = tint gradient exponential scale in world units.
+    pub room_height_fog_far_color: [f32; 4],
 }
 
 /// Per-frame data for `tile_outline.wgsl` group 0 binding 0.
