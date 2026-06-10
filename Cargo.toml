@@ -170,6 +170,12 @@ mahjuro-distribution.workspace = true
 [patch.crates-io]
 wgpu-hal = { path = "vendor/wgpu-hal" }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSEvent"] }
 

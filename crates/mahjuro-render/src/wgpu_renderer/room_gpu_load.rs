@@ -2674,7 +2674,13 @@ impl WgpuRenderer {
         pending_transition_at_black: bool,
     ) {
         self.room_profile_frame_dt_ms = frame_dt_ms;
-        self.poll_pinned_room_gpu_bit = scene_key.and_then(Self::room_gpu_bit_for_scene_key);
+        // While held at full black, pin the destination room so integrated low-memory GPUs
+        // can evict the source scene (e.g. main menu) and upload the pending shop room.
+        self.poll_pinned_room_gpu_bit = if pending_transition_at_black {
+            pending_scene_key.and_then(Self::room_gpu_bit_for_scene_key)
+        } else {
+            scene_key.and_then(Self::room_gpu_bit_for_scene_key)
+        };
         self.refresh_gpu_memory_pressure();
         crate::room_preload::try_drain_room_cpu_prefetch_threads();
         crate::room_preload::kick_eager_all_room_cpu_prefetches();
@@ -2694,7 +2700,8 @@ impl WgpuRenderer {
             this.drive_gameplay_room_gpu_upload(budget_ms);
         };
 
-        match scene_key {
+        if !pending_transition_at_black {
+            match scene_key {
             Some(scene_keys::MAIN_MENU) | Some("main_menu_exterior") => {
                 if !room_env_upload_done {
                     let before = self.rooms_gpu_loaded;
@@ -2777,6 +2784,7 @@ impl WgpuRenderer {
             | Some("game_over")
             | Some("tutorial") => upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS),
             _ => {}
+            }
         }
 
         if let Some(pending) = pending_scene_key {

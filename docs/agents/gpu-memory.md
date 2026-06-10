@@ -8,7 +8,7 @@ best-effort mode and are not part of the supported matrix.
 
 | Options → Graphics | Shadows / SSR | Internal resolution | Room GPU cap | Decal atlas cache |
 | --- | --- | --- | --- | --- |
-| **Low memory** | Off | 75% of window (min 1280×720) | 2 rooms | 1 tileset |
+| **Low memory** | Off | 100% | 2 rooms | 1 tileset |
 | **Performance** | Off | 100% | 6 | 4 |
 | **Visuals** | High + SSR | 100% | 6 | 4 |
 

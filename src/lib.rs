@@ -21,6 +21,8 @@ mod cascade_tuning_timeline;
 #[cfg(feature = "game")]
 mod crash_guard;
 #[cfg(feature = "game")]
+mod win_log_console;
+#[cfg(feature = "game")]
 mod debug_menu;
 #[cfg(feature = "game")]
 mod debug_overlays;
@@ -255,38 +257,61 @@ use main_cli::Cli;
 /// When `MAHJURO_LOG_FILE` is set, send `log` output to that path (append) instead
 /// of stderr. Steam and other GUI launchers often discard stderr, so this is the
 /// reliable way to capture `RUST_LOG` when launching from Steam.
+///
+/// On Windows release builds (`windows_subsystem = "windows"`), stderr has no
+/// console unless we attach to the parent terminal or redirect to a file.
 #[cfg(feature = "game")]
 fn init_env_logger() {
     use std::fs::OpenOptions;
-    use std::io::LineWriter;
-    use std::path::Path;
+    use std::io::{LineWriter, Write};
+    use std::path::PathBuf;
 
     let mut builder =
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
-    if let Some(path_raw) = std::env::var_os("MAHJURO_LOG_FILE") {
+
+    match if let Some(path_raw) = std::env::var_os("MAHJURO_LOG_FILE") {
         if !mahjuro_distribution::PlatformPaths::allows_external_log_file() {
             let container = mahjuro_distribution::PlatformPaths::data_root().join("mahjuro.log");
             eprintln!(
                 "MAHJURO_LOG_FILE ignored on store builds; use container log: {}",
                 container.display()
             );
+            win_log_console::RustLogOutput::File(container)
         } else {
-            let path = Path::new(&path_raw);
+            win_log_console::RustLogOutput::File(PathBuf::from(path_raw))
+        }
+    } else {
+        win_log_console::prepare_rust_log_output()
+    } {
+        win_log_console::RustLogOutput::Console(writer) => {
+            builder.target(env_logger::Target::Pipe(Box::new(writer)));
+        }
+        win_log_console::RustLogOutput::File(path) => {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            match OpenOptions::new().create(true).append(true).open(path) {
-                Ok(f) => {
+            match OpenOptions::new().create(true).append(true).open(&path) {
+                Ok(mut f) => {
+                    if std::env::var_os("MAHJURO_LOG_FILE").is_none() {
+                        let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
+                        let _ = writeln!(
+                            f,
+                            "{} Windows release: RUST_LOG={rust_log:?}; logging to {}",
+                            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                            path.display()
+                        );
+                    }
                     builder.target(env_logger::Target::Pipe(Box::new(LineWriter::new(f))));
                 }
                 Err(e) => {
                     eprintln!(
-                        "Mahjuro: could not open MAHJURO_LOG_FILE {}: {e}",
+                        "Mahjuro: could not open log file {}: {e}",
                         path.display()
                     );
                 }
             }
         }
+        win_log_console::RustLogOutput::None => {}
     }
     builder.init();
 }

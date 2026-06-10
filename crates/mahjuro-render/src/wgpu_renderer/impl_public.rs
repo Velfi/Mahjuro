@@ -39,7 +39,8 @@ impl WgpuRenderer {
         match key {
             scene_keys::MAIN_MENU => loaded(ROOM_MAIN_MENU),
             scene_keys::SHOP => loaded(ROOM_SHOP),
-            scene_keys::HALLWAY => loaded(ROOM_SHOP) && loaded(ROOM_HALLWAY),
+            // Hallway draws only hallway.glb — shop is not composited in this scene.
+            scene_keys::HALLWAY => loaded(ROOM_HALLWAY),
             scene_keys::STAIRWAY => loaded(ROOM_STAIRCASE),
             scene_keys::ARCHIVE => loaded(ROOM_ARCHIVE),
             scene_keys::GAMEPLAY | scene_keys::VICTORY | scene_keys::DEFEAT => {
