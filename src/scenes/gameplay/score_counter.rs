@@ -157,44 +157,21 @@ pub fn try_resolve_score_cascade_layout(
     .ok()
 }
 
-fn split_score_frame_rect([fx, fy, fw, fh]: [f32; 4]) -> ([f32; 4], [f32; 4]) {
-    let half = fw * 0.5;
-    let pad = fw * 0.02;
-    (
-        [fx + pad, fy, half - pad * 1.5, fh],
-        [fx + half + pad * 0.5, fy, half - pad * 1.5, fh],
-    )
-}
-
 /// Focus rects for the round-score and blind-target odometer banks.
 pub fn resolve_score_roller_bank_focus_rects(
     w: f32,
     h: f32,
     cam: &CameraParams,
     env_height_scale: f32,
-) -> Option<([f32; 4], [f32; 4])> {
+) -> ([f32; 4], [f32; 4]) {
     gameplay_glb::with_gameplay_glb_cpu(|cpu| {
-        let cpu = cpu?;
-        let min_rw = (w * 0.04).max(32.0);
-        let min_rh = (h * 0.03).max(16.0);
-        let frame = gameplay_glb::gameplay_marker_screen_rect_resolved(
-            w,
-            h,
-            cam,
-            env_height_scale,
-            cpu,
-            SCORE_FRAME,
-            min_rw,
-            min_rh,
-        )
-        .ok()?;
+        let cpu = cpu.expect("gameplay.glb CPU required for score roller focus rects");
         let pivots = collect_score_roller_pivots_doc(cpu);
-        let score = score_roller_bank_screen_rect(w, h, cam, env_height_scale, cpu, &pivots, 0);
-        let target = score_roller_bank_screen_rect(w, h, cam, env_height_scale, cpu, &pivots, 1);
-        Some(match (score, target) {
-            (Some(score), Some(target)) => (score, target),
-            _ => split_score_frame_rect(frame),
-        })
+        let score = score_roller_bank_screen_rect(w, h, cam, env_height_scale, cpu, &pivots, 0)
+            .expect("score roller bank 0 focus rect from pivots");
+        let target = score_roller_bank_screen_rect(w, h, cam, env_height_scale, cpu, &pivots, 1)
+            .expect("score roller bank 1 focus rect from pivots");
+        (score, target)
     })
 }
 

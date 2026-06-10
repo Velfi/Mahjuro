@@ -769,6 +769,9 @@ impl App {
                 FlameDebugResult::Stay => {}
                 FlameDebugResult::Reset => {
                     overlay.tuning = FlameTuning::shipping_default();
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        renderer.flame_gust_runtime = Default::default();
+                    }
                     if let Err(e) = FlameTuning::clear_saved() {
                         log::warn!("Failed to clear FlameTuning override: {e}");
                     } else {
@@ -783,6 +786,21 @@ impl App {
                     }
                 }
                 FlameDebugResult::Close => close = true,
+                FlameDebugResult::TriggerGust { room } => {
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        let dir = glam::Vec2::new(
+                            overlay.tuning.wind_bias_x,
+                            overlay.tuning.wind_bias_y,
+                        );
+                        renderer.flame_gust_runtime.trigger(dir, room, 0.0);
+                        log::debug!(
+                            "Triggered {} gust (bias=({:.3}, {:.3}))",
+                            if room { "room" } else { "per-candle" },
+                            overlay.tuning.wind_bias_x,
+                            overlay.tuning.wind_bias_y,
+                        );
+                    }
+                }
             }
             if let Some(renderer) = self.renderer.as_mut() {
                 renderer.flame_tuning = overlay.tuning;

@@ -812,9 +812,13 @@ impl WgpuRenderer {
                     }
                     // One Godot-style volume mesh per candle emitter.
                     let flame_time_s = self.creation_time.elapsed().as_secs_f32();
+                    self.flame_gust_runtime.tick(dt);
+                    let gust_config = self.flame_tuning.gust_config();
                     let count = crate::flame_volume::fill_gpu_instances(
                         &flame_emitters,
                         flame_time_s,
+                        &gust_config,
+                        &self.flame_gust_runtime,
                         &mut self.flame_instance_staging,
                     );
                     if count == 0 {

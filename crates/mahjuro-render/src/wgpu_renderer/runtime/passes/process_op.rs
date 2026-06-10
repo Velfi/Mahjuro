@@ -750,13 +750,20 @@ impl WgpuRenderer {
             RenderOp::FlameBatch { buf_idx, count } => {
                 if *count > 0 && *buf_idx != usize::MAX {
                     let mesh = &self.flame_volume_mesh;
-                    pass.set_pipeline(&self.flame_pipeline);
+                    let layers: [&wgpu::RenderPipeline; 3] = [
+                        &self.flame_glow_pipeline,
+                        &self.flame_pipeline,
+                        &self.flame_core_pipeline,
+                    ];
                     pass.set_bind_group(0, &self.globals_bind_group, &[]);
                     pass.set_bind_group(1, &self.flame_view_bind_group, &[]);
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, flame_buffers[*buf_idx].slice(..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..mesh.index_count, 0, 0..*count);
+                    for pipeline in layers {
+                        pass.set_pipeline(pipeline);
+                        pass.draw_indexed(0..mesh.index_count, 0, 0..*count);
+                    }
                 }
             }
             RenderOp::TextDraw(idx) => {

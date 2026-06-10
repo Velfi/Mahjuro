@@ -8,11 +8,14 @@ use crate::theme::{ButtonVariant, color, metrics, typography};
 use crate::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use mahjuro_types::UiAction;
 
-const FLAME_SAVE_ROW: usize = FLAME_DEBUG_SLIDER_COUNT;
-const FLAME_RESET_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + 1;
-const FLAME_CLOSE_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + 2;
-const FLAME_ROW_COUNT: usize = FLAME_DEBUG_SLIDER_COUNT + 3;
-const VISIBLE_ROWS: usize = 20;
+const FLAME_MID_ACTION_COUNT: usize = 2;
+const FLAME_TRIGGER_GUST_ROW: usize = FLAME_DEBUG_SLIDER_COUNT;
+const FLAME_TRIGGER_ROOM_GUST_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + 1;
+const FLAME_SAVE_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + FLAME_MID_ACTION_COUNT;
+const FLAME_RESET_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + FLAME_MID_ACTION_COUNT + 1;
+const FLAME_CLOSE_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + FLAME_MID_ACTION_COUNT + 2;
+const FLAME_ROW_COUNT: usize = FLAME_DEBUG_SLIDER_COUNT + FLAME_MID_ACTION_COUNT + 3;
+const MAX_VISIBLE_ROWS: usize = 14;
 
 struct FlameDebugLayout {
     panel_x: f32,
@@ -26,6 +29,7 @@ struct FlameDebugLayout {
     value_w: f32,
     scale: f32,
     scroll_row: usize,
+    visible_rows: usize,
 }
 
 impl FlameDebugLayout {
@@ -36,13 +40,14 @@ impl FlameDebugLayout {
         let title_h = (22.0 * scale).max(14.0);
         let pad = (8.0 * scale).max(5.0);
         let margin = (10.0 * scale).max(6.0);
-        let panel_w = (360.0 * scale).min(window_w * 0.48);
+        let panel_w = (380.0 * scale).min(window_w * 0.5);
         let panel_x = margin;
         let panel_y = margin;
         let rows_y0 = panel_y + pad + title_h + pad;
-        let label_w = panel_w * 0.44;
-        let slider_w = panel_w * 0.30;
+        let label_w = panel_w * 0.46;
+        let slider_w = panel_w * 0.28;
         let value_w = (panel_w - label_w - slider_w - 10.0 * scale).max(32.0);
+        let visible_rows = FLAME_ROW_COUNT.min(MAX_VISIBLE_ROWS);
         let _ = window_h;
         Self {
             panel_x,
@@ -56,6 +61,7 @@ impl FlameDebugLayout {
             value_w,
             scale,
             scroll_row,
+            visible_rows,
         }
     }
 
@@ -81,25 +87,15 @@ impl FlameDebugLayout {
         (self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h)
     }
 
-    fn action_row_rect(&self, row: usize) -> Option<(f32, f32, f32, f32)> {
-        if !(FLAME_SAVE_ROW..=FLAME_CLOSE_ROW).contains(&row) {
-            return None;
-        }
-        let action_idx = row - FLAME_SAVE_ROW;
-        let pad = (8.0 * self.scale).max(5.0);
-        let actions_y0 = self.rows_y0 + VISIBLE_ROWS as f32 * (self.row_h + self.row_gap) + pad;
-        let row_y = actions_y0 + action_idx as f32 * (self.row_h + self.row_gap);
-        Some((self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h))
+    fn row_visible(&self, row: usize) -> bool {
+        row >= self.scroll_row && row < self.scroll_row + self.visible_rows
     }
 
     fn hit_row_rect(&self, row: usize) -> Option<(f32, f32, f32, f32)> {
-        if let Some(r) = self.action_row_rect(row) {
-            return Some(r);
+        if row >= FLAME_ROW_COUNT || !self.row_visible(row) {
+            return None;
         }
-        if row < FLAME_DEBUG_SLIDER_COUNT {
-            return Some(self.row_rect(row));
-        }
-        None
+        Some(self.row_rect(row))
     }
 }
 
@@ -122,6 +118,7 @@ pub enum FlameDebugResult {
     Close,
     Reset,
     Save,
+    TriggerGust { room: bool },
 }
 
 impl FlameDebugOverlay {
@@ -137,13 +134,19 @@ impl FlameDebugOverlay {
         }
     }
 
-    fn ensure_scroll(&mut self) {
-        if self.cursor >= self.scroll_row + VISIBLE_ROWS {
-            self.scroll_row = self.cursor + 1 - VISIBLE_ROWS;
+    fn max_scroll(&self, layout: &FlameDebugLayout) -> usize {
+        FLAME_ROW_COUNT.saturating_sub(layout.visible_rows)
+    }
+
+    fn ensure_scroll(&mut self, layout: &FlameDebugLayout) {
+        let max_scroll = self.max_scroll(layout);
+        if self.cursor >= self.scroll_row + layout.visible_rows {
+            self.scroll_row = (self.cursor + 1).saturating_sub(layout.visible_rows);
         }
         if self.cursor < self.scroll_row {
             self.scroll_row = self.cursor;
         }
+        self.scroll_row = self.scroll_row.min(max_scroll);
     }
 
     fn apply_slider_mx(&mut self, row: usize, mx: f32, layout: &FlameDebugLayout) {
@@ -169,6 +172,9 @@ impl FlameDebugOverlay {
     }
 
     fn begin_editing(&mut self) {
+        if self.cursor >= FLAME_DEBUG_SLIDER_COUNT {
+            return;
+        }
         let v = self.tuning.debug_row_value(self.cursor);
         let mut s = format!("{:.6}", v);
         while s.contains('.') && (s.ends_with('0') || s.ends_with('.')) {
@@ -194,6 +200,24 @@ impl FlameDebugOverlay {
             format!("{v:.3}")
         } else {
             format!("{v:.4}")
+        }
+    }
+
+    fn action_label(row: usize) -> (&'static str, ButtonVariant) {
+        match row {
+            FLAME_TRIGGER_GUST_ROW => ("Trigger gust (per candle)", ButtonVariant::Primary),
+            FLAME_TRIGGER_ROOM_GUST_ROW => ("Trigger room gust (all candles)", ButtonVariant::Primary),
+            FLAME_SAVE_ROW => ("Save for shop / gameplay", ButtonVariant::Primary),
+            FLAME_RESET_ROW => ("Reset to defaults", ButtonVariant::Danger),
+            _ => ("Close", ButtonVariant::Subtle),
+        }
+    }
+
+    fn mid_action_result(row: usize) -> Option<FlameDebugResult> {
+        match row {
+            FLAME_TRIGGER_GUST_ROW => Some(FlameDebugResult::TriggerGust { room: false }),
+            FLAME_TRIGGER_ROOM_GUST_ROW => Some(FlameDebugResult::TriggerGust { room: true }),
+            _ => None,
         }
     }
 
@@ -268,8 +292,8 @@ impl FlameDebugOverlay {
         window_w: f32,
         window_h: f32,
     ) -> FlameDebugResult {
-        self.ensure_scroll();
         let layout = FlameDebugLayout::compute(window_w, window_h, self.scroll_row);
+        self.ensure_scroll(&layout);
         self.pointer.sync_held(mouse);
         self.pointer.clear_hover();
 
@@ -293,8 +317,8 @@ impl FlameDebugOverlay {
                 self.apply_slider_mx(di, mx, &layout);
             }
             if (clicked || held) && self.dragging_slider.is_none() {
-                for i in
-                    self.scroll_row..(self.scroll_row + VISIBLE_ROWS).min(FLAME_DEBUG_SLIDER_COUNT)
+                for i in self.scroll_row
+                    ..(self.scroll_row + layout.visible_rows).min(FLAME_DEBUG_SLIDER_COUNT)
                 {
                     if point_in_rect(mx, my, layout.slider_track(i)) {
                         self.cursor = i;
@@ -308,8 +332,8 @@ impl FlameDebugOverlay {
                 }
             }
             if clicked && self.dragging_slider.is_none() {
-                for i in
-                    self.scroll_row..(self.scroll_row + VISIBLE_ROWS).min(FLAME_DEBUG_SLIDER_COUNT)
+                for i in self.scroll_row
+                    ..(self.scroll_row + layout.visible_rows).min(FLAME_DEBUG_SLIDER_COUNT)
                 {
                     if point_in_rect(mx, my, layout.value_cell(i)) {
                         self.cursor = i;
@@ -317,13 +341,16 @@ impl FlameDebugOverlay {
                         break;
                     }
                 }
-                for row in FLAME_SAVE_ROW..=FLAME_CLOSE_ROW {
-                    let Some(rect) = layout.action_row_rect(row) else {
+                for row in FLAME_TRIGGER_GUST_ROW..=FLAME_CLOSE_ROW {
+                    let Some(rect) = layout.hit_row_rect(row) else {
                         continue;
                     };
                     if point_in_rect(mx, my, rect) {
                         self.cursor = row;
                         self.clear_edit();
+                        if let Some(result) = Self::mid_action_result(row) {
+                            return result;
+                        }
                         return match row {
                             FLAME_SAVE_ROW => FlameDebugResult::Save,
                             FLAME_RESET_ROW => FlameDebugResult::Reset,
@@ -347,12 +374,12 @@ impl FlameDebugOverlay {
                 UiAction::FocusDown => {
                     self.cursor = (self.cursor + 1) % FLAME_ROW_COUNT;
                     self.clear_edit();
-                    self.ensure_scroll();
+                    self.ensure_scroll(&layout);
                 }
                 UiAction::FocusUp => {
                     self.cursor = (self.cursor + FLAME_ROW_COUNT - 1) % FLAME_ROW_COUNT;
                     self.clear_edit();
-                    self.ensure_scroll();
+                    self.ensure_scroll(&layout);
                 }
                 UiAction::FocusNext | UiAction::FocusPrev => {
                     if !self.editing {
@@ -366,6 +393,8 @@ impl FlameDebugOverlay {
                 UiAction::Confirm | UiAction::CommitDiscard => {
                     if self.editing {
                         self.commit_edit();
+                    } else if let Some(result) = Self::mid_action_result(self.cursor) {
+                        return result;
                     } else if self.cursor == FLAME_SAVE_ROW {
                         return FlameDebugResult::Save;
                     } else if self.cursor == FLAME_RESET_ROW {
@@ -397,7 +426,7 @@ impl FlameDebugOverlay {
         let pad = (8.0 * layout.scale).max(5.0);
         let title_h = (22.0 * layout.scale).max(14.0);
         let hint_h = (13.0 * layout.scale).max(9.0);
-        let vis_h = VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + layout.row_h * 3.0;
+        let vis_h = layout.visible_rows as f32 * (layout.row_h + layout.row_gap);
         let panel_h = pad + title_h + pad + vis_h + pad + hint_h * 2.0 + pad * 2.0;
         let row_font = typography::tier_at_most(layout.row_h * 0.48, window_h);
 
@@ -425,7 +454,7 @@ impl FlameDebugOverlay {
                 layout.panel_w,
                 title_h,
             ],
-            text: "Candle flames (shop / gameplay)".into(),
+            text: "Candle flames — plume + placement".into(),
             color: color::JADE,
             ..Default::default()
         });
@@ -434,8 +463,15 @@ impl FlameDebugOverlay {
             .iter()
             .enumerate()
             .skip(self.scroll_row)
-            .take(VISIBLE_ROWS.min(FLAME_DEBUG_SLIDER_COUNT.saturating_sub(self.scroll_row)))
+            .take(
+                layout
+                    .visible_rows
+                    .min(FLAME_DEBUG_SLIDER_COUNT.saturating_sub(self.scroll_row)),
+            )
         {
+            if !layout.row_visible(i) {
+                continue;
+            }
             let visual = DebugRowVisual::for_row(i, self.cursor, &self.pointer);
             let v = self.tuning.debug_row_value(i);
             let (rx, ry, rw, rh) = layout.row_rect(i);
@@ -512,35 +548,21 @@ impl FlameDebugOverlay {
             });
         }
 
-        let actions_y0 =
-            layout.rows_y0 + VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + pad;
-        for (idx, (row, label, variant)) in [
-            (
-                FLAME_SAVE_ROW,
-                "Save for shop / gameplay",
-                ButtonVariant::Primary,
-            ),
-            (FLAME_RESET_ROW, "Reset to defaults", ButtonVariant::Danger),
-            (FLAME_CLOSE_ROW, "Close", ButtonVariant::Subtle),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let row_y = actions_y0 + idx as f32 * (layout.row_h + layout.row_gap);
+        for row in FLAME_TRIGGER_GUST_ROW..=FLAME_CLOSE_ROW {
+            if !layout.row_visible(row) {
+                continue;
+            }
+            let (label, variant) = Self::action_label(row);
+            let (rx, ry, rw, rh) = layout.row_rect(row);
             let visual = DebugRowVisual::for_row(row, self.cursor, &self.pointer);
             let (bg, tc) = debug_overlay_ui::row_surface_colors(visual, variant);
             instances.push(GpuInstance {
-                rect: [
-                    layout.panel_x + 4.0,
-                    row_y,
-                    layout.panel_w - 8.0,
-                    layout.row_h,
-                ],
+                rect: [rx, ry, rw, rh],
                 color: bg,
                 user: 0,
             });
             labels.push(TextLabel {
-                rect: [layout.panel_x, row_y, layout.panel_w, layout.row_h],
+                rect: [layout.panel_x, ry, layout.panel_w, rh],
                 text: label.into(),
                 font_px: Some(row_font),
                 color: tc,
@@ -553,7 +575,7 @@ impl FlameDebugOverlay {
         let hint_font = typography::tier_at_most(hint_h * 0.85, window_h);
         labels.push(TextLabel {
             rect: [layout.panel_x, hint_y, layout.panel_w, hint_h],
-            text: "↑↓ navigate · ←→ adjust · Enter edit/confirm".into(),
+            text: "↑↓ navigate · ←→ adjust · Enter edit/trigger".into(),
             font_px: Some(hint_font),
             color: color::alpha(color::PARCHMENT, 0.55),
             align: TextAlign::Center,
