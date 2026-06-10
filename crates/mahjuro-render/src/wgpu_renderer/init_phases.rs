@@ -10,6 +10,41 @@ use super::{
 #[cfg(target_os = "windows")]
 pub(crate) const VULKAN_PROBE_CHILD_ENV: &str = "MAHJURO_VULKAN_PROBE_CHILD";
 
+/// DX12 tuning for Windows: reliable DXC + avoid shader debug blobs that break Intel integrated.
+#[cfg(target_os = "windows")]
+fn win32_tune_dx12_instance(instance_desc: &mut wgpu::InstanceDescriptor) {
+    if !instance_desc.backends.intersects(wgpu::Backends::DX12) {
+        return;
+    }
+
+    // `cargo build` dev profile enables InstanceFlags::DEBUG, which makes DXC emit
+    // shader debug info (-Zi). Large startup shaders (lit_mesh + projected_shadow)
+    // then fail on Intel integrated DX12 with E_INVALIDARG / 0x80070057.
+    if instance_desc.flags.contains(wgpu::InstanceFlags::DEBUG) {
+        instance_desc.flags.remove(wgpu::InstanceFlags::DEBUG);
+        log::info!("DX12: disabled shader DEBUG blobs for compilation (dev profile / Intel iGPU)");
+    }
+
+    let force_fxc = std::env::var("WGPU_DX12_COMPILER")
+        .map(|v| v.eq_ignore_ascii_case("fxc"))
+        .unwrap_or(false);
+    if force_fxc {
+        log::warn!("DX12: WGPU_DX12_COMPILER=fxc — large shaders may fail on integrated GPUs");
+        return;
+    }
+    if let Some(dxc_path) = crate::dxc_redist::resolve_dxcompiler_dll() {
+        instance_desc.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::DynamicDxc {
+            dxc_path: dxc_path.to_string_lossy().into_owned(),
+        };
+        log::info!("DX12: shader compiler DXC ({})", dxc_path.display());
+    } else {
+        log::warn!(
+            "DX12: dxcompiler.dll not found — run scripts/fetch-dxc-redist.ps1 then rebuild; \
+             FXC fallback may fail on lit_mesh"
+        );
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn win32_maybe_clear_vulkan_env_after_probe() {
     use std::process::Command;
@@ -247,6 +282,8 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
             instance_desc.backends = wgpu::Backends::DX12;
         }
     }
+    #[cfg(target_os = "windows")]
+    win32_tune_dx12_instance(&mut instance_desc);
     let instance = wgpu::Instance::new(instance_desc);
     log::debug!("wgpu: instance created");
 

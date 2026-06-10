@@ -170,6 +170,9 @@ pub struct WgpuRenderer {
     /// `cascade_composite_sampler`. See `scene_color_downsample.wgsl`.
     scene_color_downsample_pipeline: wgpu::RenderPipeline,
     scene_color_downsample_bind_group: wgpu::BindGroup,
+    /// Lazy — compiled on first depth blit so Intel DX12 init order stays unchanged.
+    depth_to_r32_pipeline: std::sync::OnceLock<wgpu::RenderPipeline>,
+    depth_to_r32_bind_group_layout: wgpu::BindGroupLayout,
     tile_pipeline_opaque_cull: wgpu::RenderPipeline,
     tile_pipeline_blend_double: wgpu::RenderPipeline,
     tile_pipeline_blend_cull: wgpu::RenderPipeline,

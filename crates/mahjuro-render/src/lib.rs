@@ -17,6 +17,8 @@ pub mod debug_overlay_ui;
 pub mod decal;
 pub mod doc_tile_camera;
 pub mod draw_cmd;
+#[cfg(target_os = "windows")]
+mod dxc_redist;
 #[cfg(feature = "windowed")]
 pub mod flame_debug_overlay;
 pub mod flame_tuning;

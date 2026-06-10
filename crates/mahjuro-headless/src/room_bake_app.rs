@@ -270,6 +270,8 @@ impl RoomBakeApp {
     ) -> anyhow::Result<mahjuro::render::room_gi_bake::RoomGiBake> {
         self.effect_layers.procedural_surface_quality = true;
         self.gfx.effects_quality = mahjuro::persistence::EffectsQuality::High;
+        // Avoid dynamic shadow depth readbacks during warmup on integrated GPUs.
+        self.gfx.graphics_mode = mahjuro::persistence::GraphicsMode::Performance;
         self.renderer.request_room_gi_capture(room);
         self.run_warmup(warmup_frames);
         self.tick();

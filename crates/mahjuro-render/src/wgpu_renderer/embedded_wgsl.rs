@@ -67,6 +67,7 @@ pub const SHOOTING_STAR_CASCADE: &str = wgsl_file!("shooting_star_cascade.wgsl")
 pub const SHOOTING_STAR_CASCADE_COMPOSITE: &str =
     wgsl_file!("shooting_star_cascade_composite.wgsl");
 pub const SCENE_COLOR_DOWNSAMPLE: &str = wgsl_file!("scene_color_downsample.wgsl");
+pub const DEPTH_TO_R32: &str = wgsl_file!("depth_to_r32.wgsl");
 pub const TILE_GLOW: &str = wgsl_file!("tile_glow.wgsl");
 pub const SHADOW: &str = concat!(
     wgsl_file!("hallway_vertex_warp.wgsl"),
