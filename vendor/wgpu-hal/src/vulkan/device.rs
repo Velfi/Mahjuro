@@ -394,6 +394,54 @@ struct CompiledStage {
 }
 
 impl super::Device {
+    /// Device-local heap usage vs budget when `VK_EXT_memory_budget` is enabled.
+    pub fn memory_usage(&self) -> Option<crate::adapter_memory::AdapterMemoryUsage> {
+        if !self
+            .shared
+            .enabled_extensions
+            .contains(&ext::memory_budget::NAME)
+        {
+            return None;
+        }
+
+        let get_physical_device_properties = self
+            .shared
+            .instance
+            .get_physical_device_properties
+            .as_ref()?;
+
+        let mut memory_budget_properties = vk::PhysicalDeviceMemoryBudgetPropertiesEXT::default();
+        let mut memory_properties =
+            vk::PhysicalDeviceMemoryProperties2::default().push_next(&mut memory_budget_properties);
+
+        unsafe {
+            get_physical_device_properties.get_physical_device_memory_properties2(
+                self.shared.physical_device,
+                &mut memory_properties,
+            );
+        }
+
+        let memory_properties = memory_properties.memory_properties;
+        let mut current_bytes = 0u64;
+        let mut budget_bytes = 0u64;
+        for i in 0..memory_properties.memory_heap_count {
+            let heap = &memory_properties.memory_heaps[i as usize];
+            if heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL) {
+                current_bytes = current_bytes.saturating_add(
+                    memory_budget_properties.heap_usage[i as usize],
+                );
+                budget_bytes = budget_bytes.saturating_add(
+                    memory_budget_properties.heap_budget[i as usize],
+                );
+            }
+        }
+
+        (budget_bytes > 0).then_some(crate::adapter_memory::AdapterMemoryUsage {
+            current_bytes,
+            budget_bytes,
+        })
+    }
+
     /// # Safety
     ///
     /// - `vk_image` must be created respecting `desc`

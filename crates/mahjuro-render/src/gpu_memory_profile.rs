@@ -66,6 +66,9 @@ pub fn log_adapter_startup(
     } else {
         log::debug!("gpu mem profile: allocator report unavailable on this backend");
     }
+    if let Some(usage) = crate::adapter_memory::probe_device_memory_usage(device) {
+        crate::adapter_memory::log_device_memory_usage(&usage, memory);
+    }
 }
 
 /// Log allocator totals after a heavy upload (room GLB, tileset atlas, …).

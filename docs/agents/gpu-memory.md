@@ -26,13 +26,23 @@ At startup and each frame, Mahjuro tries to CPU-decode and GPU-warm every hub/ru
 One room env upload runs per poll to avoid hitches.
 
 Memory pressure ([`gpu_memory_pressure.rs`](../../crates/mahjuro-render/src/gpu_memory_pressure.rs))
-gates **optional** eager warm-up only — active-scene uploads always proceed after eviction preflight:
+gates **optional** eager warm-up only — active-scene uploads always proceed after eviction preflight.
 
-| Pressure | Trigger (allocator when available) | Eager behavior |
+On DX12/Vulkan, pressure uses **OS-reported process GPU usage** (DXGI `QueryVideoMemoryInfo` /
+`VK_EXT_memory_budget`) when available, not just the wgpu allocator total. The allocator omits
+swapchain images, pipeline caches, and driver reserve — on Windows that gap is often 1–2 GiB on a
+4 GiB card and was the main cause of late OOM under Low memory.
+
+Thresholds scale from the OS **budget** when present, else probed dedicated VRAM minus a 512 MiB
+untracked overhead fudge:
+
+| Pressure | Trigger (Low memory, ~4 GiB OS budget) | Eager behavior |
 | --- | --- | --- |
-| **Normal** | below threshold (Low memory: `<2200 MiB`; Performance/Visuals: `<6144 MiB`) | warm shop → archive → hallway → gameplay → staircase |
-| **Constrained** | between constrained/critical thresholds (Low memory: `2200–2799`; Performance/Visuals: `6144–8191`) or at resident cap | hub only (shop + archive) |
-| **Critical** | at/above critical threshold (Low memory: `>=2800`; Performance/Visuals: `>=8192`) or over cap | evict unpinned LRU; pause all eager warm-up |
+| **Normal** | below ~55% of budget | warm shop → archive → hallway → gameplay → staircase |
+| **Constrained** | 55–69% of budget or at resident cap | hub only (shop + archive) |
+| **Critical** | ≥70% of budget or over cap | evict unpinned LRU; pause all eager warm-up |
+
+Performance/Visuals use 75%/90% of budget (or fixed 6144/8192 MiB when budget is unavailable).
 
 On Metal (no allocator report), pressure falls back to resident count vs
 [`GraphicsMode::max_room_gpu_residents`](../../crates/mahjuro-gfx-types/src/graphics_mode.rs).
