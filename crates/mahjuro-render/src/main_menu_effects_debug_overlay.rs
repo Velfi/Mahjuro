@@ -6,6 +6,9 @@ use sdl3::keyboard::Scancode;
 use crate::debug_overlay_ui::{self, DebugPointerState, DebugRowVisual};
 use crate::draw_cmd::CameraParams;
 use crate::main_menu_effects_tuning::MainMenuEffectsTuning;
+use crate::main_menu_fog_tuning::{
+    FOG_DEBUG_ROW_META, FOG_DEBUG_SLIDER_COUNT, fog_row_is_hue, fog_row_is_saturation,
+};
 use crate::main_menu_moon_tuning::{
     MOON_DEBUG_ROW_META, MOON_DEBUG_SLIDER_COUNT, MainMenuMoonPhaseDebug, moon_row_is_hue,
     moon_row_is_phase, moon_row_is_saturation,
@@ -26,11 +29,12 @@ use mahjuro_types::UiAction;
 pub enum MainMenuEffectsTab {
     Moon = 0,
     Rain = 1,
-    Moths = 2,
+    Fog = 2,
+    Moths = 3,
 }
 
-const TAB_COUNT: usize = 3;
-const TAB_LABELS: [&str; TAB_COUNT] = ["Moon", "Rain", "Moths"];
+const TAB_COUNT: usize = 4;
+const TAB_LABELS: [&str; TAB_COUNT] = ["Moon", "Rain", "Fog", "Moths"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ActionRow {
@@ -52,6 +56,7 @@ fn tab_slider_meta(tab: MainMenuEffectsTab) -> &'static [(&'static str, f32, f32
     match tab {
         MainMenuEffectsTab::Moon => MOON_DEBUG_ROW_META,
         MainMenuEffectsTab::Rain => RAIN_DEBUG_ROW_META,
+        MainMenuEffectsTab::Fog => FOG_DEBUG_ROW_META,
         MainMenuEffectsTab::Moths => MOTH_DEBUG_ROW_META,
     }
 }
@@ -60,6 +65,7 @@ fn tab_slider_count(tab: MainMenuEffectsTab) -> usize {
     match tab {
         MainMenuEffectsTab::Moon => MOON_DEBUG_SLIDER_COUNT,
         MainMenuEffectsTab::Rain => RAIN_DEBUG_SLIDER_COUNT,
+        MainMenuEffectsTab::Fog => FOG_DEBUG_SLIDER_COUNT,
         MainMenuEffectsTab::Moths => MOTH_DEBUG_SLIDER_COUNT,
     }
 }
@@ -82,6 +88,7 @@ fn tab_mid_action_rows(tab: MainMenuEffectsTab) -> &'static [ActionRow] {
             ActionRow::ShowRainDepth,
             ActionRow::HideUi,
         ],
+        MainMenuEffectsTab::Fog => &[],
         MainMenuEffectsTab::Moths => &[],
     }
 }
@@ -102,6 +109,7 @@ fn row_is_hue(tab: MainMenuEffectsTab, row: usize) -> bool {
     match tab {
         MainMenuEffectsTab::Moon => moon_row_is_hue(row),
         MainMenuEffectsTab::Rain => rain_row_is_hue(row),
+        MainMenuEffectsTab::Fog => fog_row_is_hue(row),
         MainMenuEffectsTab::Moths => false,
     }
 }
@@ -110,6 +118,7 @@ fn row_is_saturation(tab: MainMenuEffectsTab, row: usize) -> bool {
     match tab {
         MainMenuEffectsTab::Moon => moon_row_is_saturation(row),
         MainMenuEffectsTab::Rain => rain_row_is_saturation(row),
+        MainMenuEffectsTab::Fog => fog_row_is_saturation(row),
         MainMenuEffectsTab::Moths => false,
     }
 }
@@ -122,6 +131,7 @@ fn row_color_swatch(
     match tab {
         MainMenuEffectsTab::Moon => tuning.moon.color_swatch_rgb(row),
         MainMenuEffectsTab::Rain => rain_color_swatch_rgb(&tuning.rain, row),
+        MainMenuEffectsTab::Fog => tuning.fog.color_swatch_rgb(row),
         MainMenuEffectsTab::Moths => None,
     }
 }
@@ -1026,6 +1036,7 @@ impl MainMenuEffectsDebugOverlay {
                 }
             }
             MainMenuEffectsTab::Rain => self.tuning.rain.debug_row_value(row),
+            MainMenuEffectsTab::Fog => self.tuning.fog.debug_row_value(row),
             MainMenuEffectsTab::Moths => self.tuning.moths.debug_row_value(row),
         }
     }
@@ -1042,6 +1053,7 @@ impl MainMenuEffectsDebugOverlay {
                 }
             }
             MainMenuEffectsTab::Rain => self.tuning.rain.set_debug_row_value(row, v),
+            MainMenuEffectsTab::Fog => self.tuning.fog.set_debug_row_value(row, v),
             MainMenuEffectsTab::Moths => self.tuning.moths.set_debug_row_value(row, v),
         }
     }
@@ -1415,6 +1427,7 @@ impl MainMenuEffectsDebugOverlay {
                 for t in [
                     MainMenuEffectsTab::Moon,
                     MainMenuEffectsTab::Rain,
+                    MainMenuEffectsTab::Fog,
                     MainMenuEffectsTab::Moths,
                 ] {
                     if point_in_rect(mx, my, layout.tab_rect(t)) {
@@ -1617,6 +1630,7 @@ impl MainMenuEffectsDebugOverlay {
         for t in [
             MainMenuEffectsTab::Moon,
             MainMenuEffectsTab::Rain,
+            MainMenuEffectsTab::Fog,
             MainMenuEffectsTab::Moths,
         ] {
             let (tx, ty, tw, th) = layout.tab_rect(t);
@@ -1648,6 +1662,7 @@ impl MainMenuEffectsDebugOverlay {
         let rows: &[(&str, f32, f32, f32)] = match self.tab {
             MainMenuEffectsTab::Moon => MOON_DEBUG_ROW_META,
             MainMenuEffectsTab::Rain => RAIN_DEBUG_ROW_META,
+            MainMenuEffectsTab::Fog => FOG_DEBUG_ROW_META,
             MainMenuEffectsTab::Moths => MOTH_DEBUG_ROW_META,
         };
         let last_visible = (self.scroll_row + layout.visible_rows).min(layout.scroll_item_count);

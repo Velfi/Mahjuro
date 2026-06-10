@@ -39,6 +39,7 @@ pub mod loader_pool;
 #[cfg(feature = "windowed")]
 pub mod main_menu_effects_debug_overlay;
 pub mod main_menu_effects_tuning;
+pub mod main_menu_fog_tuning;
 pub mod main_menu_glb;
 pub mod main_menu_moon_tuning;
 pub mod main_menu_moth_tuning;

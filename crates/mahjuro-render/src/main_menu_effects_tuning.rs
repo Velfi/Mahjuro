@@ -1,5 +1,6 @@
 //! Persisted tuning for main-menu hub effects (moon, rain, moths).
 
+use crate::main_menu_fog_tuning::MainMenuFogTuning;
 use crate::main_menu_moon_tuning::MainMenuMoonTuning;
 use crate::main_menu_moth_tuning::MainMenuMothTuning;
 use crate::rain_tuning::RainTuning;
@@ -9,6 +10,8 @@ pub const MAIN_MENU_EFFECTS_SCENE_KEY: &str = crate::scene_keys::MAIN_MENU;
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MainMenuEffectsTuning {
     pub rain: RainTuning,
+    #[serde(default)]
+    pub fog: MainMenuFogTuning,
     pub moon: MainMenuMoonTuning,
     pub moths: MainMenuMothTuning,
 }
@@ -23,6 +26,7 @@ impl MainMenuEffectsTuning {
     pub fn shipping_default() -> Self {
         Self {
             rain: RainTuning::shipping_default(),
+            fog: MainMenuFogTuning::shipping_default(),
             moon: MainMenuMoonTuning::shipping_default(),
             moths: MainMenuMothTuning::shipping_default(),
         }
@@ -45,6 +49,7 @@ impl MainMenuEffectsTuning {
                     speed_mul: legacy.speed_mul,
                     field: legacy.field,
                 },
+                fog: MainMenuFogTuning::shipping_default(),
                 moon: MainMenuMoonTuning {
                     emission_color: legacy.moon_emission_color,
                 },
@@ -67,6 +72,7 @@ impl MainMenuEffectsTuning {
             concat!(
                 "// MainMenuEffectsTuning snapshot\n",
                 "use crate::main_menu_effects_tuning::MainMenuEffectsTuning;\n",
+                "use crate::main_menu_fog_tuning::MainMenuFogTuning;\n",
                 "use crate::main_menu_moon_tuning::MainMenuMoonTuning;\n",
                 "use crate::main_menu_moth_tuning::MainMenuMothTuning;\n",
                 "use crate::rain_tuning::{{RainFieldTuning, RainTuning}};\n",
@@ -81,6 +87,10 @@ impl MainMenuEffectsTuning {
                 "            volume_pad_xy: {:.4}, volume_top_mul: {:.4},\n",
                 "            spawn_near_bias: {:.4},\n",
                 "        }},\n",
+                "    }},\n",
+                "    fog: MainMenuFogTuning {{\n",
+                "        density: {:.4}, height: {:.4}, floor_lift_heights: {:.4},\n",
+                "        color: [{:.4}, {:.4}, {:.4}], brightness: {:.4},\n",
                 "    }},\n",
                 "    moon: MainMenuMoonTuning {{\n",
                 "        emission_color: [{:.4}, {:.4}, {:.4}],\n",
@@ -108,6 +118,13 @@ impl MainMenuEffectsTuning {
             self.rain.field.volume_pad_xy,
             self.rain.field.volume_top_mul,
             self.rain.field.spawn_near_bias,
+            self.fog.density,
+            self.fog.height,
+            self.fog.floor_lift_heights,
+            self.fog.color[0],
+            self.fog.color[1],
+            self.fog.color[2],
+            self.fog.brightness,
             self.moon.emission_color[0],
             self.moon.emission_color[1],
             self.moon.emission_color[2],
@@ -152,6 +169,10 @@ mod tests {
     fn shipping_default_round_trips_fields() {
         let t = MainMenuEffectsTuning::shipping_default();
         assert!(t.rain.speed_mul > 0.0);
+        assert!(t.fog.density > 0.0);
+        assert!(t.fog.height > 0.0);
+        assert!(t.fog.floor_lift_heights > 0.0);
+        assert!(t.fog.brightness > 0.0);
         assert_eq!(t.moon.emission_color, [1.0, 1.0, 1.0]);
         assert_eq!(t.moths.flap_hz, 25.0);
     }
