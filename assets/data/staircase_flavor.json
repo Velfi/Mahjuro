@@ -199,5 +199,215 @@
         "italic": false
       }
     ]
+  },
+  {
+    "id": "swirling_tea",
+    "flavor_spans": [
+      {
+        "text": "If your tea starts swirling in the cup, drink up before it swallows you.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "lost_souls_placard",
+    "flavor_spans": [
+      {
+        "text": "A faded placard: \"Please enjoy our complimentary buffet of lost souls in the next wing!\"",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "house_tea_thirst",
+    "flavor_spans": [
+      {
+        "text": "The House tea will never quench your thirst. You keep drinking it anyway.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "four_gentlemen_laugh",
+    "flavor_spans": [
+      {
+        "text": "The four gentlemen laugh amongst themselves. What would flowers find so funny?",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "relic_player_soul",
+    "flavor_spans": [
+      {
+        "text": "Rumor has it every relic is the soul of a player who delved too deep.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "four_great_blessings",
+    "flavor_spans": [
+      {
+        "text": "Four great blessings: Skill, luck, a few tiles up your sleeve, and a little gold to bend the rules.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "tiles_from_bones",
+    "flavor_spans": [
+      {
+        "text": "They say the tiles are made from the bones of players of old.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "cackling_or_clack",
+    "flavor_spans": [
+      {
+        "text": "Was that cackling? or the distant clack of tiles?",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "esteemed_winner_banner",
+    "flavor_spans": [
+      {
+        "text": "\"Congratulations, Esteemed Winner! See your hostess for a complimentary beverage\" reads a tattered banner. No hostess but the creaking stairs.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "bannister_map",
+    "flavor_spans": [
+      {
+        "text": "A crude map is carved in the bannister. The rooms you entered are not on it.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "railing_map_pattern",
+    "flavor_spans": [
+      {
+        "text": "The railing is carved with a repeating map-like pattern of rooms and hallways.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "flows_downstream",
+    "flavor_spans": [
+      {
+        "text": "Money, tiles, time. Everything flows downstream.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "prize_has_price",
+    "flavor_spans": [
+      {
+        "text": "Every prize has its price.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "cant_afford_lose",
+    "flavor_spans": [
+      {
+        "text": "You can't afford to lose.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "no_way_but_down",
+    "flavor_spans": [
+      {
+        "text": "No windows. No clocks. No way but down.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "intrusive_image_downstream",
+    "flavor_spans": [
+      {
+        "text": "Intrusive image: You are watching yourself float downstream, discarded.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "walls_closing_in",
+    "flavor_spans": [
+      {
+        "text": "The walls are closing in. Draw a tile before it's too late.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "plucking_the_moon",
+    "flavor_spans": [
+      {
+        "text": "Survival is like plucking the moon from the bottom of the stairwell.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "ten_thousand_ways",
+    "flavor_spans": [
+      {
+        "text": "Ten thousand ways to lose. How many to survive?",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "color_flush_monochrome",
+    "flavor_spans": [
+      {
+        "text": "A color flush is monochrome in this light.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "chickens_have_hands",
+    "flavor_spans": [
+      {
+        "text": "Do chickens even have hands?",
+        "bold": false,
+        "italic": false
+      }
+    ]
   }
 ]
