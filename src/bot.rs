@@ -24,7 +24,7 @@ use std::time::Instant;
 
 use crate::core::consumable::Consumable;
 use crate::core::deck::Wall;
-use crate::core::hand::{MeldKind, detect_all_sets};
+use crate::core::hand::detect_all_sets;
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
     ScoreRoundBundle, ScoreTileBundle, all_relic_defs, apply_merchants_eye_discount,

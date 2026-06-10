@@ -113,8 +113,6 @@ use crate::ui::input::{InputMode, InputState, UiAction};
 #[cfg(feature = "game")]
 use crate::ui::layout::UiLayout;
 #[cfg(feature = "game")]
-use crate::ui::modal::ModalTheme;
-#[cfg(feature = "game")]
 use crate::ui::modal::{Modal, ModalQueue};
 #[cfg(feature = "game")]
 use sdl3::keyboard::Mod;
@@ -126,7 +124,7 @@ use crate::render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
 #[cfg(feature = "game")]
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 #[cfg(feature = "game")]
-use crate::scenes::{ButtonAction, DrawCtx, UpdateCtx};
+use crate::scenes::{ButtonAction, DrawCtx};
 #[cfg(feature = "game")]
 use clap::{ArgAction, Args, Parser, Subcommand};
 
