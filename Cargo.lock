@@ -2214,7 +2214,7 @@ dependencies = [
 
 [[package]]
 name = "mahjuro"
-version = "0.6.1"
+version = "0.6.2-0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2254,7 +2254,7 @@ dependencies = [
 
 [[package]]
 name = "mahjuro-assets"
-version = "0.6.1"
+version = "0.6.2-0"
 dependencies = [
  "dirs",
  "image",
@@ -2269,14 +2269,14 @@ dependencies = [
 
 [[package]]
 name = "mahjuro-bake-stamp"
-version = "0.6.1"
+version = "0.6.2-0"
 dependencies = [
  "ignore",
 ]
 
 [[package]]
 name = "mahjuro-core"
-version = "0.6.1"
+version = "0.6.2-0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2295,7 +2295,7 @@ dependencies = [
 
 [[package]]
 name = "mahjuro-distribution"
-version = "0.6.1"
+version = "0.6.2-0"
 dependencies = [
  "block2 0.6.2",
  "cc",
@@ -2313,7 +2313,7 @@ dependencies = [
 
 [[package]]
 name = "mahjuro-gfx-types"
-version = "0.6.1"
+version = "0.6.2-0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2323,7 +2323,7 @@ dependencies = [
 
 [[package]]
 name = "mahjuro-headless"
-version = "0.6.1"
+version = "0.6.2-0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2340,7 +2340,7 @@ dependencies = [
 
 [[package]]
 name = "mahjuro-render"
-version = "0.6.1"
+version = "0.6.2-0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2379,7 +2379,7 @@ dependencies = [
 
 [[package]]
 name = "mahjuro-types"
-version = "0.6.1"
+version = "0.6.2-0"
 dependencies = [
  "serde",
 ]
