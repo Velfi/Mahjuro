@@ -24,7 +24,7 @@ Headless tools (`mahjuro-bake`, `mahjuro-screenshot`) and bot/sweep always skip 
 | `MAHJURO_ASSETS_PACK_DIR` | Directory with `pack_manifest.json` + zips. |
 | `MAHJURO_STRICT_PACK_VERSION` | Panic if pack `game_version` ≠ binary. |
 | `MAHJURO_LOG_FILE` | Append `log` output to this path (also mirrors startup errors). |
-| `RUST_LOG` | Standard `env_logger` filter (e.g. `mahjuro=debug`). |
+| `RUST_LOG` | Standard `env_logger` filter (e.g. `mahjuro=debug`). On **Windows release** builds, stderr has no console: logs go to the launching terminal when one exists, otherwise to `%APPDATA%\Mahjuro\mahjuro.log` (or set `MAHJURO_LOG_FILE`). See `scripts/run-release-startup-profile.bat`. |
 | `MAHJURO_STARTUP_PROFILE` | Startup timing tables + room GLB CPU/GPU upload metrics. |
 | `MAHJURO_GPU_MEM_PROFILE` | Log adapter hint + wgpu allocator totals (also on when `MAHJURO_STARTUP_PROFILE=1`). |
 | `MAHJURO_GPU_MEM_CONSTRAINED_MIB` | Override allocator MiB threshold for `pressure=constrained` (startup + runtime profiling). |

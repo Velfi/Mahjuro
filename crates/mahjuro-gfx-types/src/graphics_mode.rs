@@ -8,15 +8,12 @@ use crate::ShadowQuality;
 pub enum GraphicsMode {
     /// Shadows and SSR off; full internal resolution.
     Performance,
-    /// Certified path for ~4 GB discrete GPUs at 1080p: reduced internal resolution,
-    /// no dynamic shadows/SSR/HDR swapchain.
+    /// Certified path for ~4 GB discrete GPUs at 1080p: no dynamic shadows/SSR/HDR swapchain.
     LowMemory,
     #[default]
     Visuals,
 }
 
-/// Internal 3D render resolution as a fraction of the window size.
-pub const LOW_MEMORY_RENDER_SCALE: f32 = 0.75;
 pub const MIN_RENDER_WIDTH: u32 = 1280;
 pub const MIN_RENDER_HEIGHT: u32 = 720;
 /// Product support floor for graphics memory budgeting.
@@ -164,13 +161,10 @@ impl GraphicsMode {
         !matches!(self, Self::LowMemory)
     }
 
-    /// Fraction of the window size used for scene/depth/bloom intermediates (1.0 = native).
+    /// Fraction of the window size used for scene/depth/bloom intermediates (always native).
     #[inline]
     pub fn render_scale(self) -> f32 {
-        match self {
-            Self::LowMemory => LOW_MEMORY_RENDER_SCALE,
-            Self::Performance | Self::Visuals => 1.0,
-        }
+        1.0
     }
 
     /// Maximum room GLB environments kept resident on the GPU at once.
@@ -309,7 +303,7 @@ mod tests {
         assert!(!m.shadow_quality().active());
         assert!(!m.ssr_enabled());
         assert!(!m.hdr_swapchain_enabled());
-        assert_eq!(m.render_scale(), LOW_MEMORY_RENDER_SCALE);
+        assert_eq!(m.render_scale(), 1.0);
         assert_eq!(m.max_room_gpu_residents(), 2);
     }
 

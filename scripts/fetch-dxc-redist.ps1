@@ -39,7 +39,9 @@ Invoke-WebRequest -Uri $Url -OutFile $TmpZip
 if (Test-Path $TmpExtract) {
     Remove-Item -Recurse -Force $TmpExtract
 }
-Expand-Archive -Path $TmpZip -DestinationPath $TmpExtract -Force
+# .nupkg is a zip archive; Expand-Archive only accepts a .zip extension.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::ExtractToDirectory($TmpZip, $TmpExtract)
 
 $BinDir = Join-Path $TmpExtract "build\native\bin\x64"
 $DxCompiler = Join-Path $BinDir "dxcompiler.dll"
