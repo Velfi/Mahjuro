@@ -456,6 +456,18 @@ pub struct Adapter {
     shared: Arc<AdapterShared>,
 }
 
+impl Adapter {
+    /// Unified-memory signal from Metal private caps (no discrete VRAM total on Apple Silicon).
+    pub fn memory_caps(&self) -> crate::adapter_memory::AdapterMemoryCaps {
+        crate::adapter_memory::AdapterMemoryCaps {
+            dedicated_bytes: None,
+            device_local_heap_bytes: None,
+            shared_system_bytes: None,
+            has_unified_memory: self.shared.private_caps.has_unified_memory,
+        }
+    }
+}
+
 pub struct Queue {
     shared: Arc<QueueShared>,
     timestamp_period: f32,

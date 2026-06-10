@@ -66,6 +66,7 @@ steamworks = { version = "0.13", features = ["raw-bindings"] }
 thiserror = "2.0.18"
 ttf-parser = "0.25"
 wgpu = { version = "29.0.1" }
+wgpu-hal = { path = "vendor/wgpu-hal" }
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 lru = "0.12"
 memmap2 = "0.9"

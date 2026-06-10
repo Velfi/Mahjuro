@@ -39,17 +39,19 @@ impl GpuMemoryPressure {
     }
 }
 
-/// Allocator pressure defaults used when the room resident cap is 2 (Low memory mode).
-const LOW_MEMORY_CONSTRAINED_ALLOC_MIB: u64 = 2200;
-const LOW_MEMORY_CRITICAL_ALLOC_MIB: u64 = 2800;
+/// Fallback when OS VRAM probe is unavailable (4 GiB support target).
+const FALLBACK_DISCRETE_VRAM_MIB: u64 = mahjuro_gfx_types::MIN_SUPPORTED_GPU_MEMORY_MIB;
+/// wgpu allocator totals omit swapchain images, pipeline caches, and driver reserve.
+const UNTRACKED_GPU_OVERHEAD_MIB: u64 = 512;
+/// Low-memory preset: enter constrained / critical at this fraction of probed VRAM budget.
+const LOW_MEMORY_CONSTRAINED_VRAM_PCT: u64 = 55;
+const LOW_MEMORY_CRITICAL_VRAM_PCT: u64 = 70;
+/// High-cap preset defaults when VRAM probe is unavailable.
+const HIGH_CAP_CONSTRAINED_ALLOC_MIB: u64 = 6144;
+const HIGH_CAP_CRITICAL_ALLOC_MIB: u64 = 8192;
 /// Integrated-GPU low-memory defaults — shared-memory parts OOM far below the discrete floor.
 const INTEGRATED_LOW_MEMORY_CONSTRAINED_ALLOC_MIB: u64 = 384;
 const INTEGRATED_LOW_MEMORY_CRITICAL_ALLOC_MIB: u64 = 640;
-/// Allocator pressure defaults used when the room resident cap is 6 (Performance/Visuals).
-///
-/// High-VRAM adapters should not enter "constrained"/"critical" at ~2-3 GiB usage.
-const HIGH_CAP_CONSTRAINED_ALLOC_MIB: u64 = 6144;
-const HIGH_CAP_CRITICAL_ALLOC_MIB: u64 = 8192;
 const CONSTRAINED_ALLOC_ENV: &str = "MAHJURO_GPU_MEM_CONSTRAINED_MIB";
 const CRITICAL_ALLOC_ENV: &str = "MAHJURO_GPU_MEM_CRITICAL_MIB";
 
@@ -82,21 +84,34 @@ pub fn eager_warm_pressure(
     }
 }
 
+fn effective_usage_bytes(allocated_bytes: Option<u64>, reserved_bytes: Option<u64>) -> Option<u64> {
+    match (allocated_bytes, reserved_bytes) {
+        (Some(a), Some(r)) => Some(a.max(r)),
+        (Some(a), None) => Some(a),
+        (None, Some(r)) => Some(r),
+        (None, None) => None,
+    }
+}
+
 /// Classify pressure from allocator report (when present) and resident count.
 pub fn classify(
     device: &wgpu::Device,
     room_gpu_residents: usize,
     max_room_gpu_residents: usize,
     integrated_gpu: bool,
+    adapter_memory: &mahjuro_gfx_types::AdapterMemoryProbe,
 ) -> PressureSnapshot {
     let report = device.generate_allocator_report();
     let allocated_bytes = report.as_ref().map(|r| r.total_allocated_bytes);
     let reserved_bytes = report.as_ref().map(|r| r.total_reserved_bytes);
 
-    let (constrained_alloc_mib, critical_alloc_mib) =
-        allocator_pressure_thresholds_mib(max_room_gpu_residents, integrated_gpu);
-    let pressure = if let Some(allocated) = allocated_bytes {
-        let mib = allocated / (1024 * 1024);
+    let (constrained_alloc_mib, critical_alloc_mib) = allocator_pressure_thresholds_mib(
+        max_room_gpu_residents,
+        integrated_gpu,
+        adapter_memory,
+    );
+    let pressure = if let Some(usage) = effective_usage_bytes(allocated_bytes, reserved_bytes) {
+        let mib = usage / (1024 * 1024);
         if mib >= critical_alloc_mib {
             GpuMemoryPressure::Critical
         } else if mib >= constrained_alloc_mib {
@@ -117,12 +132,26 @@ pub fn classify(
     }
 }
 
+fn probed_discrete_vram_mib(memory: &mahjuro_gfx_types::AdapterMemoryProbe) -> u64 {
+    memory
+        .effective_discrete_vram_mib()
+        .unwrap_or(FALLBACK_DISCRETE_VRAM_MIB)
+}
+
+fn vram_fraction_thresholds_mib(vram_mib: u64, constrained_pct: u64, critical_pct: u64) -> (u64, u64) {
+    let budget = vram_mib.saturating_sub(UNTRACKED_GPU_OVERHEAD_MIB).max(256);
+    let constrained = budget.saturating_mul(constrained_pct) / 100;
+    let critical = budget.saturating_mul(critical_pct) / 100;
+    ordered_allocator_thresholds_mib(constrained.max(256), critical.max(constrained.saturating_add(256)))
+}
+
 fn allocator_pressure_thresholds_mib(
     max_room_gpu_residents: usize,
     integrated_gpu: bool,
+    adapter_memory: &mahjuro_gfx_types::AdapterMemoryProbe,
 ) -> (u64, u64) {
     let (mut constrained, mut critical) =
-        default_allocator_pressure_thresholds_mib(max_room_gpu_residents, integrated_gpu);
+        default_allocator_pressure_thresholds_mib(max_room_gpu_residents, integrated_gpu, adapter_memory);
     if let Some(v) =
         *CONSTRAINED_ALLOC_OVERRIDE_MIB.get_or_init(|| env_override_mib(CONSTRAINED_ALLOC_ENV))
     {
@@ -139,6 +168,7 @@ fn allocator_pressure_thresholds_mib(
 fn default_allocator_pressure_thresholds_mib(
     max_room_gpu_residents: usize,
     integrated_gpu: bool,
+    adapter_memory: &mahjuro_gfx_types::AdapterMemoryProbe,
 ) -> (u64, u64) {
     // Low-memory preset currently caps room residents at 2.
     if max_room_gpu_residents <= 2 {
@@ -148,10 +178,15 @@ fn default_allocator_pressure_thresholds_mib(
                 INTEGRATED_LOW_MEMORY_CRITICAL_ALLOC_MIB,
             );
         }
-        (
-            LOW_MEMORY_CONSTRAINED_ALLOC_MIB,
-            LOW_MEMORY_CRITICAL_ALLOC_MIB,
-        )
+        return vram_fraction_thresholds_mib(
+            probed_discrete_vram_mib(adapter_memory),
+            LOW_MEMORY_CONSTRAINED_VRAM_PCT,
+            LOW_MEMORY_CRITICAL_VRAM_PCT,
+        );
+    }
+    let vram_mib = probed_discrete_vram_mib(adapter_memory);
+    if vram_mib <= HIGH_CAP_CRITICAL_ALLOC_MIB {
+        vram_fraction_thresholds_mib(vram_mib, 75, 90)
     } else {
         (HIGH_CAP_CONSTRAINED_ALLOC_MIB, HIGH_CAP_CRITICAL_ALLOC_MIB)
     }
@@ -195,12 +230,15 @@ pub fn log_pressure_transition(snapshot: &PressureSnapshot) {
     }
     match (snapshot.allocated_bytes, snapshot.reserved_bytes) {
         (Some(alloc), Some(res)) => log::info!(
-            "gpu mem profile: pressure={} residents={}/{} allocated={} MiB reserved={} MiB",
+            "gpu mem profile: pressure={} residents={}/{} allocated={} MiB reserved={} MiB usage={} MiB",
             snapshot.pressure.label(),
             snapshot.room_gpu_residents,
             snapshot.max_room_gpu_residents,
             alloc / (1024 * 1024),
             res / (1024 * 1024),
+            effective_usage_bytes(Some(alloc), Some(res))
+                .unwrap_or(0)
+                / (1024 * 1024),
         ),
         _ => log::info!(
             "gpu mem profile: pressure={} residents={}/{} (allocator report unavailable)",
@@ -273,24 +311,54 @@ mod tests {
     }
 
     #[test]
-    fn default_allocator_thresholds_follow_resident_cap() {
+    fn usage_bytes_prefers_reserved_when_higher() {
         assert_eq!(
-            default_allocator_pressure_thresholds_mib(2, false),
-            (
-                LOW_MEMORY_CONSTRAINED_ALLOC_MIB,
-                LOW_MEMORY_CRITICAL_ALLOC_MIB
-            )
+            effective_usage_bytes(Some(100), Some(250)),
+            Some(250)
+        );
+        assert_eq!(effective_usage_bytes(Some(300), Some(250)), Some(300));
+    }
+
+    #[test]
+    fn low_memory_thresholds_scale_with_probed_vram() {
+        let probe_4g = mahjuro_gfx_types::AdapterMemoryProbe {
+            dedicated_vram_bytes: Some(4 * 1024 * 1024 * 1024),
+            ..Default::default()
+        };
+        let (c, k) = default_allocator_pressure_thresholds_mib(2, false, &probe_4g);
+        // (4096 - 512) * 55% = 1971, * 70% = 2508
+        assert_eq!(c, 1971);
+        assert_eq!(k, 2508);
+
+        let probe_3g = mahjuro_gfx_types::AdapterMemoryProbe {
+            dedicated_vram_bytes: Some(3 * 1024 * 1024 * 1024),
+            ..Default::default()
+        };
+        let (c3, k3) = default_allocator_pressure_thresholds_mib(2, false, &probe_3g);
+        assert!(c3 < c);
+        assert!(k3 < k);
+    }
+
+    #[test]
+    fn default_allocator_thresholds_follow_resident_cap() {
+        let probe = mahjuro_gfx_types::AdapterMemoryProbe {
+            dedicated_vram_bytes: Some(4 * 1024 * 1024 * 1024),
+            ..Default::default()
+        };
+        assert_eq!(
+            default_allocator_pressure_thresholds_mib(2, false, &probe),
+            (1971, 2508)
         );
         assert_eq!(
-            default_allocator_pressure_thresholds_mib(2, true),
+            default_allocator_pressure_thresholds_mib(2, true, &probe),
             (
                 INTEGRATED_LOW_MEMORY_CONSTRAINED_ALLOC_MIB,
                 INTEGRATED_LOW_MEMORY_CRITICAL_ALLOC_MIB
             )
         );
         assert_eq!(
-            default_allocator_pressure_thresholds_mib(6, false),
-            (HIGH_CAP_CONSTRAINED_ALLOC_MIB, HIGH_CAP_CRITICAL_ALLOC_MIB)
+            default_allocator_pressure_thresholds_mib(6, false, &probe),
+            (2688, 3225)
         );
     }
 

@@ -49,8 +49,7 @@ fn ensure_main_menu_glb_loaded() {
     match &*w {
         MainMenuGlbCache::Uninit => {}
         MainMenuGlbCache::Ready(Some(cpu))
-            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
-                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) =>
         {
             *w = MainMenuGlbCache::Uninit;
         }

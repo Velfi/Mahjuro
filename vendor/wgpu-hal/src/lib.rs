@@ -263,6 +263,8 @@ pub mod noop;
 #[cfg(vulkan)]
 pub mod vulkan;
 
+pub mod adapter_memory;
+pub use adapter_memory::AdapterMemoryCaps;
 pub mod auxil;
 pub mod api {
     #[cfg(dx12)]

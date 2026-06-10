@@ -183,8 +183,7 @@ fn ensure_gameplay_glb_loaded() {
     match &*w {
         GameplayGlbCache::Uninit => {}
         GameplayGlbCache::Ready(cpu)
-            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
-                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) =>
         {
             *w = GameplayGlbCache::Uninit;
         }

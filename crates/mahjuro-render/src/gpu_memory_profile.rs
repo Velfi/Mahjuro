@@ -14,24 +14,43 @@ pub fn enabled() -> bool {
 }
 
 /// Log adapter identity and optional wgpu allocator totals once at startup.
-pub fn log_adapter_startup(adapter: &wgpu::Adapter, device: &wgpu::Device) {
+pub fn log_adapter_startup(
+    adapter: &wgpu::Adapter,
+    device: &wgpu::Device,
+    memory: &mahjuro_gfx_types::AdapterMemoryProbe,
+) {
     if !enabled() {
         return;
     }
     let info = adapter.get_info();
     let integrated = info.device_type == wgpu::DeviceType::IntegratedGpu;
-    let memory_model =
-        mahjuro_gfx_types::GraphicsMemoryModel::classify_adapter(&info.name, integrated);
-    let suggested = mahjuro_gfx_types::GraphicsMode::suggest_for_adapter(&info.name, integrated);
-    let meets_minimum =
-        mahjuro_gfx_types::GraphicsMode::adapter_meets_minimum_support(&info.name, integrated);
+    let memory_model = mahjuro_gfx_types::GraphicsMemoryModel::classify_adapter_with_memory(
+        &info.name,
+        integrated,
+        Some(memory),
+    );
+    let suggested = mahjuro_gfx_types::GraphicsMode::suggest_for_adapter_with_memory(
+        &info.name,
+        integrated,
+        Some(memory),
+    );
+    let meets_minimum = mahjuro_gfx_types::GraphicsMode::adapter_meets_minimum_support_with_memory(
+        &info.name,
+        integrated,
+        Some(memory),
+    );
+    let dedicated = memory
+        .effective_discrete_vram_mib()
+        .map(|m| format!("{m} MiB"))
+        .unwrap_or_else(|| "unknown".into());
     log::info!(
         "gpu mem profile: adapter='{}' backend={:?} device_type={:?} vendor=0x{:04x} \
-         memory_model={:?} suggested_graphics_mode={:?} minimum_supported_4gib={}",
+         probed_dedicated_vram={} memory_model={:?} suggested_graphics_mode={:?} minimum_supported_4gib={}",
         info.name,
         info.backend,
         info.device_type,
         info.vendor,
+        dedicated,
         memory_model,
         suggested,
         meets_minimum,

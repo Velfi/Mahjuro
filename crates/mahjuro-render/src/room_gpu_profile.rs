@@ -328,21 +328,32 @@ fn gpu_bytes_estimate_rgba8(
     if let Some(chain) = known_chain
         && !chain.is_empty()
     {
-        return chain.iter().map(|(bytes, _, _)| bytes.len() as u64).sum();
+        return chain
+            .iter()
+            .map(|(_, w, h)| gpu_rgba8_level_bytes(*w, *h))
+            .sum();
     }
     if !mips {
-        return (width as u64) * (height as u64) * 4;
+        return gpu_rgba8_level_bytes(width, height);
     }
     let levels = crate::gltf_helpers::mip_level_count(width, height);
     let mut total = 0u64;
     let mut w = width.max(1);
     let mut h = height.max(1);
     for _ in 0..levels {
-        total = total.saturating_add((w as u64) * (h as u64) * 4);
+        total = total.saturating_add(gpu_rgba8_level_bytes(w, h));
         w = (w / 2).max(1);
         h = (h / 2).max(1);
     }
     total
+}
+
+/// GPU texture footprint for one RGBA8 mip level (256-byte row pitch alignment).
+fn gpu_rgba8_level_bytes(width: u32, height: u32) -> u64 {
+    const ROW_ALIGN: u64 = 256;
+    let row_bytes = (width as u64).saturating_mul(4);
+    let aligned_row = row_bytes.div_ceil(ROW_ALIGN) * ROW_ALIGN;
+    aligned_row.saturating_mul(height as u64)
 }
 
 fn source_identity_for_slot(
