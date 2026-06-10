@@ -6,6 +6,7 @@ Short pointers to deeper context. Read the linked file before working in the are
 
 - [3D world space](docs/agents/world-space.md) — Z-up frame, table at `z = 0`, anchors, screen vs world placement.
 - [Cap-mesh coordinates](docs/agents/cap-mesh-coordinates.md) — image → cap-local → UV for relic pins (+Y) and talismans (+Z); `cap_extrude.rs` source of truth.
+- [Frame schedule (main loop)](docs/agents/frame-schedule.md) — `frame_phases/` pipeline order, `FrameLocals`, ordering constraints.
 - [Widget tree (scene input)](docs/agents/widget-tree.md) — `Tree<A>` / `FlatItem<A>` immediate-mode UI; single source of truth for rects, hover/keyboard nav.
 - [Font & text layout](docs/agents/font-scaling.md) — label auto-shrink, colored/plain block height helpers.
 - [Chart guidelines](docs/agents/chart-guidelines.md) — Duke top-ten rules for Chronicle/dashboard charts.
