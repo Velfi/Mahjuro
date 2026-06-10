@@ -310,7 +310,14 @@ fn yaku_preview_inner(
     original_tiles: Option<&[Tile]>,
 ) -> Vec<YakuPreview> {
     let active_yaku: Vec<YakuKind> = match sets_opt {
-        Some(s) => detect_yaku_with_wind(tiles, s, round_wind, bonus_round_wind, original_tiles),
+        Some(s) => yaku_after_pool_filter(
+            tiles,
+            s,
+            round_wind,
+            bonus_round_wind,
+            original_tiles,
+            available,
+        ),
         None => Vec::new(),
     };
 

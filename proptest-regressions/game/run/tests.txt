@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f5eba69c21c82e423a26dac5582f6b5a43734c1eec92d515f98ee5f81e53b2d2 # shrinks to (structure_tiles, selection_tiles, wing, pool) = ([], [Tile { suit: Manzu, rank: 1, id: 0, enhancement: None, debuffed_visual: false }, Tile { suit: Manzu, rank: 1, id: 1, enhancement: None, debuffed_visual: false }], 1, [])

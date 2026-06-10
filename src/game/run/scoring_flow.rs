@@ -972,6 +972,39 @@ impl RunState {
         best
     }
 
+    /// Meld split and tile lists for in-play yaku tablets. Uses committed
+    /// structure plus [`Self::pick_best_decomposition`] on the current
+    /// selection — the same path as play commit and manual cash-in.
+    pub(crate) fn melds_for_yaku_preview(
+        &self,
+        selected_tiles: &[Tile],
+    ) -> (Vec<DetectedMeld>, Vec<Tile>, Vec<Tile>) {
+        let mut sets = self.structure_sets.clone();
+        let structure_tiles = self.structure_tiles.clone();
+
+        if selected_tiles.is_empty() {
+            return (sets, structure_tiles.clone(), structure_tiles);
+        }
+
+        let Some((selected_sets, scoring_tiles)) =
+            self.try_validate_with_wildcards(selected_tiles)
+        else {
+            return (sets, structure_tiles.clone(), structure_tiles);
+        };
+
+        let best_sets =
+            self.pick_best_decomposition(selected_sets, &scoring_tiles, selected_tiles);
+
+        let mut original = structure_tiles.clone();
+        original.extend(selected_tiles.iter().copied());
+
+        let mut effective = structure_tiles;
+        effective.extend(scoring_tiles.iter().copied());
+
+        sets.extend(best_sets);
+        (sets, effective, original)
+    }
+
     /// Rules used when validating a selection before committing it to the structure
     /// (differs from [`RunState::round_rules`] e.g. honor-gated tutorial modifiers).
     pub fn validation_rules_for_structure_commits(&self) -> Vec<RuleModifier> {
