@@ -2,7 +2,7 @@
 //! "windows"`), so stderr is discarded unless we attach to the launching console
 //! or redirect logs to a file.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::LineWriter;
 
 /// When `RUST_LOG` is set on a Windows release build, try to attach to the parent
@@ -14,7 +14,7 @@ pub fn prepare_rust_log_output() -> RustLogOutput {
         return RustLogOutput::None;
     }
     if try_attach_parent_console() {
-        if let Ok(file) = OpenOptions::new().write(true).open("CONOUT$") {
+        if let Ok(file) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
             return RustLogOutput::Console(LineWriter::new(file));
         }
     }
