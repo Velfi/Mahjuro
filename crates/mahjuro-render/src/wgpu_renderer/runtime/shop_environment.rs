@@ -71,6 +71,7 @@ struct GltfRoomEnvUniformParams<'a> {
     bloom_linear_hdr_output: bool,
     height_fog_params: [f32; 4],
     height_fog_color: [f32; 4],
+    height_fog_far_color: [f32; 4],
     model: Mat4,
     gpu: &'a ShopEnvironmentGpu,
     shadow_upload: Option<([f32; 16], &'a mut bool)>,
@@ -513,6 +514,7 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             height_fog_params,
             height_fog_color,
+            height_fog_far_color,
             model,
             gpu,
             shadow_upload,
@@ -583,6 +585,7 @@ impl WgpuRenderer {
             room_post_params,
             room_height_fog_params: height_fog_params,
             room_height_fog_color: height_fog_color,
+            room_height_fog_far_color: height_fog_far_color,
         };
         for (pi, buf) in gpu.uniform_buffers.iter().enumerate() {
             let prim_model = if let Some(delta) = prim_deltas.get(&pi) {
@@ -673,6 +676,7 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             height_fog_params: [0.0; 4],
             height_fog_color: [0.0; 4],
+            height_fog_far_color: [0.0; 4],
             model,
             gpu,
             shadow_upload,
@@ -715,6 +719,7 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             height_fog_params: [0.0; 4],
             height_fog_color: [0.0; 4],
+            height_fog_far_color: [0.0; 4],
             model,
             gpu,
             shadow_upload,
@@ -748,6 +753,7 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             height_fog_params: [0.0; 4],
             height_fog_color: [0.0; 4],
+            height_fog_far_color: [0.0; 4],
             model,
             gpu,
             shadow_upload,
@@ -785,6 +791,7 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             height_fog_params: [0.0; 4],
             height_fog_color: [0.0; 4],
+            height_fog_far_color: [0.0; 4],
             model,
             gpu,
             shadow_upload,
@@ -902,6 +909,7 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             height_fog_params: [0.0; 4],
             height_fog_color: [0.0; 4],
+            height_fog_far_color: [0.0; 4],
             model,
             gpu,
             shadow_upload,
@@ -948,28 +956,32 @@ impl WgpuRenderer {
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
         // Victory moon recentering is a world-space offset applied after room centering.
         let model = frame.main_menu_env_model_delta * base_model;
-        let (height_fog_params, height_fog_color) = if frame.main_menu_env_moon_only {
-            ([0.0; 4], [0.0; 4])
-        } else {
-            let fog = self.main_menu_effects.fog;
-            let floor_z = crate::main_menu_glb::main_menu_height_fog_floor_z_for_model(model)
-                .or_else(|| {
-                    crate::main_menu_glb::main_menu_environment_aabb_for_model(model)
-                        .map(|(min, _)| min[2])
-                })
-                .unwrap_or(0.0)
-                + fog.floor_lift_world(camera.h);
-            let color = fog.color_hdr();
-            (
-                [
-                    floor_z,
-                    fog.height_world(camera.h),
-                    fog.density_per_world_unit(camera.h),
-                    0.0,
-                ],
-                [color[0], color[1], color[2], 0.0],
-            )
-        };
+        let (height_fog_params, height_fog_color, height_fog_far_color) =
+            if frame.main_menu_env_moon_only {
+                ([0.0; 4], [0.0; 4], [0.0; 4])
+            } else {
+                let fog = self.main_menu_effects.fog;
+                let floor_z = crate::main_menu_glb::main_menu_height_fog_floor_z_for_model(model)
+                    .or_else(|| {
+                        crate::main_menu_glb::main_menu_environment_aabb_for_model(model)
+                            .map(|(min, _)| min[2])
+                    })
+                    .unwrap_or(0.0)
+                    + fog.floor_lift_world(camera.h);
+                let color = fog.color_hdr();
+                let far_color = fog.far_color_hdr();
+                let (gradient_start, gradient_scale) = fog.gradient_curve_world(camera.h);
+                (
+                    [
+                        floor_z,
+                        fog.height_world(camera.h),
+                        fog.density_per_world_unit(camera.h),
+                        0.0,
+                    ],
+                    [color[0], color[1], color[2], gradient_start],
+                    [far_color[0], far_color[1], far_color[2], gradient_scale],
+                )
+            };
         let prim_deltas = rustc_hash::FxHashMap::default();
         self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
             frame,
@@ -980,6 +992,7 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             height_fog_params,
             height_fog_color,
+            height_fog_far_color,
             model,
             gpu,
             shadow_upload,
@@ -1185,9 +1198,9 @@ impl WgpuRenderer {
 #[cfg(test)]
 mod gameplay_score_roller_tests {
     use super::{
-        GAMEPLAY_SCORE_ROLLER_LOOP_SPIN_IN_SEMITONES, GAMEPLAY_SCORE_ROLLER_RAMP_INTERVAL_SECS,
         gameplay_score_roller_loop_speed_multiplier, gameplay_score_roller_speed_multiplier,
-        gameplay_score_roller_visual_phase,
+        gameplay_score_roller_visual_phase, GAMEPLAY_SCORE_ROLLER_LOOP_SPIN_IN_SEMITONES,
+        GAMEPLAY_SCORE_ROLLER_RAMP_INTERVAL_SECS,
     };
 
     #[test]

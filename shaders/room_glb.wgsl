@@ -13,7 +13,10 @@
 //   polychrome time on blocked cash-in (`0` = off for both)
 // - `room_height_fog_params.xyz` = main-menu exponential height fog
 //   (`floor_z`, `height_world`, `density_per_world_unit`; zero density = off)
-// - `room_height_fog_color.xyz` = main-menu height fog target color in linear HDR space
+// - `room_height_fog_color.xyz` = base height fog target color in linear HDR space
+// - `room_height_fog_color.w` = distance-tint gradient start in world units
+// - `room_height_fog_far_color.xyz` = distance tint color approached as distance grows
+// - `room_height_fog_far_color.w` = distance-tint exponential scale in world units
 //
 // Point / spot `pos.w` = max light distance in **world units** (`KHR_lights_punctual` range),
 // or `0` for infinite range (pure inverse-square with a minimum distance clamp).
@@ -47,6 +50,7 @@ struct RoomEnvUniform {
     room_post_params: vec4<f32>,
     room_height_fog_params: vec4<f32>,
     room_height_fog_color: vec4<f32>,
+    room_height_fog_far_color: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> cam: RoomEnvUniform;
@@ -250,6 +254,42 @@ fn saturate_rgb(rgb: vec3<f32>, amount: f32) -> vec3<f32> {
     return mix(vec3<f32>(luma), rgb, amount);
 }
 
+fn linear_rgb_to_oklab(rgb: vec3<f32>) -> vec3<f32> {
+    let safe_rgb = max(rgb, vec3<f32>(0.0));
+    let lms = vec3<f32>(
+        dot(safe_rgb, vec3<f32>(0.4122214708, 0.5363325363, 0.0514459929)),
+        dot(safe_rgb, vec3<f32>(0.2119034982, 0.6806995451, 0.1073969566)),
+        dot(safe_rgb, vec3<f32>(0.0883024619, 0.2817188376, 0.6299787005)),
+    );
+    let lms_cbrt = pow(max(lms, vec3<f32>(0.0)), vec3<f32>(1.0 / 3.0));
+    return vec3<f32>(
+        dot(lms_cbrt, vec3<f32>(0.2104542553, 0.7936177850, -0.0040720468)),
+        dot(lms_cbrt, vec3<f32>(1.9779984951, -2.4285922050, 0.4505937099)),
+        dot(lms_cbrt, vec3<f32>(0.0259040371, 0.7827717662, -0.8086757660)),
+    );
+}
+
+fn oklab_to_linear_rgb(lab: vec3<f32>) -> vec3<f32> {
+    let lms_cbrt = vec3<f32>(
+        lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z,
+        lab.x - 0.1055613458 * lab.y - 0.0638541728 * lab.z,
+        lab.x - 0.0894841775 * lab.y - 1.2914855480 * lab.z,
+    );
+    let lms = lms_cbrt * lms_cbrt * lms_cbrt;
+    return max(
+        vec3<f32>(
+            dot(lms, vec3<f32>(4.0767416621, -3.3077115913, 0.2309699292)),
+            dot(lms, vec3<f32>(-1.2684380046, 2.6097574011, -0.3413193965)),
+            dot(lms, vec3<f32>(-0.0041960863, -0.7034186147, 1.7076147010)),
+        ),
+        vec3<f32>(0.0),
+    );
+}
+
+fn mix_fog_color_perceptual(a: vec3<f32>, b: vec3<f32>, t: f32) -> vec3<f32> {
+    return oklab_to_linear_rgb(mix(linear_rgb_to_oklab(a), linear_rgb_to_oklab(b), t));
+}
+
 fn exponential_height_fog_alpha(world_pos: vec3<f32>) -> f32 {
     let density = max(cam.room_height_fog_params.z, 0.0);
     let height = max(cam.room_height_fog_params.y, 1e-3);
@@ -278,7 +318,20 @@ fn exponential_height_fog_alpha(world_pos: vec3<f32>) -> f32 {
 
 fn apply_exponential_height_fog(hdr: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
     let fog = exponential_height_fog_alpha(world_pos);
-    return mix(hdr, cam.room_height_fog_color.xyz, fog);
+    if (fog <= 0.0) {
+        return hdr;
+    }
+    let dist = length(world_pos - cam.cam_pos);
+    let gradient_start = max(cam.room_height_fog_color.w, 0.0);
+    let gradient_scale = max(cam.room_height_fog_far_color.w, 1e-3);
+    let gradient_dist = max(dist - gradient_start, 0.0);
+    let gradient_t = clamp(1.0 - exp(-gradient_dist / gradient_scale), 0.0, 1.0);
+    let fog_color = mix_fog_color_perceptual(
+        cam.room_height_fog_color.xyz,
+        cam.room_height_fog_far_color.xyz,
+        gradient_t,
+    );
+    return mix(hdr, fog_color, fog);
 }
 
 // Port of `score_glyph_band_albedo_uv` in text_quad.wgsl — band timing in sync with UI House text.

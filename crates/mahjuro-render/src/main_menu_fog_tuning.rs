@@ -17,6 +17,18 @@ pub struct MainMenuFogTuning {
     /// Multiplier on [`Self::color`] in shader linear HDR space.
     #[serde(default = "default_brightness")]
     pub brightness: f32,
+    /// Linear HDR tint color approached gradually as fog distance increases.
+    #[serde(default = "default_far_color")]
+    pub far_color: [f32; 3],
+    /// Multiplier on [`Self::far_color`] in shader linear HDR space.
+    #[serde(default = "default_far_brightness")]
+    pub far_brightness: f32,
+    /// Camera distance where the distance tint starts, in viewport heights.
+    #[serde(default = "default_gradient_near_heights")]
+    pub gradient_near_heights: f32,
+    /// Exponential distance scale for the tint gradient, in viewport heights.
+    #[serde(default = "default_gradient_far_heights")]
+    pub gradient_far_heights: f32,
 }
 
 fn default_density() -> f32 {
@@ -39,6 +51,22 @@ fn default_brightness() -> f32 {
     1.0
 }
 
+fn default_far_color() -> [f32; 3] {
+    [0.42, 0.52, 0.72]
+}
+
+fn default_far_brightness() -> f32 {
+    1.0
+}
+
+fn default_gradient_near_heights() -> f32 {
+    0.0
+}
+
+fn default_gradient_far_heights() -> f32 {
+    3.5
+}
+
 impl Default for MainMenuFogTuning {
     fn default() -> Self {
         Self::shipping_default()
@@ -53,6 +81,10 @@ impl MainMenuFogTuning {
             floor_lift_heights: default_floor_lift_heights(),
             color: default_color(),
             brightness: default_brightness(),
+            far_color: default_far_color(),
+            far_brightness: default_far_brightness(),
+            gradient_near_heights: default_gradient_near_heights(),
+            gradient_far_heights: default_gradient_far_heights(),
         }
     }
 
@@ -73,6 +105,22 @@ impl MainMenuFogTuning {
         [self.color[0] * b, self.color[1] * b, self.color[2] * b]
     }
 
+    pub fn far_color_hdr(self) -> [f32; 3] {
+        let b = self.far_brightness.max(0.0);
+        [
+            self.far_color[0] * b,
+            self.far_color[1] * b,
+            self.far_color[2] * b,
+        ]
+    }
+
+    pub fn gradient_curve_world(self, window_h: f32) -> (f32, f32) {
+        let h = window_h.max(1.0);
+        let start = (self.gradient_near_heights.max(0.0) * h).max(0.0);
+        let scale = (self.gradient_far_heights.max(0.001) * h).max(1.0);
+        (start, scale)
+    }
+
     pub fn debug_row_value(self, row: usize) -> f32 {
         match row {
             0 => self.density,
@@ -81,6 +129,11 @@ impl MainMenuFogTuning {
             3 => crate::rain_tuning::rgb_linear_hue(self.color),
             4 => crate::rain_tuning::rgb_linear_sat(self.color),
             5 => self.brightness,
+            6 => crate::rain_tuning::rgb_linear_hue(self.far_color),
+            7 => crate::rain_tuning::rgb_linear_sat(self.far_color),
+            8 => self.far_brightness,
+            9 => self.gradient_near_heights,
+            10 => self.gradient_far_heights,
             _ => 0.0,
         }
     }
@@ -95,23 +148,30 @@ impl MainMenuFogTuning {
             3 => crate::rain_tuning::set_linear_rgb_hue(&mut self.color, v),
             4 => crate::rain_tuning::set_linear_rgb_sat(&mut self.color, v),
             5 => self.brightness = v,
+            6 => crate::rain_tuning::set_linear_rgb_hue(&mut self.far_color, v),
+            7 => crate::rain_tuning::set_linear_rgb_sat(&mut self.far_color, v),
+            8 => self.far_brightness = v,
+            9 => self.gradient_near_heights = v,
+            10 => self.gradient_far_heights = v,
             _ => {}
         }
     }
 
     pub fn color_swatch_rgb(self, row: usize) -> Option<[f32; 3]> {
         match row {
-            3..=5 => {
-                let rgb = self.color;
-                let peak = rgb[0].max(rgb[1]).max(rgb[2]);
-                if peak <= 1e-8 {
-                    Some([0.0; 3])
-                } else {
-                    Some([rgb[0] / peak, rgb[1] / peak, rgb[2] / peak])
-                }
-            }
+            3..=5 => Some(color_swatch_rgb(self.color)),
+            6..=8 => Some(color_swatch_rgb(self.far_color)),
             _ => None,
         }
+    }
+}
+
+fn color_swatch_rgb(rgb: [f32; 3]) -> [f32; 3] {
+    let peak = rgb[0].max(rgb[1]).max(rgb[2]);
+    if peak <= 1e-8 {
+        [0.0; 3]
+    } else {
+        [rgb[0] / peak, rgb[1] / peak, rgb[2] / peak]
     }
 }
 
@@ -119,17 +179,22 @@ pub const FOG_DEBUG_ROW_META: &[(&str, f32, f32, f32)] = &[
     ("Density", 0.0, 12.0, 0.1),
     ("Height", 0.02, 0.50, 0.01),
     ("Floor lift (x height)", -2.0, 6.0, 0.05),
-    ("Fog hue", 0.0, 1.0, 1.0 / 360.0),
-    ("Fog saturation", 0.0, 1.0, 0.01),
-    ("Fog brightness", 0.0, 3.0, 0.02),
+    ("Base fog hue", 0.0, 1.0, 1.0 / 360.0),
+    ("Base fog saturation", 0.0, 1.0, 0.01),
+    ("Base fog brightness", 0.0, 3.0, 0.02),
+    ("Distance tint hue", 0.0, 1.0, 1.0 / 360.0),
+    ("Distance tint saturation", 0.0, 1.0, 0.01),
+    ("Distance tint brightness", 0.0, 3.0, 0.02),
+    ("Gradient start (x height)", 0.0, 2.0, 0.01),
+    ("Gradient scale (x height)", 0.25, 8.0, 0.05),
 ];
 
 pub const FOG_DEBUG_SLIDER_COUNT: usize = FOG_DEBUG_ROW_META.len();
 
 pub fn fog_row_is_hue(row: usize) -> bool {
-    row == 3
+    row == 3 || row == 6
 }
 
 pub fn fog_row_is_saturation(row: usize) -> bool {
-    row == 4
+    row == 4 || row == 7
 }
