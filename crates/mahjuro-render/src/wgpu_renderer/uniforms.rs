@@ -118,8 +118,10 @@ pub(crate) struct RoomEnvUniform {
     pub room_env_params: [f32; 4],
     /// Room post/tone params (`hdr_tonemap` parity); w = main-menu rainbow scene time.
     pub room_post_params: [f32; 4],
-    /// Unused in room env shader; retained for bind layout parity with tile path.
-    pub _unused_punctual_tuning: [f32; 4],
+    /// x = floor z; y = height in world units; z = density per world unit; w = reserved.
+    pub room_height_fog_params: [f32; 4],
+    /// xyz = linear HDR fog target color; w = reserved.
+    pub room_height_fog_color: [f32; 4],
 }
 
 /// Per-frame data for `tile_outline.wgsl` group 0 binding 0.

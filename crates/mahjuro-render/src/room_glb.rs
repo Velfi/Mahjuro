@@ -174,8 +174,7 @@ fn ensure_shop_glb_loaded() {
     let mut w = ROOM_GLB_CPU.write();
     match &*w {
         RoomGlbCache::Uninit => {}
-        RoomGlbCache::Ready(Some(cpu)) if room_glb_cpu_needs_environment_mesh_reload(cpu) =>
-        {
+        RoomGlbCache::Ready(Some(cpu)) if room_glb_cpu_needs_environment_mesh_reload(cpu) => {
             *w = RoomGlbCache::Uninit;
         }
         _ => return,
@@ -1153,6 +1152,14 @@ mod tests {
         assert!(
             ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL"),
             "archive decal feature flag missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("exponential_height_fog_alpha"),
+            "analytic exponential height fog helper missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("room_height_fog_params"),
+            "room height fog uniform missing from room_glb.wgsl"
         );
         assert!(
             !ROOM_GLB_WGSL.contains("pbr.emissive_factor.w >"),

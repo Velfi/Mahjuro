@@ -12,7 +12,7 @@
 use chrono::Datelike;
 use parking_lot::RwLock;
 
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 
 use crate::draw_cmd::CameraParams;
 use crate::room_env_gltf::{self, RoomEnvWalkHooks, RoomMeshPolicy};
@@ -141,6 +141,7 @@ pub fn main_menu_collision_meshes() -> Vec<crate::room_env_gltf::RoomCollisionMe
 
 /// Visible ground mesh node in [`main_menu.glb`](../../../assets/3d/main_menu.glb) (spawn fallback only).
 pub const MAIN_MENU_RAIN_GROUND_NODE: &str = "ground";
+const MAIN_MENU_FOG_GROUND_COLLIDER_NODE: &str = "rain_hit_ground";
 
 /// Hub moon mesh in [`main_menu.glb`](../../../assets/3d/main_menu.glb) (`MoonObject` node).
 /// Base-color albedo is phase-shaded in `room_glb.wgsl` from [`current_moon_phase`](crate::wgpu_renderer::current_moon_phase).
@@ -204,6 +205,45 @@ pub fn main_menu_rain_hit_spawn_aabb(
         Some(room_env_gltf::room_world_bounds_aabb_centered(
             bounds_doc, center, window_h, env_scale,
         ))
+    })
+}
+
+/// World-space AABB for the visible main-menu room under `model`.
+pub fn main_menu_environment_aabb_for_model(model: Mat4) -> Option<([f32; 3], [f32; 3])> {
+    with_main_menu_glb_cpu(|opt| {
+        let bounds = opt?.environment_bounds_doc?;
+        let mut min = [f32::INFINITY; 3];
+        let mut max = [f32::NEG_INFINITY; 3];
+        for p in bounds.corners() {
+            let w = model.transform_point3(p).to_array();
+            for i in 0..3 {
+                min[i] = min[i].min(w[i]);
+                max[i] = max[i].max(w[i]);
+            }
+        }
+        Some((min, max))
+    })
+}
+
+/// World-space base height for main-menu low fog.
+pub fn main_menu_height_fog_floor_z_for_model(model: Mat4) -> Option<f32> {
+    with_main_menu_glb_cpu(|opt| {
+        let cpu = opt?;
+        let bounds = room_env_gltf::room_collision_mesh_bounds_doc(
+            &cpu.rain_surface_meshes,
+            MAIN_MENU_FOG_GROUND_COLLIDER_NODE,
+        )
+        .or_else(|| {
+            room_env_gltf::room_env_primitive_bounds_doc(
+                &cpu.environment_primitives,
+                MAIN_MENU_RAIN_GROUND_NODE,
+            )
+        })?;
+        let mut min_z = f32::INFINITY;
+        for p in bounds.corners() {
+            min_z = min_z.min(model.transform_point3(p).z);
+        }
+        min_z.is_finite().then_some(min_z)
     })
 }
 

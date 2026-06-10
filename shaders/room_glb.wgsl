@@ -11,6 +11,9 @@
 // - `room_env_params.w` = main-menu hub moon synodic phase (`0..1`; unused elsewhere)
 // - `room_post_params.w` = main-menu pride rainbow scene time, or gameplay House
 //   polychrome time on blocked cash-in (`0` = off for both)
+// - `room_height_fog_params.xyz` = main-menu exponential height fog
+//   (`floor_z`, `height_world`, `density_per_world_unit`; zero density = off)
+// - `room_height_fog_color.xyz` = main-menu height fog target color in linear HDR space
 //
 // Point / spot `pos.w` = max light distance in **world units** (`KHR_lights_punctual` range),
 // or `0` for infinite range (pure inverse-square with a minimum distance clamp).
@@ -42,7 +45,8 @@ struct RoomEnvUniform {
     room_linear_exposure: f32,
     room_env_params: vec4<f32>,
     room_post_params: vec4<f32>,
-    _unused_punctual_tuning: vec4<f32>,
+    room_height_fog_params: vec4<f32>,
+    room_height_fog_color: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> cam: RoomEnvUniform;
@@ -244,6 +248,37 @@ struct ShopShaded {
 fn saturate_rgb(rgb: vec3<f32>, amount: f32) -> vec3<f32> {
     let luma = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
     return mix(vec3<f32>(luma), rgb, amount);
+}
+
+fn exponential_height_fog_alpha(world_pos: vec3<f32>) -> f32 {
+    let density = max(cam.room_height_fog_params.z, 0.0);
+    let height = max(cam.room_height_fog_params.y, 1e-3);
+    if (density <= 0.0) {
+        return 0.0;
+    }
+    let ray = world_pos - cam.cam_pos;
+    let dist = length(ray);
+    if (dist <= 1e-3) {
+        return 0.0;
+    }
+
+    let floor_z = cam.room_height_fog_params.x;
+    let k0 = clamp(-(cam.cam_pos.z - floor_z) / height, -32.0, 16.0);
+    let k1 = clamp(-(world_pos.z - floor_z) / height, -32.0, 16.0);
+    let dk = k1 - k0;
+    var density_integral: f32;
+    if (abs(dk) < 1e-3) {
+        density_integral = dist * exp(0.5 * (k0 + k1));
+    } else {
+        density_integral = dist * (exp(k1) - exp(k0)) / dk;
+    }
+    let tau = density * max(density_integral, 0.0);
+    return clamp(1.0 - exp(-min(tau, 80.0)), 0.0, 1.0);
+}
+
+fn apply_exponential_height_fog(hdr: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
+    let fog = exponential_height_fog_alpha(world_pos);
+    return mix(hdr, cam.room_height_fog_color.xyz, fog);
 }
 
 // Port of `score_glyph_band_albedo_uv` in text_quad.wgsl — band timing in sync with UI House text.
@@ -546,7 +581,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
 fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     // Always linear HDR. `tonemap_composite.wgsl` applies the single ACES pass.
     let s = shop_shade(in, front_facing);
-    return vec4<f32>(s.hdr, s.out_alpha);
+    return vec4<f32>(apply_exponential_height_fog(s.hdr, in.world_pos), s.out_alpha);
 }
 
 /// Emissive-only pre-pass for screen-space GI (writes `room_emissive_view`).

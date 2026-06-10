@@ -668,7 +668,8 @@ pub fn create_room_env_camera_uniform_buffers(
         room_linear_exposure: 0.0,
         room_env_params: [0.0, 0.0, 1.0, 1.0],
         room_post_params: [0.0; 4],
-        _unused_punctual_tuning: [0.0; 4],
+        room_height_fog_params: [0.0; 4],
+        room_height_fog_color: [0.0; 4],
     };
     (0..count)
         .map(|i| {
