@@ -2359,6 +2359,28 @@ impl super::Adapter {
         &self.instance
     }
 
+    /// Sum of device-local Vulkan memory heap sizes for this physical device.
+    pub fn memory_caps(&self) -> crate::adapter_memory::AdapterMemoryCaps {
+        let mem = unsafe {
+            self.instance
+                .raw
+                .get_physical_device_memory_properties(self.raw)
+        };
+        let device_local: u64 = mem
+            .memory_heaps_as_slice()
+            .iter()
+            .filter(|heap| heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
+            .map(|heap| heap.size)
+            .sum();
+        let heap = (device_local > 0).then_some(device_local);
+        crate::adapter_memory::AdapterMemoryCaps {
+            dedicated_bytes: heap,
+            device_local_heap_bytes: heap,
+            shared_system_bytes: None,
+            has_unified_memory: None,
+        }
+    }
+
     pub fn required_device_extensions(&self, features: wgt::Features) -> Vec<&'static CStr> {
         let (supported_extensions, unsupported_extensions) = self
             .phd_capabilities

@@ -24,8 +24,7 @@ fn ensure_staircase_glb_loaded() {
     match &*w {
         StaircaseGlbCache::Uninit => {}
         StaircaseGlbCache::Ready(Some(cpu))
-            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
-                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) =>
         {
             *w = StaircaseGlbCache::Uninit;
         }

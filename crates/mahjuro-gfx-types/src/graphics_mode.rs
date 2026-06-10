@@ -21,6 +21,45 @@ pub const MIN_RENDER_WIDTH: u32 = 1280;
 pub const MIN_RENDER_HEIGHT: u32 = 720;
 /// Product support floor for graphics memory budgeting.
 pub const MIN_SUPPORTED_GPU_MEMORY_MIB: u64 = 4096;
+/// Discrete adapters reporting less than this many MiB of VRAM default to Low memory.
+pub const AUTO_LOW_MEMORY_VRAM_THRESHOLD_MIB: u64 = MIN_SUPPORTED_GPU_MEMORY_MIB + 1024;
+
+/// OS-reported adapter memory at startup (capacity, not current process usage).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AdapterMemoryProbe {
+    pub dedicated_vram_bytes: Option<u64>,
+    pub device_local_heap_bytes: Option<u64>,
+    pub shared_system_bytes: Option<u64>,
+    pub has_unified_memory: Option<bool>,
+}
+
+impl AdapterMemoryProbe {
+    /// Non-zero dedicated VRAM, else device-local heap total.
+    pub fn effective_discrete_vram_bytes(self) -> Option<u64> {
+        self.dedicated_vram_bytes
+            .filter(|&b| b > 0)
+            .or(self.device_local_heap_bytes.filter(|&b| b > 0))
+    }
+
+    pub fn effective_discrete_vram_mib(self) -> Option<u64> {
+        self.effective_discrete_vram_bytes()
+            .map(|b| b / (1024 * 1024))
+    }
+
+    pub fn shared_system_mib(self) -> Option<u64> {
+        self.shared_system_bytes
+            .map(|b| b / (1024 * 1024))
+    }
+
+    /// True when OS-reported discrete VRAM is below [`AUTO_LOW_MEMORY_VRAM_THRESHOLD_MIB`].
+    pub fn suggests_low_memory_preset(self, integrated_gpu: bool) -> bool {
+        if integrated_gpu || self.has_unified_memory == Some(true) {
+            return false;
+        }
+        self.effective_discrete_vram_mib()
+            .is_some_and(|mib| mib < AUTO_LOW_MEMORY_VRAM_THRESHOLD_MIB)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -45,26 +84,38 @@ pub enum GraphicsMemoryModel {
 
 impl GraphicsMemoryModel {
     pub fn classify_adapter(name: &str, integrated_gpu: bool) -> Self {
+        Self::classify_adapter_with_memory(name, integrated_gpu, None)
+    }
+
+    pub fn classify_adapter_with_memory(
+        name: &str,
+        integrated_gpu: bool,
+        memory: Option<&AdapterMemoryProbe>,
+    ) -> Self {
         if integrated_gpu
             || adapter_name_suggests_apple_silicon(name)
             || adapter_name_suggests_steam_deck(name)
+            || memory.is_some_and(|m| m.has_unified_memory == Some(true))
         {
             let bandwidth_class = if adapter_name_suggests_apple_silicon(name)
                 || adapter_name_suggests_steam_deck(name)
             {
                 Some(BandwidthClass::High)
-            } else if adapter_name_suggests_sub_4gb_vram(name) {
+            } else if memory.is_some_and(|m| {
+                m.effective_discrete_vram_mib()
+                    .is_some_and(|mib| mib < AUTO_LOW_MEMORY_VRAM_THRESHOLD_MIB)
+            }) {
                 Some(BandwidthClass::Low)
             } else {
                 Some(BandwidthClass::Medium)
             };
             return Self::UnifiedMemory {
-                system_memory_mb: None,
+                system_memory_mb: memory.and_then(|m| m.shared_system_mib()),
                 bandwidth_class,
             };
         }
         Self::DedicatedVram {
-            dedicated_vram_mb: None,
+            dedicated_vram_mb: memory.and_then(|m| m.effective_discrete_vram_mib()),
         }
     }
 }
@@ -154,24 +205,37 @@ impl GraphicsMode {
 
     /// Heuristic default when the player has not chosen a preset.
     pub fn suggest_for_adapter(name: &str, integrated_gpu: bool) -> Self {
+        Self::suggest_for_adapter_with_memory(name, integrated_gpu, None)
+    }
+
+    /// Like [`Self::suggest_for_adapter`] but may use OS-reported adapter VRAM when available.
+    pub fn suggest_for_adapter_with_memory(
+        name: &str,
+        integrated_gpu: bool,
+        memory: Option<&AdapterMemoryProbe>,
+    ) -> Self {
         if let Some(mode) = Self::from_env_override() {
             return mode;
         }
         if std::env::var_os("MAHJURO_AUTO_LOW_MEMORY").is_some() {
             return Self::LowMemory;
         }
-        if adapter_name_suggests_low_vram(name) {
+        if memory.is_some_and(|m| m.suggests_low_memory_preset(integrated_gpu)) {
             return Self::LowMemory;
         }
-        let model = GraphicsMemoryModel::classify_adapter(name, integrated_gpu);
+        let model = GraphicsMemoryModel::classify_adapter_with_memory(name, integrated_gpu, memory);
         if matches!(model, GraphicsMemoryModel::UnifiedMemory { .. }) {
-            if adapter_name_suggests_sub_4gb_vram(name)
+            if integrated_gpu
                 && !adapter_name_suggests_apple_silicon(name)
                 && !adapter_name_suggests_steam_deck(name)
+                && memory.is_none()
             {
                 return Self::LowMemory;
             }
             return Self::Visuals;
+        }
+        if memory.is_none() {
+            return Self::LowMemory;
         }
         Self::Visuals
     }
@@ -180,17 +244,24 @@ impl GraphicsMode {
     ///
     /// Returns `false` when the adapter is likely below the 4 GiB support target.
     pub fn adapter_meets_minimum_support(name: &str, integrated_gpu: bool) -> bool {
-        let model = GraphicsMemoryModel::classify_adapter(name, integrated_gpu);
+        Self::adapter_meets_minimum_support_with_memory(name, integrated_gpu, None)
+    }
+
+    pub fn adapter_meets_minimum_support_with_memory(
+        name: &str,
+        integrated_gpu: bool,
+        memory: Option<&AdapterMemoryProbe>,
+    ) -> bool {
+        if let Some(mib) = memory.and_then(|m| m.effective_discrete_vram_mib()) {
+            return mib >= MIN_SUPPORTED_GPU_MEMORY_MIB;
+        }
+        let model = GraphicsMemoryModel::classify_adapter_with_memory(name, integrated_gpu, memory);
         match model {
             GraphicsMemoryModel::UnifiedMemory { .. } => {
-                if adapter_name_suggests_apple_silicon(name)
+                adapter_name_suggests_apple_silicon(name)
                     || adapter_name_suggests_steam_deck(name)
-                {
-                    return true;
-                }
-                !adapter_name_suggests_sub_4gb_vram(name)
             }
-            GraphicsMemoryModel::DedicatedVram { .. } => !adapter_name_suggests_sub_4gb_vram(name),
+            GraphicsMemoryModel::DedicatedVram { .. } => false,
             GraphicsMemoryModel::Unknown => false,
         }
     }
@@ -203,54 +274,6 @@ impl GraphicsMode {
             Self::Performance
         }
     }
-}
-
-/// Substrings that commonly appear on 4 GB (or smaller) discrete GPUs.
-fn adapter_name_suggests_low_vram(name: &str) -> bool {
-    let n = name.to_ascii_lowercase();
-    const NEEDLES: &[&str] = &[
-        "gtx 1050",
-        "gtx 1630",
-        "gtx 1650",
-        "mx150",
-        "mx250",
-        "mx330",
-        "mx350",
-        "mx450",
-        "mx550",
-        "rx 550",
-        "rx 560",
-        "rx 6400",
-        "arc a380",
-        "radeon 550",
-        "radeon 560",
-        "quadro p620",
-        "quadro p1000",
-    ];
-    NEEDLES.iter().any(|needle| n.contains(needle))
-}
-
-/// Substrings that commonly map to <4 GB parts (or unknown-low mobile bins).
-fn adapter_name_suggests_sub_4gb_vram(name: &str) -> bool {
-    let n = name.to_ascii_lowercase();
-    const NEEDLES: &[&str] = &[
-        "mx150",
-        "mx250",
-        "mx330",
-        "mx350",
-        "quadro p620",
-        "intel hd",
-        "intel uhd",
-        "intel iris",
-        "intel(r) graphics",
-        "intel graphics",
-        "radeon vega 3",
-        "radeon vega 5",
-        "radeon vega 6",
-        "radeon vega 7",
-        "radeon vega 8",
-    ];
-    NEEDLES.iter().any(|needle| n.contains(needle))
 }
 
 /// Apple M-series / SoC GPUs — unified memory, not low-VRAM discrete targets.
@@ -314,9 +337,59 @@ mod tests {
     }
 
     #[test]
-    fn adapter_name_heuristic() {
-        assert!(adapter_name_suggests_low_vram("NVIDIA GeForce GTX 1050 Ti"));
-        assert!(!adapter_name_suggests_low_vram("NVIDIA GeForce RTX 4070"));
+    fn probed_4gb_discrete_defaults_to_low_memory() {
+        let probe = AdapterMemoryProbe {
+            dedicated_vram_bytes: Some(4 * 1024 * 1024 * 1024),
+            device_local_heap_bytes: Some(4 * 1024 * 1024 * 1024),
+            shared_system_bytes: None,
+            has_unified_memory: Some(false),
+        };
+        assert!(probe.suggests_low_memory_preset(false));
+        assert_eq!(
+            GraphicsMode::suggest_for_adapter_with_memory(
+                "NVIDIA GeForce RTX 3060",
+                false,
+                Some(&probe),
+            ),
+            GraphicsMode::LowMemory,
+        );
+    }
+
+    #[test]
+    fn probed_8gb_discrete_defaults_to_visuals() {
+        let probe = AdapterMemoryProbe {
+            dedicated_vram_bytes: Some(8 * 1024 * 1024 * 1024),
+            device_local_heap_bytes: Some(8 * 1024 * 1024 * 1024),
+            shared_system_bytes: None,
+            has_unified_memory: Some(false),
+        };
+        assert!(!probe.suggests_low_memory_preset(false));
+        assert_eq!(
+            GraphicsMode::suggest_for_adapter_with_memory(
+                "NVIDIA GeForce RTX 4070",
+                false,
+                Some(&probe),
+            ),
+            GraphicsMode::Visuals,
+        );
+    }
+
+    #[test]
+    fn memory_model_records_probed_vram() {
+        let probe = AdapterMemoryProbe {
+            dedicated_vram_bytes: Some(8 * 1024 * 1024 * 1024),
+            ..Default::default()
+        };
+        assert!(matches!(
+            GraphicsMemoryModel::classify_adapter_with_memory(
+                "NVIDIA GeForce RTX 4070",
+                false,
+                Some(&probe),
+            ),
+            GraphicsMemoryModel::DedicatedVram {
+                dedicated_vram_mb: Some(8192),
+            }
+        ));
     }
 
     #[test]
@@ -331,25 +404,37 @@ mod tests {
     #[test]
     fn minimum_support_heuristic() {
         assert_eq!(MIN_SUPPORTED_GPU_MEMORY_MIB, 4096);
-        assert!(!GraphicsMode::adapter_meets_minimum_support(
+        let mx250 = AdapterMemoryProbe {
+            dedicated_vram_bytes: Some(2 * 1024 * 1024 * 1024),
+            ..Default::default()
+        };
+        assert!(!GraphicsMode::adapter_meets_minimum_support_with_memory(
             "NVIDIA GeForce MX250",
-            false
+            false,
+            Some(&mx250),
         ));
-        assert!(!GraphicsMode::adapter_meets_minimum_support(
+        let intel = AdapterMemoryProbe {
+            device_local_heap_bytes: Some(2 * 1024 * 1024 * 1024),
+            has_unified_memory: Some(true),
+            ..Default::default()
+        };
+        assert!(!GraphicsMode::adapter_meets_minimum_support_with_memory(
             "Intel Iris Xe",
-            true
-        ));
-        assert!(!GraphicsMode::adapter_meets_minimum_support(
-            "Intel(R) Graphics",
-            true
+            true,
+            Some(&intel),
         ));
         assert!(GraphicsMode::adapter_meets_minimum_support(
             "Apple M4 Max",
             true
         ));
-        assert!(GraphicsMode::adapter_meets_minimum_support(
+        let rx7900 = AdapterMemoryProbe {
+            dedicated_vram_bytes: Some(24 * 1024 * 1024 * 1024),
+            ..Default::default()
+        };
+        assert!(GraphicsMode::adapter_meets_minimum_support_with_memory(
             "AMD Radeon RX 7900 XT",
-            false
+            false,
+            Some(&rx7900),
         ));
         assert!(GraphicsMode::adapter_meets_minimum_support(
             "AMD Custom GPU 0405 (RADV VANGOGH)",

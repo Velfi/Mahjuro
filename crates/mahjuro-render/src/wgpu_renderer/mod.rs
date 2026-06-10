@@ -380,6 +380,8 @@ pub struct WgpuRenderer {
     /// Heuristic preset from adapter name / class at init (see [`Self::suggested_graphics_mode`]).
     suggested_graphics_mode: mahjuro_gfx_types::GraphicsMode,
     integrated_gpu: bool,
+    /// OS-reported adapter VRAM at startup — drives allocator pressure thresholds.
+    adapter_memory: mahjuro_gfx_types::AdapterMemoryProbe,
     /// LRU order of [`room_gpu_load`] room bits (front = most recent).
     room_gpu_lru: std::collections::VecDeque<u8>,
     /// Per-tile Y animation offset (positive = below rest position). Lerped toward 0 each frame.

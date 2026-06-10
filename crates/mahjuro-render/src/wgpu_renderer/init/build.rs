@@ -266,6 +266,7 @@ fn init_render_scale_and_depth_resources(
     target: &super::super::targets::RenderTarget,
     adapter_name: &str,
     integrated_gpu: bool,
+    adapter_memory: mahjuro_gfx_types::AdapterMemoryProbe,
     size: crate::physical_size::PhysicalSize,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
@@ -282,11 +283,22 @@ fn init_render_scale_and_depth_resources(
     ) {
         mahjuro_gfx_types::GraphicsMode::Visuals
     } else {
-        mahjuro_gfx_types::GraphicsMode::suggest_for_adapter(adapter_name, integrated_gpu)
+        mahjuro_gfx_types::GraphicsMode::suggest_for_adapter_with_memory(
+            adapter_name,
+            integrated_gpu,
+            Some(&adapter_memory),
+        )
     };
-    let memory_model =
-        mahjuro_gfx_types::GraphicsMemoryModel::classify_adapter(adapter_name, integrated_gpu);
-    if !mahjuro_gfx_types::GraphicsMode::adapter_meets_minimum_support(adapter_name, integrated_gpu)
+    let memory_model = mahjuro_gfx_types::GraphicsMemoryModel::classify_adapter_with_memory(
+        adapter_name,
+        integrated_gpu,
+        Some(&adapter_memory),
+    );
+    if !mahjuro_gfx_types::GraphicsMode::adapter_meets_minimum_support_with_memory(
+        adapter_name,
+        integrated_gpu,
+        Some(&adapter_memory),
+    )
     {
         match memory_model {
             mahjuro_gfx_types::GraphicsMemoryModel::UnifiedMemory { .. } => log::warn!(
@@ -406,6 +418,7 @@ pub(super) fn build_renderer_new(
         queue,
         adapter_name,
         integrated_gpu,
+        adapter_memory,
         size,
         target,
         config,
@@ -469,6 +482,7 @@ pub(super) fn build_renderer_new(
             &target,
             &adapter_name,
             integrated_gpu,
+            adapter_memory,
             size,
             depth_texture,
             depth_view,
@@ -1249,6 +1263,7 @@ pub(super) fn build_renderer_new(
         graphics_mode: suggested_graphics_mode,
         suggested_graphics_mode,
         integrated_gpu,
+        adapter_memory,
         room_gpu_lru: std::collections::VecDeque::new(),
         tile_anim_y: Vec::new(),
         tile_anim_x: Vec::new(),

@@ -156,6 +156,7 @@ impl WgpuRenderer {
             self.room_gpu_lru.len(),
             self.effective_room_gpu_cap(),
             self.integrated_gpu,
+            &self.adapter_memory,
         )
     }
 

@@ -1,4 +1,5 @@
 pub mod abacus_mesh;
+pub mod adapter_memory;
 pub mod animation;
 pub mod archive_glb;
 pub mod bell_tassel_mesh;

@@ -174,9 +174,7 @@ fn ensure_shop_glb_loaded() {
     let mut w = ROOM_GLB_CPU.write();
     match &*w {
         RoomGlbCache::Uninit => {}
-        RoomGlbCache::Ready(Some(cpu))
-            if room_glb_cpu_needs_environment_mesh_reload(cpu)
-                || room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
+        RoomGlbCache::Ready(Some(cpu)) if room_glb_cpu_needs_environment_mesh_reload(cpu) =>
         {
             *w = RoomGlbCache::Uninit;
         }
@@ -1168,5 +1166,35 @@ mod tests {
             !ROOM_GLB_WGSL.contains("abs(in.v_color.a - 4.0)"),
             "room_glb.wgsl should not treat COLOR_0.a as a hallway tint feature tag"
         );
+    }
+
+    #[test]
+    fn released_environment_is_stale_for_gpu_retry_not_corrupt_reload() {
+        let mut cpu = super::RoomGlbCpu {
+            packed_asset_bytes_read: 0,
+            decoded_cpu_payload_bytes: 0,
+            markers: Default::default(),
+            environment_primitives: Vec::new(),
+            environment_primitives_released: true,
+            environment_bounds_doc: Some(crate::room_env_gltf::RoomEnvironmentBounds {
+                min: glam::Vec3::ZERO,
+                max: glam::Vec3::ONE,
+            }),
+            marker_mesh_bounds_doc: Default::default(),
+            collision_meshes: Vec::new(),
+            embedded_perspective_camera: None,
+            embedded_cameras_by_name: Default::default(),
+            embedded_point_lights: Vec::new(),
+            embedded_spot_lights: Vec::new(),
+            rain_surface_meshes: Vec::new(),
+            rain_surface_merged: None,
+            node_bind_poses: Default::default(),
+            gltf_anim_library: Default::default(),
+        };
+        assert!(super::room_glb_cpu_stale_environment_for_gpu_upload(&cpu));
+        assert!(!super::room_glb_cpu_needs_environment_mesh_reload(&cpu));
+        cpu.environment_primitives_released = false;
+        assert!(super::room_glb_cpu_needs_environment_mesh_reload(&cpu));
+        assert!(!super::room_glb_cpu_stale_environment_for_gpu_upload(&cpu));
     }
 }

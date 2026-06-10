@@ -212,6 +212,7 @@ pub(super) struct EarlyGpuState {
     pub queue: wgpu::Queue,
     pub adapter_name: String,
     pub integrated_gpu: bool,
+    pub adapter_memory: mahjuro_gfx_types::AdapterMemoryProbe,
     pub size: crate::physical_size::PhysicalSize,
     pub target: RenderTarget,
     pub config: wgpu::SurfaceConfiguration,
@@ -299,6 +300,8 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         force_fallback_adapter: false,
     }))
     .map_err(|e| anyhow::anyhow!("adapter: {e:?}"))?;
+    let adapter_memory = crate::adapter_memory::probe_adapter_memory(&adapter);
+    crate::adapter_memory::log_adapter_memory_probe(&adapter_memory);
     let ai = adapter.get_info();
     log::debug!(
         "wgpu: adapter OK — '{}' ({:?}, power_pref={power_preference:?})",
@@ -456,7 +459,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         trace: wgpu::Trace::default(),
     }))
     .map_err(|e| anyhow::anyhow!("device: {e:?}"))?;
-    crate::gpu_memory_profile::log_adapter_startup(&adapter, &device);
+    crate::gpu_memory_profile::log_adapter_startup(&adapter, &device, &adapter_memory);
     log::debug!("wgpu: device + queue OK");
 
     let (target, config) = match surface_opt {
@@ -560,6 +563,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         queue,
         adapter_name: ai.name.clone(),
         integrated_gpu: ai.device_type == wgpu::DeviceType::IntegratedGpu,
+        adapter_memory,
         size,
         target,
         config,

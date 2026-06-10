@@ -701,6 +701,22 @@ impl Adapter {
     pub fn as_raw(&self) -> &Dxgi::IDXGIAdapter3 {
         &self.raw
     }
+
+    /// DXGI adapter descriptor sizes (hardware VRAM + shared system pool).
+    pub fn memory_caps(&self) -> crate::adapter_memory::AdapterMemoryCaps {
+        let desc = match unsafe { self.as_raw().GetDesc1() } {
+            Ok(d) => d,
+            Err(_) => return crate::adapter_memory::AdapterMemoryCaps::default(),
+        };
+        let dedicated = desc.DedicatedVideoMemory as u64;
+        let shared = desc.SharedSystemMemory as u64;
+        crate::adapter_memory::AdapterMemoryCaps {
+            dedicated_bytes: Some(dedicated),
+            device_local_heap_bytes: None,
+            shared_system_bytes: Some(shared),
+            has_unified_memory: Some(dedicated == 0 && shared > 0),
+        }
+    }
 }
 
 struct Event(pub Foundation::HANDLE);
