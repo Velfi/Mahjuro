@@ -17,7 +17,7 @@ struct ProbeSh {
 
 @group(0) @binding(0) var<uniform> p: ProbeGiFrameUniform;
 @group(0) @binding(1) var<storage, read> probes: array<ProbeSh>;
-@group(0) @binding(2) var depth_tex: texture_2d<f32>;
+@group(0) @binding(2) var depth_tex: texture_depth_2d;
 
 const MAX_PROBES: u32 = 256u;
 
@@ -174,7 +174,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         i32(clamp(pyf, 0.0, full_h - 1.0)),
     );
 
-    let d_c = textureLoad(depth_tex, center_px, 0).x;
+    let d_c = textureLoad(depth_tex, center_px, 0);
     if (d_c >= 0.9999) {
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }

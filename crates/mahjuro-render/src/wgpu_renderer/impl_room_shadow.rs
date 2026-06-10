@@ -385,26 +385,24 @@ impl WgpuRenderer {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.point_shadow_array.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &staging,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * width),
-                    rows_per_image: Some(height),
-                },
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
+        let layer_view = self
+            .point_shadow_array
+            .layer_views
+            .first()
+            .expect("shadow depth array has at least one layer");
+        self.encode_blit_depth_view_to_r32(
+            encoder,
+            layer_view,
+            &self.depth_r32_snapshot_view,
+            width,
+            height,
+        );
+        super::resources::copy_r32_texture_to_buffer(
+            encoder,
+            &staging,
+            &self.depth_r32_snapshot_texture,
+            width,
+            height,
         );
         RoomShadowCaptureStaging {
             buffer: staging,

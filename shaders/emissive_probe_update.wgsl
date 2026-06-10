@@ -22,7 +22,7 @@ struct ProbeSh {
 
 @group(0) @binding(0) var<uniform> p: ProbeGiFrameUniform;
 @group(0) @binding(1) var emissive_tex: texture_2d<f32>;
-@group(0) @binding(2) var depth_tex: texture_2d<f32>;
+@group(0) @binding(2) var depth_tex: texture_depth_2d;
 @group(0) @binding(3) var samp: sampler;
 @group(0) @binding(4) var<storage, read_write> probes: array<ProbeSh>;
 
@@ -77,7 +77,7 @@ fn march_emissive(origin: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
             i32(clamp(uv.x * full_w - 0.5, 0.0, full_w - 1.0)),
             i32(clamp(uv.y * full_h - 0.5, 0.0, full_h - 1.0)),
         );
-        let d_s = textureLoad(depth_tex, px, 0).x;
+        let d_s = textureLoad(depth_tex, px, 0);
         if (d_s >= 0.9999) {
             continue;
         }

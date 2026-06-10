@@ -428,7 +428,7 @@ impl WgpuRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&self.depth_r32_snapshot_view),
+                        resource: wgpu::BindingResource::TextureView(&self.depth_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
@@ -455,7 +455,7 @@ impl WgpuRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&self.depth_r32_snapshot_view),
+                        resource: wgpu::BindingResource::TextureView(&self.depth_view),
                     },
                 ],
             });

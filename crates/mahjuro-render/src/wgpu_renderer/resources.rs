@@ -906,7 +906,10 @@ pub(crate) fn create_depth_r32_snapshot(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     });
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
@@ -936,12 +939,11 @@ pub(crate) fn create_depth_copy_staging(
     })
 }
 
-/// Copy a hardware depth attachment into an R32Float snapshot via staging.
-pub(crate) fn encode_copy_depth_to_r32float(
+/// Copy an R32Float texture into a tightly packed staging buffer (4 bytes / texel).
+pub(crate) fn copy_r32_texture_to_buffer(
     encoder: &mut wgpu::CommandEncoder,
     staging: &wgpu::Buffer,
-    src_depth: &wgpu::Texture,
-    dst_r32: &wgpu::Texture,
+    src_r32: &wgpu::Texture,
     width: u32,
     height: u32,
 ) {
@@ -953,34 +955,20 @@ pub(crate) fn encode_copy_depth_to_r32float(
         height,
         depth_or_array_layers: 1,
     };
-    let buffer_layout = wgpu::TexelCopyBufferLayout {
-        offset: 0,
-        bytes_per_row: Some(bytes_per_row),
-        rows_per_image: Some(height),
-    };
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: src_depth,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::DepthOnly,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: staging,
-            layout: buffer_layout,
-        },
-        extent,
-    );
-    encoder.copy_buffer_to_texture(
-        wgpu::TexelCopyBufferInfo {
-            buffer: staging,
-            layout: buffer_layout,
-        },
-        wgpu::TexelCopyTextureInfo {
-            texture: dst_r32,
+            texture: src_r32,
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: staging,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(bytes_per_row),
+                rows_per_image: Some(height),
+            },
         },
         extent,
     );
@@ -1039,6 +1027,108 @@ pub(crate) fn write_rgba8_texture(
             .copy_from_slice(&tight_rgba[src..src + unpadded as usize]);
     }
     queue.write_texture(tex_info, &padded, layout, extent);
+}
+
+fn create_depth_to_r32_pipeline(
+    device: &wgpu::Device,
+    bind_group_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("depth-to-r32"),
+        source: wgpu::ShaderSource::Wgsl(
+            crate::wgpu_renderer::embedded_wgsl::DEPTH_TO_R32.into(),
+        ),
+    });
+    let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("depth-to-r32-pl"),
+        bind_group_layouts: &[Some(bind_group_layout)],
+        immediate_size: 0,
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("depth-to-r32-pipeline"),
+        layout: Some(&pl),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::R32Float,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+impl crate::wgpu_renderer::WgpuRenderer {
+    /// Blit a depth attachment into an R32Float target (D3D12-safe alternative to depth buffer copies).
+    pub(super) fn encode_blit_depth_view_to_r32(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        src_depth_view: &wgpu::TextureView,
+        dst_r32_view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+    ) {
+        let _width = width.max(1);
+        let _height = height.max(1);
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("depth-to-r32-bg"),
+            layout: &self.depth_to_r32_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(src_depth_view),
+            }],
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("depth-to-r32-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: dst_r32_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+            multiview_mask: None,
+        });
+        let pipeline = self.depth_to_r32_pipeline.get_or_init(|| {
+            create_depth_to_r32_pipeline(&self.device, &self.depth_to_r32_bind_group_layout)
+        });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// Publish scene depth into an R32Float snapshot for SSR history.
+    pub(super) fn encode_copy_depth_to_r32float(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        src_depth_view: &wgpu::TextureView,
+        dst_r32_view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+    ) {
+        self.encode_blit_depth_view_to_r32(encoder, src_depth_view, dst_r32_view, width, height);
+    }
 }
 
 #[cfg(test)]

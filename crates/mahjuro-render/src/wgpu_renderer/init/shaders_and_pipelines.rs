@@ -11,7 +11,24 @@ pub(super) struct ShadersAndPipelinesParams<'a> {
     pub render_size: crate::physical_size::PhysicalSize,
     pub format: wgpu::TextureFormat,
     pub ssr_prev_depth_view: &'a wgpu::TextureView,
-    pub depth_r32_snapshot_view: &'a wgpu::TextureView,
+    /// Scene depth attachment (`Depth32Float`) — GI probes + depth-to-R32 blit source.
+    pub scene_depth_view: &'a wgpu::TextureView,
+    /// Strip lacquered-wood table SSR at pipeline compile (Intel integrated DX12).
+    pub strip_lit_mesh_table_ssr: bool,
+}
+
+fn lit_mesh_pipeline_compilation_options(
+    strip_table_ssr: bool,
+) -> wgpu::PipelineCompilationOptions<'static> {
+    static STRIP_TABLE_SSR: [(&str, f64); 1] = [("LIT_MESH_TABLE_SSR", 0.0)];
+    if strip_table_ssr {
+        wgpu::PipelineCompilationOptions {
+            constants: &STRIP_TABLE_SSR,
+            zero_initialize_workgroup_memory: true,
+        }
+    } else {
+        wgpu::PipelineCompilationOptions::default()
+    }
 }
 
 pub(super) struct ShadersAndPipelinesInit {
@@ -95,6 +112,7 @@ pub(super) struct ShadersAndPipelinesInit {
     pub room_emissive_view: wgpu::TextureView,
     pub scene_color_downsample_bind_group: wgpu::BindGroup,
     pub scene_color_downsample_pipeline: wgpu::RenderPipeline,
+    pub depth_to_r32_bind_group_layout: wgpu::BindGroupLayout,
     pub scene_color_texture: wgpu::Texture,
     pub scene_color_view: wgpu::TextureView,
     pub scene_prev_texture: wgpu::Texture,
@@ -174,8 +192,15 @@ pub(super) fn init_shaders_and_pipelines(
         render_size,
         format,
         ssr_prev_depth_view,
-        depth_r32_snapshot_view,
+        scene_depth_view,
+        strip_lit_mesh_table_ssr,
     } = params;
+
+    let lit_mesh_compilation =
+        lit_mesh_pipeline_compilation_options(strip_lit_mesh_table_ssr);
+    if strip_lit_mesh_table_ssr {
+        log::info!("lit_mesh: compile-time table SSR disabled (integrated GPU DX12)");
+    }
 
     let scene_hdr_format = SCENE_HDR_FORMAT;
 
@@ -1592,6 +1617,21 @@ pub(super) fn init_shaders_and_pipelines(
         })
     };
 
+    let depth_to_r32_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("depth-to-r32-bg-layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Depth,
+                },
+                count: None,
+            }],
+        });
+
     let tile_vertex_layout = wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Vertex,
@@ -2135,7 +2175,7 @@ pub(super) fn init_shaders_and_pipelines(
         vertex: wgpu::VertexState {
             module: &lit_mesh_shader,
             entry_point: Some("vs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            compilation_options: lit_mesh_compilation.clone(),
             buffers: &[wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
                 step_mode: wgpu::VertexStepMode::Vertex,
@@ -2166,7 +2206,7 @@ pub(super) fn init_shaders_and_pipelines(
         fragment: Some(wgpu::FragmentState {
             module: &lit_mesh_shader,
             entry_point: Some("fs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            compilation_options: lit_mesh_compilation.clone(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: scene_hdr_format,
                 blend: None,
@@ -2192,7 +2232,7 @@ pub(super) fn init_shaders_and_pipelines(
             vertex: wgpu::VertexState {
                 module: &lit_mesh_shader,
                 entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: lit_mesh_compilation.clone(),
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
@@ -2223,7 +2263,7 @@ pub(super) fn init_shaders_and_pipelines(
             fragment: Some(wgpu::FragmentState {
                 module: &lit_mesh_shader,
                 entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: lit_mesh_compilation.clone(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: scene_hdr_format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -2703,7 +2743,7 @@ pub(super) fn init_shaders_and_pipelines(
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        sample_type: wgpu::TextureSampleType::Depth,
                     },
                     count: None,
                 },
@@ -2755,7 +2795,7 @@ pub(super) fn init_shaders_and_pipelines(
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        sample_type: wgpu::TextureSampleType::Depth,
                     },
                     count: None,
                 },
@@ -2820,7 +2860,7 @@ pub(super) fn init_shaders_and_pipelines(
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::TextureView(&depth_r32_snapshot_view),
+                resource: wgpu::BindingResource::TextureView(scene_depth_view),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -2846,7 +2886,7 @@ pub(super) fn init_shaders_and_pipelines(
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::TextureView(&depth_r32_snapshot_view),
+                resource: wgpu::BindingResource::TextureView(scene_depth_view),
             },
         ],
     });
@@ -3007,6 +3047,7 @@ pub(super) fn init_shaders_and_pipelines(
         room_emissive_view,
         scene_color_downsample_bind_group,
         scene_color_downsample_pipeline,
+        depth_to_r32_bind_group_layout,
         scene_color_texture,
         scene_color_view,
         scene_prev_texture,

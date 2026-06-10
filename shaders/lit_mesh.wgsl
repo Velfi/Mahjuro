@@ -23,6 +23,10 @@
 // All material variants share the candle/spot point-light loop from the tile
 // shader so the new geometry catches the same warm pools as the hand tiles.
 
+// Integrated Intel DX12 (DXC) fails compiling the lacquered-wood SSR ray-march
+// (nested loops + depth textureLoad). Cleared via pipeline constant on iGPU init.
+override LIT_MESH_TABLE_SSR: bool = true;
+
 struct MeshUniform {
     view_proj: mat4x4<f32>,
     model: mat4x4<f32>,
@@ -2629,7 +2633,7 @@ fn fs_main(
     // candle flames smear into vertical pillars pointing toward the
     // viewer. We march a reflection ray in world space against the
     // previous frame's depth + colour to capture that.
-    if (is_wood && ssr_globals.params.x > 0.5) {
+    if (LIT_MESH_TABLE_SSR && is_wood && ssr_globals.params.x > 0.5) {
         let cam_pos_ssr = ssr_globals.view_pos.xyz;
         let v_ssr = normalize(cam_pos_ssr - in.world_pos);
         let r = reflect(-v_ssr, n);

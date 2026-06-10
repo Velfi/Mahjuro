@@ -587,6 +587,7 @@ pub(super) fn build_renderer_new(
         room_emissive_view,
         scene_color_downsample_bind_group,
         scene_color_downsample_pipeline,
+        depth_to_r32_bind_group_layout,
         scene_color_texture,
         scene_color_view,
         scene_prev_texture,
@@ -664,7 +665,8 @@ pub(super) fn build_renderer_new(
                 render_size,
                 format,
                 ssr_prev_depth_view: &ssr_prev_depth_view,
-                depth_r32_snapshot_view: &depth_r32_snapshot_view,
+                scene_depth_view: &depth_view,
+                strip_lit_mesh_table_ssr: integrated_gpu,
             },
         )
     };
@@ -1139,6 +1141,8 @@ pub(super) fn build_renderer_new(
         cascade_composite_bind_group,
         scene_color_downsample_pipeline,
         scene_color_downsample_bind_group,
+        depth_to_r32_pipeline: std::sync::OnceLock::new(),
+        depth_to_r32_bind_group_layout,
         tile_pipeline_opaque_cull,
         tile_pipeline_blend_double,
         tile_pipeline_blend_cull,
