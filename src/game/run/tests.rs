@@ -1656,6 +1656,361 @@ mod cases {
         run.use_consumable(0, &mut bus);
         assert_eq!(run.global_buff_enhancement, None);
     }
+
+    #[test]
+    fn melds_for_yaku_preview_matches_pick_best_decomposition() {
+        use crate::core::hand::validate_selection;
+        use crate::core::yaku::{YakuKind, yaku_after_pool_filter};
+
+        let selected: Vec<Tile> = (0..6)
+            .map(|i| Tile::new(Suit::Souzu, 6, i))
+            .collect();
+        let mut run = test_run();
+        run.available_yaku = vec![YakuKind::Toitoi];
+        run.hand = selected.clone();
+        run.selected = vec![true; 6];
+
+        let (preview_sets, preview_effective, preview_original) =
+            run.melds_for_yaku_preview(&selected);
+
+        let (validator_sets, scoring_tiles) =
+            run.try_validate_with_wildcards(&selected).expect("valid six 6s");
+        let best_sets =
+            run.pick_best_decomposition(validator_sets, &scoring_tiles, &selected);
+        let mut expected_sets = run.structure_sets.clone();
+        expected_sets.extend(best_sets.clone());
+        assert_eq!(preview_sets, expected_sets);
+
+        let preview_yaku = yaku_after_pool_filter(
+            &preview_effective,
+            &preview_sets,
+            Some(1),
+            None,
+            Some(preview_original.as_slice()),
+            &run.available_yaku,
+        );
+        let mut commit_sets = run.structure_sets.clone();
+        commit_sets.extend(best_sets.clone());
+        let commit_yaku = yaku_after_pool_filter(
+            &preview_effective,
+            &commit_sets,
+            Some(1),
+            None,
+            Some(preview_original.as_slice()),
+            &run.available_yaku,
+        );
+        assert_eq!(preview_yaku, commit_yaku);
+
+        // When multiple splits exist, the validator's first split can miss Toitoi.
+        let naive_sets = validate_selection(&selected).expect("valid six 6s");
+        if naive_sets != best_sets && preview_yaku.contains(&YakuKind::Toitoi) {
+            let mut naive_merged = run.structure_sets.clone();
+            naive_merged.extend(naive_sets);
+            let naive_yaku = yaku_after_pool_filter(
+                &preview_effective,
+                &naive_merged,
+                Some(1),
+                None,
+                Some(preview_original.as_slice()),
+                &run.available_yaku,
+            );
+            assert!(
+                !naive_yaku.contains(&YakuKind::Toitoi),
+                "regression guard: preview must not use validator-first split"
+            );
+        }
+    }
+
+    mod yaku_preview_proptests {
+        use proptest::prelude::*;
+
+        use crate::core::hand::validate_selection;
+        use crate::core::relic::{
+            ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
+            ScoreRoundBundle, ScoreTileBundle,
+        };
+        use crate::core::rules::ChamberKind;
+        use crate::core::scoring::score_sets_with_original;
+        use crate::core::structure::StructureTriggerMeta;
+        use crate::core::tile::{Suit, Tile};
+        use crate::core::yaku::{YakuKind, yaku_after_pool_filter, yaku_preview};
+
+        use super::{test_run, DetectedMeld, RunState};
+
+        const NUMBER_SUITS: [Suit; 3] = [Suit::Manzu, Suit::Souzu, Suit::Pinzu];
+        const ALL_SUITS: [Suit; 5] = [
+            Suit::Manzu,
+            Suit::Souzu,
+            Suit::Pinzu,
+            Suit::Wind,
+            Suit::Dragon,
+        ];
+
+        fn arb_meld(id_start: u32) -> BoxedStrategy<Vec<Tile>> {
+            prop_oneof![
+                (0..5usize, 1..=9u8).prop_map(move |(si, rank)| {
+                    let suit = ALL_SUITS[si];
+                    let rank = match suit {
+                        Suit::Wind => (rank - 1) % 4 + 1,
+                        Suit::Dragon => (rank - 1) % 3 + 1,
+                        _ => rank,
+                    };
+                    vec![
+                        Tile::new(suit, rank, id_start),
+                        Tile::new(suit, rank, id_start + 1),
+                    ]
+                }),
+                (0..5usize, 1..=9u8).prop_map(move |(si, rank)| {
+                    let suit = ALL_SUITS[si];
+                    let rank = match suit {
+                        Suit::Wind => (rank - 1) % 4 + 1,
+                        Suit::Dragon => (rank - 1) % 3 + 1,
+                        _ => rank,
+                    };
+                    vec![
+                        Tile::new(suit, rank, id_start),
+                        Tile::new(suit, rank, id_start + 1),
+                        Tile::new(suit, rank, id_start + 2),
+                    ]
+                }),
+                (0..3usize, 1..=7u8).prop_map(move |(si, start)| {
+                    let suit = NUMBER_SUITS[si];
+                    vec![
+                        Tile::new(suit, start, id_start),
+                        Tile::new(suit, start + 1, id_start + 1),
+                        Tile::new(suit, start + 2, id_start + 2),
+                    ]
+                }),
+            ]
+            .boxed()
+        }
+
+        fn assign_ids(melds: Vec<Vec<Tile>>, id_start: u32) -> Vec<Tile> {
+            let mut out = Vec::new();
+            let mut id = id_start;
+            for meld in melds {
+                for t in meld {
+                    out.push(Tile::new(t.suit, t.rank, id));
+                    id += 1;
+                }
+            }
+            out
+        }
+
+        fn arb_meld_groups(min: usize, max: usize) -> BoxedStrategy<Vec<Vec<Tile>>> {
+            (min..=max)
+                .prop_flat_map(|count| {
+                    let strategies: Vec<_> = (0..count).map(|i| arb_meld(i as u32 * 4)).collect();
+                    strategies
+                })
+                .boxed()
+        }
+
+        fn arb_yaku_pool() -> BoxedStrategy<Vec<YakuKind>> {
+            Just(YakuKind::all().to_vec())
+                .prop_flat_map(|all| {
+                    all.into_iter()
+                        .map(|y| (Just(y), any::<bool>()))
+                        .collect::<Vec<_>>()
+                        .prop_map(|pairs| {
+                            pairs
+                                .into_iter()
+                                .filter_map(|(y, keep)| keep.then_some(y))
+                                .collect()
+                        })
+                })
+                .boxed()
+        }
+
+        fn arb_scenario() -> BoxedStrategy<(Vec<Tile>, Vec<Tile>, u32, Vec<YakuKind>)> {
+            (
+                arb_meld_groups(0, 3),
+                arb_meld_groups(0, 3),
+                1..=4u32,
+                arb_yaku_pool(),
+            )
+                .prop_filter("structure or selection must be non-empty", |(s, sel, _, _)| {
+                    !s.is_empty() || !sel.is_empty()
+                })
+                .prop_map(|(structure_melds, selection_melds, wing, pool)| {
+                    let structure_tiles = assign_ids(structure_melds, 0);
+                    let selection_tiles =
+                        assign_ids(selection_melds, structure_tiles.len() as u32);
+                    (structure_tiles, selection_tiles, wing, pool)
+                })
+                .boxed()
+        }
+
+        fn setup_run(
+            structure_tiles: &[Tile],
+            selection_tiles: &[Tile],
+            wing: u32,
+            pool: &[YakuKind],
+        ) -> (RunState, Vec<Tile>) {
+            let mut run = test_run();
+            run.wing = wing;
+            run.available_yaku = pool.to_vec();
+
+            if !structure_tiles.is_empty() {
+                run.structure_tiles = structure_tiles.to_vec();
+                run.structure_sets = validate_selection(structure_tiles)
+                    .expect("constructed structure melds must validate");
+            }
+
+            let selected = selection_tiles.to_vec();
+            run.hand = selected.clone();
+            run.selected = vec![selection_tiles.len() > 0; selection_tiles.len()];
+
+            (run, selected)
+        }
+
+        fn detected_yaku_for_cash_in(
+            run: &RunState,
+            scoring_tiles: &[Tile],
+            sets: &[DetectedMeld],
+            original_tiles: &[Tile],
+        ) -> Vec<YakuKind> {
+            let rw = Some(ChamberKind::round_wind_for_wing(run.wing));
+            let bonus_rw = run.bonus_round_wind_for_yaku();
+            let scoring_tile_debuffs: Vec<crate::core::debuff::TileDebuff> = Vec::new();
+            let meta = StructureTriggerMeta {
+                meld_count: sets.len() as u32,
+                inject_chicken_if_no_yaku: true,
+            };
+            let ctx = ScoreContext {
+                relic: ScoreRelicBundle {
+                    roster: &run.relics,
+                    counters: run.relic_counters.clone(),
+                },
+                tiles: ScoreTileBundle {
+                    debuffs: &scoring_tile_debuffs,
+                    hand_for_ghost: &run.hand,
+                },
+                round: ScoreRoundBundle {
+                    scored_last_turn: run.scored_last_turn,
+                    plays_used: run.round_play_cap().saturating_sub(run.plays_remaining),
+                    round_wind: rw,
+                    bonus_round_wind: bonus_rw,
+                    played_yaku_this_round: run.played_yaku_this_round.clone(),
+                    is_final_play: run.plays_remaining == 0,
+                },
+                pattern: ScorePatternBundle {
+                    dora_faces: run.wall.dora_faces(),
+                    available_yaku: run.available_yaku.clone(),
+                    yaku_levels: Some(run.yaku_levels.clone()),
+                },
+                economy: ScoreEconomyBundle {
+                    yen: run.yen,
+                    total_score: run.total_score_earned,
+                },
+                structure: Some(meta),
+            };
+            score_sets_with_original(
+                scoring_tiles,
+                sets,
+                &ctx,
+                &run.round_rules,
+                original_tiles,
+            )
+            .detected_yaku
+        }
+
+        fn preview_yaku_matching_score(
+            effective: &[Tile],
+            sets: &[DetectedMeld],
+            original: Option<&[Tile]>,
+            round_wind: Option<u8>,
+            bonus_round_wind: Option<u8>,
+            available: &[YakuKind],
+        ) -> Vec<YakuKind> {
+            let mut yaku = yaku_after_pool_filter(
+                effective,
+                sets,
+                round_wind,
+                bonus_round_wind,
+                original,
+                available,
+            );
+            // Mirror [`StructureTriggerMeta::inject_chicken_if_no_yaku`] in scoring.
+            if yaku.is_empty() && !sets.is_empty() {
+                yaku.push(YakuKind::ChickenHand);
+            }
+            yaku
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 128, ..ProptestConfig::default() })]
+
+            #[test]
+            fn yaku_preview_matches_scoring_path(
+                (structure_tiles, selection_tiles, wing, pool) in arb_scenario(),
+            ) {
+                let (run, selected) = setup_run(&structure_tiles, &selection_tiles, wing, &pool);
+                let rw = Some(ChamberKind::round_wind_for_wing(run.wing));
+                let bonus_rw = run.bonus_round_wind_for_yaku();
+
+                let (preview_sets, preview_effective, preview_original) =
+                    run.melds_for_yaku_preview(&selected);
+
+                let preview_yaku = preview_yaku_matching_score(
+                    &preview_effective,
+                    &preview_sets,
+                    Some(preview_original.as_slice()),
+                    rw,
+                    bonus_rw,
+                    &run.available_yaku,
+                );
+                let score_yaku = detected_yaku_for_cash_in(
+                    &run,
+                    &preview_effective,
+                    &preview_sets,
+                    preview_original.as_slice(),
+                );
+                prop_assert_eq!(
+                    preview_yaku.clone(),
+                    score_yaku,
+                    "yaku_after_pool_filter must match score_sets detected_yaku"
+                );
+
+                let ui_previews = yaku_preview(
+                    &preview_original,
+                    &run.available_yaku,
+                    rw,
+                    bonus_rw,
+                    Some((preview_sets.as_slice(), preview_effective.as_slice())),
+                );
+                for preview in ui_previews
+                    .iter()
+                    .filter(|p| p.kind != YakuKind::ChickenHand)
+                {
+                    let active_in_filter = preview_yaku.iter().any(|y| *y == preview.kind);
+                    prop_assert_eq!(
+                        preview.active,
+                        active_in_filter,
+                        "{:?} active flag mismatch for pool {:?}",
+                        preview.kind,
+                        run.available_yaku,
+                    );
+                }
+
+                if selected.is_empty() {
+                    prop_assert_eq!(preview_sets, run.structure_sets);
+                    prop_assert_eq!(preview_effective, run.structure_tiles);
+                } else if let Some((validator_sets, scoring_tiles)) =
+                    run.try_validate_with_wildcards(&selected)
+                {
+                    let best_sets =
+                        run.pick_best_decomposition(validator_sets, &scoring_tiles, &selected);
+                    let mut expected_sets = run.structure_sets.clone();
+                    expected_sets.extend(best_sets);
+                    prop_assert_eq!(
+                        preview_sets, expected_sets,
+                        "preview melds must match committed structure + pick_best(selection)"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

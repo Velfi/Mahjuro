@@ -1670,45 +1670,6 @@ pub(super) fn structure_strip_callout_anchor(
     })
 }
 
-/// When structure and rack (or selection) together form a complete winning hand,
-/// return the decomposition used for yaku tablets. Tries relic-aware validation
-/// first, then the same best-decomposition picker scoring uses on 14-tile hands.
-fn combined_complete_hand_preview(
-    run: &crate::game::run::RunState,
-    structure_tiles: &[crate::core::tile::Tile],
-    extra_tiles: &[crate::core::tile::Tile],
-    round_wind: Option<u8>,
-    bonus_round_wind: Option<u8>,
-) -> Option<(
-    Vec<crate::core::hand::DetectedMeld>,
-    Vec<crate::core::tile::Tile>,
-    Vec<crate::core::tile::Tile>,
-)> {
-    use crate::core::yaku::{detect_yaku_best_decomposition, is_complete_winning_hand};
-
-    let mut combined: Vec<crate::core::tile::Tile> = structure_tiles.iter().copied().collect();
-    combined.extend(extra_tiles.iter().copied());
-    if combined.is_empty() {
-        return None;
-    }
-
-    if let Some((sets, scoring_tiles)) = GameEngine::validate_with_wildcards(run, &combined)
-        && is_complete_winning_hand(&scoring_tiles, &sets)
-    {
-        return Some((sets, scoring_tiles, combined));
-    }
-
-    let rules = run.validation_rules_for_structure_commits();
-    if let Some((sets, _)) =
-        detect_yaku_best_decomposition(&combined, &rules, round_wind, bonus_round_wind, None)
-        && is_complete_winning_hand(&combined, &sets)
-    {
-        return Some((sets, combined.clone(), combined));
-    }
-
-    None
-}
-
 /// Build the yaku progress panel (previews, structure showcase tiles) and yaku tablets.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_yaku_panel_and_tablets(
@@ -1742,66 +1703,23 @@ pub(super) fn build_yaku_panel_and_tablets(
         .collect();
     let round_wind_for_yaku = Some(gameplay.round_wind_rank);
     let bonus_round_wind_for_yaku = run.bonus_round_wind_for_yaku();
-    let wildcard_result = if selected_tiles_for_yaku.is_empty() {
-        None
-    } else {
-        GameEngine::validate_with_wildcards(run, &selected_tiles_for_yaku)
-    };
-    let mut yaku_preview_original_tiles: Vec<crate::core::tile::Tile> = Vec::new();
-    let mut yaku_preview_effective_tiles: Vec<crate::core::tile::Tile> = Vec::new();
-    let mut yaku_preview_sets: Vec<crate::core::hand::DetectedMeld> = Vec::new();
 
-    // Cash-in clears live structure immediately; keep the scored melds for
-    // yaku tablets until the scoring cascade finishes.
-    let (base_structure_tiles, base_structure_sets) = if let Some(showcase) = cascade_showcase_ref {
-        (showcase.tiles.clone(), showcase.sets.clone())
-    } else {
-        (
-            GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run),
-            gameplay.structure_sets.clone(),
-        )
-    };
-
-    if selected_tiles_for_yaku.is_empty() {
-        if let Some((sets, scoring_tiles, combined)) = combined_complete_hand_preview(
-            run,
-            run.structure_tiles(),
-            interaction.hand.as_slice(),
-            round_wind_for_yaku,
-            bonus_round_wind_for_yaku,
-        ) {
-            yaku_preview_original_tiles = GameplayScene::display_tiles(combined, run);
-            yaku_preview_effective_tiles = GameplayScene::display_tiles(scoring_tiles, run);
-            yaku_preview_sets = sets;
+    let (yaku_preview_sets, yaku_preview_effective_tiles, yaku_preview_original_tiles) =
+        if let Some(showcase) = cascade_showcase_ref {
+            (
+                showcase.sets.clone(),
+                showcase.tiles.clone(),
+                showcase.tiles.clone(),
+            )
         } else {
-            yaku_preview_original_tiles = base_structure_tiles.clone();
-            yaku_preview_effective_tiles = base_structure_tiles;
-            yaku_preview_sets = base_structure_sets;
-        }
-    } else if let Some((sets, scoring_tiles, combined)) = combined_complete_hand_preview(
-        run,
-        run.structure_tiles(),
-        &selected_tiles_for_yaku,
-        round_wind_for_yaku,
-        bonus_round_wind_for_yaku,
-    ) {
-        yaku_preview_original_tiles = GameplayScene::display_tiles(combined, run);
-        yaku_preview_effective_tiles = GameplayScene::display_tiles(scoring_tiles, run);
-        yaku_preview_sets = sets;
-    } else if let Some((selected_sets, selected_scoring_tiles)) = wildcard_result.as_ref() {
-        yaku_preview_original_tiles = base_structure_tiles.clone();
-        yaku_preview_original_tiles.extend(GameplayScene::display_tiles(
-            selected_tiles_for_yaku.iter().copied(),
-            run,
-        ));
-        yaku_preview_effective_tiles = base_structure_tiles;
-        yaku_preview_effective_tiles.extend(GameplayScene::display_tiles(
-            selected_scoring_tiles.iter().copied(),
-            run,
-        ));
-        yaku_preview_sets = base_structure_sets;
-        yaku_preview_sets.extend(selected_sets.iter().cloned());
-    }
+            let (sets, scoring, original) =
+                run.melds_for_yaku_preview(&selected_tiles_for_yaku);
+            (
+                sets,
+                GameplayScene::display_tiles(scoring.iter().copied(), run),
+                GameplayScene::display_tiles(original.iter().copied(), run),
+            )
+        };
 
     let previews = if yaku_preview_sets.is_empty() {
         Vec::new()
