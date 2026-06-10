@@ -373,12 +373,12 @@ fn structure_commit_fits(
     scoring_tile_count: usize,
     new_sets: &[crate::core::hand::DetectedMeld],
 ) -> bool {
-    let kongs_after = run
-        .structure_sets()
-        .iter()
-        .chain(new_sets.iter())
-        .filter(|s| s.kind == MeldKind::Kong)
-        .count();
+    use crate::core::hand::kong_structure_bonus;
+    let kongs_after = kong_structure_bonus(
+        run.structure_sets()
+            .iter()
+            .chain(new_sets.iter()),
+    );
     run.structure_tiles().len() + scoring_tile_count <= HAND_SIZE + kongs_after
 }
 
@@ -1339,12 +1339,11 @@ mod tests {
             let Some((sets, scoring_tiles)) = run.try_validate_with_wildcards(&tiles) else {
                 continue;
             };
-            let kongs_after = run
-                .structure_sets()
-                .iter()
-                .chain(sets.iter())
-                .filter(|s| s.kind == MeldKind::Kong)
-                .count();
+            let kongs_after = crate::core::hand::kong_structure_bonus(
+                run.structure_sets()
+                    .iter()
+                    .chain(sets.iter()),
+            );
             if run.structure_tiles().len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
                 continue;
             }

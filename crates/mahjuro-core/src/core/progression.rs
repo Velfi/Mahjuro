@@ -760,6 +760,9 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::DoraCrown,
                 RelicId::HonorFury,
                 RelicId::WhiteDragonsHush,
+                RelicId::BlueTilesWhiteDragon,
+                RelicId::GreenTilesGreenDragon,
+                RelicId::RedTilesRedDragon,
                 RelicId::DragonRage,
                 RelicId::StrengthInNumbers,
                 RelicId::WallWeaver,
@@ -772,6 +775,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
         7 => LevelUnlocks {
             relics: vec![
                 RelicId::KongCollector,
+                RelicId::KingKong,
                 RelicId::BeggarsCup,
                 RelicId::Cosmopolitan,
                 RelicId::Heirloom,

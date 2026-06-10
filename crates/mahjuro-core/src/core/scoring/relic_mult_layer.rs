@@ -4,9 +4,9 @@
 //! Keeping this in one module makes the main pipeline easier to read and gives a
 //! single place to audit "post-yaku" balance.
 
-use crate::core::hand::MeldKind;
+use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::relic::{RelicId, TURTLE_SHELL_CHIPS};
-use crate::core::tile::Suit;
+use crate::core::tile::{Suit, Tile};
 
 use super::layer_input::{PostYakuRelicLayerOpts, ScoringLayerInput, ScoringLayerOut};
 use super::push_steps::{push_chips, push_mult};
@@ -14,6 +14,23 @@ use super::tea_bonus::{
     tea_harmony_chips, tea_purity_mult, tea_respect_chips, tea_tranquility_chips,
 };
 use super::{tile_by_id, tile_is_debuffed};
+
+fn meld_all_tiles_match(s: &DetectedMeld, tiles: &[Tile], pred: impl Fn(&Tile) -> bool) -> bool {
+    !s.tile_ids.is_empty()
+        && s.tile_ids.iter().all(|&tid| {
+            tile_by_id(tiles, tid).is_some_and(|t| pred(t))
+        })
+}
+
+fn structure_has_suit_meld(sets: &[DetectedMeld], tiles: &[Tile], suit: Suit) -> bool {
+    sets.iter().any(|s| meld_all_tiles_match(s, tiles, |t| t.suit == suit))
+}
+
+fn structure_has_dragon_meld(sets: &[DetectedMeld], tiles: &[Tile], rank: u8) -> bool {
+    sets.iter().any(|s| {
+        meld_all_tiles_match(s, tiles, |t| t.suit == Suit::Dragon && t.rank == rank)
+    })
+}
 
 pub(crate) fn apply_post_yaku_relic_modifiers(
     input: &ScoringLayerInput<'_>,
@@ -247,6 +264,27 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         let seq_count = sets.iter().filter(|s| s.kind == MeldKind::Sequence).count();
         if seq_count >= 3 {
             push_mult(steps, *chips, mult, "Chow Line", 4.0);
+        }
+    }
+
+    if ctx.structure.is_some() {
+        if has(RelicId::BlueTilesWhiteDragon)
+            && structure_has_suit_meld(sets, tiles, Suit::Pinzu)
+            && structure_has_dragon_meld(sets, tiles, 3)
+        {
+            push_mult(steps, *chips, mult, "Blue Tiles White Dragon", 6.0);
+        }
+        if has(RelicId::GreenTilesGreenDragon)
+            && structure_has_suit_meld(sets, tiles, Suit::Souzu)
+            && structure_has_dragon_meld(sets, tiles, 2)
+        {
+            push_mult(steps, *chips, mult, "Green Tiles Green Dragon", 6.0);
+        }
+        if has(RelicId::RedTilesRedDragon)
+            && structure_has_suit_meld(sets, tiles, Suit::Manzu)
+            && structure_has_dragon_meld(sets, tiles, 1)
+        {
+            push_mult(steps, *chips, mult, "Red Tiles Red Dragon", 6.0);
         }
     }
 

@@ -27,6 +27,27 @@ fn face_groups(tiles: &[Tile]) -> FxHashMap<(Suit, u8), Vec<u32>> {
     m
 }
 
+fn same_face_prefix_len(remaining: &[Tile]) -> usize {
+    if remaining.is_empty() {
+        return 0;
+    }
+    let first = &remaining[0];
+    remaining
+        .iter()
+        .take_while(|t| t.suit == first.suit && t.rank == first.rank)
+        .count()
+}
+
+fn kong_tile_counts_to_try(run_len: usize, allow_five_tile_kong: bool) -> [usize; 2] {
+    if allow_five_tile_kong && run_len >= 5 {
+        [5, 4]
+    } else if run_len >= 4 {
+        [4, 0]
+    } else {
+        [0, 0]
+    }
+}
+
 /// Find pairs, triplets, and kongs from multiset counts. A face with 4+ copies
 /// emits a kong (preferred) before falling back to triplet/pair leftovers.
 pub fn find_pairs_and_triplets(tiles: &[Tile]) -> Vec<DetectedMeld> {
@@ -132,6 +153,7 @@ pub fn enumerate_decompositions(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<V
     let allow_wrap = rules.contains(&RuleModifier::SequenceWrap);
     let no_sequences = rules.contains(&RuleModifier::NoSequences);
     let require_honor = rules.contains(&RuleModifier::RequireHonor);
+    let allow_five_tile_kong = rules.contains(&RuleModifier::FiveTileKong);
 
     let mut all: Vec<Vec<DetectedMeld>> = Vec::new();
     let mut seen: FxHashSet<DecompositionKey> = FxHashSet::default();
@@ -171,6 +193,7 @@ pub fn enumerate_decompositions(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<V
             &mut wildcards,
             &mut prefix,
             allow_wrap,
+            allow_five_tile_kong,
             &mut |sets: &[DetectedMeld]| {
                 if no_sequences && sets.iter().any(|s| s.kind == MeldKind::Sequence) {
                     return;
@@ -225,6 +248,7 @@ fn collect_decompositions(
     flower_pool: &mut Vec<u32>,
     found: &mut Vec<DetectedMeld>,
     allow_wrap: bool,
+    allow_five_tile_kong: bool,
     on_found: &mut dyn FnMut(&[DetectedMeld]),
 ) {
     if remaining.is_empty() {
@@ -235,26 +259,17 @@ fn collect_decompositions(
     }
     let first = remaining[0];
 
-    // Kong (4 of a kind).
-    if remaining.len() >= 4
-        && remaining[1].suit == first.suit
-        && remaining[1].rank == first.rank
-        && remaining[2].suit == first.suit
-        && remaining[2].rank == first.rank
-        && remaining[3].suit == first.suit
-        && remaining[3].rank == first.rank
-    {
+    let run_len = same_face_prefix_len(remaining);
+    for count in kong_tile_counts_to_try(run_len, allow_five_tile_kong) {
+        if count == 0 {
+            break;
+        }
         found.push(DetectedMeld {
             kind: MeldKind::Kong,
-            tile_ids: vec![
-                remaining[0].id,
-                remaining[1].id,
-                remaining[2].id,
-                remaining[3].id,
-            ],
+            tile_ids: remaining[..count].iter().map(|t| t.id).collect(),
         });
-        let rest: Vec<Tile> = remaining[4..].to_vec();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        let rest: Vec<Tile> = remaining[count..].to_vec();
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
         found.pop();
     }
 
@@ -270,13 +285,21 @@ fn collect_decompositions(
             tile_ids: vec![remaining[0].id, remaining[1].id, remaining[2].id],
         });
         let rest: Vec<Tile> = remaining[3..].to_vec();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
         found.pop();
     }
 
     // Sequence.
     if first.is_number_tile() && remaining.len() >= 3 {
-        collect_sequence(remaining, flower_pool, found, allow_wrap, &first, on_found);
+        collect_sequence(
+            remaining,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            &first,
+            on_found,
+        );
     }
 
     // Pair.
@@ -286,7 +309,7 @@ fn collect_decompositions(
             tile_ids: vec![remaining[0].id, remaining[1].id],
         });
         let rest: Vec<Tile> = remaining[2..].to_vec();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
         found.pop();
     }
 
@@ -302,7 +325,7 @@ fn collect_decompositions(
                 tile_ids: vec![remaining[0].id, remaining[1].id, fid],
             });
             let rest: Vec<Tile> = remaining[2..].to_vec();
-            collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+            collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
             found.pop();
             flower_pool.push(fid);
         }
@@ -312,6 +335,7 @@ fn collect_decompositions(
                 flower_pool,
                 found,
                 allow_wrap,
+                allow_five_tile_kong,
                 &first,
                 on_found,
             );
@@ -324,6 +348,7 @@ fn collect_sequence(
     flower_pool: &mut Vec<u32>,
     found: &mut Vec<DetectedMeld>,
     allow_wrap: bool,
+    allow_five_tile_kong: bool,
     first: &Tile,
     on_found: &mut dyn FnMut(&[DetectedMeld]),
 ) {
@@ -347,12 +372,20 @@ fn collect_sequence(
                 .enumerate()
                 .filter_map(|(i, t)| (i != 0 && i != mid_idx && i != hi_idx).then_some(*t))
                 .collect();
-            collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+            collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
             found.pop();
         }
     }
     if allow_wrap {
-        collect_wrap_sequence(remaining, flower_pool, found, allow_wrap, first, on_found);
+        collect_wrap_sequence(
+            remaining,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            first,
+            on_found,
+        );
     }
 }
 
@@ -361,6 +394,7 @@ fn collect_wrap_sequence(
     flower_pool: &mut Vec<u32>,
     found: &mut Vec<DetectedMeld>,
     allow_wrap: bool,
+    allow_five_tile_kong: bool,
     first: &Tile,
     on_found: &mut dyn FnMut(&[DetectedMeld]),
 ) {
@@ -397,7 +431,7 @@ fn collect_wrap_sequence(
                     .enumerate()
                     .filter_map(|(i, t)| (i != 0 && i != mid_idx && i != hi_idx).then_some(*t))
                     .collect();
-                collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+                collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
                 found.pop();
             }
         }
@@ -409,6 +443,7 @@ fn collect_sequence_with_flower(
     flower_pool: &mut Vec<u32>,
     found: &mut Vec<DetectedMeld>,
     allow_wrap: bool,
+    allow_five_tile_kong: bool,
     first: &Tile,
     on_found: &mut dyn FnMut(&[DetectedMeld]),
 ) {
@@ -428,7 +463,7 @@ fn collect_sequence_with_flower(
             .enumerate()
             .filter_map(|(i, t)| (i != 0 && i != mid_idx).then_some(*t))
             .collect();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
         found.pop();
         flower_pool.push(fid);
     }
@@ -448,7 +483,7 @@ fn collect_sequence_with_flower(
             .enumerate()
             .filter_map(|(i, t)| (i != 0 && i != hi_idx).then_some(*t))
             .collect();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
         found.pop();
         flower_pool.push(fid);
     }
@@ -469,13 +504,21 @@ fn collect_sequence_with_flower(
             .enumerate()
             .filter_map(|(i, t)| (i != 0 && i != next_idx).then_some(*t))
             .collect();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
         found.pop();
         flower_pool.push(fid);
     }
     // Wrapping sequences (8-9-1, 9-1-2) with a flower filling one missing rank.
     if allow_wrap {
-        collect_wrap_sequence_with_flower(remaining, flower_pool, found, allow_wrap, first, on_found);
+        collect_wrap_sequence_with_flower(
+            remaining,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            first,
+            on_found,
+        );
     }
 }
 
@@ -484,6 +527,7 @@ fn collect_wrap_sequence_with_flower(
     flower_pool: &mut Vec<u32>,
     found: &mut Vec<DetectedMeld>,
     allow_wrap: bool,
+    allow_five_tile_kong: bool,
     first: &Tile,
     on_found: &mut dyn FnMut(&[DetectedMeld]),
 ) {
@@ -505,7 +549,7 @@ fn collect_wrap_sequence_with_flower(
             .enumerate()
             .filter_map(|(i, t)| (i != 0 && i != present_idx).then_some(*t))
             .collect();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
         found.pop();
         flower_pool.push(fid);
     }
@@ -676,6 +720,7 @@ pub(super) fn backtrack_decompose_flowers(
     flower_pool: &mut Vec<u32>,
     found: &mut Vec<DetectedMeld>,
     allow_wrap: bool,
+    allow_five_tile_kong: bool,
 ) -> bool {
     if remaining.is_empty() {
         // All selected flowers must be consumed — the player chose to include them.
@@ -685,27 +730,17 @@ pub(super) fn backtrack_decompose_flowers(
 
     // ── Normal melds (no flower) ───────────────────────────────────────
 
-    // Try kong (4 of a kind).
-    if remaining.len() >= 4
-        && remaining[1].suit == first.suit
-        && remaining[1].rank == first.rank
-        && remaining[2].suit == first.suit
-        && remaining[2].rank == first.rank
-        && remaining[3].suit == first.suit
-        && remaining[3].rank == first.rank
-    {
-        let set = DetectedMeld {
+    let run_len = same_face_prefix_len(remaining);
+    for count in kong_tile_counts_to_try(run_len, allow_five_tile_kong) {
+        if count == 0 {
+            break;
+        }
+        found.push(DetectedMeld {
             kind: MeldKind::Kong,
-            tile_ids: vec![
-                remaining[0].id,
-                remaining[1].id,
-                remaining[2].id,
-                remaining[3].id,
-            ],
-        };
-        found.push(set);
-        let rest: Vec<Tile> = remaining[4..].to_vec();
-        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+            tile_ids: remaining[..count].iter().map(|t| t.id).collect(),
+        });
+        let rest: Vec<Tile> = remaining[count..].to_vec();
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
             return true;
         }
         found.pop();
@@ -724,7 +759,7 @@ pub(super) fn backtrack_decompose_flowers(
         };
         found.push(set);
         let rest: Vec<Tile> = remaining[3..].to_vec();
-        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
             return true;
         }
         found.pop();
@@ -733,7 +768,14 @@ pub(super) fn backtrack_decompose_flowers(
     // Try sequence: first + (rank+1 same suit) + (rank+2 same suit).
     if first.is_number_tile()
         && remaining.len() >= 3
-        && try_sequence(remaining, flower_pool, found, allow_wrap, first)
+        && try_sequence(
+            remaining,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            first,
+        )
     {
         return true;
     }
@@ -746,7 +788,7 @@ pub(super) fn backtrack_decompose_flowers(
         };
         found.push(set);
         let rest: Vec<Tile> = remaining[2..].to_vec();
-        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
             return true;
         }
         found.pop();
@@ -769,7 +811,7 @@ pub(super) fn backtrack_decompose_flowers(
             };
             found.push(set);
             let rest: Vec<Tile> = remaining[2..].to_vec();
-            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
                 return true;
             }
             found.pop();
@@ -779,7 +821,14 @@ pub(super) fn backtrack_decompose_flowers(
         // Sequence with flower filling one gap.
         if first.is_number_tile()
             && remaining.len() >= 2
-            && try_sequence_with_flower(remaining, flower_pool, found, allow_wrap, first)
+            && try_sequence_with_flower(
+                remaining,
+                flower_pool,
+                found,
+                allow_wrap,
+                allow_five_tile_kong,
+                first,
+            )
         {
             return true;
         }
@@ -794,6 +843,7 @@ fn try_sequence(
     flower_pool: &mut Vec<u32>,
     found: &mut Vec<DetectedMeld>,
     allow_wrap: bool,
+    allow_five_tile_kong: bool,
     first: &Tile,
 ) -> bool {
     let mid = remaining[1..]
@@ -818,7 +868,7 @@ fn try_sequence(
                     rest.push(*t);
                 }
             }
-            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
                 return true;
             }
             found.pop();
@@ -826,7 +876,16 @@ fn try_sequence(
     }
 
     // Wrapping sequences (8-9-1, 9-1-2).
-    if allow_wrap && try_wrap_sequence(remaining, flower_pool, found, allow_wrap, first) {
+    if allow_wrap
+        && try_wrap_sequence(
+            remaining,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            first,
+        )
+    {
         return true;
     }
     false
@@ -838,6 +897,7 @@ fn try_wrap_sequence(
     flower_pool: &mut Vec<u32>,
     found: &mut Vec<DetectedMeld>,
     allow_wrap: bool,
+    allow_five_tile_kong: bool,
     first: &Tile,
 ) -> bool {
     let wrap_patterns: &[[u8; 3]] = match first.rank {
@@ -876,7 +936,7 @@ fn try_wrap_sequence(
                         rest.push(*t);
                     }
                 }
-                if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+                if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
                     return true;
                 }
                 found.pop();
@@ -893,6 +953,7 @@ fn try_sequence_with_flower(
     flower_pool: &mut Vec<u32>,
     found: &mut Vec<DetectedMeld>,
     allow_wrap: bool,
+    allow_five_tile_kong: bool,
     first: &Tile,
 ) -> bool {
     // Case 1: have first and first+1 in hand, flower fills first+2
@@ -916,7 +977,7 @@ fn try_sequence_with_flower(
                     rest.push(*t);
                 }
             }
-            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
                 return true;
             }
             found.pop();
@@ -945,7 +1006,7 @@ fn try_sequence_with_flower(
                     rest.push(*t);
                 }
             }
-            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
                 return true;
             }
             found.pop();
@@ -976,7 +1037,7 @@ fn try_sequence_with_flower(
                     rest.push(*t);
                 }
             }
-            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
                 return true;
             }
             found.pop();
@@ -986,7 +1047,14 @@ fn try_sequence_with_flower(
 
     // Wrapping sequences (8-9-1, 9-1-2) with a flower filling one missing rank.
     if allow_wrap
-        && try_wrap_sequence_with_flower(remaining, flower_pool, found, allow_wrap, first)
+        && try_wrap_sequence_with_flower(
+            remaining,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            first,
+        )
     {
         return true;
     }
@@ -1002,6 +1070,7 @@ fn try_wrap_sequence_with_flower(
     flower_pool: &mut Vec<u32>,
     found: &mut Vec<DetectedMeld>,
     allow_wrap: bool,
+    allow_five_tile_kong: bool,
     first: &Tile,
 ) -> bool {
     for [present_rank, _flower_rank] in wrap_flower_partner_ranks(first.rank) {
@@ -1026,7 +1095,7 @@ fn try_wrap_sequence_with_flower(
                 rest.push(*t);
             }
         }
-        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
             return true;
         }
         found.pop();

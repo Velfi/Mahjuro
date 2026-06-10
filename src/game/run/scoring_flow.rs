@@ -3,7 +3,7 @@ use crate::{
     OrdealKindExt,
     core::{
         debuff::TileDebuff,
-        hand::{DetectedMeld, MeldKind, enumerate_decompositions},
+        hand::{DetectedMeld, MeldKind, enumerate_decompositions, kong_structure_bonus},
         hand_intent::{decomposition_affinity, infer_decomposition_bias},
         ordeal::{self, OrdealKind},
         relic::{
@@ -62,12 +62,11 @@ impl RunState {
         self.tiles_played = self.tiles_played.saturating_add(scoring_tiles.len() as u32);
 
         let current_tile_count = self.structure_tiles.len();
-        let kongs_after = self
-            .structure_sets
-            .iter()
-            .chain(sets.iter())
-            .filter(|s| s.kind == MeldKind::Kong)
-            .count();
+        let kongs_after = kong_structure_bonus(
+            self.structure_sets
+                .iter()
+                .chain(sets.iter()),
+        );
         if current_tile_count + scoring_tiles.len() > HAND_SIZE + kongs_after {
             bus.push(GameEvent::InvalidAction);
             return 0;
@@ -873,13 +872,10 @@ impl RunState {
         scoring_tiles: &[Tile],
         original_tiles: &[Tile],
     ) -> Vec<DetectedMeld> {
-        // A full hand has 14 + kong_count tiles (kongs use 4 tiles each).
-        let kongs = default_sets
-            .iter()
-            .filter(|s| s.kind == MeldKind::Kong)
-            .count();
+        // A full hand has 14 tiles plus each kong's excess over a triplet (4→+1, 5→+2).
+        let kong_bonus = kong_structure_bonus(default_sets.iter());
         let is_full_hand =
-            scoring_tiles.len() >= HAND_SIZE && scoring_tiles.len() == HAND_SIZE + kongs;
+            scoring_tiles.len() >= HAND_SIZE && scoring_tiles.len() == HAND_SIZE + kong_bonus;
         let bias = infer_decomposition_bias(&self.hand);
         let rules = self.validation_rules_for_structure_commits();
         let alternatives = enumerate_decompositions(scoring_tiles, &rules);
@@ -1008,11 +1004,16 @@ impl RunState {
     /// Rules used when validating a selection before committing it to the structure
     /// (differs from [`RunState::round_rules`] e.g. honor-gated tutorial modifiers).
     pub fn validation_rules_for_structure_commits(&self) -> Vec<RuleModifier> {
-        self.round_rules
+        let mut rules: Vec<RuleModifier> = self
+            .round_rules
             .iter()
             .copied()
             .filter(|rule| *rule != RuleModifier::RequireHonor)
-            .collect()
+            .collect();
+        if self.relics.has(RelicId::KingKong) {
+            rules.push(RuleModifier::FiveTileKong);
+        }
+        rules
     }
 
     fn has_any_committable_play(&self) -> bool {
@@ -1032,12 +1033,11 @@ impl RunState {
                 continue;
             };
 
-            let kongs_after = self
-                .structure_sets
-                .iter()
-                .chain(new_sets.iter())
-                .filter(|s| s.kind == MeldKind::Kong)
-                .count();
+            let kongs_after = kong_structure_bonus(
+                self.structure_sets
+                    .iter()
+                    .chain(new_sets.iter()),
+            );
             if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
                 continue;
             }

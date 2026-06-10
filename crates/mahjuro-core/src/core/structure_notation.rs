@@ -182,7 +182,7 @@ fn infer_meld_kind(faces: &[Face]) -> Result<MeldKind, StructureNotationError> {
                 Ok(MeldKind::Triplet)
             }
         }
-        4 => {
+        4 | 5 => {
             if faces.windows(2).all(|w| w[0] == w[1]) {
                 Ok(MeldKind::Kong)
             } else {
@@ -193,7 +193,7 @@ fn infer_meld_kind(faces: &[Face]) -> Result<MeldKind, StructureNotationError> {
             }
         }
         n => Err(StructureNotationError(format!(
-            "expected 2–4 tiles per token, got {n}"
+            "expected 2–5 tiles per token, got {n}"
         ))),
     }
 }
