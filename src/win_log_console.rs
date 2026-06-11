@@ -2,6 +2,9 @@
 //! "windows"`), so stderr is discarded unless we attach to the launching console
 //! or redirect logs to a file.
 
+#[cfg(all(windows, not(debug_assertions)))]
+use std::io::LineWriter;
+
 /// When `RUST_LOG` is set on a Windows release build, try to attach to the parent
 /// console and return a writer for it. Otherwise return a default log path under
 /// the Mahjuro data directory.
@@ -37,5 +40,7 @@ pub fn prepare_rust_log_output() -> RustLogOutput {
 
 pub enum RustLogOutput {
     None,
+    #[cfg(all(windows, not(debug_assertions)))]
+    Console(LineWriter<std::fs::File>),
     File(std::path::PathBuf),
 }

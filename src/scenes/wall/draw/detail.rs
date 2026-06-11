@@ -53,7 +53,7 @@ pub fn draw_wall_detail_panel(
         TextAlign::Left,
     );
 
-    let preview_size = (rect[2] * 0.33).min(rect[3] * 0.44).clamp(56.0, 112.0);
+    let preview_size = (rect[2] * 0.36).min(rect[3] * 0.52).clamp(64.0, 136.0);
     let preview_rect = [
         rect[0] + pad,
         rect[1] + header_line + 10.0,
