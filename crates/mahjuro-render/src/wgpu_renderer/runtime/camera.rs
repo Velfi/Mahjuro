@@ -158,21 +158,18 @@ impl CameraFrame {
 }
 
 impl WgpuRenderer {
-    /// Per-frame embedded glTF punctual intensity for `tile_3d` (not `lit_mesh` `extras.w`).
+    /// Kept for tile uniform layout compatibility. Embedded glTF punctual intensity is already
+    /// baked into the shared scene light buffer, so tiles use the same receiver gain as room GLB
+    /// and lit_mesh.
     pub(super) fn tile_punctual_tuning(&self, frame: &crate::draw_cmd::UiFrame) -> [f32; 4] {
         self.tile_punctual_tuning_for(frame.foreground_scene_lighting())
     }
 
     pub(super) fn tile_punctual_tuning_for(
         &self,
-        lighting: &crate::draw_cmd::SceneLighting,
+        _lighting: &crate::draw_cmd::SceneLighting,
     ) -> [f32; 4] {
-        let scale = if lighting.embedded_gltf_punctual {
-            self.active_frame_env().tile_gltf_punctual_scale
-        } else {
-            1.0
-        };
-        [scale, 0.0, 0.0, 0.0]
+        [1.0, 0.0, 0.0, 0.0]
     }
 
     pub(super) fn room_punctual_inv_doc_scale(&self, cam: &CameraFrame, enabled: bool) -> f32 {
@@ -281,20 +278,10 @@ impl WgpuRenderer {
         } else {
             0.0
         };
-        let (shop_cat_amb, _shop_cat_shadow_floor) = if shop_punctual_display_case > 0.5 {
-            (crate::lit_mesh::shop_catalog_balance::AMBIENT_MUL, 0.0)
+        let shop_cat_amb = if shop_punctual_display_case > 0.5 {
+            crate::lit_mesh::shop_catalog_balance::AMBIENT_MUL
         } else {
-            (0.0, 0.0)
-        };
-        // Decimate embedded punctual on gameplay-table marker spawns (tally sticks,
-        // books, river, wood tablets). See `gameplay_marker_spawn_punctual_mul`
-        // in `lit_mesh.wgsl`.
-        let gameplay_marker_punctual_mul = match self.active_scene_key {
-            Some(scene_keys::GAMEPLAY)
-            | Some(scene_keys::VICTORY)
-            | Some(scene_keys::DEFEAT)
-            | Some("tutorial") => 0.1,
-            _ => 1.0,
+            0.0
         };
         let ssr_max_distance = cam.h * 2.0;
         let ssr_stride = cam.h * 0.04;
@@ -314,7 +301,7 @@ impl WgpuRenderer {
                 shop_punctual_inv_doc,
                 shop_punctual_display_case,
                 shop_cat_amb,
-                gameplay_marker_punctual_mul,
+                0.0,
             ],
         }
     }

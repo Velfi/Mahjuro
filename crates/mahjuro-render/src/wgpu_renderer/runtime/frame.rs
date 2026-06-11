@@ -356,17 +356,11 @@ impl WgpuRenderer {
         let pl_w = self.size.width.max(1) as f32;
         let pl_h = self.size.height.max(1) as f32;
         let time_s = self.creation_time.elapsed().as_secs_f32();
-        let lit_mesh_inv_scale = if lighting.embedded_gltf_punctual {
-            self.active_frame_env().lit_mesh_gltf_punctual_scale
-        } else {
-            1.0
-        };
         let punctual_bake = PunctualLightBakeParams {
             src: &lighting.punctual,
             gltf_nodes: &lighting.punctual_gltf_nodes,
             candle_count: frame.candle_light_count,
             flame_height_world: frame.flame_height_world,
-            lit_mesh_punctual_intensity_scale: lit_mesh_inv_scale,
             screen_w: pl_w,
             screen_h: pl_h,
             gamma,

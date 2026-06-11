@@ -69,9 +69,11 @@
 //! metallic–roughness, ACES (fitted) tonemap, and linear HDR exposure:
 //! [`ROOM_GLB_LINEAR_EXPOSURE_BASE`] × debug tune (see [`SHOP_ENV_LINEAR_EXPOSURE`]) before tonemap;
 //! [`SHOP_ENV_AMBIENT_SCALE`] defaults to `0` for this interior.
-//! glTF punctual intensity is scaled by [`SHOP_GLTF_LIGHT_INTENSITY_SCALE`] (default `1`). Shop punctual
-//! points use a separate uniform buffer, bound as group 1 binding 0 for [`room_glb.wgsl`] and binding 2
-//! for [`lit_mesh.wgsl`] (inverse-square on props; stays within WebGPU `max_bind_groups` on Metal).
+//! glTF punctual intensity is scaled by [`SHOP_GLTF_LIGHT_INTENSITY_SCALE`] (default `1`) before
+//! the shared light buffer is consumed by `room_glb.wgsl`, `lit_mesh.wgsl`, and `tile_3d.wgsl`.
+//! Shop punctual points use a separate uniform buffer, bound as group 1 binding 0 for
+//! [`room_glb.wgsl`] and binding 2 for [`lit_mesh.wgsl`] (inverse-square on props; stays within
+//! WebGPU `max_bind_groups` on Metal).
 //! Punctual lights on nodes whose names start with [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`] or
 //! [`SHOP_GLTF_LANTERN_LIGHT_NODE_PREFIX`] multiply glTF color by
 //! [`RoomEnvLightingTune::candle_light_color_mul`] / [`RoomEnvLightingTune::lantern_light_color_mul`];
@@ -343,14 +345,6 @@ pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = 1.0;
 /// (punctual-forward interior); tune via debug overlay [`RoomEnvLightingTune::ambient_scale`].
 pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
 
-/// Applied to `lit_mesh` as punctual buffer `extras.w` when
-/// [`crate::draw_cmd::SceneLighting::embedded_gltf_punctual`] is set (`room_glb.wgsl` ignores it).
-pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 2.0;
-
-/// Inverse-square intensity scale for hand/structure tiles (`tile_3d.wgsl` via
-/// `TileUniform.tile_punctual_params.x`). Tiles share the same candle pools as `lit_mesh`.
-pub const TILE_GLTF_PUNCTUAL_SCALE: f32 = 1.0;
-
 /// glTF **node** name prefix for punctual lights that should read as warm candles
 /// (`light_candle`, `light_candle.001`, `light_candle_06`, …).
 pub const SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX: &str = "light_candle";
@@ -378,18 +372,11 @@ pub struct RoomEnvLightingTune {
     #[serde(default = "linear_exposure_base_default")]
     pub linear_exposure_base: f32,
     pub ambient_scale: f32,
-    pub lit_mesh_gltf_punctual_scale: f32,
-    #[serde(default = "tile_gltf_punctual_scale_default")]
-    pub tile_gltf_punctual_scale: f32,
     /// Room glTF emissive strength ([`SHOP_GLTF_EMISSIVE_SCALE`] default).
     pub gltf_emissive_scale: f32,
     pub candle_light_color_mul: [f32; 3],
     #[serde(default = "lantern_light_color_mul_default")]
     pub lantern_light_color_mul: [f32; 3],
-}
-
-fn tile_gltf_punctual_scale_default() -> f32 {
-    TILE_GLTF_PUNCTUAL_SCALE
 }
 
 fn linear_exposure_base_default() -> f32 {
@@ -412,8 +399,6 @@ impl RoomEnvLightingTune {
         linear_exposure: SHOP_ENV_LINEAR_EXPOSURE,
         linear_exposure_base: ROOM_GLB_LINEAR_EXPOSURE_BASE,
         ambient_scale: SHOP_ENV_AMBIENT_SCALE,
-        lit_mesh_gltf_punctual_scale: SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
-        tile_gltf_punctual_scale: TILE_GLTF_PUNCTUAL_SCALE,
         gltf_emissive_scale: SHOP_GLTF_EMISSIVE_SCALE,
         candle_light_color_mul: SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL,
         lantern_light_color_mul: SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL,
@@ -431,8 +416,6 @@ pub struct RoomEnvFrameTune {
     pub linear_exposure: f32,
     pub linear_exposure_base: f32,
     pub ambient_scale: f32,
-    pub lit_mesh_gltf_punctual_scale: f32,
-    pub tile_gltf_punctual_scale: f32,
     pub gltf_emissive_scale: f32,
     pub height_scale: f32,
 }
@@ -443,8 +426,6 @@ impl RoomEnvFrameTune {
             linear_exposure: room.linear_exposure,
             linear_exposure_base: room.linear_exposure_base,
             ambient_scale: room.ambient_scale,
-            lit_mesh_gltf_punctual_scale: room.lit_mesh_gltf_punctual_scale,
-            tile_gltf_punctual_scale: room.tile_gltf_punctual_scale,
             gltf_emissive_scale: room.gltf_emissive_scale,
             height_scale,
         }

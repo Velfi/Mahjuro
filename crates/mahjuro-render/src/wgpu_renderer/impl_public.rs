@@ -36,8 +36,7 @@ impl WgpuRenderer {
     /// environment upload has completed.
     /// True when victory can draw the isolated `MoonObject` mesh from `main_menu.glb`.
     pub fn victory_moon_gpu_draw_ready(&self) -> bool {
-        self.main_menu_environment.is_some()
-            && !self.main_menu_moon_prim_indices.is_empty()
+        self.main_menu_environment.is_some() && !self.main_menu_moon_prim_indices.is_empty()
     }
 
     pub fn scene_room_gpu_ready(&self, key: &str) -> bool {

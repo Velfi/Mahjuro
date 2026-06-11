@@ -103,12 +103,9 @@ fn room_upload_runtime_phase(scene_key: Option<&str>) -> crate::room_gpu_profile
     use crate::room_gpu_profile::RuntimePhase;
     match scene_key {
         None => RuntimePhase::StartupBlocking,
-        Some(
-            scene_keys::GAMEPLAY
-            | scene_keys::DEFEAT
-            | "game_over"
-            | "tutorial",
-        ) => RuntimePhase::GameplayInteractive,
+        Some(scene_keys::GAMEPLAY | scene_keys::DEFEAT | "game_over" | "tutorial") => {
+            RuntimePhase::GameplayInteractive
+        }
         Some(scene_keys::VICTORY) => RuntimePhase::MenuInteractive,
         Some(_) => RuntimePhase::MenuInteractive,
     }
@@ -3254,10 +3251,7 @@ impl WgpuRenderer {
                             );
                         }
                     }
-                    scene_keys::GAMEPLAY
-                    | scene_keys::DEFEAT
-                    | "game_over"
-                    | "tutorial" => {
+                    scene_keys::GAMEPLAY | scene_keys::DEFEAT | "game_over" | "tutorial" => {
                         crate::room_preload::start_gameplay_cpu_prefetch();
                         upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
                     }

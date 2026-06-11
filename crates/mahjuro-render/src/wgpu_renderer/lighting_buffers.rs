@@ -135,8 +135,7 @@ pub(crate) struct PointLightsBuf {
     /// to scroll the river surface and animate foam crests).
     /// `extras.z` = candle flame height in world units (for shaders that
     /// key flame envelope size off the shared point-light buffer).
-    /// `extras.w` = inverse-square intensity scale in `lit_mesh` when embedded GLB punctual is active
-    /// (tiles use `TileUniform.tile_punctual_params.x` instead).
+    /// `extras.w` = reserved; kept at `1.0` for shader layout compatibility.
     pub extras: [f32; 4],
     pub lights: [PointLightGpu; MAX_POINT_LIGHTS],
 }
@@ -146,7 +145,6 @@ pub(crate) struct PunctualLightBakeParams<'a> {
     pub gltf_nodes: &'a [Option<String>],
     pub candle_count: u32,
     pub flame_height_world: f32,
-    pub lit_mesh_punctual_intensity_scale: f32,
     pub screen_w: f32,
     pub screen_h: f32,
     pub gamma: f32,
@@ -337,12 +335,7 @@ impl PointLightsBuf {
         }
         Self {
             count: [n as u32, p.candle_count.min(n as u32), 0, 0],
-            extras: [
-                p.gamma.max(0.01),
-                p.time,
-                p.flame_height_world,
-                p.lit_mesh_punctual_intensity_scale,
-            ],
+            extras: [p.gamma.max(0.01), p.time, p.flame_height_world, 1.0],
             lights,
         }
     }
@@ -400,7 +393,7 @@ impl PointLightsBuf {
                 bake.gamma.max(0.01),
                 bake.time,
                 bake.flame_height_world,
-                bake.lit_mesh_punctual_intensity_scale,
+                1.0,
             ],
             lights,
         }

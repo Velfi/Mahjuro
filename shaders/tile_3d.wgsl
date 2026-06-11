@@ -5,7 +5,7 @@ struct TileFrameUniform {
     /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient (albedo * 0.08);
     /// w = inverse document scale for embedded glTF punctual attenuation.
     tile_post_params: vec4<f32>,
-    /// x = embedded glTF inverse-square intensity scale (`RoomEnvLightingTune::tile_gltf_punctual_scale`).
+    /// x = reserved; source punctual intensity is shared across room/tile/lit_mesh.
     tile_punctual_params: vec4<f32>,
 };
 
@@ -50,7 +50,7 @@ struct PointLight {
 struct PointLights {
     // count.x = number of active lights; rest is std140 padding.
     count: vec4<u32>,
-    // extras.x = display gamma; extras.w = lit_mesh inverse-square scale (tiles use `tile_punctual_params.x`).
+    // extras.x = display gamma; extras.w = reserved.
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
@@ -281,8 +281,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let radius = lights.lights[i].pos.w;
         let kind = lights.lights[i].params.x;
         let lc = lights.lights[i].color.rgb * punc_rgb_mul;
-        let intensity =
-            lights.lights[i].color.a * select(1.0, frame.tile_punctual_params.x, kind > 0.5);
+        let intensity = lights.lights[i].color.a;
         let to_light = lp - in.world_pos;
         let dist = length(to_light);
         // `tile_post_params.w` carries inverse document scale on tile draws (see

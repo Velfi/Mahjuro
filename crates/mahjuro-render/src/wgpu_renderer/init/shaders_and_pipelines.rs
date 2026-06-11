@@ -293,7 +293,6 @@ pub(super) fn init_shaders_and_pipelines(
                 gltf_nodes: &[],
                 candle_count: 0,
                 flame_height_world: 0.0,
-                lit_mesh_punctual_intensity_scale: 1.0,
                 screen_w: 1.0,
                 screen_h: 1.0,
                 gamma: 1.0,
