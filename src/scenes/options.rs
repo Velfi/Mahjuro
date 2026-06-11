@@ -34,7 +34,12 @@ const GAMMA_STEP: f32 = 0.05;
 const TOC_ID_BASE: u32 = 0xF200;
 /// Click-id for the fixed bottom buttons (below the scroll area).
 const BACK_ID: u32 = 0xF210;
+#[cfg(not(feature = "dist-steam"))]
 const TILESET_MODS_FOLDER_ID: u32 = 0xF213;
+#[cfg(feature = "dist-steam")]
+const STEAM_PUBLISH_ARROW_PREV_ID: u32 = 0xF215;
+#[cfg(feature = "dist-steam")]
+const STEAM_PUBLISH_ARROW_NEXT_ID: u32 = 0xF216;
 /// Tile set row: mouse-only prev/next arrows (registered before the row hit target).
 const TILESET_ARROW_PREV_ID: u32 = 0xF211;
 const TILESET_ARROW_NEXT_ID: u32 = 0xF212;
@@ -55,6 +60,8 @@ enum Section {
     Controls,
     Accessibility,
     Data,
+    #[cfg(feature = "dist-steam")]
+    Steam,
 }
 
 impl Section {
@@ -65,10 +72,23 @@ impl Section {
             Section::Controls => "Controls",
             Section::Accessibility => "Accessibility",
             Section::Data => "Data",
+            #[cfg(feature = "dist-steam")]
+            Section::Steam => "Steam",
         }
     }
 }
 
+#[cfg(feature = "dist-steam")]
+const SECTIONS: &[Section] = &[
+    Section::Audio,
+    Section::Graphics,
+    Section::Controls,
+    Section::Accessibility,
+    Section::Data,
+    Section::Steam,
+];
+
+#[cfg(not(feature = "dist-steam"))]
 const SECTIONS: &[Section] = &[
     Section::Audio,
     Section::Graphics,
@@ -102,6 +122,12 @@ enum Row {
     GlyphPrompts,
     ExportPlayStats,
     Credits,
+    #[cfg(feature = "dist-steam")]
+    SteamBrowseWorkshop,
+    #[cfg(feature = "dist-steam")]
+    SteamPublishMod,
+    #[cfg(feature = "dist-steam")]
+    SteamOpenModsFolder,
 }
 
 impl Row {
@@ -119,6 +145,35 @@ impl Row {
 }
 
 /// Navigable rows in section order (keyboard Up/Down cycles through these).
+#[cfg(feature = "dist-steam")]
+const ROWS: &[Row] = &[
+    Row::Master,
+    Row::Music,
+    Row::Sfx,
+    Row::SfxToggle,
+    Row::Gamma,
+    Row::Effects,
+    Row::Tile,
+    Row::Tileset,
+    Row::BorderlessFullscreen,
+    Row::Graphics,
+    Row::Hdr,
+    Row::SwapAb,
+    Row::SwapXy,
+    Row::XyQuickAction,
+    Row::HoldToSellRumble,
+    Row::AutoCashInOnFullStructure,
+    Row::StructureMeldPreview,
+    Row::UndoDiscard,
+    Row::GlyphPrompts,
+    Row::ExportPlayStats,
+    Row::Credits,
+    Row::SteamBrowseWorkshop,
+    Row::SteamPublishMod,
+    Row::SteamOpenModsFolder,
+];
+
+#[cfg(not(feature = "dist-steam"))]
 const ROWS: &[Row] = &[
     Row::Master,
     Row::Music,
@@ -151,6 +206,41 @@ enum ContentSlot {
     Row(Row),
 }
 
+#[cfg(feature = "dist-steam")]
+const CONTENT: &[ContentSlot] = &[
+    ContentSlot::Header(Section::Audio),
+    ContentSlot::Row(Row::Master),
+    ContentSlot::Row(Row::Music),
+    ContentSlot::Row(Row::Sfx),
+    ContentSlot::Row(Row::SfxToggle),
+    ContentSlot::Header(Section::Graphics),
+    ContentSlot::Row(Row::Gamma),
+    ContentSlot::Row(Row::Effects),
+    ContentSlot::Row(Row::Tile),
+    ContentSlot::Row(Row::Tileset),
+    ContentSlot::Row(Row::BorderlessFullscreen),
+    ContentSlot::Row(Row::Graphics),
+    ContentSlot::Row(Row::Hdr),
+    ContentSlot::Header(Section::Controls),
+    ContentSlot::Row(Row::SwapAb),
+    ContentSlot::Row(Row::SwapXy),
+    ContentSlot::Row(Row::XyQuickAction),
+    ContentSlot::Row(Row::HoldToSellRumble),
+    ContentSlot::Row(Row::AutoCashInOnFullStructure),
+    ContentSlot::Row(Row::StructureMeldPreview),
+    ContentSlot::Header(Section::Accessibility),
+    ContentSlot::Row(Row::UndoDiscard),
+    ContentSlot::Row(Row::GlyphPrompts),
+    ContentSlot::Header(Section::Data),
+    ContentSlot::Row(Row::ExportPlayStats),
+    ContentSlot::Row(Row::Credits),
+    ContentSlot::Header(Section::Steam),
+    ContentSlot::Row(Row::SteamBrowseWorkshop),
+    ContentSlot::Row(Row::SteamPublishMod),
+    ContentSlot::Row(Row::SteamOpenModsFolder),
+];
+
+#[cfg(not(feature = "dist-steam"))]
 const CONTENT: &[ContentSlot] = &[
     ContentSlot::Header(Section::Audio),
     ContentSlot::Row(Row::Master),
@@ -373,6 +463,12 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
         Row::UndoDiscard => ("Discard undo", on_off(scene.discard_undo_enabled)),
         Row::ExportPlayStats => ("Export play stats", String::new()),
         Row::Credits => ("Credits", String::new()),
+        #[cfg(feature = "dist-steam")]
+        Row::SteamBrowseWorkshop => ("Browse Workshop", "Open".into()),
+        #[cfg(feature = "dist-steam")]
+        Row::SteamPublishMod => ("Publish mod", scene.steam_publish_mod_value()),
+        #[cfg(feature = "dist-steam")]
+        Row::SteamOpenModsFolder => ("Local mod folder", "Open".into()),
     }
 }
 
@@ -398,7 +494,9 @@ struct PanelLayout {
     slot_gap: f32,
     visible_slots: usize,
     // Bottom buttons
+    #[cfg(not(feature = "dist-steam"))]
     tileset_mods_x: f32,
+    #[cfg(not(feature = "dist-steam"))]
     tileset_mods_w: f32,
     back_x: f32,
     back_y: f32,
@@ -439,12 +537,17 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
     let back_h = (42.0 * scale).max(28.0);
     let version_h = (14.0 * scale).max(10.0);
     let version_y = h - footer_reserve - version_h - (4.0 * scale);
-    let back_y = version_y - back_h - (12.0 * scale);
+        let back_y = version_y - back_h - (12.0 * scale);
+        let back_w = (total_w * 0.30).max(96.0 * scale).min(total_w * 0.42);
+    #[cfg(not(feature = "dist-steam"))]
     let bottom_gap = (12.0 * scale).max(8.0);
-    let back_w = (total_w * 0.30).max(96.0 * scale).min(total_w * 0.42);
-    let tileset_mods_w = total_w - back_w - bottom_gap;
-    let tileset_mods_x = margin;
-    let back_x = margin + tileset_mods_w + bottom_gap;
+    #[cfg(not(feature = "dist-steam"))]
+    let (tileset_mods_x, tileset_mods_w, back_x) = {
+        let tileset_mods_w = total_w - back_w - bottom_gap;
+        (margin, tileset_mods_w, margin + tileset_mods_w + bottom_gap)
+    };
+    #[cfg(feature = "dist-steam")]
+    let back_x = margin + total_w - back_w;
 
     let content_end_y = back_y - (12.0 * scale);
     let slot_step = slot_h + slot_gap;
@@ -466,7 +569,9 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
         slot_h,
         slot_gap,
         visible_slots,
+        #[cfg(not(feature = "dist-steam"))]
         tileset_mods_x,
+        #[cfg(not(feature = "dist-steam"))]
         tileset_mods_w,
         back_x,
         back_y,
@@ -481,6 +586,7 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
 enum BottomFocus {
     #[default]
     None,
+    #[cfg(not(feature = "dist-steam"))]
     TilesetMods,
     Back,
 }
@@ -511,8 +617,19 @@ pub struct OptionsScene {
     export_requested: bool,
     /// User activated "Credits" this frame (after [`Self::update_input`]).
     credits_requested: bool,
-    /// User activated "Open tileset mods" this frame (after [`Self::update_input`]).
+    /// User activated "Open tileset mods" this frame (non-Steam bottom bar).
+    #[cfg(not(feature = "dist-steam"))]
     open_tileset_mods_requested: bool,
+    #[cfg(feature = "dist-steam")]
+    publish_mod_folder: String,
+    #[cfg(feature = "dist-steam")]
+    publish_mod_candidates: Vec<String>,
+    #[cfg(feature = "dist-steam")]
+    workshop_registry_revision: u64,
+    #[cfg(feature = "dist-steam")]
+    steam_open_mods_error: Option<String>,
+    #[cfg(feature = "dist-steam")]
+    steam_publish_error: Option<String>,
     /// Smooth-scrolling state for the content pane.
     scroll: SmoothScroll,
     /// While `Some`, LMB is held after pressing on this row's slider track.
@@ -573,7 +690,7 @@ impl OptionsScene {
         } else {
             available_tilesets[0].clone()
         };
-        Self {
+        let mut scene = Self {
             focused: Row::Master,
             bottom_focus: BottomFocus::None,
             focus_changed: false,
@@ -581,7 +698,18 @@ impl OptionsScene {
             cancel_requested: false,
             export_requested: false,
             credits_requested: false,
+            #[cfg(not(feature = "dist-steam"))]
             open_tileset_mods_requested: false,
+            #[cfg(feature = "dist-steam")]
+            publish_mod_folder: String::new(),
+            #[cfg(feature = "dist-steam")]
+            publish_mod_candidates: Vec::new(),
+            #[cfg(feature = "dist-steam")]
+            workshop_registry_revision: mahjuro_assets::tileset_workshop::registry_revision(),
+            #[cfg(feature = "dist-steam")]
+            steam_open_mods_error: None,
+            #[cfg(feature = "dist-steam")]
+            steam_publish_error: None,
             scroll: SmoothScroll::new(),
             dragging_slider: None,
             master_volume_restore: volume_restore_default(settings.master_volume),
@@ -611,7 +739,63 @@ impl OptionsScene {
             discard_undo_enabled: settings.discard_undo_enabled,
             glyph_prompt: settings.glyph_prompt,
             cursor_pos: (0.0, 0.0),
+        };
+        #[cfg(feature = "dist-steam")]
+        {
+            scene.refresh_publish_mod_candidates();
         }
+        scene
+    }
+
+    #[cfg(feature = "dist-steam")]
+    fn refresh_publish_mod_candidates(&mut self) {
+        self.publish_mod_candidates = mahjuro_assets::tileset_mod::list_mod_tilesets()
+            .into_iter()
+            .map(|e| e.folder_name)
+            .collect();
+        if self.publish_mod_candidates.is_empty() {
+            self.publish_mod_folder.clear();
+        } else if !self
+            .publish_mod_candidates
+            .iter()
+            .any(|n| n == &self.publish_mod_folder)
+        {
+            self.publish_mod_folder = self.publish_mod_candidates[0].clone();
+        }
+    }
+
+    #[cfg(feature = "dist-steam")]
+    fn steam_publish_mod_value(&self) -> String {
+        if let Some(label) = mahjuro_distribution::workshop_publish_progress_label() {
+            return label;
+        }
+        if self.publish_mod_candidates.is_empty() {
+            return "No local mods".into();
+        }
+        self.publish_mod_folder.clone()
+    }
+
+    #[cfg(feature = "dist-steam")]
+    fn cycle_publish_mod(&mut self, delta: isize) {
+        if self.publish_mod_candidates.is_empty() || mahjuro_distribution::workshop_publish_busy() {
+            return;
+        }
+        let len = self.publish_mod_candidates.len() as isize;
+        let cur = self
+            .publish_mod_candidates
+            .iter()
+            .position(|n| n == &self.publish_mod_folder)
+            .unwrap_or(0) as isize;
+        let next = ((cur + delta).rem_euclid(len)) as usize;
+        self.publish_mod_folder = self.publish_mod_candidates[next].clone();
+    }
+
+    #[cfg(feature = "dist-steam")]
+    fn publish_selected_mod_to_workshop(&mut self) -> Result<(), String> {
+        if self.publish_mod_candidates.is_empty() {
+            return Err("Create a local mod first (Steam section → Local mod folder).".into());
+        }
+        mahjuro_distribution::publish_workshop_tileset_mod(&self.publish_mod_folder)
     }
 
     fn cycle_tileset(&mut self, delta: isize) {
@@ -693,10 +877,79 @@ impl OptionsScene {
         v
     }
 
+    #[cfg(not(feature = "dist-steam"))]
     pub fn take_open_tileset_mods_requested(&mut self) -> bool {
         let v = self.open_tileset_mods_requested;
         self.open_tileset_mods_requested = false;
         v
+    }
+
+    #[cfg(feature = "dist-steam")]
+    pub fn poll_steam(&mut self, bus: &mut crate::game::event_bus::EventBus) {
+        self.poll_workshop_publish_results(bus);
+        if let Some(err) = self.steam_open_mods_error.take() {
+            bus.push(GameEvent::InfoModal {
+                title: "Could not open folder".into(),
+                body: err,
+            });
+        }
+        if let Some(err) = self.steam_publish_error.take() {
+            bus.push(GameEvent::InfoModal {
+                title: "Workshop upload failed".into(),
+                body: err,
+            });
+        }
+    }
+
+    #[cfg(feature = "dist-steam")]
+    fn poll_workshop_publish_results(&self, bus: &mut crate::game::event_bus::EventBus) {
+        let Some(result) = mahjuro_distribution::take_workshop_publish_result() else {
+            return;
+        };
+        match result {
+            Ok(done) => {
+                if done.needs_legal_agreement {
+                    mahjuro_distribution::open_workshop_item_overlay(done.file_id);
+                }
+                let action = if done.updated {
+                    "Updated Workshop item"
+                } else {
+                    "Published to Workshop"
+                };
+                let legal = if done.needs_legal_agreement {
+                    "\n\nAccept the Workshop agreement in the Steam overlay, then set visibility to Public."
+                } else {
+                    "\n\nSubscribers can find it under Options → Tile set after subscribing."
+                };
+                bus.push(GameEvent::InfoModal {
+                    title: action.into(),
+                    body: format!("Workshop item {}{legal}", done.file_id),
+                });
+            }
+            Err(err) => {
+                bus.push(GameEvent::InfoModal {
+                    title: "Workshop upload failed".into(),
+                    body: err,
+                });
+            }
+        }
+    }
+
+    #[cfg(feature = "dist-steam")]
+    fn refresh_available_tilesets_if_needed(&mut self) {
+        let rev = mahjuro_assets::tileset_workshop::registry_revision();
+        if rev == self.workshop_registry_revision {
+            return;
+        }
+        self.workshop_registry_revision = rev;
+        let mut available = crate::asset_path::list_player_tilesets();
+        if available.is_empty() {
+            available.push("original".to_string());
+        }
+        if !available.contains(&self.tileset_name) {
+            self.tileset_name = available[0].clone();
+        }
+        self.available_tilesets = available;
     }
 
     /// Range (min, max, step) for a slider row.
@@ -861,6 +1114,13 @@ impl OptionsScene {
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.next(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             Row::ExportPlayStats | Row::Credits => return,
+            #[cfg(feature = "dist-steam")]
+            Row::SteamPublishMod => {
+                self.cycle_publish_mod(1);
+                return;
+            }
+            #[cfg(feature = "dist-steam")]
+            Row::SteamBrowseWorkshop | Row::SteamOpenModsFolder => return,
             _ => return,
         }
         self.save_settings();
@@ -901,6 +1161,13 @@ impl OptionsScene {
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.prev(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             Row::ExportPlayStats | Row::Credits => return,
+            #[cfg(feature = "dist-steam")]
+            Row::SteamPublishMod => {
+                self.cycle_publish_mod(-1);
+                return;
+            }
+            #[cfg(feature = "dist-steam")]
+            Row::SteamBrowseWorkshop | Row::SteamOpenModsFolder => return,
             _ => return,
         }
         self.save_settings();
@@ -992,6 +1259,24 @@ impl OptionsScene {
             Row::Credits => {
                 self.credits_requested = true;
             }
+            #[cfg(feature = "dist-steam")]
+            Row::SteamBrowseWorkshop => {
+                mahjuro_distribution::open_tileset_workshop_overlay();
+            }
+            #[cfg(feature = "dist-steam")]
+            Row::SteamOpenModsFolder => {
+                if let Err(e) = crate::shell_open::open_tileset_mods_folder() {
+                    self.steam_open_mods_error = Some(e);
+                } else {
+                    self.refresh_publish_mod_candidates();
+                }
+            }
+            #[cfg(feature = "dist-steam")]
+            Row::SteamPublishMod => {
+                if let Err(e) = self.publish_selected_mod_to_workshop() {
+                    self.steam_publish_error = Some(e);
+                }
+            }
         }
         false
     }
@@ -1060,17 +1345,15 @@ impl OptionsScene {
                     }
                 }
             }
-            if cx >= layout.tileset_mods_x
+            let in_bottom_bar = cy >= layout.back_y && cy <= layout.back_y + layout.back_h;
+            #[cfg(not(feature = "dist-steam"))]
+            if in_bottom_bar
+                && cx >= layout.tileset_mods_x
                 && cx <= layout.tileset_mods_x + layout.tileset_mods_w
-                && cy >= layout.back_y
-                && cy <= layout.back_y + layout.back_h
             {
                 self.bottom_focus = BottomFocus::TilesetMods;
-            } else if cx >= layout.back_x
-                && cx <= layout.back_x + layout.back_w
-                && cy >= layout.back_y
-                && cy <= layout.back_y + layout.back_h
-            {
+            }
+            if in_bottom_bar && cx >= layout.back_x && cx <= layout.back_x + layout.back_w {
                 self.bottom_focus = BottomFocus::Back;
             }
         }
@@ -1091,6 +1374,7 @@ impl OptionsScene {
                 }
                 continue;
             }
+            #[cfg(not(feature = "dist-steam"))]
             if cid == TILESET_MODS_FOLDER_ID {
                 self.bottom_focus = BottomFocus::TilesetMods;
                 self.open_tileset_mods_requested = true;
@@ -1118,6 +1402,22 @@ impl OptionsScene {
                 self.confirm_requested = true;
                 continue;
             }
+            #[cfg(feature = "dist-steam")]
+            if cid == STEAM_PUBLISH_ARROW_PREV_ID {
+                self.focused = Row::SteamPublishMod;
+                self.bottom_focus = BottomFocus::None;
+                self.cycle_publish_mod(-1);
+                self.confirm_requested = true;
+                continue;
+            }
+            #[cfg(feature = "dist-steam")]
+            if cid == STEAM_PUBLISH_ARROW_NEXT_ID {
+                self.focused = Row::SteamPublishMod;
+                self.bottom_focus = BottomFocus::None;
+                self.cycle_publish_mod(1);
+                self.confirm_requested = true;
+                continue;
+            }
             if let Some(row) = Row::from_click_id(cid) {
                 self.focused = row;
                 self.bottom_focus = BottomFocus::None;
@@ -1142,12 +1442,15 @@ impl OptionsScene {
         for a in actions {
             match a {
                 UiAction::FocusDown if self.bottom_focus == BottomFocus::Back => {}
+                #[cfg(not(feature = "dist-steam"))]
                 UiAction::FocusDown if self.bottom_focus == BottomFocus::TilesetMods => {
                     self.bottom_focus = BottomFocus::Back;
                 }
+                #[cfg(not(feature = "dist-steam"))]
                 UiAction::FocusUp if self.bottom_focus == BottomFocus::Back => {
                     self.bottom_focus = BottomFocus::TilesetMods;
                 }
+                #[cfg(not(feature = "dist-steam"))]
                 UiAction::FocusUp if self.bottom_focus == BottomFocus::TilesetMods => {
                     self.bottom_focus = BottomFocus::None;
                     self.focused = *ROWS.last().unwrap();
@@ -1159,7 +1462,14 @@ impl OptionsScene {
                         self.focused = ROWS[idx + 1];
                         self.ensure_focused_visible(&layout);
                     } else {
-                        self.bottom_focus = BottomFocus::TilesetMods;
+                        #[cfg(not(feature = "dist-steam"))]
+                        {
+                            self.bottom_focus = BottomFocus::TilesetMods;
+                        }
+                        #[cfg(feature = "dist-steam")]
+                        {
+                            self.bottom_focus = BottomFocus::Back;
+                        }
                     }
                 }
                 UiAction::FocusUp => {
@@ -1179,6 +1489,7 @@ impl OptionsScene {
                         self.adjust_row_left();
                     }
                 }
+                #[cfg(not(feature = "dist-steam"))]
                 UiAction::Confirm | UiAction::CommitDiscard
                     if self.bottom_focus == BottomFocus::TilesetMods =>
                 {
@@ -1407,47 +1718,50 @@ impl OptionsScene {
         }
 
         // ── Bottom buttons ───────────────────────────────────────────
-        let mods_focused = self.bottom_focus == BottomFocus::TilesetMods;
-        let mods_bg = if mods_focused {
-            color::WALNUT_BRIGHT
-        } else {
-            color::WALNUT_RAISED
-        };
-        instances.push(GpuInstance {
-            rect: [
-                layout.tileset_mods_x,
-                layout.back_y,
-                layout.tileset_mods_w,
-                layout.back_h,
-            ],
-            color: mods_bg,
-            user: 0,
-        });
-        let mods_text = if mods_focused {
-            color::CHAMPAGNE
-        } else {
-            color::STONE
-        };
-        text_labels.push(TextLabel {
-            rect: [
-                layout.tileset_mods_x,
-                layout.back_y,
-                layout.tileset_mods_w,
-                layout.back_h,
-            ],
-            text: "Open tileset mods".into(),
-            color: mods_text,
-            ..Default::default()
-        });
-        buttons.push(ButtonDef::scene(
-            (
-                layout.tileset_mods_x,
-                layout.back_y,
-                layout.tileset_mods_w,
-                layout.back_h,
-            ),
-            TILESET_MODS_FOLDER_ID,
-        ));
+        #[cfg(not(feature = "dist-steam"))]
+        {
+            let mods_focused = self.bottom_focus == BottomFocus::TilesetMods;
+            let mods_bg = if mods_focused {
+                color::WALNUT_BRIGHT
+            } else {
+                color::WALNUT_RAISED
+            };
+            instances.push(GpuInstance {
+                rect: [
+                    layout.tileset_mods_x,
+                    layout.back_y,
+                    layout.tileset_mods_w,
+                    layout.back_h,
+                ],
+                color: mods_bg,
+                user: 0,
+            });
+            let mods_text = if mods_focused {
+                color::CHAMPAGNE
+            } else {
+                color::STONE
+            };
+            text_labels.push(TextLabel {
+                rect: [
+                    layout.tileset_mods_x,
+                    layout.back_y,
+                    layout.tileset_mods_w,
+                    layout.back_h,
+                ],
+                text: "Open tileset mods".into(),
+                color: mods_text,
+                ..Default::default()
+            });
+            buttons.push(ButtonDef::scene(
+                (
+                    layout.tileset_mods_x,
+                    layout.back_y,
+                    layout.tileset_mods_w,
+                    layout.back_h,
+                ),
+                TILESET_MODS_FOLDER_ID,
+            ));
+        }
 
         let back_focused = self.bottom_focus == BottomFocus::Back;
         let back_bg = if back_focused {
@@ -1643,6 +1957,66 @@ impl OptionsScene {
                     });
                 }
             }
+            #[cfg(feature = "dist-steam")]
+            Row::SteamPublishMod => {
+                let (label, value) = row_copy(row, self);
+                let bg_color = if is_focused {
+                    color::WALNUT_SOFT
+                } else {
+                    color::WALNUT_RAISED
+                };
+                push_quad_in_clip([row_x, row_y, row_w, row_h], bg_color);
+                if is_focused {
+                    push_quad_in_clip([row_x, row_y, accent_w, row_h], color::GOLD);
+                }
+
+                text_labels.push(TextLabel {
+                    rect: [cols.label_x + pad, row_y, cols.label_w - pad * 2.0, row_h],
+                    text: label.into(),
+                    color: label_color,
+                    align: TextAlign::Left,
+                    clip_rect: Some(content_clip_rect),
+                    ..Default::default()
+                });
+
+                let arrows = tileset_arrow_layout(rect, cols, scale);
+                let busy = mahjuro_distribution::workshop_publish_busy();
+                let arrows_enabled =
+                    !busy && self.publish_mod_candidates.len() > 1;
+                let cursor = self.cursor_pos;
+                push_cycle_arrow(
+                    instances,
+                    text_labels,
+                    buttons,
+                    arrows.prev,
+                    "◀",
+                    STEAM_PUBLISH_ARROW_PREV_ID,
+                    arrows_enabled,
+                    arrows_enabled && point_in_rect(cursor, arrows.prev),
+                    content_clip_rect,
+                );
+                push_cycle_arrow(
+                    instances,
+                    text_labels,
+                    buttons,
+                    arrows.next,
+                    "▶",
+                    STEAM_PUBLISH_ARROW_NEXT_ID,
+                    arrows_enabled,
+                    arrows_enabled && point_in_rect(cursor, arrows.next),
+                    content_clip_rect,
+                );
+                if !value.is_empty() {
+                    text_labels.push(TextLabel {
+                        rect: arrows.value,
+                        text: value,
+                        color: value_color,
+                        align: TextAlign::Center,
+                        clip_rect: Some(content_clip_rect),
+                        ..Default::default()
+                    });
+                }
+            }
             _ => {
                 let (label, value) = row_copy(row, self);
                 let bg_color = if is_focused {
@@ -1688,6 +2062,8 @@ impl OptionsScene {
 
 impl SceneBehavior for OptionsScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        #[cfg(feature = "dist-steam")]
+        self.refresh_available_tilesets_if_needed();
         if self.update_input(OptionsInput {
             actions: ctx.actions,
             button_clicks: ctx.button_clicks,
@@ -1732,6 +2108,7 @@ impl SceneBehavior for OptionsScene {
             return Some(SceneIntent::CreditsFromOptions);
         }
         #[cfg(any(feature = "game", feature = "headless-screenshot"))]
+        #[cfg(not(feature = "dist-steam"))]
         if self.take_open_tileset_mods_requested() {
             if let Err(e) = crate::shell_open::open_tileset_mods_folder() {
                 ctx.bus.push(GameEvent::InfoModal {
@@ -1740,6 +2117,8 @@ impl SceneBehavior for OptionsScene {
                 });
             }
         }
+        #[cfg(feature = "dist-steam")]
+        self.poll_steam(ctx.bus);
         None
     }
 

@@ -1,5 +1,8 @@
 //! Steamworks backend.
 
+pub mod workshop;
+pub mod workshop_publish;
+
 use std::sync::Arc;
 
 use mahjuro_core::core::progression::PlayerProgress;
@@ -10,10 +13,13 @@ use crate::backend::DistributionBackend;
 use crate::stat::profile_stat_snapshot;
 
 /// Mahjuro's Steam App ID (configured in Steamworks partner backend).
-const MAHJURO_APP_ID: u32 = 4636490;
+pub const MAHJURO_APP_ID: u32 = 4636490;
 
 pub enum SteamBackend {
-    Connected { client: Arc<Client> },
+    Connected {
+        client: Arc<Client>,
+        workshop: workshop::TilesetWorkshop,
+    },
     Disabled,
 }
 
@@ -29,9 +35,9 @@ impl SteamBackend {
                     steam_id.raw(),
                     MAHJURO_APP_ID,
                 );
-                Self::Connected {
-                    client: Arc::new(client),
-                }
+                let client = Arc::new(client);
+                let workshop = workshop::TilesetWorkshop::new(client.clone());
+                Self::Connected { client, workshop }
             }
             Err(err) => {
                 log::warn!(
@@ -45,17 +51,22 @@ impl SteamBackend {
     pub fn disabled() -> Self {
         Self::Disabled
     }
+
+    pub fn open_tileset_workshop(&self) {
+        workshop::open_tileset_workshop_overlay();
+    }
 }
 
 impl DistributionBackend for SteamBackend {
     fn tick(&self) {
-        if let Self::Connected { client } = self {
+        if let Self::Connected { client, workshop } = self {
             client.run_callbacks();
+            workshop.tick();
         }
     }
 
     fn unlock_achievement(&self, ach: Achievement) {
-        let Self::Connected { client } = self else {
+        let Self::Connected { client, .. } = self else {
             return;
         };
         let api_name = ach.steam_api_name();
@@ -83,7 +94,7 @@ impl DistributionBackend for SteamBackend {
     }
 
     fn sync_profile_stats(&self, progress: &PlayerProgress) {
-        let Self::Connected { client } = self else {
+        let Self::Connected { client, .. } = self else {
             return;
         };
         let stats = client.user_stats();

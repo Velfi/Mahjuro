@@ -468,7 +468,7 @@ impl HeadlessApp {
             )) = queue.draw(self.width as f32, self.height as f32)
             {
                 let _ = modal_buttons;
-                frame.quads(modal_insts);
+                frame.overlay_quads(modal_insts);
                 frame.texts(modal_labels);
                 if !modal_gradient_quads.is_empty() {
                     frame.gradient_quads(modal_gradient_quads);

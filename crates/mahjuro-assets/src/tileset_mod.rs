@@ -62,10 +62,13 @@ pub fn mod_tileset_cache_root(folder_name: &str) -> PathBuf {
         .join(folder_name)
 }
 
-/// Cached offline showcase decal atlas for a mod tileset.
+/// Cached offline showcase decal atlas for a mod or Workshop tileset.
 pub fn mod_showcase_cache_path(tileset_id: &str) -> Option<PathBuf> {
-    let folder = mod_folder_name(tileset_id)?;
-    Some(mod_tileset_cache_root(folder).join("showcase_decal_atlas.png"))
+    if let Some(folder) = mod_folder_name(tileset_id) {
+        return Some(mod_tileset_cache_root(folder).join("showcase_decal_atlas.png"));
+    }
+    let folder = crate::tileset_workshop::workshop_cache_folder_name(tileset_id)?;
+    Some(mod_tileset_cache_root(&folder).join("showcase_decal_atlas.png"))
 }
 
 pub fn mod_showcase_cache_exists(tileset_id: &str) -> bool {
@@ -84,6 +87,11 @@ pub fn mod_id(folder_name: &str) -> String {
 
 pub fn is_mod_tileset(tileset_id: &str) -> bool {
     tileset_id.starts_with(MOD_PREFIX)
+}
+
+/// Local mod folder or Steam Workshop tileset.
+pub fn is_player_tileset(tileset_id: &str) -> bool {
+    is_mod_tileset(tileset_id) || crate::tileset_workshop::is_workshop_tileset(tileset_id)
 }
 
 /// Folder name from a mod tileset id (`mod:my_theme` → `my_theme`).
@@ -116,8 +124,18 @@ pub fn parse_tileset_id(tileset_id: &str) -> Option<TilesetId<'_>> {
 
 /// Options label for a tileset id.
 pub fn tileset_display_name(tileset_id: &str) -> String {
+    if let Some(title) = crate::tileset_workshop::workshop_display_title(tileset_id) {
+        return format!("{title} (Workshop)");
+    }
     match parse_tileset_id(tileset_id) {
         Some(TilesetId::Mod { folder_name }) => format!("{folder_name} (mod)"),
+        _ if crate::tileset_workshop::is_workshop_tileset(tileset_id) => {
+            if let Some(id) = crate::tileset_workshop::parse_workshop_file_id(tileset_id) {
+                format!("Workshop #{id}")
+            } else {
+                tileset_id.to_string()
+            }
+        }
         _ => tileset_id.to_string(),
     }
 }
@@ -249,6 +267,23 @@ impl std::fmt::Display for ModTilesetValidationError {
     }
 }
 
+/// Resolve a mod folder (or an immediate child) that contains `atlas.toml` + `atlas.png`.
+pub fn resolve_mod_content_dir(root: &Path) -> Option<PathBuf> {
+    if validate_mod_tileset(root).is_ok() {
+        return Some(root.to_path_buf());
+    }
+    let rd = fs::read_dir(root).ok()?;
+    let mut matches = Vec::new();
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if path.is_dir() && validate_mod_tileset(&path).is_ok() {
+            matches.push(path);
+        }
+    }
+    matches.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    matches.into_iter().next()
+}
+
 pub fn validate_mod_tileset(dir: &Path) -> Result<(), ModTilesetValidationError> {
     let folder_name = dir
         .file_name()
@@ -341,6 +376,31 @@ pub fn read_mod_file(tileset_id: &str, filename: &str) -> Option<Vec<u8>> {
     }
     let path = mod_tilesets_root().join(folder_name).join(filename);
     fs::read(&path).ok()
+}
+
+/// Read a file from a local mod or Workshop tileset.
+pub fn read_player_tileset_file(tileset_id: &str, filename: &str) -> Option<Vec<u8>> {
+    if is_mod_tileset(tileset_id) {
+        read_mod_file(tileset_id, filename)
+    } else if crate::tileset_workshop::is_workshop_tileset(tileset_id) {
+        crate::tileset_workshop::read_workshop_file(tileset_id, filename)
+    } else {
+        None
+    }
+}
+
+const WORKSHOP_ID_FILE: &str = ".workshop_id";
+
+/// Published Steam Workshop file id stored after a successful in-game upload.
+pub fn read_mod_workshop_id(folder_name: &str) -> Option<u64> {
+    let path = mod_tilesets_root().join(folder_name).join(WORKSHOP_ID_FILE);
+    let text = fs::read_to_string(path).ok()?;
+    text.trim().parse().ok()
+}
+
+pub fn write_mod_workshop_id(folder_name: &str, file_id: u64) -> std::io::Result<()> {
+    let path = mod_tilesets_root().join(folder_name).join(WORKSHOP_ID_FILE);
+    fs::write(path, format!("{file_id}\n"))
 }
 
 /// Write bytes to the mod showcase cache (creates parent dirs).

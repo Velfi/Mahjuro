@@ -284,6 +284,7 @@ impl PauseMenu {
                     }
                 }
                 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
+                #[cfg(not(feature = "dist-steam"))]
                 if opts.take_open_tileset_mods_requested()
                     && let Err(e) = crate::shell_open::open_tileset_mods_folder()
                 {
@@ -292,6 +293,8 @@ impl PauseMenu {
                         body: e,
                     });
                 }
+                #[cfg(feature = "dist-steam")]
+                opts.poll_steam(bus);
                 if opts.take_credits_requested() {
                     bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                     self.options_overlay = None;

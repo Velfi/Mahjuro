@@ -62,6 +62,55 @@ compile_error!("enable only one of: dist-steam, dist-mas, dist-msstore");
 #[cfg(all(feature = "macos-store", feature = "windows-store"))]
 compile_error!("enable only one of: dist-steam, dist-mas, dist-msstore");
 
+#[cfg(feature = "steam")]
+pub use steam::workshop::open_tileset_workshop_overlay;
+#[cfg(feature = "steam")]
+pub use steam::workshop_publish::{
+    open_workshop_item_overlay, publish_busy as workshop_publish_busy,
+    publish_local_mod as publish_workshop_tileset_mod, publish_progress_label as workshop_publish_progress_label,
+    take_publish_result as take_workshop_publish_result, WorkshopPublishResult,
+};
+
+#[cfg(not(feature = "steam"))]
+pub fn open_tileset_workshop_overlay() {}
+
+#[cfg(not(feature = "steam"))]
+pub fn publish_workshop_tileset_mod(_folder_name: &str) -> Result<(), String> {
+    Err("Steam Workshop is only available in the Steam build".into())
+}
+
+#[cfg(not(feature = "steam"))]
+pub fn workshop_publish_busy() -> bool {
+    false
+}
+
+#[cfg(not(feature = "steam"))]
+pub fn workshop_publish_progress_label() -> Option<String> {
+    None
+}
+
+#[cfg(not(feature = "steam"))]
+pub fn take_workshop_publish_result() -> Option<Result<WorkshopPublishResult, String>> {
+    None
+}
+
+#[cfg(not(feature = "steam"))]
+pub struct WorkshopPublishResult {
+    pub file_id: u64,
+    pub updated: bool,
+    pub needs_legal_agreement: bool,
+}
+
+#[cfg(not(feature = "steam"))]
+pub fn open_workshop_item_overlay(_file_id: u64) {}
+
+impl DistributionClient {
+    /// Open the Mahjuro tileset Workshop page in the Steam overlay (Steam SKU only).
+    pub fn open_tileset_workshop(&self) {
+        open_tileset_workshop_overlay();
+    }
+}
+
 /// Initialize the distribution backend for this SKU.
 pub fn init(config: DistributionConfig) -> DistributionClient {
     if config.platform_services_disabled {

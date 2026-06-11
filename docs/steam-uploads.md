@@ -214,6 +214,24 @@ build.
 The `--no-steam` flag on the binary disables Steam init entirely — useful
 when iterating on UI without Steam claiming the foreground process slot.
 
+## Steam Workshop (tilesets)
+
+Players share custom tile face atlases via Workshop on the Steam SKU. The
+game syncs subscribed items each session, downloads updates, validates
+`atlas.toml` + `atlas.png`, and lists them in Options → **Tile set**.
+
+### Partner setup
+
+1. Open [partner.steamgames.com → Mahjuro → Workshop](https://partner.steamgames.com/apps/landings/4636490) and **enable Workshop**.
+2. Item type: **Community items** (standard UGC; not game-managed).
+3. Upload a smoke-test item: copy `mods/tilesets/_template/` after first
+   launch, edit `atlas.png`, zip or point the Steam upload flow at the
+   folder. Confirm it appears in-game after subscribing.
+
+Players browse via Options → **Steam Workshop** (opens the overlay). See
+[`docs/agents/tileset-mods.md`](agents/tileset-mods.md) for pack layout and
+validation rules.
+
 ## Steam Cloud (Auto-Cloud)
 
 Saves stay on disk in the user **config** directory. Cloud sync is **Steam

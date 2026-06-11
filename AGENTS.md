@@ -4,6 +4,8 @@ Short pointers to deeper context. Read the linked file before working in the are
 
 - **CI locally** — `./scripts/check.sh` mirrors the GitHub `build-and-test` job (bake tools → `cargo build` → `cargo test`; Linux needs `xvfb-run`). Optional `--extras` for fmt/clippy/Python (not in CI). Hot-build wall times: `./scripts/profile-build.sh --hot` (add `--timings` for per-crate HTML under `target/cargo-timings/`).
 
+- [Tileset mods & Workshop](docs/agents/tileset-mods.md) — local `mods/tilesets/` installs; Steam Workshop sync on `dist-steam`.
+
 - [3D world space](docs/agents/world-space.md) — Z-up frame, table at `z = 0`, anchors, screen vs world placement.
 - [Cap-mesh coordinates](docs/agents/cap-mesh-coordinates.md) — image → cap-local → UV for relic pins (+Y) and talismans (+Z); `cap_extrude.rs` source of truth.
 - [Frame schedule (main loop)](docs/agents/frame-schedule.md) — `frame_phases/` pipeline order, `FrameLocals`, ordering constraints.

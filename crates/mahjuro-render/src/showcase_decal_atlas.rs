@@ -199,7 +199,7 @@ pub fn upload_showcase_decal_atlas_rgba(
 
 /// Returns true when a pre-baked showcase decal atlas is available for `tileset`.
 pub fn baked_showcase_decal_atlas_available(tileset: &str) -> bool {
-    if mahjuro_assets::tileset_mod::is_mod_tileset(tileset) {
+    if mahjuro_assets::tileset_mod::is_player_tileset(tileset) {
         return mahjuro_assets::tileset_mod::mod_showcase_cache_exists(tileset);
     }
     mahjuro_assets::asset_path::get(&baked_atlas_asset_path(tileset)).is_some()
@@ -257,11 +257,11 @@ pub fn load_or_bake_showcase_decal_atlas(
     queue: &wgpu::Queue,
     tileset: &str,
 ) -> anyhow::Result<ShowcaseDecalAtlasGpu> {
-    let rgba = if mahjuro_assets::tileset_mod::is_mod_tileset(tileset) {
+    let rgba = if mahjuro_assets::tileset_mod::is_player_tileset(tileset) {
         if let Some(bytes) = mahjuro_assets::tileset_mod::read_mod_showcase_cache(tileset) {
-            decode_showcase_decal_png(&bytes, &format!("mod cache for {tileset}"))?
+            decode_showcase_decal_png(&bytes, &format!("player tileset cache for {tileset}"))?
         } else {
-            log::info!("runtime-baking showcase decal atlas for mod tileset {tileset}");
+            log::info!("runtime-baking showcase decal atlas for player tileset {tileset}");
             bake_mod_showcase_decal_rgba(tileset)?
         }
     } else {
