@@ -1,5 +1,6 @@
 //! Run-record capture and hydration (needs live [`RunState`](crate::game::run::RunState)).
 
+use crate::core::chamber_target::FINAL_WING;
 use crate::core::progression::{RunOutcome, RunRecord};
 use crate::core::rules::ChamberKind;
 use crate::core::run_chronicle;
@@ -46,6 +47,7 @@ pub fn run_record_from_run(run: &RunState, outcome: RunOutcome) -> RunRecord {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    let final_wing = final_wing_for_record(run, outcome);
     let final_ordeal = if run.chamber == ChamberKind::Ordeal {
         run.ordeal.upcoming
     } else {
@@ -55,7 +57,7 @@ pub fn run_record_from_run(run: &RunState, outcome: RunOutcome) -> RunRecord {
         timestamp_unix,
         run_number: run.run_number,
         outcome,
-        final_wing: run.wing,
+        final_wing,
         final_chamber: run.chamber,
         final_ordeal,
         round_score: run.round_score,
@@ -79,9 +81,17 @@ pub fn run_record_from_run(run: &RunState, outcome: RunOutcome) -> RunRecord {
         tutorial_run: false,
         memorial_kind: run.defeat_memorial_kind,
         best_hand_tiles: run.best_hand_tiles.clone(),
-        score_after_wing: finalize_score_after_wing(run),
-        chronicle: finalize_run_chronicle(run, outcome),
+        score_after_wing: finalize_score_after_wing(run, final_wing),
+        chronicle: finalize_run_chronicle(run, outcome, final_wing),
         duration_secs: run_duration_secs(run),
+    }
+}
+
+fn final_wing_for_record(run: &RunState, outcome: RunOutcome) -> u32 {
+    if matches!(outcome, RunOutcome::Victory) {
+        run.wing.min(FINAL_WING)
+    } else {
+        run.wing
     }
 }
 
@@ -98,13 +108,17 @@ fn run_duration_secs(run: &RunState) -> u32 {
     }
 }
 
-fn finalize_run_chronicle(run: &RunState, outcome: RunOutcome) -> run_chronicle::RunChronicle {
+fn finalize_run_chronicle(
+    run: &RunState,
+    outcome: RunOutcome,
+    final_wing: u32,
+) -> run_chronicle::RunChronicle {
     let mut chronicle = run.chronicle.clone();
     let victory = matches!(outcome, RunOutcome::Victory);
     chronicle.finalize_for_outcome(
         victory,
         run.total_score_earned,
-        run.wing,
+        final_wing,
         run.plays_remaining,
     );
 
@@ -125,7 +139,7 @@ fn finalize_run_chronicle(run: &RunState, outcome: RunOutcome) -> run_chronicle:
             None
         };
         chronicle.record_run_end_defeat(
-            run.wing,
+            final_wing,
             run.chamber,
             ordeal_name.as_deref(),
             run.round_score,
@@ -146,11 +160,59 @@ fn finalize_run_chronicle(run: &RunState, outcome: RunOutcome) -> run_chronicle:
     chronicle
 }
 
-fn finalize_score_after_wing(run: &RunState) -> Vec<(u32, u64)> {
+fn finalize_score_after_wing(run: &RunState, final_wing: u32) -> Vec<(u32, u64)> {
     let mut v = run.score_after_wing.clone();
-    let terminal = (run.wing, run.total_score_earned);
+    let terminal = (final_wing, run.total_score_earned);
     if v.last().copied() != Some(terminal) {
         v.push(terminal);
     }
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::event_bus::EventBus;
+
+    #[test]
+    fn victory_record_after_final_boss_uses_final_playable_wing() {
+        let mut run = RunState::new_demo();
+        let mut bus = EventBus::default();
+        let total_score = 62_000;
+        run.wing = FINAL_WING;
+        run.chamber = ChamberKind::Ordeal;
+        run.upcoming_chamber = ChamberKind::Ordeal;
+        run.total_score_earned = total_score;
+        run.round_score = 40_000;
+        run.target_score = run.chamber_score_target(ChamberKind::Ordeal);
+        run.plays_remaining = 2;
+
+        run.advance_round(&mut bus);
+        assert!(run.is_run_complete());
+
+        let record = run_record_from_run(&run, RunOutcome::Victory);
+
+        assert_eq!(record.final_wing, FINAL_WING);
+        assert_eq!(
+            record.score_after_wing.last(),
+            Some(&(FINAL_WING, total_score))
+        );
+        assert!(
+            !record
+                .score_after_wing
+                .iter()
+                .any(|&(wing, _)| wing > FINAL_WING)
+        );
+        assert_eq!(
+            record.chronicle.victory_tier,
+            Some(run_chronicle::VictoryTier::Exceptional)
+        );
+        assert!(
+            record
+                .chronicle
+                .milestones
+                .iter()
+                .any(|milestone| milestone == "Speed Clear")
+        );
+    }
 }

@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::chamber_target::FINAL_WING;
 use crate::core::consumable::Consumable;
 use crate::core::rules::ChamberKind;
 use crate::core::scoring::{ScoreBreakdown, StepKind};
@@ -411,7 +412,7 @@ fn score_snapshot_from_breakdown(
 }
 
 fn victory_tier_for(total_score: u64, final_wing: u32) -> VictoryTier {
-    if final_wing >= 8 && total_score >= 50_000 {
+    if final_wing >= FINAL_WING && total_score >= 50_000 {
         VictoryTier::Exceptional
     } else if total_score >= 25_000 || final_wing >= 6 {
         VictoryTier::High
@@ -430,7 +431,7 @@ fn compute_milestones(
     if total_score >= 30_000 {
         tags.push("High Score".into());
     }
-    if final_wing >= 8 && plays_remaining >= 2 {
+    if final_wing >= FINAL_WING && plays_remaining >= 2 {
         tags.push("Speed Clear".into());
     }
     if chronicle.best_combo_han >= 12 {
