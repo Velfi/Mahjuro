@@ -268,6 +268,10 @@ impl App {
                 self.cpu_profiler.start(100);
                 log::debug!("CPU profile capture queued (100 frames)");
             }
+            DebugAction::ToggleBrownoutMode => {
+                let mode = self.room_gltf_brownout.toggle_mode();
+                log::debug!("Brownout mode: {}", mode.label());
+            }
             DebugAction::ToggleWorldAxes => {
                 // Forward to the gameplay scene's existing toggle branch
                 // via the same UiAction the keyboard binding used to push.
