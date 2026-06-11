@@ -9,7 +9,7 @@ use glam::Vec3;
 use crate::draw_cmd::CameraParams;
 use crate::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
-use crate::wgpu_renderer::{PointLight, SpotLight};
+use crate::wgpu_renderer::PointLight;
 
 enum ShadowTestRoomGlbCache {
     Uninit,
@@ -203,27 +203,6 @@ pub fn shadow_test_room_embedded_point_lights_runtime(
         .collect()
 }
 
-pub fn shadow_test_room_embedded_spot_lights_runtime(
-    w: f32,
-    h: f32,
-    env_h: f32,
-    tune: &RoomEnvLightingTune,
-) -> Vec<SpotLight> {
-    with_shadow_test_room_glb_cpu(|opt| {
-        opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu,
-                w,
-                h,
-                env_h,
-                tune,
-                "shadow_test_room.glb",
-            )
-        })
-        .unwrap_or_default()
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,8 +218,6 @@ mod tests {
             cpu.embedded_point_lights[0].node_name,
             "light_shadow_ao_comparison"
         );
-        assert!(cpu.embedded_spot_lights.is_empty());
-
         let node_names: std::collections::BTreeSet<&str> = cpu
             .environment_primitives
             .iter()

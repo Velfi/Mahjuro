@@ -34,8 +34,7 @@ use crate::render::room_glb::{
     room_camera_fit_fovy_for_corners, room_camera_with_room_clip_planes, room_env_world_scale,
     room_world_bounds_corners_centered, screen_rect_for_marker_mesh_bounds,
     shop_camera_from_glb_if_present, shop_embedded_point_lights_runtime_tagged,
-    shop_embedded_spot_lights_runtime, shop_glb_has_embedded_lights, spawn_relic_marker_name,
-    with_shop_glb_cpu,
+    shop_glb_has_embedded_lights, spawn_relic_marker_name, with_shop_glb_cpu,
 };
 use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::theme::{color, metrics};
@@ -823,14 +822,6 @@ pub(crate) fn render_shop_frame(
         punctual_gltf_nodes.extend(std::iter::repeat_n(None, proc_count));
         frame.scene_lighting.punctual = merged_punctual;
         frame.scene_lighting.punctual_gltf_nodes = punctual_gltf_nodes;
-        frame
-            .scene_lighting
-            .set_gltf_embedded_spot_lights(shop_embedded_spot_lights_runtime(
-                w,
-                h,
-                env_h,
-                &ctx.room_env_for("shop").0,
-            ));
         if use_glb_lights {
             let candle_flames = shop_gltf_candle_flame_emitters(
                 w,

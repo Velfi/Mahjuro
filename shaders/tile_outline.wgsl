@@ -51,13 +51,17 @@ fn vs_main(
     @location(7) model_c1: vec4<f32>,
     @location(8) model_c2: vec4<f32>,
     @location(9) model_c3: vec4<f32>,
-    @location(10) inst_base_color_factor: vec4<f32>,
+    @location(10) normal_c0: vec4<f32>,
+    @location(11) normal_c1: vec4<f32>,
+    @location(12) normal_c2: vec4<f32>,
+    @location(13) inst_base_color_factor: vec4<f32>,
 ) -> VsOut {
     let model = mat4x4<f32>(model_c0, model_c1, model_c2, model_c3);
+    let normal_model = mat3x3<f32>(normal_c0.xyz, normal_c1.xyz, normal_c2.xyz);
     let world = model * vec4<f32>(pos, 1.0);
     var o: VsOut;
     o.clip_pos = outline_frame.view_proj * world;
-    o.wn = normalize((model * vec4<f32>(n, 0.0)).xyz);
+    o.wn = normalize(normal_model * n);
     o.world_pos = world.xyz;
     o.local_n = n;
     o.sel_y = inst_base_color_factor.y;

@@ -145,15 +145,6 @@ impl ShadowAoLabScene {
         let room_glb = shadow_test_room_glb::shadow_test_room_glb_has_embedded_lights();
         frame.scene_lighting.embedded_gltf_punctual = room_glb;
         frame.scene_lighting.room_glb_brdf = room_glb;
-        frame
-            .scene_lighting
-            .set_gltf_embedded_spot_lights(if room_glb {
-                shadow_test_room_glb::shadow_test_room_embedded_spot_lights_runtime(
-                    w, h, env_h, &tune,
-                )
-            } else {
-                Vec::new()
-            });
         let (punctual, nodes) = if room_glb {
             crate::render::room_gltf_punctual::tagged_to_scene_punctual(
                 shadow_test_room_glb::shadow_test_room_embedded_point_lights_runtime_tagged(

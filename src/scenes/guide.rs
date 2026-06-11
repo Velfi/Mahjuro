@@ -3763,9 +3763,6 @@ fn push_scoring_gameplay_cash_in_env(
         );
         overlay_lighting.punctual = punctual;
         overlay_lighting.punctual_gltf_nodes = nodes;
-        overlay_lighting.set_gltf_embedded_spot_lights(
-            gameplay_glb::gameplay_embedded_spot_lights_runtime(w, h, env_h, &tune),
-        );
     }
     frame.gameplay_cash_in_overlay_lighting = Some(overlay_lighting);
     true

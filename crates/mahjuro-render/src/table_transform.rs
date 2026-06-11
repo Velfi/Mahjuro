@@ -145,10 +145,73 @@ pub fn translate_rot_scale(center: Vec3, rotation: Mat4, scale: Vec3) -> Mat4 {
     Mat4::from_translation(center) * rotation * Mat4::from_scale(scale)
 }
 
+/// Inverse-transpose transform for directions that live in surface-normal space.
+///
+/// Runtime instances frequently use non-uniform scale (`T * R * S`), where multiplying
+/// normals by the model matrix skews diffuse/specular response. Singular transforms can
+/// appear transiently for hidden or degenerate placements; keep those finite by falling
+/// back to the original linear transform instead of uploading NaNs.
+#[inline]
+pub fn normal_matrix_from_model(model: Mat4) -> Mat4 {
+    let det = model.determinant();
+    if det.is_finite() && det.abs() > 1.0e-8 {
+        model.inverse().transpose()
+    } else {
+        model
+    }
+}
+
+#[inline]
+pub fn normal_matrix_cols3_from_model(model: Mat4) -> [[f32; 4]; 3] {
+    let normal = normal_matrix_from_model(model);
+    [
+        normal.x_axis.to_array(),
+        normal.y_axis.to_array(),
+        normal.z_axis.to_array(),
+    ]
+}
+
 /// Zodiac ribbon submesh after the anchor [`translate_rot_scale`]: optional offset along
 /// **local Y**, then non-uniform scale. Pass `local_offset_y = 0` for the single-segment
 /// ribbon mesh (origin at centroid); the helper still takes an offset for per-segment reuse.
 #[inline]
 pub fn ribbon_submesh(parent: Mat4, local_offset_y: f32, scale: Vec3) -> Mat4 {
     parent * Mat4::from_translation(Vec3::new(0.0, local_offset_y, 0.0)) * Mat4::from_scale(scale)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normal_matrix_preserves_perpendicularity_under_non_uniform_scale() {
+        let local_tangent = Vec3::new(1.0, 1.0, 0.0).normalize();
+        let local_normal = Vec3::new(1.0, -1.0, 0.0).normalize();
+        let model = translate_rot_scale(
+            Vec3::new(2.0, -3.0, 4.0),
+            rot_euler_xyz_rad(0.2, -0.4, 0.7),
+            Vec3::new(2.5, 0.4, 1.3),
+        );
+
+        let world_tangent = model.transform_vector3(local_tangent).normalize();
+        let correct_normal = normal_matrix_from_model(model)
+            .transform_vector3(local_normal)
+            .normalize();
+        let model_normal = model.transform_vector3(local_normal).normalize();
+
+        assert!(world_tangent.dot(correct_normal).abs() < 1.0e-5);
+        assert!(world_tangent.dot(model_normal).abs() > 0.5);
+    }
+
+    #[test]
+    fn normal_matrix_keeps_singular_transforms_finite() {
+        let model = translate_rot_scale(
+            Vec3::new(1.0, 2.0, 3.0),
+            rot_euler_xyz_rad(0.1, 0.2, 0.3),
+            Vec3::new(0.0, 1.0, 2.0),
+        );
+        let normal = normal_matrix_from_model(model);
+
+        assert!(normal.to_cols_array().into_iter().all(f32::is_finite));
+    }
 }

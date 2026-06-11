@@ -109,6 +109,7 @@ pub(super) struct RendererShaderPack {
     pub tile_glow: wgpu::ShaderModule,
     pub lit_mesh: wgpu::ShaderModule,
     pub shadow: wgpu::ShaderModule,
+    pub room_shadow_mask: wgpu::ShaderModule,
     pub image: wgpu::ShaderModule,
     pub bloom_extract: wgpu::ShaderModule,
     pub bloom_blur: wgpu::ShaderModule,
@@ -205,6 +206,10 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
         shadow: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shadow-shader"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::SHADOW.into()),
+        }),
+        room_shadow_mask: device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("room-shadow-mask-shader"),
+            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::ROOM_SHADOW_MASK.into()),
         }),
         image: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("image-shader"),

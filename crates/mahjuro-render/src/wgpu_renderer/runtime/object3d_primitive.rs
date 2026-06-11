@@ -299,6 +299,7 @@ impl WgpuRenderer {
         self.coin_3d_draw_state.push(Coin3dDrawState {
             instance: Tile3dInstance {
                 model: model.to_cols_array(),
+                normal_model: crate::table_transform::normal_matrix_cols3_from_model(model),
                 tile_visual_params: [
                     obj.color[0],
                     obj.color[1],

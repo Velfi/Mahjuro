@@ -10,7 +10,7 @@ use glam::Vec3;
 use crate::draw_cmd::CameraParams;
 use crate::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
-use crate::wgpu_renderer::{PointLight, SpotLight};
+use crate::wgpu_renderer::PointLight;
 
 enum StaircaseGlbCache {
     Uninit,
@@ -210,25 +210,4 @@ pub fn staircase_embedded_point_lights_runtime(
         .into_iter()
         .map(|t| t.light)
         .collect()
-}
-
-pub fn staircase_embedded_spot_lights_runtime(
-    w: f32,
-    h: f32,
-    env_h: f32,
-    tune: &RoomEnvLightingTune,
-) -> Vec<SpotLight> {
-    with_staircase_glb_cpu(|opt| {
-        opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu,
-                w,
-                h,
-                env_h,
-                tune,
-                "staircase.glb",
-            )
-        })
-        .unwrap_or_default()
-    })
 }

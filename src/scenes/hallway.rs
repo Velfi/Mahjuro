@@ -409,18 +409,6 @@ impl SceneBehavior for HallwayScene {
             let room_glb = hallway_glb::hallway_glb_has_embedded_lights();
             frame.scene_lighting.embedded_gltf_punctual = room_glb;
             frame.scene_lighting.room_glb_brdf = room_glb;
-            frame
-                .scene_lighting
-                .set_gltf_embedded_spot_lights(if room_glb {
-                    hallway_glb::hallway_embedded_spot_lights_runtime(
-                        w,
-                        h,
-                        ctx.room_gltf_height_scale,
-                        &ctx.room_env_for(scene_keys::HALLWAY).0,
-                    )
-                } else {
-                    Vec::new()
-                });
             let (mut inverse_punctual, mut punctual_gltf_nodes): (
                 Vec<ScenePunctualLight>,
                 Vec<Option<String>>,

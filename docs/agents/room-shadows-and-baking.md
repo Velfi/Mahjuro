@@ -12,6 +12,8 @@ Stamp hashes and skip env vars are centralized in [`crates/mahjuro-bake-stamp`](
 
 Static rooms ship offline `assets/data/room_shadow/<room>.msh` (MSH1: depth + contact AO). [`room_glb.wgsl`](../../shaders/room_glb.wgsl) samples baked contact AO via `sample_contact_ao` when a `.msh` is loaded; the live depth array is for **moving catalog props** (static room shells skip the live cast pass when offline bake is active — see `skip_room_env_live_shadow_pass` in [`shadow_setup.rs`](../../crates/mahjuro-render/src/wgpu_renderer/runtime/shadow_setup.rs)).
 
+Contact AO is generated from bake-time GPU captures, not from raw depth alone: [`room_shadow_mask.wgsl`](../../shaders/room_shadow_mask.wgsl) writes receiver/occluder weights, primitive id, and world normal alongside the captured depth. [`room_shadow_bake.rs`](../../crates/mahjuro-render/src/room_shadow_bake.rs) uses those buffers for per-room tuning, receiver/occluder separation, and normal/depth coherence before writing the final AO bytes into `.msh`.
+
 **Rebake all rooms** (refreshes `.inputs_stamp` automatically):
 
 ```bash
@@ -23,9 +25,12 @@ scripts/rebake-offline.sh room
 - Freshness checks auto-skip when building `mahjuro-headless` with `--features bake` (`mahjuro/offline-bake-support` on the dependency graph) or when `MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1` is set.
 - Implementation: [`room_shadow_bake.rs`](../../crates/mahjuro-render/src/room_shadow_bake.rs)
 
-### Archive (exception)
+### Archive runtime sampling
 
 Archive **does not** sample offline `archive.msh` today — the room GLB uses punctual lights only. Offline cubby-only bakes mis-darken receivers as the asset grows (30+ prims). See [`docs/todo/archive-offline-baked-shadows.md`](../todo/archive-offline-baked-shadows.md).
+
+The committed `archive.msh` is still baked and validated with real depth + contact AO so the
+room bake set has no placeholder/all-white shadow asset.
 
 The live map is still used on archive for **inspect orbit only**: only [`SHOP_INSPECT_SUBJECT_ANIM_ID`](../../crates/mahjuro-render/src/draw_cmd.rs) casts dynamic shadows (grid featured close-up and cubbies do not, so the pedestal and description signs stay clean). Inspect sets `UiFrame::shop_inspect_shadow_target` for a tight frustum + subject-only cast.
 

@@ -270,9 +270,6 @@ impl SceneBehavior for ButtonAabbLabScene {
                         );
                     frame.scene_lighting.punctual = punctual;
                     frame.scene_lighting.punctual_gltf_nodes = nodes;
-                    frame.scene_lighting.set_gltf_embedded_spot_lights(
-                        gameplay_glb::gameplay_embedded_spot_lights_runtime(w, h, env_h, &tune),
-                    );
                 }
             }
         }

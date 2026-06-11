@@ -1113,13 +1113,18 @@ impl WgpuRenderer {
             self.active_scene_key
                 .and_then(super::shadow_setup::ActiveRoomEnv::from_scene_key)
         });
-        self.warn_if_spot_lights_present(frame);
         let light_view_proj_arr = projected_frame.first_light_view_proj;
-        let contact_ao_active = shadow_quality.contact_ao() && self.active_lab_baked_shadow;
+        let contact_ao_active = shadow_quality.contact_ao()
+            && (self.active_lab_baked_shadow || self.active_room_baked_shadow.is_some());
         let contact_ao_view_proj = if self.active_lab_baked_shadow {
             self.lab_baked_shadow
                 .as_ref()
                 .map(|(_, gpu)| gpu.baked_light_view_proj)
+                .unwrap_or([0.0; 16])
+        } else if let Some(room) = self.active_room_baked_shadow {
+            self.room_baked_shadow_gpu[crate::room_gi_bake::room_gi_room_index(room)]
+                .as_ref()
+                .map(|gpu| gpu.baked_light_view_proj)
                 .unwrap_or([0.0; 16])
         } else {
             [0.0; 16]
@@ -1238,13 +1243,12 @@ impl WgpuRenderer {
             ops.insert(pos + 1, RenderOp::ShowcaseTileTranslucent);
         }
 
-        if self.active_lab_baked_shadow {
-            self.write_active_room_baked_shadow_globals(
-                shadow_quality,
-                &projected_frame.build,
-                camera.h,
-            );
-        }
+        self.write_active_room_baked_shadow_globals(
+            shadow_quality,
+            &projected_frame.build,
+            camera.h,
+            contact_ao_active,
+        );
         self.upload_projected_shadow_globals(
             shadow_quality,
             &projected_frame.build,
@@ -1253,7 +1257,7 @@ impl WgpuRenderer {
             camera.h,
         );
         let room_shadow_active = shadow_quality.active();
-        let offline_room_baked_loaded = false;
+        let offline_room_baked_loaded = self.active_room_baked_shadow.is_some();
         // #region agent log
         {
             use super::{
@@ -1264,7 +1268,12 @@ impl WgpuRenderer {
             use crate::projected_light_shadow::punctual_light_world;
             use crate::room_gi_bake::room_gi_room_index;
             use crate::room_glb::room_env_world_scale;
-            let skip_live = false;
+            let skip_live = active_room_env.is_some_and(|env| {
+                super::shadow_setup::skip_room_env_live_shadow_pass(
+                    env,
+                    self.active_room_baked_shadow,
+                )
+            });
             let ao_scale = if self.active_lab_baked_shadow {
                 crate::shadow_ao_lab::CONTACT_AO_WORLD_SCALE
             } else if contact_ao_active {
@@ -1446,8 +1455,14 @@ impl WgpuRenderer {
         // #endregion
         macro_rules! room_env_shadow_upload {
             ($env:expr) => {
-                super::shadow_setup::room_env_shadow_upload_active(room_shadow_active)
-                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed))
+                super::shadow_setup::room_env_shadow_upload_active(
+                    room_shadow_active,
+                    super::shadow_setup::skip_room_env_live_shadow_pass(
+                        $env,
+                        self.active_room_baked_shadow,
+                    ),
+                )
+                .then_some((light_view_proj_arr, &mut shadow_uniforms_changed))
             };
         }
         if ops_flags.shop_env {
@@ -1545,11 +1560,13 @@ impl WgpuRenderer {
             let size = self.point_shadow_array.size;
             self.encode_room_shadow_capture_copy(
                 &mut encoder,
+                frame,
                 room,
                 size,
                 size,
                 light_view_proj_arr,
                 BIAS,
+                camera.h,
             )
         });
 

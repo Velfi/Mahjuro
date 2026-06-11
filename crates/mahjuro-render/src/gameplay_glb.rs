@@ -35,7 +35,7 @@ use crate::table_transform::{
     apply_rotation_deg_to_model, compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad,
     tile_mesh_local_to_world, translate_rot_scale,
 };
-use crate::wgpu_renderer::{PointLight, SpotLight};
+use crate::wgpu_renderer::PointLight;
 use crate::world_space::{
     LayoutAnchorPx, object3d_pos_triple_for_world_center, pixel_to_world,
     surface_anchor_from_world_xyz,
@@ -1189,27 +1189,6 @@ pub fn gameplay_embedded_point_lights_runtime(
     .into_iter()
     .map(|t| t.light)
     .collect()
-}
-
-pub fn gameplay_embedded_spot_lights_runtime(
-    w: f32,
-    h: f32,
-    env_h: f32,
-    tune: &RoomEnvLightingTune,
-) -> Vec<SpotLight> {
-    with_gameplay_glb_cpu(|opt| {
-        opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu,
-                w,
-                h,
-                env_h,
-                tune,
-                "gameplay.glb",
-            )
-        })
-        .unwrap_or_default()
-    })
 }
 
 /// Procedural flame particles at each `light_candle*` punctual in `gameplay.glb`.

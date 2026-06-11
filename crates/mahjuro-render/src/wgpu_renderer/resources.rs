@@ -980,6 +980,43 @@ pub(crate) fn rgba8_copy_bytes_per_row(width: u32) -> u32 {
     unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
 }
 
+pub(crate) fn rgba8_copy_buffer_size(width: u32, height: u32) -> u64 {
+    rgba8_copy_bytes_per_row(width) as u64 * height.max(1) as u64
+}
+
+pub(crate) fn copy_rgba8_texture_to_buffer(
+    encoder: &mut wgpu::CommandEncoder,
+    staging: &wgpu::Buffer,
+    src: &wgpu::Texture,
+    width: u32,
+    height: u32,
+) {
+    let width = width.max(1);
+    let height = height.max(1);
+    let bytes_per_row = rgba8_copy_bytes_per_row(width);
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: src,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: staging,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(bytes_per_row),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+}
+
 /// Upload tightly packed RGBA8 (`width * height * 4` bytes) into an `Rgba8*` texture.
 pub(crate) fn write_rgba8_texture(
     queue: &wgpu::Queue,

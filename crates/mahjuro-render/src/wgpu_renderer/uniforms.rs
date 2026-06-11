@@ -86,6 +86,7 @@ pub(crate) struct TileFrameUniform {
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct Tile3dInstance {
     pub model: [f32; 16],
+    pub normal_model: [[f32; 4]; 3],
     pub tile_visual_params: [f32; 4],
     pub tile_decal_atlas_uv: [f32; 4],
     pub tile_material_seed: f32,
@@ -126,6 +127,14 @@ pub(crate) struct RoomEnvUniform {
     pub room_height_fog_far_color: [f32; 4],
 }
 
+/// Per-primitive metadata rendered into the bake-only room shadow mask.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct RoomShadowMaskUniform {
+    /// x = receiver, y = occluder, z = primitive id low byte / 255, w = high byte / 255.
+    pub class: [f32; 4],
+}
+
 /// Per-frame data for `tile_outline.wgsl` group 0 binding 0.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -139,6 +148,7 @@ pub(crate) struct TileOutlineFrameUniform {
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct TileOutlineInstance {
     pub model: [f32; 16],
+    pub normal_model: [[f32; 4]; 3],
     pub base_color_factor: [f32; 4],
 }
 

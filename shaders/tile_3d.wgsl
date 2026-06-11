@@ -109,14 +109,22 @@ fn vs_main(
     @location(7) inst_model_c1: vec4<f32>,
     @location(8) inst_model_c2: vec4<f32>,
     @location(9) inst_model_c3: vec4<f32>,
-    @location(10) inst_visual: vec4<f32>,
-    @location(11) inst_decal_uv: vec4<f32>,
-    @location(12) inst_seed_opacity: vec2<f32>,
+    @location(10) inst_normal_c0: vec4<f32>,
+    @location(11) inst_normal_c1: vec4<f32>,
+    @location(12) inst_normal_c2: vec4<f32>,
+    @location(13) inst_visual: vec4<f32>,
+    @location(14) inst_decal_uv: vec4<f32>,
+    @location(15) inst_seed_opacity: vec2<f32>,
 ) -> VsOut {
     let model = mat4x4<f32>(inst_model_c0, inst_model_c1, inst_model_c2, inst_model_c3);
+    let normal_model = mat3x3<f32>(
+        inst_normal_c0.xyz,
+        inst_normal_c1.xyz,
+        inst_normal_c2.xyz,
+    );
 
     let world_h = (model * vec4<f32>(pos, 1.0)).xyz;
-    let N0 = normalize((model * vec4<f32>(n, 0.0)).xyz);
+    let N0 = normalize(normal_model * n);
     let Tw = (model * vec4<f32>(tangent.xyz, 0.0)).xyz;
     let Torth = normalize(Tw - N0 * dot(N0, Tw));
     let Borth = normalize(cross(N0, Torth)) * tangent.w;

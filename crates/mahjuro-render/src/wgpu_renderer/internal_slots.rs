@@ -156,6 +156,9 @@ pub(crate) struct ShopEnvironmentGpu {
     /// Per-primitive `(light_view_proj, model)` for [`shaders/shadow.wgsl`].
     pub shadow_uniform_buffers: Vec<wgpu::Buffer>,
     pub shadow_bind_groups: Vec<wgpu::BindGroup>,
+    /// Per-primitive receiver/occluder/id for bake-only room shadow mask capture.
+    pub _shadow_mask_uniform_buffers: Vec<wgpu::Buffer>,
+    pub shadow_mask_bind_groups: Vec<wgpu::BindGroup>,
     /// Same `distortion_buffer` as `room_glb` @binding(8) — shadow VS group 1 (warp disabled when zeroed).
     pub shadow_warp_bind_group: wgpu::BindGroup,
     pub bind_groups: Vec<wgpu::BindGroup>,
