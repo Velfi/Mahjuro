@@ -129,8 +129,12 @@ impl StrategicWallScene {
         let mut out = Vec::new();
         out.push(FlatItem::new(
             LedgerNav::Back.id(),
+<<<<<<< Updated upstream
             HeaderChromeMetrics::from_window(w, layout.summary_y + layout.summary_h)
                 .back_rect_left(),
+=======
+            HeaderChromeMetrics::from_window(w, layout.detail_y + layout.detail_h).back_rect_left(),
+>>>>>>> Stashed changes
             LedgerNav::Back,
         ));
 
@@ -139,7 +143,11 @@ impl StrategicWallScene {
                 continue;
             }
             if let Some(rect) = grid_cell_rect(layout, idx) {
-                out.push(FlatItem::new(LedgerNav::Tile(idx).id(), rect, LedgerNav::Tile(idx)));
+                out.push(FlatItem::new(
+                    LedgerNav::Tile(idx).id(),
+                    rect,
+                    LedgerNav::Tile(idx),
+                ));
             }
         }
 

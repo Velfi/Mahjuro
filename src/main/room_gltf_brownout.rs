@@ -11,6 +11,10 @@ use rand::RngExt;
 const IDLE_MIN_SECS: f32 = 240.0;
 const IDLE_MAX_SECS: f32 = 420.0;
 
+/// Between events while Debug → Runtime → Brownout Mode is enabled.
+const DEBUG_IDLE_MIN_SECS: f32 = 5.0;
+const DEBUG_IDLE_MAX_SECS: f32 = 10.0;
+
 /// Between random floor creaks while an eligible room scene is on-screen.
 const CREAK_MIN_SECS: f32 = 45.0;
 const CREAK_MAX_SECS: f32 = 120.0;
@@ -26,6 +30,23 @@ pub struct RoomGltfBrownout {
     secs_to_next: f32,
     creak_secs_to_next: f32,
     active: Option<ActiveBrownout>,
+    mode: BrownoutMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BrownoutMode {
+    #[default]
+    Normal,
+    Frequent,
+}
+
+impl BrownoutMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "Normal",
+            Self::Frequent => "Frequent (5-10s)",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -39,10 +60,12 @@ struct ActiveBrownout {
 
 impl RoomGltfBrownout {
     pub fn new() -> Self {
+        let mode = BrownoutMode::Normal;
         Self {
-            secs_to_next: Self::roll_idle_delay(),
+            secs_to_next: Self::roll_idle_delay(mode),
             creak_secs_to_next: Self::roll_creak_delay(),
             active: None,
+            mode,
         }
     }
 
@@ -51,9 +74,12 @@ impl RoomGltfBrownout {
         rng.random_range(CREAK_MIN_SECS..CREAK_MAX_SECS)
     }
 
-    fn roll_idle_delay() -> f32 {
+    fn roll_idle_delay(mode: BrownoutMode) -> f32 {
         let mut rng = rand::rng();
-        rng.random_range(IDLE_MIN_SECS..IDLE_MAX_SECS)
+        match mode {
+            BrownoutMode::Normal => rng.random_range(IDLE_MIN_SECS..IDLE_MAX_SECS),
+            BrownoutMode::Frequent => rng.random_range(DEBUG_IDLE_MIN_SECS..DEBUG_IDLE_MAX_SECS),
+        }
     }
 
     fn roll_active() -> ActiveBrownout {
@@ -76,6 +102,17 @@ impl RoomGltfBrownout {
     pub fn trigger(&mut self) {
         self.active = Some(Self::roll_active());
         self.secs_to_next = 0.0;
+    }
+
+    pub fn toggle_mode(&mut self) -> BrownoutMode {
+        self.mode = match self.mode {
+            BrownoutMode::Normal => BrownoutMode::Frequent,
+            BrownoutMode::Frequent => BrownoutMode::Normal,
+        };
+        if self.active.is_none() {
+            self.secs_to_next = Self::roll_idle_delay(self.mode);
+        }
+        self.mode
     }
 
     /// `freeze`: pause menu, shop lighting debug overlay, or scene blocking overlay.
@@ -105,7 +142,7 @@ impl RoomGltfBrownout {
             a.t += dt;
             if a.t >= Self::total_event_secs(a) {
                 self.active = None;
-                self.secs_to_next = Self::roll_idle_delay();
+                self.secs_to_next = Self::roll_idle_delay(self.mode);
             }
         } else {
             self.secs_to_next -= dt;

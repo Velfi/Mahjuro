@@ -36,9 +36,6 @@ const POLYCHROME_WARP_X: f32 = 2.5;
 const POLYCHROME_LIGHT_GOLD: vec3<f32> = vec3<f32>(1.0, 0.68, 0.08);
 const POLYCHROME_SATURATION: f32 = 1.42;
 const HOUSE_BASE_RGB: vec3<f32> = vec3<f32>(0.90, 0.15, 0.10);
-/// Default `RoomEnvLightingTune::linear_exposure_base` (`2^-9`); gold signage fill is
-/// normalized against this so Scene Look exposure tracks punctual lights, not emissive.
-const ROOM_LINEAR_EXPOSURE_BASE_DEFAULT: f32 = 1.0 / 512.0;
 // Hallway vertex warp: `hallway_vertex_warp.wgsl` prepended in `embedded_wgsl::SHOP_GLB`.
 
 struct RoomEnvUniform {
@@ -476,7 +473,19 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let f0_base = mix(albedo, max(albedo, metal_f0_floor), f0_boost);
     let F0 = mix(vec3<f32>(0.04), f0_base, metallic);
 
+    // Shop gold lettering (SHOP / tagline): it should read as warm metal reflecting
+    // the room's lanterns, not as a self-lit sign. Classify once here so the light
+    // loops below can add a small rough-gold reflection from actual punctual lights.
+    let warm_gold_sign = albedo_lum > 0.45
+        && albedo.r > albedo.g * 0.90
+        && albedo.g > albedo.b * 1.20
+        && albedo.r > albedo.b * 2.2;
+    let gold_sign_ramp = smoothstep(0.45, 0.85, metallic)
+        * select(0.0, 1.0, warm_gold_sign);
+    let gold_face_view = 0.22 + 0.50 * pow(NdotV, 0.7);
+
     var Lo = vec3<f32>(0.0);
+    var gold_reflected_fill = vec3<f32>(0.0);
     // Boss blind (`hd.flags.y` ≈ 1): wash punctual, spots, and lamp emissive toward red.
     let boss_press = clamp(hd.flags.y, 0.0, 1.0);
     let boss_light_rgb_mul = mix(
@@ -501,7 +510,21 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         );
         let radiance = pl.color.rgb * boss_light_rgb_mul * pl.color.a * atten;
         let NdotL = max(dot(n_world, L), 0.0);
-        if (NdotL <= 0.0 || length(radiance) <= 0.0) {
+        if (length(radiance) <= 0.0) {
+            continue;
+        }
+
+        let projected_shadows_on = shadow_globals.params.x > 0.5;
+        let punc_vis = select(
+            1.0,
+            punctual_shadow_vis(i, in.world_pos),
+            projected_shadows_on,
+        );
+        let gold_soft_ndl = smoothstep(-0.12, 0.62, dot(n_world, L));
+        gold_reflected_fill = gold_reflected_fill
+            + gold_sign_ramp * albedo * radiance * gold_soft_ndl * gold_face_view * 0.018 * punc_vis;
+
+        if (NdotL <= 0.0) {
             continue;
         }
         let H = normalize(V + L);
@@ -511,13 +534,6 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let F = fresnel_schlick(VdotH, F0);
         let kS = F;
         let kD = dielectric_kD(kS, metallic);
-
-        let projected_shadows_on = shadow_globals.params.x > 0.5;
-        let punc_vis = select(
-            1.0,
-            punctual_shadow_vis(i, in.world_pos),
-            projected_shadows_on,
-        );
         let diffuse = kD * albedo / PI * radiance * NdotL * punc_vis;
 
         let D = distribution_ggx(NdotH, roughness);
@@ -549,6 +565,16 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         }
         let radiance = s.color.rgb * boss_light_rgb_mul * s.color.a * atten_spot * spot_factor;
         let NdotL = max(dot(n_world, L), 0.0);
+        let projected_shadows_on = shadow_globals.params.x > 0.5;
+        let punc_vis = select(
+            1.0,
+            1.0,
+            projected_shadows_on,
+        );
+        let gold_soft_ndl = smoothstep(-0.12, 0.62, dot(n_world, L));
+        gold_reflected_fill = gold_reflected_fill
+            + gold_sign_ramp * albedo * radiance * gold_soft_ndl * gold_face_view * 0.018 * punc_vis;
+
         if (NdotL <= 0.0) {
             continue;
         }
@@ -559,13 +585,6 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let F = fresnel_schlick(VdotH, F0);
         let kS = F;
         let kD = dielectric_kD(kS, metallic);
-
-        let projected_shadows_on = shadow_globals.params.x > 0.5;
-        let punc_vis = select(
-            1.0,
-            1.0,
-            projected_shadows_on,
-        );
         let diffuse = kD * albedo / PI * radiance * NdotL * punc_vis;
 
         let D = distribution_ggx(NdotH, roughness);
@@ -596,29 +615,22 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         albedo,
         clamp(albedo_lum * 15.0, 0.0, 1.0),
     );
-    let metal_hemi = dark_metal_ramp * metallic * hemi_tint * (0.10 + 0.26 * NdotV);
-
-    // Shop gold lettering (SHOP / tagline): bright baseColor + high metallic suppresses
-    // diffuse; flat facets toward the camera miss punctual N·L. View-facing body fill
-    // keeps the front face gold instead of edge-only specular (GPU-stable; not thresholded).
-    let warm_gold_sign = albedo_lum > 0.45
-        && albedo.r > albedo.g * 0.90
-        && albedo.g > albedo.b * 1.20
-        && albedo.r > albedo.b * 2.2;
-    let gold_sign_ramp = smoothstep(0.45, 0.85, metallic)
-        * select(0.0, 1.0, warm_gold_sign);
-    let gold_sign_body = gold_sign_ramp * albedo * (0.22 + 0.40 * pow(NdotV, 0.7));
-    // Scale with `room_linear_exposure` but keep default authored brightness (fill was tuned at
-    // `linear_exposure_base == ROOM_LINEAR_EXPOSURE_BASE_DEFAULT`). Unscaled add looked
-    // emissive when crushing room exposure in Scene Look.
-    let gold_sign_hdr = gold_sign_body
-        * cam.room_linear_exposure
-        / max(ROOM_LINEAR_EXPOSURE_BASE_DEFAULT, 1e-6);
+    let metal_hemi_room_visibility = clamp(
+        max(cam.room_env_params.x, cam.room_linear_exposure * 80.0),
+        0.0,
+        1.0,
+    );
+    let metal_hemi = dark_metal_ramp
+        * metallic
+        * hemi_tint
+        * (0.10 + 0.26 * NdotV)
+        * metal_hemi_room_visibility;
+    Lo = Lo + gold_reflected_fill;
 
     // `room_linear_exposure` is scene exposure for punctual PBR (often ≪ 1 to tame imported
     // glTF light energy). Keep the runtime hemisphere fill in scene-linear units
     // so the Scene Look "Room ambient" slider remains visible.
-    var lit_hdr = Lo * cam.room_linear_exposure + gold_sign_hdr + ambient + metal_hemi;
+    var lit_hdr = Lo * cam.room_linear_exposure + ambient + metal_hemi;
     if ((pbr.flags & GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO) == 0u) {
         lit_hdr = lit_hdr * sample_contact_ao(in.world_pos);
     }

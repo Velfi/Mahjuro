@@ -101,6 +101,8 @@ pub enum DebugAction {
     /// over the next 100 rendered frames and log the result. Always
     /// available; safe to run while the GPU profile is *not* active.
     ProfileCpu,
+    /// Toggle frequent room brownouts for visual tuning.
+    ToggleBrownoutMode,
     /// Restock the shop stock for free (no gold cost, no cost increment).
     RestockShop,
     /// Force-open a random tile pack celebration (free, ignores shop stock).
@@ -335,6 +337,18 @@ impl DebugMenuBar {
         let _ = profiling_sub.append(&profile_gpu_item);
 
         let _ = debug_menu.append(&profiling_sub);
+
+        // ── Runtime toggles ─────────────────────────────────────────────────
+        let runtime_sub = Submenu::new("Runtime", true);
+
+        let brownout_mode_item = MenuItem::new("Brownout Mode (5-10s)", true, None);
+        mappings.push((
+            brownout_mode_item.id().clone(),
+            DebugAction::ToggleBrownoutMode,
+        ));
+        let _ = runtime_sub.append(&brownout_mode_item);
+
+        let _ = debug_menu.append(&runtime_sub);
 
         // ── Cheats ───────────────────────────────────────────────────────────
         // Grouped by persistence: current run only vs saved profile meta.

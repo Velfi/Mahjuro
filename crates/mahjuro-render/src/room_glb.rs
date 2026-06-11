@@ -945,8 +945,14 @@ pub fn marker_translation(cpu: &RoomGlbCpu, name: &str) -> Option<Vec3> {
 
 #[cfg(test)]
 mod tests {
-    /// Keep in sync with `gold_sign_body` / `gold_sign_hdr` in `shaders/room_glb.wgsl` `shop_shade`.
-    fn gold_sign_body_fill_lum(albedo: [f32; 3], metallic: f32, ndotv: f32) -> f32 {
+    /// Keep in sync with `gold_reflected_fill` in `shaders/room_glb.wgsl` `shop_shade`.
+    fn gold_sign_reflected_fill_lum(
+        albedo: [f32; 3],
+        metallic: f32,
+        ndotl_raw: f32,
+        ndotv: f32,
+        radiance: [f32; 3],
+    ) -> f32 {
         let smoothstep = |e0: f32, e1: f32, x: f32| {
             let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
             t * t * (3.0 - 2.0 * t)
@@ -960,8 +966,14 @@ mod tests {
             return 0.0;
         }
         let gold_sign_ramp = smoothstep(0.45, 0.85, metallic);
-        let scale = (0.22 + 0.40 * ndotv.powf(0.7)) * gold_sign_ramp;
-        let rgb = [albedo[0] * scale, albedo[1] * scale, albedo[2] * scale];
+        let gold_face_view = 0.22 + 0.50 * ndotv.powf(0.7);
+        let gold_soft_ndl = smoothstep(-0.12, 0.62, ndotl_raw);
+        let scale = gold_sign_ramp * gold_soft_ndl * gold_face_view * 0.018;
+        let rgb = [
+            albedo[0] * radiance[0] * scale,
+            albedo[1] * radiance[1] * scale,
+            albedo[2] * radiance[2] * scale,
+        ];
         0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
     }
 
@@ -974,6 +986,13 @@ mod tests {
         let metal_ramp = smoothstep(0.45, 0.65, metallic);
         let dark_ramp = 1.0 - smoothstep(0.04, 0.16, albedo_lum);
         metal_ramp * dark_ramp
+    }
+
+    /// Keep in sync with `metal_hemi_room_visibility` in `shaders/room_glb.wgsl` `shop_shade`.
+    fn metal_hemi_room_visibility(ambient_scale: f32, room_linear_exposure: f32) -> f32 {
+        ambient_scale
+            .max(room_linear_exposure * 80.0)
+            .clamp(0.0, 1.0)
     }
 
     const ROOM_GLB_WGSL: &str = include_str!(concat!(
@@ -1019,7 +1038,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/3d/Shop.glb");
         let data = std::fs::read(&path).expect("Shop.glb");
         let cpu = crate::room_glb::load_shop_glb_from_bytes(&data).expect("load shop");
-        for name in ["Text", "SHOP"] {
+        for name in ["Text", "Text.004"] {
             let ep = cpu
                 .environment_primitives
                 .iter()
@@ -1055,36 +1074,45 @@ mod tests {
     }
 
     #[test]
-    fn gold_sign_body_fill_strong_for_shop_gold_facing_camera() {
+    fn gold_sign_reflection_tracks_lantern_intensity() {
         // Representative decoded Gold_BaseColor sample (~linear sRGB after upload).
         let albedo = [0.88_f32, 0.72, 0.32];
-        let fill = gold_sign_body_fill_lum(albedo, 1.0, 1.0);
+        let full = gold_sign_reflected_fill_lum(albedo, 1.0, 0.6, 1.0, [12.0, 8.0, 4.0]);
+        let half = gold_sign_reflected_fill_lum(albedo, 1.0, 0.6, 1.0, [6.0, 4.0, 2.0]);
         assert!(
-            fill > 0.25,
-            "camera-facing shop gold should get visible body fill, got {fill}"
+            full > half * 1.95 && full < half * 2.05,
+            "shop gold reflection should scale with lantern radiance, got full={full} half={half}"
         );
     }
 
     #[test]
-    fn gold_sign_body_fill_off_for_dielectric_wood() {
+    fn gold_sign_reflection_off_for_dielectric_wood() {
         let wood = [0.35_f32, 0.22, 0.12];
-        assert_eq!(gold_sign_body_fill_lum(wood, 0.0, 1.0), 0.0);
-        assert_eq!(gold_sign_body_fill_lum(wood, 1.0, 1.0), 0.0);
+        assert_eq!(
+            gold_sign_reflected_fill_lum(wood, 0.0, 0.6, 1.0, [12.0, 8.0, 4.0]),
+            0.0
+        );
+        assert_eq!(
+            gold_sign_reflected_fill_lum(wood, 1.0, 0.6, 1.0, [12.0, 8.0, 4.0]),
+            0.0
+        );
     }
 
     #[test]
-    fn gold_sign_hdr_tracks_room_linear_exposure_base() {
+    fn gold_sign_reflection_requires_lantern_radiance() {
         let albedo = [0.88_f32, 0.72, 0.32];
-        let body = gold_sign_body_fill_lum(albedo, 1.0, 1.0);
-        let base_default = super::ROOM_GLB_LINEAR_EXPOSURE_BASE;
-        let base_dark = 1e-4_f32;
-        let hdr_default = body * base_default / base_default;
-        let hdr_dark = body * base_dark / base_default;
-        assert!((hdr_default - body).abs() < 1e-6);
-        assert!(
-            hdr_dark < body * 0.1,
-            "crushed exposure base should dim gold fill, got {hdr_dark} vs body {body}"
+        assert_eq!(
+            gold_sign_reflected_fill_lum(albedo, 1.0, 0.6, 1.0, [0.0, 0.0, 0.0]),
+            0.0
         );
+    }
+
+    #[test]
+    fn metal_hemi_visibility_can_black_out_with_room_brownout() {
+        assert_eq!(metal_hemi_room_visibility(0.0, 0.0), 0.0);
+        assert!(metal_hemi_room_visibility(0.1, 0.0005) > 0.0);
+        assert_eq!(metal_hemi_room_visibility(1.0, 0.0), 1.0);
+        assert_eq!(metal_hemi_room_visibility(0.0, 1.0 / 80.0), 1.0);
     }
 
     #[test]
@@ -1102,16 +1130,20 @@ mod tests {
             "F0 gold-boost ramp missing from room_glb.wgsl"
         );
         assert!(
-            ROOM_GLB_WGSL.contains("gold_sign_body"),
-            "shop gold signage body fill missing from room_glb.wgsl"
+            ROOM_GLB_WGSL.contains("gold_reflected_fill"),
+            "shop gold signage should accumulate reflected punctual light"
         );
         assert!(
-            ROOM_GLB_WGSL.contains("gold_sign_hdr"),
-            "shop gold signage exposure-scaled fill missing from room_glb.wgsl"
+            !ROOM_GLB_WGSL.contains("gold_sign_hdr"),
+            "shop gold signage should not use a sign-specific HDR/emissive boost"
         );
         assert!(
             ROOM_GLB_WGSL.contains("warm_gold_sign"),
             "warm gold signage detection missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("metal_hemi_room_visibility"),
+            "metallic readability fill should dim with room brownout"
         );
         assert!(
             ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE"),
