@@ -619,12 +619,14 @@ pub fn compute_scrollable_tile_picker_layout<A: Copy>(
     ];
     let cols = config.grid_cols.max(1);
     let section_gap = (8.0 * scale).max(5.0);
+    let micro_font =
+        crate::render::theme::typography::size(crate::render::theme::typography::H45, h);
     let section_header_h = if config.grouped_rows {
         0.0
     } else {
-        (body_font * 0.95).max(22.0)
+        micro_font.max(22.0)
     };
-    let label_h_fallback = (body_font * 0.88).max(11.0);
+    let label_h_fallback = micro_font.max(11.0);
 
     struct Section {
         drawer: SuitDrawer,

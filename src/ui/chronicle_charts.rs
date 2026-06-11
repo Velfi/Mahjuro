@@ -76,7 +76,8 @@ pub fn push_outcome_chart_legend(
     y: f32,
     w: f32,
     row_h: f32,
-    caption_px: f32,
+    _caption_px: f32,
+    micro_px: f32,
 ) {
     let swatch = (row_h * 0.42).max(6.0);
     let gap = 6.0;
@@ -94,7 +95,7 @@ pub fn push_outcome_chart_legend(
                 rect: [ix + swatch + gap, y, item_w - swatch - gap, row_h],
                 text: label.into(),
                 color: text_color,
-                font_px: Some(caption_px * 0.88),
+                font_px: Some(micro_px),
                 align: TextAlign::Left,
                 ..Default::default()
             },
@@ -233,6 +234,7 @@ pub fn push_score_history_ledger(
     personal_best: u64,
     caption_px: f32,
     body_px: f32,
+    micro_px: f32,
     dense: bool,
     show_stat_panels: bool,
 ) {
@@ -272,7 +274,7 @@ pub fn push_score_history_ledger(
     let stat_row_gap = if show_stat_panels { 4.0 } else { 0.0 };
     let chart_x = x;
     let chart_w = w;
-    let axis_w = chart_y_axis_width_for_max(max_v, caption_px);
+    let axis_w = chart_y_axis_width_for_max(max_v, micro_px);
     let content_top = y + stat_row_h + stat_row_gap;
     let (legend_h, plot_x, plot_w, plot_y, plot_h) = if dense {
         let plot_x = chart_x + axis_w;
@@ -302,6 +304,7 @@ pub fn push_score_history_ledger(
             plot_w,
             legend_h,
             caption_px,
+            micro_px,
         );
     }
     push_chart_y_axis(
@@ -315,7 +318,7 @@ pub fn push_score_history_ledger(
         plot_y,
         plot_h,
         max_v,
-        caption_px,
+        micro_px,
         grid_color,
         false,
         TextAlign::Left,
@@ -410,7 +413,7 @@ pub fn push_score_history_ledger(
         plot_w,
         plot_h,
         cap_h,
-        caption_px * 0.88,
+        micro_px,
     );
 }
 
@@ -461,6 +464,7 @@ pub fn push_ante_outcome_matrix(
     h: f32,
     cells: &[WingOutcomeCell],
     caption_px: f32,
+    micro_px: f32,
 ) {
     if cells.is_empty() {
         return;
@@ -498,7 +502,7 @@ pub fn push_ante_outcome_matrix(
                 rect: [cx, y, cell_w, label_h],
                 text: format!("W{}", cell.wing),
                 color: archive_career::chronicle_wing_color(),
-                font_px: Some(caption_px * 0.82),
+                font_px: Some(micro_px),
                 align: TextAlign::Center,
                 mono: true,
                 ..Default::default()
@@ -517,11 +521,12 @@ pub fn push_ordeal_record_rows(
     row_h: f32,
     rows: &[OrdealRecordRow],
     caption_px: f32,
+    micro_px: f32,
     _body_px: f32,
 ) {
     let gutter = 6.0;
     let row_font_px = caption_px;
-    let wl_font_px = caption_px * 0.9;
+    let wl_font_px = micro_px;
     let score_w = (chart_primitives::measure_text_width("999. M cp", row_font_px, true) + 6.0)
         .clamp(54.0, 78.0)
         .min(w * 0.34);
@@ -560,7 +565,7 @@ pub fn push_ordeal_record_rows(
                 rect: [wl_x, ry, wl_w, row_h],
                 text: wl,
                 color: color::alpha(color::STONE, 0.88),
-                font_px: Some(caption_px * 0.9),
+                font_px: Some(micro_px),
                 align: TextAlign::Left,
                 mono: true,
                 ..Default::default()

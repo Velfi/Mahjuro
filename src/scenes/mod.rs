@@ -296,6 +296,10 @@ pub struct DrawCtx<'a> {
     pub flame_tuning: crate::render::flame_tuning::FlameTuning,
     /// Victory run-summary 3D moon rotation + synodic phase (debug overlay).
     pub victory_moon_debug: crate::render::victory_moon_tuning::VictoryMoonDebug,
+    /// Graphics preset — Low memory uses the procedural 2D victory moon only.
+    pub graphics_mode: crate::persistence::GraphicsMode,
+    /// `main_menu.glb` moon mesh resident on GPU (victory 3D moon path).
+    pub victory_moon_gpu_ready: bool,
     /// When true, scenes may stash a [`crate::ui::focus_nav::FocusNavDebugSnapshot`]
     /// into [`Self::focus_nav_snapshot_out`] for the debug overlay.
     pub focus_nav_debug: bool,
@@ -340,6 +344,8 @@ impl<'a> DrawCtx<'a> {
         main_menu_effects: crate::render::main_menu_effects_tuning::MainMenuEffectsTuning,
         flame_tuning: crate::render::flame_tuning::FlameTuning,
         victory_moon_debug: crate::render::victory_moon_tuning::VictoryMoonDebug,
+        graphics_mode: crate::persistence::GraphicsMode,
+        victory_moon_gpu_ready: bool,
         focus_nav_debug: bool,
         focus_nav_snapshot_out: &'a mut Option<crate::ui::focus_nav::FocusNavDebugSnapshot>,
     ) -> Self {
@@ -374,6 +380,8 @@ impl<'a> DrawCtx<'a> {
             main_menu_effects,
             flame_tuning,
             victory_moon_debug,
+            graphics_mode,
+            victory_moon_gpu_ready,
             focus_nav_debug,
             focus_nav_snapshot_out,
         }

@@ -31,7 +31,8 @@ pub fn push_wall_remaining_hud(
     let [block_left, block_top, block_w, block_h] = layout.block_rect;
     let icon_w = (window_h * 0.030).clamp(24.0, 38.0);
     let icon_h = icon_w * 1.28;
-    let pad = typography::size(typography::H20, window_h) * 0.22;
+    let font_px = typography::size(typography::H20, window_h);
+    let pad = font_px * 0.22;
 
     frame.overlay_quads([
         GpuInstance {

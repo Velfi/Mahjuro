@@ -204,7 +204,8 @@ impl SceneBehavior for TextShadowLabScene {
                 &self.tuning,
             )
         } else {
-            let line_step = typography::size(typography::H32, h) * 1.4;
+            let line_step =
+                typography::size(typography::H32, h) * crate::ui::widget::PLAIN_TEXT_LINE_STEP_MUL;
             let band_w = (w - 2.0 * w * self.tuning.margin_x_frac).min(self.tuning.band_max_w);
             let content_lines = estimated_flavor_line_count(sample.flavor, band_w, body_px, 8);
             let preview_band_h = (line_step * content_lines as f32 + body_px * 0.5)

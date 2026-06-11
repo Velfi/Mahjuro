@@ -307,7 +307,7 @@ struct TutorialDemoLayoutPlan {
 
 /// Part 1 left-column copy: shared measure + draw so intro band and body stay aligned.
 struct TutorialTilesCopyLayout {
-    line_mul: f32,
+    font_cap_px: f32,
     intro_h: f32,
     section_gap: f32,
     start_y: f32,
@@ -653,8 +653,12 @@ impl TutorialCampaignScene {
         Self::tutorial_text_block_height(text, w, tier, h, color::PARCHMENT)
     }
 
-    fn tutorial_tiles_copy_line_h(tier: f32, h: f32, line_mul: f32) -> f32 {
-        typography::size(tier, h) * line_mul
+    fn tutorial_tiles_copy_font_px(tier: f32, h: f32, font_cap_px: f32) -> f32 {
+        typography::tier_at_most(typography::size(tier, h).min(font_cap_px), h)
+    }
+
+    fn tutorial_tiles_copy_line_h(tier: f32, h: f32, font_cap_px: f32) -> f32 {
+        Self::tutorial_tiles_copy_font_px(tier, h, font_cap_px)
     }
 
     fn tutorial_tiles_copy_block_height(
@@ -662,10 +666,10 @@ impl TutorialCampaignScene {
         copy_w: f32,
         tier: f32,
         h: f32,
-        line_mul: f32,
+        font_cap_px: f32,
         default_color: [f32; 4],
     ) -> f32 {
-        let font_px = Self::tutorial_tiles_copy_line_h(tier, h, line_mul);
+        let font_px = Self::tutorial_tiles_copy_line_h(tier, h, font_cap_px);
         styled_text::styled_line_block_height_at_font_px(
             text,
             copy_w,
@@ -675,9 +679,9 @@ impl TutorialCampaignScene {
         )
     }
 
-    fn tutorial_tiles_copy_natural_height(copy_w: f32, h: f32, line_mul: f32) -> f32 {
+    fn tutorial_tiles_copy_natural_height(copy_w: f32, h: f32, font_cap_px: f32) -> f32 {
         let block = |text: &str, tier: f32, color: [f32; 4]| {
-            Self::tutorial_tiles_copy_block_height(text, copy_w, tier, h, line_mul, color)
+            Self::tutorial_tiles_copy_block_height(text, copy_w, tier, h, font_cap_px, color)
         };
         let mut natural_h = block(tiles_intro_copy::INTRO, typography::H32, color::PARCHMENT);
         natural_h += block(
@@ -707,17 +711,16 @@ impl TutorialCampaignScene {
         natural_h
     }
 
-    /// Largest `line_mul` in `[min, max]` whose wrapped copy fits `budget` px tall.
-    /// Wrapping is non-linear in `line_mul`, so a single ratio estimate undershoots.
-    fn tutorial_tiles_copy_line_mul_for_budget(
+    /// Largest font cap in `[min_cap, max_cap]` whose wrapped copy fits `budget` px tall.
+    fn tutorial_tiles_copy_font_cap_for_budget(
         copy_w: f32,
         h: f32,
         budget: f32,
-        min: f32,
-        max: f32,
+        min_cap: f32,
+        max_cap: f32,
     ) -> f32 {
-        let mut lo = min;
-        let mut hi = max;
+        let mut lo = min_cap;
+        let mut hi = max_cap;
         for _ in 0..20 {
             let mid = (lo + hi) * 0.5;
             let natural_h = Self::tutorial_tiles_copy_natural_height(copy_w, h, mid);
@@ -746,20 +749,20 @@ impl TutorialCampaignScene {
         copy_floor: f32,
         h: f32,
     ) -> TutorialTilesCopyLayout {
-        const MIN_LINE_MUL: f32 = 0.55;
-        const MAX_LINE_MUL: f32 = 3.0;
+        let min_cap = typography::readable_floor_px(h);
+        let max_cap = typography::size(typography::H32, h);
         let section_gap = h * 0.006;
         let copy_bottom_pad = h * 0.008;
         let available = (copy_floor - content_top - copy_bottom_pad).max(1.0);
         let gap_stack = section_gap * TUTORIAL_TILES_COPY_SECTION_GAPS as f32;
         let text_budget = (available - gap_stack).max(1.0);
 
-        let line_mul = Self::tutorial_tiles_copy_line_mul_for_budget(
+        let font_cap_px = Self::tutorial_tiles_copy_font_cap_for_budget(
             copy_w,
             h,
             text_budget,
-            MIN_LINE_MUL,
-            MAX_LINE_MUL,
+            min_cap,
+            max_cap,
         );
         let start_y = content_top;
         let intro_h = Self::tutorial_tiles_copy_block_height(
@@ -767,12 +770,12 @@ impl TutorialCampaignScene {
             copy_w,
             typography::H32,
             h,
-            line_mul,
+            font_cap_px,
             color::PARCHMENT,
         );
 
         TutorialTilesCopyLayout {
-            line_mul,
+            font_cap_px,
             intro_h,
             section_gap,
             start_y,
@@ -792,9 +795,9 @@ impl TutorialCampaignScene {
         tier: f32,
         default_color: [f32; 4],
         h: f32,
-        line_mul: f32,
+        font_cap_px: f32,
     ) -> f32 {
-        let line_h = Self::tutorial_tiles_copy_line_h(tier, h, line_mul);
+        let line_h = Self::tutorial_tiles_copy_line_h(tier, h, font_cap_px);
         let block = styled_text::StyledTextBlock::measure_at_font_px(
             text,
             copy_w,
@@ -826,7 +829,7 @@ impl TutorialCampaignScene {
         copy_w: f32,
         h: f32,
     ) -> f32 {
-        let line_mul = layout.line_mul;
+        let font_cap_px = layout.font_cap_px;
         let section_gap = layout.section_gap;
         let mut cursor = layout.start_y;
 
@@ -839,7 +842,7 @@ impl TutorialCampaignScene {
             typography::H32,
             color::PARCHMENT,
             h,
-            line_mul,
+            font_cap_px,
         );
         cursor += section_gap;
 
@@ -852,7 +855,7 @@ impl TutorialCampaignScene {
             typography::H28,
             color::CHAMPAGNE,
             h,
-            line_mul,
+            font_cap_px,
         );
         for line in tiles_intro_copy::NUMBER_SUIT_LINES {
             cursor += Self::push_tutorial_tiles_copy_line(
@@ -864,7 +867,7 @@ impl TutorialCampaignScene {
                 typography::H32,
                 color::PARCHMENT,
                 h,
-                line_mul,
+                font_cap_px,
             );
         }
         cursor += section_gap;
@@ -878,7 +881,7 @@ impl TutorialCampaignScene {
             typography::H28,
             color::CHAMPAGNE,
             h,
-            line_mul,
+            font_cap_px,
         );
         for line in tiles_intro_copy::HONOR_LINES {
             cursor += Self::push_tutorial_tiles_copy_line(
@@ -890,7 +893,7 @@ impl TutorialCampaignScene {
                 typography::H32,
                 color::PARCHMENT,
                 h,
-                line_mul,
+                font_cap_px,
             );
         }
         cursor += section_gap;
@@ -904,7 +907,7 @@ impl TutorialCampaignScene {
             typography::H28,
             color::CHAMPAGNE,
             h,
-            line_mul,
+            font_cap_px,
         );
         for line in tiles_intro_copy::FLOWER_LINES {
             cursor += Self::push_tutorial_tiles_copy_line(
@@ -916,7 +919,7 @@ impl TutorialCampaignScene {
                 typography::H32,
                 color::PARCHMENT,
                 h,
-                line_mul,
+                font_cap_px,
             );
         }
 
@@ -1226,7 +1229,8 @@ impl TutorialCampaignScene {
         let underline_gap = (8.0 * scale).max(5.0);
         let underline_h = (3.0 * scale).max(2.0);
         let label_gap = (5.0 * scale).max(3.0);
-        let label_line_h = typography::size(typography::H42, h) * 1.22;
+        let label_line_h =
+            typography::size(typography::H42, h) * crate::ui::widget::PLAIN_TEXT_LINE_STEP_MUL;
         tile_size + underline_gap + underline_h + label_gap + label_line_h
     }
 
@@ -1375,7 +1379,8 @@ impl TutorialCampaignScene {
             underline_h: (3.0 * scale).max(2.0),
             label_text_gap: (5.0 * scale).max(3.0),
         };
-        let label_line_h = typography::size(typography::H42, window_h) * 1.22;
+        let label_line_h =
+            typography::size(typography::H42, window_h) * crate::ui::widget::PLAIN_TEXT_LINE_STEP_MUL;
 
         let mut placements = Vec::new();
         let mut labels = Vec::new();
@@ -2200,20 +2205,20 @@ mod tests {
             h,
         );
         let natural_h =
-            TutorialCampaignScene::tutorial_tiles_copy_natural_height(copy_w, h, layout.line_mul);
+            TutorialCampaignScene::tutorial_tiles_copy_natural_height(copy_w, h, layout.font_cap_px);
         let copy_bottom_pad = h * 0.008;
         let available = copy_floor - content_top - copy_bottom_pad;
         let total = natural_h + layout.section_gap * TUTORIAL_TILES_COPY_SECTION_GAPS as f32;
         let fill = total / available;
         assert!(
             total <= available + 1.0,
-            "copy should fit: total={total} available={available} line_mul={}",
-            layout.line_mul
+            "copy should fit: total={total} available={available} font_cap_px={}",
+            layout.font_cap_px
         );
         assert!(
             fill > 0.90,
-            "short window should use most of the column (fill={fill:.3}, line_mul={})",
-            layout.line_mul
+            "short window should use most of the column (fill={fill:.3}, font_cap_px={})",
+            layout.font_cap_px
         );
     }
 
@@ -2229,15 +2234,15 @@ mod tests {
             h,
         );
         let natural_h =
-            TutorialCampaignScene::tutorial_tiles_copy_natural_height(copy_w, h, layout.line_mul);
+            TutorialCampaignScene::tutorial_tiles_copy_natural_height(copy_w, h, layout.font_cap_px);
         let copy_bottom_pad = h * 0.008;
         let available = copy_floor - content_top - copy_bottom_pad;
         let used = natural_h + layout.section_gap * 6.0;
         let fill = used / available;
         assert!(
             fill > 0.92,
-            "copy should use most of the column (fill={fill:.3}, line_mul={})",
-            layout.line_mul
+            "copy should use most of the column (fill={fill:.3}, font_cap_px={})",
+            layout.font_cap_px
         );
         assert_eq!(layout.start_y, content_top);
     }

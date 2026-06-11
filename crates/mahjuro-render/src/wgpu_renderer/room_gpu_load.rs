@@ -10,6 +10,7 @@
 
 use super::*;
 
+use crate::room_gpu_resident::victory_uses_3d_moon;
 use crate::scene_keys;
 
 use std::time::{Duration, Instant};
@@ -104,11 +105,11 @@ fn room_upload_runtime_phase(scene_key: Option<&str>) -> crate::room_gpu_profile
         None => RuntimePhase::StartupBlocking,
         Some(
             scene_keys::GAMEPLAY
-            | scene_keys::VICTORY
             | scene_keys::DEFEAT
             | "game_over"
             | "tutorial",
         ) => RuntimePhase::GameplayInteractive,
+        Some(scene_keys::VICTORY) => RuntimePhase::MenuInteractive,
         Some(_) => RuntimePhase::MenuInteractive,
     }
 }
@@ -3032,8 +3033,9 @@ impl WgpuRenderer {
             Some(scene_keys::STAIRWAY) => self.ensure_staircase_room_gpu(),
             Some(scene_keys::ARCHIVE) => self.ensure_archive_room_gpu(),
             Some(scene_keys::VICTORY) => {
-                self.ensure_main_menu_room_gpu();
-                self.ensure_gameplay_room_gpu();
+                if victory_uses_3d_moon(self.graphics_mode) {
+                    self.ensure_main_menu_room_gpu();
+                }
             }
             Some(scene_keys::GAMEPLAY) | Some(scene_keys::DEFEAT) => {
                 self.ensure_gameplay_room_gpu();
@@ -3078,9 +3080,9 @@ impl WgpuRenderer {
         // While held at full black, pin the destination room so integrated low-memory GPUs
         // can evict the source scene (e.g. main menu) and upload the pending shop room.
         self.poll_pinned_room_gpu_bit = if pending_transition_at_black {
-            pending_scene_key.and_then(Self::room_gpu_bit_for_scene_key)
+            pending_scene_key.and_then(|k| self.room_gpu_bit_for_scene_key(k))
         } else {
-            scene_key.and_then(Self::room_gpu_bit_for_scene_key)
+            scene_key.and_then(|k| self.room_gpu_bit_for_scene_key(k))
         };
         self.refresh_gpu_memory_pressure();
         crate::room_preload::try_drain_room_cpu_prefetch_threads();
@@ -3182,8 +3184,16 @@ impl WgpuRenderer {
                         |r| r.ensure_archive_room_gpu(),
                     );
                 }
+                Some(scene_keys::VICTORY) => {
+                    if victory_uses_3d_moon(self.graphics_mode) && !room_env_upload_done {
+                        let before = self.rooms_gpu_loaded;
+                        self.ensure_main_menu_room_gpu();
+                        if self.rooms_gpu_loaded != before {
+                            room_env_upload_done = true;
+                        }
+                    }
+                }
                 Some(scene_keys::GAMEPLAY)
-                | Some(scene_keys::VICTORY)
                 | Some(scene_keys::DEFEAT)
                 | Some("game_over")
                 | Some("tutorial") => upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS),
@@ -3205,8 +3215,18 @@ impl WgpuRenderer {
                             |r| r.ensure_main_menu_room_gpu(),
                         );
                     }
+                    scene_keys::VICTORY => {
+                        if victory_uses_3d_moon(self.graphics_mode) {
+                            crate::room_preload::start_main_menu_cpu_prefetch();
+                            self.maybe_upload_one_room_env(
+                                &mut room_env_upload_done,
+                                ROOM_MAIN_MENU,
+                                crate::main_menu_glb::main_menu_cpu_ready_for_gpu_upload(),
+                                |r| r.ensure_main_menu_room_gpu(),
+                            );
+                        }
+                    }
                     scene_keys::GAMEPLAY
-                    | scene_keys::VICTORY
                     | scene_keys::DEFEAT
                     | "game_over"
                     | "tutorial" => {
@@ -3376,6 +3396,8 @@ impl WgpuRenderer {
     }
 
     pub(super) fn ensure_main_menu_room_gpu(&mut self) {
+        // After GPU eviction, CPU vertex buffers were released — re-decode before upload.
+        crate::main_menu_glb::with_main_menu_glb_cpu(|_| ());
         self.ensure_standard_room_env_gpu(
             RoomGpuResidentId::MainMenu,
             || {
@@ -3889,7 +3911,7 @@ impl WgpuRenderer {
     fn drive_pending_scene_room_gpu_at_black(&mut self, pending: &str) {
         let budget = TRANSITION_BLACK_ROOM_GPU_UPLOAD_BUDGET_MS;
         let key = scene_keys::normalize_scene_key(pending);
-        let dest_bit = Self::room_gpu_bit_for_scene_key(key);
+        let dest_bit = self.room_gpu_bit_for_scene_key(key);
         if self.integrated_low_memory_gpu() {
             if let Some(bit) = dest_bit {
                 self.evict_room_gpu_residents_except(bit);
@@ -3920,7 +3942,13 @@ impl WgpuRenderer {
                 self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Archive);
                 self.ensure_archive_room_gpu();
             }
-            scene_keys::GAMEPLAY | scene_keys::VICTORY | scene_keys::DEFEAT => {
+            scene_keys::VICTORY => {
+                if victory_uses_3d_moon(self.graphics_mode) {
+                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::MainMenu);
+                    self.ensure_main_menu_room_gpu();
+                }
+            }
+            scene_keys::GAMEPLAY | scene_keys::DEFEAT => {
                 self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Gameplay);
                 self.drive_gameplay_room_gpu_upload(budget);
             }

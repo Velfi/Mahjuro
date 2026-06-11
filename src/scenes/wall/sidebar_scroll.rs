@@ -97,7 +97,7 @@ pub fn measure_detail_panel_height(
     let preview_size = (inner_w * 0.78).clamp(80.0, 168.0);
     y += preview_size * 1.08 + 10.0;
 
-    y += text_line_h(layout.body_px * 0.96) + 8.0;
+    y += text_line_h(layout.body_px) + 8.0;
     y += caption_lh + 4.0;
     let copy_rows = if mode.shows_round_locations() { 4 } else { 1 };
     y += (caption_lh + 2.0) * copy_rows as f32;

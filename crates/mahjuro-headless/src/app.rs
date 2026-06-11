@@ -448,6 +448,8 @@ impl HeadlessApp {
             self.renderer.main_menu_effects,
             self.renderer.flame_tuning,
             mahjuro::render::victory_moon_tuning::VictoryMoonDebug::default(),
+            self.gfx.graphics_mode,
+            false,
             false,
             &mut focus_nav_snapshot,
         );
