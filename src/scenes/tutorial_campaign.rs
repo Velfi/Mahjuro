@@ -653,8 +653,12 @@ impl TutorialCampaignScene {
         Self::tutorial_text_block_height(text, w, tier, h, color::PARCHMENT)
     }
 
+    /// `font_cap_px` is the scaled body (`H32`) size; other tiers scale proportionally
+    /// so the column can grow past the nominal ladder step when filling height.
     fn tutorial_tiles_copy_font_px(tier: f32, h: f32, font_cap_px: f32) -> f32 {
-        typography::tier_at_most(typography::size(tier, h).min(font_cap_px), h)
+        let body_nominal = typography::size(typography::H32, h);
+        let scale = font_cap_px / body_nominal;
+        (typography::size(tier, h) * scale).max(typography::readable_floor_px(h))
     }
 
     fn tutorial_tiles_copy_line_h(tier: f32, h: f32, font_cap_px: f32) -> f32 {
@@ -749,8 +753,9 @@ impl TutorialCampaignScene {
         copy_floor: f32,
         h: f32,
     ) -> TutorialTilesCopyLayout {
-        let min_cap = typography::readable_floor_px(h);
-        let max_cap = typography::size(typography::H32, h);
+        let body_nominal = typography::size(typography::H32, h);
+        let min_cap = body_nominal * 0.55;
+        let max_cap = body_nominal * 3.0;
         let section_gap = h * 0.006;
         let copy_bottom_pad = h * 0.008;
         let available = (copy_floor - content_top - copy_bottom_pad).max(1.0);
@@ -2237,7 +2242,7 @@ mod tests {
             TutorialCampaignScene::tutorial_tiles_copy_natural_height(copy_w, h, layout.font_cap_px);
         let copy_bottom_pad = h * 0.008;
         let available = copy_floor - content_top - copy_bottom_pad;
-        let used = natural_h + layout.section_gap * 6.0;
+        let used = natural_h + layout.section_gap * TUTORIAL_TILES_COPY_SECTION_GAPS as f32;
         let fill = used / available;
         assert!(
             fill > 0.92,

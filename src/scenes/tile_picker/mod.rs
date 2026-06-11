@@ -601,8 +601,6 @@ pub fn compute_scrollable_tile_picker_layout<A: Copy>(
     config: ScrollableTilePickerConfig<'_, A>,
 ) -> ScrollableTilePickerLayout<A> {
     let scale = metrics::scene_scale(w, h);
-    let body_font =
-        crate::render::theme::typography::size(crate::render::theme::typography::H42, h);
     let viewport = config
         .viewport
         .unwrap_or_else(|| legacy_scroll_viewport(w, h, 0.0));

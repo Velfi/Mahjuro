@@ -214,7 +214,6 @@ pub fn draw_timelines(
 ) {
     let diag_pad = 12.0 * scale;
     let font_sm = typography::tier_at_most(11.0 * scale, window_h);
-    let micro_font = typography::size(typography::H45, window_h);
 
     instances.push(GpuInstance {
         rect: geom.diagram_rect(panel_x, panel_w, diag_pad),
