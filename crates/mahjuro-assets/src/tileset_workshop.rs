@@ -135,7 +135,11 @@ pub fn workshop_cache_folder_name(tileset_id: &str) -> Option<String> {
     parse_workshop_file_id(tileset_id).map(|id| format!("workshop_{id}"))
 }
 
+#[cfg(test)]
 mod tests {
+    use crate::tileset_mod::write_valid_mod;
+    use crate::tileset_workshop::{WorkshopTilesetInstall, is_workshop_tileset, parse_workshop_file_id, read_workshop_file, registry_revision, resolve_workshop_content_dir, set_workshop_installs, update_workshop_title, workshop_id};
+
     #[test]
     fn workshop_id_round_trip() {
         let id = workshop_id(42);
@@ -151,7 +155,7 @@ mod tests {
             "mahjuro_workshop_resolve_{}",
             std::process::id()
         ));
-        let _ = fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&base);
         let nested = base.join("pack");
         write_valid_mod(&nested, 10, 20, 9);
         assert_eq!(
@@ -166,7 +170,7 @@ mod tests {
             "mahjuro_workshop_registry_{}",
             std::process::id()
         ));
-        let _ = fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&base);
         write_valid_mod(&base, 10, 20, 9);
 
         set_workshop_installs(vec![WorkshopTilesetInstall {
@@ -185,7 +189,7 @@ mod tests {
         assert!(registry_revision() > rev1);
         assert_eq!(
             read_workshop_file("workshop:99", "atlas.toml"),
-            fs::read(base.join("atlas.toml")).ok()
+            std::fs::read(base.join("atlas.toml")).ok()
         );
     }
 }

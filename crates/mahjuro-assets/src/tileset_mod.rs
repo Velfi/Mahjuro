@@ -34,6 +34,25 @@ pub fn set_mod_tilesets_root_for_tests(root: PathBuf) {
     TEST_CONFIG_ROOT.with(|cell| *cell.borrow_mut() = Some(root));
 }
 
+/// Test-only: write a minimal valid mod folder (`atlas.toml` + `atlas.png`).
+#[cfg(test)]
+pub(crate) fn write_valid_mod(dir: &Path, tile_w: u32, tile_h: u32, columns: u32) {
+    fs::create_dir_all(dir).unwrap();
+    let layout = r#"layout = [
+    "B1","B2","B3","B4","B5","B6","B7","B8","B9",
+]"#;
+    fs::write(
+        dir.join("atlas.toml"),
+        format!(
+            "tile_width = {tile_w}\ntile_height = {tile_h}\ncolumns = {columns}\n{layout}\n"
+        ),
+    )
+    .unwrap();
+    let rows = 1u32;
+    let img = image::RgbaImage::new(columns * tile_w, rows * tile_h);
+    img.save(dir.join("atlas.png")).unwrap();
+}
+
 fn config_data_dir() -> PathBuf {
     #[cfg(test)]
     if let Some(root) = TEST_CONFIG_ROOT.with(|cell| cell.borrow().clone()) {
@@ -424,23 +443,6 @@ pub fn read_mod_showcase_cache(tileset_id: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
     use std::fs;
-
-    fn write_valid_mod(dir: &Path, tile_w: u32, tile_h: u32, columns: u32) {
-        fs::create_dir_all(dir).unwrap();
-        let layout = r#"layout = [
-    "B1","B2","B3","B4","B5","B6","B7","B8","B9",
-]"#;
-        fs::write(
-            dir.join("atlas.toml"),
-            format!(
-                "tile_width = {tile_w}\ntile_height = {tile_h}\ncolumns = {columns}\n{layout}\n"
-            ),
-        )
-        .unwrap();
-        let rows = 1u32;
-        let img = image::RgbaImage::new(columns * tile_w, rows * tile_h);
-        img.save(dir.join("atlas.png")).unwrap();
-    }
 
     #[test]
     fn mod_id_round_trip() {
