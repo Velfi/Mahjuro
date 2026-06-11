@@ -48,22 +48,9 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, mut ctx: DrawCtx<'_>) ->
     let flat_items = scene.flat_items(w, &layout, &frame_ctx.stats);
 
     let mut texts = Vec::new();
-<<<<<<< Updated upstream
-=======
-    draw_wall_header(&mut frame, &mut texts, w, h, jr, &layout, &frame_ctx.stats);
-    draw_wall_tabs(&mut frame, &mut texts, &layout, scene.screen.view, focus);
-    draw_wall_summary_panel(
-        &mut frame,
-        &mut texts,
-        &layout,
-        &frame_ctx.stats,
-        scene.screen.view,
-        focus,
-    );
 
     draw_grid_panel_chrome(&mut frame, &layout);
 
->>>>>>> Stashed changes
     let mut placements = Vec::new();
 
     let group = groups
