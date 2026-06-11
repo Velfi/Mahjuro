@@ -6,11 +6,11 @@ best-effort mode and are not part of the supported matrix.
 
 ## Presets
 
-| Options → Graphics | Shadows / SSR | Internal resolution | Room GPU cap | Decal atlas cache |
+| Options → Graphics | Shadows | Internal resolution | Room GPU cap | Decal atlas cache |
 | --- | --- | --- | --- | --- |
 | **Low memory** | Off | 100% | 2 rooms | 1 tileset |
 | **Performance** | Off | 100% | 6 | 4 |
-| **Visuals** | High + SSR | 100% | 6 | 4 |
+| **Visuals** | High | 100% | 6 | 4 |
 
 Low memory also disables HDR swapchain output even if HDR is toggled in Options.
 

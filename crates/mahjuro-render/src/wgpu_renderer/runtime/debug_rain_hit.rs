@@ -42,7 +42,7 @@ impl WgpuRenderer {
             return;
         }
         pass.set_pipeline(&self.lit_mesh_pipeline);
-        pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
+        pass.set_bind_group(3, &self.lit_mesh_spot_frame_bind_group, &[]);
         pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
         pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
         pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));

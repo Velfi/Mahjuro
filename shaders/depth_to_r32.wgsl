@@ -1,4 +1,4 @@
-// Blit a hardware depth attachment into an R32Float texture (SSR history / probe readback).
+// Blit a hardware depth attachment into an R32Float texture (probe readback).
 // D3D12 integrated GPUs reject `copy_texture_to_buffer` from Depth32Float — sampling in a
 // render pass is the portable path.
 

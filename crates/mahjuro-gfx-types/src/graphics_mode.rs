@@ -2,13 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::ShadowQuality;
 
-/// Unified graphics preset: trades GPU cost for shadows, reflections, and VRAM.
+/// Unified graphics preset: trades GPU cost for shadows, HDR output, and VRAM.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphicsMode {
-    /// Shadows and SSR off; full internal resolution.
+    /// Shadows off; full internal resolution.
     Performance,
-    /// Certified path for ~4 GB discrete GPUs at 1080p: no dynamic shadows/SSR/HDR swapchain.
+    /// Certified path for ~4 GB discrete GPUs at 1080p: no dynamic shadows/HDR swapchain.
     LowMemory,
     #[default]
     Visuals,
@@ -149,11 +149,6 @@ impl GraphicsMode {
         }
     }
 
-    #[inline]
-    pub fn ssr_enabled(self) -> bool {
-        matches!(self, Self::Visuals)
-    }
-
     /// HDR swapchain output is disabled on the low-memory preset to save WSI bytes.
     #[inline]
     pub fn hdr_swapchain_enabled(self) -> bool {
@@ -291,7 +286,6 @@ mod tests {
     fn performance_disables_heavy_passes() {
         let m = GraphicsMode::Performance;
         assert!(!m.shadow_quality().active());
-        assert!(!m.ssr_enabled());
         assert_eq!(m.render_scale(), 1.0);
     }
 
@@ -299,7 +293,6 @@ mod tests {
     fn low_memory_tightens_budget() {
         let m = GraphicsMode::LowMemory;
         assert!(!m.shadow_quality().active());
-        assert!(!m.ssr_enabled());
         assert!(!m.hdr_swapchain_enabled());
         assert_eq!(m.render_scale(), 1.0);
         assert_eq!(m.max_room_gpu_residents(), 2);
@@ -309,7 +302,6 @@ mod tests {
     fn visuals_enables_heavy_passes() {
         let m = GraphicsMode::Visuals;
         assert_eq!(m.shadow_quality(), ShadowQuality::High);
-        assert!(m.ssr_enabled());
     }
 
     #[test]

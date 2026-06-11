@@ -185,8 +185,9 @@ impl WgpuRenderer {
         1.0 / s.max(1e-6)
     }
 
-    /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline` (`TileUniform.tile_post_params`)
-    /// and `lit_mesh` (`SsrGlobals.hdr_tonemap`). Same `RoomEnvLightingTune` as the room.
+    /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline`
+    /// (`TileUniform.tile_post_params`) and `lit_mesh`
+    /// (`LitMeshFrameGlobals.hdr_tonemap`). Same `RoomEnvLightingTune` as the room.
     pub(super) fn tile_hdr_tonemap(&self, frame: &crate::draw_cmd::UiFrame) -> [f32; 4] {
         use crate::draw_cmd::DrawCmd;
         let k = self.active_scene_key;
@@ -250,12 +251,11 @@ impl WgpuRenderer {
         ]
     }
 
-    fn lit_mesh_ssr_globals(
+    fn lit_mesh_frame_globals(
         &self,
         cam: &CameraFrame,
-        ssr_enabled: bool,
         frame: &crate::draw_cmd::UiFrame,
-    ) -> SsrGlobals {
+    ) -> LitMeshFrameGlobals {
         let tm = self.tile_hdr_tonemap(frame);
         let hdr_path = tm[0];
         let linear_exposure = if hdr_path > 0.5 { tm[1] } else { 0.0 };
@@ -283,19 +283,8 @@ impl WgpuRenderer {
         } else {
             0.0
         };
-        let ssr_max_distance = cam.h * 2.0;
-        let ssr_stride = cam.h * 0.04;
-        let ssr_max_steps = 24.0;
-        SsrGlobals {
-            inv_view_proj: cam.view_proj.inverse().to_cols_array(),
-            view_proj: cam.view_proj_arr,
+        LitMeshFrameGlobals {
             view_pos: [cam.cam_pos.x, cam.cam_pos.y, cam.cam_pos.z, 1.0],
-            params: [
-                if ssr_enabled { 1.0 } else { 0.0 },
-                ssr_max_distance,
-                ssr_stride,
-                ssr_max_steps,
-            ],
             hdr_tonemap: [hdr_path, linear_exposure, ambient_scale, 0.0],
             shop_punctual: [
                 shop_punctual_inv_doc,
@@ -309,12 +298,11 @@ impl WgpuRenderer {
     pub(super) fn upload_camera_uniforms(
         &self,
         cam: &CameraFrame,
-        ssr_enabled: bool,
         frame: &crate::draw_cmd::UiFrame,
     ) {
-        let g = self.lit_mesh_ssr_globals(cam, ssr_enabled, frame);
+        let g = self.lit_mesh_frame_globals(cam, frame);
         self.queue
-            .write_buffer(&self.lit_mesh_ssr_buffer, 0, bytemuck::bytes_of(&g));
+            .write_buffer(&self.lit_mesh_frame_buffer, 0, bytemuck::bytes_of(&g));
 
         self.queue.write_buffer(
             &self.flame_view_buffer,

@@ -252,8 +252,6 @@ struct RenderScaleDepthResources {
     render_size: crate::physical_size::PhysicalSize,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
-    ssr_prev_depth_texture: wgpu::Texture,
-    ssr_prev_depth_view: wgpu::TextureView,
     depth_r32_snapshot_texture: wgpu::Texture,
     depth_r32_snapshot_view: wgpu::TextureView,
     overlay_depth_texture: wgpu::Texture,
@@ -270,8 +268,6 @@ fn init_render_scale_and_depth_resources(
     size: crate::physical_size::PhysicalSize,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
-    ssr_prev_depth_texture: wgpu::Texture,
-    ssr_prev_depth_view: wgpu::TextureView,
     depth_r32_snapshot_texture: wgpu::Texture,
     depth_r32_snapshot_view: wgpu::TextureView,
 ) -> RenderScaleDepthResources {
@@ -312,45 +308,30 @@ fn init_render_scale_and_depth_resources(
     let render_scale = suggested_graphics_mode.render_scale();
     let render_size = super::super::constants::scaled_render_size(size, render_scale);
     // `early_gpu_and_depth` allocates scene depth at window size; recreate when scaled down.
-    let (
-        depth_texture,
-        depth_view,
-        ssr_prev_depth_texture,
-        ssr_prev_depth_view,
-        depth_r32_snapshot_texture,
-        depth_r32_snapshot_view,
-    ) = if render_size.width != size.width || render_size.height != size.height {
-        depth_texture.destroy();
-        ssr_prev_depth_texture.destroy();
-        depth_r32_snapshot_texture.destroy();
-        let (dt, dv) = super::super::resources::create_depth(
-            device,
-            render_size.width.max(1),
-            render_size.height.max(1),
-        );
-        let (sdt, sdv) = super::super::resources::create_depth_r32_snapshot(
-            device,
-            render_size.width.max(1),
-            render_size.height.max(1),
-            "ssr-prev-depth",
-        );
-        let (drt, drv) = super::super::resources::create_depth_r32_snapshot(
-            device,
-            render_size.width.max(1),
-            render_size.height.max(1),
-            "depth-r32-snapshot",
-        );
-        (dt, dv, sdt, sdv, drt, drv)
-    } else {
-        (
-            depth_texture,
-            depth_view,
-            ssr_prev_depth_texture,
-            ssr_prev_depth_view,
-            depth_r32_snapshot_texture,
-            depth_r32_snapshot_view,
-        )
-    };
+    let (depth_texture, depth_view, depth_r32_snapshot_texture, depth_r32_snapshot_view) =
+        if render_size.width != size.width || render_size.height != size.height {
+            depth_texture.destroy();
+            depth_r32_snapshot_texture.destroy();
+            let (dt, dv) = super::super::resources::create_depth(
+                device,
+                render_size.width.max(1),
+                render_size.height.max(1),
+            );
+            let (drt, drv) = super::super::resources::create_depth_r32_snapshot(
+                device,
+                render_size.width.max(1),
+                render_size.height.max(1),
+                "depth-r32-snapshot",
+            );
+            (dt, dv, drt, drv)
+        } else {
+            (
+                depth_texture,
+                depth_view,
+                depth_r32_snapshot_texture,
+                depth_r32_snapshot_view,
+            )
+        };
     let (overlay_depth_texture, overlay_depth_view) =
         super::super::resources::create_depth(device, size.width.max(1), size.height.max(1));
     let depth_copy_staging_buffer = super::super::resources::create_depth_copy_staging(
@@ -364,8 +345,6 @@ fn init_render_scale_and_depth_resources(
         render_size,
         depth_texture,
         depth_view,
-        ssr_prev_depth_texture,
-        ssr_prev_depth_view,
         depth_r32_snapshot_texture,
         depth_r32_snapshot_view,
         overlay_depth_texture,
@@ -428,8 +407,6 @@ pub(super) fn build_renderer_new(
         gpu_profiler_backend,
         depth_texture,
         depth_view,
-        ssr_prev_depth_texture,
-        ssr_prev_depth_view,
         depth_r32_snapshot_texture,
         depth_r32_snapshot_view,
     } = {
@@ -467,8 +444,6 @@ pub(super) fn build_renderer_new(
         render_size,
         depth_texture,
         depth_view,
-        ssr_prev_depth_texture,
-        ssr_prev_depth_view,
         depth_r32_snapshot_texture,
         depth_r32_snapshot_view,
         overlay_depth_texture,
@@ -485,8 +460,6 @@ pub(super) fn build_renderer_new(
             size,
             depth_texture,
             depth_view,
-            ssr_prev_depth_texture,
-            ssr_prev_depth_view,
             depth_r32_snapshot_texture,
             depth_r32_snapshot_view,
         )
@@ -568,10 +541,9 @@ pub(super) fn build_renderer_new(
         lit_mesh_blended_pipeline,
         lit_mesh_material_layout,
         lit_mesh_pipeline,
-        lit_mesh_spot_ssr_bind_group,
-        lit_mesh_spot_ssr_layout,
-        lit_mesh_ssr_buffer,
-        lit_mesh_ssr_sampler,
+        lit_mesh_spot_frame_bind_group,
+        lit_mesh_spot_frame_layout,
+        lit_mesh_frame_buffer,
         moonlit_water_bind_group,
         moonlit_water_pipeline,
         point_lights_bind_group,
@@ -586,13 +558,9 @@ pub(super) fn build_renderer_new(
         room_baked_shadow_gpu,
         room_emissive_texture,
         room_emissive_view,
-        scene_color_downsample_bind_group,
-        scene_color_downsample_pipeline,
         depth_to_r32_bind_group_layout,
         scene_color_texture,
         scene_color_view,
-        scene_prev_texture,
-        scene_prev_view,
         shadow_ao_sampler,
         shadow_ao_white_texture,
         shadow_ao_white_view,
@@ -667,9 +635,7 @@ pub(super) fn build_renderer_new(
                 size,
                 render_size,
                 format,
-                ssr_prev_depth_view: &ssr_prev_depth_view,
                 scene_depth_view: &depth_view,
-                strip_lit_mesh_table_ssr: integrated_gpu,
             },
         )
     };
@@ -1110,8 +1076,6 @@ pub(super) fn build_renderer_new(
         config,
         depth_texture,
         depth_view,
-        ssr_prev_depth_texture,
-        ssr_prev_depth_view,
         depth_r32_snapshot_texture,
         depth_r32_snapshot_view,
         depth_copy_staging_buffer,
@@ -1145,8 +1109,6 @@ pub(super) fn build_renderer_new(
         cascade_offscreen_texture,
         cascade_offscreen_view,
         cascade_composite_bind_group,
-        scene_color_downsample_pipeline,
-        scene_color_downsample_bind_group,
         depth_to_r32_pipeline: std::sync::OnceLock::new(),
         depth_to_r32_bind_group_layout,
         tile_pipeline_opaque_cull,
@@ -1286,7 +1248,6 @@ pub(super) fn build_renderer_new(
         last_gameplay_cash_in_button_visible: false,
         pass_a_draw_camera: None,
         pass_a_frame_gamma: 1.0,
-        pass_a_frame_ssr_enabled: false,
         last_relic_models: Vec::new(),
         relic_slot_texture: vec![None; MAX_RELIC_SLOTS],
         ordeal_icon_instances,
@@ -1370,12 +1331,9 @@ pub(super) fn build_renderer_new(
         showcase_decal_atlas_tileset: None,
         showcase_decal_atlas_cache: std::collections::VecDeque::new(),
         lit_mesh_material_layout,
-        lit_mesh_spot_ssr_layout,
-        lit_mesh_ssr_buffer,
-        lit_mesh_spot_ssr_bind_group,
-        lit_mesh_ssr_sampler,
-        scene_prev_texture,
-        scene_prev_view,
+        lit_mesh_spot_frame_layout,
+        lit_mesh_frame_buffer,
+        lit_mesh_spot_frame_bind_group,
         scene_color_texture,
         scene_color_view,
         room_emissive_texture,

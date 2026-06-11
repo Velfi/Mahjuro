@@ -66,7 +66,7 @@ impl OpsFlags {
 }
 
 /// One contiguous slice of [`RenderOp`]s inside Pass A. `shop_inspect_hdr_upload` selects an
-/// optional [`SsrGlobals.hdr_tonemap`] upload **before** this slice's render pass.
+/// optional [`LitMeshFrameGlobals.hdr_tonemap`] upload **before** this slice's render pass.
 struct PassAChunk<'a> {
     ops: &'a [RenderOp],
     shop_inspect_hdr_upload: PassAShopInspectHdrUpload,
@@ -140,9 +140,7 @@ impl WgpuRenderer {
     /// Internal scratch buffers (`scene_color_texture`, depth, bloom
     /// ping/pong) are reused across both calls — only one render is in
     /// flight at a time and the override path's encoder is submitted
-    /// before the swapchain path begins. Temporal SSR inputs
-    /// (`scene_prev_texture`, `ssr_prev_depth_texture`) are updated only
-    /// when `output_override` is `None` (the visible frame).
+    /// before the swapchain path begins.
     pub fn render_to(
         &mut self,
         frame: &UiFrame,
@@ -159,7 +157,6 @@ impl WgpuRenderer {
             sort_settle_speed,
             gamma,
             shadow_quality,
-            ssr_enabled,
             vhs_enabled,
         } = settings;
         self.shadow_quality = shadow_quality;
@@ -274,10 +271,9 @@ impl WgpuRenderer {
         } else {
             camera
         };
-        self.upload_camera_uniforms(&camera, ssr_enabled, frame);
+        self.upload_camera_uniforms(&camera, frame);
         self.pass_a_draw_camera = Some(camera);
         self.pass_a_frame_gamma = gamma;
-        self.pass_a_frame_ssr_enabled = ssr_enabled;
         let look_target = camera.look_target;
         let w = camera.w;
         let h = camera.h;
@@ -1065,7 +1061,7 @@ impl WgpuRenderer {
 
         // ── Single-pass scan over `ops` to compute the flags every later
         // section needs. Replaces a handful of repeated `ops.iter().any(...)`
-        // walks (table / cascade / shop / hallway / archive / SSR-relevant)
+        // walks (table / cascade / shop / hallway / archive)
         // with one O(n) loop.
         let ops_flags = OpsFlags::scan(&ops);
         self.ensure_room_gpu_for_draw_cmds(&frame.cmds);
@@ -1690,8 +1686,7 @@ impl WgpuRenderer {
                 ($pass:expr) => {{
                     for op in &ops {
                         // 2D HUD text labels are drawn in a later overlay pass
-                        // (Load on the tonemapped target) so they are not stored
-                        // in `scene_prev_texture`. Gameplay plaques are
+                        // (Load on the tonemapped target). Gameplay plaques are
                         // `Object3d` meshes (engraved decal on the mesh); they
                         // render here in Pass A like other lit meshes.
                         if matches!(
@@ -1731,7 +1726,7 @@ impl WgpuRenderer {
                 ($pass:expr) => {{
                     if frame.debug_axes {
                         $pass.set_pipeline(&self.lit_mesh_pipeline);
-                        $pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
+                        $pass.set_bind_group(3, &self.lit_mesh_spot_frame_bind_group, &[]);
                         $pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
                         $pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
                         $pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
@@ -1789,7 +1784,7 @@ impl WgpuRenderer {
                                 frame,
                                 self.size,
                             );
-                            self.upload_camera_uniforms(&chunk_cam, ssr_enabled, frame);
+                            self.upload_camera_uniforms(&chunk_cam, frame);
                             self.upload_punctual_light_buffers(
                                 frame,
                                 frame.foreground_scene_lighting(),
@@ -1853,7 +1848,7 @@ impl WgpuRenderer {
                                 frame,
                                 self.size,
                             );
-                            self.upload_camera_uniforms(&chunk_cam, ssr_enabled, frame);
+                            self.upload_camera_uniforms(&chunk_cam, frame);
                             self.upload_punctual_light_buffers(
                                 frame,
                                 frame.foreground_scene_lighting(),
@@ -2451,56 +2446,6 @@ impl WgpuRenderer {
             }
         }
 
-        // ── SSR snapshot ────────────────────────────────────────────────
-        // Lacquered-table SSR history is unused now that gameplay draws
-        // `gameplay.glb` instead of a procedural table mesh.
-        let ssr_writes_history = false;
-        if ssr_writes_history {
-            // Half-res blit replaces the old full-res
-            // `copy_texture_to_texture` of `scene_color → scene_prev`.
-            // `scene_prev_texture` is allocated at half size (see
-            // `scene_prev_size` / `create_scene_prev`), so a fullscreen
-            // triangle that samples `scene_color_view` at the half-res
-            // viewport gives a 4-tap-equivalent bilinear box filter — a
-            // little softer than the previous exact copy, but SSR
-            // already integrates over reflection rays so the loss is
-            // imperceptible. Bandwidth: ~16 MB → ~4 MB at 1080p.
-            let ssr_history_ts = self
-                .gpu_profiler
-                .pass_writes(crate::gpu_profiler::PassSlot::SsrHistory);
-            let mut ds_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("scene-color-downsample-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.scene_prev_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: ssr_history_ts,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            ds_pass.set_pipeline(&self.scene_color_downsample_pipeline);
-            ds_pass.set_bind_group(0, &self.scene_color_downsample_bind_group, &[]);
-            ds_pass.draw(0..3, 0..1);
-            drop(ds_pass);
-            // Depth is still copied at full resolution (`ssr_prev_depth_texture`
-            // matches `depth_texture`). The lit_mesh SSR sampler reads both
-            // via normalised UVs so the size mismatch with `scene_prev` is
-            // fine. A future change can downsample depth to halve this too.
-            self.encode_copy_depth_to_r32float(
-                &mut encoder,
-                &self.depth_view,
-                &self.ssr_prev_depth_view,
-                self.render_size.width,
-                self.render_size.height,
-            );
-        }
-
         let bloom_w = (self.render_size.width.max(1) / 2).max(1);
         let bloom_h = (self.render_size.height.max(1) / 2).max(1);
         // `scene_color` is linear HDR — see `tonemap_composite.wgsl`.
@@ -2786,8 +2731,8 @@ impl WgpuRenderer {
         }
 
         // ── Overlay pass: 2D HUD text labels ────────────────────────────
-        // After tonemap, Load the final target so labels are not in the linear
-        // HDR `scene_prev_texture` used for lacquered-table SSR.
+        // After tonemap, Load the final target so labels stay in display space
+        // instead of the linear HDR scene buffer.
         if ops.iter().any(|o| {
             matches!(
                 o,

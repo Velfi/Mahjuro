@@ -7,7 +7,7 @@ use sdl3::video::Window;
 /// no window-server occlusion games, no swapchain `Outdated` retries).
 ///
 /// `config` on `WgpuRenderer` still holds the format/size that downstream
-/// scene-color/SSR textures track against — the offscreen path writes the
+/// scene-color/post textures track against — the offscreen path writes the
 /// same values there so `resize()` and the various post textures don't
 /// need to branch.
 pub(crate) enum RenderTarget {

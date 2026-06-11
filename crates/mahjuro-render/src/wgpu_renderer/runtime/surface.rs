@@ -194,11 +194,6 @@ impl WgpuRenderer {
         let (odt, odv) = create_depth(&self.device, new_size.width, new_size.height);
         self.overlay_depth_texture = odt;
         self.overlay_depth_view = odv;
-        self.ssr_prev_depth_texture.destroy();
-        let (sdt, sdv) =
-            create_depth_r32_snapshot(&self.device, rs.width, rs.height, "ssr-prev-depth");
-        self.ssr_prev_depth_texture = sdt;
-        self.ssr_prev_depth_view = sdv;
         self.depth_r32_snapshot_texture.destroy();
         let (drt, drv) =
             create_depth_r32_snapshot(&self.device, rs.width, rs.height, "depth-r32-snapshot");
@@ -208,17 +203,6 @@ impl WgpuRenderer {
         self.depth_copy_staging_buffer =
             create_depth_copy_staging(&self.device, rs.width, rs.height);
 
-        // SSR scene history texture lives at *half* the swapchain size
-        // (see `scene_color_downsample.wgsl`); rebuild the bind group so
-        // it points at the freshly allocated half-res view. The lit_mesh
-        // SSR sampler reads via normalised UVs so size-mismatch with
-        // `ssr_prev_depth_view` is fine.
-        self.scene_prev_texture.destroy();
-        let (scene_prev_w, scene_prev_h) = scene_prev_size(rs.width.max(1), rs.height.max(1));
-        let (spt, spv) =
-            create_scene_prev(&self.device, SCENE_HDR_FORMAT, scene_prev_w, scene_prev_h);
-        self.scene_prev_texture = spt;
-        self.scene_prev_view = spv;
         self.scene_color_texture.destroy();
         let (sct, scv) = create_scene_color(&self.device, SCENE_HDR_FORMAT, rs.width, rs.height);
         self.scene_color_texture = sct;
@@ -262,21 +246,6 @@ impl WgpuRenderer {
                     },
                 ],
             });
-        self.scene_color_downsample_bind_group =
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("scene-color-downsample-bg"),
-                layout: &self.cascade_composite_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&self.scene_color_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.cascade_composite_sampler),
-                    },
-                ],
-            });
         self.bloom_ping_texture.destroy();
         self.bloom_pong_texture.destroy();
         self.emissive_gi_texture.destroy();
@@ -309,10 +278,10 @@ impl WgpuRenderer {
         );
         self.bloom_pong_texture = bot;
         self.bloom_pong_view = bov;
-        self.lit_mesh_spot_ssr_bind_group =
+        self.lit_mesh_spot_frame_bind_group =
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("lit-mesh-spot-ssr-bg"),
-                layout: &self.lit_mesh_spot_ssr_layout,
+                label: Some("lit-mesh-spot-frame-bg"),
+                layout: &self.lit_mesh_spot_frame_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -320,19 +289,7 @@ impl WgpuRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: self.lit_mesh_ssr_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&self.scene_prev_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&self.ssr_prev_depth_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Sampler(&self.lit_mesh_ssr_sampler),
+                        resource: self.lit_mesh_frame_buffer.as_entire_binding(),
                     },
                 ],
             });

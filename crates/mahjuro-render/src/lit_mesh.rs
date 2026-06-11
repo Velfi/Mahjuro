@@ -49,7 +49,7 @@ pub enum MaterialKind {
     Wick = 2,
     LacqueredWood = 3,
     /// Same wood albedo branch as `LacqueredWood`, but with no vertex
-    /// displacement and no SSR. Used for thin upright slabs (e.g. the
+    /// displacement. Used for thin upright slabs (e.g. the
     /// hanging score plaque) where the table-tuned heightfield amplitude
     /// would push vertices through the slab thickness and produce
     /// rectangular ghost artifacts on the face.
@@ -144,12 +144,12 @@ pub fn material_casts_shadow(kind: MaterialKind) -> bool {
 }
 
 /// Balance for props on the shop shelf when embedded punctual lights and HDR
-/// tonemap are active (`SsrGlobals.shop_punctual.y == DISPLAY_CASE_STOREROOM`).
+/// tonemap are active (`LitMeshFrameGlobals.shop_punctual.y == DISPLAY_CASE_STOREROOM`).
 ///
 /// Spec-forward materials (pack wrap, foil, talismans) pull back direct lit in
 /// `lit_mesh.wgsl`; art-forward materials (enamel relics) use [`AMBIENT_MUL`].
 pub mod shop_catalog_balance {
-    /// `SsrGlobals.shop_punctual.y` — storeroom shelf row balance active.
+    /// `LitMeshFrameGlobals.shop_punctual.y` — storeroom shelf row balance active.
     pub const DISPLAY_CASE_STOREROOM: f32 = 1.0;
     /// Hemispheric ambient multiplier for art-forward catalog props.
     pub const AMBIENT_MUL: f32 = 0.22;
@@ -1040,19 +1040,12 @@ pub fn create_shadow_sample_bind_group(
     })
 }
 
-/// Frame-shared SSR globals consumed by `lit_mesh.wgsl` (group 3) for
-/// the lacquered-wood reflection march. The camera is fixed, so this is
-/// rewritten once per frame with the current view-projection inverse.
+/// Frame-shared globals consumed by `lit_mesh.wgsl` (group 3).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct SsrGlobals {
-    pub inv_view_proj: [f32; 16],
-    pub view_proj: [f32; 16],
+pub struct LitMeshFrameGlobals {
     /// xyz = camera world position, w = unused
     pub view_pos: [f32; 4],
-    /// x = enabled (0/1), y = max_distance (world units), z = stride
-    /// (world units per step), w = max_steps
-    pub params: [f32; 4],
     /// Matches [`crate::wgpu_renderer::uniforms::TileUniform::tile_post_params`]:
     /// x = ACES HDR path when **1**; y = linear exposure before ACES;
     /// z = hemispheric ambient scale; w = reserved.
@@ -1065,12 +1058,12 @@ pub struct SsrGlobals {
 }
 
 /// Bind-group layout for lit_mesh group 3: spotlights (binding 0, same
-/// uniform as `tile_3d.wgsl` / the tile pipeline) plus SSR
-/// globals + history textures (bindings 1–4). Merged so the lit_mesh
-/// pipeline stays within WebGPU's four bind-group limit.
-pub fn create_lit_mesh_spot_ssr_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+/// uniform as `tile_3d.wgsl` / the tile pipeline) plus lit-mesh frame
+/// globals (binding 1). Merged so the lit_mesh pipeline stays within
+/// WebGPU's four bind-group limit.
+pub fn create_lit_mesh_spot_frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("lit-mesh-spot-ssr-layout"),
+        label: Some("lit-mesh-spot-frame-layout"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -1090,32 +1083,6 @@ pub fn create_lit_mesh_spot_ssr_layout(device: &wgpu::Device) -> wgpu::BindGroup
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
             },
         ],

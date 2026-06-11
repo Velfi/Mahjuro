@@ -102,9 +102,6 @@ pub(super) struct RendererShaderPack {
     pub sunlit_water: wgpu::ShaderModule,
     pub shooting_star_cascade: wgpu::ShaderModule,
     pub cascade_composite: wgpu::ShaderModule,
-    /// Half-res blit that downsamples `scene_color_view` into the SSR
-    /// history target each frame; see `scene_color_downsample.wgsl`.
-    pub scene_color_downsample: wgpu::ShaderModule,
     pub tile_outline: wgpu::ShaderModule,
     pub tile_glow: wgpu::ShaderModule,
     pub lit_mesh: wgpu::ShaderModule,
@@ -187,10 +184,6 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
             label: Some("cascade-composite-pipeline"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::SHOOTING_STAR_CASCADE_COMPOSITE.into()),
         }),
-        scene_color_downsample: device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("scene-color-downsample"),
-            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::SCENE_COLOR_DOWNSAMPLE.into()),
-        }),
         tile_outline: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tile-outline-shader"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::TILE_OUTLINE.into()),
@@ -246,7 +239,7 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
     }
 }
 
-/// Through depth + SSR depth-copy textures (before WGSL modules).
+/// Through depth-copy textures (before WGSL modules).
 pub(super) struct EarlyGpuState {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -263,8 +256,6 @@ pub(super) struct EarlyGpuState {
     pub gpu_profiler_backend: wgpu::Backend,
     pub depth_texture: wgpu::Texture,
     pub depth_view: wgpu::TextureView,
-    pub ssr_prev_depth_texture: wgpu::Texture,
-    pub ssr_prev_depth_view: wgpu::TextureView,
     pub depth_r32_snapshot_texture: wgpu::Texture,
     pub depth_r32_snapshot_view: wgpu::TextureView,
 }
@@ -478,11 +469,10 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         }
     }
     // Opt into linear filtering of R32Float / Rgba32Float textures when the
-    // adapter supports it. The SSR feedback (`lit-mesh-spot-ssr-bg`) and the
-    // emissive probe update (`emissive-probe-update-bg`) bind R32Float depth
-    // textures with `Float { filterable: true }` layouts; without this, every
-    // resize hits a wgpu validation error on offline-bake adapters that don't
-    // auto-expose the feature.
+    // adapter supports it. Emissive probe update binds R32Float textures with
+    // `Float { filterable: true }` layouts; without this, every resize hits a
+    // wgpu validation error on offline-bake adapters that don't auto-expose
+    // the feature.
     if adapter
         .features()
         .contains(wgpu::Features::FLOAT32_FILTERABLE)
@@ -587,12 +577,6 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     let render_size = super::constants::scaled_render_size(size, 1.0);
     let (depth_texture, depth_view) =
         create_depth(&device, render_size.width.max(1), render_size.height.max(1));
-    let (ssr_prev_depth_texture, ssr_prev_depth_view) = create_depth_r32_snapshot(
-        &device,
-        render_size.width.max(1),
-        render_size.height.max(1),
-        "ssr-prev-depth",
-    );
     let (depth_r32_snapshot_texture, depth_r32_snapshot_view) = create_depth_r32_snapshot(
         &device,
         render_size.width.max(1),
@@ -616,8 +600,6 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         gpu_profiler_backend,
         depth_texture,
         depth_view,
-        ssr_prev_depth_texture,
-        ssr_prev_depth_view,
         depth_r32_snapshot_texture,
         depth_r32_snapshot_view,
     })

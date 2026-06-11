@@ -949,8 +949,8 @@ impl App {
         // before the main pass. The shop's book mesh samples that texture
         // in screen space, so the page region reads as a live render of
         // the embedded yaku-journal scene rather than a flat decal.
-        // That path must not update lacquer SSR history (`scene_prev` /
-        // depth prev); only `renderer.render` below publishes those.
+        // That path renders into an offscreen target; only `renderer.render`
+        // below presents the visible frame.
         if let Some(prepass) = frame.journal_prepass_frame.take()
             && let Err(e) = renderer.render_journal_prepass(&prepass, render_settings.clone())
         {
