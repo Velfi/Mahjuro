@@ -133,7 +133,7 @@ impl RunState {
         !self.is_selection_valid() && self.selection_blocked_by_ordeal_rules(&selected_tiles)
     }
 
-    /// Check if the current selection forms a valid playable hand.
+    /// Check if the current selection can be played into structure right now.
     pub fn is_selection_valid(&self) -> bool {
         if self.selected_count() == 0 {
             return false;
@@ -145,7 +145,15 @@ impl RunState {
             .filter(|&(_, &sel)| sel)
             .map(|(t, _)| *t)
             .collect();
-        self.try_validate_with_wildcards(&selected_tiles).is_some()
+        let Some((sets, scoring_tiles)) = self.try_validate_with_wildcards(&selected_tiles) else {
+            return false;
+        };
+        let sets = self.pick_best_decomposition(sets, &scoring_tiles, &selected_tiles);
+        use crate::core::hand::kong_structure_bonus;
+        use crate::game::game_mode::HAND_SIZE;
+        let kongs_after =
+            kong_structure_bonus(self.structure_sets.iter().chain(sets.iter()));
+        self.structure_tiles.len() + scoring_tiles.len() <= HAND_SIZE + kongs_after
     }
 
     /// Player-facing copy for the current selection when Play is rejected.
@@ -160,20 +168,17 @@ impl RunState {
         if selected_tiles.is_empty() {
             return None;
         }
+        if self.is_selection_valid() {
+            return None;
+        }
         let rules = self.validation_rules_for_structure_commits();
-        let Some((sets, scoring_tiles)) = self.try_validate_with_wildcards(&selected_tiles) else {
+        if self.try_validate_with_wildcards(&selected_tiles).is_none() {
             return Some(crate::core::hand::selection_rejection_hint(
                 &selected_tiles,
                 &rules,
             ));
-        };
-        use crate::core::hand::kong_structure_bonus;
-        use crate::game::game_mode::HAND_SIZE;
-        let kongs_after = kong_structure_bonus(self.structure_sets.iter().chain(sets.iter()));
-        if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
-            return self.play_rejection_callout().map(str::to_string);
         }
-        None
+        self.play_rejection_callout().map(str::to_string)
     }
 
     /// Floating callout when Play is rejected for structure capacity (not bad melds).
@@ -185,18 +190,14 @@ impl RunState {
             .filter(|&(_, &sel)| sel)
             .map(|(t, _)| *t)
             .collect();
-        if selected_tiles.is_empty() {
+        if selected_tiles.is_empty() || self.is_selection_valid() {
             return None;
         }
-        let Some((sets, scoring_tiles)) = self.try_validate_with_wildcards(&selected_tiles) else {
+        if self.try_validate_with_wildcards(&selected_tiles).is_none() {
             return None;
-        };
+        }
         use crate::core::hand::kong_structure_bonus;
         use crate::game::game_mode::HAND_SIZE;
-        let kongs_after = kong_structure_bonus(self.structure_sets.iter().chain(sets.iter()));
-        if self.structure_tiles.len() + scoring_tiles.len() <= HAND_SIZE + kongs_after {
-            return None;
-        }
         let kongs_now = kong_structure_bonus(self.structure_sets.iter());
         let capacity = HAND_SIZE + kongs_now;
         if self.structure_tiles.len() >= capacity {

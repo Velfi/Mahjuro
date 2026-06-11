@@ -3,7 +3,7 @@ use crate::{
     OrdealKindExt,
     core::{
         debuff::TileDebuff,
-        hand::{DetectedMeld, MeldKind, enumerate_decompositions, kong_structure_bonus},
+        hand::{DetectedMeld, MeldKind, decomposition_canonical_key, enumerate_decompositions, kong_structure_bonus},
         hand_intent::{decomposition_affinity, infer_decomposition_bias},
         ordeal::{self, OrdealKind},
         relic::{
@@ -15,8 +15,10 @@ use crate::{
         structure::{
             StructureTriggerKind, StructureTriggerMeta, can_trigger_structure,
             is_winning_structure_shape, played_meld_chips, star_tile_yaku_pool,
+            structure_cannot_grow_further,
         },
         tile::{Suit, Tile},
+        yaku::{YakuKind, yaku_after_pool_filter},
     },
     game::{
         event_bus::{EventBus, GameEvent, GameOverReason},
@@ -556,7 +558,13 @@ impl RunState {
         }
         let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
         let bonus_rw = self.bonus_round_wind_for_yaku();
-        if !is_winning_structure_shape(&self.structure_tiles, &self.structure_sets) {
+        if !is_winning_structure_shape(&self.structure_tiles, &self.structure_sets)
+            && !structure_cannot_grow_further(
+                &self.structure_tiles,
+                &self.structure_sets,
+                HAND_SIZE,
+            )
+        {
             return;
         }
         if !can_trigger_structure(
@@ -861,7 +869,7 @@ impl RunState {
     /// one that would score best at cash-in. Full winning submissions score the
     /// selection alone; partial commits score the merged structure (existing
     /// melds plus the candidate split). Ties fall back to hand-shape affinity,
-    /// then the validator's first split.
+    /// then preview yaku weight, then a canonical decomposition key.
     pub(crate) fn pick_best_decomposition(
         &self,
         default_sets: Vec<DetectedMeld>,
@@ -875,8 +883,11 @@ impl RunState {
         let bias = infer_decomposition_bias(&self.hand);
         let rules = self.validation_rules_for_structure_commits();
         let alternatives = enumerate_decompositions(scoring_tiles, &rules);
-        if alternatives.len() <= 1 {
+        if alternatives.is_empty() {
             return default_sets;
+        }
+        if alternatives.len() == 1 {
+            return alternatives[0].clone();
         }
 
         let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
@@ -891,6 +902,31 @@ impl RunState {
             self.scoring_tile_debuffs(scoring_tiles)
         } else {
             self.scoring_tile_debuffs(&merged_tiles)
+        };
+
+        let preview_yaku_weight = |sets: &[DetectedMeld]| -> i64 {
+            let yaku = if is_full_hand {
+                yaku_after_pool_filter(
+                    scoring_tiles,
+                    sets,
+                    rw,
+                    bonus_rw,
+                    Some(original_tiles),
+                    &self.available_yaku,
+                )
+            } else {
+                let mut merged = self.structure_sets.clone();
+                merged.extend(sets.iter().cloned());
+                yaku_after_pool_filter(
+                    &merged_tiles,
+                    &merged,
+                    rw,
+                    bonus_rw,
+                    Some(original_tiles),
+                    &self.available_yaku,
+                )
+            };
+            preview_yaku_bundle_weight(&yaku)
         };
 
         let mut score_decomp = |sets: &[DetectedMeld]| -> u64 {
@@ -951,13 +987,27 @@ impl RunState {
         let mut best = default_sets;
         let mut best_total = score_decomp(&best);
         let mut best_affinity = decomposition_affinity(&best, bias);
+        let mut best_yaku_weight = preview_yaku_weight(&best);
+        let mut best_key = decomposition_canonical_key(scoring_tiles, &best);
         for candidate in alternatives {
             let total = score_decomp(&candidate);
             let affinity = decomposition_affinity(&candidate, bias);
-            let take = total > best_total || (total == best_total && affinity > best_affinity);
+            let yaku_weight = preview_yaku_weight(&candidate);
+            let key = decomposition_canonical_key(scoring_tiles, &candidate);
+            let take = total > best_total
+                || (total == best_total && affinity > best_affinity)
+                || (total == best_total
+                    && affinity == best_affinity
+                    && yaku_weight > best_yaku_weight)
+                || (total == best_total
+                    && affinity == best_affinity
+                    && yaku_weight == best_yaku_weight
+                    && key < best_key);
             if take {
                 best_total = total;
                 best_affinity = affinity;
+                best_yaku_weight = yaku_weight;
+                best_key = key;
                 best = candidate;
             }
         }
@@ -1060,4 +1110,11 @@ impl RunState {
             None
         }
     }
+}
+
+fn preview_yaku_bundle_weight(yaku: &[YakuKind]) -> i64 {
+    yaku
+        .iter()
+        .map(|y| y.chip_bonus() as i64 + (y.mult_bonus() * 100.0).round() as i64)
+        .sum()
 }

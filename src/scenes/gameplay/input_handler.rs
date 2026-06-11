@@ -1688,7 +1688,7 @@ pub(super) fn build_yaku_panel_and_tablets(
     run: &crate::game::run::RunState,
     ctx: &crate::scenes::DrawCtx<'_>,
     gameplay: &crate::game::engine::GameplayReadModel,
-    interaction: &crate::game::engine::GameplayInteractionReadModel,
+    _interaction: &crate::game::engine::GameplayInteractionReadModel,
     cascade_showcase_ref: Option<&CascadeShowcase>,
     cascade_frame: Option<&crate::game::cascade::CascadeFrame>,
     cascade_scored_yaku: Option<&[crate::core::yaku::YakuKind]>,
@@ -1698,53 +1698,32 @@ pub(super) fn build_yaku_panel_and_tablets(
     yaku_marker_poses: [crate::render::gameplay_glb::GameplayMarkerPose; 2],
 ) -> YakuPanelOutputs {
     use super::cascade_hud::CascadeShowcase;
-    use crate::core::yaku::yaku_preview;
+    use crate::core::yaku::{YakuKind, YakuTabletEntry};
     use crate::render::draw_cmd::{Object3d, Object3dKind, ShowcaseTilePlacement};
 
-    // ── Yaku progress panel (above the bottom button bar) ────────────
-    // Builds one card per available yaku showing how close the current
-    // selection is to qualifying. Active yaku glow gold; partial progress
-    // fills a horizontal bar across the card.
-    let selected_tiles_for_yaku: Vec<_> = interaction
-        .hand
-        .iter()
-        .zip(interaction.selected.iter())
-        .filter(|&(_, &sel)| sel)
-        .map(|(t, _)| *t)
-        .collect();
-    let round_wind_for_yaku = Some(gameplay.round_wind_rank);
-    let bonus_round_wind_for_yaku = run.bonus_round_wind_for_yaku();
-
-    let (yaku_preview_sets, yaku_preview_effective_tiles, yaku_preview_original_tiles) =
+    let (yaku_preview_sets, yaku_preview_effective_tiles, _yaku_preview_original_tiles, tablet_yaku, is_chicken_hand) =
         if let Some(showcase) = cascade_showcase_ref {
+            let mut scored = cascade_scored_yaku
+                .map(|yaku| yaku.to_vec())
+                .unwrap_or_default();
+            YakuKind::sort_for_tablets(&mut scored);
             (
                 showcase.sets.clone(),
                 showcase.tiles.clone(),
                 showcase.tiles.clone(),
+                scored,
+                false,
             )
         } else {
-            let (sets, scoring, original) = run.melds_for_yaku_preview(&selected_tiles_for_yaku);
+            let cache = &scene.yaku_preview_cache;
             (
-                sets,
-                GameplayScene::display_tiles(scoring.iter().copied(), run),
-                GameplayScene::display_tiles(original.iter().copied(), run),
+                cache.sets.clone(),
+                cache.effective_tiles.clone(),
+                cache.original_tiles.clone(),
+                cache.active_yaku.clone(),
+                cache.is_chicken_hand,
             )
         };
-
-    let previews = if yaku_preview_sets.is_empty() {
-        Vec::new()
-    } else {
-        yaku_preview(
-            &yaku_preview_original_tiles,
-            &gameplay.available_yaku,
-            round_wind_for_yaku,
-            bonus_round_wind_for_yaku,
-            Some((
-                yaku_preview_sets.as_slice(),
-                yaku_preview_effective_tiles.as_slice(),
-            )),
-        )
-    };
 
     let mut structure_showcase: Vec<ShowcaseTilePlacement> = Vec::new();
 
@@ -1752,7 +1731,7 @@ pub(super) fn build_yaku_panel_and_tablets(
         .as_ref()
         .map(|frame| frame.wave_t)
         .unwrap_or(0.0);
-    let active_yaku = cascade_frame
+    let active_yaku_wave = cascade_frame
         .as_ref()
         .and_then(|frame| frame.active_yaku.as_deref());
 
@@ -1843,34 +1822,7 @@ pub(super) fn build_yaku_panel_and_tablets(
         }
     }
 
-    // Phase 9: with the Yaku Journal taking over the "browse all
-    // yaku" job, the in-play tablet row collapses to *only firing
-    // yaku*. Players who want to study levels, bonuses, or
-    // construction hints open the Journal book on the table; the
-    // play area is reserved for "what just fired this turn".
-    let mut visible_previews: Vec<&crate::core::yaku::YakuPreview> =
-        previews.iter().filter(|p| p.active).collect();
-    visible_previews.sort_by_key(|p| p.kind);
-
-    // If the selection is a valid hand but triggers no yaku, show a
-    // chicken-hand tablet so the player knows the hand is legal.
-    let is_chicken_hand = !yaku_preview_sets.is_empty()
-        && crate::core::yaku::would_show_chicken_tablet(
-            &yaku_preview_effective_tiles,
-            &yaku_preview_sets,
-            round_wind_for_yaku,
-            bonus_round_wind_for_yaku,
-            Some(yaku_preview_original_tiles.as_slice()),
-            &gameplay.available_yaku,
-        );
-
-    // Phase 3: yaku selectors are now physical bone tablets sitting in
-    // a row in front of the hand. The flat slate-blue card quads + the
-    // progress-fill bar are gone — replaced by `YakuTabletBatch` that
-    // the renderer dispatches through the lit-mesh pipeline. The 2D
-    // text labels stay as a screen-space overlay until the engraved
-    // decal pass lands; hover tracking still uses the original screen
-    // rect (the cards live in the same pixel region as before).
+    // Phase 9: in-play tablet row shows only firing yaku (see Yaku Journal for the full list).
     let a_l = yaku_marker_poses[0].anchor;
     let a_r = yaku_marker_poses[1].anchor;
     let rot_l = yaku_marker_poses[0].rotation_rad;
@@ -1880,23 +1832,19 @@ pub(super) fn build_yaku_panel_and_tablets(
     let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
     let panel_h = ((a_r[1] - a_l[1]).abs()).max((24.0 * layout_scale).max(18.0));
     let mut yaku_tablet_placements: Vec<Object3d> = Vec::new();
-    let cascade_tablet_yaku: Option<Vec<crate::core::yaku::YakuKind>> = cascade_scored_yaku
-        .filter(|yaku| !yaku.is_empty())
-        .map(|yaku| {
-            let mut kinds: Vec<_> = yaku.to_vec();
-            kinds.sort();
-            kinds
-        });
-    let show_tablets =
-        cascade_tablet_yaku.is_some() || !visible_previews.is_empty() || is_chicken_hand;
+    let tablet_entries: Vec<YakuTabletEntry> = if is_chicken_hand {
+        vec![YakuTabletEntry {
+            kind: YakuKind::ChickenHand,
+            count: 1,
+        }]
+    } else {
+        let mut kinds = tablet_yaku;
+        YakuKind::sort_for_tablets(&mut kinds);
+        YakuKind::consolidate_for_tablets(&kinds)
+    };
+    let show_tablets = !tablet_entries.is_empty();
     if show_tablets {
-        let tablet_count = if let Some(ref scored) = cascade_tablet_yaku {
-            scored.len()
-        } else if is_chicken_hand {
-            1
-        } else {
-            visible_previews.len()
-        };
+        let tablet_count = tablet_entries.len();
         let n = tablet_count as f32;
         let card_gap = 6.0 * layout_scale;
         let natural_card_w = (span - card_gap * 2.0) / 3.0;
@@ -1913,7 +1861,7 @@ pub(super) fn build_yaku_panel_and_tablets(
                 let mut pos = crate::render::gameplay_glb::lerp_marker_anchor(a_l, a_r, t);
                 let rotation =
                     crate::render::gameplay_glb::lerp_marker_rotation_rad(rot_l, rot_r, t);
-                let yaku_wave = active_yaku.is_some_and(|name| {
+                let yaku_wave = active_yaku_wave.is_some_and(|name| {
                     kind.is_some_and(|yk| yk.name() == name) || label.contains(name)
                 });
                 if yaku_wave {
@@ -1937,41 +1885,18 @@ pub(super) fn build_yaku_panel_and_tablets(
                     anim_id: 0,
                 });
             };
-        if let Some(scored) = cascade_tablet_yaku {
-            for (i, kind) in scored.iter().enumerate() {
-                let yaku_discovered = ctx
-                    .progress
-                    .yaku_times_scored
-                    .get(kind)
-                    .copied()
-                    .unwrap_or(0)
-                    >= 1;
-                let tablet_label =
-                    std::borrow::Cow::Borrowed(kind.gameplay_tablet_label(yaku_discovered));
-                push_tablet(i, tablet_label, true, Some(*kind));
-            }
-        } else if is_chicken_hand {
-            push_tablet(
-                0,
-                std::borrow::Cow::Borrowed(
-                    crate::core::yaku::YakuKind::ChickenHand.gameplay_tablet_label(true),
-                ),
-                true,
-                Some(crate::core::yaku::YakuKind::ChickenHand),
-            );
-        } else {
-            for (i, p) in visible_previews.iter().enumerate() {
-                let yaku_discovered = ctx
-                    .progress
-                    .yaku_times_scored
-                    .get(&p.kind)
-                    .copied()
-                    .unwrap_or(0)
-                    >= 1;
-                let tablet_label =
-                    std::borrow::Cow::Borrowed(p.kind.gameplay_tablet_label(yaku_discovered));
-                push_tablet(i, tablet_label, p.active, Some(p.kind));
-            }
+        for (i, entry) in tablet_entries.iter().enumerate() {
+            let yaku_discovered = ctx
+                .progress
+                .yaku_times_scored
+                .get(&entry.kind)
+                .copied()
+                .unwrap_or(0)
+                >= 1;
+            let tablet_label = entry
+                .kind
+                .gameplay_tablet_label_with_count(entry.count, yaku_discovered);
+            push_tablet(i, tablet_label, true, Some(entry.kind));
         }
     }
 

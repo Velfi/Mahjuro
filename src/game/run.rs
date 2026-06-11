@@ -248,7 +248,7 @@ pub struct RunState {
     /// Game mode preset used for this run (drives advance_round resets).
     pub mode: GameMode,
     /// When true, automatically cash in the structure as soon as it reaches
-    /// a full valid shape.
+    /// a full valid shape or can accept no further melds.
     #[serde(default = "default_auto_cash_in_on_full_structure")]
     pub auto_cash_in_on_full_structure: bool,
     /// Debug labs: allow scoring past target without blind clear / run advance.

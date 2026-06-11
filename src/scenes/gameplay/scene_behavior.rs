@@ -313,6 +313,7 @@ impl SceneBehavior for GameplayScene {
         }
 
         self.tick_staging_zone(ctx.run, dt);
+        self.tick_yaku_preview_cache(ctx.run);
 
         // Terminal predicates can become true without another discard refill (dead hand
         // with plays/discards exhausted). Reconcile once per idle frame like the bot loop.

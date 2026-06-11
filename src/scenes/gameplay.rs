@@ -61,6 +61,38 @@ pub(crate) struct StagingZoneLayout {
     pub meld_index_groups: Vec<Vec<usize>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct YakuPreviewCacheKey {
+    selected: Vec<bool>,
+    structure_tile_ids: Vec<u32>,
+    structure_sets_hash: u64,
+    wing: u32,
+    bonus_round_wind: Option<u8>,
+}
+
+#[derive(Default, Clone, Debug)]
+pub(super) struct YakuPreviewCache {
+    key: Option<YakuPreviewCacheKey>,
+    pub sets: Vec<crate::core::hand::DetectedMeld>,
+    pub effective_tiles: Vec<crate::core::tile::Tile>,
+    pub original_tiles: Vec<crate::core::tile::Tile>,
+    pub active_yaku: Vec<crate::core::yaku::YakuKind>,
+    pub is_chicken_hand: bool,
+}
+
+fn hash_structure_sets(sets: &[crate::core::hand::DetectedMeld]) -> u64 {
+    let mut hash = 0u64;
+    for set in sets {
+        hash = hash
+            .wrapping_mul(31)
+            .wrapping_add(set.kind as u8 as u64);
+        for &id in &set.tile_ids {
+            hash = hash.wrapping_mul(31).wrapping_add(id as u64);
+        }
+    }
+    hash
+}
+
 pub struct GameplayScene {
     /// Queue of scoring cascade animations. The front entry is the active
     /// cascade; when it finishes, it is popped and the next starts
@@ -242,6 +274,9 @@ pub struct GameplayScene {
     boss_rule_feedback_live: bool,
     /// Layout tracking for the Staging Zone (grouped melds when tiles are selected).
     staging_layout: StagingZoneLayout,
+    /// Memoized yaku preview for the current selection + structure (rebuilt in
+    /// [`Self::tick_yaku_preview_cache`] when inputs change).
+    yaku_preview_cache: YakuPreviewCache,
 }
 
 /// How long after the opening deal before the candles begin sparking on.
@@ -687,6 +722,7 @@ impl GameplayScene {
             tutorial_panel_wiggle_at: None,
             boss_rule_feedback_live: false,
             staging_layout: StagingZoneLayout::default(),
+            yaku_preview_cache: YakuPreviewCache::default(),
         }
     }
 
@@ -1267,6 +1303,72 @@ impl GameplayScene {
                 - self.staging_layout.staging_lift_z[i])
                 * spring_factor;
         }
+    }
+
+    /// Recompute the in-play yaku preview when selection or committed structure
+    /// changes. Draw reads [`Self::yaku_preview_cache`] instead of recomputing
+    /// `melds_for_yaku_preview` every frame.
+    pub(super) fn tick_yaku_preview_cache(&mut self, run: &crate::game::run::RunState) {
+        use crate::core::rules::ChamberKind;
+        use crate::core::yaku::{YakuKind, yaku_after_pool_filter};
+
+        let key = YakuPreviewCacheKey {
+            selected: run.selected_slice().to_vec(),
+            structure_tile_ids: run.structure_tiles().iter().map(|t| t.id).collect(),
+            structure_sets_hash: hash_structure_sets(run.structure_sets()),
+            wing: run.wing,
+            bonus_round_wind: run.bonus_round_wind_for_yaku(),
+        };
+        if self.yaku_preview_cache.key.as_ref() == Some(&key) {
+            return;
+        }
+
+        let selected_tiles: Vec<_> = run
+            .hand()
+            .iter()
+            .zip(key.selected.iter())
+            .filter(|&(_, &sel)| sel)
+            .map(|(t, _)| *t)
+            .collect();
+
+        let (sets, scoring, original) = run.melds_for_yaku_preview(&selected_tiles);
+        let effective_tiles = Self::display_tiles(scoring.iter().copied(), run);
+        let original_tiles = Self::display_tiles(original.iter().copied(), run);
+        let round_wind = Some(ChamberKind::round_wind_for_wing(run.wing));
+        let bonus_round_wind = run.bonus_round_wind_for_yaku();
+
+        let mut active_yaku = if sets.is_empty() {
+            Vec::new()
+        } else {
+            yaku_after_pool_filter(
+                &effective_tiles,
+                &sets,
+                round_wind,
+                bonus_round_wind,
+                Some(original_tiles.as_slice()),
+                run.available_yaku.as_slice(),
+            )
+        };
+        YakuKind::sort_for_tablets(&mut active_yaku);
+
+        let is_chicken_hand = !sets.is_empty()
+            && crate::core::yaku::would_show_chicken_tablet(
+                &effective_tiles,
+                &sets,
+                round_wind,
+                bonus_round_wind,
+                Some(original_tiles.as_slice()),
+                run.available_yaku.as_slice(),
+            );
+
+        self.yaku_preview_cache = YakuPreviewCache {
+            key: Some(key),
+            sets,
+            effective_tiles,
+            original_tiles,
+            active_yaku,
+            is_chicken_hand,
+        };
     }
 }
 

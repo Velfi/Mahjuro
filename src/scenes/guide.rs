@@ -1178,9 +1178,9 @@ pub(crate) fn yaku_guide_detail(yk: YakuKind, kokushi_discovered: bool) -> YakuG
             breaks_if: "The hand contains a terminal, wind, or dragon.",
         },
         YakuKind::Yakuhai => YakuGuideDetail {
-            rule: "A triplet or kong of any dragon, or of the current round wind.",
-            requires: "Dragon triplet/kong OR round-wind triplet/kong",
-            breaks_if: "The honor group is only a pair, or the wind is not the current round wind.",
+            rule: "Each dragon or matching wind triplet/kong; stacks.",
+            requires: "One qualifying honor triplet/kong per Yakuhai",
+            breaks_if: "The honor group is only a pair, or the wind is not the round or bonus round wind.",
         },
         YakuKind::Toitoi => YakuGuideDetail {
             rule: "All melds are triplets or kongs. No sequences allowed.",
@@ -5797,7 +5797,7 @@ pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
         YakuKind::Tanyao => "All tiles 2\u{2013}8, no honors/terminals",
         YakuKind::Toitoi => "All triplets/kongs, no sequences",
         YakuKind::FullHand => "Complete 14-tile hand: 4+4+4+4+2 (4 melds + 1 pair)",
-        YakuKind::Yakuhai => "Triplet of any dragon or round wind",
+        YakuKind::Yakuhai => "Each dragon or matching wind triplet/kong; This yaku stacks",
         YakuKind::Iipeikou => "Two identical sequences on a full hand",
         YakuKind::Junchan => "All 1/9/honors; each meld has a terminal or honor",
         YakuKind::SanshokuDoujun => "Same sequence in all 3 suits",
