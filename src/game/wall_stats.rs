@@ -3,50 +3,15 @@
 use crate::core::debuff::TileDebuff;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::game::run::RunState;
-use crate::game::wall_ledger::{WallLedgerFaceGroup, WallLedgerReadModel};
+use crate::game::wall_ledger::{WallLedgerFaceGroup, WallLedgerMode, WallLedgerReadModel};
 
-/// Which supply column the grid emphasizes.
-///
-/// **Seen** and **Discarded** both use copies drawn from the wall today; there is no
-/// per-face discard river in `RunState` yet, so those modes share the same counts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum WallCountView {
-    #[default]
-    Remaining,
-    FullWall,
-    Seen,
-    Discarded,
-}
-
-impl WallCountView {
-    pub const ALL: [Self; 4] = [Self::Remaining, Self::FullWall, Self::Seen, Self::Discarded];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Remaining => "Remaining",
-            Self::FullWall => "Full Wall",
-            Self::Seen => "Seen",
-            Self::Discarded => "Discarded",
-        }
-    }
-
-    pub fn next(self) -> Self {
-        match self {
-            Self::Remaining => Self::FullWall,
-            Self::FullWall => Self::Seen,
-            Self::Seen => Self::Discarded,
-            Self::Discarded => Self::Remaining,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Remaining => Self::Discarded,
-            Self::FullWall => Self::Remaining,
-            Self::Seen => Self::FullWall,
-            Self::Discarded => Self::Seen,
-        }
-    }
+/// Per-face tile counts by where copies live this round.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TileLocationCounts {
+    pub in_wall: usize,
+    pub in_hand: usize,
+    pub played: usize,
+    pub discarded: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,8 +22,6 @@ pub enum AbundanceState {
     Abundant,
 }
 
-/// View/tab aliases for UI layer naming.
-pub type WallViewMode = WallCountView;
 pub type WallTab = WallLedgerTab;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -105,7 +68,7 @@ pub struct TileLedgerEntry {
     pub remaining: usize,
     pub seen: usize,
     pub total: usize,
-    pub display_count: usize,
+    pub locations: TileLocationCounts,
     pub draw_probability: f32,
     pub wall_share: f32,
     pub abundance: AbundanceState,
@@ -139,9 +102,9 @@ pub struct SelectedTileDetails {
     pub name: String,
     pub remaining: usize,
     pub total: usize,
+    pub locations: TileLocationCounts,
     pub draw_probability: f32,
     pub wall_share: f32,
-    pub sequence_hints: Vec<String>,
     pub modifiers: ModifierBreakdown,
     pub about: String,
 }
@@ -275,11 +238,44 @@ fn face_counts(
     (remaining, seen, group.copies.len(), mods)
 }
 
-fn display_count(remaining: usize, seen: usize, total: usize, view: WallCountView) -> usize {
-    match view {
-        WallCountView::Remaining => remaining,
-        WallCountView::FullWall => total,
-        WallCountView::Seen | WallCountView::Discarded => seen,
+pub fn face_location_counts(
+    suit: Suit,
+    rank: u8,
+    group: Option<&WallLedgerFaceGroup>,
+    run: &RunState,
+    mode: WallLedgerMode,
+) -> TileLocationCounts {
+    let in_wall = group
+        .map(|g| g.copies.iter().filter(|c| !c.drawn).count())
+        .unwrap_or(0);
+    if !mode.shows_round_locations() {
+        return TileLocationCounts {
+            in_wall,
+            ..Default::default()
+        };
+    }
+    let in_hand = run
+        .hand()
+        .iter()
+        .filter(|t| t.suit == suit && t.rank == rank)
+        .count();
+    let played = run
+        .structure_tiles()
+        .iter()
+        .filter(|t| t.suit == suit && t.rank == rank)
+        .count();
+    let label = Tile::new(suit, rank, 0).label();
+    let discarded = run
+        .chronicle
+        .discards_by_face
+        .get(&label)
+        .copied()
+        .unwrap_or(0) as usize;
+    TileLocationCounts {
+        in_wall,
+        in_hand,
+        played,
+        discarded,
     }
 }
 
@@ -307,18 +303,6 @@ pub fn abundance_state(suit: Suit, remaining: usize) -> AbundanceState {
         AbundanceState::Thin
     } else if remaining >= 6 {
         AbundanceState::Abundant
-    } else {
-        AbundanceState::Normal
-    }
-}
-
-pub fn abundance_state_for_display(
-    suit: Suit,
-    display_count: usize,
-    view: WallCountView,
-) -> AbundanceState {
-    if view == WallCountView::Remaining || view == WallCountView::FullWall {
-        abundance_state(suit, display_count)
     } else {
         AbundanceState::Normal
     }
@@ -508,11 +492,8 @@ fn compute_yaku_hints(entries: &[TileLedgerEntry], summary: &SuitSummary) -> Vec
     hints
 }
 
-pub fn compute_wall_stats(
-    ledger: &WallLedgerReadModel,
-    debuffs: &[TileDebuff],
-    view: WallCountView,
-) -> WallStats {
+pub fn compute_wall_stats(ledger: &WallLedgerReadModel, run: &RunState) -> WallStats {
+    let debuffs = &run.tile_debuffs;
     let mut map = std::collections::HashMap::new();
     for g in ledger.standard_groups.iter().chain(&ledger.pack_groups) {
         map.insert((g.suit, g.rank), g);
@@ -525,6 +506,7 @@ pub fn compute_wall_stats(
     for &(suit, rank) in &GRID_FACE_ORDER {
         let group = map.get(&(suit, rank)).copied();
         let (remaining, seen, total, mods) = face_counts(group, debuffs);
+        let locations = face_location_counts(suit, rank, group, run, ledger.mode);
         merge_modifiers(&mut global_modifiers, mods);
         suit_bucket(&mut suit_summary, suit, remaining);
 
@@ -534,7 +516,7 @@ pub fn compute_wall_stats(
             remaining,
             seen,
             total,
-            display_count: display_count(remaining, seen, total, view),
+            locations,
             draw_probability: 0.0,
             wall_share: 0.0,
             abundance: abundance_state(suit, remaining),
@@ -546,11 +528,7 @@ pub fn compute_wall_stats(
     let total_wall = ledger.total;
     let denom = total_remaining.max(1) as f32;
     for e in &mut entries {
-        e.draw_probability = if view == WallCountView::Remaining {
-            e.remaining as f32 / denom
-        } else {
-            0.0
-        };
+        e.draw_probability = e.remaining as f32 / denom;
         e.wall_share = if total_remaining > 0 {
             e.remaining as f32 / denom
         } else {
@@ -697,34 +675,21 @@ pub fn selected_tile_details(
         .iter()
         .find(|e| e.suit == face.suit && e.rank == face.rank)?;
     let (_, _, _, mods) = face_counts(group, debuffs);
-    let remaining_of = |s: Suit, r: u8| -> usize {
-        stats
-            .entries
-            .iter()
-            .find(|e| e.suit == s && e.rank == r)
-            .map(|e| e.remaining)
-            .unwrap_or(0)
-    };
-    let (_, sequence_hints) = sequence_waits(face.suit, face.rank, &remaining_of);
     Some(SelectedTileDetails {
         face,
         name: face_short_name(face.suit, face.rank),
         remaining: entry.remaining,
         total: entry.total,
+        locations: entry.locations,
         draw_probability: entry.draw_probability,
         wall_share: entry.wall_share,
-        sequence_hints,
         modifiers: mods,
         about: tile_about(face.suit, face.rank, entry.remaining, entry.total),
     })
 }
 
-pub fn compute_wall_stats_for_run(
-    ledger: &WallLedgerReadModel,
-    run: &RunState,
-    view: WallCountView,
-) -> WallStats {
-    compute_wall_stats(ledger, &run.tile_debuffs, view)
+pub fn compute_wall_stats_for_run(ledger: &WallLedgerReadModel, run: &RunState) -> WallStats {
+    compute_wall_stats(ledger, run)
 }
 
 #[cfg(test)]
@@ -739,7 +704,7 @@ mod tests {
         run.wall = Wall::from_unshuffled(build_wall());
         run.wall.draw();
         let ledger = read_wall_ledger(&run, WallLedgerMode::Live);
-        let stats = compute_wall_stats_for_run(&ledger, &run, WallCountView::Remaining);
+        let stats = compute_wall_stats_for_run(&ledger, &run);
         assert_eq!(stats.total_remaining, 139);
         assert_eq!(stats.entries.len(), 38);
         let manzu_5 = stats
@@ -755,27 +720,13 @@ mod tests {
     fn sequence_waits_counts_patterns_not_tile_copies() {
         let run = RunState::new_with_material(crate::persistence::TileMaterial::Bamboo);
         let ledger = read_wall_ledger(&run, WallLedgerMode::ShopPreview);
-        let stats = compute_wall_stats_for_run(&ledger, &run, WallCountView::Remaining);
+        let stats = compute_wall_stats_for_run(&ledger, &run);
         let souzu_5 = stats
             .entries
             .iter()
             .find(|e| e.suit == Suit::Souzu && e.rank == 5)
             .unwrap();
         assert_eq!(souzu_5.remaining, 4);
-        let details = selected_tile_details(
-            &stats,
-            FaceKey {
-                suit: Suit::Souzu,
-                rank: 5,
-            },
-            &run.tile_debuffs,
-            ledger
-                .standard_groups
-                .iter()
-                .find(|g| g.suit == Suit::Souzu && g.rank == 5),
-        )
-        .unwrap();
-        assert_eq!(details.sequence_hints.len(), 3);
         assert!(
             stats
                 .best_draws
@@ -789,7 +740,7 @@ mod tests {
     fn flowers_are_not_listed_as_thin_at_baseline() {
         let run = RunState::new_with_material(crate::persistence::TileMaterial::Bamboo);
         let ledger = read_wall_ledger(&run, WallLedgerMode::ShopPreview);
-        let stats = compute_wall_stats_for_run(&ledger, &run, WallCountView::Remaining);
+        let stats = compute_wall_stats_for_run(&ledger, &run);
         assert!(
             !stats
                 .thin_exhausted
@@ -799,27 +750,55 @@ mod tests {
     }
 
     #[test]
-    fn view_modes_change_display_count() {
+    fn face_location_counts_split_wall_hand_and_discards() {
         let mut run = RunState::new_with_material(crate::persistence::TileMaterial::Bamboo);
         run.wall = Wall::from_unshuffled(build_wall());
         run.wall.draw();
+        let drawn = run.wall.all_tiles()[0];
+        run.hand_mut().push(drawn);
+        run.chronicle
+            .note_discarded_tile(&Tile::new(Suit::Wind, 1, 0));
         let ledger = read_wall_ledger(&run, WallLedgerMode::Live);
-        let remaining = compute_wall_stats_for_run(&ledger, &run, WallCountView::Remaining);
-        let seen = compute_wall_stats_for_run(&ledger, &run, WallCountView::Seen);
-        let drawn_entry = seen
-            .entries
+        let group = ledger
+            .standard_groups
             .iter()
-            .find(|e| e.display_count > 0)
-            .expect("one tile was drawn");
-        assert_eq!(drawn_entry.display_count, 1);
-        assert_eq!(
-            remaining
-                .entries
-                .iter()
-                .find(|e| e.suit == drawn_entry.suit && e.rank == drawn_entry.rank)
-                .unwrap()
-                .display_count,
-            drawn_entry.total - 1
+            .find(|g| g.suit == drawn.suit && g.rank == drawn.rank);
+        let loc = face_location_counts(
+            drawn.suit,
+            drawn.rank,
+            group,
+            &run,
+            WallLedgerMode::Live,
         );
+        assert_eq!(loc.in_wall, 3);
+        assert_eq!(loc.in_hand, 1);
+        assert_eq!(loc.discarded, 0);
+        let east = face_location_counts(Suit::Wind, 1, None, &run, WallLedgerMode::Live);
+        assert_eq!(east.discarded, 1);
+    }
+
+    #[test]
+    fn shop_preview_hides_round_specific_locations() {
+        let mut run = RunState::new_with_material(crate::persistence::TileMaterial::Bamboo);
+        run.wall = Wall::from_unshuffled(build_wall());
+        run.wall.draw();
+        let drawn = run.wall.all_tiles()[0];
+        run.hand_mut().push(drawn);
+        let ledger = read_wall_ledger(&run, WallLedgerMode::ShopPreview);
+        let group = ledger
+            .standard_groups
+            .iter()
+            .find(|g| g.suit == drawn.suit && g.rank == drawn.rank);
+        let loc = face_location_counts(
+            drawn.suit,
+            drawn.rank,
+            group,
+            &run,
+            WallLedgerMode::ShopPreview,
+        );
+        assert_eq!(loc.in_wall, 4);
+        assert_eq!(loc.in_hand, 0);
+        assert_eq!(loc.played, 0);
+        assert_eq!(loc.discarded, 0);
     }
 }

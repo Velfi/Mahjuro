@@ -7,21 +7,19 @@ use crate::render::theme::{ButtonState, ButtonVariant};
 use crate::scenes::header_chrome::HeaderChromeMetrics;
 use crate::scenes::{OverlayRequest, SceneTransition, UpdateCtx};
 use crate::sfx_id::SfxId;
-use crate::ui::focus_nav;
+use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::UiAction;
 use crate::ui::widget::{self, ButtonSpec};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::StrategicWallScene;
-use super::layout::{WallLayout, grid_cell_rect, text_line_h, view_toggle_rect};
+use super::layout::{WallLayout, GRID_ROWS, grid_cell_rect};
 
 const NAV_BASE: u32 = 0xE200;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LedgerNav {
     Back,
-    View,
-    Summary(usize),
     Tile(usize),
 }
 
@@ -29,8 +27,6 @@ impl LedgerNav {
     pub fn id(self) -> FocusId {
         FocusId(match self {
             Self::Back => NAV_BASE,
-            Self::View => NAV_BASE + 10,
-            Self::Summary(i) => NAV_BASE + 20 + i as u32,
             Self::Tile(i) => NAV_BASE + 40 + i as u32,
         })
     }
@@ -39,12 +35,8 @@ impl LedgerNav {
 pub fn ledger_nav_from_id(id: FocusId) -> LedgerNav {
     if id == LedgerNav::Back.id() {
         LedgerNav::Back
-    } else if id == LedgerNav::View.id() {
-        LedgerNav::View
     } else if id.0 >= NAV_BASE + 40 {
         LedgerNav::Tile((id.0 - (NAV_BASE + 40)) as usize)
-    } else if id.0 >= NAV_BASE + 20 {
-        LedgerNav::Summary((id.0 - (NAV_BASE + 20)) as usize)
     } else {
         LedgerNav::Back
     }
@@ -73,6 +65,39 @@ pub fn face_index(face: FaceKey) -> Option<usize> {
         .position(|&(s, r)| s == face.suit && r == face.rank)
 }
 
+/// Explicit grid edges so sidebar chrome cannot merge suit rows during inference.
+pub fn wall_ledger_nav_edges() -> Vec<(FocusId, FocusDir, FocusId)> {
+    let mut edges = Vec::new();
+    let mut edge = |from: LedgerNav, dir: FocusDir, to: LedgerNav| {
+        edges.push((from.id(), dir, to.id()));
+    };
+
+    for (row_idx, &(start, count)) in GRID_ROWS.iter().enumerate() {
+        for col in 0..count {
+            let idx = start + col;
+            let cur = LedgerNav::Tile(idx);
+            if col + 1 < count {
+                edge(cur, FocusDir::Right, LedgerNav::Tile(start + col + 1));
+            }
+            if row_idx > 0 {
+                let (prev_start, prev_count) = GRID_ROWS[row_idx - 1];
+                let target_col = col.min(prev_count - 1);
+                edge(cur, FocusDir::Up, LedgerNav::Tile(prev_start + target_col));
+            }
+            if row_idx + 1 < GRID_ROWS.len() {
+                let (next_start, next_count) = GRID_ROWS[row_idx + 1];
+                let target_col = col.min(next_count - 1);
+                edge(cur, FocusDir::Down, LedgerNav::Tile(next_start + target_col));
+            }
+        }
+    }
+
+    edge(LedgerNav::Back, FocusDir::Down, LedgerNav::Tile(0));
+    edge(LedgerNav::Tile(0), FocusDir::Left, LedgerNav::Back);
+
+    edges
+}
+
 impl StrategicWallScene {
     pub fn focused_nav(&self) -> Option<LedgerNav> {
         self.focus.tree.focused().map(ledger_nav_from_id)
@@ -83,18 +108,9 @@ impl StrategicWallScene {
         None
     }
 
-    fn activate(&mut self, nav: LedgerNav, stats: &WallStats) -> bool {
+    fn activate(&mut self, nav: LedgerNav, _stats: &WallStats) -> bool {
         match nav {
             LedgerNav::Back => return true,
-            LedgerNav::View => self.screen.view = self.screen.view.next(),
-            LedgerNav::Summary(i) => {
-                if let Some(hint) = stats.best_draws.get(i) {
-                    self.screen.selected = hint.face;
-                    if let Some(tile_i) = face_index(hint.face) {
-                        self.focus.tree.set_focus(LedgerNav::Tile(tile_i).id());
-                    }
-                }
-            }
             LedgerNav::Tile(i) => {
                 if let Some(&(suit, rank)) = GRID_FACE_ORDER.get(i) {
                     self.screen.selected = FaceKey { suit, rank };
@@ -113,39 +129,10 @@ impl StrategicWallScene {
         let mut out = Vec::new();
         out.push(FlatItem::new(
             LedgerNav::Back.id(),
-            HeaderChromeMetrics::from_window(w, layout.detail_y + layout.detail_h)
+            HeaderChromeMetrics::from_window(w, layout.summary_y + layout.summary_h)
                 .back_rect_left(),
             LedgerNav::Back,
         ));
-
-        out.push(FlatItem::new(
-            LedgerNav::View.id(),
-            view_toggle_rect(w, layout),
-            LedgerNav::View,
-        ));
-
-        let line = text_line_h(layout.caption_px);
-        let section_line = text_line_h(layout.caption_px * 0.94);
-        let mut section_top = layout.summary_y + layout.summary_pad();
-        section_top += text_line_h(layout.caption_px * 1.02) + 8.0;
-        section_top += (line + 2.0) * 2.0;
-        section_top += 6.0 + 7.0;
-        section_top += section_line + 4.0;
-        section_top += (line + 2.0) * 5.0;
-        section_top += 4.0 + 7.0;
-        section_top += section_line + 4.0;
-        for (i, _) in stats.best_draws.iter().enumerate().take(3) {
-            out.push(FlatItem::new(
-                LedgerNav::Summary(i).id(),
-                [
-                    layout.summary_x + 8.0,
-                    section_top + i as f32 * (line * 2.0 + 2.0),
-                    layout.summary_w - 16.0,
-                    line * 2.0,
-                ],
-                LedgerNav::Summary(i),
-            ));
-        }
 
         for (idx, entry) in stats.entries.iter().enumerate() {
             if !self.screen.face_visible(entry) {
@@ -183,22 +170,9 @@ impl StrategicWallScene {
             }
         }
 
-        for a in ctx.actions {
-            match a {
-                UiAction::InvertSelection => {
-                    self.screen.view = self.screen.view.next();
-                    ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                }
-                UiAction::Delete => {
-                    self.screen.view = self.screen.view.prev();
-                    ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                }
-                _ => {}
-            }
-        }
-
         let items = self.flat_items(w, layout, stats);
-        let action = self.focus.tree.update_flat(
+        let edges = wall_ledger_nav_edges();
+        let action = self.focus.tree.update_flat_with_edges(
             &items,
             TreeInput {
                 actions: ctx.actions,
@@ -208,6 +182,7 @@ impl StrategicWallScene {
                 input_mode: ctx.input_mode,
                 scroll_lines: 0.0,
             },
+            &edges,
         );
         if self.focus.tree.take_focus_changed() {
             ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
@@ -230,6 +205,139 @@ impl StrategicWallScene {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::tile::Suit;
+    use crate::game::wall_stats::{
+        AbundanceState, ModifierBreakdown, TileLedgerEntry, TileLocationCounts, WallStats,
+    };
+    use super::super::layout::{read_boost, wall_layout};
+    use super::super::state::WallScreenState;
+    use crate::ui::input::{InputMode, UiAction};
+    use crate::ui::widget_tree::TreeState;
+
+    fn stub_stats() -> WallStats {
+        let entries = GRID_FACE_ORDER
+            .iter()
+            .map(|&(suit, rank)| TileLedgerEntry {
+                suit,
+                rank,
+                remaining: 4,
+                seen: 0,
+                total: 4,
+                locations: TileLocationCounts {
+                    in_wall: 4,
+                    in_hand: 0,
+                    played: 0,
+                    discarded: 0,
+                },
+                draw_probability: 0.0,
+                wall_share: 0.0,
+                abundance: AbundanceState::Normal,
+                modifiers: ModifierBreakdown::default(),
+            })
+            .collect();
+        WallStats {
+            entries,
+            suit_summary: Default::default(),
+            total_remaining: 136,
+            total_wall: 136,
+            most_common: Vec::new(),
+            thin_exhausted: Vec::new(),
+            abundant: Vec::new(),
+            best_draws: Vec::new(),
+            yaku_hints: Vec::new(),
+            global_modifiers: ModifierBreakdown::default(),
+        }
+    }
+
+    fn flat_items_at(w: f32, h: f32, stats: &WallStats) -> Vec<FlatItem<LedgerNav>> {
+        let jr = read_boost(w, h);
+        let layout = wall_layout(w, h, jr);
+        StrategicWallScene {
+            mode: crate::game::wall_ledger::WallLedgerMode::Live,
+            screen: WallScreenState {
+                selected: FaceKey {
+                    suit: Suit::Souzu,
+                    rank: 5,
+                },
+            },
+            focus: WallFocusModel::new(),
+            sidebar_scroll: crate::ui::smooth_scroll::SmoothScroll::new(),
+        }
+        .flat_items(w, &layout, stats)
+    }
+
+    #[test]
+    fn down_from_souzu_row_reaches_pinzu_row() {
+        let w = 1920.0;
+        let h = 1080.0;
+        let stats = stub_stats();
+        let items = flat_items_at(w, h, &stats);
+        let souzu5 = face_index(FaceKey {
+            suit: Suit::Souzu,
+            rank: 5,
+        })
+        .expect("souzu 5");
+        let pinzu5 = face_index(FaceKey {
+            suit: Suit::Pinzu,
+            rank: 5,
+        })
+        .expect("pinzu 5");
+
+        let mut tree = TreeState::new();
+        tree.set_focus(LedgerNav::Tile(souzu5).id());
+        let edges = wall_ledger_nav_edges();
+        let _ = tree.update_flat_with_edges(
+            &items,
+            TreeInput {
+                actions: &[UiAction::FocusDown],
+                button_clicks: &[],
+                cursor_pos: (0.0, 0.0),
+                window: (w, h),
+                input_mode: InputMode::Controller,
+                scroll_lines: 0.0,
+            },
+            &edges,
+        );
+        let got = tree.focused().map(ledger_nav_from_id);
+        assert_eq!(
+            got,
+            Some(LedgerNav::Tile(pinzu5)),
+            "down from 5 Souzu should land on 5 Pinzu, got {got:?}"
+        );
+    }
+
+    #[test]
+    fn focus_nav_debug_snapshot_includes_grid_nodes() {
+        let w = 1920.0;
+        let h = 1080.0;
+        let stats = stub_stats();
+        let items = flat_items_at(w, h, &stats);
+        let mut tree = TreeState::new();
+        let edges = wall_ledger_nav_edges();
+        let _ = tree.update_flat_with_edges(
+            &items,
+            TreeInput {
+                actions: &[],
+                button_clicks: &[],
+                cursor_pos: (0.0, 0.0),
+                window: (w, h),
+                input_mode: InputMode::Controller,
+                scroll_lines: 0.0,
+            },
+            &edges,
+        );
+        let snap = tree.focus_nav_debug_snapshot_flat(&items, |a| format!("{a:?}"));
+        assert!(
+            snap.nodes.len() >= 38,
+            "expected grid + chrome nodes, got {}",
+            snap.nodes.len()
+        );
     }
 }
 

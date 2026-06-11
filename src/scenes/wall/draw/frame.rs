@@ -10,20 +10,19 @@ use crate::ui::controller_hints::{HintStyle, push_screen_footer_hint, wall_ledge
 
 use super::super::StrategicWallScene;
 use super::super::data::{build_frame_context, groups_by_face};
-use super::super::focus::{LedgerNav, push_back_button};
+use super::super::focus::{LedgerNav, push_back_button, wall_ledger_nav_edges};
 use super::super::layout::{WallLayout, read_boost, wall_layout};
+use super::super::sidebar_scroll::sidebar_scroll_layout;
 use super::super::state::WallScreenState;
-use super::detail::draw_wall_detail_panel;
 use super::grid::{draw_grid_panel_chrome, draw_tile_ledger_grid};
 use super::header::draw_wall_header;
 use super::summary::draw_wall_summary_panel;
-use super::tabs::draw_wall_tabs;
 
 pub fn draw_strategic_frame(scene: &StrategicWallScene, mut ctx: DrawCtx<'_>) -> UiFrame {
     let w = ctx.layout.window_w;
     let h = ctx.layout.window_h;
     let jr = read_boost(w, h);
-    let frame_ctx = build_frame_context(ctx.run, scene.mode, scene.screen.view);
+    let frame_ctx = build_frame_context(ctx.run, scene.mode);
     let groups = groups_by_face(&frame_ctx.ledger);
     let layout = wall_layout(w, h, jr);
 
@@ -49,44 +48,7 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, mut ctx: DrawCtx<'_>) ->
     let flat_items = scene.flat_items(w, &layout, &frame_ctx.stats);
 
     let mut texts = Vec::new();
-    draw_wall_header(&mut frame, &mut texts, w, h, jr, &layout, &frame_ctx.stats);
-    draw_wall_tabs(
-        &mut frame,
-        &mut texts,
-        &layout,
-        scene.screen.view,
-        focus,
-    );
-    draw_wall_summary_panel(
-        &mut frame,
-        &mut texts,
-        &layout,
-        &frame_ctx.stats,
-        scene.screen.view,
-        focus,
-    );
-
-    draw_grid_panel_chrome(&mut frame, &layout);
-
     let mut placements = Vec::new();
-    draw_main_panel(
-        &mut frame,
-        &mut texts,
-        &mut placements,
-        &layout,
-        &scene.screen,
-        &frame_ctx.stats,
-        &groups,
-        ctx.run,
-        focus,
-        h,
-    );
-
-    scene
-        .focus
-        .tree
-        .register_flat_buttons(&flat_items, &mut frame.buttons);
-    ctx.stash_focus_nav_tree_flat(&scene.focus.tree, &flat_items, |a| format!("{a:?}"));
 
     let group = groups
         .get(&(scene.screen.selected.suit, scene.screen.selected.rank))
@@ -98,22 +60,68 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, mut ctx: DrawCtx<'_>) ->
             .or_else(|| g.copies.first())
             .map(|c| c.tile)
     });
-    if let Some(details) = selected_tile_details(
+    let selected_details = selected_tile_details(
         &frame_ctx.stats,
         scene.screen.selected,
         &ctx.run.tile_debuffs,
         group,
-    ) {
-        draw_wall_detail_panel(
-            &mut frame,
-            &mut texts,
-            &mut placements,
-            &layout,
-            &details,
-            ctx.run,
-            rep_tile.as_ref(),
-        );
-    }
+    );
+
+    draw_wall_header(&mut texts, w, h, jr, &layout);
+    let scroll_layout =
+        sidebar_scroll_layout(&layout, &frame_ctx.stats, selected_details.as_ref(), scene.mode);
+    let scroll_y = scene.sidebar_scroll.tick();
+    draw_wall_summary_panel(
+        &mut frame,
+        &mut texts,
+        &mut placements,
+        &layout,
+        &frame_ctx.stats,
+        selected_details.as_ref(),
+        ctx.run,
+        rep_tile.as_ref(),
+        w,
+        h,
+        scroll_y,
+        scroll_layout.clip,
+        scene.mode,
+    );
+
+    draw_grid_panel_chrome(&mut frame, &layout);
+
+    draw_main_panel(
+        &mut frame,
+        &mut texts,
+        &mut placements,
+        &layout,
+        &scene.screen,
+        &frame_ctx.stats,
+        &groups,
+        ctx.run,
+        focus,
+        w,
+        h,
+    );
+
+    scene
+        .focus
+        .tree
+        .register_flat_buttons(&flat_items, &mut frame.buttons);
+    let nav_edges = wall_ledger_nav_edges();
+    let candidates: Vec<_> = flat_items.iter().map(|it| (it.id, it.rect)).collect();
+    ctx.stash_focus_nav_graph(
+        &candidates,
+        &nav_edges,
+        scene.focus.tree.focused(),
+        scene.focus.tree.focus_nav_memory(),
+        |id| {
+            flat_items
+                .iter()
+                .find(|it| it.id == id)
+                .map(|it| format!("{:?}", it.action))
+                .unwrap_or_else(|| format!("id {}", id.0))
+        },
+    );
 
     push_screen_footer_hint(
         &mut frame,
@@ -143,9 +151,20 @@ fn draw_main_panel(
     >,
     run: &crate::game::run::RunState,
     focus: Option<LedgerNav>,
-    h: f32,
+    window_w: f32,
+    window_h: f32,
 ) {
     draw_tile_ledger_grid(
-        frame, texts, placements, layout, screen, stats, groups, run, focus, h,
+        frame,
+        texts,
+        placements,
+        layout,
+        screen,
+        stats,
+        groups,
+        run,
+        focus,
+        window_w,
+        window_h,
     );
 }

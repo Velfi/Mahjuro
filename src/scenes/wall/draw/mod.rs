@@ -3,7 +3,7 @@ mod frame;
 mod grid;
 mod header;
 mod summary;
-mod tabs;
 mod text;
+mod tile_placement;
 
 pub use frame::draw_strategic_frame;

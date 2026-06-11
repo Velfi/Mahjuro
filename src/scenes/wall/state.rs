@@ -1,9 +1,8 @@
 //! UI state for the strategic Wall screen.
 
-use crate::game::wall_stats::{FaceKey, WallCountView};
+use crate::game::wall_stats::FaceKey;
 
 pub struct WallScreenState {
-    pub view: WallCountView,
     pub selected: FaceKey,
 }
 
@@ -12,6 +11,3 @@ impl WallScreenState {
         true
     }
 }
-
-#[allow(dead_code)]
-pub type WallViewMode = WallCountView;

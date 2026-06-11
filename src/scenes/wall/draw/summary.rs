@@ -1,12 +1,15 @@
 //! Left summary plaque — compact ledger blocks with clipped overflow.
 
-use crate::core::tile::Suit;
-use crate::game::wall_stats::{WallCountView, WallStats, face_short_name};
+use crate::core::tile::{Suit, Tile};
+use crate::game::run::RunState;
+use crate::game::wall_ledger::WallLedgerMode;
+use crate::game::wall_stats::{SelectedTileDetails, WallStats};
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::TextAlign;
 
-use super::super::focus::LedgerNav;
-use super::super::layout::{WallLayout, text_line_h};
+use super::super::layout::{WallLayout, text_line_h, wall_progress_bar_block_h};
+use super::super::sidebar_scroll::{SidebarScrollDraw, measure_detail_panel_height};
+use super::detail::draw_wall_detail_panel;
 use super::text::{push_plaque, push_text, push_text_maybe_clip};
 
 const VALUE_W: f32 = 38.0;
@@ -14,10 +17,17 @@ const VALUE_W: f32 = 38.0;
 pub fn draw_wall_summary_panel(
     frame: &mut crate::render::draw_cmd::UiFrame,
     texts: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
+    placements: &mut Vec<crate::render::draw_cmd::ShowcaseTilePlacement>,
     layout: &WallLayout,
     stats: &WallStats,
-    view: WallCountView,
-    focus: Option<LedgerNav>,
+    details: Option<&SelectedTileDetails>,
+    run: &RunState,
+    representative: Option<&Tile>,
+    window_w: f32,
+    window_h: f32,
+    scroll_y: f32,
+    scroll_clip: [f32; 4],
+    mode: WallLedgerMode,
 ) {
     let pad = layout.summary_pad();
     let rect = [
@@ -26,7 +36,6 @@ pub fn draw_wall_summary_panel(
         layout.summary_w,
         layout.summary_h,
     ];
-    let summary_clip = Some(rect);
     push_plaque(frame, rect, 0.90);
     frame.quad(crate::render::wgpu_renderer::GpuInstance {
         rect: [
@@ -45,8 +54,8 @@ pub fn draw_wall_summary_panel(
         layout.summary_w - pad * 2.0,
     );
 
-    let mut y = layout.summary_y + pad;
-    let title_line = text_line_h(layout.caption_px * 1.02);
+    let y = layout.summary_y + pad;
+    let title_line = text_line_h(layout.caption_px);
     push_text(
         texts,
         [
@@ -56,22 +65,36 @@ pub fn draw_wall_summary_panel(
             title_line,
         ],
         "WALL SUMMARY",
-        layout.caption_px * 1.02,
+        layout.caption_px,
         color::alpha(color::BRASS, 0.82),
         true,
         TextAlign::Left,
     );
-    y += title_line + 8.0;
+
+    let content_top = y + title_line + 8.0;
+    let scroll = SidebarScrollDraw {
+        content_top,
+        scroll_y,
+        clip: scroll_clip,
+        x: layout.summary_x,
+        w: layout.summary_w,
+    };
+    let mut logical_y = 0.0_f32;
 
     draw_wall_tab_summary(
         frame,
         texts,
+        placements,
         layout,
         stats,
-        view,
-        focus,
-        summary_clip,
-        &mut y,
+        &scroll,
+        details,
+        run,
+        representative,
+        window_w,
+        window_h,
+        &mut logical_y,
+        mode,
     );
 }
 
@@ -86,213 +109,198 @@ fn push_divider(frame: &mut crate::render::draw_cmd::UiFrame, x: f32, y: f32, w:
 fn push_section_header(
     texts: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
     layout: &WallLayout,
-    y: &mut f32,
+    scroll: &SidebarScrollDraw,
+    logical_y: &mut f32,
     title: &str,
 ) {
-    let line = text_line_h(layout.caption_px * 0.94);
-    push_text(
-        texts,
-        [
-            layout.summary_x + layout.summary_pad(),
-            *y,
-            layout.summary_w - layout.summary_pad() * 2.0,
-            line,
-        ],
-        title,
-        layout.caption_px * 0.94,
-        color::alpha(color::CHAMPAGNE, 0.92),
-        true,
-        TextAlign::Left,
-    );
-    *y += line + 4.0;
+    let line = text_line_h(layout.caption_px);
+    let screen_y = scroll.screen_y(*logical_y);
+    if scroll.visible(screen_y, line) {
+        push_text_maybe_clip(
+            texts,
+            [
+                layout.summary_x + layout.summary_pad(),
+                screen_y,
+                layout.summary_w - layout.summary_pad() * 2.0,
+                line,
+            ],
+            title,
+            layout.caption_px,
+            color::alpha(color::CHAMPAGNE, 0.92),
+            true,
+            TextAlign::Left,
+            Some(scroll.clip),
+        );
+    }
+    *logical_y += line + 4.0;
 }
 
-fn push_stat_row(
+fn draw_wall_progress_bar(
+    frame: &mut crate::render::draw_cmd::UiFrame,
     texts: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
     layout: &WallLayout,
-    y: &mut f32,
-    label: &str,
-    value: impl std::fmt::Display,
-    value_color: [f32; 4],
-    clip: Option<[f32; 4]>,
+    scroll: &SidebarScrollDraw,
+    logical_y: &mut f32,
+    remaining: usize,
+    total: usize,
 ) {
-    if clip.is_some_and(|c| *y > c[1] + c[3] - text_line_h(layout.caption_px)) {
+    let pad = layout.summary_pad();
+    let inner_w = layout.summary_w - pad * 2.0;
+    let end_w = 44.0;
+    let gap = 6.0;
+    let bar_w = (inner_w - end_w * 2.0 - gap * 2.0).max(8.0);
+
+    let count_line = text_line_h(layout.count_px);
+    let bar_h = (count_line * 0.38).max(10.0);
+    let count_row_h = count_line.max(bar_h);
+    let label_line = text_line_h(layout.caption_px);
+    let block_h = wall_progress_bar_block_h(layout);
+
+    let screen_y = scroll.screen_y(*logical_y);
+    if !scroll.visible(screen_y, block_h) {
+        *logical_y += block_h;
         return;
     }
-    let line = text_line_h(layout.caption_px);
-    let pad = layout.summary_pad();
-    let value_x = layout.summary_value_x() - VALUE_W;
+
+    let x0 = layout.summary_x + pad;
+    let bar_x = x0 + end_w + gap;
+    let bar_y = screen_y + (count_row_h - bar_h) * 0.5;
+
     push_text_maybe_clip(
         texts,
-        [
-            layout.summary_x + pad,
-            *y,
-            value_x - layout.summary_x - pad - 4.0,
-            line,
-        ],
-        label,
-        layout.caption_px,
-        color::STONE,
-        false,
+        [x0, screen_y, end_w, count_line],
+        format!("{remaining}"),
+        layout.count_px,
+        color::CHAMPAGNE,
+        true,
         TextAlign::Left,
-        clip,
+        Some(scroll.clip),
     );
     push_text_maybe_clip(
         texts,
-        [value_x, *y, VALUE_W, line],
-        format!("{value}"),
-        layout.caption_px,
-        value_color,
+        [x0 + inner_w - end_w, screen_y, end_w, count_line],
+        format!("{total}"),
+        layout.count_px,
+        color::STONE,
         true,
         TextAlign::Right,
-        clip,
+        Some(scroll.clip),
     );
-    *y += line + 2.0;
-}
 
-fn push_best_draw_row(
-    texts: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
-    layout: &WallLayout,
-    y: &mut f32,
-    name: &str,
-    reason: &str,
-    focused: bool,
-    clip: Option<[f32; 4]>,
-) {
-    if clip.is_some_and(|c| *y > c[1] + c[3] - text_line_h(layout.caption_px) * 2.1) {
-        return;
+    frame.quad(crate::render::wgpu_renderer::GpuInstance {
+        rect: [bar_x, bar_y, bar_w, bar_h],
+        color: color::alpha(color::WALNUT_INK, 0.65),
+        user: 0,
+    });
+    let frac = if total > 0 {
+        remaining as f32 / total as f32
+    } else {
+        0.0
+    };
+    let fill_w = bar_w * frac.clamp(0.0, 1.0);
+    if fill_w > 1.0 {
+        frame.quad(crate::render::wgpu_renderer::GpuInstance {
+            rect: [bar_x, bar_y, fill_w, bar_h],
+            color: color::alpha(color::CHAMPAGNE, 0.55),
+            user: 0,
+        });
     }
-    let line = text_line_h(layout.caption_px);
-    let pad = layout.summary_pad();
-    let reason = if reason.len() > 32 {
-        format!("{}…", &reason[..31])
-    } else {
-        reason.to_string()
-    };
-    let tint = if focused {
-        color::BRASS
-    } else {
-        color::alpha(color::JADE, 0.88)
-    };
+
+    let label_y = screen_y + count_row_h + 2.0;
+    let label_w = inner_w * 0.5;
     push_text_maybe_clip(
         texts,
-        [
-            layout.summary_x + pad,
-            *y,
-            layout.summary_w - pad * 2.0,
-            line,
-        ],
-        name,
+        [x0, label_y, label_w, label_line],
+        "remaining",
         layout.caption_px,
-        tint,
-        focused,
-        TextAlign::Left,
-        clip,
-    );
-    push_text_maybe_clip(
-        texts,
-        [
-            layout.summary_x + pad + 6.0,
-            *y + line,
-            layout.summary_w - pad * 2.0 - 6.0,
-            line,
-        ],
-        reason,
-        layout.caption_px * 0.88,
-        color::alpha(color::UMBER, if focused { 0.78 } else { 0.62 }),
+        color::alpha(color::STONE, 0.75),
         false,
         TextAlign::Left,
-        clip,
+        Some(scroll.clip),
     );
-    *y += line * 2.0 + 2.0;
+    push_text_maybe_clip(
+        texts,
+        [x0 + inner_w - label_w, label_y, label_w, label_line],
+        "total",
+        layout.caption_px,
+        color::alpha(color::STONE, 0.75),
+        false,
+        TextAlign::Right,
+        Some(scroll.clip),
+    );
+
+    *logical_y += block_h;
 }
 
 fn draw_wall_tab_summary(
     frame: &mut crate::render::draw_cmd::UiFrame,
     texts: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
+    placements: &mut Vec<crate::render::draw_cmd::ShowcaseTilePlacement>,
     layout: &WallLayout,
     stats: &WallStats,
-    _view: WallCountView,
-    focus: Option<LedgerNav>,
-    summary_clip: Option<[f32; 4]>,
-    y: &mut f32,
+    scroll: &SidebarScrollDraw,
+    details: Option<&SelectedTileDetails>,
+    run: &RunState,
+    representative: Option<&Tile>,
+    window_w: f32,
+    window_h: f32,
+    logical_y: &mut f32,
+    mode: WallLedgerMode,
 ) {
-    push_stat_row(
+    draw_wall_progress_bar(
+        frame,
         texts,
         layout,
-        y,
-        "Total Tiles",
-        stats.total_wall,
-        color::STONE,
-        summary_clip,
-    );
-    push_stat_row(
-        texts,
-        layout,
-        y,
-        "Remaining",
+        scroll,
+        logical_y,
         stats.total_remaining,
-        color::CHAMPAGNE,
-        summary_clip,
+        stats.total_wall,
     );
-    *y += 6.0;
-    push_divider(
-        frame,
-        layout.summary_x + layout.summary_pad(),
-        *y,
-        layout.summary_w - layout.summary_pad() * 2.0,
-    );
-    *y += 7.0;
-
-    push_section_header(texts, layout, y, "SUIT BALANCE");
-    draw_suit_balance_bars(frame, texts, layout, stats, y, summary_clip);
-    *y += 4.0;
-    push_divider(
-        frame,
-        layout.summary_x + layout.summary_pad(),
-        *y,
-        layout.summary_w - layout.summary_pad() * 2.0,
-    );
-    *y += 7.0;
-
-    if let Some(c) = summary_clip {
-        let min_room = text_line_h(layout.caption_px) * 2.0 + 2.0;
-        let max_top = c[1] + c[3] - min_room;
-        if *y > max_top {
-            *y = max_top;
-        }
-    }
-    push_section_header(texts, layout, y, "BEST DRAWS");
-    if stats.best_draws.is_empty() {
-        push_text_maybe_clip(
-            texts,
-            [
-                layout.summary_x + layout.summary_pad(),
-                *y,
-                layout.summary_w - layout.summary_pad() * 2.0,
-                text_line_h(layout.caption_px),
-            ],
-            "No strong draw hints",
-            layout.caption_px * 0.9,
-            color::alpha(color::UMBER, 0.66),
-            false,
-            TextAlign::Left,
-            summary_clip,
+    *logical_y += 6.0;
+    let divider_y = scroll.screen_y(*logical_y);
+    if scroll.visible(divider_y, 1.0) {
+        push_divider(
+            frame,
+            layout.summary_x + layout.summary_pad(),
+            divider_y,
+            layout.summary_w - layout.summary_pad() * 2.0,
         );
-        *y += text_line_h(layout.caption_px) + 2.0;
-    } else {
-        for (i, hint) in stats.best_draws.iter().enumerate().take(3) {
-            let focused = focus == Some(LedgerNav::Summary(i));
-            push_best_draw_row(
-                texts,
-                layout,
-                y,
-                &face_short_name(hint.face.suit, hint.face.rank),
-                &hint.reason,
-                focused,
-                summary_clip,
-            );
-        }
+    }
+    *logical_y += 7.0;
+
+    push_section_header(texts, layout, scroll, logical_y, "SUIT BALANCE");
+    draw_suit_balance_bars(frame, texts, layout, stats, scroll, logical_y);
+    *logical_y += 4.0;
+    let divider_y = scroll.screen_y(*logical_y);
+    if scroll.visible(divider_y, 1.0) {
+        push_divider(
+            frame,
+            layout.summary_x + layout.summary_pad(),
+            divider_y,
+            layout.summary_w - layout.summary_pad() * 2.0,
+        );
+    }
+    *logical_y += 7.0;
+
+    if let Some(details) = details {
+        let detail_h = measure_detail_panel_height(layout, scroll.w, details, mode);
+        let detail_top = scroll.screen_y(*logical_y);
+        let detail_rect = [scroll.x, detail_top, scroll.w, detail_h];
+        draw_wall_detail_panel(
+            frame,
+            texts,
+            placements,
+            layout,
+            detail_rect,
+            details,
+            run,
+            representative,
+            window_w,
+            window_h,
+            scroll.clip,
+            mode,
+        );
+        *logical_y += detail_h;
     }
 }
 
@@ -301,17 +309,19 @@ fn draw_suit_balance_bars(
     texts: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
     layout: &WallLayout,
     stats: &WallStats,
-    y: &mut f32,
-    clip: Option<[f32; 4]>,
+    scroll: &SidebarScrollDraw,
+    logical_y: &mut f32,
 ) {
     let line = text_line_h(layout.caption_px);
     let pad = layout.summary_pad();
-    let label_w = layout.summary_w * 0.36;
-    let bar_x = layout.summary_x + pad + label_w;
-    let bar_w = layout.summary_value_x() - VALUE_W - bar_x - 8.0;
-    let bar_h = (line * 0.24).max(3.0);
+    let inner_w = layout.summary_w - pad * 2.0;
+    let label_w = inner_w * 0.34;
+    let count_w = VALUE_W;
+    let bar_x = layout.summary_x + pad + label_w + 4.0;
+    let bar_w = inner_w - label_w - count_w - 8.0;
+    let bar_h = (line * 0.28).max(4.0);
     let total = stats.total_remaining.max(1) as f32;
-    let value_x = layout.summary_value_x() - VALUE_W;
+    let value_x = layout.summary_x + pad + inner_w - count_w;
     let rows = [
         ("Manzu", stats.suit_summary.manzu, Suit::Manzu),
         ("Souzu", stats.suit_summary.souzu, Suit::Souzu),
@@ -320,18 +330,21 @@ fn draw_suit_balance_bars(
         ("Flowers", stats.suit_summary.flowers, Suit::Flower),
     ];
     for (name, count, suit) in rows {
-        if clip.is_some_and(|c| *y > c[1] + c[3] - line) {
-            break;
+        let screen_y = scroll.screen_y(*logical_y);
+        if !scroll.visible(screen_y, line) {
+            *logical_y += line + 2.0;
+            continue;
         }
-        let row_y = *y + (line - bar_h) * 0.5;
-        push_text(
+        let row_y = screen_y + (line - bar_h) * 0.5;
+        push_text_maybe_clip(
             texts,
-            [layout.summary_x + pad, *y, label_w, line],
+            [layout.summary_x + pad, screen_y, label_w, line],
             name,
             layout.caption_px,
             suit.keyword_color(),
             false,
             TextAlign::Left,
+            Some(scroll.clip),
         );
         frame.quad(crate::render::wgpu_renderer::GpuInstance {
             rect: [bar_x, row_y, bar_w.max(1.0), bar_h],
@@ -346,15 +359,16 @@ fn draw_suit_balance_bars(
                 user: 0,
             });
         }
-        push_text(
+        push_text_maybe_clip(
             texts,
-            [value_x, *y, VALUE_W, line],
+            [value_x, screen_y, VALUE_W, line],
             format!("{count}"),
             layout.caption_px,
             color::STONE,
             false,
             TextAlign::Right,
+            Some(scroll.clip),
         );
-        *y += line + 2.0;
+        *logical_y += line + 2.0;
     }
 }

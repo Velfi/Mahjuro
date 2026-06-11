@@ -7,20 +7,16 @@ use crate::game::run::RunState;
 use crate::game::wall_ledger::{
     WallLedgerFaceGroup, WallLedgerMode, WallLedgerReadModel, read_wall_ledger,
 };
-use crate::game::wall_stats::{WallCountView, WallStats, compute_wall_stats_for_run};
+use crate::game::wall_stats::{WallStats, compute_wall_stats_for_run};
 
 pub struct WallFrameContext {
     pub ledger: WallLedgerReadModel,
     pub stats: WallStats,
 }
 
-pub fn build_frame_context(
-    run: &RunState,
-    mode: WallLedgerMode,
-    view: WallCountView,
-) -> WallFrameContext {
+pub fn build_frame_context(run: &RunState, mode: WallLedgerMode) -> WallFrameContext {
     let ledger = read_wall_ledger(run, mode);
-    let stats = compute_wall_stats_for_run(&ledger, run, view);
+    let stats = compute_wall_stats_for_run(&ledger, run);
     WallFrameContext { ledger, stats }
 }
 
