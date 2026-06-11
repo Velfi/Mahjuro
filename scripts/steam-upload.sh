@@ -13,8 +13,9 @@
 #   --branch NAME  Set the build live on this beta branch after upload.
 #                  Default: empty (build is uploaded but not promoted; use the
 #                  Steamworks partner UI to promote).
-#   --beta         Same as --branch, but the branch name defaults to "beta"
-#                  (or STEAM_BETA_BRANCH if set). For pushing public betas.
+#   --beta         Promote the main AppID to the "beta" branch (or
+#                  STEAM_BETA_BRANCH) and also upload + promote the Steam
+#                  Playtest child app (see packaging/steam/targets.env).
 #   --skip-login   Don't pass +login to steamcmd; assume an existing cached
 #                  session. Useful when re-running after a successful login.
 #
@@ -29,11 +30,10 @@
 #   STEAM_BUILD_USER     Steam account with "Publish Builds" partner permission.
 #                        Required (unless --skip-login).
 #   STEAM_BUILD_PASSWORD If set, passed to steamcmd; otherwise interactive prompt.
-#   STEAM_APP_ID         Override Mahjuro's AppID. Default: 4636490
-#   STEAM_DEPOT_WINDOWS  Default: 4636491
-#   STEAM_DEPOT_MACOS    Default: 4636492
+#   packaging/steam/targets.env — default AppID / depot IDs (main + playtest).
 #   STEAM_BETA_BRANCH    Used with --beta when you want a default other than
 #                        the branch literally named "beta" (e.g. "publicbeta").
+#   STEAM_PLAYTEST_BRANCH  Playtest branch when using --beta (default: beta).
 
 set -euo pipefail
 
@@ -86,9 +86,53 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 STEAM_SDK_ROOT="${STEAM_SDK_ROOT:-${REPO_ROOT}/steam_sdk}"
+TARGETS_ENV="${REPO_ROOT}/packaging/steam/targets.env"
+if [[ -f "$TARGETS_ENV" ]]; then
+    # shellcheck source=/dev/null
+    source "$TARGETS_ENV"
+fi
 STEAM_APP_ID="${STEAM_APP_ID:-4636490}"
 STEAM_DEPOT_WINDOWS="${STEAM_DEPOT_WINDOWS:-4636491}"
 STEAM_DEPOT_MACOS="${STEAM_DEPOT_MACOS:-4636492}"
+if [[ -z "${STEAM_PLAYTEST_BRANCH:-}" ]]; then
+    STEAM_PLAYTEST_BRANCH="${BRANCH:-${STEAM_BETA_BRANCH:-beta}}"
+fi
+
+validate_app_id () {
+    local label="$1"
+    local value="$2"
+    if ! [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" -eq 0 ]]; then
+        echo "error: invalid $label AppID: '$value'" >&2
+        return 1
+    fi
+}
+
+validate_depot_id () {
+    local label="$1"
+    local value="$2"
+    if ! [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" -eq 0 ]]; then
+        echo "error: invalid $label depot ID: '$value'" >&2
+        return 1
+    fi
+}
+
+if [[ $BETA -eq 1 ]]; then
+    missing=()
+    [[ -z "${STEAM_PLAYTEST_APP_ID:-}" ]] && missing+=(STEAM_PLAYTEST_APP_ID)
+    [[ -z "${STEAM_PLAYTEST_DEPOT_WINDOWS:-}" ]] && missing+=(STEAM_PLAYTEST_DEPOT_WINDOWS)
+    [[ -z "${STEAM_PLAYTEST_DEPOT_MACOS:-}" ]] && missing+=(STEAM_PLAYTEST_DEPOT_MACOS)
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "error: --beta uploads to Mahjuro + Steam Playtest; set in $TARGETS_ENV:" >&2
+        for key in "${missing[@]}"; do
+            echo "         $key" >&2
+        done
+        echo "       Playtest depots: partner site → Playtest app → SteamPipe → Depots." >&2
+        exit 1
+    fi
+    validate_app_id "playtest" "$STEAM_PLAYTEST_APP_ID"
+    validate_depot_id "playtest windows" "$STEAM_PLAYTEST_DEPOT_WINDOWS"
+    validate_depot_id "playtest macos" "$STEAM_PLAYTEST_DEPOT_MACOS"
+fi
 
 if [[ ! -d "$STEAM_SDK_ROOT" ]]; then
     echo "error: STEAM_SDK_ROOT does not exist: $STEAM_SDK_ROOT" >&2
@@ -212,28 +256,64 @@ else
 fi
 
 # ─────────────────────────── Render VDFs ───────────────────────────
-render () {
-    local src="$1"
-    local dst="$2"
-    sed \
-        -e "s|__APPID__|${STEAM_APP_ID}|g" \
-        -e "s|__DESC__|Mahjuro ${TAG}|g" \
-        -e "s|__PREVIEW__|${PREVIEW}|g" \
-        -e "s|__SETLIVE__|${BRANCH}|g" \
-        -e "s|__CONTENT_ROOT__|${CONTENT}|g" \
-        -e "s|__BUILD_OUTPUT__|${OUTPUT}|g" \
-        -e "s|__DEPOT_WINDOWS__|${STEAM_DEPOT_WINDOWS}|g" \
-        -e "s|__DEPOT_MACOS__|${STEAM_DEPOT_MACOS}|g" \
-        "$src" > "$dst"
+render_target_vdfs () {
+    local target_label="$1"
+    local app_id="$2"
+    local depot_windows="$3"
+    local depot_macos="$4"
+    local setlive="$5"
+    local desc="$6"
+    local target_scripts="$SCRIPTS/$target_label"
+    local target_output="$OUTPUT/$target_label"
+
+    mkdir -p "$target_scripts" "$target_output"
+
+    render_one () {
+        local src="$1"
+        local dst="$2"
+        sed \
+            -e "s|__APPID__|${app_id}|g" \
+            -e "s|__DESC__|${desc}|g" \
+            -e "s|__PREVIEW__|${PREVIEW}|g" \
+            -e "s|__SETLIVE__|${setlive}|g" \
+            -e "s|__CONTENT_ROOT__|${CONTENT}|g" \
+            -e "s|__BUILD_OUTPUT__|${target_output}|g" \
+            -e "s|__DEPOT_WINDOWS__|${depot_windows}|g" \
+            -e "s|__DEPOT_MACOS__|${depot_macos}|g" \
+            "$src" > "$dst"
+    }
+
+    render_one "packaging/steam/app_build.vdf.template"           "$target_scripts/app_build.vdf"
+    render_one "packaging/steam/depot_build_windows.vdf.template" "$target_scripts/depot_build_windows.vdf"
+    render_one "packaging/steam/depot_build_macos.vdf.template"   "$target_scripts/depot_build_macos.vdf"
+
+    echo "Rendered $target_label VDFs (AppID $app_id, setlive=${setlive:-<none>}) in $target_scripts"
 }
 
-render "packaging/steam/app_build.vdf.template"           "$SCRIPTS/app_build.vdf"
-render "packaging/steam/depot_build_windows.vdf.template" "$SCRIPTS/depot_build_windows.vdf"
-render "packaging/steam/depot_build_macos.vdf.template"   "$SCRIPTS/depot_build_macos.vdf"
+BUILD_TARGETS=()
+register_build_target () {
+    BUILD_TARGETS+=("$1")
+}
+
+render_target_vdfs "main" \
+    "$STEAM_APP_ID" \
+    "$STEAM_DEPOT_WINDOWS" \
+    "$STEAM_DEPOT_MACOS" \
+    "$BRANCH" \
+    "Mahjuro ${TAG}"
+register_build_target "main"
+
+if [[ $BETA -eq 1 ]]; then
+    render_target_vdfs "playtest" \
+        "$STEAM_PLAYTEST_APP_ID" \
+        "$STEAM_PLAYTEST_DEPOT_WINDOWS" \
+        "$STEAM_PLAYTEST_DEPOT_MACOS" \
+        "$STEAM_PLAYTEST_BRANCH" \
+        "Mahjuro ${TAG} (playtest)"
+    register_build_target "playtest"
+fi
 
 echo
-echo "Rendered VDFs in $SCRIPTS:"
-ls -1 "$SCRIPTS"
 
 # ─────────────────────────── steamcmd ───────────────────────────
 LOGIN_ARGS=()
@@ -250,15 +330,30 @@ if [[ $SKIP_LOGIN -eq 0 ]]; then
     fi
 fi
 
+STEAMCMD_ARGS=()
+for target in "${BUILD_TARGETS[@]}"; do
+    STEAMCMD_ARGS+=(+run_app_build "$SCRIPTS/$target/app_build.vdf")
+done
+STEAMCMD_ARGS+=(+quit)
+
 echo
 if [[ $PREVIEW -eq 1 ]]; then
     echo "── PREVIEW BUILD (no upload) ──"
 else
-    echo "── REAL BUILD (will upload to Steam AppID $STEAM_APP_ID) ──"
+    echo "── REAL BUILD ──"
+    for target in "${BUILD_TARGETS[@]}"; do
+        case "$target" in
+            main)
+                echo "  main:     AppID $STEAM_APP_ID → branch ${BRANCH:-<none — promote in partner UI>}"
+                ;;
+            playtest)
+                echo "  playtest: AppID $STEAM_PLAYTEST_APP_ID → branch $STEAM_PLAYTEST_BRANCH"
+                ;;
+        esac
+    done
 fi
-echo "  staging:    $STAGING"
-echo "  steamcmd:   $STEAMCMD"
-echo "  setlive:    ${BRANCH:-<none — promote in partner UI>}"
+echo "  staging:  $STAGING"
+echo "  steamcmd: $STEAMCMD"
 echo
 
 if [[ $PIPE_PASSWORD -eq 1 ]]; then
@@ -266,17 +361,19 @@ if [[ $PIPE_PASSWORD -eq 1 ]]; then
     # set -x output, or CI logs that capture command lines).
     printf '%s\n' "$STEAM_BUILD_PASSWORD" | "$STEAMCMD" \
         "${LOGIN_ARGS[@]}" \
-        +run_app_build "$SCRIPTS/app_build.vdf" \
-        +quit
+        "${STEAMCMD_ARGS[@]}"
 else
     "$STEAMCMD" \
         "${LOGIN_ARGS[@]}" \
-        +run_app_build "$SCRIPTS/app_build.vdf" \
-        +quit
+        "${STEAMCMD_ARGS[@]}"
 fi
 
 echo
 echo "Done. Logs in: $OUTPUT"
 if [[ $PREVIEW -eq 0 ]]; then
-    echo "View the build: https://partner.steamgames.com/apps/builds/${STEAM_APP_ID}"
+    echo "View builds:"
+    echo "  main:     https://partner.steamgames.com/apps/builds/${STEAM_APP_ID}"
+    if [[ $BETA -eq 1 ]]; then
+        echo "  playtest: https://partner.steamgames.com/apps/builds/${STEAM_PLAYTEST_APP_ID}"
+    fi
 fi
