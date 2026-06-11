@@ -14,8 +14,8 @@ use steamworks::{
     UpdateWatchHandle,
 };
 
-use super::workshop::steam_client;
 use super::MAHJURO_APP_ID;
+use super::workshop::steam_client;
 
 /// Steam rejects workshop preview files ≥ 1 MiB (`k_EResultLimitExceeded`).
 const WORKSHOP_PREVIEW_MAX_BYTES: u64 = 1024 * 1024;
@@ -223,18 +223,18 @@ fn maybe_start_pending_upload() {
 }
 
 fn start_create(client: Arc<Client>) {
-    client
-        .ugc()
-        .create_item(AppId(MAHJURO_APP_ID), FileType::Community, move |result| {
-            match result {
-                Ok((id, _)) => {
-                    if let Err(e) = queue_pending_upload(id, false) {
-                        set_finished(Err(e));
-                    }
+    client.ugc().create_item(
+        AppId(MAHJURO_APP_ID),
+        FileType::Community,
+        move |result| match result {
+            Ok((id, _)) => {
+                if let Err(e) = queue_pending_upload(id, false) {
+                    set_finished(Err(e));
                 }
-                Err(err) => set_finished(Err(format!("Workshop create failed: {err:?}"))),
             }
-        });
+            Err(err) => set_finished(Err(format!("Workshop create failed: {err:?}"))),
+        },
+    );
 }
 
 /// Begin uploading a local mod folder to Steam Workshop. Idempotent while busy.

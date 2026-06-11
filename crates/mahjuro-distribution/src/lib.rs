@@ -66,9 +66,10 @@ compile_error!("enable only one of: dist-steam, dist-mas, dist-msstore");
 pub use steam::workshop::open_tileset_workshop_overlay;
 #[cfg(feature = "steam")]
 pub use steam::workshop_publish::{
-    open_workshop_item_overlay, publish_busy as workshop_publish_busy,
-    publish_local_mod as publish_workshop_tileset_mod, publish_progress_label as workshop_publish_progress_label,
-    take_publish_result as take_workshop_publish_result, WorkshopPublishResult,
+    WorkshopPublishResult, open_workshop_item_overlay, publish_busy as workshop_publish_busy,
+    publish_local_mod as publish_workshop_tileset_mod,
+    publish_progress_label as workshop_publish_progress_label,
+    take_publish_result as take_workshop_publish_result,
 };
 
 #[cfg(not(feature = "steam"))]

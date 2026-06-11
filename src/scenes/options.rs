@@ -537,8 +537,8 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
     let back_h = (42.0 * scale).max(28.0);
     let version_h = (14.0 * scale).max(10.0);
     let version_y = h - footer_reserve - version_h - (4.0 * scale);
-        let back_y = version_y - back_h - (12.0 * scale);
-        let back_w = (total_w * 0.30).max(96.0 * scale).min(total_w * 0.42);
+    let back_y = version_y - back_h - (12.0 * scale);
+    let back_w = (total_w * 0.30).max(96.0 * scale).min(total_w * 0.42);
     #[cfg(not(feature = "dist-steam"))]
     let bottom_gap = (12.0 * scale).max(8.0);
     #[cfg(not(feature = "dist-steam"))]
@@ -1981,8 +1981,7 @@ impl OptionsScene {
 
                 let arrows = tileset_arrow_layout(rect, cols, scale);
                 let busy = mahjuro_distribution::workshop_publish_busy();
-                let arrows_enabled =
-                    !busy && self.publish_mod_candidates.len() > 1;
+                let arrows_enabled = !busy && self.publish_mod_candidates.len() > 1;
                 let cursor = self.cursor_pos;
                 push_cycle_arrow(
                     instances,

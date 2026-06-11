@@ -104,7 +104,8 @@ impl TilesetWorkshop {
                 continue;
             };
             let install_root = std::path::Path::new(&info.folder);
-            let Some(content_dir) = tileset_workshop::validate_workshop_install(install_root) else {
+            let Some(content_dir) = tileset_workshop::validate_workshop_install(install_root)
+            else {
                 log::warn!(
                     "skipping subscribed Workshop item {}: no valid atlas.toml + atlas.png under {}",
                     file_id.0,

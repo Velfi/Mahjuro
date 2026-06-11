@@ -17,9 +17,11 @@ use std::time::{Duration, Instant};
 use crate::gltf_helpers::{
     GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME, GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE,
     GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW, GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL,
-    GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT, GltfPbrUniform, build_sampler_descriptor,
+    GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT, GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO, GltfPbrUniform,
+    build_sampler_descriptor,
 };
 use crate::room_env_gltf::{RoomEnvPrimitiveCpu, RoomTextureUsageClass};
+use crate::room_gi_bake::RoomGiRoom;
 use crate::wgpu_renderer::resources::{RoomEnvTextureCache, RoomEnvTextureDedupeHint};
 use wgpu::util::DeviceExt;
 
@@ -183,10 +185,40 @@ fn room_env_shader_flags(scene_key: &str, node_name: Option<&str>) -> u32 {
 }
 
 #[inline]
+fn scene_key_room_shadow_room(scene_key: &str) -> Option<RoomGiRoom> {
+    match scene_key {
+        scene_keys::SHOP => Some(RoomGiRoom::Shop),
+        scene_keys::HALLWAY => Some(RoomGiRoom::Hallway),
+        scene_keys::MAIN_MENU => Some(RoomGiRoom::MainMenu),
+        scene_keys::STAIRWAY => Some(RoomGiRoom::Stairway),
+        scene_keys::GAMEPLAY => Some(RoomGiRoom::Gameplay),
+        _ => None,
+    }
+}
+
+#[inline]
+fn room_env_baked_contact_ao_flags(
+    scene_key: &str,
+    node_name: Option<&str>,
+    material_name: Option<&str>,
+) -> u32 {
+    let Some(room) = scene_key_room_shadow_room(scene_key) else {
+        return 0;
+    };
+    let class = crate::room_shadow_bake::primitive_contact_ao_class(room, node_name, material_name);
+    if class.receiver <= 0.0 {
+        GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO
+    } else {
+        0
+    }
+}
+
+#[inline]
 fn room_env_pbr_uniform(
     prim: &crate::tile_glb::LoadedPrimitive,
     scene_key: &str,
     node_name: Option<&str>,
+    material_name: Option<&str>,
 ) -> GltfPbrUniform {
     let mut pbr_uniform = GltfPbrUniform::from_loaded(
         prim.metallic_factor,
@@ -196,6 +228,11 @@ fn room_env_pbr_uniform(
         prim.alpha_cutoff,
     );
     pbr_uniform.add_flags(room_env_shader_flags(scene_key, node_name));
+    pbr_uniform.add_flags(room_env_baked_contact_ao_flags(
+        scene_key,
+        node_name,
+        material_name,
+    ));
     pbr_uniform
 }
 
@@ -528,6 +565,7 @@ fn load_shop_room_gpu(
                     prim,
                     scene_keys::SHOP,
                     env_prim.gltf_node_name.as_deref(),
+                    env_prim.material_name.as_deref(),
                 );
                 let pbr_uniform_buffer =
                     ctx.device
@@ -754,6 +792,7 @@ fn load_hallway_room_gpu(
                     prim,
                     scene_keys::HALLWAY,
                     env_prim.gltf_node_name.as_deref(),
+                    env_prim.material_name.as_deref(),
                 );
                 let pbr_uniform_buffer =
                     ctx.device
@@ -969,6 +1008,7 @@ fn load_main_menu_room_gpu(
                     prim,
                     scene_keys::MAIN_MENU,
                     env_prim.gltf_node_name.as_deref(),
+                    env_prim.material_name.as_deref(),
                 );
                 let pbr_uniform_buffer =
                     ctx.device
@@ -1184,6 +1224,7 @@ fn load_staircase_room_gpu(
                     prim,
                     scene_keys::STAIRWAY,
                     env_prim.gltf_node_name.as_deref(),
+                    env_prim.material_name.as_deref(),
                 );
                 let pbr_uniform_buffer =
                     ctx.device
@@ -1399,6 +1440,7 @@ fn load_shadow_test_room_gpu(
                     prim,
                     scene_keys::SHADOW_AO_LAB,
                     env_prim.gltf_node_name.as_deref(),
+                    env_prim.material_name.as_deref(),
                 );
                 let pbr_uniform_buffer =
                     ctx.device
@@ -1703,6 +1745,7 @@ fn load_archive_room_gpu(
                     prim,
                     scene_keys::ARCHIVE,
                     env_prim.gltf_node_name.as_deref(),
+                    env_prim.material_name.as_deref(),
                 );
                 let pbr_uniform_buffer =
                     ctx.device
@@ -2001,8 +2044,12 @@ fn upload_incremental_room_env_prim_gpu(
         mips,
         ctx.tile_glb_default_emissive_view,
     );
-    let pbr_uniform =
-        room_env_pbr_uniform(prim, kind.scene_key(), env_prim.gltf_node_name.as_deref());
+    let pbr_uniform = room_env_pbr_uniform(
+        prim,
+        kind.scene_key(),
+        env_prim.gltf_node_name.as_deref(),
+        env_prim.material_name.as_deref(),
+    );
     let pbr_uniform_buffer = ctx
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2244,6 +2291,7 @@ fn upload_gameplay_env_prim_gpu(
         prim,
         scene_keys::GAMEPLAY,
         env_prim.gltf_node_name.as_deref(),
+        env_prim.material_name.as_deref(),
     );
     if env_prim.gltf_node_name.as_deref() == Some(crate::gameplay_glb::BTN_CASH_IN) {
         pbr_uniform.add_flags(GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME);
@@ -4106,6 +4154,30 @@ mod tests {
         );
         assert_eq!(
             room_env_shader_flags(scene_keys::HALLWAY, Some("ceiling")),
+            0
+        );
+    }
+
+    #[test]
+    fn room_env_baked_contact_ao_flags_hallway_broad_surfaces_skip() {
+        assert_eq!(
+            room_env_baked_contact_ao_flags(
+                scene_keys::HALLWAY,
+                Some(crate::hallway_glb::HALLWAY_WALLS_NODE),
+                Some("wall"),
+            ),
+            GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO
+        );
+        assert_eq!(
+            room_env_baked_contact_ao_flags(scene_keys::HALLWAY, Some("ceiling"), Some("ceiling")),
+            GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO
+        );
+        assert_eq!(
+            room_env_baked_contact_ao_flags(
+                scene_keys::HALLWAY,
+                Some("floor"),
+                Some("Sauna Room planks"),
+            ),
             0
         );
     }
