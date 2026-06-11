@@ -99,8 +99,7 @@ impl RunState {
                 self.sync_round_resource_caps();
             }
             MemorialTalismanKind::Discarded => {
-                let extra =
-                    crate::core::memorial_talisman::discarded_extra_discards(snapshot);
+                let extra = crate::core::memorial_talisman::discarded_extra_discards(snapshot);
                 self.discards_remaining = self.discards_remaining.saturating_add(extra);
                 self.sync_round_resource_caps();
             }

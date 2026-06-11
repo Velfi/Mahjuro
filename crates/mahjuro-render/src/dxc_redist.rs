@@ -27,7 +27,8 @@ pub(crate) fn resolve_dxcompiler_dll() -> Option<PathBuf> {
         }
     }
 
-    let kits = PathBuf::from(r"C:\Program Files (x86)\Windows Kits\10\Redist\D3D\x64\dxcompiler.dll");
+    let kits =
+        PathBuf::from(r"C:\Program Files (x86)\Windows Kits\10\Redist\D3D\x64\dxcompiler.dll");
     if kits.is_file() {
         return Some(kits);
     }

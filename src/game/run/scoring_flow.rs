@@ -62,11 +62,7 @@ impl RunState {
         self.tiles_played = self.tiles_played.saturating_add(scoring_tiles.len() as u32);
 
         let current_tile_count = self.structure_tiles.len();
-        let kongs_after = kong_structure_bonus(
-            self.structure_sets
-                .iter()
-                .chain(sets.iter()),
-        );
+        let kongs_after = kong_structure_bonus(self.structure_sets.iter().chain(sets.iter()));
         if current_tile_count + scoring_tiles.len() > HAND_SIZE + kongs_after {
             bus.push(GameEvent::InvalidAction);
             return 0;
@@ -982,14 +978,12 @@ impl RunState {
             return (sets, structure_tiles.clone(), structure_tiles);
         }
 
-        let Some((selected_sets, scoring_tiles)) =
-            self.try_validate_with_wildcards(selected_tiles)
+        let Some((selected_sets, scoring_tiles)) = self.try_validate_with_wildcards(selected_tiles)
         else {
             return (sets, structure_tiles.clone(), structure_tiles);
         };
 
-        let best_sets =
-            self.pick_best_decomposition(selected_sets, &scoring_tiles, selected_tiles);
+        let best_sets = self.pick_best_decomposition(selected_sets, &scoring_tiles, selected_tiles);
 
         let mut original = structure_tiles.clone();
         original.extend(selected_tiles.iter().copied());
@@ -1033,11 +1027,8 @@ impl RunState {
                 continue;
             };
 
-            let kongs_after = kong_structure_bonus(
-                self.structure_sets
-                    .iter()
-                    .chain(new_sets.iter()),
-            );
+            let kongs_after =
+                kong_structure_bonus(self.structure_sets.iter().chain(new_sets.iter()));
             if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
                 continue;
             }

@@ -1,12 +1,12 @@
 //! Left summary plaque — compact ledger blocks with clipped overflow.
 
 use crate::core::tile::Suit;
-use crate::game::wall_stats::{face_short_name, WallCountView, WallStats};
+use crate::game::wall_stats::{WallCountView, WallStats, face_short_name};
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::TextAlign;
 
 use super::super::focus::LedgerNav;
-use super::super::layout::{text_line_h, WallLayout};
+use super::super::layout::{WallLayout, text_line_h};
 use super::text::{push_plaque, push_text, push_text_maybe_clip};
 
 const VALUE_W: f32 = 38.0;
@@ -49,7 +49,12 @@ pub fn draw_wall_summary_panel(
     let title_line = text_line_h(layout.caption_px * 1.02);
     push_text(
         texts,
-        [layout.summary_x + pad, y, layout.summary_w - pad * 2.0, title_line],
+        [
+            layout.summary_x + pad,
+            y,
+            layout.summary_w - pad * 2.0,
+            title_line,
+        ],
         "WALL SUMMARY",
         layout.caption_px * 1.02,
         color::alpha(color::BRASS, 0.82),
@@ -58,7 +63,16 @@ pub fn draw_wall_summary_panel(
     );
     y += title_line + 8.0;
 
-    draw_wall_tab_summary(frame, texts, layout, stats, view, focus, summary_clip, &mut y);
+    draw_wall_tab_summary(
+        frame,
+        texts,
+        layout,
+        stats,
+        view,
+        focus,
+        summary_clip,
+        &mut y,
+    );
 }
 
 fn push_divider(frame: &mut crate::render::draw_cmd::UiFrame, x: f32, y: f32, w: f32) {
@@ -110,7 +124,12 @@ fn push_stat_row(
     let value_x = layout.summary_value_x() - VALUE_W;
     push_text_maybe_clip(
         texts,
-        [layout.summary_x + pad, *y, value_x - layout.summary_x - pad - 4.0, line],
+        [
+            layout.summary_x + pad,
+            *y,
+            value_x - layout.summary_x - pad - 4.0,
+            line,
+        ],
         label,
         layout.caption_px,
         color::STONE,
@@ -157,7 +176,12 @@ fn push_best_draw_row(
     };
     push_text_maybe_clip(
         texts,
-        [layout.summary_x + pad, *y, layout.summary_w - pad * 2.0, line],
+        [
+            layout.summary_x + pad,
+            *y,
+            layout.summary_w - pad * 2.0,
+            line,
+        ],
         name,
         layout.caption_px,
         tint,
@@ -167,7 +191,12 @@ fn push_best_draw_row(
     );
     push_text_maybe_clip(
         texts,
-        [layout.summary_x + pad + 6.0, *y + line, layout.summary_w - pad * 2.0 - 6.0, line],
+        [
+            layout.summary_x + pad + 6.0,
+            *y + line,
+            layout.summary_w - pad * 2.0 - 6.0,
+            line,
+        ],
         reason,
         layout.caption_px * 0.88,
         color::alpha(color::UMBER, if focused { 0.78 } else { 0.62 }),
@@ -329,4 +358,3 @@ fn draw_suit_balance_bars(
         *y += line + 2.0;
     }
 }
-

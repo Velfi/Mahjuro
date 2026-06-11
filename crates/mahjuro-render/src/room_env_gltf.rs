@@ -379,7 +379,9 @@ impl RoomGltfEmbeddedCamera {
             eye: ((self.eye - center_doc) * s).to_array(),
             target: ((self.target - center_doc) * s).to_array(),
             up: up.to_array(),
-            projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: self.fovy_deg },
+            projection: crate::draw_cmd::CameraProjection::Perspective {
+                fovy_deg: self.fovy_deg,
+            },
             clip_near: None,
             clip_far: None,
         }

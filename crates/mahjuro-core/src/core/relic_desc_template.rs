@@ -8,11 +8,10 @@
 use std::collections::BTreeMap;
 
 use crate::core::relic::{
-    RelicId, RelicState, CHRYSALIS_HATCH_EXCESS_THRESHOLD, KINDLING_MULT_CAP,
-    MELTING_ICE_START_CHIPS, SNOWBALL_STACK_CAP, TAOTIE_CHIPS_PER_DEVOURED,
-    golden_engine_mult_bonus, kindling_mult_bonus, monarch_butterfly_bonus_chips,
-    monarch_butterfly_tier, monarch_next_tier_excess_floor, relic_sell_price_live,
-    snowball_score_chips,
+    CHRYSALIS_HATCH_EXCESS_THRESHOLD, KINDLING_MULT_CAP, MELTING_ICE_START_CHIPS, RelicId,
+    RelicState, SNOWBALL_STACK_CAP, TAOTIE_CHIPS_PER_DEVOURED, golden_engine_mult_bonus,
+    kindling_mult_bonus, monarch_butterfly_bonus_chips, monarch_butterfly_tier,
+    monarch_next_tier_excess_floor, relic_sell_price_live, snowball_score_chips,
 };
 
 // --- Fortune's Favor tuning (keep in sync with `round_flow` / `scoring_flow`) ---
@@ -50,8 +49,7 @@ pub struct RelicDescContext<'a> {
 
 impl RelicDescContext<'_> {
     fn has_fortunes_favor(&self) -> bool {
-        self.relics
-            .is_some_and(|r| r.has(RelicId::FortunesFavor))
+        self.relics.is_some_and(|r| r.has(RelicId::FortunesFavor))
     }
 
     fn counter(&self, id: RelicId, design_default: i32) -> i32 {
@@ -207,13 +205,11 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
         (RelicId::NestEgg, "nest_egg_rounds") => {
             Some(ctx.counter(RelicId::NestEgg, 0).max(0).to_string())
         }
-        (RelicId::NestEgg, "nest_egg_sell") => Some(
-            if ctx.live {
-                relic_sell_price_live(RelicId::NestEgg, ctx.counters).to_string()
-            } else {
-                "4".to_string()
-            },
-        ),
+        (RelicId::NestEgg, "nest_egg_sell") => Some(if ctx.live {
+            relic_sell_price_live(RelicId::NestEgg, ctx.counters).to_string()
+        } else {
+            "4".to_string()
+        }),
         (RelicId::Kindling, "kindling_cashins") => {
             Some(ctx.counter(RelicId::Kindling, 0).max(0).to_string())
         }
@@ -227,9 +223,9 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
             Some(raw.clamp(0, SNOWBALL_STACK_CAP).to_string())
         }
         (RelicId::Snowball, "snowball_cap") => Some(SNOWBALL_STACK_CAP.to_string()),
-        (RelicId::Snowball, "snowball_chips") => Some(
-            snowball_score_chips(ctx.counter(RelicId::Snowball, 0)).to_string(),
-        ),
+        (RelicId::Snowball, "snowball_chips") => {
+            Some(snowball_score_chips(ctx.counter(RelicId::Snowball, 0)).to_string())
+        }
         (RelicId::Kintsugi, "kintsugi_mult") => {
             Some(ctx.counter(RelicId::Kintsugi, 0).max(0).to_string())
         }
@@ -299,7 +295,13 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
         (RelicId::GhostHand, "ghost_hand_chips") => ctx
             .ghost_hand_chips_preview
             .map(|n| n.to_string())
-            .or_else(|| if ctx.live { None } else { Some("0".to_string()) }),
+            .or_else(|| {
+                if ctx.live {
+                    None
+                } else {
+                    Some("0".to_string())
+                }
+            }),
         (RelicId::LotusBloom, "lotus_blooms") => {
             Some(ctx.counter(RelicId::LotusBloom, 0).max(0).to_string())
         }

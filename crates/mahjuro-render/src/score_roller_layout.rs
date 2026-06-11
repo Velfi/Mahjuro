@@ -270,7 +270,10 @@ mod tests {
         let mut cpu = validate_gameplay_glb(load_gameplay_glb_from_bytes(bytes).unwrap()).unwrap();
         let before = collect_score_roller_pivots_doc(&cpu);
         let before_count = before.iter().filter(|p| **p != [0.0, 0.0, 0.0]).count();
-        assert!(before_count >= 10, "expected pivots before release, found {before_count}");
+        assert!(
+            before_count >= 10,
+            "expected pivots before release, found {before_count}"
+        );
         release_room_environment_primitives_cpu(&mut cpu);
         assert!(cpu.environment_primitives.is_empty());
         let after = collect_score_roller_pivots_doc(&cpu);
@@ -284,16 +287,28 @@ mod tests {
     #[test]
     fn roller_bank_focus_rect_at_common_resolutions() {
         use crate::gameplay_glb::{
-            gameplay_camera_from_cpu, load_gameplay_glb_from_bytes, validate_gameplay_glb, SCORE_FRAME,
-            gameplay_marker_screen_rect_resolved,
+            SCORE_FRAME, gameplay_camera_from_cpu, gameplay_marker_screen_rect_resolved,
+            load_gameplay_glb_from_bytes, validate_gameplay_glb,
         };
         let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
         let cpu = validate_gameplay_glb(load_gameplay_glb_from_bytes(bytes).unwrap()).unwrap();
         let env_h = 1.0f32;
-        for (w, h) in [(1920.0, 1080.0), (2560.0, 1440.0), (1280.0, 720.0), (1440.0, 900.0)] {
+        for (w, h) in [
+            (1920.0, 1080.0),
+            (2560.0, 1440.0),
+            (1280.0, 720.0),
+            (1440.0, 900.0),
+        ] {
             let cam = gameplay_camera_from_cpu(&cpu, h, env_h).expect("camera");
             let frame = gameplay_marker_screen_rect_resolved(
-                w, h, &cam, env_h, &cpu, SCORE_FRAME, 32.0, 16.0,
+                w,
+                h,
+                &cam,
+                env_h,
+                &cpu,
+                SCORE_FRAME,
+                32.0,
+                16.0,
             )
             .expect("frame");
             let pivots = collect_score_roller_pivots_doc(&cpu);
@@ -321,8 +336,8 @@ mod tests {
     #[test]
     fn roller_bank_focus_rect_matches_frame_height() {
         use crate::gameplay_glb::{
-            gameplay_camera_from_cpu, load_gameplay_glb_from_bytes, validate_gameplay_glb, SCORE_FRAME,
-            gameplay_marker_screen_rect_resolved,
+            SCORE_FRAME, gameplay_camera_from_cpu, gameplay_marker_screen_rect_resolved,
+            load_gameplay_glb_from_bytes, validate_gameplay_glb,
         };
         let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
         let cpu = validate_gameplay_glb(load_gameplay_glb_from_bytes(bytes).unwrap()).unwrap();
@@ -330,13 +345,12 @@ mod tests {
         let h = 1080.0f32;
         let env_h = 1.0f32;
         let cam = gameplay_camera_from_cpu(&cpu, h, env_h).expect("camera");
-        let frame = gameplay_marker_screen_rect_resolved(
-            w, h, &cam, env_h, &cpu, SCORE_FRAME, 32.0, 16.0,
-        )
-        .expect("frame");
+        let frame =
+            gameplay_marker_screen_rect_resolved(w, h, &cam, env_h, &cpu, SCORE_FRAME, 32.0, 16.0)
+                .expect("frame");
         let pivots = collect_score_roller_pivots_doc(&cpu);
-        let score = score_roller_bank_screen_rect(w, h, &cam, env_h, &cpu, &pivots, 0)
-            .expect("score bank");
+        let score =
+            score_roller_bank_screen_rect(w, h, &cam, env_h, &cpu, &pivots, 0).expect("score bank");
         let target = score_roller_bank_screen_rect(w, h, &cam, env_h, &cpu, &pivots, 1);
         let found = pivots.iter().filter(|p| **p != [0.0, 0.0, 0.0]).count();
         eprintln!(
@@ -345,7 +359,10 @@ mod tests {
             score[3],
             target.map(|t| format!("h={:.1}", t[3]))
         );
-        assert!(target.is_some(), "target bank rect should resolve from pivots");
+        assert!(
+            target.is_some(),
+            "target bank rect should resolve from pivots"
+        );
         assert!(
             score[3] <= frame[3] * 1.15,
             "score bank focus rect too tall: h={} frame_h={}",

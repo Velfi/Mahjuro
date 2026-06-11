@@ -374,11 +374,7 @@ fn structure_commit_fits(
     new_sets: &[crate::core::hand::DetectedMeld],
 ) -> bool {
     use crate::core::hand::kong_structure_bonus;
-    let kongs_after = kong_structure_bonus(
-        run.structure_sets()
-            .iter()
-            .chain(new_sets.iter()),
-    );
+    let kongs_after = kong_structure_bonus(run.structure_sets().iter().chain(new_sets.iter()));
     run.structure_tiles().len() + scoring_tile_count <= HAND_SIZE + kongs_after
 }
 
@@ -1340,9 +1336,7 @@ mod tests {
                 continue;
             };
             let kongs_after = crate::core::hand::kong_structure_bonus(
-                run.structure_sets()
-                    .iter()
-                    .chain(sets.iter()),
+                run.structure_sets().iter().chain(sets.iter()),
             );
             if run.structure_tiles().len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
                 continue;
@@ -1565,9 +1559,13 @@ mod tests {
             t(Suit::Wind, 2, 14),
         ];
         run.hand_mut().sort();
-        let lift = super::transform_talisman_lift_on_hand(&run, run.hand(), TalismanKind::Wildflower)
-            .expect("wildflower should apply to a non-flower hand");
-        assert!(lift > 0, "wildflower should improve a scattered hand (lift={lift})");
+        let lift =
+            super::transform_talisman_lift_on_hand(&run, run.hand(), TalismanKind::Wildflower)
+                .expect("wildflower should apply to a non-flower hand");
+        assert!(
+            lift > 0,
+            "wildflower should improve a scattered hand (lift={lift})"
+        );
         let base = ShopMarginalBase::with_synthetic_samples(&run, 0, false);
         assert!(
             super::talisman_marginal_value_with_base(&run, TalismanKind::Wildflower, &base) > 0,

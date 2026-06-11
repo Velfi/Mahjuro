@@ -6,13 +6,13 @@ use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::scenes::{BackgroundId, DrawCtx};
-use crate::ui::controller_hints::{push_screen_footer_hint, wall_ledger_footer_row, HintStyle};
+use crate::ui::controller_hints::{HintStyle, push_screen_footer_hint, wall_ledger_footer_row};
 
-use super::super::data::{build_frame_context, groups_by_face};
-use super::super::focus::{push_back_button, LedgerNav};
-use super::super::layout::{read_boost, wall_layout, WallLayout};
-use super::super::state::WallScreenState;
 use super::super::StrategicWallScene;
+use super::super::data::{build_frame_context, groups_by_face};
+use super::super::focus::{LedgerNav, push_back_button};
+use super::super::layout::{WallLayout, read_boost, wall_layout};
+use super::super::state::WallScreenState;
 use super::detail::draw_wall_detail_panel;
 use super::grid::{draw_grid_panel_chrome, draw_tile_ledger_grid};
 use super::header::draw_wall_header;
@@ -137,15 +137,6 @@ fn draw_main_panel(
     h: f32,
 ) {
     draw_tile_ledger_grid(
-        frame,
-        texts,
-        placements,
-        layout,
-        screen,
-        stats,
-        groups,
-        run,
-        focus,
-        h,
+        frame, texts, placements, layout, screen, stats, groups, run, focus, h,
     );
 }

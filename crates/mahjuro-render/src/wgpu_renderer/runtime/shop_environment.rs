@@ -1261,9 +1261,9 @@ impl WgpuRenderer {
 #[cfg(test)]
 mod gameplay_score_roller_tests {
     use super::{
+        GAMEPLAY_SCORE_ROLLER_LOOP_SPIN_IN_SEMITONES, GAMEPLAY_SCORE_ROLLER_RAMP_INTERVAL_SECS,
         gameplay_score_roller_loop_speed_multiplier, gameplay_score_roller_speed_multiplier,
-        gameplay_score_roller_visual_phase, GAMEPLAY_SCORE_ROLLER_LOOP_SPIN_IN_SEMITONES,
-        GAMEPLAY_SCORE_ROLLER_RAMP_INTERVAL_SECS,
+        gameplay_score_roller_visual_phase,
     };
 
     #[test]

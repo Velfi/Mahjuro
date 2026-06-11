@@ -306,9 +306,12 @@ impl MemorialTalismanKind {
     /// auto-use order when the round would otherwise end.
     pub fn salvage_candidates(reason: GameOverReason) -> &'static [MemorialTalismanKind] {
         match reason {
-            GameOverReason::OutOfPlays => {
-                &[Self::DeadOnArrival, Self::Exhausted, Self::BossMark, Self::TagBearer]
-            }
+            GameOverReason::OutOfPlays => &[
+                Self::DeadOnArrival,
+                Self::Exhausted,
+                Self::BossMark,
+                Self::TagBearer,
+            ],
             GameOverReason::NoActionsRemaining => &[
                 Self::DeadOnArrival,
                 Self::FrozenHand,

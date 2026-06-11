@@ -176,7 +176,10 @@ fn vram_fraction_thresholds_mib(
     };
     let constrained = budget.saturating_mul(constrained_pct) / 100;
     let critical = budget.saturating_mul(critical_pct) / 100;
-    ordered_allocator_thresholds_mib(constrained.max(256), critical.max(constrained.saturating_add(256)))
+    ordered_allocator_thresholds_mib(
+        constrained.max(256),
+        critical.max(constrained.saturating_add(256)),
+    )
 }
 
 fn allocator_pressure_thresholds_mib(
@@ -271,7 +274,11 @@ pub fn log_pressure_transition(snapshot: &PressureSnapshot) {
     if !crate::gpu_memory_profile::enabled() {
         return;
     }
-    match (snapshot.allocated_bytes, snapshot.reserved_bytes, snapshot.os_usage_bytes) {
+    match (
+        snapshot.allocated_bytes,
+        snapshot.reserved_bytes,
+        snapshot.os_usage_bytes,
+    ) {
         (Some(alloc), Some(res), Some(os)) => log::info!(
             "gpu mem profile: pressure={} residents={}/{} allocated={} MiB reserved={} MiB os_usage={} MiB os_budget={} MiB effective_usage={} MiB",
             snapshot.pressure.label(),
@@ -281,9 +288,7 @@ pub fn log_pressure_transition(snapshot: &PressureSnapshot) {
             res / (1024 * 1024),
             os / (1024 * 1024),
             snapshot.os_budget_bytes.unwrap_or(0) / (1024 * 1024),
-            effective_pressure_bytes(Some(alloc), Some(res), Some(os))
-                .unwrap_or(0)
-                / (1024 * 1024),
+            effective_pressure_bytes(Some(alloc), Some(res), Some(os)).unwrap_or(0) / (1024 * 1024),
         ),
         (Some(alloc), Some(res), None) => log::info!(
             "gpu mem profile: pressure={} residents={}/{} allocated={} MiB reserved={} MiB usage={} MiB",
@@ -292,9 +297,7 @@ pub fn log_pressure_transition(snapshot: &PressureSnapshot) {
             snapshot.max_room_gpu_residents,
             alloc / (1024 * 1024),
             res / (1024 * 1024),
-            effective_usage_bytes(Some(alloc), Some(res))
-                .unwrap_or(0)
-                / (1024 * 1024),
+            effective_usage_bytes(Some(alloc), Some(res)).unwrap_or(0) / (1024 * 1024),
         ),
         _ => log::info!(
             "gpu mem profile: pressure={} residents={}/{} (allocator report unavailable)",
@@ -382,10 +385,7 @@ mod tests {
 
     #[test]
     fn usage_bytes_prefers_reserved_when_higher() {
-        assert_eq!(
-            effective_usage_bytes(Some(100), Some(250)),
-            Some(250)
-        );
+        assert_eq!(effective_usage_bytes(Some(100), Some(250)), Some(250));
         assert_eq!(effective_usage_bytes(Some(300), Some(250)), Some(300));
     }
 

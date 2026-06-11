@@ -802,7 +802,9 @@ unsafe impl Sync for Device {}
 
 impl Device {
     /// WDDM local video-memory segment usage vs budget (includes untracked swapchain / driver bytes).
-    pub fn memory_usage(&self) -> Result<crate::adapter_memory::AdapterMemoryUsage, crate::DeviceError> {
+    pub fn memory_usage(
+        &self,
+    ) -> Result<crate::adapter_memory::AdapterMemoryUsage, crate::DeviceError> {
         let info = self
             .shared
             .adapter

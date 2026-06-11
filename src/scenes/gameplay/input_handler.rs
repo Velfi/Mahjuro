@@ -1718,8 +1718,7 @@ pub(super) fn build_yaku_panel_and_tablets(
                 showcase.tiles.clone(),
             )
         } else {
-            let (sets, scoring, original) =
-                run.melds_for_yaku_preview(&selected_tiles_for_yaku);
+            let (sets, scoring, original) = run.melds_for_yaku_preview(&selected_tiles_for_yaku);
             (
                 sets,
                 GameplayScene::display_tiles(scoring.iter().copied(), run),
@@ -1876,15 +1875,15 @@ pub(super) fn build_yaku_panel_and_tablets(
     let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
     let panel_h = ((a_r[1] - a_l[1]).abs()).max((24.0 * layout_scale).max(18.0));
     let mut yaku_tablet_placements: Vec<Object3d> = Vec::new();
-    let cascade_tablet_yaku: Option<Vec<crate::core::yaku::YakuKind>> =
-        cascade_scored_yaku.filter(|yaku| !yaku.is_empty()).map(|yaku| {
+    let cascade_tablet_yaku: Option<Vec<crate::core::yaku::YakuKind>> = cascade_scored_yaku
+        .filter(|yaku| !yaku.is_empty())
+        .map(|yaku| {
             let mut kinds: Vec<_> = yaku.to_vec();
             kinds.sort();
             kinds
         });
-    let show_tablets = cascade_tablet_yaku.is_some()
-        || !visible_previews.is_empty()
-        || is_chicken_hand;
+    let show_tablets =
+        cascade_tablet_yaku.is_some() || !visible_previews.is_empty() || is_chicken_hand;
     if show_tablets {
         let tablet_count = if let Some(ref scored) = cascade_tablet_yaku {
             scored.len()

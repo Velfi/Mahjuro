@@ -18,7 +18,6 @@ use crate::game::event_bus::GameEvent;
 use crate::render::archive_glb;
 use crate::render::doc_tile_camera::wall_ledger_camera;
 use crate::render::draw_cmd::ShowcaseTilePlacement;
-use crate::render::wgpu_renderer::PointLight;
 use crate::render::draw_cmd::{
     CameraParams, Object3d, Object3dKind, UiFrame, camera_facing_euler_xyz_rad,
 };
@@ -29,6 +28,7 @@ use crate::render::table_transform::{
     euler_xyz_rad_from_deg, mat4_to_euler_xyz_rad, rot_fixed_axes_deg,
 };
 use crate::render::theme::{color, metrics, typography};
+use crate::render::wgpu_renderer::PointLight;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_ray_plane_z};
 use crate::sfx_id::SfxId;

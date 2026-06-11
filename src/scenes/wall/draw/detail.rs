@@ -4,14 +4,14 @@ use crate::core::tile::Tile;
 use crate::game::engine::GameEngine;
 use crate::game::run::RunState;
 use crate::game::wall_stats::{
-    abundance_color, abundance_state, AbundanceState, ModifierBreakdown, SelectedTileDetails,
+    AbundanceState, ModifierBreakdown, SelectedTileDetails, abundance_color, abundance_state,
 };
 use crate::render::doc_tile_camera::TOP_DOWN_TILE_ROTATION;
 use crate::render::draw_cmd::{ShowcaseTilePlacement, UiFrame};
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign};
 
-use super::super::layout::{text_line_h, LEDGER_FOCUS_GLOW, LEDGER_FOCUS_OUTLINE, WallLayout};
+use super::super::layout::{LEDGER_FOCUS_GLOW, LEDGER_FOCUS_OUTLINE, WallLayout, text_line_h};
 use super::text::{push_plaque, push_text};
 
 pub fn draw_wall_detail_panel(
@@ -23,7 +23,12 @@ pub fn draw_wall_detail_panel(
     run: &RunState,
     representative: Option<&Tile>,
 ) {
-    let rect = [layout.summary_x, layout.detail_y, layout.summary_w, layout.detail_h];
+    let rect = [
+        layout.summary_x,
+        layout.detail_y,
+        layout.summary_w,
+        layout.detail_h,
+    ];
     frame.quad(GpuInstance {
         rect: [rect[0], rect[1], rect[2], 3.0],
         color: color::alpha(color::BRASS, 0.44),
@@ -35,7 +40,12 @@ pub fn draw_wall_detail_panel(
     let header_line = text_line_h(layout.caption_px * 0.92);
     push_text(
         texts,
-        [rect[0] + pad, rect[1] + 8.0, rect[2] - pad * 2.0, header_line],
+        [
+            rect[0] + pad,
+            rect[1] + 8.0,
+            rect[2] - pad * 2.0,
+            header_line,
+        ],
         "SELECTED TILE",
         layout.caption_px * 0.92,
         color::alpha(color::BRASS, 0.78),
@@ -100,7 +110,11 @@ pub fn draw_wall_detail_panel(
         });
     }
     push_border(frame, preview_rect, 1.5, LEDGER_FOCUS_OUTLINE);
-    push_focus_corner(frame, preview_rect[0] + preview_rect[2] - 6.0, preview_rect[1] + 4.0);
+    push_focus_corner(
+        frame,
+        preview_rect[0] + preview_rect[2] - 6.0,
+        preview_rect[1] + 4.0,
+    );
 
     let text_x = preview_rect[0] + preview_rect[2] + 10.0;
     let text_w = (rect[0] + rect[2] - pad - text_x).max(32.0);

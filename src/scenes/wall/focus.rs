@@ -12,8 +12,8 @@ use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, ButtonSpec};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::layout::{grid_cell_rect, text_line_h, view_toggle_rect, WallLayout};
 use super::StrategicWallScene;
+use super::layout::{WallLayout, grid_cell_rect, text_line_h, view_toggle_rect};
 
 const NAV_BASE: u32 = 0xE200;
 

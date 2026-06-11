@@ -5,10 +5,10 @@ use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::game::run::RunState;
 use crate::game::wall_ledger::{WallLedgerFaceGroup, WallLedgerReadModel};
 
-    /// Which supply column the grid emphasizes.
-    ///
-    /// **Seen** and **Discarded** both use copies drawn from the wall today; there is no
-    /// per-face discard river in `RunState` yet, so those modes share the same counts.
+/// Which supply column the grid emphasizes.
+///
+/// **Seen** and **Discarded** both use copies drawn from the wall today; there is no
+/// per-face discard river in `RunState` yet, so those modes share the same counts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum WallCountView {
     #[default]
@@ -19,12 +19,7 @@ pub enum WallCountView {
 }
 
 impl WallCountView {
-    pub const ALL: [Self; 4] = [
-        Self::Remaining,
-        Self::FullWall,
-        Self::Seen,
-        Self::Discarded,
-    ];
+    pub const ALL: [Self; 4] = [Self::Remaining, Self::FullWall, Self::Seen, Self::Discarded];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -259,7 +254,10 @@ fn merge_modifiers(acc: &mut ModifierBreakdown, add: ModifierBreakdown) {
     acc.plain += add.plain;
 }
 
-fn face_counts(group: Option<&WallLedgerFaceGroup>, debuffs: &[TileDebuff]) -> (usize, usize, usize, ModifierBreakdown) {
+fn face_counts(
+    group: Option<&WallLedgerFaceGroup>,
+    debuffs: &[TileDebuff],
+) -> (usize, usize, usize, ModifierBreakdown) {
     let Some(group) = group else {
         return (0, 0, 0, ModifierBreakdown::default());
     };
@@ -314,7 +312,11 @@ pub fn abundance_state(suit: Suit, remaining: usize) -> AbundanceState {
     }
 }
 
-pub fn abundance_state_for_display(suit: Suit, display_count: usize, view: WallCountView) -> AbundanceState {
+pub fn abundance_state_for_display(
+    suit: Suit,
+    display_count: usize,
+    view: WallCountView,
+) -> AbundanceState {
     if view == WallCountView::Remaining || view == WallCountView::FullWall {
         abundance_state(suit, display_count)
     } else {
@@ -387,7 +389,9 @@ fn tile_about(suit: Suit, rank: u8, remaining: usize, _total: usize) -> String {
             if remaining == 0 {
                 format!("{rank} {suit} is exhausted from the wall.")
             } else if remaining >= 6 {
-                format!("Strong supply in {suit}. High availability — good for sequences and pairs.")
+                format!(
+                    "Strong supply in {suit}. High availability — good for sequences and pairs."
+                )
             } else if (2..=8).contains(&rank) {
                 format!("Middle tile in {suit}. Forms many sequences when neighbors remain.")
             } else {
@@ -423,12 +427,17 @@ fn compute_yaku_hints(entries: &[TileLedgerEntry], summary: &SuitSummary) -> Vec
 
     let middle: usize = entries
         .iter()
-        .filter(|e| matches!(e.suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu) && (2..=8).contains(&e.rank))
+        .filter(|e| {
+            matches!(e.suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu) && (2..=8).contains(&e.rank)
+        })
         .map(|e| e.remaining)
         .sum();
     let terminals: usize = entries
         .iter()
-        .filter(|e| matches!(e.suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu) && (e.rank == 1 || e.rank == 9))
+        .filter(|e| {
+            matches!(e.suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu)
+                && (e.rank == 1 || e.rank == 9)
+        })
         .map(|e| e.remaining)
         .sum();
     if middle > terminals.saturating_add(8) {
@@ -560,13 +569,29 @@ pub fn compute_wall_stats(
     let mut ranked: Vec<(FaceKey, usize)> = entries
         .iter()
         .filter(|e| e.remaining > standard_face_cap(e.suit))
-        .map(|e| (FaceKey { suit: e.suit, rank: e.rank }, e.remaining))
+        .map(|e| {
+            (
+                FaceKey {
+                    suit: e.suit,
+                    rank: e.rank,
+                },
+                e.remaining,
+            )
+        })
         .collect();
     if ranked.is_empty() {
         ranked = entries
             .iter()
             .filter(|e| e.remaining > 0)
-            .map(|e| (FaceKey { suit: e.suit, rank: e.rank }, e.remaining))
+            .map(|e| {
+                (
+                    FaceKey {
+                        suit: e.suit,
+                        rank: e.rank,
+                    },
+                    e.remaining,
+                )
+            })
             .collect();
         ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.suit.cmp(&b.0.suit)));
         let top = ranked.first().map(|(_, c)| *c).unwrap_or(0);
@@ -581,14 +606,30 @@ pub fn compute_wall_stats(
     let mut thin_exhausted: Vec<(FaceKey, usize)> = entries
         .iter()
         .filter(|e| is_strategically_thin(e.suit, e.remaining))
-        .map(|e| (FaceKey { suit: e.suit, rank: e.rank }, e.remaining))
+        .map(|e| {
+            (
+                FaceKey {
+                    suit: e.suit,
+                    rank: e.rank,
+                },
+                e.remaining,
+            )
+        })
         .collect();
     thin_exhausted.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.suit.cmp(&b.0.suit)));
 
     let abundant: Vec<_> = entries
         .iter()
         .filter(|e| e.remaining >= 6)
-        .map(|e| (FaceKey { suit: e.suit, rank: e.rank }, e.remaining))
+        .map(|e| {
+            (
+                FaceKey {
+                    suit: e.suit,
+                    rank: e.rank,
+                },
+                e.remaining,
+            )
+        })
         .collect();
 
     let mut best_scored: Vec<(FaceKey, usize, String)> = Vec::new();
@@ -613,7 +654,14 @@ pub fn compute_wall_stats(
             continue;
         };
         let score = patterns * 100 + e.remaining;
-        best_scored.push((FaceKey { suit: e.suit, rank: e.rank }, score, reason));
+        best_scored.push((
+            FaceKey {
+                suit: e.suit,
+                rank: e.rank,
+            },
+            score,
+            reason,
+        ));
     }
     best_scored.sort_by(|a, b| b.1.cmp(&a.1));
     let best_draws: Vec<_> = best_scored
@@ -644,7 +692,10 @@ pub fn selected_tile_details(
     debuffs: &[TileDebuff],
     group: Option<&WallLedgerFaceGroup>,
 ) -> Option<SelectedTileDetails> {
-    let entry = stats.entries.iter().find(|e| e.suit == face.suit && e.rank == face.rank)?;
+    let entry = stats
+        .entries
+        .iter()
+        .find(|e| e.suit == face.suit && e.rank == face.rank)?;
     let (_, _, _, mods) = face_counts(group, debuffs);
     let remaining_of = |s: Suit, r: u8| -> usize {
         stats
@@ -739,10 +790,12 @@ mod tests {
         let run = RunState::new_with_material(crate::persistence::TileMaterial::Bamboo);
         let ledger = read_wall_ledger(&run, WallLedgerMode::ShopPreview);
         let stats = compute_wall_stats_for_run(&ledger, &run, WallCountView::Remaining);
-        assert!(!stats
-            .thin_exhausted
-            .iter()
-            .any(|(f, _)| f.suit == Suit::Flower));
+        assert!(
+            !stats
+                .thin_exhausted
+                .iter()
+                .any(|(f, _)| f.suit == Suit::Flower)
+        );
     }
 
     #[test]

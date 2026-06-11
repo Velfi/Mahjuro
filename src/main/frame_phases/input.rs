@@ -1,8 +1,8 @@
 use super::locals::FrameLocals;
-use crate::ui::input::UiAction;
 use crate::App;
-use crate::sdl_shell::SdlShell;
 use crate::Scene;
+use crate::sdl_shell::SdlShell;
+use crate::ui::input::UiAction;
 
 pub fn run(app: &mut App, shell: &mut SdlShell, locals: &mut FrameLocals) {
     locals.button_clicks.append(&mut app.mouse_button_clicks);

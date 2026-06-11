@@ -198,8 +198,7 @@ pub(super) fn init_shaders_and_pipelines(
         strip_lit_mesh_table_ssr,
     } = params;
 
-    let lit_mesh_compilation =
-        lit_mesh_pipeline_compilation_options(strip_lit_mesh_table_ssr);
+    let lit_mesh_compilation = lit_mesh_pipeline_compilation_options(strip_lit_mesh_table_ssr);
     if strip_lit_mesh_table_ssr {
         log::info!("lit_mesh: compile-time table SSR disabled (integrated GPU DX12)");
     }

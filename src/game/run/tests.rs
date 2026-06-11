@@ -1662,9 +1662,7 @@ mod cases {
         use crate::core::hand::validate_selection;
         use crate::core::yaku::{YakuKind, yaku_after_pool_filter};
 
-        let selected: Vec<Tile> = (0..6)
-            .map(|i| Tile::new(Suit::Souzu, 6, i))
-            .collect();
+        let selected: Vec<Tile> = (0..6).map(|i| Tile::new(Suit::Souzu, 6, i)).collect();
         let mut run = test_run();
         run.available_yaku = vec![YakuKind::Toitoi];
         run.hand = selected.clone();
@@ -1673,10 +1671,10 @@ mod cases {
         let (preview_sets, preview_effective, preview_original) =
             run.melds_for_yaku_preview(&selected);
 
-        let (validator_sets, scoring_tiles) =
-            run.try_validate_with_wildcards(&selected).expect("valid six 6s");
-        let best_sets =
-            run.pick_best_decomposition(validator_sets, &scoring_tiles, &selected);
+        let (validator_sets, scoring_tiles) = run
+            .try_validate_with_wildcards(&selected)
+            .expect("valid six 6s");
+        let best_sets = run.pick_best_decomposition(validator_sets, &scoring_tiles, &selected);
         let mut expected_sets = run.structure_sets.clone();
         expected_sets.extend(best_sets.clone());
         assert_eq!(preview_sets, expected_sets);
@@ -1735,7 +1733,7 @@ mod cases {
         use crate::core::tile::{Suit, Tile};
         use crate::core::yaku::{YakuKind, yaku_after_pool_filter, yaku_preview};
 
-        use super::{test_run, DetectedMeld, RunState};
+        use super::{DetectedMeld, RunState, test_run};
 
         const NUMBER_SUITS: [Suit; 3] = [Suit::Manzu, Suit::Souzu, Suit::Pinzu];
         const ALL_SUITS: [Suit; 5] = [
@@ -1829,13 +1827,13 @@ mod cases {
                 1..=4u32,
                 arb_yaku_pool(),
             )
-                .prop_filter("structure or selection must be non-empty", |(s, sel, _, _)| {
-                    !s.is_empty() || !sel.is_empty()
-                })
+                .prop_filter(
+                    "structure or selection must be non-empty",
+                    |(s, sel, _, _)| !s.is_empty() || !sel.is_empty(),
+                )
                 .prop_map(|(structure_melds, selection_melds, wing, pool)| {
                     let structure_tiles = assign_ids(structure_melds, 0);
-                    let selection_tiles =
-                        assign_ids(selection_melds, structure_tiles.len() as u32);
+                    let selection_tiles = assign_ids(selection_melds, structure_tiles.len() as u32);
                     (structure_tiles, selection_tiles, wing, pool)
                 })
                 .boxed()
@@ -1905,14 +1903,8 @@ mod cases {
                 },
                 structure: Some(meta),
             };
-            score_sets_with_original(
-                scoring_tiles,
-                sets,
-                &ctx,
-                &run.round_rules,
-                original_tiles,
-            )
-            .detected_yaku
+            score_sets_with_original(scoring_tiles, sets, &ctx, &run.round_rules, original_tiles)
+                .detected_yaku
         }
 
         fn preview_yaku_matching_score(

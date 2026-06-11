@@ -78,9 +78,7 @@ fn windows_sdk_d3d_redist() -> Option<PathBuf> {
 }
 
 fn maybe_warn_missing_dxc() {
-    let release = env::var("PROFILE")
-        .map(|p| p == "release")
-        .unwrap_or(false);
+    let release = env::var("PROFILE").map(|p| p == "release").unwrap_or(false);
     if release {
         println!(
             "cargo:warning=DXC redist not found (dxcompiler.dll + dxil.dll). \

@@ -1111,7 +1111,9 @@ impl CameraDebugOverlay {
             eye: self.eye,
             target: self.target,
             up: self.up,
-            projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: self.fovy_deg },
+            projection: crate::render::draw_cmd::CameraProjection::Perspective {
+                fovy_deg: self.fovy_deg,
+            },
             clip_near: None,
             clip_far: None,
         }

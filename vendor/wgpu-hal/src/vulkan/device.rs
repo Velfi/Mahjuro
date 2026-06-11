@@ -427,12 +427,10 @@ impl super::Device {
         for i in 0..memory_properties.memory_heap_count {
             let heap = &memory_properties.memory_heaps[i as usize];
             if heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL) {
-                current_bytes = current_bytes.saturating_add(
-                    memory_budget_properties.heap_usage[i as usize],
-                );
-                budget_bytes = budget_bytes.saturating_add(
-                    memory_budget_properties.heap_budget[i as usize],
-                );
+                current_bytes =
+                    current_bytes.saturating_add(memory_budget_properties.heap_usage[i as usize]);
+                budget_bytes =
+                    budget_bytes.saturating_add(memory_budget_properties.heap_budget[i as usize]);
             }
         }
 

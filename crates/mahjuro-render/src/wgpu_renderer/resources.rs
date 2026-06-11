@@ -1035,9 +1035,7 @@ fn create_depth_to_r32_pipeline(
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("depth-to-r32"),
-        source: wgpu::ShaderSource::Wgsl(
-            crate::wgpu_renderer::embedded_wgsl::DEPTH_TO_R32.into(),
-        ),
+        source: wgpu::ShaderSource::Wgsl(crate::wgpu_renderer::embedded_wgsl::DEPTH_TO_R32.into()),
     });
     let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("depth-to-r32-pl"),

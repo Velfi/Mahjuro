@@ -187,7 +187,9 @@ pub fn inspect_orbit_camera(ins: &ItemInspectOrbitState, rig: &InspectRig) -> Ca
         eye: new_eye.to_array(),
         target: ins.target_world,
         up,
-        projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: rig.fovy_deg },
+        projection: crate::render::draw_cmd::CameraProjection::Perspective {
+            fovy_deg: rig.fovy_deg,
+        },
         clip_near: Some(clip_near),
         clip_far: Some(clip_far),
     }
