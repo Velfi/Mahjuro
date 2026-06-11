@@ -173,7 +173,7 @@ pub fn wall_layout(w: f32, h: f32, jr: f32) -> WallLayout {
     let weight_sum: f32 = ROW_HEIGHT_FRAC.iter().sum();
     let unit_h = (grid_content_h - gap_total) / weight_sum;
     let row_cell_h =
-        std::array::from_fn(|i| (unit_h * ROW_HEIGHT_FRAC[i]).clamp(46.0 * jr, 94.0 * jr));
+        std::array::from_fn(|i| (unit_h * ROW_HEIGHT_FRAC[i]).max(46.0 * jr));
     let mut row_y = [0.0_f32; 5];
     row_y[0] = grid_content_y;
     for i in 1..5 {
@@ -306,6 +306,23 @@ mod tests {
         let font_px = row_label_font_px(text_w, layout.row_cell_h[4], 1080.0);
         assert!(row_label_text_width("FLOWERS", font_px) <= text_w + 1.0);
         assert!(row_label_text_width("HONORS", font_px) <= text_w + 1.0);
+    }
+
+    #[test]
+    fn row_heights_fill_grid_content() {
+        for (w, h) in [(1920.0, 1080.0), (2560.0, 1440.0), (3840.0, 2160.0)] {
+            let jr = read_boost(w, h);
+            let layout = wall_layout(w, h, jr);
+            let gap_total = layout.row_gap * (GRID_ROWS.len() - 1) as f32;
+            let rows_total: f32 = layout.row_cell_h.iter().sum();
+            let used = rows_total + gap_total;
+            assert!(
+                (used - layout.grid_content_h).abs() < 1.5,
+                "{w}x{h}: rows used {used:.1} of grid_content_h {:.1} (row_cell_h={:?})",
+                layout.grid_content_h,
+                layout.row_cell_h
+            );
+        }
     }
 
     #[test]

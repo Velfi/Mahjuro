@@ -11,4 +11,4 @@ pub fn run(app: &mut App) {
 }
 
 #[cfg(not(debug_menu_enabled))]
-pub fn run(_app: &mut App) {}
+pub fn run(_app: &mut crate::App) {}
