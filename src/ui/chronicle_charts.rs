@@ -406,14 +406,7 @@ pub fn push_score_history_ledger(
 
     push_chart_plot_baseline(quads, clip, plot_x, plot_y, plot_w, plot_h);
     push_chart_time_axis_labels(
-        labels,
-        clip,
-        plot_x,
-        plot_y,
-        plot_w,
-        plot_h,
-        cap_h,
-        micro_px,
+        labels, clip, plot_x, plot_y, plot_w, plot_h, cap_h, micro_px,
     );
 }
 

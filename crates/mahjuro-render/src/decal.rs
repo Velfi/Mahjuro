@@ -2197,7 +2197,9 @@ fn glyph_run_vertical_extents(glyphs: &[GlyphData]) -> (f32, f32) {
 /// Merged regular + italic line metrics for single-line baseline placement.
 fn raster_span_line_metrics(fonts: &DecalFonts<'_>, font_px: f32) -> Option<fontdue::LineMetrics> {
     let Some(regular) = fonts.regular.horizontal_line_metrics(font_px) else {
-        return fonts.italic.and_then(|f| f.horizontal_line_metrics(font_px));
+        return fonts
+            .italic
+            .and_then(|f| f.horizontal_line_metrics(font_px));
     };
     let mut merged = regular;
     if let Some(italic) = fonts.italic {

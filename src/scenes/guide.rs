@@ -3796,7 +3796,8 @@ fn push_scoring_flow_panel(
     pad: f32,
     glb_cash_in: bool,
 ) {
-    let flow = ScoringFlowDiagramLayout::new(content, body_font, caption_font, micro_font, pad, tile_max);
+    let flow =
+        ScoringFlowDiagramLayout::new(content, body_font, caption_font, micro_font, pad, tile_max);
     let mut placements = Vec::new();
     let mut flow_arrows = Vec::new();
 

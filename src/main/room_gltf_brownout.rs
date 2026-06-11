@@ -169,15 +169,14 @@ impl RoomGltfBrownout {
         x * x * (3.0 - 2.0 * x)
     }
 
-    fn dip_full(sev: f32) -> (f32, f32, f32, f32, f32, f32) {
+    fn dip_full(sev: f32) -> (f32, f32, f32, f32, f32) {
         let k = 1.0_f32;
         let bulb = (1.0 - 0.82 * sev * k).max(0.08);
         let exp = (1.0 - 0.62 * sev * k).max(0.26);
         let amb = (1.0 - 0.55 * sev * k).max(0.24);
         let em = (1.0 - 0.42 * sev * k).max(0.38);
-        let punct = (1.0 - 0.48 * sev * k).max(0.28);
         let candle = (1.0 - 0.32 * sev * k).max(0.68);
-        (bulb, exp, amb, em, punct, candle)
+        (bulb, exp, amb, em, candle)
     }
 
     #[inline]
@@ -185,7 +184,7 @@ impl RoomGltfBrownout {
         a + (b - a) * t
     }
 
-    /// Multiply punctual / exposure / emissive tuning. Inactive → `base` unchanged.
+    /// Multiply source punctual / exposure / emissive tuning. Inactive → `base` unchanged.
     pub fn apply(&self, base: RoomEnvLightingTune) -> RoomEnvLightingTune {
         let Some(ref a) = self.active else {
             return base;
@@ -197,7 +196,7 @@ impl RoomGltfBrownout {
         let t = a.t;
         let sev = a.dip_severity;
 
-        let (gltf_mul, exp_mul, amb_mul, emissive_mul, punct_mul, candle_dim) = if t < tf {
+        let (gltf_mul, exp_mul, amb_mul, emissive_mul, candle_dim) = if t < tf {
             let ft = t;
             let fast1 = (ft * 49.0).sin();
             let fast2 = (ft * 21.0 + 0.7).sin();
@@ -210,29 +209,27 @@ impl RoomGltfBrownout {
             };
             let gltf = (chaos * spike).clamp(0.09, 1.22);
             let exp = (0.94 + 0.06 * fast2.abs()).clamp(0.88, 1.0);
-            (gltf, exp, 1.0, 1.0, 1.0, 1.0)
+            (gltf, exp, 1.0, 1.0, 1.0)
         } else if t < tf + td {
             let u = ((t - tf) / td).clamp(0.0, 1.0);
             let dip_k = Self::smoothstep01(u);
-            let (b0, e0, a0, em0, p0, c0) = Self::dip_full(sev);
+            let (b0, e0, a0, em0, c0) = Self::dip_full(sev);
             let gltf = Self::lerp_f(1.0, b0, dip_k);
             let exp = Self::lerp_f(1.0, e0, dip_k);
             let amb = Self::lerp_f(1.0, a0, dip_k);
             let em = Self::lerp_f(1.0, em0, dip_k);
-            let punct = Self::lerp_f(1.0, p0, dip_k);
             let candle = Self::lerp_f(1.0, c0, dip_k);
-            (gltf, exp, amb, em, punct, candle)
+            (gltf, exp, amb, em, candle)
         } else {
             let u = ((t - tf - td) / tr).clamp(0.0, 1.0);
             let rec = Self::smoothstep01(u);
-            let (b0, e0, a0, em0, p0, c0) = Self::dip_full(sev);
+            let (b0, e0, a0, em0, c0) = Self::dip_full(sev);
             let gltf = Self::lerp_f(b0, 1.0, rec);
             let exp = Self::lerp_f(e0, 1.0, rec);
             let amb = Self::lerp_f(a0, 1.0, rec);
             let em = Self::lerp_f(em0, 1.0, rec);
-            let punct = Self::lerp_f(p0, 1.0, rec);
             let candle = Self::lerp_f(c0, 1.0, rec);
-            (gltf, exp, amb, em, punct, candle)
+            (gltf, exp, amb, em, candle)
         };
 
         RoomEnvLightingTune {
@@ -240,8 +237,6 @@ impl RoomGltfBrownout {
             linear_exposure: base.linear_exposure * exp_mul,
             linear_exposure_base: base.linear_exposure_base,
             ambient_scale: base.ambient_scale * amb_mul,
-            lit_mesh_gltf_punctual_scale: base.lit_mesh_gltf_punctual_scale * punct_mul,
-            tile_gltf_punctual_scale: base.tile_gltf_punctual_scale * punct_mul,
             gltf_emissive_scale: base.gltf_emissive_scale * emissive_mul,
             candle_light_color_mul: [
                 base.candle_light_color_mul[0] * candle_dim,

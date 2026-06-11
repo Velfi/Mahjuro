@@ -762,13 +762,8 @@ impl TutorialCampaignScene {
         let gap_stack = section_gap * TUTORIAL_TILES_COPY_SECTION_GAPS as f32;
         let text_budget = (available - gap_stack).max(1.0);
 
-        let font_cap_px = Self::tutorial_tiles_copy_font_cap_for_budget(
-            copy_w,
-            h,
-            text_budget,
-            min_cap,
-            max_cap,
-        );
+        let font_cap_px =
+            Self::tutorial_tiles_copy_font_cap_for_budget(copy_w, h, text_budget, min_cap, max_cap);
         let start_y = content_top;
         let intro_h = Self::tutorial_tiles_copy_block_height(
             tiles_intro_copy::INTRO,
@@ -1384,8 +1379,8 @@ impl TutorialCampaignScene {
             underline_h: (3.0 * scale).max(2.0),
             label_text_gap: (5.0 * scale).max(3.0),
         };
-        let label_line_h =
-            typography::size(typography::H42, window_h) * crate::ui::widget::PLAIN_TEXT_LINE_STEP_MUL;
+        let label_line_h = typography::size(typography::H42, window_h)
+            * crate::ui::widget::PLAIN_TEXT_LINE_STEP_MUL;
 
         let mut placements = Vec::new();
         let mut labels = Vec::new();
@@ -2209,8 +2204,11 @@ mod tests {
             copy_floor,
             h,
         );
-        let natural_h =
-            TutorialCampaignScene::tutorial_tiles_copy_natural_height(copy_w, h, layout.font_cap_px);
+        let natural_h = TutorialCampaignScene::tutorial_tiles_copy_natural_height(
+            copy_w,
+            h,
+            layout.font_cap_px,
+        );
         let copy_bottom_pad = h * 0.008;
         let available = copy_floor - content_top - copy_bottom_pad;
         let total = natural_h + layout.section_gap * TUTORIAL_TILES_COPY_SECTION_GAPS as f32;
@@ -2238,8 +2236,11 @@ mod tests {
             copy_floor,
             h,
         );
-        let natural_h =
-            TutorialCampaignScene::tutorial_tiles_copy_natural_height(copy_w, h, layout.font_cap_px);
+        let natural_h = TutorialCampaignScene::tutorial_tiles_copy_natural_height(
+            copy_w,
+            h,
+            layout.font_cap_px,
+        );
         let copy_bottom_pad = h * 0.008;
         let available = copy_floor - content_top - copy_bottom_pad;
         let used = natural_h + layout.section_gap * TUTORIAL_TILES_COPY_SECTION_GAPS as f32;
