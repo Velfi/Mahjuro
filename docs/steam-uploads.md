@@ -33,6 +33,27 @@ and confirm three depots exist. The defaults the script assumes:
 
 If Valve assigned different IDs, export the matching `STEAM_DEPOT_*` env var.
 
+#### Playtest depots (`4819450`)
+
+Per-OS depots match the main game so each platform only downloads its binaries
+([Depots → OS mounting](https://partner.steamgames.com/doc/store/application/depots)).
+
+On the **Playtest** app ([depots page](https://partner.steamgames.com/apps/depots/4819450)):
+
+1. Rename depot `4819451` to something like **Mahjuro Playtest Windows** and set
+   **OS → Windows** (not All OSes).
+2. **Add New Depot** for macOS (e.g. **Mahjuro Playtest macOS**), set **OS → macOS**.
+3. **Save Changes**.
+4. Add **both** depots to every playtest package that should ship builds (store
+   package + Dev Comp — see [Uploading to Steam](https://partner.steamgames.com/doc/sdk/uploading)).
+
+Record IDs in [`packaging/steam/targets.env`](../../packaging/steam/targets.env):
+
+| Platform | Env var                         | Default / notes        |
+| -------- | ------------------------------- | ---------------------- |
+| Windows  | `STEAM_PLAYTEST_DEPOT_WINDOWS`  | `4819451`              |
+| macOS    | `STEAM_PLAYTEST_DEPOT_MACOS`    | `4819452`              |
+
 ### 3. Build account + Steam Guard
 
 Create (or use) a dedicated Steam account with **Edit App Metadata** and
@@ -79,11 +100,22 @@ VDFs, and runs `steamcmd +run_app_build`. The `--branch internal` flag sets
 the build live on the `internal` beta branch — leave it off to upload without
 promoting (then promote manually in the partner UI).
 
-For a Steam branch named `beta`, use `--beta` (same as
-`--branch beta`). To default to a different partner branch name, set
-`STEAM_BETA_BRANCH` (e.g. `STEAM_BETA_BRANCH=publicbeta scripts/steam-upload.sh --beta 0.4.2`).
-Create the branch under **App Admin → SteamPipe → Branches** if it does not
-exist yet.
+For a public beta, use `--beta`. That uploads **twice** in one `steamcmd` run:
+
+1. **Main game** (`4636490`) — Windows + macOS depots, promoted to the `beta`
+   branch (or `STEAM_BETA_BRANCH`, e.g. `publicbeta`).
+2. **Steam Playtest** (`4819450`) — Windows + macOS depots (same VDF layout as
+   the main game), promoted to the playtest `beta` branch (or
+   `STEAM_PLAYTEST_BRANCH` in [`packaging/steam/targets.env`](../../packaging/steam/targets.env)).
+
+IDs live in `packaging/steam/targets.env`. Verify the playtest App ID on the
+partner site if uploads fail with “application not found”.
+
+Create each branch under **App Admin → SteamPipe → Branches** on the matching
+AppID if it does not exist yet.
+
+`--branch NAME` (without `--beta`) uploads only the main game — useful for the
+`internal` smoke branch.
 
 To upload from a local build instead (host platform only — useful for smoke
 tests), pass `--local`:
