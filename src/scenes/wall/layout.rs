@@ -182,7 +182,7 @@ pub fn wall_layout(w: f32, h: f32, jr: f32) -> WallLayout {
     let cell_h = row_cell_h[0];
 
     let sidebar_gap = (6.0 * jr).max(5.0);
-    let detail_h = (panel_h * 0.35).clamp(120.0 * jr, 220.0 * jr);
+    let detail_h = (panel_h * 0.44).clamp(140.0 * jr, 300.0 * jr);
     let detail_y = panel_top + panel_h - detail_h;
     let summary_h = (detail_y - panel_top - sidebar_gap).max(100.0 * jr);
 

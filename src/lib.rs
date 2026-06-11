@@ -281,6 +281,10 @@ fn init_env_logger() {
     } else {
         win_log_console::prepare_rust_log_output()
     } {
+        #[cfg(all(windows, not(debug_assertions)))]
+        win_log_console::RustLogOutput::Console(writer) => {
+            builder.target(env_logger::Target::Pipe(Box::new(writer)));
+        }
         win_log_console::RustLogOutput::File(path) => {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
