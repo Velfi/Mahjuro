@@ -85,6 +85,7 @@ pub mod score_popups;
 pub mod score_reel;
 pub mod score_roller_layout;
 pub mod shadow_ao_lab;
+pub mod shadow_test_room_glb;
 pub mod shop_bell_mesh;
 pub mod showcase_decal_atlas;
 pub mod showcase_tile_layout;

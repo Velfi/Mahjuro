@@ -19,6 +19,7 @@ pub(crate) enum ActiveRoomEnv {
     Archive,
     MainMenu,
     Gameplay,
+    ShadowTest,
 }
 
 #[inline]
@@ -31,6 +32,7 @@ pub fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
             DrawCmd::ArchiveEnvironment => return Some(ActiveRoomEnv::Archive),
             DrawCmd::MainMenuEnvironment => return Some(ActiveRoomEnv::MainMenu),
             DrawCmd::GameplayEnvironment => return Some(ActiveRoomEnv::Gameplay),
+            DrawCmd::ShadowTestEnvironment => return Some(ActiveRoomEnv::ShadowTest),
             _ => {}
         }
     }
@@ -56,6 +58,9 @@ impl ActiveRoomEnv {
                 o.and_then(|c| c.environment_bounds_doc)
             }),
             Self::MainMenu => crate::main_menu_glb::with_main_menu_glb_cpu(|o| {
+                o.and_then(|c| c.environment_bounds_doc)
+            }),
+            Self::ShadowTest => crate::shadow_test_room_glb::with_shadow_test_room_glb_cpu(|o| {
                 o.and_then(|c| c.environment_bounds_doc)
             }),
         }

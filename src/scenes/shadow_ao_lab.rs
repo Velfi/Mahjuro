@@ -7,8 +7,9 @@ use crate::render::shadow_ao_lab::{
     ShadowAoLabCamera, ShadowAoLabLayout, ShadowAoLabProbe, build_object3ds, build_point_lights,
     camera, probe_layout,
 };
+use crate::render::shadow_test_room_glb;
 use crate::render::theme::{color, metrics, typography};
-use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::controller_hints::{HintStyle, back_footer_row, push_screen_footer_hint};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -18,10 +19,9 @@ use super::{BackgroundId, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, 
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LabAction {
+    CycleScene,
     CycleLayout,
     CycleCamera,
-    OrbitLeft,
-    OrbitRight,
     CycleShadows,
     Back,
 }
@@ -32,9 +32,32 @@ impl LabAction {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LabScene {
+    Synthetic,
+    ShadowTestRoom,
+}
+
+impl LabScene {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Synthetic => "Synthetic corridor",
+            Self::ShadowTestRoom => "Shadow test room",
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Synthetic => Self::ShadowTestRoom,
+            Self::ShadowTestRoom => Self::Synthetic,
+        }
+    }
+}
+
 pub struct ShadowAoLabScene {
     has_suspended: bool,
     tree: TreeState,
+    scene: LabScene,
     layout: ShadowAoLabLayout,
     camera: ShadowAoLabCamera,
     orbit_yaw: f32,
@@ -46,6 +69,7 @@ impl ShadowAoLabScene {
         Self {
             has_suspended,
             tree: TreeState::default(),
+            scene: LabScene::ShadowTestRoom,
             layout: ShadowAoLabLayout::HorizontalBand,
             camera: ShadowAoLabCamera::Corridor,
             orbit_yaw: 0.0,
@@ -72,12 +96,11 @@ impl ShadowAoLabScene {
         let row_h = (36.0 * scale).max(28.0);
         let row_y = h - row_h - margin;
         let gap = 8.0;
-        let btn_w = ((w - margin * 2.0) - gap * 5.0) / 6.0;
+        let btn_w = ((w - margin * 2.0) - gap * 4.0) / 5.0;
         [
+            LabAction::CycleScene,
             LabAction::CycleLayout,
             LabAction::CycleCamera,
-            LabAction::OrbitLeft,
-            LabAction::OrbitRight,
             LabAction::CycleShadows,
             LabAction::Back,
         ]
@@ -95,12 +118,60 @@ impl ShadowAoLabScene {
 
     fn button_label(&self, action: LabAction) -> String {
         match action {
-            LabAction::CycleLayout => format!("Layout: {}", self.layout.label()),
-            LabAction::CycleCamera => format!("Cam: {}", self.camera.label()),
+            LabAction::CycleScene => format!("Scene: {} v", self.scene.label()),
+            LabAction::CycleLayout => {
+                if self.scene == LabScene::Synthetic {
+                    format!("Layout: {}", self.layout.label())
+                } else {
+                    "Layout: n/a".into()
+                }
+            }
+            LabAction::CycleCamera => {
+                if self.scene == LabScene::Synthetic {
+                    format!("Cam: {}", self.camera.label())
+                } else {
+                    "Cam: GLB".into()
+                }
+            }
             LabAction::CycleShadows => format!("Shadows: {}", self.shadow_quality.label()),
-            LabAction::OrbitLeft => "◀ orbit".into(),
-            LabAction::OrbitRight => "orbit ▶".into(),
             LabAction::Back => "Back".into(),
+        }
+    }
+
+    fn push_shadow_test_room(&self, frame: &mut UiFrame, ctx: &DrawCtx<'_>, w: f32, h: f32) {
+        let (tune, env_h) = ctx.room_env_for(scene_keys::SHADOW_AO_LAB);
+        frame.shadow_test_environment();
+        frame.camera_override = Some(shadow_test_room_glb::shadow_test_room_camera(w, h, env_h));
+        let room_glb = shadow_test_room_glb::shadow_test_room_glb_has_embedded_lights();
+        frame.scene_lighting.embedded_gltf_punctual = room_glb;
+        frame.scene_lighting.room_glb_brdf = room_glb;
+        frame
+            .scene_lighting
+            .set_gltf_embedded_spot_lights(if room_glb {
+                shadow_test_room_glb::shadow_test_room_embedded_spot_lights_runtime(
+                    w, h, env_h, &tune,
+                )
+            } else {
+                Vec::new()
+            });
+        let (punctual, nodes) = if room_glb {
+            crate::render::room_gltf_punctual::tagged_to_scene_punctual(
+                shadow_test_room_glb::shadow_test_room_embedded_point_lights_runtime_tagged(
+                    w, h, env_h, &tune,
+                ),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        frame.scene_lighting.punctual = punctual;
+        frame.scene_lighting.punctual_gltf_nodes = nodes;
+        if !room_glb {
+            frame.scene_lighting.push_smooth(PointLight {
+                pos: [w * 0.5, h * 0.42, h * 1.15],
+                radius: h * 3.0,
+                color: [1.0, 0.92, 0.78],
+                intensity: 5.0,
+            });
         }
     }
 }
@@ -124,20 +195,16 @@ impl SceneBehavior for ShadowAoLabScene {
         }
         match fired {
             Some(LabAction::Back) => self.go_back(ctx.overlay_request),
+            Some(LabAction::CycleScene) => {
+                self.scene = self.scene.next();
+                None
+            }
             Some(LabAction::CycleLayout) => {
                 self.layout = self.layout.next();
                 None
             }
             Some(LabAction::CycleCamera) => {
                 self.camera = self.camera.next();
-                None
-            }
-            Some(LabAction::OrbitLeft) => {
-                self.orbit_yaw -= 0.12;
-                None
-            }
-            Some(LabAction::OrbitRight) => {
-                self.orbit_yaw += 0.12;
                 None
             }
             Some(LabAction::CycleShadows) => {
@@ -154,17 +221,22 @@ impl SceneBehavior for ShadowAoLabScene {
         let scale = metrics::scene_scale(w, h);
         let items = Self::layout_items(w, h);
         let focused = self.tree.focused();
-        let probes = probe_layout(self.layout, h);
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
-        frame.shadow_ao_lab_layout = Some(self.layout);
         frame.shadow_quality_override = Some(self.shadow_quality);
-        frame.camera_override = Some(camera(self.camera, self.orbit_yaw));
-        frame.object3d_batch(build_object3ds(self.layout, w, h));
-        for light in build_point_lights(w, h) {
-            frame.scene_lighting.push_smooth(light);
-        }
+        let probes = if self.scene == LabScene::Synthetic {
+            frame.shadow_ao_lab_layout = Some(self.layout);
+            frame.camera_override = Some(camera(self.camera, self.orbit_yaw));
+            frame.object3d_batch(build_object3ds(self.layout, w, h));
+            for light in build_point_lights(w, h) {
+                frame.scene_lighting.push_smooth(light);
+            }
+            probe_layout(self.layout, h)
+        } else {
+            self.push_shadow_test_room(&mut frame, &ctx, w, h);
+            Vec::new()
+        };
 
         let title_font = typography::size(typography::H20, h);
         let body_font = typography::size(typography::H42, h);
@@ -172,7 +244,7 @@ impl SceneBehavior for ShadowAoLabScene {
 
         frame.text(TextLabel {
             rect: [margin, margin, w - margin * 2.0, title_font * 1.4],
-            text: "Shadow & AO Lab (synthetic)".into(),
+            text: "Shadow & AO Lab".into(),
             color: color::CHAMPAGNE,
             align: TextAlign::Left,
             font_px: Some(title_font),
@@ -187,11 +259,19 @@ impl SceneBehavior for ShadowAoLabScene {
                 body_font * 1.2,
             ],
             text: format!(
-                "layout={}  camera={}  shadows={}  orbit={:.2}",
-                self.layout.label(),
-                self.camera.label(),
+                "scene={}  layout={}  camera={}  shadows={}",
+                self.scene.label(),
+                if self.scene == LabScene::Synthetic {
+                    self.layout.label()
+                } else {
+                    "glb"
+                },
+                if self.scene == LabScene::Synthetic {
+                    self.camera.label()
+                } else {
+                    "GLB"
+                },
                 self.shadow_quality.label(),
-                self.orbit_yaw,
             ),
             color: color::PARCHMENT,
             align: TextAlign::Left,
@@ -199,8 +279,18 @@ impl SceneBehavior for ShadowAoLabScene {
             ..Default::default()
         });
 
+        let probe_text = if self.scene == LabScene::Synthetic {
+            probe_lines(&probes)
+        } else {
+            vec![
+                "GLB fixture - compare roof occlusion, receiver bands, and grounded-vs-raised contact"
+                    .into(),
+                "Use shadow quality changes here to compare leakage, acne, and map resolution"
+                    .into(),
+            ]
+        };
         let line_h = body_font * 1.12;
-        for (i, line) in probe_lines(&probes).iter().enumerate() {
+        for (i, line) in probe_text.iter().enumerate() {
             frame.text(TextLabel {
                 rect: [
                     margin,

@@ -248,6 +248,9 @@ pub struct WgpuRenderer {
     /// [`hallway.glb`](../../assets/3d/hallway.glb) pick-blind room.
     hallway_env_primitives: Vec<TilePrimitiveGpu>,
     hallway_environment: Option<ShopEnvironmentGpu>,
+    /// [`shadow_test_room.glb`](../../assets/3d/shadow_test_room.glb) debug shadow lab room.
+    shadow_test_room_env_primitives: Vec<TilePrimitiveGpu>,
+    shadow_test_room_environment: Option<ShopEnvironmentGpu>,
     /// In-progress time-sliced upload for [`hallway.glb`](../../assets/3d/hallway.glb).
     hallway_room_gpu_upload: Option<room_gpu_load::IncrementalRoomEnvGpuUpload>,
     /// [`staircase.glb`](../../assets/3d/staircase.glb) post-ordeal interstitial.
