@@ -302,6 +302,11 @@ pub(super) fn gameplay_nav_edges(
     }
 
     for score in score_targets {
+        // Target bank sits farther right; let spatial nav pick Down instead of
+        // the left-column x-nearest hop used for round score.
+        if matches!(score, FocusTarget::ScoreRoller(ScoreRollerBank::Target)) {
+            continue;
+        }
         let Some(score_rect) = target_rect(focus_rects, score) else {
             continue;
         };
@@ -976,6 +981,33 @@ mod tests {
                 "talisman Up should reach round-score roller"
             );
         }
+    }
+
+    #[test]
+    fn target_score_roller_down_uses_spatial_nav() {
+        let rects = live_gameplay_focus_rects(14);
+        let target = FocusTarget::ScoreRoller(ScoreRollerBank::Target);
+        let mut nav_spatial = load_nav_inferred_only(&rects);
+        let spatial_down = nav_spatial
+            .pick(target, FocusDir::Down)
+            .expect("target roller Down via spatial nav");
+        let mut nav = load_nav(&rects);
+        assert_eq!(
+            nav.pick(target, FocusDir::Down),
+            Some(spatial_down),
+            "target roller Down should match spatial inference, not explicit x-nearest hop"
+        );
+        let round_score = FocusTarget::ScoreRoller(ScoreRollerBank::Score);
+        let explicit_down = nav
+            .pick(round_score, FocusDir::Down)
+            .expect("round-score roller Down via explicit edge");
+        assert!(
+            matches!(
+                explicit_down,
+                FocusTarget::Consumable(_) | FocusTarget::Relic(_)
+            ),
+            "round-score roller Down should still use left-column hop, got {explicit_down:?}"
+        );
     }
 
     #[test]

@@ -7,8 +7,8 @@ use crate::render::theme::{ButtonState, ButtonVariant};
 use crate::scenes::header_chrome::HeaderChromeMetrics;
 use crate::scenes::{OverlayRequest, SceneTransition, UpdateCtx};
 use crate::sfx_id::SfxId;
-use crate::ui::focus_nav::{self, FocusDir, FocusNavState};
-use crate::ui::input::{InputMode, UiAction};
+use crate::ui::focus_nav;
+use crate::ui::input::UiAction;
 use crate::ui::widget::{self, ButtonSpec};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -36,19 +36,34 @@ impl LedgerNav {
     }
 }
 
+pub fn ledger_nav_from_id(id: FocusId) -> LedgerNav {
+    if id == LedgerNav::Back.id() {
+        LedgerNav::Back
+    } else if id == LedgerNav::View.id() {
+        LedgerNav::View
+    } else if id.0 >= NAV_BASE + 40 {
+        LedgerNav::Tile((id.0 - (NAV_BASE + 40)) as usize)
+    } else if id.0 >= NAV_BASE + 20 {
+        LedgerNav::Summary((id.0 - (NAV_BASE + 20)) as usize)
+    } else {
+        LedgerNav::Back
+    }
+}
+
 pub struct WallFocusModel {
-    pub focus: Option<LedgerNav>,
-    pub focus_nav: FocusNavState<LedgerNav>,
     pub tree: TreeState,
 }
 
 impl WallFocusModel {
     pub fn new() -> Self {
-        Self {
-            focus: None,
-            focus_nav: FocusNavState::new(),
-            tree: TreeState::new(),
+        let mut tree = TreeState::new();
+        if let Some(i) = face_index(FaceKey {
+            suit: crate::core::tile::Suit::Souzu,
+            rank: 5,
+        }) {
+            tree.set_focus(LedgerNav::Tile(i).id());
         }
+        Self { tree }
     }
 }
 
@@ -59,6 +74,10 @@ pub fn face_index(face: FaceKey) -> Option<usize> {
 }
 
 impl StrategicWallScene {
+    pub fn focused_nav(&self) -> Option<LedgerNav> {
+        self.focus.tree.focused().map(ledger_nav_from_id)
+    }
+
     pub fn go_back(overlay_request: &mut Option<OverlayRequest>) -> SceneTransition {
         *overlay_request = Some(OverlayRequest::Pop);
         None
@@ -71,7 +90,9 @@ impl StrategicWallScene {
             LedgerNav::Summary(i) => {
                 if let Some(hint) = stats.best_draws.get(i) {
                     self.screen.selected = hint.face;
-                    self.focus.focus = face_index(hint.face).map(LedgerNav::Tile);
+                    if let Some(tile_i) = face_index(hint.face) {
+                        self.focus.tree.set_focus(LedgerNav::Tile(tile_i).id());
+                    }
                 }
             }
             LedgerNav::Tile(i) => {
@@ -83,19 +104,25 @@ impl StrategicWallScene {
         false
     }
 
-    pub fn focus_targets(
+    pub fn flat_items(
         &self,
         w: f32,
         layout: &WallLayout,
         stats: &WallStats,
-    ) -> Vec<(LedgerNav, [f32; 4])> {
+    ) -> Vec<FlatItem<LedgerNav>> {
         let mut out = Vec::new();
-        out.push((
+        out.push(FlatItem::new(
+            LedgerNav::Back.id(),
+            HeaderChromeMetrics::from_window(w, layout.detail_y + layout.detail_h)
+                .back_rect_left(),
             LedgerNav::Back,
-            HeaderChromeMetrics::from_window(w, layout.detail_y + layout.detail_h).back_rect_left(),
         ));
 
-        out.push((LedgerNav::View, view_toggle_rect(w, layout)));
+        out.push(FlatItem::new(
+            LedgerNav::View.id(),
+            view_toggle_rect(w, layout),
+            LedgerNav::View,
+        ));
 
         let line = text_line_h(layout.caption_px);
         let section_line = text_line_h(layout.caption_px * 0.94);
@@ -108,14 +135,15 @@ impl StrategicWallScene {
         section_top += 4.0 + 7.0;
         section_top += section_line + 4.0;
         for (i, _) in stats.best_draws.iter().enumerate().take(3) {
-            out.push((
-                LedgerNav::Summary(i),
+            out.push(FlatItem::new(
+                LedgerNav::Summary(i).id(),
                 [
                     layout.summary_x + 8.0,
                     section_top + i as f32 * (line * 2.0 + 2.0),
                     layout.summary_w - 16.0,
                     line * 2.0,
                 ],
+                LedgerNav::Summary(i),
             ));
         }
 
@@ -124,11 +152,19 @@ impl StrategicWallScene {
                 continue;
             }
             if let Some(rect) = grid_cell_rect(layout, idx) {
-                out.push((LedgerNav::Tile(idx), rect));
+                out.push(FlatItem::new(LedgerNav::Tile(idx).id(), rect, LedgerNav::Tile(idx)));
             }
         }
 
         out
+    }
+
+    fn sync_selected_from_focus(&mut self) {
+        if let Some(LedgerNav::Tile(i)) = self.focused_nav() {
+            if let Some(&(suit, rank)) = GRID_FACE_ORDER.get(i) {
+                self.screen.selected = FaceKey { suit, rank };
+            }
+        }
     }
 
     pub fn handle_input(
@@ -161,26 +197,11 @@ impl StrategicWallScene {
             }
         }
 
-        let back = HeaderChromeMetrics::from_window(w, h).back_rect_left();
-        let back_items = vec![FlatItem::new(LedgerNav::Back.id(), back, LedgerNav::Back)];
-        let nav_actions: Vec<UiAction> = ctx
-            .actions
-            .iter()
-            .copied()
-            .filter(|a| {
-                !matches!(
-                    a,
-                    UiAction::FocusUp
-                        | UiAction::FocusDown
-                        | UiAction::FocusPrev
-                        | UiAction::FocusNext
-                )
-            })
-            .collect();
-        let back_action = self.focus.tree.update_flat(
-            &back_items,
+        let items = self.flat_items(w, layout, stats);
+        let action = self.focus.tree.update_flat(
+            &items,
             TreeInput {
-                actions: &nav_actions,
+                actions: ctx.actions,
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (w, h),
@@ -191,85 +212,24 @@ impl StrategicWallScene {
         if self.focus.tree.take_focus_changed() {
             ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
         }
-        if matches!(back_action, Some(LedgerNav::Back)) {
-            ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-            return Some(Self::go_back(ctx.overlay_request));
-        }
+        self.sync_selected_from_focus();
 
-        let targets = self.focus_targets(w, layout, stats);
-        self.focus.focus_nav.load_candidates(&targets, &[]);
-
-        if ctx.input_mode == InputMode::Cursor {
-            if let Some(nav) =
-                focus_nav::focus_target_at_cursor(&targets, ctx.cursor_pos.0, ctx.cursor_pos.1)
-            {
-                self.focus.focus = Some(nav);
-                if let LedgerNav::Tile(i) = nav {
-                    if let Some(&(suit, rank)) = GRID_FACE_ORDER.get(i) {
-                        self.screen.selected = FaceKey { suit, rank };
-                    }
-                }
+        match action {
+            Some(LedgerNav::Back) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+                return Some(Self::go_back(ctx.overlay_request));
             }
-        }
-
-        for &cid in ctx.button_clicks {
-            if let Some(nav) = targets
-                .iter()
-                .find(|(n, _)| n.id().0 == cid)
-                .map(|(n, _)| *n)
-            {
-                self.focus.focus = Some(nav);
+            Some(nav) => {
                 if self.activate(nav, stats) {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                     return Some(Self::go_back(ctx.overlay_request));
                 }
                 ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
             }
-        }
-
-        let prev = self.focus.focus;
-        for &a in ctx.actions {
-            match a {
-                UiAction::FocusUp => self.move_focus(&targets, FocusDir::Up),
-                UiAction::FocusDown => self.move_focus(&targets, FocusDir::Down),
-                UiAction::FocusPrev => self.move_focus(&targets, FocusDir::Left),
-                UiAction::FocusNext => self.move_focus(&targets, FocusDir::Right),
-                UiAction::Confirm | UiAction::CommitDiscard => {
-                    if let Some(nav) = self.focus.focus {
-                        if self.activate(nav, stats) {
-                            ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                            return Some(Self::go_back(ctx.overlay_request));
-                        }
-                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if self.focus.focus != prev {
-            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+            None => {}
         }
 
         None
-    }
-
-    fn move_focus(&mut self, targets: &[(LedgerNav, [f32; 4])], dir: FocusDir) {
-        let current = self.focus.focus.or_else(|| {
-            face_index(self.screen.selected)
-                .map(LedgerNav::Tile)
-                .or_else(|| targets.first().map(|(n, _)| *n))
-        });
-        if let Some(cur) = current
-            && let Some(next) = self.focus.focus_nav.pick(cur, dir)
-        {
-            self.focus.focus = Some(next);
-            if let LedgerNav::Tile(i) = next {
-                if let Some(&(suit, rank)) = GRID_FACE_ORDER.get(i) {
-                    self.screen.selected = FaceKey { suit, rank };
-                }
-            }
-        }
     }
 }
 
