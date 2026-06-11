@@ -308,15 +308,24 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
 
     for &relic in &run.relics.active {
         match relic {
-            RelicId::RubySerpent | RelicId::RedTilesRedDragon => manzu += 3,
-            RelicId::JadeSerpent | RelicId::GreenTilesGreenDragon => souzu += 3,
-            RelicId::LapisSerpent | RelicId::BlueTilesWhiteDragon => pinzu += 3,
+            RelicId::RubySerpent => manzu += 3,
+            RelicId::JadeSerpent => souzu += 3,
+            RelicId::LapisSerpent => pinzu += 3,
+            RelicId::BlueTilesWhiteDragon => {
+                pinzu += 3;
+                honors += 2;
+            }
+            RelicId::GreenTilesGreenDragon => {
+                souzu += 3;
+                honors += 2;
+            }
+            RelicId::RedTilesRedDragon => {
+                manzu += 3;
+                honors += 2;
+            }
             RelicId::HonorFury
             | RelicId::DragonRage
             | RelicId::WhiteDragonsHush
-            | RelicId::BlueTilesWhiteDragon
-            | RelicId::GreenTilesGreenDragon
-            | RelicId::RedTilesRedDragon
             | RelicId::WildWinds
             | RelicId::DragonEcho
             | RelicId::WindReader => honors += 2,
