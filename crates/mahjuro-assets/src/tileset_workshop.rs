@@ -136,22 +136,6 @@ pub fn workshop_cache_folder_name(tileset_id: &str) -> Option<String> {
 }
 
 mod tests {
-    use super::*;
-    use std::fs;
-
-    fn write_valid_mod(dir: &Path, tile_w: u32, tile_h: u32, columns: u32) {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(
-            dir.join("atlas.toml"),
-            format!(
-                "tile_width = {tile_w}\ntile_height = {tile_h}\ncolumns = {columns}\nlayout = [\"B1\"]\n"
-            ),
-        )
-        .unwrap();
-        let img = image::RgbaImage::new(columns * tile_w, tile_h);
-        img.save(dir.join("atlas.png")).unwrap();
-    }
-
     #[test]
     fn workshop_id_round_trip() {
         let id = workshop_id(42);

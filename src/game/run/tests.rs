@@ -1565,7 +1565,7 @@ mod cases {
         assert_eq!(baked.suit, crate::core::tile::Suit::Souzu);
         assert_eq!(baked.rank, original_rank);
 
-        let mut wall = Wall::from_filtered_with_packs(
+        let wall = Wall::from_filtered_with_packs(
             &run.removed_tile_ids,
             &run.tile_packs,
             &run.tile_enhancements,
@@ -1583,6 +1583,7 @@ mod cases {
         assert_eq!(drawn.rank, original_rank);
     }
 
+    #[test]
     fn brocade_pouch_stamps_tiles_drawn_after_talisman_use() {
         use crate::core::consumable::Consumable;
         use crate::core::talisman::TalismanKind;
