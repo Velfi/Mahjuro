@@ -6,7 +6,6 @@ pub mod event_bus;
 pub mod game_mode;
 pub mod memorial_run;
 pub mod onboarding;
-pub(crate) mod onboarding_intro_copy;
 pub mod ordeal;
 pub mod progression_run;
 pub mod run;

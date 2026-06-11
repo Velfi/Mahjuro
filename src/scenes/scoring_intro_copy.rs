@@ -1,7 +1,7 @@
 //! Shared copy for the Guide scoring basics page (page 4).
 
 pub const PAGE_TITLE: &str = "Scoring Basics";
-pub const SUBTITLE: &str = "Select melds, Play to Structure, then Cash In to score.";
+pub const SUBTITLE: &str = "Select melds, Play them, then Cash In to score.";
 
 pub const SECTION_FLOW: &str = "THE FLOW";
 pub const FLOW_REMINDER: &str = "Played melds do not score immediately. Cash In scores everything in your Structure and then empties it.";

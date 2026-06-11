@@ -28,6 +28,7 @@ use crate::render::draw_cmd::{
     ShowcaseTilePlacement, UiFrame, camera_facing_euler_xyz_rad,
 };
 use crate::render::gameplay_glb;
+use crate::render::scene_keys;
 use crate::render::showcase_tile_layout::{
     ShowcaseTileLabelGaps, showcase_tile_group_label_anchor, showcase_tile_merge_projected_group,
 };
@@ -866,30 +867,30 @@ fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, Vec<Ti
 // ── Guide layout frame ────────────────────────────────────────────────────
 
 /// Margins and reserved header / nav bands for every guide page.
-struct GuideLayout {
-    window_w: f32,
-    window_h: f32,
+pub(crate) struct GuideLayout {
+    pub(crate) window_w: f32,
+    pub(crate) window_h: f32,
     margin: f32,
-    content_x: f32,
-    content_w: f32,
-    content_bottom: f32,
+    pub(crate) content_x: f32,
+    pub(crate) content_w: f32,
+    pub(crate) content_bottom: f32,
     header_btn_h: f32,
 }
 
-struct GuideHeaderChrome {
-    back: [f32; 4],
-    prev: [f32; 4],
-    next: [f32; 4],
-    page_counter: [f32; 4],
+pub(crate) struct GuideHeaderChrome {
+    pub(crate) back: [f32; 4],
+    pub(crate) prev: [f32; 4],
+    pub(crate) next: [f32; 4],
+    pub(crate) page_counter: [f32; 4],
 }
 
-struct GuideNavHeader {
-    copy_x: f32,
-    title_y: f32,
-    subtitle_y: f32,
-    content_top: f32,
-    title_font: f32,
-    body_font: f32,
+pub(crate) struct GuideNavHeader {
+    pub(crate) copy_x: f32,
+    pub(crate) title_y: f32,
+    pub(crate) subtitle_y: f32,
+    pub(crate) content_top: f32,
+    pub(crate) title_font: f32,
+    pub(crate) body_font: f32,
 }
 
 fn guide_copy_inset_x(w: f32) -> f32 {
@@ -898,7 +899,7 @@ fn guide_copy_inset_x(w: f32) -> f32 {
 
 fn page_nav_subtitle(page: usize) -> Option<&'static str> {
     match page {
-        PAGE_TILES => Some(tiles_intro_copy::INTRO),
+        PAGE_TILES => Some(tiles_intro_copy::PAGE_SUBTITLE),
         PAGE_MELDS => Some(melds_intro_copy::PAGE_SUBTITLE),
         PAGE_YAKU => Some(yaku_intro_copy::PAGE_SUBTITLE),
         PAGE_FLOWERS => Some(flowers_intro_copy::PAGE_SUBTITLE),
@@ -908,7 +909,12 @@ fn page_nav_subtitle(page: usize) -> Option<&'static str> {
     }
 }
 
-fn guide_nav_header(w: f32, h: f32, back: [f32; 4], subtitle: Option<&str>) -> GuideNavHeader {
+pub(crate) fn guide_nav_header(
+    w: f32,
+    h: f32,
+    back: [f32; 4],
+    subtitle: Option<&str>,
+) -> GuideNavHeader {
     let scale = metrics::scene_scale(w, h);
     let title_font = typography::size(typography::H20, h);
     let body_font = typography::size(typography::H42, h);
@@ -945,7 +951,7 @@ fn guide_nav_header(w: f32, h: f32, back: [f32; 4], subtitle: Option<&str>) -> G
 }
 
 impl GuideLayout {
-    fn new(w: f32, h: f32) -> Self {
+    pub(crate) fn new(w: f32, h: f32) -> Self {
         let chrome = HeaderChromeMetrics::from_window(w, h);
         let content_bottom = h - screen_footer_reserve(w, h) - 12.0 * chrome.ui;
         Self {
@@ -959,7 +965,7 @@ impl GuideLayout {
         }
     }
 
-    fn header_chrome(&self) -> GuideHeaderChrome {
+    pub(crate) fn header_chrome(&self) -> GuideHeaderChrome {
         let chrome_metrics = HeaderChromeMetrics::from_window(self.window_w, self.window_h);
         let btn_h = self.header_btn_h;
         let btn_gap = 10.0 * (chrome_metrics.margin / 48.0);
@@ -1012,7 +1018,7 @@ fn push_guide_panel_stroke(frame: &mut UiFrame, rect: [f32; 4], color: [f32; 4])
 }
 
 /// Header rule below the nav title band. Returns top of the content band.
-fn push_guide_chrome(frame: &mut UiFrame, layout: &GuideLayout, divider_y: f32) -> f32 {
+pub(crate) fn push_guide_chrome(frame: &mut UiFrame, layout: &GuideLayout, divider_y: f32) -> f32 {
     let jr = (layout.window_w.min(layout.window_h) / 720.0).clamp(1.0, 1.38);
     frame.quad(GpuInstance {
         rect: [layout.content_x, divider_y, layout.content_w, 1.0],
@@ -2055,7 +2061,8 @@ fn draw_scoring_page(
         pad,
         flow_tile_max,
     );
-    let glb_cash_in = push_scoring_gameplay_cash_in_env(frame, ctx, w, h, cash_in_visual);
+    let glb_cash_in =
+        push_gameplay_cash_in_overlay(frame, ctx, w, h, cash_in_visual, scene_keys::GAMEPLAY);
 
     let flow_content = scoring_panel_open(
         frame,
@@ -3737,12 +3744,14 @@ fn scoring_flow_inner_content_rect(flow_outer: [f32; 4], section_font: f32) -> [
     ]
 }
 
-fn push_scoring_gameplay_cash_in_env(
+/// Draw the authored gameplay cash-in mesh into `cash_in_visual` via an overlay camera.
+pub fn push_gameplay_cash_in_overlay(
     frame: &mut UiFrame,
     ctx: &DrawCtx<'_>,
     w: f32,
     h: f32,
     cash_in_visual: [f32; 4],
+    room_env_key: &'static str,
 ) -> bool {
     let env_h = ctx.room_gltf_height_scale.max(0.01);
     let Some(cam) = gameplay_glb::gameplay_cash_in_camera_for_screen_rect_if_present(
@@ -3765,7 +3774,7 @@ fn push_scoring_gameplay_cash_in_env(
     overlay_lighting.embedded_gltf_punctual = room_glb_lights;
     overlay_lighting.room_glb_brdf = room_glb_lights;
     if room_glb_lights {
-        let tune = ctx.room_env_for("gameplay").0;
+        let tune = ctx.room_env_for(room_env_key).0;
         let (punctual, nodes) = crate::render::room_gltf_punctual::tagged_to_scene_punctual(
             gameplay_glb::gameplay_embedded_point_lights_runtime_tagged(
                 w,
@@ -4371,16 +4380,28 @@ fn draw_tiles_page(
     let left_x = layout.content_x;
     let right_x = left_x + left_w + gutter;
     let columns_bottom = content_floor - h * 0.006;
+    let body_font = typography::size(typography::H42, h);
+    let line_mul = 1.12;
+    let footer_h = guide_column_footer_height(left_w, h, body_font, tiles_intro_copy::INTRO);
 
     push_tiles_left_cards(
         frame,
         left_x,
         left_w,
         content_top,
+        columns_bottom - footer_h,
+        h,
+        body_font,
+        line_mul,
+    );
+    push_guide_column_footer_prose(
+        frame,
+        left_x,
+        left_w,
         columns_bottom,
         h,
-        typography::size(typography::H42, h),
-        1.12,
+        body_font,
+        tiles_intro_copy::INTRO,
     );
 
     let (placements, labels, panels) = layout_tiles_page_grid(
@@ -4427,18 +4448,21 @@ fn draw_melds_page(
     let left_x = layout.content_x;
     let right_x = left_x + left_w + gutter;
     let columns_bottom = content_floor - h * 0.006;
+    let graffiti = page_graffiti(PAGE_MELDS);
+    let graffiti_reserve = if graffiti.is_some() { h * 0.14 } else { 0.0 };
 
     push_melds_left_cards(
         frame,
         left_x,
         left_w,
         content_top,
-        columns_bottom - h * 0.14,
+        columns_bottom - graffiti_reserve,
         h,
         body_font,
         line_mul,
+        Some(melds_intro_copy::INTRO),
     );
-    if let Some(scrawl) = page_graffiti(PAGE_MELDS) {
+    if let Some(scrawl) = graffiti {
         push_flowers_margin_scrawl(frame, left_x, left_w, columns_bottom, h, scrawl);
     }
 
@@ -4685,10 +4709,6 @@ fn push_yaku_left_cards(
             yaku_intro_copy::SECTION_CASH_IN,
             yaku_intro_copy::CASH_IN_LINES,
         ),
-        (
-            tiles_intro_copy::SECTION_RANK_TERMS,
-            tiles_intro_copy::RANK_TERM_LINES,
-        ),
     ];
     push_guide_left_panels(
         frame,
@@ -4807,6 +4827,61 @@ fn push_flowers_left_cards(
     );
 }
 
+fn guide_column_prose_height(w: f32, body_font: f32, text: &str) -> f32 {
+    let pad = 10.0;
+    let inner_w = (w - pad * 2.0).max(1.0);
+    styled_text::ColoredLineBlock::measure(
+        text,
+        inner_w,
+        body_font,
+        color::PARCHMENT,
+        GlossaryMode::Prose,
+    )
+    .height()
+}
+
+fn push_guide_column_prose(
+    frame: &mut UiFrame,
+    x: f32,
+    w: f32,
+    top: f32,
+    body_font: f32,
+    text: &str,
+) {
+    let pad = 10.0;
+    let inner_w = (w - pad * 2.0).max(1.0);
+    let mut labels = Vec::new();
+    styled_text::push_colored_line_left(
+        &mut labels,
+        x + pad,
+        top,
+        inner_w,
+        body_font,
+        text,
+        color::PARCHMENT,
+        GlossaryMode::Prose,
+    );
+    frame.texts(labels);
+}
+
+fn guide_column_footer_height(w: f32, h: f32, body_font: f32, text: &str) -> f32 {
+    guide_column_prose_height(w, body_font, text) + h * 0.016
+}
+
+fn push_guide_column_footer_prose(
+    frame: &mut UiFrame,
+    x: f32,
+    w: f32,
+    bottom: f32,
+    h: f32,
+    body_font: f32,
+    text: &str,
+) {
+    let block_h = guide_column_prose_height(w, body_font, text);
+    let y = bottom - block_h - h * 0.008;
+    push_guide_column_prose(frame, x, w, y, body_font, text);
+}
+
 fn push_flowers_margin_scrawl(
     frame: &mut UiFrame,
     x: f32,
@@ -4857,10 +4932,16 @@ fn push_melds_left_cards(
     h: f32,
     body_font: f32,
     line_mul: f32,
+    intro: Option<&str>,
 ) {
     let section_font = typography::size(typography::H28, h);
     let pad = 10.0;
     let inner_w = (w - pad * 2.0).max(1.0);
+    let mut panels_top = top;
+    if let Some(text) = intro {
+        push_guide_column_prose(frame, x, w, panels_top, body_font, text);
+        panels_top += guide_column_prose_height(w, body_font, text) + h * 0.012;
+    }
     let sections: [(&str, &[&str]); 1] = [(
         melds_intro_copy::SECTION_SEQUENCE_RULES,
         melds_intro_copy::SEQUENCE_RULE_LINES,
@@ -4869,7 +4950,7 @@ fn push_melds_left_cards(
         frame,
         x,
         w,
-        top,
+        panels_top,
         bottom,
         h,
         body_font,
@@ -5203,11 +5284,11 @@ fn layout_tiles_page_grid(
     let row_gap = 6.0;
     let tile_gap = 3.0;
     let pad = 3.0;
-    let label_col_w = (col_w * 0.15).clamp(90.0, 160.0);
+    let label_col_w = (col_w * 0.18).clamp(100.0, 170.0);
     let tile_span_w = (col_w - label_col_w).max(1.0);
 
-    let title_font = typography::size(typography::H28, window_h);
-    let sub_font = typography::size(typography::H45, window_h);
+    let title_font = typography::size(typography::H24, window_h);
+    let sub_font = typography::size(typography::H36, window_h);
     let title_h = title_font * 1.05;
     let sub_line_h = sub_font * 1.02;
     let side_label_h = title_h
@@ -5517,8 +5598,8 @@ fn push_tiles_example_labels(
     h: f32,
     _scale: f32,
 ) {
-    let title_font = typography::size(typography::H28, h);
-    let sub_font = typography::size(typography::H45, h);
+    let title_font = typography::size(typography::H24, h);
+    let sub_font = typography::size(typography::H36, h);
     for lbl in labels {
         let title_color = color_for_token(lbl.title, color::CHAMPAGNE, GlossaryMode::Prose);
         frame.text(TextLabel {
@@ -5527,6 +5608,7 @@ fn push_tiles_example_labels(
             color: title_color,
             align: TextAlign::Left,
             font_px: Some(title_font),
+            bold: true,
             ..Default::default()
         });
         if let Some(sub) = lbl.subtitle {

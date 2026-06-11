@@ -655,9 +655,14 @@ pub(super) fn process_focus_and_actions(
             ))));
             return Some(None);
         }
+        let (cx, cy) = ctx.cursor_pos;
+        let focus_rects = scene.last_focus_rects.borrow();
+        if play_button_hit_at_cursor(&focus_rects, cx, cy) {
+            actions_for_scene.push(UiAction::ScoreHand);
+            continue;
+        }
         let action = match ctx.picked_gameplay_object {
             Some(GameplayPick::CashInButton) if cash_in_enabled => Some(UiAction::TriggerStructure),
-            Some(GameplayPick::BronzeMirror) => Some(UiAction::ScoreHand),
             Some(GameplayPick::DiscardBowl) => Some(UiAction::CommitDiscard),
             _ => None,
         };
@@ -1976,6 +1981,17 @@ pub(super) fn build_yaku_panel_and_tablets(
         yaku_tablet_placements,
         structure_showcase,
     }
+}
+
+/// Inset play-mirror click target — matches focus rects and hover tooltip.
+fn play_button_hit_at_cursor(
+    focus_rects: &[(FocusTarget, [f32; 4])],
+    cx: f32,
+    cy: f32,
+) -> bool {
+    focus_rects.iter().any(|(target, rect)| {
+        matches!(target, FocusTarget::Button(GameplayButton::Play)) && rect_contains(*rect, cx, cy)
+    })
 }
 
 /// Cursor hit-test for HUD focus targets, excluding full-height hand slot strips.

@@ -57,7 +57,6 @@ pub(super) fn generate_shop_stock(
         .map(|d| ShopItem {
             relic: d.id,
             name: d.name,
-            description: d.description,
             rarity: d.rarity,
             price: mode.scale_shop_price(relic_shop_price(d.id, relics)),
             sold: false,
@@ -116,7 +115,6 @@ fn tutorial_shop_stock(
         vec![ShopItem {
             relic: pair_power.id,
             name: pair_power.name,
-            description: pair_power.description,
             rarity: pair_power.rarity,
             price: mode.scale_shop_price(relic_shop_price(pair_power.id, &RelicState::default())),
             sold: false,

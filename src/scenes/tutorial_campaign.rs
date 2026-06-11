@@ -20,24 +20,29 @@ use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel
 use crate::render::world_space::LayoutAnchorPx;
 use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{
-    HintStyle, menu_footer_row, push_screen_footer_hint, screen_footer_reserve,
+    HintStyle, menu_footer_row, push_screen_footer_hint,
 };
 use crate::ui::focus_nav;
+use crate::ui::input::UiAction;
 use crate::ui::placement::PlacementAnchor;
 use crate::ui::styled_text;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::melds_intro_copy;
-use super::scoring_intro_copy;
-use super::tiles_intro_copy;
+use super::guide::{GuideLayout, GuideNavHeader, guide_nav_header, push_guide_chrome};
+use super::tutorial_intro_copy::{campaign, melds, tiles, try_it};
 use super::{BackgroundId, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 /// Gaps between intro + three left-panel sections on Part 1 (see guide tiles page).
 const TUTORIAL_TILES_COPY_SECTION_GAPS: usize = 3;
 
+/// Header page counter total — one more than [`PAGES`] so Part 2 reads "2/3"
+/// and advancing to the lesson feels like the third step.
+const TUTORIAL_DISPLAY_PAGES: usize = 3;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TutorialNav {
+    Prev,
     Back,
     Next,
     TryPlay,
@@ -76,7 +81,6 @@ struct TryItLayout {
 
 /// Two-column grid for Part 2 — How to Score.
 struct ScoringPageLayout {
-    article_rect: [f32; 4],
     left_col_x: f32,
     left_col_w: f32,
     right_col_x: f32,
@@ -166,23 +170,39 @@ impl SequenceCardSpacing {
 /// Part 1 — The Tiles (0-based index into `PAGES`).
 const TUTORIAL_PAGE_TILES: usize = 0;
 
+macro_rules! suit_ranks_tiles {
+    ($suit:expr) => {
+        &[
+            ($suit, 1),
+            ($suit, 2),
+            ($suit, 3),
+            ($suit, 4),
+            ($suit, 5),
+            ($suit, 6),
+            ($suit, 7),
+            ($suit, 8),
+            ($suit, 9),
+        ]
+    };
+}
+
 const PART1_TILE_GROUPS: &[TileGroup] = &[
     TileGroup {
         label: "Manzu",
         accent: Suit::Manzu.keyword_color(),
-        tiles: &[(Suit::Manzu, 1), (Suit::Manzu, 5), (Suit::Manzu, 9)],
+        tiles: suit_ranks_tiles!(Suit::Manzu),
         debuffed_visual: false,
     },
     TileGroup {
         label: "Souzu",
         accent: Suit::Souzu.keyword_color(),
-        tiles: &[(Suit::Souzu, 1), (Suit::Souzu, 5), (Suit::Souzu, 9)],
+        tiles: suit_ranks_tiles!(Suit::Souzu),
         debuffed_visual: false,
     },
     TileGroup {
         label: "Pinzu",
         accent: Suit::Pinzu.keyword_color(),
-        tiles: &[(Suit::Pinzu, 1), (Suit::Pinzu, 5), (Suit::Pinzu, 9)],
+        tiles: suit_ranks_tiles!(Suit::Pinzu),
         debuffed_visual: false,
     },
     TileGroup {
@@ -218,7 +238,7 @@ const PART1_TILE_GROUPS: &[TileGroup] = &[
 /// Part 2 — How to Score (0-based index into `PAGES`).
 const TUTORIAL_PAGE_SCORING: usize = 1;
 
-const SCORING_MELDS_HEADING: &str = melds_intro_copy::PAGE_TITLE;
+const SCORING_MELDS_HEADING: &str = melds::PAGE_TITLE;
 
 const SCORING_DEMO_GROUPS: &[TileGroup] = &[
     TileGroup {
@@ -255,13 +275,13 @@ const SCORING_DEMO_GROUPS: &[TileGroup] = &[
 /// Valid / invalid sequence examples — same captions as the guide melds page.
 const SCORING_SEQUENCE_GROUPS: &[TileGroup] = &[
     TileGroup {
-        label: "Valid sequence",
+        label: melds::VALID_SEQUENCE,
         accent: [0.35, 0.70, 0.85, 0.9],
         tiles: &[(Suit::Manzu, 3), (Suit::Manzu, 4), (Suit::Manzu, 5)],
         debuffed_visual: false,
     },
     TileGroup {
-        label: "Invalid sequence",
+        label: melds::INVALID_SEQUENCE,
         accent: color::STONE,
         tiles: &[(Suit::Manzu, 3), (Suit::Souzu, 4), (Suit::Pinzu, 5)],
         debuffed_visual: false,
@@ -270,45 +290,187 @@ const SCORING_SEQUENCE_GROUPS: &[TileGroup] = &[
 
 const PAGES: &[TutorialPage] = &[
     TutorialPage {
-        title: "Part 1 — The Tiles",
+        title: campaign::PART1_TITLE,
         subtitle: "",
         glossary: &[],
-        callout: Some("Next: melds and how to score."),
+        callout: Some(campaign::PART1_CALLOUT),
         try_it_demo: false,
         groups: PART1_TILE_GROUPS,
     },
     TutorialPage {
-        title: "Part 2 — Melds & Scoring",
-        subtitle: scoring_intro_copy::SUBTITLE,
-        glossary: &[
-            melds_intro_copy::PAGE_SUBTITLE,
-            "Only number suits can form sequences.",
-            "Sequences must stay in one suit.",
-            "Honors cannot form sequences.",
-            "Structure — played melds that will score when you cash in.",
-            "Discard — remove unwanted tiles from your hand. Discards are a limited resource.",
-            "Play — play melds to your structure. Plays are a limited resource.",
-            scoring_intro_copy::FLOW_REMINDER,
-            scoring_intro_copy::FINAL_EQUATION,
-        ],
-        callout: Some("Your actions are limited — make them count."),
+        title: campaign::PART2_TITLE,
+        subtitle: campaign::PART2_SUBTITLE,
+        glossary: campaign::PART2_GLOSSARY,
+        callout: Some(campaign::PART2_CALLOUT),
         try_it_demo: true,
         groups: SCORING_DEMO_GROUPS,
     },
 ];
 
-struct TutorialDemoLayoutPlan {
-    terminals_size: f32,
-    honor_size: f32,
-    /// Gap after the number-suit row, before Winds / Dragons / Flowers.
+fn tutorial_page_subtitle(page: &TutorialPage) -> Option<&str> {
+    if page.subtitle.is_empty() {
+        None
+    } else {
+        Some(page.subtitle)
+    }
+}
+
+fn tutorial_content_band(w: f32, h: f32, subtitle: Option<&str>) -> (GuideLayout, GuideNavHeader, f32, f32) {
+    let layout = GuideLayout::new(w, h);
+    let nav_header = guide_nav_header(w, h, layout.header_chrome().back, subtitle);
+    let jr = (w.min(h) / 720.0).clamp(1.0, 1.38);
+    let content_top = nav_header.content_top + 1.0 + (18.0 * jr).max(14.0);
+    let content_bottom = layout.content_bottom;
+    (layout, nav_header, content_top, content_bottom)
+}
+
+fn push_tutorial_header_nav(
+    frame: &mut UiFrame,
+    layout: &GuideLayout,
+    tree: &TreeState,
+    page: usize,
+    pages: usize,
+    scale: f32,
+    w: f32,
+    h: f32,
+    page_title: &str,
+    nav_header: &GuideNavHeader,
+    subtitle: Option<&str>,
+) {
+    let prev_enabled = page > 0;
+    let chrome = layout.header_chrome();
+    let items = [
+        FlatItem::new(TutorialNav::Back.id(), chrome.back, TutorialNav::Back),
+        FlatItem::new(TutorialNav::Prev.id(), chrome.prev, TutorialNav::Prev),
+        FlatItem::new(TutorialNav::Next.id(), chrome.next, TutorialNav::Next),
+    ];
+    let mut nav_quads = Vec::new();
+    let mut nav_texts = Vec::new();
+    let mut junk_buttons = Vec::new();
+    for item in &items {
+        let focused = tree.focused() == Some(item.id);
+        let (label, variant, state) = match item.action {
+            TutorialNav::Prev => {
+                let state = if !prev_enabled {
+                    ButtonState::Disabled
+                } else if focused {
+                    ButtonState::Hover
+                } else {
+                    ButtonState::Rest
+                };
+                ("◀️", ButtonVariant::Default, state)
+            }
+            TutorialNav::Back => {
+                let state = if !prev_enabled {
+                    ButtonState::Disabled
+                } else if focused {
+                    ButtonState::Hover
+                } else {
+                    ButtonState::Rest
+                };
+                ("Back", ButtonVariant::Default, state)
+            }
+            TutorialNav::Next => {
+                let state = if focused {
+                    ButtonState::Hover
+                } else {
+                    ButtonState::Rest
+                };
+                ("▶️", ButtonVariant::Default, state)
+            }
+            TutorialNav::TryDiscard | TutorialNav::TryPlay | TutorialNav::TryTrigger => {
+                continue;
+            }
+        };
+        widget::push_button(
+            &mut nav_quads,
+            &mut nav_texts,
+            &mut junk_buttons,
+            widget::ButtonSpec {
+                rect: item.rect,
+                label,
+                variant,
+                state,
+                action: UiAction::Confirm,
+            },
+        );
+        if focused {
+            focus_nav::push_focus_ring(item.rect, scale, w, h, &mut nav_quads);
+        }
+    }
+    frame.quads(nav_quads);
+    for label in nav_texts {
+        frame.text(label);
+    }
+    let counter_font = typography::size(typography::H28, h);
+    let counter_line_h = styled_text::colored_row_line_step(counter_font);
+    let btn_y = chrome.prev[1];
+    let btn_h = chrome.prev[3];
+    let counter_rect = [
+        chrome.page_counter[0],
+        btn_y + (btn_h - counter_line_h) * 0.5,
+        chrome.page_counter[2],
+        counter_line_h,
+    ];
+    frame.text(TextLabel {
+        rect: counter_rect,
+        text: format!("{} / {}", page + 1, pages),
+        color: color::UMBER,
+        align: TextAlign::Center,
+        font_px: Some(counter_font),
+        bold: true,
+        ..Default::default()
+    });
+    junk_buttons.clear();
+
+    frame.text(TextLabel {
+        rect: [
+            nav_header.copy_x,
+            nav_header.title_y,
+            w * 0.55,
+            nav_header.title_font * 1.15,
+        ],
+        text: page_title.into(),
+        color: color::CHAMPAGNE,
+        align: TextAlign::Left,
+        font_px: Some(nav_header.title_font),
+        bold: true,
+        ..Default::default()
+    });
+    if let Some(sub) = subtitle {
+        let mut subtitle_labels = Vec::new();
+        styled_text::push_colored_line_left(
+            &mut subtitle_labels,
+            nav_header.copy_x,
+            nav_header.subtitle_y,
+            w * 0.72,
+            nav_header.body_font,
+            sub,
+            color::PARCHMENT,
+            GlossaryMode::Prose,
+        );
+        frame.texts(subtitle_labels);
+    }
+}
+
+/// Part 1 tile showcase — side labels, tiles left-aligned in each row.
+struct TutorialTilesGridPlan {
+    tile_size: f32,
+    tile_gap: f32,
     row_gap: f32,
-    stack_top: f32,
+    pad: f32,
+    label_col_w: f32,
+}
+
+struct TutorialTilesSideLabel {
+    rect: [f32; 4],
+    text: &'static str,
+    accent: [f32; 4],
 }
 
 /// Part 1 left-column copy: shared measure + draw so intro band and body stay aligned.
 struct TutorialTilesCopyLayout {
     font_cap_px: f32,
-    intro_h: f32,
     section_gap: f32,
     start_y: f32,
 }
@@ -355,18 +517,10 @@ impl TutorialCampaignScene {
 
     fn try_it_demo_line(page_index: usize, flash: Option<TryItFlash>) -> Option<&'static str> {
         match (page_index, flash) {
-            (TUTORIAL_PAGE_SCORING, Some(TryItFlash::CashIn)) => {
-                Some("Demo: 4 **chips** × 3 **mult** = 12")
-            }
-            (TUTORIAL_PAGE_SCORING, Some(TryItFlash::Play)) => {
-                Some("You **Play**ed a meld to your structure.")
-            }
-            (TUTORIAL_PAGE_SCORING, Some(TryItFlash::Discard)) => {
-                Some("Discarded tiles are removed to the river.")
-            }
-            (TUTORIAL_PAGE_SCORING, None) => {
-                Some("These are the **Discard**, **Play**, and **Cash In** buttons. Try them.")
-            }
+            (TUTORIAL_PAGE_SCORING, Some(TryItFlash::CashIn)) => Some(try_it::CASH_IN),
+            (TUTORIAL_PAGE_SCORING, Some(TryItFlash::Play)) => Some(try_it::PLAY),
+            (TUTORIAL_PAGE_SCORING, Some(TryItFlash::Discard)) => Some(try_it::DISCARD),
+            (TUTORIAL_PAGE_SCORING, None) => Some(try_it::PROMPT),
             _ => None,
         }
     }
@@ -436,44 +590,23 @@ impl TutorialCampaignScene {
         [face, thickness, face * 0.94]
     }
 
-    fn scoring_page_subtitle_height(panel_w: f32, h: f32, scale: f32, subtitle: &str) -> f32 {
-        let subtitle_w = panel_w - 60.0 * scale;
-        styled_text::styled_line_block_height(
-            subtitle,
-            subtitle_w,
-            typography::H36,
-            h,
-            GlossaryMode::Prose,
-            color::PARCHMENT,
-        )
-        .min(128.0 * scale)
-    }
-
     fn compute_scoring_page_layout(
         page: &TutorialPage,
         w: f32,
         h: f32,
-        panel_x: f32,
-        panel_y: f32,
-        panel_w: f32,
-        _panel_h: f32,
+        content_x: f32,
+        content_w: f32,
+        content_top: f32,
+        content_bottom: f32,
     ) -> ScoringPageLayout {
         let scale = metrics::scene_scale(w, h);
-        let pad_x = 34.0 * scale;
-        let gutter = (panel_w * 0.05).max(18.0 * scale);
-        let inner_w = panel_w - pad_x * 2.0;
-        let left_col_w = inner_w * 0.44;
-        let right_col_w = inner_w - gutter - left_col_w;
-        let left_col_x = panel_x + pad_x;
+        let gutter = (content_w * 0.05).max(18.0 * scale);
+        let left_col_w = content_w * 0.44;
+        let right_col_w = content_w - gutter - left_col_w;
+        let left_col_x = content_x;
         let right_col_x = left_col_x + left_col_w + gutter;
 
-        let article_y = panel_y + (18.0 + 40.0 + 4.0) * scale;
-        let article_w = panel_w - 60.0 * scale;
-        let article_x = panel_x + 30.0 * scale;
-        let article_h = Self::scoring_page_subtitle_height(panel_w, h, scale, page.subtitle);
-        let article_rect = [article_x, article_y, article_w, article_h];
-
-        let section_row_top = article_y + article_h + 6.0 * scale;
+        let section_row_top = content_top;
         let melds_heading_h = 22.0 * scale;
         let melds_heading_y = section_row_top + 4.0 * scale;
         let pair_row_top = melds_heading_y + melds_heading_h + 4.0 * scale;
@@ -497,18 +630,16 @@ impl TutorialCampaignScene {
             Self::glossary_term_metrics(page.glossary, glossary_w, term_font, scale);
         let glossary_block_h = 28.0 * scale + 24.0 * scale + terms_h;
 
-        let nav_top = Self::tutorial_nav_top(w, h, scale);
         let callout_rect = page.callout.map(|callout| {
             let callout_w = right_col_w - 8.0 * scale;
             let callout_x = right_col_x + 4.0 * scale;
             let callout_h =
                 Self::callout_box_height(callout, callout_w, scale, h, None, typography::H36);
-            let callout_y = nav_top - callout_h - 14.0 * scale;
+            let callout_y = content_bottom - callout_h - 14.0 * scale;
             [callout_x, callout_y, callout_w, callout_h]
         });
 
         ScoringPageLayout {
-            article_rect,
             left_col_x,
             left_col_w,
             right_col_x,
@@ -636,14 +767,8 @@ impl TutorialCampaignScene {
     }
 
     fn try_it_demo_callout_max_height(col_w: f32, scale: f32, h: f32) -> f32 {
-        const LINES: &[&str] = &[
-            "These are the **Discard**, **Play**, and **Cash In** buttons. Try them.",
-            "Demo: 4 **chips** × 3 **mult** = 12",
-            "You **Play**ed a meld to your structure.",
-            "Discarded tiles are removed to the river.",
-        ];
         let callout_w = col_w - 8.0 * scale;
-        LINES
+        try_it::FLASH_LINES
             .iter()
             .map(|line| Self::callout_box_height(line, callout_w, scale, h, None, typography::H42))
             .fold(0.0f32, f32::max)
@@ -687,29 +812,29 @@ impl TutorialCampaignScene {
         let block = |text: &str, tier: f32, color: [f32; 4]| {
             Self::tutorial_tiles_copy_block_height(text, copy_w, tier, h, font_cap_px, color)
         };
-        let mut natural_h = block(tiles_intro_copy::INTRO, typography::H32, color::PARCHMENT);
+        let mut natural_h = block(tiles::INTRO, typography::H32, color::PARCHMENT);
         natural_h += block(
-            tiles_intro_copy::NUMBER_SUITS_HEADING,
+            tiles::NUMBER_SUITS_HEADING,
             typography::H28,
             color::CHAMPAGNE,
         );
-        for line in tiles_intro_copy::NUMBER_SUIT_LINES {
+        for line in tiles::NUMBER_SUIT_LINES {
             natural_h += block(line, typography::H32, color::PARCHMENT);
         }
         natural_h += block(
-            tiles_intro_copy::HONOR_SUITS_HEADING,
+            tiles::HONOR_SUITS_HEADING,
             typography::H28,
             color::CHAMPAGNE,
         );
-        for line in tiles_intro_copy::HONOR_LINES {
+        for line in tiles::HONOR_LINES {
             natural_h += block(line, typography::H32, color::PARCHMENT);
         }
         natural_h += block(
-            tiles_intro_copy::FLOWERS_HEADING,
+            tiles::FLOWERS_HEADING,
             typography::H28,
             color::CHAMPAGNE,
         );
-        for line in tiles_intro_copy::FLOWER_LINES {
+        for line in tiles::FLOWER_LINES {
             natural_h += block(line, typography::H32, color::PARCHMENT);
         }
         natural_h
@@ -737,14 +862,8 @@ impl TutorialCampaignScene {
         lo
     }
 
-    /// Left copy may extend below the tile-column `content_floor` — the page
-    /// callout only occupies the right column, not this text stack.
-    fn tutorial_nav_top(window_w: f32, h: f32, scale: f32) -> f32 {
-        h - screen_footer_reserve(window_w, h) - (46.0 * scale).max(30.0) - 22.0 * scale
-    }
-
-    fn tutorial_tiles_copy_floor(nav_top: f32, scale: f32) -> f32 {
-        nav_top - (24.0 * scale).max(18.0)
+    fn tutorial_tiles_copy_floor(content_bottom: f32, scale: f32) -> f32 {
+        content_bottom - (24.0 * scale).max(18.0)
     }
 
     fn compute_tutorial_tiles_copy_layout(
@@ -755,7 +874,7 @@ impl TutorialCampaignScene {
     ) -> TutorialTilesCopyLayout {
         let body_nominal = typography::size(typography::H32, h);
         let min_cap = body_nominal * 0.55;
-        let max_cap = body_nominal * 3.0;
+        let max_cap = body_nominal * 0.82;
         let section_gap = h * 0.006;
         let copy_bottom_pad = h * 0.008;
         let available = (copy_floor - content_top - copy_bottom_pad).max(1.0);
@@ -765,25 +884,12 @@ impl TutorialCampaignScene {
         let font_cap_px =
             Self::tutorial_tiles_copy_font_cap_for_budget(copy_w, h, text_budget, min_cap, max_cap);
         let start_y = content_top;
-        let intro_h = Self::tutorial_tiles_copy_block_height(
-            tiles_intro_copy::INTRO,
-            copy_w,
-            typography::H32,
-            h,
-            font_cap_px,
-            color::PARCHMENT,
-        );
 
         TutorialTilesCopyLayout {
             font_cap_px,
-            intro_h,
             section_gap,
             start_y,
         }
-    }
-
-    fn tutorial_intro_band_height(layout: &TutorialTilesCopyLayout, h: f32) -> f32 {
-        layout.intro_h + h * 0.014
     }
 
     fn push_tutorial_tiles_copy_line(
@@ -838,7 +944,7 @@ impl TutorialCampaignScene {
             copy_x,
             cursor,
             copy_w,
-            tiles_intro_copy::INTRO,
+            tiles::INTRO,
             typography::H32,
             color::PARCHMENT,
             h,
@@ -851,13 +957,13 @@ impl TutorialCampaignScene {
             copy_x,
             cursor,
             copy_w,
-            tiles_intro_copy::NUMBER_SUITS_HEADING,
+            tiles::NUMBER_SUITS_HEADING,
             typography::H28,
             color::CHAMPAGNE,
             h,
             font_cap_px,
         );
-        for line in tiles_intro_copy::NUMBER_SUIT_LINES {
+        for line in tiles::NUMBER_SUIT_LINES {
             cursor += Self::push_tutorial_tiles_copy_line(
                 texts,
                 copy_x,
@@ -877,13 +983,13 @@ impl TutorialCampaignScene {
             copy_x,
             cursor,
             copy_w,
-            tiles_intro_copy::HONOR_SUITS_HEADING,
+            tiles::HONOR_SUITS_HEADING,
             typography::H28,
             color::CHAMPAGNE,
             h,
             font_cap_px,
         );
-        for line in tiles_intro_copy::HONOR_LINES {
+        for line in tiles::HONOR_LINES {
             cursor += Self::push_tutorial_tiles_copy_line(
                 texts,
                 copy_x,
@@ -903,13 +1009,13 @@ impl TutorialCampaignScene {
             copy_x,
             cursor,
             copy_w,
-            tiles_intro_copy::FLOWERS_HEADING,
+            tiles::FLOWERS_HEADING,
             typography::H28,
             color::CHAMPAGNE,
             h,
             font_cap_px,
         );
-        for line in tiles_intro_copy::FLOWER_LINES {
+        for line in tiles::FLOWER_LINES {
             cursor += Self::push_tutorial_tiles_copy_line(
                 texts,
                 copy_x,
@@ -951,48 +1057,33 @@ impl TutorialCampaignScene {
         (heights, total_h)
     }
 
-    fn scoring_page_try_it_layout(
-        page: &TutorialPage,
-        w: f32,
-        h: f32,
-        panel_x: f32,
-        panel_y: f32,
-        panel_w: f32,
-    ) -> TryItLayout {
-        let panel_h = h * 0.84;
-        Self::compute_scoring_page_layout(page, w, h, panel_x, panel_y, panel_w, panel_h).try_it
+    fn scoring_page_try_it_layout(page: &TutorialPage, w: f32, h: f32) -> TryItLayout {
+        let (layout, _, content_top, content_bottom) =
+            tutorial_content_band(w, h, tutorial_page_subtitle(page));
+        Self::compute_scoring_page_layout(
+            page,
+            w,
+            h,
+            layout.content_x,
+            layout.content_w,
+            content_top,
+            content_bottom,
+        )
+        .try_it
     }
 
     fn flat_items(&self, w: f32, h: f32) -> Vec<FlatItem<TutorialNav>> {
-        let scale = metrics::scene_scale(w, h);
-        let btn_w = (170.0 * scale).max(120.0);
-        let btn_h = (46.0 * scale).max(30.0);
-        let gap = 14.0 * scale;
-        let y = Self::tutorial_nav_top(w, h, scale);
-        let next_x = w * 0.5 + gap * 0.5;
-        let back_x = next_x - btn_w - gap;
-
         let page = self.page();
-        let panel_x = w * 0.06;
-        let panel_w = w * 0.88;
-        let panel_y = h * 0.07;
-
-        let mut items = Vec::new();
-        if self.page > 0 {
-            items.push(FlatItem::new(
-                TutorialNav::Back.id(),
-                [back_x, y, btn_w, btn_h],
-                TutorialNav::Back,
-            ));
-        }
-        items.push(FlatItem::new(
-            TutorialNav::Next.id(),
-            [next_x, y, btn_w, btn_h],
-            TutorialNav::Next,
-        ));
+        let layout = GuideLayout::new(w, h);
+        let chrome = layout.header_chrome();
+        let mut items = vec![
+            FlatItem::new(TutorialNav::Back.id(), chrome.back, TutorialNav::Back),
+            FlatItem::new(TutorialNav::Prev.id(), chrome.prev, TutorialNav::Prev),
+            FlatItem::new(TutorialNav::Next.id(), chrome.next, TutorialNav::Next),
+        ];
 
         if page.try_it_demo {
-            let t = Self::scoring_page_try_it_layout(page, w, h, panel_x, panel_y, panel_w);
+            let t = Self::scoring_page_try_it_layout(page, w, h);
             items.push(FlatItem::new(
                 TutorialNav::TryDiscard.id(),
                 t.discard_rect,
@@ -1088,8 +1179,8 @@ impl TutorialCampaignScene {
         let card_gap = if stack_vertical { 0.0 } else { col_w * 0.065 };
         let valid_accent = [0.35, 0.70, 0.85, 0.9];
         let invalid_accent = [0.65, 0.35, 0.35, 0.9];
-        const VALID_HEADER: &str = "Valid sequence";
-        const INVALID_HEADER: &str = "Invalid sequence";
+        const VALID_HEADER: &str = melds::VALID_SEQUENCE;
+        const INVALID_HEADER: &str = melds::INVALID_SEQUENCE;
 
         struct SeqCardSpec<'a> {
             group: &'a TileGroup,
@@ -1225,15 +1316,6 @@ impl TutorialCampaignScene {
         (placements, row_bottom)
     }
 
-    fn tutorial_labeled_row_height(tile_size: f32, scale: f32, h: f32) -> f32 {
-        let underline_gap = (8.0 * scale).max(5.0);
-        let underline_h = (3.0 * scale).max(2.0);
-        let label_gap = (5.0 * scale).max(3.0);
-        let label_line_h =
-            typography::size(typography::H42, h) * crate::ui::widget::PLAIN_TEXT_LINE_STEP_MUL;
-        tile_size + underline_gap + underline_h + label_gap + label_line_h
-    }
-
     fn sequence_card_tile_metrics(
         col_w: f32,
         h: f32,
@@ -1254,103 +1336,158 @@ impl TutorialCampaignScene {
         (card_w, card_tile_size)
     }
 
-    fn plan_tutorial_demo_layout(
-        page: &TutorialPage,
+    fn tutorial_tiles_row_size(tile_count: usize, tile_span_w: f32, min_gap: f32) -> f32 {
+        let n = tile_count.max(1);
+        ((tile_span_w - min_gap * (n.saturating_sub(1)) as f32) / n as f32).max(1.0)
+    }
+
+    fn layout_tile_row_left_aligned(
+        tiles: &[(Suit, u8)],
+        debuffed_visual: bool,
+        start_x: f32,
+        center_y: f32,
+        tile_size: f32,
+        tile_gap: f32,
+        next_id: &mut u32,
+    ) -> Vec<ShowcaseTilePlacement> {
+        let mut placements = Vec::with_capacity(tiles.len());
+        let mut cursor_x = start_x;
+        for &(suit, rank) in tiles {
+            let px = cursor_x + tile_size * 0.5;
+            let mut tile = Tile::new(suit, rank, *next_id);
+            tile.debuffed_visual = debuffed_visual;
+            placements.push(ShowcaseTilePlacement {
+                tile,
+                center_pos: [px, center_y, 0.0],
+                rotation: [0.0, 0.0, std::f32::consts::PI],
+                scale: 1.0,
+                size_px: tile_size,
+                brightness: 1.08,
+                opacity: 1.0,
+                selected: false,
+                hovered: false,
+                outline: false,
+                glow: false,
+                glow_color: None,
+                outline_sel: None,
+                pick_id: None,
+                overlay_rect_group: None,
+            });
+            *next_id += 1;
+            cursor_x += tile_size + tile_gap;
+        }
+        placements
+    }
+
+    fn plan_tutorial_tiles_grid_layout(
+        groups: &[TileGroup],
         col_w: f32,
-        h: f32,
         scale: f32,
         content_top: f32,
         content_floor: f32,
-    ) -> TutorialDemoLayoutPlan {
-        let available = (content_floor - content_top).max(h * 0.30);
-        let row_gap = (14.0 * scale).max(h * 0.016);
-        let mut max_tile = (available / 2.8).min(h * 0.054).max(20.0);
-
-        for _ in 0..28 {
-            let terminals_size = Self::tutorial_row_tile_size(page, &[0, 1, 2], col_w, max_tile);
-            let honor_size = Self::tutorial_row_tile_size(page, &[3, 4, 5], col_w, max_tile);
-            let terminals_block_h = Self::tutorial_labeled_row_height(terminals_size, scale, h);
-            let honor_block_h = Self::tutorial_labeled_row_height(honor_size, scale, h);
-            let blocks_total = terminals_block_h + row_gap + honor_block_h;
-            if blocks_total <= available {
-                return TutorialDemoLayoutPlan {
-                    terminals_size,
-                    honor_size,
-                    row_gap,
-                    stack_top: content_top,
-                };
-            }
-            max_tile *= 0.88;
+    ) -> TutorialTilesGridPlan {
+        let available_h = (content_floor - content_top).max(1.0);
+        let row_gap = (5.0 * scale).max(3.0);
+        let pad = (3.0 * scale).max(2.0);
+        let label_col_w = (col_w * 0.18).clamp(100.0, 132.0);
+        let tile_span_w = (col_w - label_col_w).max(1.0);
+        let min_gap = (2.0 * scale).max(1.5);
+        let max_tiles = groups
+            .iter()
+            .map(|group| group.tiles.len())
+            .max()
+            .unwrap_or(1);
+        let mut tile_size = Self::tutorial_tiles_row_size(max_tiles, tile_span_w, min_gap);
+        let row_count = groups.len().max(1);
+        let natural_h =
+            (pad * 2.0 + tile_size) * row_count as f32 + row_gap * row_count.saturating_sub(1) as f32;
+        if natural_h > available_h * 0.96 {
+            tile_size *= (available_h * 0.96 / natural_h).clamp(0.5, 1.0);
         }
 
-        let terminals_size = Self::tutorial_row_tile_size(page, &[0, 1, 2], col_w, 20.0);
-        let honor_size = Self::tutorial_row_tile_size(page, &[3, 4, 5], col_w, 20.0);
-        TutorialDemoLayoutPlan {
-            terminals_size,
-            honor_size,
+        TutorialTilesGridPlan {
+            tile_size,
+            tile_gap: min_gap,
             row_gap,
-            stack_top: content_top,
+            pad,
+            label_col_w,
         }
     }
 
-    /// Part 1 — two-column layout: copy left, tile demos right.
+    /// Part 1 — two-column layout: copy left, tile demos right (labels beside rows).
     fn layout_tutorial_tiles_demo_column(
-        cam: &CameraParams,
         page: &TutorialPage,
-        window_w: f32,
-        h: f32,
         col_x: f32,
         col_w: f32,
+        h: f32,
+        scale: f32,
         content_top: f32,
         content_floor: f32,
-        scale: f32,
-    ) -> (Vec<ShowcaseTilePlacement>, Vec<TilesPageLabel>, f32, f32) {
-        let plan =
-            Self::plan_tutorial_demo_layout(page, col_w, h, scale, content_top, content_floor);
+    ) -> (Vec<ShowcaseTilePlacement>, Vec<TutorialTilesSideLabel>, f32, f32) {
+        let plan = Self::plan_tutorial_tiles_grid_layout(
+            page.groups,
+            col_w,
+            scale,
+            content_top,
+            content_floor,
+        );
 
+        let title_font = typography::size(typography::H24, h);
+        let tile_start_x = col_x + plan.label_col_w;
         let mut placements = Vec::new();
         let mut labels = Vec::new();
         let mut next_id = 30_000u32;
-        let mut cursor = plan.stack_top;
+        let mut cursor_y = content_top;
 
-        let terminals_center = cursor + plan.terminals_size * 0.5;
-        let (row_placements, row_labels, terminals_bottom) = Self::layout_tutorial_tile_row(
-            cam,
-            page,
-            &[0, 1, 2],
-            col_x,
-            window_w,
-            col_w,
-            h,
-            terminals_center,
-            scale,
-            plan.terminals_size,
-            &mut next_id,
-        );
-        placements.extend(row_placements);
-        labels.extend(row_labels);
-        cursor = terminals_bottom + plan.row_gap;
+        let tile_size = plan.tile_size;
+        let block_h = plan.pad * 2.0 + tile_size;
 
-        let honor_center = cursor + plan.honor_size * 0.5;
-        let (honor_placements, honor_labels, honor_bottom) = Self::layout_tutorial_tile_row(
-            cam,
-            page,
-            &[3, 4, 5],
-            col_x,
-            window_w,
-            col_w,
-            h,
-            honor_center,
-            scale,
-            plan.honor_size,
-            &mut next_id,
-        );
-        placements.extend(honor_placements);
-        labels.extend(honor_labels);
+        for group in page.groups {
+            let center_y = cursor_y + plan.pad + tile_size * 0.5;
+            labels.push(TutorialTilesSideLabel {
+                rect: [
+                    col_x + plan.pad,
+                    cursor_y + plan.pad + (block_h - plan.pad * 2.0 - title_font) * 0.5,
+                    plan.label_col_w - plan.pad * 2.0,
+                    title_font * 1.15,
+                ],
+                text: group.label,
+                accent: group.accent,
+            });
+            placements.extend(Self::layout_tile_row_left_aligned(
+                group.tiles,
+                group.debuffed_visual,
+                tile_start_x,
+                center_y,
+                tile_size,
+                plan.tile_gap,
+                &mut next_id,
+            ));
+            cursor_y += block_h + plan.row_gap;
+        }
 
-        let content_bottom = honor_bottom.min(content_floor);
+        let content_bottom = (cursor_y - plan.row_gap).min(content_floor);
         let tile_light_y = content_top + (content_bottom - content_top) * 0.35;
         (placements, labels, content_bottom, tile_light_y)
+    }
+
+    fn draw_tutorial_tiles_side_labels(
+        texts: &mut Vec<TextLabel>,
+        labels: &[TutorialTilesSideLabel],
+        h: f32,
+    ) {
+        let title_font = typography::size(typography::H24, h);
+        for label in labels {
+            texts.push(TextLabel {
+                rect: label.rect,
+                text: label.text.into(),
+                color: label.accent,
+                align: TextAlign::Left,
+                font_px: Some(title_font),
+                bold: true,
+                ..Default::default()
+            });
+        }
     }
 
     fn layout_tutorial_tile_row(
@@ -1501,12 +1638,14 @@ impl SceneBehavior for TutorialCampaignScene {
         }
 
         match action {
-            Some(TutorialNav::Back) => {
-                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+            Some(TutorialNav::Back) | Some(TutorialNav::Prev) => {
                 if self.page > 0 {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                     self.page -= 1;
                     self.reset_try_it_demo();
                     ctx.bus.push(GameEvent::UiSound(SfxId::TileClick));
+                } else {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
                 }
                 None
             }
@@ -1556,8 +1695,8 @@ impl SceneBehavior for TutorialCampaignScene {
         let h = ctx.layout.window_h;
         let scale = metrics::scene_scale(w, h);
         let page = self.page();
+        let subtitle = tutorial_page_subtitle(page);
 
-        let mut bg_quads = Vec::new();
         let mut fg_quads = Vec::new();
         let mut texts = Vec::new();
         let mut wood_tablet_placements: Vec<Object3d> = Vec::new();
@@ -1565,86 +1704,46 @@ impl SceneBehavior for TutorialCampaignScene {
         let mut mirror_placement: Option<Object3d> = None;
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
-        if ctx.effect_layers.starfield {
-            frame.starfield();
-        }
-        if ctx.effect_layers.golden_dust {
-            frame.golden_dust();
-        }
         let cam = doc_tile_camera(h);
         frame.camera_override = Some(cam);
         frame.showcase_render_hints.layout_use_ray_plane_z = true;
         frame.showcase_render_hints.doc_tile_no_shadow = true;
 
-        let panel_x = w * 0.06;
-        let panel_y = h * 0.07;
-        let panel_w = w * 0.88;
-        let panel_h = h * 0.84;
-        bg_quads.push(GpuInstance {
-            rect: [panel_x, panel_y, panel_w, panel_h],
-            color: color::WALNUT_DEEP,
-            user: 0,
-        });
-        bg_quads.push(GpuInstance {
-            rect: [panel_x, panel_y, panel_w, (2.0 * scale).max(1.0)],
-            color: color::BRASS,
-            user: 0,
-        });
-        bg_quads.push(GpuInstance {
-            rect: [panel_x, panel_y, (2.0 * scale).max(1.0), panel_h],
-            color: color::BRASS,
-            user: 0,
-        });
-        bg_quads.push(GpuInstance {
-            rect: [
-                panel_x + panel_w - (2.0 * scale).max(1.0),
-                panel_y,
-                (2.0 * scale).max(1.0),
-                panel_h,
-            ],
-            color: color::BRASS,
-            user: 0,
-        });
-        bg_quads.push(GpuInstance {
-            rect: [
-                panel_x,
-                panel_y + panel_h - (2.0 * scale).max(1.0),
-                panel_w,
-                (2.0 * scale).max(1.0),
-            ],
-            color: color::BRASS,
-            user: 0,
+        frame.scene_lighting.push_smooth(PointLight {
+            pos: [w * 0.5, h * 0.38, h * 1.35],
+            radius: h * 2.9,
+            color: color::rgb(color::PARCHMENT),
+            intensity: 1.15,
         });
 
-        let title_font = if self.page == TUTORIAL_PAGE_TILES {
-            typography::size(typography::H24, h)
+        let (layout, nav_header, _, content_bottom) = tutorial_content_band(w, h, subtitle);
+        let content_top = push_guide_chrome(&mut frame, &layout, nav_header.content_top);
+        push_tutorial_header_nav(
+            &mut frame,
+            &layout,
+            &self.tree,
+            self.page,
+            TUTORIAL_DISPLAY_PAGES,
+            scale,
+            w,
+            h,
+            page.title,
+            &nav_header,
+            subtitle,
+        );
+        let content_floor = content_bottom;
+
+        let left_w = if self.page == TUTORIAL_PAGE_TILES {
+            layout.content_w * 0.32
         } else {
-            typography::size(typography::H36, h)
+            layout.content_w * 0.38
         };
-        texts.push(TextLabel {
-            rect: [
-                panel_x + 24.0 * scale,
-                panel_y + 18.0 * scale,
-                panel_w - 48.0 * scale,
-                40.0 * scale,
-            ],
-            text: page.title.to_string(),
-            color: color::CHAMPAGNE,
-            align: TextAlign::Center,
-            font_px: Some(title_font),
-            ..Default::default()
-        });
-
-        let nav_top = Self::tutorial_nav_top(w, h, scale);
-        let content_top = panel_y + panel_h * 0.11;
-        let pad_x = panel_w * 0.04;
-        // Wider copy column — fewer wraps so body text can scale up to fill height.
-        let copy_frac = if h < 820.0 { 0.46 } else { 0.40 };
-        let copy_w = panel_w * copy_frac;
-        let col_gutter = panel_w * 0.05;
-        let copy_x = panel_x + pad_x;
-        let tile_col_x = copy_x + copy_w + col_gutter;
-        let tile_col_w = panel_x + panel_w - pad_x - tile_col_x;
+        let col_gutter = layout.content_w * 0.02;
+        let right_w = layout.content_w - left_w - col_gutter;
+        let copy_x = layout.content_x;
+        let copy_w = left_w;
+        let tile_col_x = copy_x + left_w + col_gutter;
+        let tile_col_w = right_w;
 
         let tiles_callout_h = if self.page == TUTORIAL_PAGE_TILES {
             page.callout.map_or(0.0, |callout| {
@@ -1654,13 +1753,13 @@ impl SceneBehavior for TutorialCampaignScene {
             0.0
         };
         let callout_band = tiles_callout_h + 28.0 * scale;
-        let content_floor = if self.page == TUTORIAL_PAGE_TILES {
-            nav_top - callout_band
+        let tile_content_floor = if self.page == TUTORIAL_PAGE_TILES {
+            content_floor - callout_band
         } else {
-            nav_top - panel_h * 0.13
+            content_floor
         };
 
-        let copy_floor = Self::tutorial_tiles_copy_floor(nav_top, scale);
+        let copy_floor = Self::tutorial_tiles_copy_floor(content_floor, scale);
         let tiles_copy_layout = if self.page == TUTORIAL_PAGE_TILES {
             Some(Self::compute_tutorial_tiles_copy_layout(
                 copy_w,
@@ -1671,15 +1770,17 @@ impl SceneBehavior for TutorialCampaignScene {
         } else {
             None
         };
-        let intro_band_h = tiles_copy_layout
-            .as_ref()
-            .map(|layout| Self::tutorial_intro_band_height(layout, h))
-            .unwrap_or(0.0);
-        let tile_area_top = content_top + intro_band_h;
+        let tile_area_top = content_top;
 
         let scoring_layout = if self.page == TUTORIAL_PAGE_SCORING && page.try_it_demo {
             Some(Self::compute_scoring_page_layout(
-                page, w, h, panel_x, panel_y, panel_w, panel_h,
+                page,
+                w,
+                h,
+                layout.content_x,
+                layout.content_w,
+                content_top,
+                content_floor,
             ))
         } else {
             None
@@ -1700,27 +1801,17 @@ impl SceneBehavior for TutorialCampaignScene {
                 user: 0,
             });
             let (placements, labels, bottom, light_y) = Self::layout_tutorial_tiles_demo_column(
-                &cam,
                 page,
-                w,
-                h,
                 tile_col_x,
                 tile_col_w,
-                tile_area_top,
-                content_floor,
+                h,
                 scale,
+                tile_area_top,
+                tile_content_floor,
             );
-            Self::draw_tiles_page_group_labels(&mut texts, &mut fg_quads, &labels, scale, h);
+            Self::draw_tutorial_tiles_side_labels(&mut texts, &labels, h);
             (placements, light_y, bottom)
         } else if let Some(ref scoring) = scoring_layout {
-            let [article_x, article_y, article_w, article_h] = scoring.article_rect;
-            Self::push_tutorial_text_block(
-                &mut texts,
-                [article_x, article_y, article_w, article_h],
-                page.subtitle,
-                Self::tutorial_text_style(typography::H36, color::PARCHMENT, TextAlign::Center),
-                h,
-            );
             let gutter_mid = scoring.left_col_x
                 + scoring.left_col_w
                 + (scoring.right_col_x - scoring.left_col_x - scoring.left_col_w) * 0.5;
@@ -1783,7 +1874,7 @@ impl SceneBehavior for TutorialCampaignScene {
         };
 
         let try_it_layout = scoring_layout.as_ref().map(|s| s.try_it);
-        let tiles_page_footer = content_floor;
+        let tiles_page_footer = tile_content_floor;
         let scoring_glossary_metrics = scoring_layout
             .as_ref()
             .map(|s| (s.term_heights.clone(), s.term_heights.iter().sum::<f32>()));
@@ -1794,7 +1885,7 @@ impl SceneBehavior for TutorialCampaignScene {
         } else if self.page == TUTORIAL_PAGE_TILES {
             tiles_page_footer + 20.0 * scale
         } else {
-            (content_bottom + 14.0 * scale).min(nav_top - 120.0 * scale)
+            (content_bottom + 14.0 * scale).min(content_floor - 120.0 * scale)
         };
 
         if let (Some(ref layout), Some(scoring)) = (try_it_layout, scoring_layout.as_ref()) {
@@ -1809,6 +1900,7 @@ impl SceneBehavior for TutorialCampaignScene {
             let play_center_y = layout.play_rect[1] + layout.play_rect[3] * 0.5;
             let trigger_center_x = layout.trigger_rect[0] + layout.trigger_rect[2] * 0.5;
             let trigger_center_y = layout.trigger_rect[1] + layout.trigger_rect[3] * 0.5;
+            let trigger_focused = self.tree.focused() == Some(TutorialNav::TryTrigger.id());
             let wobble_t = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs_f32())
@@ -1893,7 +1985,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     label: std::borrow::Cow::Borrowed("Cash In"),
                     pick_id: None,
                 },
-                hover_target: 0.0,
+                hover_target: if trigger_focused { 1.0 } else { 0.0 },
                 anim_id: 0,
             });
             texts.push(TextLabel {
@@ -1933,13 +2025,13 @@ impl SceneBehavior for TutorialCampaignScene {
                 if let Some(ref s) = scoring_layout {
                     (s.glossary_w, heights)
                 } else {
-                    (panel_w - 68.0 * scale, heights)
+                    (layout.content_w - 68.0 * scale, heights)
                 }
             } else {
                 let term_w = if page.try_it_demo {
-                    panel_w * 0.42
+                    layout.content_w * 0.42
                 } else {
-                    panel_w * 0.34
+                    layout.content_w * 0.34
                 };
                 let term_font = typography::size(typography::H42, h);
                 let (heights, _) =
@@ -1949,10 +2041,10 @@ impl SceneBehavior for TutorialCampaignScene {
             let glossary_x = scoring_layout
                 .as_ref()
                 .map(|s| s.left_col_x + 2.0 * scale)
-                .unwrap_or(panel_x + 34.0 * scale);
+                .unwrap_or(layout.content_x + 34.0 * scale);
             texts.push(TextLabel {
                 rect: [glossary_x, glossary_y, term_w, 24.0 * scale],
-                text: "Key Terms".to_string(),
+                text: "Key Ideas".to_string(),
                 color: color::GOLD,
                 align: TextAlign::Left,
                 font_px: Some(typography::size(typography::H32, h)),
@@ -1982,7 +2074,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 let callout_x = if self.page == TUTORIAL_PAGE_TILES {
                     tile_col_x
                 } else {
-                    panel_x + panel_w * 0.47
+                    layout.content_x + layout.content_w * 0.47
                 };
                 let callout_y = if self.page == TUTORIAL_PAGE_TILES {
                     glossary_y
@@ -1992,7 +2084,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 let callout_w = if self.page == TUTORIAL_PAGE_TILES {
                     tile_col_w
                 } else {
-                    panel_w * 0.45
+                    layout.content_w * 0.45
                 };
                 let min_h = if self.page == TUTORIAL_PAGE_TILES {
                     None
@@ -2016,76 +2108,16 @@ impl SceneBehavior for TutorialCampaignScene {
         }
 
         let items = self.flat_items(w, h);
-        let mut buttons = Vec::new();
-        for item in &items {
-            if matches!(
-                item.action,
-                TutorialNav::TryDiscard | TutorialNav::TryPlay | TutorialNav::TryTrigger
-            ) {
-                continue;
-            }
-            let focused = self.tree.focused() == Some(item.id);
-            let (label, variant, state) = match item.action {
-                TutorialNav::Next => {
-                    let label = if self.page + 1 == PAGES.len() {
-                        "Start Lesson"
-                    } else {
-                        "Next"
-                    };
-                    (
-                        label,
-                        ButtonVariant::Primary,
-                        if focused {
-                            ButtonState::Hover
-                        } else {
-                            ButtonState::Rest
-                        },
-                    )
-                }
-                TutorialNav::Back => (
-                    "Back",
-                    ButtonVariant::Default,
-                    if focused {
-                        ButtonState::Hover
-                    } else {
-                        ButtonState::Rest
-                    },
-                ),
-                TutorialNav::TryDiscard | TutorialNav::TryPlay | TutorialNav::TryTrigger => {
-                    continue;
-                }
-            };
-            widget::push_button(
-                &mut fg_quads,
-                &mut texts,
-                &mut buttons,
-                widget::ButtonSpec {
-                    rect: item.rect,
-                    label,
-                    variant,
-                    state,
-                    action: crate::ui::input::UiAction::Confirm,
-                },
-            );
-            if focused {
-                focus_nav::push_focus_ring(item.rect, scale, w, h, &mut fg_quads);
-            }
-        }
-        buttons.clear();
-        self.tree.register_flat_buttons(&items, &mut buttons);
 
         if let Some(rect) = match self.tree.focused() {
             Some(id) if id == TutorialNav::TryDiscard.id() => ctx.proj.bowl_rect,
             Some(id) if id == TutorialNav::TryPlay.id() => ctx.proj.mirror_rect,
-            Some(id) if id == TutorialNav::TryTrigger.id() => {
-                ctx.proj.wood_tablet_rects.first().copied()
-            }
+            Some(id) if id == TutorialNav::TryTrigger.id() => ctx.proj.wood_tablet_rects.first().copied(),
             _ => None,
         } {
             focus_nav::push_focus_ring(rect, scale, w, h, &mut fg_quads);
         }
 
-        frame.quads(bg_quads);
         if !showcase_tiles.is_empty() {
             frame
                 .cmds
@@ -2100,24 +2132,23 @@ impl SceneBehavior for TutorialCampaignScene {
         if !wood_tablet_placements.is_empty() {
             frame.object3d_batch(wood_tablet_placements);
         }
-        // Broad, forgiving lighting for educational showcase objects.
         let light_y = h * 0.18;
         let light_rows: &[(f32, f32, f32)] = if self.page == TUTORIAL_PAGE_TILES {
             &[
                 (
                     tile_col_x + tile_col_w * 0.20,
                     tile_light_y - 10.0 * scale,
-                    1.95,
+                    1.10,
                 ),
                 (
                     tile_col_x + tile_col_w * 0.50,
                     tile_light_y - 22.0 * scale,
-                    2.15,
+                    1.20,
                 ),
                 (
                     tile_col_x + tile_col_w * 0.80,
                     tile_light_y - 10.0 * scale,
-                    1.95,
+                    1.10,
                 ),
             ]
         } else if let (Some(ref layout), Some(scoring)) = (try_it_layout, scoring_layout.as_ref()) {
@@ -2145,13 +2176,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 ),
             ]
         } else {
-            &[
-                (panel_x + panel_w * 0.24, tile_light_y - 12.0 * scale, 1.95),
-                (panel_x + panel_w * 0.50, tile_light_y - 24.0 * scale, 2.15),
-                (panel_x + panel_w * 0.76, tile_light_y - 12.0 * scale, 1.95),
-                (panel_x + panel_w * 0.34, content_bottom + 8.0 * scale, 1.10),
-                (panel_x + panel_w * 0.66, content_bottom + 8.0 * scale, 1.10),
-            ]
+            unreachable!("tutorial pages use tiles or scoring layout")
         };
         for &(lx, ly, intensity) in light_rows {
             frame.scene_lighting.push_smooth(PointLight {
@@ -2163,7 +2188,7 @@ impl SceneBehavior for TutorialCampaignScene {
         }
         frame.quads(fg_quads);
         frame.texts(texts);
-        frame.buttons = buttons;
+        self.tree.register_flat_buttons(&items, &mut frame.buttons);
         push_screen_footer_hint(
             &mut frame,
             &ctx,
@@ -2182,15 +2207,14 @@ mod tests {
 
     fn tiles_page_copy_metrics(w: f32, h: f32) -> (f32, f32, f32, f32) {
         let scale = metrics::scene_scale(w, h);
-        let panel_y = h * 0.07;
-        let panel_w = w * 0.88;
-        let panel_h = h * 0.84;
-        let nav_top = TutorialCampaignScene::tutorial_nav_top(w, h, scale);
-        let content_top = panel_y + panel_h * 0.11;
-        let copy_frac = if h < 820.0 { 0.46 } else { 0.40 };
-        let copy_w = panel_w * copy_frac;
-        let copy_floor = TutorialCampaignScene::tutorial_tiles_copy_floor(nav_top, scale);
-        (copy_w, content_top, copy_floor, nav_top)
+        let (layout, nav_header, content_top, content_bottom) =
+            tutorial_content_band(w, h, None);
+        let _ = nav_header;
+        let left_w = layout.content_w * 0.38;
+        let copy_w = left_w;
+        let copy_floor =
+            TutorialCampaignScene::tutorial_tiles_copy_floor(content_bottom, scale);
+        (copy_w, content_top, copy_floor, content_bottom)
     }
 
     #[test]
@@ -2257,9 +2281,9 @@ mod tests {
     fn tiles_copy_floor_extends_past_tile_content_floor() {
         let h = 1080.0;
         let scale = metrics::scene_scale(1920.0, h);
-        let (_, _, copy_floor, nav_top) = tiles_page_copy_metrics(1920.0, h);
+        let (_, _, copy_floor, content_bottom) = tiles_page_copy_metrics(1920.0, h);
         let callout_band = 28.0 * scale + 60.0;
-        let tile_content_floor = nav_top - callout_band;
+        let tile_content_floor = content_bottom - callout_band;
         assert!(
             copy_floor > tile_content_floor + 40.0,
             "left copy should not reserve the right-column callout band"
@@ -2267,23 +2291,26 @@ mod tests {
     }
 
     #[test]
-    fn scoring_page_callout_clears_nav_buttons() {
+    fn scoring_page_callout_within_content_band() {
         let w = 1920.0;
         let h = 1080.0;
         let scale = metrics::scene_scale(w, h);
         let page = &PAGES[TUTORIAL_PAGE_SCORING];
-        let panel_x = w * 0.06;
-        let panel_y = h * 0.07;
-        let panel_w = w * 0.88;
-        let panel_h = h * 0.84;
-        let nav_top = TutorialCampaignScene::tutorial_nav_top(w, h, scale);
+        let (guide_layout, _, content_top, content_bottom) =
+            tutorial_content_band(w, h, tutorial_page_subtitle(page));
         let layout = TutorialCampaignScene::compute_scoring_page_layout(
-            page, w, h, panel_x, panel_y, panel_w, panel_h,
+            page,
+            w,
+            h,
+            guide_layout.content_x,
+            guide_layout.content_w,
+            content_top,
+            content_bottom,
         );
         let [_, callout_y, _, callout_h] = layout.callout_rect.expect("callout rect");
         assert!(
-            callout_y + callout_h <= nav_top - 14.0 * scale + 0.5,
-            "callout bottom={} should sit above nav top={nav_top}",
+            callout_y + callout_h <= content_bottom - 14.0 * scale + 0.5,
+            "callout bottom={} should sit above content bottom={content_bottom}",
             callout_y + callout_h,
         );
     }
@@ -2295,12 +2322,16 @@ mod tests {
         let scale = metrics::scene_scale(w, h);
         let page = &PAGES[TUTORIAL_PAGE_SCORING];
         let callout = page.callout.expect("scoring page callout");
-        let panel_x = w * 0.06;
-        let panel_y = h * 0.07;
-        let panel_w = w * 0.88;
-        let panel_h = h * 0.84;
+        let (guide_layout, _, content_top, content_bottom) =
+            tutorial_content_band(w, h, tutorial_page_subtitle(page));
         let layout = TutorialCampaignScene::compute_scoring_page_layout(
-            page, w, h, panel_x, panel_y, panel_w, panel_h,
+            page,
+            w,
+            h,
+            guide_layout.content_x,
+            guide_layout.content_w,
+            content_top,
+            content_bottom,
         );
         let [_, _, callout_w, callout_h] = layout.callout_rect.expect("callout rect");
         let inner_w = TutorialCampaignScene::callout_text_inner_w(callout_w, scale);

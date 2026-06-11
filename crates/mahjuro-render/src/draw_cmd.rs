@@ -1189,6 +1189,20 @@ impl UiFrame {
                 .is_some_and(|l| l.room_glb_brdf)
     }
 
+    /// Overlay cash-in draws in doc-tile scenes need the page fill lights too;
+    /// embedded gameplay punctual alone leaves the button black on a void backdrop.
+    pub fn gameplay_cash_in_overlay_lighting_merged(&self) -> Option<SceneLighting> {
+        let overlay = self.gameplay_cash_in_overlay_lighting.as_ref()?;
+        let mut merged = overlay.clone();
+        for (i, light) in self.scene_lighting.punctual.iter().enumerate() {
+            if self.scene_lighting.punctual_gltf_node(i).is_none() {
+                merged.punctual.push(light.clone());
+                merged.punctual_gltf_nodes.push(None);
+            }
+        }
+        Some(merged)
+    }
+
     // ── Push helpers ────────────────────────────────────────────────────
     pub fn background(&mut self, bg: BackgroundId) {
         self.cmds.push(DrawCmd::Background(bg));

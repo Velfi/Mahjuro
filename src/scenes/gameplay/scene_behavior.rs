@@ -868,7 +868,10 @@ impl SceneBehavior for GameplayScene {
             frame.procedural_flame_emitters = glb_flames;
         }
 
-        let yen_label_rect = if vis.hide_yen_label {
+        // Gold plaque + label sit on the post-tonemap overlay layer (text routes
+        // through `frame.texts`), so they'd punch through the pause / options dim
+        // — skip them while the pause menu is up (same as shop).
+        let yen_label_rect = if vis.hide_yen_label || paused {
             [0.0, 0.0, 0.0, 0.0]
         } else {
             let gold_label_center = super::glb_anchors::player_gold_label_screen_center(
@@ -2094,11 +2097,26 @@ impl SceneBehavior for GameplayScene {
         // `buttons` here: that would also wipe the pause-menu buttons we
         // just added, leaving the pause overlay completely unclickable.
         use crate::render::wgpu_renderer::GameplayPick;
+        // Discard / play / cash-in already have dedicated projected button
+        // rects pushed above. The fullscreen catch-all is only for journal,
+        // guidebook, wood/yaku tablets, etc. Including the bronze mirror here
+        // made its 3D pick zone (full visual AABB) swallow clicks near the
+        // mirror that miss the inset play hit rect — hand tiles and empty
+        // padding — even though hover/focus stayed on the hand.
         let push_3d_hit = if self.lab_mode {
             gameplay.trigger_enabled
                 && matches!(ctx.picked_gameplay_object, Some(GameplayPick::CashInButton))
         } else {
-            ctx.picked_gameplay_object.is_some()
+            matches!(
+                ctx.picked_gameplay_object,
+                Some(
+                    GameplayPick::YakuTablet(_)
+                        | GameplayPick::WoodTablet(_)
+                        | GameplayPick::JournalBook
+                        | GameplayPick::GuideBook
+                        | GameplayPick::MainMenu(_)
+                )
+            )
         };
         if !self.pause_menu.paused && push_3d_hit {
             buttons.push(ButtonDef::scene(

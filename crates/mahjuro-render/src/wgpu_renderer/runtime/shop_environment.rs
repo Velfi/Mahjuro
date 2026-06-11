@@ -1146,9 +1146,10 @@ impl WgpuRenderer {
                 return;
             };
             let overlay_cam = super::CameraFrame::build_from(Some(overlay), frame, self.size);
-            let overlay_lit = frame
-                .gameplay_cash_in_overlay_lighting
+            let merged_overlay_lit = frame.gameplay_cash_in_overlay_lighting_merged();
+            let overlay_lit = merged_overlay_lit
                 .as_ref()
+                .or(frame.gameplay_cash_in_overlay_lighting.as_ref())
                 .unwrap_or(&frame.scene_lighting);
             self.upload_camera_uniforms(&overlay_cam, self.pass_a_frame_ssr_enabled, frame);
             self.upload_punctual_light_buffers(

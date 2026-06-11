@@ -1288,12 +1288,15 @@ fn hover_tooltip_content(
             } else {
                 color::RUBY
             };
-            Some((
-                item.name.to_string(),
-                item.description.to_string(),
-                cta,
-                col,
-            ))
+            let desc = relic_description_live(
+                item.relic,
+                &shop.relic_counters,
+                shop.yen,
+                None,
+                None,
+                Some(shop.wing),
+            );
+            Some((item.name.to_string(), desc, cta, col))
         }
         ShopHit::Relic(i) => {
             let oi = i.checked_sub(n_for_sale_relics)?;
