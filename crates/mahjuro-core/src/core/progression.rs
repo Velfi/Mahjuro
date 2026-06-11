@@ -332,7 +332,7 @@ impl PlayerProgress {
 
     /// Is `season` playable on `material`? Spring is always available; each
     /// higher season requires the previous one to have been cleared on this
-    /// material (full victory, not just reaching ante 8).
+    /// material (full final-wing victory, not just reaching the run end).
     pub fn season_unlocked_for(&self, material: TileMaterial, season: Season) -> bool {
         match season {
             Season::Spring => true,
@@ -1414,7 +1414,7 @@ mod tests {
             timestamp_unix: 0,
             run_number: 1,
             outcome: RunOutcome::Victory,
-            final_wing: 8,
+            final_wing: 7,
             final_chamber: ChamberKind::Ordeal,
             final_ordeal: None,
             round_score: 1000,
@@ -1438,7 +1438,7 @@ mod tests {
             tutorial_run: false,
             memorial_kind: None,
             best_hand_tiles: Vec::new(),
-            score_after_wing: vec![(8, 5000)],
+            score_after_wing: vec![(7, 5000)],
             chronicle: crate::core::run_chronicle::RunChronicle::default(),
             duration_secs: 0,
         });
