@@ -27,6 +27,7 @@ const GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL: u32 = 1u << 1u;
 const GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE: u32 = 1u << 2u;
 const GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW: u32 = 1u << 3u;
 const GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME: u32 = 1u << 4u;
+const GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO: u32 = 1u << 5u;
 // UI polychrome (The House) — coarser bands than 3D score pops at label sizes.
 const POLYCHROME_COORD_X: f32 = 2.0;
 const POLYCHROME_COORD_Y: f32 = 1.25;
@@ -618,7 +619,9 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     // glTF light energy). Keep the runtime hemisphere fill in scene-linear units
     // so the Scene Look "Room ambient" slider remains visible.
     var lit_hdr = Lo * cam.room_linear_exposure + gold_sign_hdr + ambient + metal_hemi;
-    lit_hdr = lit_hdr * sample_contact_ao(in.world_pos);
+    if ((pbr.flags & GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO) == 0u) {
+        lit_hdr = lit_hdr * sample_contact_ao(in.world_pos);
+    }
     // Per-light projected shadows are applied in the punctual / spot loops above.
     let emissive_out = emissive * boss_light_rgb_mul;
     var hdr = lit_hdr + emissive_out;

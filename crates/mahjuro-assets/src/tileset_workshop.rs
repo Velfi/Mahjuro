@@ -40,17 +40,11 @@ pub fn is_workshop_tileset(tileset_id: &str) -> bool {
 }
 
 pub fn parse_workshop_file_id(tileset_id: &str) -> Option<u64> {
-    tileset_id
-        .strip_prefix(WORKSHOP_PREFIX)?
-        .parse()
-        .ok()
+    tileset_id.strip_prefix(WORKSHOP_PREFIX)?.parse().ok()
 }
 
 pub fn registry_revision() -> u64 {
-    registry()
-        .lock()
-        .map(|r| r.revision)
-        .unwrap_or(0)
+    registry().lock().map(|r| r.revision).unwrap_or(0)
 }
 
 pub fn list_workshop_tilesets() -> Vec<WorkshopTilesetInstall> {
@@ -138,7 +132,11 @@ pub fn workshop_cache_folder_name(tileset_id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use crate::tileset_mod::write_valid_mod;
-    use crate::tileset_workshop::{WorkshopTilesetInstall, is_workshop_tileset, parse_workshop_file_id, read_workshop_file, registry_revision, resolve_workshop_content_dir, set_workshop_installs, update_workshop_title, workshop_id};
+    use crate::tileset_workshop::{
+        WorkshopTilesetInstall, is_workshop_tileset, parse_workshop_file_id, read_workshop_file,
+        registry_revision, resolve_workshop_content_dir, set_workshop_installs,
+        update_workshop_title, workshop_id,
+    };
 
     #[test]
     fn workshop_id_round_trip() {
@@ -151,10 +149,8 @@ mod tests {
 
     #[test]
     fn resolve_nested_workshop_content() {
-        let base = std::env::temp_dir().join(format!(
-            "mahjuro_workshop_resolve_{}",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("mahjuro_workshop_resolve_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let nested = base.join("pack");
         write_valid_mod(&nested, 10, 20, 9);
@@ -166,10 +162,8 @@ mod tests {
 
     #[test]
     fn registry_revision_bumps_on_update() {
-        let base = std::env::temp_dir().join(format!(
-            "mahjuro_workshop_registry_{}",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("mahjuro_workshop_registry_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         write_valid_mod(&base, 10, 20, 9);
 

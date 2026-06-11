@@ -43,9 +43,7 @@ pub(crate) fn write_valid_mod(dir: &Path, tile_w: u32, tile_h: u32, columns: u32
 ]"#;
     fs::write(
         dir.join("atlas.toml"),
-        format!(
-            "tile_width = {tile_w}\ntile_height = {tile_h}\ncolumns = {columns}\n{layout}\n"
-        ),
+        format!("tile_width = {tile_w}\ntile_height = {tile_h}\ncolumns = {columns}\n{layout}\n"),
     )
     .unwrap();
     let rows = 1u32;

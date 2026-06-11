@@ -261,11 +261,13 @@ impl ContactAoTuning {
                 ..default
             },
             RoomGiRoom::Hallway => Self {
-                strength: CONTACT_AO_STRENGTH,
-                max_darken: CONTACT_AO_MAX_DARKEN,
-                max_neighbor_depth_delta: 0.080,
-                surface_depth_coherence_eps: 0.080,
-                same_prim_scale: 1.0,
+                strength: 6.0,
+                max_darken: 0.34,
+                max_neighbor_depth_delta: 0.045,
+                surface_depth_coherence_eps: 0.024,
+                same_prim_normal_min_dot: 0.88,
+                same_prim_scale: 0.04,
+                cross_prim_normal_min_dot: -0.05,
                 ..default
             },
             RoomGiRoom::MainMenu => Self {
@@ -633,12 +635,43 @@ pub fn primitive_contact_ao_class(
     material_name: Option<&str>,
 ) -> PrimitiveContactAoClass {
     let mut class = PrimitiveContactAoClass::DEFAULT;
-    if room != RoomGiRoom::Shop {
+    let node = node_name.unwrap_or("").to_ascii_lowercase();
+    let material = material_name.unwrap_or("").to_ascii_lowercase();
+
+    if room == RoomGiRoom::Hallway {
+        if contains_any(&node, &["walls"]) || contains_any(&material, &["wall"]) {
+            class.receiver = class.receiver.min(0.0);
+            class.occluder = class.occluder.min(0.20);
+        }
+
+        if contains_any(&node, &["ceiling"]) || contains_any(&material, &["ceiling"]) {
+            class.receiver = class.receiver.min(0.0);
+            class.occluder = class.occluder.min(0.10);
+        }
+
+        if contains_any(&node, &["btn_", "painting", "lamp", "cord", "trim"])
+            || contains_any(&material, &["old gold", "lamp", "paint", "white wood"])
+        {
+            class.receiver = class.receiver.min(0.08);
+            class.occluder = class.occluder.min(0.45);
+        }
+
+        if contains_any(&node, &["floor"]) || contains_any(&material, &["sauna room planks"]) {
+            class.receiver = class.receiver.max(1.0);
+            class.occluder = class.occluder.max(0.85);
+        }
+
+        if contains_any(&node, &["table"]) || contains_any(&material, &["dark wood"]) {
+            class.receiver = class.receiver.min(0.65);
+            class.occluder = class.occluder.min(0.80);
+        }
+
         return class;
     }
 
-    let node = node_name.unwrap_or("").to_ascii_lowercase();
-    let material = material_name.unwrap_or("").to_ascii_lowercase();
+    if room != RoomGiRoom::Shop {
+        return class;
+    }
 
     if contains_any(&node, &["mysterious_sheet", "cloth", "sheet"])
         || contains_any(&material, &["sheet fabric"])
@@ -1145,6 +1178,29 @@ mod tests {
             ao_bytes: Some(Arc::from(ao)),
         };
         assert!(room_shadow_bake_is_effective(&bake));
+    }
+
+    #[test]
+    fn hallway_walls_do_not_receive_baked_contact_ao() {
+        let walls = primitive_contact_ao_class(RoomGiRoom::Hallway, Some("walls"), Some("wall"));
+        assert_eq!(walls.receiver, 0.0);
+        assert!(walls.occluder > 0.0);
+
+        let floor = primitive_contact_ao_class(
+            RoomGiRoom::Hallway,
+            Some("floor"),
+            Some("Sauna Room planks"),
+        );
+        assert_eq!(floor.receiver, 1.0);
+        assert_eq!(floor.occluder, 1.0);
+
+        let sign = primitive_contact_ao_class(
+            RoomGiRoom::Hallway,
+            Some("btn_play_round"),
+            Some("Material.002"),
+        );
+        assert!(sign.receiver < 0.10);
+        assert!(sign.occluder < 0.50);
     }
 
     fn test_ao_tuning() -> ContactAoTuning {

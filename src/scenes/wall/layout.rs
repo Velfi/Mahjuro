@@ -172,8 +172,7 @@ pub fn wall_layout(w: f32, h: f32, jr: f32) -> WallLayout {
     let gap_total = row_gap * (GRID_ROWS.len() - 1) as f32;
     let weight_sum: f32 = ROW_HEIGHT_FRAC.iter().sum();
     let unit_h = (grid_content_h - gap_total) / weight_sum;
-    let row_cell_h =
-        std::array::from_fn(|i| (unit_h * ROW_HEIGHT_FRAC[i]).max(46.0 * jr));
+    let row_cell_h = std::array::from_fn(|i| (unit_h * ROW_HEIGHT_FRAC[i]).max(46.0 * jr));
     let mut row_y = [0.0_f32; 5];
     row_y[0] = grid_content_y;
     for i in 1..5 {

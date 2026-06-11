@@ -54,7 +54,9 @@ pub fn list_player_tilesets() -> Vec<String> {
         names.push(entry.id);
     }
     for entry in crate::tileset_workshop::list_workshop_tilesets() {
-        names.push(crate::tileset_workshop::workshop_id(entry.published_file_id));
+        names.push(crate::tileset_workshop::workshop_id(
+            entry.published_file_id,
+        ));
     }
     names
 }
