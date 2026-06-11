@@ -9,8 +9,6 @@ use crate::ui::styled_text::styled_line_block_height_at_font_px;
 use super::layout::{WallLayout, text_line_h, wall_progress_bar_block_h};
 
 pub struct SidebarScrollLayout {
-    pub content_top: f32,
-    pub viewport_h: f32,
     pub max_scroll_px: f32,
     pub wheel_step_px: f32,
     pub clip: [f32; 4],
@@ -49,8 +47,6 @@ pub fn sidebar_scroll_layout(
     let max_scroll_px = (content_h - viewport_h).max(0.0);
     let wheel_step_px = (text_line_h(layout.caption_px) * 2.4).clamp(36.0, 80.0);
     SidebarScrollLayout {
-        content_top,
-        viewport_h,
         max_scroll_px,
         wheel_step_px,
         clip: [layout.summary_x, content_top, layout.summary_w, viewport_h],
@@ -216,7 +212,7 @@ mod tests {
         let stats = stub_stats();
         let details = stub_details();
         let scroll = sidebar_scroll_layout(&layout, &stats, Some(&details), WallLedgerMode::Live);
-        assert!(scroll.viewport_h > 0.0);
+        assert!(scroll.clip[3] > 0.0);
         assert!(
             scroll.max_scroll_px > 0.0,
             "detail stack should overflow sidebar viewport"

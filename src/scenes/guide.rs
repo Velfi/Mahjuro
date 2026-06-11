@@ -2093,7 +2093,6 @@ fn draw_scoring_page(
         tiles_content,
         values_tile_max,
         small_font,
-        body_font,
         micro_font,
         pad,
     );
@@ -2114,8 +2113,6 @@ fn draw_scoring_page(
         h,
         &scoring_section_title(3, scoring_intro_copy::SECTION_FINAL_SCORE),
         section_font,
-        body_font,
-        small_font,
         micro_font,
         pad,
     );
@@ -4034,7 +4031,6 @@ fn push_scoring_tile_values_panel(
     content: [f32; 4],
     tile_size: f32,
     caption_font: f32,
-    body_font: f32,
     micro_font: f32,
     pad: f32,
 ) {
@@ -4223,8 +4219,6 @@ fn push_scoring_final_score_panel(
     window_h: f32,
     title: &str,
     section_font: f32,
-    body_font: f32,
-    caption_font: f32,
     micro_font: f32,
     pad: f32,
 ) {
