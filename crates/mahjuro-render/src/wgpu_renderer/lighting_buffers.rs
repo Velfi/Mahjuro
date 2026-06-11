@@ -119,6 +119,7 @@ pub(crate) struct PointLightGpu {
     /// rgb = colour, a = intensity.
     pub color: [f32; 4],
     /// x = kind ([`SCENE_POINT_KIND_SMOOTH`] or [`SCENE_POINT_KIND_INVERSE_SQUARE`]).
+    /// y = candle flame flag for room shaders.
     pub params: [f32; 4],
 }
 
@@ -142,6 +143,7 @@ pub(crate) struct PointLightsBuf {
 
 pub(crate) struct PunctualLightBakeParams<'a> {
     pub src: &'a [ScenePunctualLight],
+    pub gltf_nodes: &'a [Option<String>],
     pub candle_count: u32,
     pub flame_height_world: f32,
     pub lit_mesh_punctual_intensity_scale: f32,
@@ -276,12 +278,24 @@ impl PointLightsBuf {
         p: &PointLight,
         world_xyz: glam::Vec3,
         kind: f32,
+        room_reflection: f32,
     ) {
         lights[i] = PointLightGpu {
             pos: [world_xyz.x, world_xyz.y, world_xyz.z, p.radius],
             color: [p.color[0], p.color[1], p.color[2], p.intensity],
-            params: [kind, 0.0, 0.0, 0.0],
+            params: [kind, room_reflection, 0.0, 0.0],
         };
+    }
+
+    fn room_reflection_flag(gltf_nodes: &[Option<String>], i: usize) -> f32 {
+        let Some(name) = gltf_nodes.get(i).and_then(|n| n.as_deref()) else {
+            return 0.0;
+        };
+        if name.starts_with(crate::room_glb::SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX) {
+            1.0
+        } else {
+            0.0
+        }
     }
 
     /// Unified punctual upload (smooth + inverse-square in one buffer).
@@ -293,6 +307,7 @@ impl PointLightsBuf {
         }; MAX_POINT_LIGHTS];
         let n = p.src.len().min(MAX_POINT_LIGHTS);
         for (i, ent) in p.src.iter().take(n).enumerate() {
+            let room_reflection = Self::room_reflection_flag(p.gltf_nodes, i);
             match ent {
                 ScenePunctualLight::Smooth(l) => {
                     let world =
@@ -303,6 +318,7 @@ impl PointLightsBuf {
                         l,
                         world,
                         SCENE_POINT_KIND_SMOOTH,
+                        room_reflection,
                     );
                 }
                 ScenePunctualLight::InverseSquare(l) => {
@@ -314,6 +330,7 @@ impl PointLightsBuf {
                         l,
                         world,
                         SCENE_POINT_KIND_INVERSE_SQUARE,
+                        room_reflection,
                     );
                 }
             }
@@ -343,6 +360,7 @@ impl PointLightsBuf {
         }; MAX_POINT_LIGHTS];
         let n = bake.src.len().min(MAX_POINT_LIGHTS);
         for (i, ent) in bake.src.iter().take(n).enumerate() {
+            let room_reflection = Self::room_reflection_flag(bake.gltf_nodes, i);
             match ent {
                 ScenePunctualLight::Smooth(l) => {
                     let p = crate::world_space::world_on_camera_ray_plane_z(
@@ -353,7 +371,14 @@ impl PointLightsBuf {
                         l.pos[1],
                         l.pos[2],
                     );
-                    Self::push_scene_punctual_entry(&mut lights, i, l, p, SCENE_POINT_KIND_SMOOTH);
+                    Self::push_scene_punctual_entry(
+                        &mut lights,
+                        i,
+                        l,
+                        p,
+                        SCENE_POINT_KIND_SMOOTH,
+                        room_reflection,
+                    );
                 }
                 ScenePunctualLight::InverseSquare(l) => {
                     let p =
@@ -364,6 +389,7 @@ impl PointLightsBuf {
                         l,
                         p,
                         SCENE_POINT_KIND_INVERSE_SQUARE,
+                        room_reflection,
                     );
                 }
             }

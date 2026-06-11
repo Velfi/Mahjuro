@@ -290,6 +290,7 @@ pub(super) fn init_shaders_and_pipelines(
         contents: bytemuck::bytes_of(&PointLightsBuf::from_scene_punctual(
             &PunctualLightBakeParams {
                 src: &[],
+                gltf_nodes: &[],
                 candle_count: 0,
                 flame_height_world: 0.0,
                 lit_mesh_punctual_intensity_scale: 1.0,

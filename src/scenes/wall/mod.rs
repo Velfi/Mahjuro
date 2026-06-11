@@ -94,9 +94,9 @@ impl SceneBehavior for WallLedgerScene {
                         && cy >= layout.summary_y
                         && cy <= layout.summary_y + layout.summary_h;
                     if over_sidebar || ctx.input_mode != InputMode::Cursor {
-                        scene.sidebar_scroll.scroll_by(
-                            ctx.scroll_lines * scroll_layout.wheel_step_px,
-                        );
+                        scene
+                            .sidebar_scroll
+                            .scroll_by(ctx.scroll_lines * scroll_layout.wheel_step_px);
                     }
                 }
                 if let Some(transition) = scene.handle_input(ctx, &layout, &frame_ctx.stats) {

@@ -18,7 +18,7 @@ use super::super::layout::{
     row_label_font_px, row_suit_color, text_line_h,
 };
 use super::super::state::WallScreenState;
-use super::text::{push_text_maybe_clip};
+use super::text::push_text_maybe_clip;
 use super::tile_placement::{
     ledger_grid_tile_size, ledger_tile_brightness, showcase_tile_center_in_rect,
 };
@@ -58,26 +58,12 @@ pub fn draw_tile_ledger_grid(
         if let Some(group) = groups.get(&(entry.suit, entry.rank)) {
             if let Some(rep) = representative_entry(&group.copies) {
                 push_cell_tile(
-                    placements,
-                    rep,
-                    exhausted,
-                    focused,
-                    tile_area,
-                    run,
-                    window_w,
-                    window_h,
+                    placements, rep, exhausted, focused, tile_area, run, window_w, window_h,
                 );
             }
         } else {
             push_cell_tile_from_face(
-                placements,
-                entry.suit,
-                entry.rank,
-                exhausted,
-                focused,
-                tile_area,
-                run,
-                window_w,
+                placements, entry.suit, entry.rank, exhausted, focused, tile_area, run, window_w,
                 window_h,
             );
         }

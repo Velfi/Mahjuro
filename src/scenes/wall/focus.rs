@@ -13,7 +13,7 @@ use crate::ui::widget::{self, ButtonSpec};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::StrategicWallScene;
-use super::layout::{WallLayout, GRID_ROWS, grid_cell_rect};
+use super::layout::{GRID_ROWS, WallLayout, grid_cell_rect};
 
 const NAV_BASE: u32 = 0xE200;
 
@@ -87,7 +87,11 @@ pub fn wall_ledger_nav_edges() -> Vec<(FocusId, FocusDir, FocusId)> {
             if row_idx + 1 < GRID_ROWS.len() {
                 let (next_start, next_count) = GRID_ROWS[row_idx + 1];
                 let target_col = col.min(next_count - 1);
-                edge(cur, FocusDir::Down, LedgerNav::Tile(next_start + target_col));
+                edge(
+                    cur,
+                    FocusDir::Down,
+                    LedgerNav::Tile(next_start + target_col),
+                );
             }
         }
     }
@@ -214,13 +218,13 @@ impl StrategicWallScene {
 
 #[cfg(test)]
 mod tests {
+    use super::super::layout::{read_boost, wall_layout};
+    use super::super::state::WallScreenState;
     use super::*;
     use crate::core::tile::Suit;
     use crate::game::wall_stats::{
         AbundanceState, ModifierBreakdown, TileLedgerEntry, TileLocationCounts, WallStats,
     };
-    use super::super::layout::{read_boost, wall_layout};
-    use super::super::state::WallScreenState;
     use crate::ui::input::{InputMode, UiAction};
     use crate::ui::widget_tree::TreeState;
 

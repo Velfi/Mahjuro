@@ -2,8 +2,8 @@
 
 use crate::game::wall_ledger::WallLedgerMode;
 use crate::game::wall_stats::{ModifierBreakdown, SelectedTileDetails, WallStats};
-use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::theme::color;
+use crate::render::vocabulary_colors::GlossaryMode;
 use crate::ui::styled_text::styled_line_block_height_at_font_px;
 
 use super::layout::{WallLayout, text_line_h, wall_progress_bar_block_h};
@@ -149,8 +149,8 @@ mod tests {
     use super::*;
     use crate::core::tile::Suit;
     use crate::game::wall_stats::{
-        AbundanceState, FaceKey, ModifierBreakdown, SelectedTileDetails, TileLedgerEntry,
-        TileLocationCounts, WallStats, GRID_FACE_ORDER,
+        AbundanceState, FaceKey, GRID_FACE_ORDER, ModifierBreakdown, SelectedTileDetails,
+        TileLedgerEntry, TileLocationCounts, WallStats,
     };
 
     fn stub_details() -> SelectedTileDetails {

@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 use crate::gltf_helpers::{
     GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME, GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE,
     GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW, GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL,
-    GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT, GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO, GltfPbrUniform,
-    build_sampler_descriptor,
+    GLTF_PBR_FLAG_ROOM_CANDLE_WAX, GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT,
+    GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO, GltfPbrUniform, build_sampler_descriptor,
 };
 use crate::room_env_gltf::{RoomEnvPrimitiveCpu, RoomTextureUsageClass};
 use crate::room_gi_bake::RoomGiRoom;
@@ -176,13 +176,41 @@ fn main_menu_env_shader_flags(node_name: Option<&str>) -> u32 {
 }
 
 #[inline]
-fn room_env_shader_flags(scene_key: &str, node_name: Option<&str>) -> u32 {
-    match scene_key {
+fn room_env_candle_wax_flags(
+    scene_key: &str,
+    node_name: Option<&str>,
+    material_name: Option<&str>,
+) -> u32 {
+    let is_candle_wax = match scene_key {
+        scene_keys::SHOP => {
+            material_name.is_some_and(|name| name.to_ascii_lowercase().starts_with("candle wax"))
+        }
+        scene_keys::GAMEPLAY => {
+            node_name.is_some_and(|name| name.starts_with("candles"))
+                && material_name == Some("Cream Scratched Porcelain")
+        }
+        _ => false,
+    };
+    if is_candle_wax {
+        GLTF_PBR_FLAG_ROOM_CANDLE_WAX
+    } else {
+        0
+    }
+}
+
+#[inline]
+fn room_env_shader_flags(
+    scene_key: &str,
+    node_name: Option<&str>,
+    material_name: Option<&str>,
+) -> u32 {
+    let scene_flags = match scene_key {
         scene_keys::HALLWAY => hallway_env_shader_flags(node_name),
         scene_keys::ARCHIVE => archive_env_shader_flags(node_name),
         scene_keys::MAIN_MENU => main_menu_env_shader_flags(node_name),
         _ => 0,
-    }
+    };
+    scene_flags | room_env_candle_wax_flags(scene_key, node_name, material_name)
 }
 
 #[inline]
@@ -228,7 +256,7 @@ fn room_env_pbr_uniform(
         prim.alpha_mode,
         prim.alpha_cutoff,
     );
-    pbr_uniform.add_flags(room_env_shader_flags(scene_key, node_name));
+    pbr_uniform.add_flags(room_env_shader_flags(scene_key, node_name, material_name));
     pbr_uniform.add_flags(room_env_baked_contact_ao_flags(
         scene_key,
         node_name,
@@ -4176,12 +4204,13 @@ mod tests {
         assert_eq!(
             room_env_shader_flags(
                 scene_keys::HALLWAY,
-                Some(crate::hallway_glb::HALLWAY_WALLS_NODE)
+                Some(crate::hallway_glb::HALLWAY_WALLS_NODE),
+                Some("wall"),
             ),
             GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT
         );
         assert_eq!(
-            room_env_shader_flags(scene_keys::HALLWAY, Some("ceiling")),
+            room_env_shader_flags(scene_keys::HALLWAY, Some("ceiling"), Some("ceiling")),
             0
         );
     }
@@ -4215,28 +4244,63 @@ mod tests {
         assert_eq!(
             room_env_shader_flags(
                 scene_keys::ARCHIVE,
-                Some(crate::archive_glb::SIGN_DESCRIPTION_LEFT)
+                Some(crate::archive_glb::SIGN_DESCRIPTION_LEFT),
+                Some("sign"),
             ),
             GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL
         );
         assert_eq!(
             room_env_shader_flags(
                 scene_keys::ARCHIVE,
-                Some(crate::archive_glb::SIGN_DESCRIPTION_RIGHT)
+                Some(crate::archive_glb::SIGN_DESCRIPTION_RIGHT),
+                Some("sign"),
             ),
             GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL
         );
         assert_eq!(
             room_env_shader_flags(
                 scene_keys::ARCHIVE,
-                Some(crate::archive_glb::INSPECT_PLAQUE)
+                Some(crate::archive_glb::INSPECT_PLAQUE),
+                Some("plaque"),
             ),
             GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL
         );
         assert_eq!(
             room_env_shader_flags(
                 scene_keys::ARCHIVE,
-                Some(crate::archive_glb::PLAQUE_BACKING)
+                Some(crate::archive_glb::PLAQUE_BACKING),
+                Some("plaque"),
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn room_env_shader_flags_candle_wax_primitives_only() {
+        let shop_wax =
+            room_env_shader_flags(scene_keys::SHOP, Some("Candle.006"), Some("Candle wax.002"));
+        assert_eq!(shop_wax, GLTF_PBR_FLAG_ROOM_CANDLE_WAX);
+        assert_eq!(
+            room_env_shader_flags(
+                scene_keys::SHOP,
+                Some("Candle.006"),
+                Some("Almost black torch wick"),
+            ),
+            0
+        );
+        assert_eq!(
+            room_env_shader_flags(
+                scene_keys::GAMEPLAY,
+                Some("candles.003"),
+                Some("Cream Scratched Porcelain"),
+            ),
+            GLTF_PBR_FLAG_ROOM_CANDLE_WAX
+        );
+        assert_eq!(
+            room_env_shader_flags(
+                scene_keys::GAMEPLAY,
+                Some("candle_wicks.003"),
+                Some("Charcoal Wood"),
             ),
             0
         );
@@ -4247,16 +4311,17 @@ mod tests {
         assert_eq!(
             room_env_shader_flags(
                 scene_keys::MAIN_MENU,
-                Some(crate::main_menu_glb::MAIN_MENU_MOON_MESH_NODE)
+                Some(crate::main_menu_glb::MAIN_MENU_MOON_MESH_NODE),
+                Some("moon"),
             ),
             GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE
         );
         assert_eq!(
-            room_env_shader_flags(scene_keys::MAIN_MENU, Some("star.001")),
+            room_env_shader_flags(scene_keys::MAIN_MENU, Some("star.001"), Some("star")),
             GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW
         );
         assert_eq!(
-            room_env_shader_flags(scene_keys::MAIN_MENU, Some("dock")),
+            room_env_shader_flags(scene_keys::MAIN_MENU, Some("dock"), Some("dock")),
             0
         );
     }
@@ -4266,10 +4331,14 @@ mod tests {
         assert_eq!(
             room_env_shader_flags(
                 scene_keys::SHOP,
-                Some(crate::hallway_glb::HALLWAY_WALLS_NODE)
+                Some(crate::hallway_glb::HALLWAY_WALLS_NODE),
+                Some("wall"),
             ),
             0
         );
-        assert_eq!(room_env_shader_flags("unknown_scene", Some("star.001")), 0);
+        assert_eq!(
+            room_env_shader_flags("unknown_scene", Some("star.001"), Some("star")),
+            0
+        );
     }
 }

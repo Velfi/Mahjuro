@@ -48,9 +48,6 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, mut ctx: DrawCtx<'_>) ->
     let flat_items = scene.flat_items(w, &layout, &frame_ctx.stats);
 
     let mut texts = Vec::new();
-
-    draw_grid_panel_chrome(&mut frame, &layout);
-
     let mut placements = Vec::new();
 
     let group = groups
@@ -71,8 +68,12 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, mut ctx: DrawCtx<'_>) ->
     );
 
     draw_wall_header(&mut texts, w, h, jr, &layout);
-    let scroll_layout =
-        sidebar_scroll_layout(&layout, &frame_ctx.stats, selected_details.as_ref(), scene.mode);
+    let scroll_layout = sidebar_scroll_layout(
+        &layout,
+        &frame_ctx.stats,
+        selected_details.as_ref(),
+        scene.mode,
+    );
     let scroll_y = scene.sidebar_scroll.tick();
     draw_wall_summary_panel(
         &mut frame,
@@ -158,16 +159,6 @@ fn draw_main_panel(
     window_h: f32,
 ) {
     draw_tile_ledger_grid(
-        frame,
-        texts,
-        placements,
-        layout,
-        screen,
-        stats,
-        groups,
-        run,
-        focus,
-        window_w,
-        window_h,
+        frame, texts, placements, layout, screen, stats, groups, run, focus, window_w, window_h,
     );
 }

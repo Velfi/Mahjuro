@@ -298,13 +298,13 @@ fn vs_plume(
         pz = anchor_xz.y + lz * core_pull;
         out_radial = radial * 0.72;
     } else if (layer == 0u) {
-        let glow_scale = 1.06 + y01 * 0.1;
+        let glow_scale = mix(2.65, 1.72, y01);
         lx = lx * glow_scale;
         lz = lz * glow_scale;
         px = anchor_xz.x + lx;
-        py = ly + FLAME_BASE * 0.004 * (1.0 - y01);
+        py = ly + flame_height * 0.015 * (1.0 - y01);
         pz = anchor_xz.y + lz;
-        out_radial = flame_local_radial(y01, lx, lz, flame_height, view.tuning.flame_width_mul);
+        out_radial = radial;
     }
 
     let world = anchor + vec3<f32>(px, pz, py) * scale;
@@ -426,15 +426,19 @@ fn fs_glow(in: VsOut) -> @location(0) vec4<f32> {
     let y01 = in.flame.x;
     let radial = in.flame.y;
 
-    var edge = 1.0 - smoothstep(0.32, 1.0, radial);
-    edge = pow(edge, 1.1);
+    var inner = 1.0 - smoothstep(0.18, 0.74, radial);
+    inner = pow(max(inner, 0.0), 1.15);
+    var outer = 1.0 - smoothstep(0.42, 1.04, radial);
+    outer = pow(max(outer, 0.0), 1.65);
+    let vertical = smoothstep(0.0, 0.13, y01) * (1.0 - smoothstep(0.86, 1.0, y01));
+    let aura = (inner * 0.52 + outer * 0.32) * vertical;
 
-    var col = vec3<f32>(1.0, 0.52, 0.12) * edge;
-    col = col + vec3<f32>(0.2, 0.35, 1.0) * smoothstep(0.44, 0.0, y01) * edge * 0.35;
+    var col = vec3<f32>(1.0, 0.50, 0.10) * (outer * 0.82 + inner * 0.58);
+    col = col + vec3<f32>(0.2, 0.35, 1.0) * smoothstep(0.44, 0.0, y01) * inner * 0.22;
 
-    var weight = edge * 0.72 * (1.0 - smoothstep(0.85, 1.0, y01));
+    var weight = aura * 0.58;
     let base_round = smoothstep(0.0, 0.12, y01 + (1.0 - radial) * 0.1);
     weight = weight * base_round;
     let gain = view.tuning.emission_gain * in.brightness;
-    return vec4<f32>(col * weight * gain, weight);
+    return vec4<f32>(col * gain * 1.35, weight);
 }
