@@ -29,6 +29,7 @@ struct OpsFlags {
     archive_env: bool,
     main_menu_env: bool,
     gameplay_env: bool,
+    shadow_test_env: bool,
     cascade: bool,
 }
 
@@ -43,6 +44,7 @@ impl OpsFlags {
                 RenderOp::ArchiveEnvironment => f.archive_env = true,
                 RenderOp::MainMenuEnvironment => f.main_menu_env = true,
                 RenderOp::GameplayEnvironment => f.gameplay_env = true,
+                RenderOp::ShadowTestEnvironment => f.shadow_test_env = true,
                 RenderOp::ShootingStarCascade => f.cascade = true,
                 _ => {}
             }
@@ -53,6 +55,7 @@ impl OpsFlags {
                 && f.archive_env
                 && f.main_menu_env
                 && f.gameplay_env
+                && f.shadow_test_env
                 && f.cascade
             {
                 break;
@@ -688,6 +691,10 @@ impl WgpuRenderer {
                 }
                 DrawCmd::GameplayEnvironment => {
                     ops.push(RenderOp::GameplayEnvironment);
+                    i += 1;
+                }
+                DrawCmd::ShadowTestEnvironment => {
+                    ops.push(RenderOp::ShadowTestEnvironment);
                     i += 1;
                 }
                 DrawCmd::ClearSceneDepth => {
@@ -1468,6 +1475,14 @@ impl WgpuRenderer {
                 &camera,
                 false,
                 room_env_shadow_upload!(super::shadow_setup::ActiveRoomEnv::Stairway),
+            );
+        }
+        if ops_flags.shadow_test_env {
+            self.write_shadow_test_room_environment_uniforms(
+                frame,
+                &camera,
+                false,
+                room_env_shadow_upload!(super::shadow_setup::ActiveRoomEnv::ShadowTest),
             );
         }
         if self.archive_environment.is_some() {

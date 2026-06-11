@@ -77,6 +77,8 @@ pub(super) enum RenderOp {
     MainMenuEnvironment,
     /// Gameplay table room (`gameplay.glb`).
     GameplayEnvironment,
+    /// Debug shadow-test room (`shadow_test_room.glb`).
+    ShadowTestEnvironment,
     /// Marker: start a new Pass A subpass with depth cleared (HDR color unchanged).
     /// Emitted from [`crate::draw_cmd::DrawCmd::ClearSceneDepth`]. Never dispatched
     /// through [`super::process_op::WgpuRenderer::process_op`].

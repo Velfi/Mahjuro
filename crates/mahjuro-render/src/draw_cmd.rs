@@ -908,6 +908,8 @@ pub enum DrawCmd {
     MainMenuEnvironment,
     /// Imported [`gameplay.glb`](../../assets/3d/gameplay.glb) table room (same GPU path as shop).
     GameplayEnvironment,
+    /// Imported [`shadow_test_room.glb`](../../assets/3d/shadow_test_room.glb) debug room.
+    ShadowTestEnvironment,
     /// Reset the main scene depth target while keeping the HDR color buffer. Later 3D
     /// draws (same camera) composite by depth among themselves but no longer test
     /// against geometry drawn before this marker — e.g. pack celebration meshes over
@@ -1225,6 +1227,10 @@ impl UiFrame {
     pub fn gameplay_environment(&mut self) {
         self.cmds.push(DrawCmd::GameplayEnvironment);
     }
+    /// Draw [`shadow_test_room.glb`](../../assets/3d/shadow_test_room.glb).
+    pub fn shadow_test_environment(&mut self) {
+        self.cmds.push(DrawCmd::ShadowTestEnvironment);
+    }
     /// See [`DrawCmd::ClearSceneDepth`].
     pub fn clear_scene_depth(&mut self) {
         self.cmds.push(DrawCmd::ClearSceneDepth);
@@ -1369,6 +1375,7 @@ impl UiFrame {
                 | DrawCmd::ArchiveEnvironment
                 | DrawCmd::MainMenuEnvironment
                 | DrawCmd::GameplayEnvironment
+                | DrawCmd::ShadowTestEnvironment
                 | DrawCmd::ClearSceneDepth
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::Object3d(_)
@@ -1408,6 +1415,7 @@ pub fn apply_modal_relic_staging(
                 | DrawCmd::StaircaseEnvironment
                 | DrawCmd::ArchiveEnvironment
                 | DrawCmd::MainMenuEnvironment
+                | DrawCmd::ShadowTestEnvironment
         )
     });
     let w = window_w;

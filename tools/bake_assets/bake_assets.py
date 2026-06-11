@@ -35,6 +35,7 @@ ROOM_ENV_GLB_NAMES = frozenset(
         "main_menu.glb",
         "staircase.glb",
         "gameplay.glb",
+        "shadow_test_room.glb",
     }
 )
 ROOM_ENV_TEXTURE_MAX = 1024

@@ -90,6 +90,7 @@ impl WgpuRenderer {
             ActiveRoomEnv::Hallway => self.env_tune_for(scene_keys::HALLWAY).height_scale,
             ActiveRoomEnv::Stairway => self.env_tune_for(scene_keys::STAIRWAY).height_scale,
             ActiveRoomEnv::Archive => self.env_tune_for(scene_keys::ARCHIVE).height_scale,
+            ActiveRoomEnv::ShadowTest => self.env_tune_for(scene_keys::SHADOW_AO_LAB).height_scale,
             ActiveRoomEnv::MainMenu => {
                 let h = self.env_tune_for(scene_keys::MAIN_MENU).height_scale;
                 crate::main_menu_glb::main_menu_env_height_scale(h)
@@ -139,6 +140,14 @@ impl WgpuRenderer {
                 })
             })
             .unwrap_or_else(|| glam::Mat4::from_scale(glam::Vec3::splat(s))),
+            ActiveRoomEnv::ShadowTest => {
+                crate::shadow_test_room_glb::with_shadow_test_room_glb_cpu(|opt| {
+                    opt.map(|cpu| {
+                        crate::room_glb::room_env_model_matrix_from_cpu(camera_h, height, cpu)
+                    })
+                })
+                .unwrap_or_else(|| glam::Mat4::from_scale(glam::Vec3::splat(s)))
+            }
             ActiveRoomEnv::MainMenu => crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
                 opt.map(|cpu| {
                     crate::room_glb::room_env_model_matrix_from_cpu(camera_h, height, cpu)
@@ -484,6 +493,26 @@ impl WgpuRenderer {
         );
     }
 
+    /// Draw [`shadow_test_room.glb`] in the debug Shadow & AO lab.
+    pub(super) fn draw_shadow_test_room_environment_meshes(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        frame: &crate::draw_cmd::UiFrame,
+        room_hdr_mrt_emissive: bool,
+    ) {
+        let Some(ref gpu) = self.shadow_test_room_environment else {
+            return;
+        };
+        self.draw_gltf_room_env_meshes(
+            pass,
+            frame,
+            &self.shadow_test_room_env_primitives,
+            gpu,
+            room_hdr_mrt_emissive,
+            |_| false,
+        );
+    }
+
     /// Draw [`archive.glb`] Archive room.
     pub(super) fn draw_archive_environment_meshes(
         &self,
@@ -786,6 +815,40 @@ impl WgpuRenderer {
             frame,
             camera,
             env_scene_key: scene_keys::STAIRWAY,
+            embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
+            main_menu_env: false,
+            bloom_linear_hdr_output,
+            height_fog_params: [0.0; 4],
+            height_fog_color: [0.0; 4],
+            height_fog_far_color: [0.0; 4],
+            model,
+            gpu,
+            shadow_upload,
+            prim_deltas: &prim_deltas,
+        });
+    }
+
+    pub(super) fn write_shadow_test_room_environment_uniforms(
+        &self,
+        frame: &crate::draw_cmd::UiFrame,
+        camera: &CameraFrame,
+        bloom_linear_hdr_output: bool,
+        shadow_upload: Option<([f32; 16], &mut bool)>,
+    ) {
+        let Some(ref gpu) = self.shadow_test_room_environment else {
+            return;
+        };
+        let height = self.env_tune_for(scene_keys::SHADOW_AO_LAB).height_scale;
+        let s = crate::room_glb::room_env_world_scale(camera.h, height);
+        let model = crate::shadow_test_room_glb::with_shadow_test_room_glb_cpu(|opt| {
+            opt.map(|cpu| crate::room_glb::room_env_model_matrix_from_cpu(camera.h, height, cpu))
+        })
+        .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
+        let prim_deltas = rustc_hash::FxHashMap::default();
+        self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
+            frame,
+            camera,
+            env_scene_key: scene_keys::SHADOW_AO_LAB,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             main_menu_env: false,
             bloom_linear_hdr_output,

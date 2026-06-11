@@ -509,6 +509,11 @@ impl WgpuRenderer {
             RenderOp::GameplayEnvironment => {
                 self.draw_gameplay_environment_for_op(pass, frame);
             }
+            RenderOp::ShadowTestEnvironment => {
+                if self.shadow_test_room_environment.is_some() {
+                    self.draw_shadow_test_room_environment_meshes(pass, frame, false);
+                }
+            }
             RenderOp::ShowcaseTileBatch(batch_idx) => {
                 if let Some(sc) = showcase_tile_batch_clips
                     .get(*batch_idx)

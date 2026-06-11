@@ -96,6 +96,7 @@ impl WgpuRenderer {
             ActiveRoomEnv::Archive => self.archive_environment.as_ref(),
             ActiveRoomEnv::MainMenu => self.main_menu_environment.as_ref(),
             ActiveRoomEnv::Gameplay => self.gameplay_environment.as_ref(),
+            ActiveRoomEnv::ShadowTest => self.shadow_test_room_environment.as_ref(),
         };
         if let Some(gpu) = gpu {
             self.write_room_env_shadow_caster(gpu, lvp, model, &prim_deltas, &mut _changed);
@@ -166,6 +167,16 @@ impl WgpuRenderer {
                                         && self.gameplay_cash_in_prim_indices.contains(&pi)
                                 }
                             },
+                        );
+                    }
+                }
+                ActiveRoomEnv::ShadowTest => {
+                    if let Some(ref gpu) = self.shadow_test_room_environment {
+                        room_draws += self.draw_gltf_room_env_shadow(
+                            shadow_pass,
+                            &self.shadow_test_room_env_primitives,
+                            gpu,
+                            |_| false,
                         );
                     }
                 }

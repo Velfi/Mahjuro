@@ -742,6 +742,7 @@ pub(super) fn build_renderer_new(
     let (shop_env_primitives, shop_environment, shop_eyeball_prim_indices) =
         (Vec::new(), None, Vec::new());
     let (hallway_env_primitives, hallway_environment) = (Vec::new(), None);
+    let (shadow_test_room_env_primitives, shadow_test_room_environment) = (Vec::new(), None);
     let (staircase_env_primitives, staircase_environment) = (Vec::new(), None);
     let (
         archive_env_primitives,
@@ -1209,6 +1210,8 @@ pub(super) fn build_renderer_new(
         tile_env_emissive_view,
         hallway_env_primitives,
         hallway_environment,
+        shadow_test_room_env_primitives,
+        shadow_test_room_environment,
         hallway_room_gpu_upload: None,
         staircase_env_primitives,
         staircase_environment,
