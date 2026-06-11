@@ -278,7 +278,7 @@ impl crate::App {
                 vhs_enabled: settings.vhs_enabled,
             },
             // Default: cheap baseline; see `effect_layers.rs`. Use `FULL` or flip
-            // flags to restore shadows, SSR, particles, transition FX, HDR, etc.
+            // flags to restore shadows, particles, transition FX, HDR, etc.
             effect_layers: crate::effect_layers::EffectLayers::BASELINE,
             debug: crate::main_debug_state::DebugState::new(),
             cascade_tuning: crate::game::cascade::CascadeTuning::default(),

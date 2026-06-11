@@ -21,9 +21,4 @@ impl RenderSettings {
     pub fn shadow_quality(&self) -> mahjuro_gfx_types::ShadowQuality {
         self.graphics_mode.shadow_quality()
     }
-
-    #[inline]
-    pub fn ssr_enabled(&self) -> bool {
-        self.graphics_mode.ssr_enabled()
-    }
 }

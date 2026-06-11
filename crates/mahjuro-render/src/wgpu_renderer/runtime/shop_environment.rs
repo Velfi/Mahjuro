@@ -1151,7 +1151,7 @@ impl WgpuRenderer {
                 .as_ref()
                 .or(frame.gameplay_cash_in_overlay_lighting.as_ref())
                 .unwrap_or(&frame.scene_lighting);
-            self.upload_camera_uniforms(&overlay_cam, self.pass_a_frame_ssr_enabled, frame);
+            self.upload_camera_uniforms(&overlay_cam, frame);
             self.upload_punctual_light_buffers(
                 frame,
                 overlay_lit,
@@ -1160,7 +1160,7 @@ impl WgpuRenderer {
             );
             self.write_gameplay_environment_uniforms(frame, &overlay_cam, false, None);
             self.draw_gameplay_environment_meshes(pass, frame, false);
-            self.upload_camera_uniforms(&restore, self.pass_a_frame_ssr_enabled, frame);
+            self.upload_camera_uniforms(&restore, frame);
             self.upload_punctual_light_buffers(
                 frame,
                 frame.foreground_scene_lighting(),

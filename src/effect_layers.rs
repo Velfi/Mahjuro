@@ -1,7 +1,7 @@
 //! Layered visual-effect toggles for isolating GPU cost and debugging look.
 //!
-//! Live builds start from [`EffectLayers::BASELINE`] (directional shadows + table
-//! SSR on; heavier effects off; game-over moonlit / sunlit water stays on). Turn
+//! Live builds start from [`EffectLayers::BASELINE`] (directional shadows on;
+//! heavier effects off; game-over moonlit / sunlit water stays on). Turn
 //! individual fields on to restore heavier visuals.
 
 use crate::main_render_settings::RenderSettings as AppRenderSettings;
@@ -21,7 +21,6 @@ pub struct WgpuRenderSettingsParams<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct EffectLayers {
     pub shadows: bool,
-    pub ssr: bool,
     /// Felt fluff / `EffectsQuality` tier (also scales procedural vignette layers).
     pub procedural_surface_quality: bool,
     pub starfield: bool,
@@ -36,7 +35,6 @@ pub struct EffectLayers {
 impl EffectLayers {
     pub const BASELINE: Self = Self {
         shadows: true,
-        ssr: true,
         procedural_surface_quality: false,
         starfield: false,
         rain: false,
@@ -65,7 +63,6 @@ impl EffectLayers {
             } else {
                 mahjuro_gfx_types::ShadowQuality::Off
             },
-            ssr_enabled: p.gfx.ssr_enabled() && self.ssr,
             vhs_enabled: p.gfx.vhs_enabled,
         }
     }

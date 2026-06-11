@@ -235,7 +235,7 @@ impl WgpuRenderer {
             }
             RenderOp::Object3dBatch { start, end } => {
                 pass.set_pipeline(&self.lit_mesh_pipeline);
-                pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
+                pass.set_bind_group(3, &self.lit_mesh_spot_frame_bind_group, &[]);
                 pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
                 pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
                 let mut current_blended = false;
@@ -359,7 +359,7 @@ impl WgpuRenderer {
                             inst_start,
                             1,
                         );
-                        pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
+                        pass.set_bind_group(3, &self.lit_mesh_spot_frame_bind_group, &[]);
                         continue;
                     }
                     if matches!(kind, DrawKind::Talisman) {

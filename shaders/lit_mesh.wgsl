@@ -23,10 +23,6 @@
 // All material variants share the candle/spot point-light loop from the tile
 // shader so the new geometry catches the same warm pools as the hand tiles.
 
-// Integrated Intel DX12 (DXC) fails compiling the lacquered-wood SSR ray-march
-// (nested loops + depth textureLoad). Cleared via pipeline constant on iGPU init.
-override LIT_MESH_TABLE_SSR: bool = true;
-
 struct MeshUniform {
     view_proj: mat4x4<f32>,
     model: mat4x4<f32>,
@@ -205,20 +201,11 @@ struct SpotLights {
 }
 @group(3) @binding(0) var<uniform> spot_lights: SpotLights;
 
-// ── SSR globals (group 3, bindings 1–4; spotlights occupy binding 0) ──
-// WebGPU allows only four bind groups (0..3). SSR shares group 3 with
-// `spot_lights` so lit_mesh stays within the limit.
-// The lacquered-floor branch marches reflection rays in screen space
-// against the previous frame's composited colour + depth. The camera
-// is fixed in this game, so a one-frame stale snapshot is effectively
-// current. Disabled (params.x < 0.5) → analytic clearcoat only.
-struct SsrGlobals {
-    inv_view_proj: mat4x4<f32>,
-    view_proj: mat4x4<f32>,
+// ── Lit-mesh frame globals (group 3, binding 1; spotlights occupy binding 0) ──
+// WebGPU allows only four bind groups (0..3), so lit_mesh shares group 3 with
+// `spot_lights`.
+struct LitMeshFrameGlobals {
     view_pos: vec4<f32>,
-    // x = enabled (0/1), y = max_distance (world units),
-    // z = stride (world units / step), w = max_steps
-    params: vec4<f32>,
     // x = ACES HDR path (1 = linear HDR + ACES composite); y = linear exposure;
     // z = ambient hemispheric scale; w = reserved.
     hdr_tonemap: vec4<f32>,
@@ -227,36 +214,7 @@ struct SsrGlobals {
     // z = art-forward ambient mul; w = reserved.
     shop_punctual: vec4<f32>,
 };
-@group(3) @binding(1) var<uniform> ssr_globals: SsrGlobals;
-@group(3) @binding(2) var ssr_scene_prev: texture_2d<f32>;
-@group(3) @binding(3) var ssr_depth: texture_2d<f32>;
-@group(3) @binding(4) var ssr_samp: sampler;
-
-// Project a world-space point to screen-space UV (0..1, top-left origin
-// to match wgpu/webgpu texture sampling) plus its NDC z. Returns w<0 if
-// the point is behind the camera.
-fn ssr_project(world: vec3<f32>) -> vec4<f32> {
-    let clip = ssr_globals.view_proj * vec4<f32>(world, 1.0);
-    if (clip.w <= 0.0) {
-        return vec4<f32>(0.0, 0.0, 0.0, -1.0);
-    }
-    let inv_w = 1.0 / clip.w;
-    let ndc = clip.xyz * inv_w;
-    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
-    return vec4<f32>(uv, ndc.z, 1.0);
-}
-
-// Sample the SSR depth texture at a UV (clamped) and unproject the
-// resulting NDC point back to world space. Returns world Y of the
-// nearest opaque surface at that screen position.
-fn ssr_world_at(uv: vec2<f32>) -> vec3<f32> {
-    let dim = vec2<f32>(textureDimensions(ssr_depth, 0));
-    let px = vec2<i32>(clamp(uv * dim, vec2<f32>(0.0), dim - vec2<f32>(1.0)));
-    let d = textureLoad(ssr_depth, px, 0).x;
-    let ndc = vec3<f32>(uv.x * 2.0 - 1.0, (1.0 - uv.y) * 2.0 - 1.0, d);
-    let world = ssr_globals.inv_view_proj * vec4<f32>(ndc, 1.0);
-    return world.xyz / max(world.w, 1e-6);
-}
+@group(3) @binding(1) var<uniform> lit_mesh_frame: LitMeshFrameGlobals;
 
 struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,
@@ -752,9 +710,9 @@ fn fs_main(
     let is_chitin    = (kind > 20.5 && kind < 21.5);
     let is_unshaded  = (kind > 21.5 && kind < 22.5);
     let is_bronze_mirror = (kind > 22.5 && kind < 23.5);
-    let phys_hdr = clamp(ssr_globals.hdr_tonemap.x, 0.0, 1.0);
+    let phys_hdr = clamp(lit_mesh_frame.hdr_tonemap.x, 0.0, 1.0);
     // Shop storeroom catalog balance (see `shop_catalog_balance` in lit_mesh.rs).
-    let shop_display_case_tuning = phys_hdr > 0.5 && ssr_globals.shop_punctual.y > 0.5;
+    let shop_display_case_tuning = phys_hdr > 0.5 && lit_mesh_frame.shop_punctual.y > 0.5;
 
     // Brass is a conductor too; group with metal for the per-light
     // Fresnel-spec branch and for the rim halo. Skips the coin-face
@@ -795,7 +753,7 @@ fn fs_main(
     // Storeroom row (`shop_punctual.y == 1`, see `shop_catalog_balance` in lit_mesh.rs):
     //   spec_forward — pack wrap, foil, talisman: gloss/holo-led pull-back.
     //   art_forward  — enamel relic: ambient fill.
-    let shop_cat_amb = ssr_globals.shop_punctual.z;
+    let shop_cat_amb = lit_mesh_frame.shop_punctual.z;
     let shop_spec_forward = shop_display_case_tuning
         && (is_pack_wrap || is_foil || is_talisman);
     let shop_art_forward = shop_display_case_tuning && is_enamel;
@@ -1332,7 +1290,7 @@ fn fs_main(
 
         var lit_water = vec3<f32>(0.0);
         var spec_water = vec3<f32>(0.0);
-        let cam_pos_w = ssr_globals.view_pos.xyz;
+        let cam_pos_w = lit_mesh_frame.view_pos.xyz;
         let view_dir_w = normalize(cam_pos_w - in.world_pos);
         let pt_n_w = lights.count.x;
         for (var i: u32 = 0u; i < pt_n_w; i = i + 1u) {
@@ -1346,7 +1304,7 @@ fn fs_main(
             let dist = length(to_light);
             let atten = select(
                 scene_smooth_point_atten(dist, range_w),
-                punctual_attenuation_with_inv_doc_scale(dist, range_w, ssr_globals.shop_punctual.x),
+                punctual_attenuation_with_inv_doc_scale(dist, range_w, lit_mesh_frame.shop_punctual.x),
                 is_inv,
             );
             let l_dir = to_light / max(dist, 0.0001);
@@ -1402,9 +1360,9 @@ fn fs_main(
         );
         var rgb_w = water_albedo * (lit_water + ambient) + spec_water;
         if (phys_hdr > 0.5) {
-            let amb = ssr_globals.hdr_tonemap.z * 0.08;
+            let amb = lit_mesh_frame.hdr_tonemap.z * 0.08;
             rgb_w = rgb_w + water_albedo * vec3<f32>(amb);
-            rgb_w = rgb_w * ssr_globals.hdr_tonemap.y;
+            rgb_w = rgb_w * lit_mesh_frame.hdr_tonemap.y;
         } else {
             let inv_g = 1.0 / max(lights.extras.x, 0.01);
             rgb_w = pow(rgb_w, vec3<f32>(inv_g));
@@ -1621,7 +1579,7 @@ fn fs_main(
     var coat_acc = vec3<f32>(0.0);     // clearcoat accumulator (white, untinted)
     var sheen_acc = vec3<f32>(0.0);    // talisman sheen accumulator
 
-    let cam_pos = ssr_globals.view_pos.xyz;
+    let cam_pos = lit_mesh_frame.view_pos.xyz;
     let view_dir = normalize(cam_pos - in.world_pos);
     let ndv_view = clamp(dot(n, view_dir), 0.0, 1.0);
 
@@ -1784,7 +1742,7 @@ fn fs_main(
         let dist = length(to_light);
         let atten = select(
             scene_smooth_point_atten(dist, range_w),
-            punctual_attenuation_with_inv_doc_scale(dist, range_w, ssr_globals.shop_punctual.x),
+            punctual_attenuation_with_inv_doc_scale(dist, range_w, lit_mesh_frame.shop_punctual.x),
             is_inv,
         );
         // Skip lights whose attenuation has fallen to zero — no point
@@ -2595,90 +2553,6 @@ fn fs_main(
     var coat_final = coat_acc;
     var spec_final = spec_acc;
 
-    // ── Screen-space reflections (lacquered wood only) ─────────────
-    // The analytic clearcoat lobe above gives the table a glassy
-    // highlight pinpoint, but a real polished tabletop also reflects
-    // the *content* of the scene above it — most importantly, the
-    // candle flames smear into vertical pillars pointing toward the
-    // viewer. We march a reflection ray in world space against the
-    // previous frame's depth + colour to capture that.
-    if (LIT_MESH_TABLE_SSR && is_wood && ssr_globals.params.x > 0.5) {
-        let cam_pos_ssr = ssr_globals.view_pos.xyz;
-        let v_ssr = normalize(cam_pos_ssr - in.world_pos);
-        let r = reflect(-v_ssr, n);
-        // Only march rays that point upward away from the table.
-        // Reject grazing/down rays — they'd just hit the floor itself.
-        if (r.z > 0.02) {
-            let max_dist = ssr_globals.params.y;
-            let stride = ssr_globals.params.z;
-            let max_steps = i32(ssr_globals.params.w);
-            // Start a hair above the surface to avoid self-intersection.
-            let origin = in.world_pos + n * (stride * 0.5);
-            var t_prev = 0.0;
-            var t_hit = -1.0;
-            var hit_uv = vec2<f32>(0.0, 0.0);
-            for (var i: i32 = 1; i <= 64; i = i + 1) {
-                if (i > max_steps) { break; }
-                let t = f32(i) * stride;
-                if (t > max_dist) { break; }
-                let p = origin + r * t;
-                let proj = ssr_project(p);
-                if (proj.w < 0.0) { break; }
-                let uv = proj.xy;
-                if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-                    break;
-                }
-                let scene_world = ssr_world_at(uv);
-                // The march and the depth texture both encode "how
-                // far above the table". A hit happens when the ray
-                // first dips at-or-below the recorded scene point's
-                // world Z at the same screen pixel.
-                if (p.z <= scene_world.z + stride * 0.6
-                    && scene_world.z > in.world_pos.z + 0.1) {
-                    // Binary refinement between the previous and
-                    // current step for a sharper contact point.
-                    var lo = t_prev;
-                    var hi = t;
-                    for (var k: i32 = 0; k < 4; k = k + 1) {
-                        let mid = (lo + hi) * 0.5;
-                        let pm = origin + r * mid;
-                        let pmp = ssr_project(pm);
-                        if (pmp.w < 0.0) { break; }
-                        let uvm = pmp.xy;
-                        let sw = ssr_world_at(uvm);
-                        if (pm.z <= sw.z && sw.z > in.world_pos.z + 0.1) {
-                            hi = mid;
-                            hit_uv = uvm;
-                        } else {
-                            lo = mid;
-                        }
-                    }
-                    t_hit = hi;
-                    if (hit_uv.x == 0.0 && hit_uv.y == 0.0) {
-                        hit_uv = uv;
-                    }
-                    break;
-                }
-                t_prev = t;
-            }
-            if (t_hit > 0.0) {
-                // Schlick Fresnel against the actual view (not the
-                // half-vector) — at glancing angles the reflection
-                // should swell toward the lacquer's full intensity.
-                let f0 = 0.04;
-                let f_view = f0 + (1.0 - f0) * pow(1.0 - max(dot(n, v_ssr), 0.0), 5.0);
-                // Fade against screen edges so the reflection doesn't
-                // pop when it walks off the framebuffer.
-                let edge = min(min(hit_uv.x, 1.0 - hit_uv.x), min(hit_uv.y, 1.0 - hit_uv.y));
-                let edge_fade = smoothstep(0.0, 0.08, edge);
-                // Distance fade so far reflections don't dominate.
-                let dist_fade = 1.0 - clamp(t_hit / ssr_globals.params.y, 0.0, 1.0);
-                let refl = textureSampleLevel(ssr_scene_prev, ssr_samp, hit_uv, 0.0).rgb;
-                coat_final = coat_final + refl * (f_view * 0.55 * edge_fade * dist_fade);
-            }
-        }
-    }
-
     if (is_wood) {
         coat_final = coat_final / (vec3<f32>(1.0) + coat_final * 0.7);
     }
@@ -2760,9 +2634,9 @@ fn fs_main(
         // applies ACES + sRGB encode for the swapchain. The per-shader
         // `lights.extras.x` gamma slider is intentionally a no-op here — display
         // encoding belongs at the composite stage now.
-        var amb = ssr_globals.hdr_tonemap.z * 0.08;
+        var amb = lit_mesh_frame.hdr_tonemap.z * 0.08;
         if (shop_art_forward && shop_cat_amb > 0.001) {
-            amb = ssr_globals.hdr_tonemap.z * shop_cat_amb;
+            amb = lit_mesh_frame.hdr_tonemap.z * shop_cat_amb;
         }
         if (is_unshaded) {
             // Flat atlas decals skip punctual lighting but still need to land in
@@ -2773,7 +2647,7 @@ fn fs_main(
         } else {
             var hdr = rgb;
             hdr = hdr + albedo * vec3<f32>(amb) * diffuse_scale * baked_contact;
-            hdr = hdr * ssr_globals.hdr_tonemap.y;
+            hdr = hdr * lit_mesh_frame.hdr_tonemap.y;
             if (is_bronze_mirror && mesh.instance_params.x > 0.01) {
                 let pg = mesh.instance_params.x;
                 let jade_hdr = vec3<f32>(0.08, 0.72, 0.34);

@@ -237,7 +237,7 @@ pub fn clear_shop_glb_cpu_cache() {
 pub const SHOP_ENV_HEIGHT_SCALE: f32 = 1.0;
 
 /// Multiplies glTF punctual **intensity** before upload (document-space inverse-square; see
-/// `decal_atlas_uv.y` / `SsrGlobals.shop_punctual.x`). `1.0` matches authored glTF / Blender
+/// `decal_atlas_uv.y` / `LitMeshFrameGlobals.shop_punctual.x`). `1.0` matches authored glTF / Blender
 /// export; lower only if punctuals clip after ACES (debug **glTF light intensity** slider).
 pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 1.0;
 

@@ -64,11 +64,12 @@ use crate::lit_mesh::Aabb;
 use crate::lit_mesh::MeshCpu;
 use crate::lit_mesh::push_box;
 use crate::lit_mesh::{
-    LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowDepthArrayGpu, ShadowGlobals,
-    SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_spot_ssr_layout,
-    create_room_env_camera_uniform_buffers, create_room_env_shadow_gpu_batch,
-    create_room_shadow_mask_gpu_batch, create_room_shadow_mask_layout, create_shadow_caster_layout,
-    create_shadow_sample_layout, create_shadow_warp_bind_group, create_shadow_warp_layout,
+    LitMeshFrameGlobals, LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams,
+    ShadowDepthArrayGpu, ShadowGlobals, create_lit_mesh_material_layout,
+    create_lit_mesh_spot_frame_layout, create_room_env_camera_uniform_buffers,
+    create_room_env_shadow_gpu_batch, create_room_shadow_mask_gpu_batch,
+    create_room_shadow_mask_layout, create_shadow_caster_layout, create_shadow_sample_layout,
+    create_shadow_warp_bind_group, create_shadow_warp_layout,
 };
 use crate::mirror_mesh::build_mirror_mesh;
 use crate::ofuda_mesh::build_ofuda_mesh;
@@ -107,11 +108,6 @@ pub struct WgpuRenderer {
     config: wgpu::SurfaceConfiguration,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
-    /// Previous-frame depth snapshot copied after Pass A for lacquered-table SSR
-    /// (paired with `scene_prev_texture`). See the SSR snapshot block in
-    /// `runtime/render.rs`.
-    ssr_prev_depth_texture: wgpu::Texture,
-    ssr_prev_depth_view: wgpu::TextureView,
     /// Current-frame depth copied to R32Float before emissive-probe passes
     /// (`textureLoad` is unsupported on depth textures in the GLSL backend).
     depth_r32_snapshot_texture: wgpu::Texture,
@@ -143,7 +139,7 @@ pub struct WgpuRenderer {
     flame_volume_mesh: crate::lit_mesh::LitMeshGpu,
     /// Per-frame camera matrices uploaded for the flame vertex shader.
     /// Structurally identical to the view_proj + view_pos portion of
-    /// `SsrGlobals`, but with a vertex-visible binding.
+    /// `LitMeshFrameGlobals`, but with a vertex-visible binding.
     flame_view_buffer: wgpu::Buffer,
     flame_view_bind_group: wgpu::BindGroup,
     /// Reusable staging buffer for [`crate::flame_volume::GpuFlameInstance`].
@@ -164,14 +160,6 @@ pub struct WgpuRenderer {
     cascade_offscreen_texture: wgpu::Texture,
     cascade_offscreen_view: wgpu::TextureView,
     cascade_composite_bind_group: wgpu::BindGroup,
-    /// Half-res downsample blit that publishes `scene_color_view` →
-    /// `scene_prev_view` once per frame as the new SSR history input.
-    /// Replaces the old full-res `copy_texture_to_texture` of color
-    /// (~12 MB/frame at 1080p → ~3 MB/frame). Reuses
-    /// `cascade_composite_layout` (texture + sampler) and the
-    /// `cascade_composite_sampler`. See `scene_color_downsample.wgsl`.
-    scene_color_downsample_pipeline: wgpu::RenderPipeline,
-    scene_color_downsample_bind_group: wgpu::BindGroup,
     /// Lazy — compiled on first depth blit so Intel DX12 init order stays unchanged.
     depth_to_r32_pipeline: std::sync::OnceLock<wgpu::RenderPipeline>,
     depth_to_r32_bind_group_layout: wgpu::BindGroupLayout,
@@ -414,7 +402,6 @@ pub struct WgpuRenderer {
     /// Pass A camera/lighting scratch for mid-pass env overlay restore (guide cash-in).
     pub(super) pass_a_draw_camera: Option<runtime::CameraFrame>,
     pub(super) pass_a_frame_gamma: f32,
-    pub(super) pass_a_frame_ssr_enabled: bool,
     /// Timestamp of the previous frame — used to compute delta time for lerping.
     last_frame: Instant,
     /// Delta time of the *current* frame in seconds (set early in
@@ -480,20 +467,12 @@ pub struct WgpuRenderer {
     // ── Procedural lit meshes (candles + wood table) ────────────────────
     /// Bind-group layout shared by every lit-mesh instance.
     lit_mesh_material_layout: wgpu::BindGroupLayout,
-    /// Bind-group layout for lit_mesh group 3: spotlights + SSR history.
-    lit_mesh_spot_ssr_layout: wgpu::BindGroupLayout,
-    /// Frame-shared SSR uniform (camera matrices + toggle + tuning).
-    lit_mesh_ssr_buffer: wgpu::Buffer,
-    /// Spotlights + SSR resources bound as lit_mesh group 3. Recreated on
-    /// resize whenever the scene-history texture or SSR depth snapshot is reallocated.
-    lit_mesh_spot_ssr_bind_group: wgpu::BindGroup,
-    /// Sampler used by the SSR pass for both the scene-history colour
-    /// texture and the depth snapshot.
-    lit_mesh_ssr_sampler: wgpu::Sampler,
-    /// Snapshot of the previous frame's linear HDR scene colour. Read by the
-    /// lacquered floor as the SSR source.
-    scene_prev_texture: wgpu::Texture,
-    scene_prev_view: wgpu::TextureView,
+    /// Bind-group layout for lit_mesh group 3: spotlights + frame globals.
+    lit_mesh_spot_frame_layout: wgpu::BindGroupLayout,
+    /// Frame-shared lit-mesh uniform (camera + tonemap + room-light tuning).
+    lit_mesh_frame_buffer: wgpu::Buffer,
+    /// Spotlights + frame globals bound as lit_mesh group 3.
+    lit_mesh_spot_frame_bind_group: wgpu::BindGroup,
     /// Current frame's linear HDR scene color (`Rgba16Float`), rendered offscreen
     /// before bloom, tonemap, and final composite into the swapchain.
     scene_color_texture: wgpu::Texture,

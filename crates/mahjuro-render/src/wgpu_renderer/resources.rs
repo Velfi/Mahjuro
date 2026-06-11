@@ -735,48 +735,6 @@ pub(crate) fn create_depth(
     (tex, view)
 }
 
-/// Snapshot of the previous frame's swapchain colour. Bound by the lacquered
-/// floor as the source for screen-space reflections — the table is drawn
-/// before the candles each frame, so it has to reflect *last* frame's
-/// composited candles + flames + tiles. The camera is fixed, so the
-/// one-frame stale image is essentially correct.
-///
-/// Allocated at half the visible resolution (`width / 2`, `height / 2`)
-/// — see `scene_color_downsample.wgsl`. The lit_mesh SSR sampler reads
-/// it with normalized UVs so any size works. Texture is a render
-/// attachment because the downsample blit writes to it directly
-/// (the old full-res `copy_texture_to_texture` path is gone).
-pub(super) fn create_scene_prev(
-    device: &wgpu::Device,
-    format: wgpu::TextureFormat,
-    width: u32,
-    height: u32,
-) -> (wgpu::Texture, wgpu::TextureView) {
-    let tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("scene-prev"),
-        size: wgpu::Extent3d {
-            width: width.max(1),
-            height: height.max(1),
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
-    let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-    (tex, view)
-}
-
-/// Returns the `(width, height)` to allocate `scene_prev_texture` at,
-/// given the swapchain's full size. Centralised so the init path and
-/// the resize path can't drift.
-pub(super) fn scene_prev_size(full_width: u32, full_height: u32) -> (u32, u32) {
-    ((full_width / 2).max(1), (full_height / 2).max(1))
-}
-
 pub(super) fn create_scene_color(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
@@ -887,7 +845,7 @@ pub(super) fn create_post_texture(
     (tex, view)
 }
 
-/// R32 depth snapshot for `textureLoad` in SSR / emissive-probe shaders.
+/// R32 depth snapshot for `textureLoad` in emissive-probe shaders.
 /// GLES/llvmpipe cannot compile WGSL `textureLoad` on `texture_depth_2d`.
 pub(crate) fn create_depth_r32_snapshot(
     device: &wgpu::Device,
@@ -1151,18 +1109,6 @@ impl crate::wgpu_renderer::WgpuRenderer {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.draw(0..3, 0..1);
-    }
-
-    /// Publish scene depth into an R32Float snapshot for SSR history.
-    pub(super) fn encode_copy_depth_to_r32float(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        src_depth_view: &wgpu::TextureView,
-        dst_r32_view: &wgpu::TextureView,
-        width: u32,
-        height: u32,
-    ) {
-        self.encode_blit_depth_view_to_r32(encoder, src_depth_view, dst_r32_view, width, height);
     }
 }
 

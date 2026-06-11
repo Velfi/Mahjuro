@@ -10,7 +10,7 @@ pub struct GpuInstance {
 
 /// Per-frame settings threaded from the app into `WgpuRenderer::render`:
 /// quality tiers, tile-look choices, animation settle speeds, gamma, and
-/// the shadow/SSR toggles. Grouped so the render entry point takes one
+/// the shadow toggle. Grouped so the render entry point takes one
 /// value instead of ten individual params.
 #[derive(Clone)]
 pub struct RenderSettings {
@@ -26,7 +26,6 @@ pub struct RenderSettings {
     pub sort_settle_speed: f32,
     pub gamma: f32,
     pub shadow_quality: mahjuro_gfx_types::ShadowQuality,
-    pub ssr_enabled: bool,
     /// Master Options-toggle gate for the VHS overlay. The per-effect
     /// amounts (chromatic / scanline / grain / vignette) live on the
     /// renderer itself — pushed via `set_tonemap_tuning` from the per-scene
