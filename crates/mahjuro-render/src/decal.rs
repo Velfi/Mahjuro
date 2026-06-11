@@ -148,9 +148,9 @@ fn load_atlas(tile_set: &str) -> Option<std::sync::Arc<Atlas>> {
 }
 
 fn atlas_source_bytes(tile_set: &str) -> Option<(Vec<u8>, Vec<u8>)> {
-    if mahjuro_assets::tileset_mod::is_mod_tileset(tile_set) {
-        let toml = mahjuro_assets::tileset_mod::read_mod_file(tile_set, "atlas.toml")?;
-        let png = mahjuro_assets::tileset_mod::read_mod_file(tile_set, "atlas.png")?;
+    if mahjuro_assets::tileset_mod::is_player_tileset(tile_set) {
+        let toml = mahjuro_assets::tileset_mod::read_player_tileset_file(tile_set, "atlas.toml")?;
+        let png = mahjuro_assets::tileset_mod::read_player_tileset_file(tile_set, "atlas.png")?;
         return Some((toml, png));
     }
     let toml_path = format!("textures/tile_sets/{tile_set}/atlas.toml");

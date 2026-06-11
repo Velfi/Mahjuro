@@ -47,11 +47,14 @@ pub fn list_builtin_player_tilesets() -> Vec<String> {
         .collect()
 }
 
-/// Built-in + validated player mod tilesets (`mod:<folder_name>`).
+/// Built-in + validated player mod tilesets (`mod:<folder_name>`) + Workshop (`workshop:<id>`).
 pub fn list_player_tilesets() -> Vec<String> {
     let mut names = list_builtin_player_tilesets();
     for entry in crate::tileset_mod::list_mod_tilesets() {
         names.push(entry.id);
+    }
+    for entry in crate::tileset_workshop::list_workshop_tilesets() {
+        names.push(crate::tileset_workshop::workshop_id(entry.published_file_id));
     }
     names
 }

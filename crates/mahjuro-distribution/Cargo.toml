@@ -6,16 +6,18 @@ publish.workspace = true
 
 [features]
 default = []
-steam = ["dep:steamworks"]
+steam = ["dep:steamworks", "dep:mahjuro-assets", "dep:image"]
 macos-store = []
 windows-store = []
 
 [dependencies]
 mahjuro-core.workspace = true
+mahjuro-assets = { workspace = true, optional = true }
 dirs.workspace = true
 enum_dispatch.workspace = true
 log.workspace = true
 steamworks = { workspace = true, optional = true }
+image = { workspace = true, optional = true, features = ["png"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"

@@ -99,6 +99,7 @@ See **[windows-app-store.md](windows-app-store.md)** for the full Partner Center
 - [ ] Profile stats sync after run end / profile switch
 - [ ] `MAHJURO_ASSETS` loose tree works in dev
 - [ ] Tileset mod folder opens via Options
+- [ ] Workshop: browse via **Steam Workshop** button; subscribed tilesets appear in **Tile set**
 - [ ] Play-stats export lands in Downloads
 
 ### Mac App Store

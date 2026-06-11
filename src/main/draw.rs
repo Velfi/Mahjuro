@@ -641,7 +641,9 @@ impl App {
             modal_gradient_quads,
         )) = self.modals.draw(size.width as f32, size.height as f32)
         {
-            frame.quads(modal_insts);
+            // Modal chrome must use OverlayQuad so it draws in the text-overlay
+            // pass after scene labels (regular Quad is tonemapped in Pass A).
+            frame.overlay_quads(modal_insts);
             frame.texts(modal_labels);
             if !modal_gradient_quads.is_empty() {
                 frame.gradient_quads(modal_gradient_quads);

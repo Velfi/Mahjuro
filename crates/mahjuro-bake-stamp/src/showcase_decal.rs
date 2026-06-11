@@ -79,6 +79,8 @@ fn skip_decal_input(rel: &str) -> bool {
         || base.eq_ignore_ascii_case("desktop.ini")
 }
 
+/// Same rule as `mahjuro_assets::list_tilesets`: a shipped tileset has `atlas.png`.
+/// Source-only folders (e.g. work-in-progress art under `source/`) are ignored.
 fn list_tileset_names(repo: &Path) -> Vec<String> {
     let root = repo.join(ShowcaseDecal::OUT_DIR);
     let Ok(read) = fs::read_dir(&root) else {
@@ -88,6 +90,7 @@ fn list_tileset_names(repo: &Path) -> Vec<String> {
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
         .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|name| root.join(name).join("atlas.png").is_file())
         .collect();
     names.sort();
     names
