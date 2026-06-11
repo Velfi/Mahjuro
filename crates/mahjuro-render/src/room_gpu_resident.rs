@@ -163,10 +163,7 @@ impl RoomGpuResidentDesc {
             RoomGpuResidentId::Staircase => key == scene_keys::STAIRWAY,
             RoomGpuResidentId::Archive => key == scene_keys::ARCHIVE,
             RoomGpuResidentId::Gameplay => {
-                matches!(
-                    key,
-                    scene_keys::GAMEPLAY | scene_keys::VICTORY | scene_keys::DEFEAT
-                )
+                matches!(key, scene_keys::GAMEPLAY | scene_keys::DEFEAT)
             }
         }
     }
@@ -186,6 +183,24 @@ impl RoomGpuResidentDesc {
         }
         (d.start_cpu_prefetch)();
     }
+}
+
+/// Victory run-summary 3D moon (`MoonObject` from `main_menu.glb`) vs procedural 2D disc.
+#[inline]
+pub fn victory_uses_3d_moon(mode: mahjuro_gfx_types::GraphicsMode) -> bool {
+    mode != mahjuro_gfx_types::GraphicsMode::LowMemory
+}
+
+/// Scene key → pinned room GPU bit, accounting for graphics preset policy.
+pub fn room_gpu_bit_for_scene_key(
+    key: &str,
+    graphics_mode: mahjuro_gfx_types::GraphicsMode,
+) -> Option<u8> {
+    let key = scene_keys::normalize_scene_key(key);
+    if key == scene_keys::VICTORY {
+        return victory_uses_3d_moon(graphics_mode).then(|| RoomGpuResidentId::MainMenu.bit());
+    }
+    RoomGpuResidentId::bit_for_scene_key(key)
 }
 
 /// Legacy bit constants — prefer [`RoomGpuResidentId::bit`].
@@ -231,6 +246,19 @@ mod tests {
         );
         assert_eq!(
             RoomGpuResidentId::bit_for_scene_key("game_over"),
+            Some(ROOM_GAMEPLAY)
+        );
+        assert_eq!(RoomGpuResidentId::bit_for_scene_key("victory"), None);
+        assert_eq!(
+            room_gpu_bit_for_scene_key("victory", mahjuro_gfx_types::GraphicsMode::Visuals),
+            Some(ROOM_MAIN_MENU)
+        );
+        assert_eq!(
+            room_gpu_bit_for_scene_key("victory", mahjuro_gfx_types::GraphicsMode::LowMemory),
+            None
+        );
+        assert_eq!(
+            room_gpu_bit_for_scene_key("gameplay", mahjuro_gfx_types::GraphicsMode::LowMemory),
             Some(ROOM_GAMEPLAY)
         );
     }

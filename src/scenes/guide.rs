@@ -2036,6 +2036,7 @@ fn draw_scoring_page(
     let body_font = typography::size(typography::H36, h);
     let section_font = typography::size(typography::H28, h);
     let small_font = typography::size(typography::H42, h);
+    let micro_font = typography::size(typography::H45, h);
 
     let x = layout.content_x;
     let full_w = layout.content_w;
@@ -2050,6 +2051,7 @@ fn draw_scoring_page(
         section_font,
         body_font,
         small_font,
+        micro_font,
         pad,
         flow_tile_max,
     );
@@ -2070,6 +2072,7 @@ fn draw_scoring_page(
         flow_tile_max,
         body_font,
         small_font,
+        micro_font,
         pad,
         glb_cash_in,
     );
@@ -2091,6 +2094,7 @@ fn draw_scoring_page(
         values_tile_max,
         small_font,
         body_font,
+        micro_font,
         pad,
     );
 
@@ -2101,7 +2105,7 @@ fn draw_scoring_page(
         section_font,
         ScoringPanelStyle::Cards,
     );
-    push_scoring_yaku_relics_panel(frame, yaku_content, small_font, body_font, pad);
+    push_scoring_yaku_relics_panel(frame, yaku_content, small_font, body_font, micro_font, pad);
 
     push_scoring_final_score_panel(
         frame,
@@ -2112,6 +2116,7 @@ fn draw_scoring_page(
         section_font,
         body_font,
         small_font,
+        micro_font,
         pad,
     );
 }
@@ -2590,7 +2595,7 @@ fn draw_earning_note_row(
         text: line.into(),
         color: line_color,
         align: TextAlign::Left,
-        font_px: Some(font * 0.96),
+        font_px: Some(font),
         ..Default::default()
     });
     row_h * 1.85
@@ -2637,7 +2642,7 @@ fn economy_flow_header_metrics(
     block_w: f32,
 ) -> (f32, f32, f32, f32) {
     let inner_pad = economy_flow_block_inner_pad(pad);
-    let label_font_px = label_font * 0.86;
+    let label_font_px = label_font;
     let badge = economy_flow_badge_size(label_font);
     let badge_gap = inner_pad * 0.55;
     let text_w = (block_w - inner_pad * 2.0).max(1.0);
@@ -2657,7 +2662,7 @@ fn economy_flow_block_height_at_width(
     block_w: f32,
 ) -> f32 {
     let inner_pad = economy_flow_block_inner_pad(pad);
-    let line_font_px = line_font * 0.92;
+    let line_font_px = line_font;
     let text_w = (block_w - inner_pad * 2.0).max(1.0);
     let (_, _, _, header_h) = economy_flow_header_metrics(step, label_font, pad, block_w);
     let body_line_h = economy_flow_font_line_height(line_font_px, true);
@@ -2677,8 +2682,8 @@ fn economy_flow_block_natural_width(
     pad: f32,
 ) -> f32 {
     let inner_pad = economy_flow_block_inner_pad(pad);
-    let label_font_px = label_font * 0.86;
-    let line_font_px = line_font * 0.92;
+    let label_font_px = label_font;
+    let line_font_px = line_font;
     let badge = economy_flow_badge_size(label_font);
     let badge_gap = inner_pad * 0.55;
     let label_w = economy_measure_text_width(step.label, label_font_px);
@@ -2695,7 +2700,9 @@ fn draw_economy_flow_block(
     label_font: f32,
     line_font: f32,
     pad: f32,
+    window_h: f32,
 ) {
+    let badge_font = typography::size(typography::H45, window_h);
     let [x, y, w, h] = rect;
     frame.quad(GpuInstance {
         rect,
@@ -2706,7 +2713,7 @@ fn draw_economy_flow_block(
 
     let inner_pad = economy_flow_block_inner_pad(pad);
     let text_w = (w - inner_pad * 2.0).max(1.0);
-    let label_font_px = label_font * 0.86;
+    let label_font_px = label_font;
     let (badge, badge_gap, title_w, header_h) =
         economy_flow_header_metrics(step, label_font, pad, w);
     let title_y = y + inner_pad;
@@ -2722,7 +2729,7 @@ fn draw_economy_flow_block(
         text: step.num.to_string(),
         color: color::CHAMPAGNE,
         align: TextAlign::Center,
-        font_px: Some(label_font * 0.82),
+        font_px: Some(badge_font),
         bold: true,
         ..Default::default()
     });
@@ -2741,7 +2748,7 @@ fn draw_economy_flow_block(
         ..Default::default()
     });
 
-    let line_font_px = line_font * 0.92;
+    let line_font_px = line_font;
     let line_y = title_y + header_h + economy_flow_block_line_gap(pad);
     let body_line_h = economy_flow_font_line_height(line_font_px, true);
     let body_lines = economy_flow_wrapped_line_count(step.line, text_w, line_font_px).max(2) as f32;
@@ -2787,23 +2794,23 @@ struct EconomyFlowRingLayout {
 
 fn economy_flow_ring_layout(
     window_h: f32,
-    caption_font: f32,
+    _caption_font: f32,
     pad: f32,
     max_w: f32,
     max_h: f32,
 ) -> EconomyFlowRingLayout {
-    let arrow_font = typography::size(typography::H36, window_h).max(caption_font * 0.85);
+    let arrow_font = typography::size(typography::H36, window_h);
     let h_gutter = arrow_font * 1.15;
     let v_gutter = arrow_font * 1.10;
-    let mut label_font = typography::size(typography::H36, window_h).max(caption_font * 0.92);
-    let mut line_font = caption_font * 0.84;
+    let mut label_font = typography::size(typography::H36, window_h);
+    let mut line_font = typography::size(typography::H42, window_h);
     let [mut block_w, mut block_h] = economy_flow_ring_block_sizes(label_font, line_font, pad);
     let mut ring_w = block_w * 2.0 + h_gutter;
     let mut ring_h = block_h * 2.0 + v_gutter;
     if ring_w > max_w || ring_h > max_h {
         let scale = (max_w / ring_w).min(max_h / ring_h).min(1.0);
-        label_font *= scale;
-        line_font *= scale;
+        label_font = typography::tier_at_most(label_font * scale, window_h);
+        line_font = typography::tier_at_most(line_font * scale, window_h);
         [block_w, block_h] = economy_flow_ring_block_sizes(label_font, line_font, pad);
         ring_w = block_w * 2.0 + h_gutter;
         ring_h = block_h * 2.0 + v_gutter;
@@ -2903,6 +2910,7 @@ fn draw_between_chambers_band(
             ring.label_font,
             ring.line_font,
             pad,
+            window_h,
         );
     }
 }
@@ -3102,7 +3110,7 @@ fn draw_economy_rules_band(
         text: economy_intro_copy::STOREROOM_CAPACITY_FOOTER.into(),
         color: color::alpha(color::PARCHMENT, 0.86),
         align: TextAlign::Left,
-        font_px: Some(body_font * 0.94),
+        font_px: Some(micro_font),
         ..Default::default()
     });
 
@@ -3173,7 +3181,7 @@ fn push_economy_item_cards(
     let stroke = color::alpha(color::BRASS, 0.32);
     let fill = color::alpha(color::WALNUT_RAISED, 0.28);
     let body_color = color::alpha(color::PARCHMENT, 0.90);
-    let role_font = small_font * 0.78;
+    let role_font = typography::size(typography::H45, h);
     let content_x = layout.content_x;
     let icon_col_w = cell_w * ECONOMY_ICON_COL_FRAC;
     let text_pad = pad * 0.75;
@@ -3218,7 +3226,7 @@ fn push_economy_item_cards(
             text: card.title.to_uppercase(),
             color: title_color,
             align: TextAlign::Left,
-            font_px: Some(title_font * 0.96),
+            font_px: Some(title_font),
             bold: true,
             ..Default::default()
         };
@@ -3239,7 +3247,7 @@ fn push_economy_item_cards(
         let body_top = cy + pad + title_h + role_h + pad * 0.12;
         let body_available = (cy + cell_h - pad - body_top).max(1.0);
         let row_gap = pad * 0.14;
-        let min_font = typography::size(typography::H45, h) * 0.92;
+        let min_font = typography::size(typography::H45, h);
         let body_font = economy_card_body_font(
             body_available,
             inner_w,
@@ -3526,7 +3534,7 @@ fn scoring_panel_open(
         text: title.into(),
         color: title_color,
         align: TextAlign::Left,
-        font_px: Some(section_font * 0.94),
+        font_px: Some(section_font),
         bold: true,
         ..Default::default()
     });
@@ -3601,9 +3609,16 @@ struct ScoringFlowDiagramLayout {
 }
 
 impl ScoringFlowDiagramLayout {
-    fn new(content: [f32; 4], body_font: f32, caption_font: f32, pad: f32, tile_max: f32) -> Self {
+    fn new(
+        content: [f32; 4],
+        body_font: f32,
+        caption_font: f32,
+        micro_font: f32,
+        pad: f32,
+        tile_max: f32,
+    ) -> Self {
         let [cx, cy, cw, ch] = content;
-        let reminder_font = caption_font * 0.96;
+        let reminder_font = micro_font;
         let reminder_h = reminder_font * 1.28;
         let diagram_h = (ch - reminder_h - pad * 1.35).max(1.0);
         let title_h = body_font * 1.02;
@@ -3652,6 +3667,7 @@ impl ScoringFlowDiagramLayout {
         section_font: f32,
         body_font: f32,
         caption_font: f32,
+        micro_font: f32,
         pad: f32,
         tile_max: f32,
     ) -> Self {
@@ -3659,6 +3675,7 @@ impl ScoringFlowDiagramLayout {
             scoring_flow_inner_content_rect(flow_outer, section_font),
             body_font,
             caption_font,
+            micro_font,
             pad,
             tile_max,
         )
@@ -3695,6 +3712,7 @@ fn scoring_flow_cash_in_visual_rect(
     section_font: f32,
     body_font: f32,
     caption_font: f32,
+    micro_font: f32,
     pad: f32,
     tile_max: f32,
 ) -> [f32; 4] {
@@ -3703,6 +3721,7 @@ fn scoring_flow_cash_in_visual_rect(
         section_font,
         body_font,
         caption_font,
+        micro_font,
         pad,
         tile_max,
     );
@@ -3776,10 +3795,11 @@ fn push_scoring_flow_panel(
     tile_max: f32,
     body_font: f32,
     caption_font: f32,
+    micro_font: f32,
     pad: f32,
     glb_cash_in: bool,
 ) {
-    let flow = ScoringFlowDiagramLayout::new(content, body_font, caption_font, pad, tile_max);
+    let flow = ScoringFlowDiagramLayout::new(content, body_font, caption_font, micro_font, pad, tile_max);
     let mut placements = Vec::new();
     let mut flow_arrows = Vec::new();
 
@@ -3810,7 +3830,7 @@ fn push_scoring_flow_panel(
             text: title.to_string(),
             color: color::CHAMPAGNE,
             align: TextAlign::Center,
-            font_px: Some(body_font * 0.92),
+            font_px: Some(body_font),
             bold: true,
             ..Default::default()
         });
@@ -3819,7 +3839,7 @@ fn push_scoring_flow_panel(
             text: caption.to_string(),
             color: color::alpha(color::PARCHMENT, 0.88),
             align: TextAlign::Center,
-            font_px: Some(caption_font * 0.90),
+            font_px: Some(micro_font),
             ..Default::default()
         });
 
@@ -3853,7 +3873,7 @@ fn push_scoring_flow_panel(
                 }
             }
             3 => {
-                let eq_font = typography::size(typography::H24, window_h).max(body_font * 0.98);
+                let eq_font = typography::size(typography::H24, window_h);
                 push_scoring_formula_colored(
                     frame,
                     graphic,
@@ -3904,7 +3924,7 @@ fn push_scoring_flow_panel(
         text: scoring_intro_copy::FLOW_REMINDER.into(),
         color: color::PARCHMENT,
         align: TextAlign::Center,
-        font_px: Some(caption_font * 0.96),
+        font_px: Some(micro_font),
         ..Default::default()
     });
 }
@@ -4015,6 +4035,7 @@ fn push_scoring_tile_values_panel(
     tile_size: f32,
     caption_font: f32,
     body_font: f32,
+    micro_font: f32,
     pad: f32,
 ) {
     let [cx, cy, cw, ch] = content;
@@ -4022,7 +4043,7 @@ fn push_scoring_tile_values_panel(
         frame,
         [cx, cy, cw, 0.0],
         scoring_intro_copy::TILE_VALUES_CAPTION,
-        caption_font * 0.94,
+        micro_font,
         color::alpha(color::PARCHMENT, 0.88),
     );
     let examples_top = cy + caption_h + pad * 0.45;
@@ -4030,7 +4051,7 @@ fn push_scoring_tile_values_panel(
     let col_count = SCORING_CHIP_GROUPS.len().max(1);
     let col_gap = pad * 0.65;
     let col_w = (cw - col_gap * (col_count.saturating_sub(1)) as f32) / col_count as f32;
-    let value_font = body_font * 0.96;
+    let value_font = caption_font;
     let name_h = caption_font * 1.02;
     let value_h = value_font * 1.10;
     let text_h = name_h + value_h + pad * 0.25;
@@ -4053,7 +4074,7 @@ fn push_scoring_tile_values_panel(
             text: group.label.into(),
             color: color::CHAMPAGNE,
             align: TextAlign::Center,
-            font_px: Some(caption_font * 0.90),
+            font_px: Some(micro_font),
             bold: true,
             ..Default::default()
         });
@@ -4081,10 +4102,11 @@ fn push_scoring_yaku_relics_panel(
     content: [f32; 4],
     caption_font: f32,
     body_font: f32,
+    micro_font: f32,
     pad: f32,
 ) {
     let [x, y, w, h] = content;
-    let intro_font = caption_font * 0.90;
+    let intro_font = micro_font;
     let mut cursor = y + pad * 0.15;
     for line in [
         scoring_intro_copy::YAKU_RELICS_INTRO,
@@ -4118,7 +4140,7 @@ fn push_scoring_yaku_relics_panel(
         text: scoring_intro_copy::YAKU_TABLE_HEADER_EXAMPLE.into(),
         color: color::CHAMPAGNE,
         align: TextAlign::Left,
-        font_px: Some(body_font * 0.92),
+        font_px: Some(caption_font),
         bold: true,
         ..Default::default()
     });
@@ -4127,7 +4149,7 @@ fn push_scoring_yaku_relics_panel(
         text: scoring_intro_copy::YAKU_TABLE_HEADER_CHIPS.into(),
         color: color::keyword::CHIPS,
         align: TextAlign::Right,
-        font_px: Some(body_font * 0.92),
+        font_px: Some(caption_font),
         bold: true,
         ..Default::default()
     });
@@ -4136,7 +4158,7 @@ fn push_scoring_yaku_relics_panel(
         text: scoring_intro_copy::YAKU_TABLE_HEADER_MULT.into(),
         color: color::keyword::MULT,
         align: TextAlign::Right,
-        font_px: Some(body_font * 0.92),
+        font_px: Some(caption_font),
         bold: true,
         ..Default::default()
     });
@@ -4171,7 +4193,7 @@ fn push_scoring_yaku_relics_panel(
             text: name.into(),
             color: color::PARCHMENT,
             align: TextAlign::Left,
-            font_px: Some(caption_font * 0.88),
+            font_px: Some(micro_font),
             ..Default::default()
         });
         frame.text(TextLabel {
@@ -4179,7 +4201,7 @@ fn push_scoring_yaku_relics_panel(
             text: chips,
             color: color::keyword::CHIPS,
             align: TextAlign::Right,
-            font_px: Some(caption_font * 0.88),
+            font_px: Some(micro_font),
             ..Default::default()
         });
         frame.text(TextLabel {
@@ -4187,7 +4209,7 @@ fn push_scoring_yaku_relics_panel(
             text: mult,
             color: color::keyword::MULT,
             align: TextAlign::Right,
-            font_px: Some(caption_font * 0.88),
+            font_px: Some(micro_font),
             ..Default::default()
         });
         row_y += row_h;
@@ -4203,12 +4225,13 @@ fn push_scoring_final_score_panel(
     section_font: f32,
     body_font: f32,
     caption_font: f32,
+    micro_font: f32,
     pad: f32,
 ) {
     let content = scoring_panel_open(frame, rect, title, section_font, ScoringPanelStyle::Formula);
     let [x, y, w, h] = content;
-    let eq_font = typography::size(typography::H24, window_h).max(body_font * 1.08);
-    let detail_font = caption_font * 0.90;
+    let eq_font = typography::size(typography::H24, window_h);
+    let detail_font = micro_font;
     let eq_h = h * 0.24;
     let detail_h = h * 0.34;
     let example_h = h * 0.18;
@@ -4256,7 +4279,7 @@ fn push_scoring_final_score_panel(
         x,
         example_y + (example_h - detail_font * styled_text::COLORED_ROW_LINE_STEP_MUL) * 0.5,
         w,
-        detail_font * 1.04,
+        detail_font,
         scoring_intro_copy::FINAL_EXAMPLE,
         color::alpha(color::BRASS, 0.95),
         GlossaryMode::Prose,
@@ -4519,7 +4542,7 @@ fn guide_example_row_width(tile_px: f32, tiles: &[Tile], meld_gap: f32) -> f32 {
 /// Fixed overhead per yaku intro example row (title + gap + tablet band, no subtitle).
 fn guide_yaku_example_row_overhead(h: f32, tablet_row_reserve: f32) -> f32 {
     let pad = 4.0;
-    let title_h = typography::size(typography::H28, h) * 1.05;
+    let title_h = typography::size(typography::H28, h);
     let label_tile_gap = (h * 0.012).clamp(8.0, 14.0);
     pad * 2.0 + title_h + label_tile_gap + tablet_row_reserve
 }

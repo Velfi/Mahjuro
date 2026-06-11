@@ -566,6 +566,8 @@ impl App {
             renderer.main_menu_effects,
             renderer.flame_tuning,
             self.debug.victory_moon_debug,
+            self.gfx.graphics_mode,
+            renderer.victory_moon_gpu_draw_ready(),
             self.debug.focus_nav_overlay,
             &mut self.debug.focus_nav_snapshot,
         );

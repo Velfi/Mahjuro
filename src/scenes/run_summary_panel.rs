@@ -15,7 +15,7 @@ use crate::ui::controller_hints::{
 use crate::ui::input::InputMode;
 use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::styled_text::{StyledBlockStyle, styled_line_block_height_at_font_px};
-use crate::ui::widget::wrap_text;
+use crate::ui::widget::{PLAIN_TEXT_LINE_STEP_MUL, wrap_text};
 
 #[derive(Clone, Debug)]
 pub struct RunSummaryStats {
@@ -124,6 +124,11 @@ pub struct RunSummaryPanelLayout {
     pub well_draw_rect: [f32; 4],
     pub stats_row_rects: Vec<[f32; 4]>,
     pub row_font_px: f32,
+    pub row_line_h: f32,
+    pub level_body_font: f32,
+    pub level_title_font: f32,
+    pub points_chip_font: f32,
+    pub chip_detail_font: f32,
     pub text_align: TextAlign,
     /// Clip rect for scrollable panel interior content.
     pub scroll_clip_rect: [f32; 4],
@@ -176,7 +181,7 @@ impl RunSummaryPanelScroll {
         if input_mode == InputMode::Cursor && !cursor_over_scroll_area(cursor, layout) {
             return;
         }
-        let line_h = layout.row_font_px * 1.35;
+        let line_h = layout.row_line_h;
         self.scroll.scroll_by(scroll_lines * line_h);
     }
 
@@ -421,7 +426,11 @@ impl RunSummaryPanelLayout {
         theme: &RunSummaryPanelTheme,
     ) -> Self {
         let row_font_px = typography::size(typography::H36, h);
-        let row_line_h = row_font_px * 1.35;
+        let row_line_h = row_font_px * PLAIN_TEXT_LINE_STEP_MUL;
+        let level_body_font = typography::size(typography::H42, h);
+        let level_title_font = typography::size(typography::H24, h);
+        let points_chip_font = typography::size(typography::H42, h);
+        let chip_detail_font = typography::size(typography::H45, h);
         let pad_v = row_font_px * 0.8;
         let pad_h = row_font_px * 0.55;
         let scroll_bottom_pad = row_font_px * 0.45;
@@ -756,6 +765,11 @@ impl RunSummaryPanelLayout {
             well_draw_rect,
             stats_row_rects,
             row_font_px,
+            row_line_h,
+            level_body_font,
+            level_title_font,
+            points_chip_font,
+            chip_detail_font,
             text_align,
             scroll_clip_rect,
             scroll_content_h,
@@ -779,9 +793,10 @@ pub fn push_run_summary_panel(
 ) {
     let h = layout.window_h;
     let row_font_px = layout.row_font_px;
-    let level_body_font = row_font_px * 0.82;
-    let level_title_font = row_font_px * 1.45;
-    let points_chip_font = row_font_px * 0.90;
+    let level_body_font = layout.level_body_font;
+    let level_title_font = layout.level_title_font;
+    let points_chip_font = layout.points_chip_font;
+    let chip_detail_font = layout.chip_detail_font;
     let panel_rect = layout.panel_rect;
     let clip = layout.scroll_clip_rect;
     let inner_w = clip[2];
@@ -947,7 +962,7 @@ pub fn push_run_summary_panel(
             rect: ribbon_rect,
             text: "DEEPER".to_string(),
             color: color::WALNUT_DEEP,
-            font_px: Some(level_body_font * 0.92),
+            font_px: Some(chip_detail_font),
             align: TextAlign::Center,
             clip_rect: Some(clip),
             ..Default::default()

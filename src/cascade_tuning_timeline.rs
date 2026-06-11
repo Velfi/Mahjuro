@@ -214,6 +214,7 @@ pub fn draw_timelines(
 ) {
     let diag_pad = 12.0 * scale;
     let font_sm = typography::tier_at_most(11.0 * scale, window_h);
+    let micro_font = typography::size(typography::H45, window_h);
 
     instances.push(GpuInstance {
         rect: geom.diagram_rect(panel_x, panel_w, diag_pad),
@@ -344,6 +345,7 @@ fn draw_track(
     labels: &mut Vec<TextLabel>,
 ) {
     let font_sm = typography::tier_at_most(10.0 * scale, window_h);
+    let micro_font = typography::size(typography::H45, window_h);
     let label_x = panel_x + diag_pad;
     let label_w = geom.inner_x - label_x - 4.0 * scale;
 
@@ -444,7 +446,7 @@ fn draw_track(
             ],
             text: format!("±{stagger}ms stagger"),
             color: color::alpha(color::STONE, 0.55),
-            font_px: Some(font_sm * 0.9),
+            font_px: Some(micro_font),
             ..Default::default()
         });
     }
@@ -492,7 +494,7 @@ fn draw_track(
                 rect: [hx - 28.0, spec.bar_y - 12.0 * scale, 56.0, 11.0 * scale],
                 text: (*ev).into(),
                 color: color::alpha(color::STONE, 0.78),
-                font_px: Some(font_sm * 0.92),
+                font_px: Some(micro_font),
                 align: TextAlign::Center,
                 ..Default::default()
             });
@@ -502,7 +504,7 @@ fn draw_track(
                 rect: [hx - 24.0, spec.bar_y + geom.bar_h + 2.0, 48.0, 10.0 * scale],
                 text: format!("{ms}"),
                 color: color::alpha(color::STONE, 0.62),
-                font_px: Some(font_sm * 0.88),
+                font_px: Some(micro_font),
                 align: TextAlign::Center,
                 ..Default::default()
             });

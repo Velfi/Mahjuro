@@ -187,7 +187,7 @@ pub fn face_short_name(suit: Suit, rank: u8) -> String {
             1 => "Plum".into(),
             2 => "Orchid".into(),
             3 => "Bamboo".into(),
-            4 => "Chrys.".into(),
+            4 => "Chrysanthemum".into(),
             _ => format!("Flower {rank}"),
         },
         Suit::Season => format!("Season {rank}"),

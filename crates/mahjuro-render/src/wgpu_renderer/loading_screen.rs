@@ -6,6 +6,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use crate::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
+use crate::theme::typography;
 use crate::wgpu_renderer::TextLabel;
 use crate::wgpu_renderer::ui_instances::GpuInstance;
 
@@ -330,7 +331,7 @@ pub fn append_splash_frame(
                 layout.text_color[2],
                 layout.text_color[3] * ui_a,
             ],
-            font_px: Some(label_h * 0.95),
+            font_px: Some(typography::size(typography::H32, screen_h)),
             ..Default::default()
         });
     }

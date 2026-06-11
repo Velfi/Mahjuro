@@ -170,9 +170,9 @@ pub fn push_colored_label_clipped(
 }
 
 /// Tight gutter width from the widest rendered tick label.
-pub fn chart_y_axis_width_for_max(max_value: u64, caption_px: f32) -> f32 {
+pub fn chart_y_axis_width_for_max(max_value: u64, micro_px: f32) -> f32 {
     let max_v = max_value.max(1);
-    let axis_font = caption_px * 0.86;
+    let axis_font = micro_px;
     let mut widest = pill_label_width(&format_chart_axis_tick(max_v), axis_font);
     for top_frac in [0.0_f32, 0.25, 0.5, 0.75] {
         let value_frac = 1.0 - top_frac;
@@ -215,13 +215,13 @@ pub fn push_chart_y_axis(
     plot_y: f32,
     plot_h: f32,
     max_value: u64,
-    caption_px: f32,
+    micro_px: f32,
     grid_color: [f32; 4],
     draw_grid: bool,
     label_align: TextAlign,
 ) {
     let max_v = max_value.max(1);
-    let axis_font = caption_px * 0.86;
+    let axis_font = micro_px;
     let axis_line_h = axis_font + 2.0;
     let tick_gap = axis_line_h + 4.0;
     push_quad_clipped(

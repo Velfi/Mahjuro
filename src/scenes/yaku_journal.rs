@@ -1194,13 +1194,13 @@ fn draw_plaque(
     let header_w = face_w - header_pad * 2.0;
     let header_y = face_y + header_pad * 0.6;
 
-    let line_font = typography::size(typography::H36, h);
+    let line_font = typography::size(typography::H28, h);
     let header_line_h = line_font * 1.15;
     let inline_gap = header_pad * 0.35;
 
     let stat_font = typography::size(typography::H24, h);
     let stat_band_h = stat_font * 1.2;
-    let stat_font_px = stat_font * 0.95;
+    let stat_font_px = typography::size(typography::H32, h);
     let payout_reserve = match state {
         ProgressionState::Unseen => measure_ui_text_width("— — —", stat_font_px),
         _ => chips_mult_stat_segments(chips, mult)
@@ -1212,7 +1212,7 @@ fn draw_plaque(
     let text_right = header_x + header_w - payout_reserve - payout_gap;
 
     // Compact level pill — inline at the start of the header row.
-    let pill_font = typography::size(typography::H45, h) * 0.92;
+    let pill_font = typography::size(typography::H32, h);
     let pill_label = format!("Lv {lvl}");
     let pill_text_w = measure_ui_text_width(&pill_label, pill_font);
     let pill_pad_x = pill_font * 0.55;

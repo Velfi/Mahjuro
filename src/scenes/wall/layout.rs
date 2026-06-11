@@ -139,11 +139,10 @@ pub fn row_label_font_px(text_w: f32, cell_h: f32, h: f32) -> f32 {
 pub fn wall_layout(w: f32, h: f32, jr: f32) -> WallLayout {
     let back = HeaderChromeMetrics::from_window(w, h).back_rect_left();
     let scale = metrics::scene_scale(w, h);
-    let title_px = typography::size(typography::H24, h) * jr.min(1.08);
-    let body_px = typography::size(typography::H36, h) * jr.min(1.05);
-    let small_px = typography::size(typography::H42, h) * jr.min(1.05);
-    let count_px = typography::size(typography::H28, h) * jr.min(1.06);
-    // H42 is the smallest named tier; do not shrink below it (was * 0.82 → ~21 px).
+    let title_px = typography::size(typography::H24, h);
+    let body_px = typography::size(typography::H36, h);
+    let small_px = typography::size(typography::H42, h);
+    let count_px = typography::size(typography::H28, h);
     let caption_px = small_px;
 
     let content_x = w * 0.04;

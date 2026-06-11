@@ -2194,6 +2194,41 @@ fn glyph_run_vertical_extents(glyphs: &[GlyphData]) -> (f32, f32) {
 
 /// Ascender + descender below baseline for one wrapped flavor line, using the
 /// same faces as rasterization (italic metrics can exceed regular line metrics).
+/// Merged regular + italic line metrics for single-line baseline placement.
+fn raster_span_line_metrics(fonts: &DecalFonts<'_>, font_px: f32) -> Option<fontdue::LineMetrics> {
+    let Some(regular) = fonts.regular.horizontal_line_metrics(font_px) else {
+        return fonts.italic.and_then(|f| f.horizontal_line_metrics(font_px));
+    };
+    let mut merged = regular;
+    if let Some(italic) = fonts.italic {
+        if let Some(im) = italic.horizontal_line_metrics(font_px) {
+            merged.new_line_size = merged.new_line_size.max(im.new_line_size);
+            merged.ascent = merged.ascent.max(im.ascent);
+        }
+    }
+    Some(merged)
+}
+
+/// Baseline for one wrapped raster line inside a label band.
+fn single_line_raster_spans_baseline_y(
+    fonts: &DecalFonts<'_>,
+    line: &[FlavorCell],
+    font_px: f32,
+    height: u32,
+) -> f32 {
+    let band_h = height as f32;
+    // When the band fits the face line box, use line metrics (same rule as pinned
+    // [`rasterize_label_styled`]) so adjacent split labels share one baseline.
+    if let Some(lm) = raster_span_line_metrics(fonts, font_px) {
+        if band_h >= lm.new_line_size {
+            return ((band_h - lm.new_line_size) * 0.5).max(0.0) + lm.ascent;
+        }
+    }
+    let (ascender, descender) = flavor_line_vertical_extents(fonts, line, font_px);
+    let text_block_h = ascender + descender;
+    (band_h - text_block_h) * 0.5 + ascender
+}
+
 fn flavor_line_vertical_extents(
     fonts: &DecalFonts<'_>,
     line: &[FlavorCell],
@@ -2656,11 +2691,7 @@ pub fn rasterize_label_raster_spans(
             continue;
         }
         let baseline_y = if soft_lines.len() == 1 {
-            // Match pinned [`rasterize_label_styled`]: centre from measured glyph
-            // extents so italic ascenders are not clipped in short rects.
-            let (ascender, descender) = flavor_line_vertical_extents(fonts, line, font_px);
-            let text_block_h = ascender + descender;
-            (height as f32 - text_block_h) * 0.5 + ascender
+            single_line_raster_spans_baseline_y(fonts, line, font_px, height)
         } else {
             let (line_ascender, _) = flavor_line_vertical_extents(fonts, line, font_px);
             let line_ascender = line_ascender.max(ascender_px);
@@ -2902,6 +2933,39 @@ mod flavor_layout_tests {
         assert!(
             min_y + (max_y - min_y) + 1 <= height,
             "ink rows {min_y}..={max_y} exceed band height {height}"
+        );
+    }
+
+    #[test]
+    fn split_tinted_labels_share_baseline_on_colored_row_band() {
+        let Some(fonts) = test_fonts() else {
+            return;
+        };
+        let font_px = 24.0;
+        // Guide margin scrawl and colored rows use ~1.4× line step for label height.
+        let height = (font_px * 1.4_f32).round() as u32;
+        let width = 160u32;
+        let plain = &[RasterStyleSpan {
+            text: "tile? ",
+            bold: false,
+            italic: true,
+            underline: false,
+        }];
+        let house = &[RasterStyleSpan {
+            text: "The House",
+            bold: false,
+            italic: true,
+            underline: false,
+        }];
+        let soft_plain = build_flavor_soft_lines(&fonts, plain, width, font_px);
+        let soft_house = build_flavor_soft_lines(&fonts, house, width, font_px);
+        let baseline_plain =
+            single_line_raster_spans_baseline_y(&fonts, &soft_plain[0], font_px, height);
+        let baseline_house =
+            single_line_raster_spans_baseline_y(&fonts, &soft_house[0], font_px, height);
+        assert!(
+            (baseline_plain - baseline_house).abs() < 0.01,
+            "split glossary labels must share one baseline: plain={baseline_plain:.2} house={baseline_house:.2}"
         );
     }
 

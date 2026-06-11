@@ -347,7 +347,10 @@ impl SceneBehavior for RunSummaryScene {
             if ctx.effect_layers.fullscreen_water_backdrop {
                 frame.moonlit_water();
             }
-            if main_menu_glb::main_menu_room_draw_ready() {
+            if crate::render::room_gpu_resident::victory_uses_3d_moon(ctx.graphics_mode)
+                && ctx.victory_moon_gpu_ready
+                && main_menu_glb::main_menu_room_draw_ready()
+            {
                 let env_scale =
                     main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
                 if let Some((cam, model_delta)) = main_menu_glb::victory_summary_moon_setup(

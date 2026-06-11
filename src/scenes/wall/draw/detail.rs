@@ -83,12 +83,12 @@ pub fn draw_wall_detail_panel(
 
     let exhausted = details.remaining == 0;
 
-    let title_lh = text_line_h(layout.body_px * 0.96);
+    let title_lh = text_line_h(layout.body_px);
     push_text_maybe_clip(
         texts,
         [rect[0] + pad, y, inner_w, title_lh],
         details.name.clone(),
-        layout.body_px * 0.96,
+        layout.body_px,
         color::alpha(color::JADE, if exhausted { 0.75 } else { 0.96 }),
         true,
         TextAlign::Center,

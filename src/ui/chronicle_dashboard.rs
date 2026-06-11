@@ -319,6 +319,7 @@ struct ChronicleTypeScale {
     section_px: f32,
     body: f32,
     caption_px: f32,
+    micro_px: f32,
     metrics: ChronicleLayoutMetrics,
 }
 
@@ -600,23 +601,57 @@ fn career_content_height(
     doc_y
 }
 
+/// Total vertical extent of the run-detail pane (must mirror [`push_run_detail_pane`]).
 fn run_detail_content_height(
     model: &archive_career::RunDetailModel,
+    rec: &RunRecord,
     m: ChronicleLayoutMetrics,
     cap_h: f32,
     val_h: f32,
     strip_w: f32,
 ) -> f32 {
-    let mut h = m.title_h + 4.0 + cap_h + m.gap * 0.75;
-    h += run_detail_hero_height(cap_h, val_h, strip_w, &model.tiles) + m.gap;
-    h += model.yaku_rows.len().min(8) as f32 * m.bar_row_h + m.gap;
-    h += m.title_h + m.chart_h + m.gap;
-    if !model.timeline.is_empty() {
-        h += m.title_h + model.timeline.len() as f32 * m.line_h * 0.9 + m.gap;
+    let mut doc_y = 0.0_f32;
+
+    doc_y += m.title_h + 4.0;
+    doc_y += cap_h + m.gap * 0.75;
+    doc_y += run_detail_hero_height(cap_h, val_h, strip_w, &model.tiles) + m.gap;
+
+    if !model.yaku_rows.is_empty() {
+        doc_y += m.title_h + m.gap * 0.4;
+        doc_y += model.yaku_rows.len().min(8) as f32 * (m.bar_row_h + 3.0);
+        doc_y += m.gap * 0.5;
     }
-    h += m.title_h + m.line_h + m.gap;
-    h += m.footer_h + m.gap * 2.0;
-    h
+
+    doc_y += m.title_h + m.gap * 0.35;
+    doc_y += model.score_lines.len() as f32 * m.line_h;
+    doc_y += m.gap * 0.5;
+
+    if model.wing_scores.len() >= 2 {
+        doc_y += m.title_h + m.gap * 0.4;
+        doc_y += m.chart_h + m.gap;
+    }
+
+    if !model.timeline.is_empty() {
+        doc_y += m.title_h + m.gap * 0.35;
+        doc_y += model.timeline.len() as f32 * m.line_h * 0.9;
+        doc_y += m.gap * 0.5;
+    }
+
+    if !rec.relics_owned.is_empty() {
+        doc_y += m.title_h + m.gap * 0.35;
+        doc_y += 36.0 + m.gap * 0.5;
+    }
+
+    if !rec.consumables_owned.is_empty() {
+        doc_y += m.line_h + m.gap * 0.5;
+    }
+
+    if rec.memorial_kind.is_some() {
+        doc_y += m.line_h + m.gap;
+    }
+
+    doc_y += m.footer_h;
+    doc_y
 }
 
 pub fn chronicle_run_log_scroll_max(w: f32, h: f32, panel: [f32; 4], entry_count: usize) -> f32 {
@@ -647,10 +682,11 @@ pub fn chronicle_run_detail_scroll_max(
     };
     let display = archive_career::chronicle_display_run_number(list_index, progress).unwrap_or(0);
     let model = archive_career::run_detail_model(progress, display, rec);
-    let cap_h = rhythm::line_h(typography::size(rhythm::CAPTION, h));
-    let val_h = rhythm::line_h(typography::size(rhythm::BODY, h));
+    let caption_px = typography::size(rhythm::CAPTION, h);
+    let cap_h = (caption_px / 0.55).ceil();
+    let val_h = (m.body / 0.55).ceil();
     let strip_w = panes.right_content_w() - 20.0;
-    let content = run_detail_content_height(&model, m, cap_h, val_h, strip_w);
+    let content = run_detail_content_height(&model, rec, m, cap_h, val_h, strip_w);
     (content - panes.content_h()).max(0.0)
 }
 
@@ -879,6 +915,7 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
         section_px,
         body,
         caption_px,
+        micro_px,
         metrics,
         ..
     } = type_scale;
@@ -1136,7 +1173,7 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
                     boss_x,
                     text_y + (row_text_h - stamp) * 0.5,
                     stamp,
-                    caption_px * 0.75,
+                    micro_px,
                 );
                 boss_x += stamp + 2.0;
                 boss_w -= stamp + 2.0;
@@ -1340,7 +1377,7 @@ fn push_career_insights_band(
                 val_h * 0.92,
                 yk.name(),
                 inner_w * 0.24,
-                caption_px * 0.82,
+                micro_px,
             );
             tag_x += pill_w + 4.0;
             if tag_x > tx + inner_w - 40.0 {
@@ -1360,7 +1397,7 @@ fn push_career_insights_band(
             clip,
             &meta,
             color::CHAMPAGNE,
-            body_px * 0.92,
+            caption_px,
             TextAlign::Left,
             false,
         );
@@ -1453,6 +1490,7 @@ fn push_career_pane(h: f32, _w: f32, draw: ChroniclePaneDraw<'_>) {
         section_px,
         body,
         caption_px,
+        micro_px: _,
         metrics,
         ..
     } = type_scale;
@@ -1477,7 +1515,7 @@ fn push_career_pane(h: f32, _w: f32, draw: ChroniclePaneDraw<'_>) {
     );
     doc_y += metrics.title_h + metrics.gap * 0.35;
 
-    let micro_px = typography::size(rhythm::MICRO, h);
+    let micro_px = type_scale.micro_px;
     let inset = rhythm::card_inset(h);
     let stack = rhythm::stack_gap(h);
     let tight = metrics.gap * 0.4;
@@ -1589,6 +1627,7 @@ fn push_career_pane(h: f32, _w: f32, draw: ChroniclePaneDraw<'_>) {
         personal_best,
         caption_px,
         body,
+        micro_px,
         true,
         false,
     );
@@ -1629,6 +1668,7 @@ fn push_career_pane(h: f32, _w: f32, draw: ChroniclePaneDraw<'_>) {
         metrics.bar_row_h,
         &ordeal_rows,
         caption_px,
+        micro_px,
         body,
     );
     let ante_cells = archive_career::career_ante_outcome_matrix(progress);
@@ -1642,6 +1682,7 @@ fn push_career_pane(h: f32, _w: f32, draw: ChroniclePaneDraw<'_>) {
         metrics.bar_row_h * 2.2,
         &ante_cells,
         caption_px,
+        micro_px,
     );
     doc_y += records_h + tight * 0.35;
 
@@ -1725,6 +1766,7 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
         section_px,
         body,
         caption_px,
+        micro_px,
         metrics,
         ..
     } = type_scale;
@@ -2075,7 +2117,7 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
                 rect: [sx, fy + cap_h + 8.0, slot, cap_h],
                 text: label.clone(),
                 color: color::alpha(color::STONE, 0.85),
-                font_px: Some(caption_px * 0.9),
+                font_px: Some(micro_px),
                 align: TextAlign::Center,
                 ..Default::default()
             },
@@ -2102,6 +2144,7 @@ pub fn push_chronicle_dashboard(
         section_px: typography::size(rhythm::PANE_TITLE, h),
         body: metrics.body,
         caption_px: typography::size(rhythm::CAPTION, h),
+        micro_px: typography::size(rhythm::MICRO, h),
         metrics,
     };
 

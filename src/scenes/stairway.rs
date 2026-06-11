@@ -1413,7 +1413,7 @@ impl StairwayScene {
 
         let title_font = typography::size(typography::H20, h);
         let body_font = typography::size(typography::H42, h);
-        let header_font = (body_font * 0.94).max(12.0);
+        let header_font = typography::size(typography::H45, h);
         let suit_label_font = if layout.grouped_label_font_px > 0.0 {
             layout.grouped_label_font_px
         } else {
@@ -1623,7 +1623,7 @@ impl StairwayScene {
         let face_aspect = ctx.tile_preset.face_long_ratio();
         let title_font = typography::size(typography::H20, h);
         let body_font = typography::size(typography::H42, h);
-        let label_font = (body_font * 0.92).max(11.0);
+        let label_font = typography::size(typography::H45, h);
         let header_font = label_font;
 
         let footer: Vec<(DecimationAction, [f32; 4])> = if show_footer {
