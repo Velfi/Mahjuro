@@ -150,7 +150,7 @@ pub fn run(app: &mut App, shell: &mut SdlShell, locals: &mut FrameLocals) {
         app.audio.set_master_volume(opts.master_volume);
         app.audio.set_sfx_volume(opts.sfx_volume);
         app.audio.set_music_volume(opts.music_volume);
-        app.audio.set_enabled(opts.sfx_enabled);
+        app.audio.set_enabled(opts.sfx_volume > 0.0);
         app.gfx.effects_quality = opts.effects_quality;
         app.gfx.tile_preset = opts.tile_preset;
         app.gfx.tileset_name = opts.tileset_name.clone();

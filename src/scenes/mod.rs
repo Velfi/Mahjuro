@@ -46,6 +46,7 @@ pub mod tile_picker;
 pub mod tile_stress_lab;
 pub(crate) mod tiles_intro_copy;
 pub mod transition_playground;
+pub(crate) mod tutorial_intro_copy;
 pub mod tutorial_campaign;
 pub mod tutorial_summary;
 pub mod wall;

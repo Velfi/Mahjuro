@@ -222,7 +222,7 @@ impl crate::App {
         audio.set_master_volume(settings.master_volume);
         audio.set_sfx_volume(settings.sfx_volume);
         audio.set_music_volume(settings.music_volume);
-        if !settings.sfx_enabled {
+        if settings.sfx_volume <= 0.0 || !settings.sfx_enabled {
             audio.set_enabled(false);
         }
         let scene_look = {

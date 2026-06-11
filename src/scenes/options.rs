@@ -104,7 +104,6 @@ enum Row {
     Master,
     Music,
     Sfx,
-    SfxToggle,
     Gamma,
     Effects,
     Tile,
@@ -150,7 +149,6 @@ const ROWS: &[Row] = &[
     Row::Master,
     Row::Music,
     Row::Sfx,
-    Row::SfxToggle,
     Row::Gamma,
     Row::Effects,
     Row::Tile,
@@ -178,7 +176,6 @@ const ROWS: &[Row] = &[
     Row::Master,
     Row::Music,
     Row::Sfx,
-    Row::SfxToggle,
     Row::Gamma,
     Row::Effects,
     Row::Tile,
@@ -212,7 +209,6 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Master),
     ContentSlot::Row(Row::Music),
     ContentSlot::Row(Row::Sfx),
-    ContentSlot::Row(Row::SfxToggle),
     ContentSlot::Header(Section::Graphics),
     ContentSlot::Row(Row::Gamma),
     ContentSlot::Row(Row::Effects),
@@ -246,7 +242,6 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Master),
     ContentSlot::Row(Row::Music),
     ContentSlot::Row(Row::Sfx),
-    ContentSlot::Row(Row::SfxToggle),
     ContentSlot::Header(Section::Graphics),
     ContentSlot::Row(Row::Gamma),
     ContentSlot::Row(Row::Effects),
@@ -430,7 +425,6 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
             "SFX",
             format!("{}%", persistence::volume_display_percent(scene.sfx_volume)),
         ),
-        Row::SfxToggle => ("SFX enabled", on_off(scene.sfx_enabled)),
         Row::Gamma => ("Gamma", format!("{:.2}", scene.gamma)),
         Row::Effects => ("Effects quality", scene.effects_quality.label().into()),
         Row::Tile => ("Tile style", scene.tile_preset.label().into()),
@@ -643,7 +637,6 @@ pub struct OptionsScene {
     pub master_volume: f32,
     pub sfx_volume: f32,
     pub music_volume: f32,
-    pub sfx_enabled: bool,
     pub effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
     pub tileset_name: String,
@@ -690,6 +683,14 @@ impl OptionsScene {
         } else {
             available_tilesets[0].clone()
         };
+        let (sfx_volume, sfx_volume_restore) = if !settings.sfx_enabled && settings.sfx_volume > 0.0 {
+            (0.0, settings.sfx_volume)
+        } else {
+            (
+                settings.sfx_volume,
+                volume_restore_default(settings.sfx_volume),
+            )
+        };
         let mut scene = Self {
             focused: Row::Master,
             bottom_focus: BottomFocus::None,
@@ -714,11 +715,10 @@ impl OptionsScene {
             dragging_slider: None,
             master_volume_restore: volume_restore_default(settings.master_volume),
             music_volume_restore: volume_restore_default(settings.music_volume),
-            sfx_volume_restore: volume_restore_default(settings.sfx_volume),
+            sfx_volume_restore,
             master_volume: settings.master_volume,
-            sfx_volume: settings.sfx_volume,
+            sfx_volume,
             music_volume: settings.music_volume,
-            sfx_enabled: settings.sfx_enabled,
             effects_quality: settings.effects_quality,
             tile_preset: settings.tile_preset,
             tileset_name,
@@ -822,7 +822,7 @@ impl OptionsScene {
         settings.master_volume = self.master_volume;
         settings.sfx_volume = self.sfx_volume;
         settings.music_volume = self.music_volume;
-        settings.sfx_enabled = self.sfx_enabled;
+        settings.sfx_enabled = self.sfx_volume > 0.0;
         settings.effects_quality = self.effects_quality;
         settings.tile_preset = self.tile_preset;
         settings.tileset_name = self.tileset_name.clone();
@@ -1087,7 +1087,6 @@ impl OptionsScene {
             return;
         }
         match focused {
-            Row::SfxToggle => self.sfx_enabled = !self.sfx_enabled,
             Row::Effects => self.effects_quality = self.effects_quality.next(),
             Row::Tile => self.tile_preset = self.tile_preset.next(),
             Row::Tileset => self.cycle_tileset(1),
@@ -1134,7 +1133,6 @@ impl OptionsScene {
             return;
         }
         match focused {
-            Row::SfxToggle => self.sfx_enabled = !self.sfx_enabled,
             Row::Effects => self.effects_quality = self.effects_quality.prev(),
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
             Row::Tileset => self.cycle_tileset(-1),
@@ -1189,10 +1187,6 @@ impl OptionsScene {
                     self.set_slider_from_cursor(row, layout, cursor_pos);
                     self.save_settings();
                 }
-            }
-            Row::SfxToggle => {
-                self.sfx_enabled = !self.sfx_enabled;
-                self.save_settings();
             }
             Row::Effects => {
                 self.effects_quality = self.effects_quality.next();

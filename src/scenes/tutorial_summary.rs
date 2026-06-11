@@ -18,7 +18,7 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::guide::GuideScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
-use crate::game::onboarding_intro_copy;
+use crate::scenes::tutorial_intro_copy::summary;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SummaryAction {
@@ -109,16 +109,16 @@ impl SceneBehavior for TutorialSummaryScene {
         let mut texts = Vec::new();
 
         let title = if self.won {
-            "Tutorial Complete"
+            summary::TITLE_WON
         } else {
-            "Tutorial Recap"
+            summary::TITLE_LOST
         };
         let subtitle = if self.won {
-            "You surpassed The Iconoclast and won, an auspicious beginning."
+            summary::SUBTITLE_WON
         } else {
-            "You reached the finale but faltered against The Iconoclast. Perhaps you'll fare better next time."
+            summary::SUBTITLE_LOST
         };
-        let bullets = onboarding_intro_copy::SUMMARY_BULLETS;
+        let bullets = summary::BULLETS;
 
         let mut frame = UiFrame::new();
         frame.quad(GpuInstance {

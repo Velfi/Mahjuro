@@ -412,7 +412,6 @@ pub(super) fn apply_shop_action(
 pub(super) struct ShopItem {
     pub(super) relic: RelicId,
     pub(super) name: &'static str,
-    pub(super) description: &'static str,
     pub(super) rarity: Rarity,
     pub(super) price: u32,
     pub(super) sold: bool,

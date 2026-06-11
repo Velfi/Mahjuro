@@ -374,7 +374,6 @@ mod tests {
         let mut items = vec![ShopItem {
             relic: def.id,
             name: def.name,
-            description: def.description,
             rarity: def.rarity,
             price: 0,
             sold: false,

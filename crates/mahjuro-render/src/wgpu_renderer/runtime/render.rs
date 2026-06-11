@@ -2120,6 +2120,19 @@ impl WgpuRenderer {
                     .as_ref()
                     .map(|c| CameraFrame::build_from(Some(c), frame, self.size))
                     .unwrap_or(camera);
+                let merged_overlay_lit = frame.gameplay_cash_in_overlay_lighting_merged();
+                let overlay_lit = merged_overlay_lit
+                    .as_ref()
+                    .or(frame.gameplay_cash_in_overlay_lighting.as_ref())
+                    .unwrap_or(&frame.scene_lighting);
+                if frame.gameplay_cash_in_overlay_camera.is_some() {
+                    self.upload_punctual_light_buffers(
+                        frame,
+                        overlay_lit,
+                        frame.gameplay_cash_in_overlay_camera.as_ref(),
+                        gamma,
+                    );
+                }
                 self.write_gameplay_environment_uniforms(frame, &gameplay_cam, true, None);
                 {
                     let room_bloom_ts = self

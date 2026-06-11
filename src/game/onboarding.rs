@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::ordeal::OrdealKind;
 use crate::core::yaku::YakuKind;
 use crate::game::engine::GameEngine;
-use crate::game::onboarding_intro_copy as copy;
+use crate::scenes::tutorial_intro_copy::lessons as copy;
 use crate::ui::score_format::format_score;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,16 +92,16 @@ impl OnboardingState {
         let has_structure = gameplay.has_structure;
 
         match self.step {
-            0 if !has_selection => copy::LESSONS_SELECT,
-            0 | 1 if has_selection && !has_structure => copy::LESSONS_PLAY,
-            2 if has_structure => copy::LESSONS_CASH_IN,
-            3 if !self.discard_river_tooltip_shown => copy::LESSONS_DISCARD,
-            3 => copy::LESSONS_DISCARD_RETRY,
-            4 => copy::LESSONS_SECOND_SCORE,
-            _ if !has_selection => copy::LESSONS_SELECT,
-            _ if has_selection && !has_structure => copy::LESSONS_FALLBACK_PLAY,
-            _ if has_structure => copy::LESSONS_FALLBACK_CASH_IN,
-            _ => copy::LESSONS_FALLBACK_TARGET,
+            0 if !has_selection => copy::SELECT,
+            0 | 1 if has_selection && !has_structure => copy::PLAY,
+            2 if has_structure => copy::CASH_IN,
+            3 if !self.discard_river_tooltip_shown => copy::DISCARD,
+            3 => copy::DISCARD_RETRY,
+            4 => copy::SECOND_SCORE,
+            _ if !has_selection => copy::SELECT,
+            _ if has_selection && !has_structure => copy::FALLBACK_PLAY,
+            _ if has_structure => copy::FALLBACK_CASH_IN,
+            _ => copy::FALLBACK_TARGET,
         }
     }
 }
@@ -124,7 +124,7 @@ pub fn tutorial_yaku() -> Vec<YakuKind> {
 /// Hint text after failing the Lessons blind.
 pub fn lessons_failure_feedback(round_score: u64, target: u32, plays_remaining: u32) -> String {
     if round_score == 0 {
-        return copy::LESSONS_FAILURE_ZERO.to_string();
+        return copy::FAILURE_ZERO.to_string();
     }
     if plays_remaining > 0 {
         return format!(
