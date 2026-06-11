@@ -3,6 +3,18 @@ use crate::projected_light_shadow::ProjectedShadowLightSetup;
 use crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
 
 impl WgpuRenderer {
+    pub(crate) fn room_env_shadow_prim_deltas(
+        &self,
+        active_room_env: ActiveRoomEnv,
+        frame: &UiFrame,
+    ) -> rustc_hash::FxHashMap<usize, glam::Mat4> {
+        match active_room_env {
+            ActiveRoomEnv::Shop => self.shop_gltf_anim_prim_deltas(frame),
+            ActiveRoomEnv::Gameplay => self.gameplay_env_prim_deltas(frame),
+            _ => rustc_hash::FxHashMap::default(),
+        }
+    }
+
     /// Shadow pre-pass — one projected depth layer per point/spot light.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_shadow_pre_pass(
@@ -82,12 +94,18 @@ impl WgpuRenderer {
         let Some(active_room_env) = super::shadow_setup::active_room_env(frame) else {
             return;
         };
+        let prim_deltas = self.room_env_shadow_prim_deltas(active_room_env, frame);
+        let archive_capture =
+            self.room_shadow_capture_pending == Some(crate::room_gi_bake::RoomGiRoom::Archive);
+        let skip_static_baked = !archive_capture
+            && super::shadow_setup::skip_room_env_live_shadow_pass(
+                active_room_env,
+                self.active_room_baked_shadow,
+            );
+        if skip_static_baked && prim_deltas.is_empty() {
+            return;
+        }
         let model = self.room_env_shadow_base_model(active_room_env, camera_h);
-        let prim_deltas = match active_room_env {
-            ActiveRoomEnv::Shop => self.shop_gltf_anim_prim_deltas(frame),
-            ActiveRoomEnv::Gameplay => self.gameplay_env_prim_deltas(frame),
-            _ => rustc_hash::FxHashMap::default(),
-        };
         let mut _changed = false;
         let gpu = match active_room_env {
             ActiveRoomEnv::Shop => self.shop_environment.as_ref(),
@@ -114,12 +132,25 @@ impl WgpuRenderer {
     ) -> u32 {
         let mut room_draws = 0u32;
         if let Some(active_room_env) = super::shadow_setup::active_room_env(frame) {
+            let prim_deltas = self.room_env_shadow_prim_deltas(active_room_env, frame);
+            let archive_capture =
+                self.room_shadow_capture_pending == Some(crate::room_gi_bake::RoomGiRoom::Archive);
+            let skip_static_baked = !archive_capture
+                && super::shadow_setup::skip_room_env_live_shadow_pass(
+                    active_room_env,
+                    self.active_room_baked_shadow,
+                );
             match active_room_env {
                 ActiveRoomEnv::Shop => {
-                    room_draws += self.draw_shop_environment_shadow(shadow_pass, frame);
+                    room_draws += self.draw_shop_environment_shadow(
+                        shadow_pass,
+                        frame,
+                        skip_static_baked,
+                        &prim_deltas,
+                    );
                 }
                 ActiveRoomEnv::Hallway => {
-                    if let Some(ref gpu) = self.hallway_environment {
+                    if !skip_static_baked && let Some(ref gpu) = self.hallway_environment {
                         room_draws += self.draw_gltf_room_env_shadow(
                             shadow_pass,
                             &self.hallway_env_primitives,
@@ -129,7 +160,7 @@ impl WgpuRenderer {
                     }
                 }
                 ActiveRoomEnv::Stairway => {
-                    if let Some(ref gpu) = self.staircase_environment {
+                    if !skip_static_baked && let Some(ref gpu) = self.staircase_environment {
                         room_draws += self.draw_gltf_room_env_shadow(
                             shadow_pass,
                             &self.staircase_env_primitives,
@@ -139,10 +170,12 @@ impl WgpuRenderer {
                     }
                 }
                 ActiveRoomEnv::Archive => {
-                    room_draws += self.draw_archive_environment_shadow(shadow_pass, frame);
+                    if !skip_static_baked {
+                        room_draws += self.draw_archive_environment_shadow(shadow_pass, frame);
+                    }
                 }
                 ActiveRoomEnv::MainMenu => {
-                    if !frame.main_menu_env_moon_only {
+                    if !skip_static_baked && !frame.main_menu_env_moon_only {
                         if let Some(ref gpu) = self.main_menu_environment {
                             room_draws += self.draw_gltf_room_env_shadow(
                                 shadow_pass,
@@ -160,6 +193,9 @@ impl WgpuRenderer {
                             &self.gameplay_env_primitives,
                             gpu,
                             |pi| {
+                                if skip_static_baked && !prim_deltas.contains_key(&pi) {
+                                    return true;
+                                }
                                 if frame.gameplay_env_cash_in_only {
                                     !self.gameplay_cash_in_prim_indices.contains(&pi)
                                 } else {
@@ -171,7 +207,7 @@ impl WgpuRenderer {
                     }
                 }
                 ActiveRoomEnv::ShadowTest => {
-                    if let Some(ref gpu) = self.shadow_test_room_environment {
+                    if !skip_static_baked && let Some(ref gpu) = self.shadow_test_room_environment {
                         room_draws += self.draw_gltf_room_env_shadow(
                             shadow_pass,
                             &self.shadow_test_room_env_primitives,

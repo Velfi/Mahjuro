@@ -107,7 +107,7 @@ impl WgpuRenderer {
     }
 
     /// Centered room model matrix for the shadow depth pass — same as lit `room_glb` draws.
-    pub(super) fn room_env_shadow_base_model(
+    pub(crate) fn room_env_shadow_base_model(
         &self,
         env: crate::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv,
         camera_h: f32,
@@ -187,7 +187,7 @@ impl WgpuRenderer {
         self.main_menu_moon_prim_indices.clone()
     }
 
-    pub(super) fn main_menu_env_skip_prim(
+    pub(crate) fn main_menu_env_skip_prim(
         &self,
         pi: usize,
         frame: &crate::draw_cmd::UiFrame,
@@ -668,6 +668,8 @@ impl WgpuRenderer {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         frame: &crate::draw_cmd::UiFrame,
+        skip_static_baked: bool,
+        prim_deltas: &rustc_hash::FxHashMap<usize, glam::Mat4>,
     ) -> u32 {
         let Some(ref gpu) = self.shop_environment else {
             return 0;
@@ -675,6 +677,9 @@ impl WgpuRenderer {
         let eyeball_only = frame.shop_env_eyeball_only;
         let eyeball_indices = self.shop_eyeball_prim_indices_for_draw();
         self.draw_gltf_room_env_shadow(pass, &self.shop_env_primitives, gpu, |pi| {
+            if skip_static_baked && !prim_deltas.contains_key(&pi) {
+                return true;
+            }
             eyeball_only && !eyeball_indices.is_empty() && !eyeball_indices.contains(&pi)
         })
     }
@@ -1114,7 +1119,11 @@ impl WgpuRenderer {
     }
 
     #[inline]
-    fn gameplay_env_skip_prim(&self, pi: usize, frame: &crate::draw_cmd::UiFrame) -> bool {
+    pub(crate) fn gameplay_env_skip_prim(
+        &self,
+        pi: usize,
+        frame: &crate::draw_cmd::UiFrame,
+    ) -> bool {
         if frame.gameplay_env_cash_in_only {
             return !self.gameplay_cash_in_prim_indices.contains(&pi);
         }
@@ -1200,7 +1209,7 @@ impl WgpuRenderer {
             || self.archive_env_skip_page_button_prim(pi, frame)
     }
 
-    pub(super) fn archive_env_skip_shadow_prim(
+    pub(crate) fn archive_env_skip_shadow_prim(
         &self,
         pi: usize,
         frame: &crate::draw_cmd::UiFrame,

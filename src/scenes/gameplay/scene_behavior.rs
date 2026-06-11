@@ -854,14 +854,6 @@ impl SceneBehavior for GameplayScene {
             );
             frame.scene_lighting.punctual = punctual;
             frame.scene_lighting.punctual_gltf_nodes = nodes;
-            frame.scene_lighting.set_gltf_embedded_spot_lights(
-                crate::render::gameplay_glb::gameplay_embedded_spot_lights_runtime(
-                    layout.window_w,
-                    layout.window_h,
-                    env_h,
-                    &ctx.room_env_for("gameplay").0,
-                ),
-            );
             let glb_flames = crate::render::gameplay_glb::gameplay_gltf_candle_flame_emitters(
                 layout.window_h,
                 env_h,

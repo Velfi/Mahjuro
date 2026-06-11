@@ -67,8 +67,8 @@ use crate::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowDepthArrayGpu, ShadowGlobals,
     SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_spot_ssr_layout,
     create_room_env_camera_uniform_buffers, create_room_env_shadow_gpu_batch,
-    create_shadow_caster_layout, create_shadow_sample_layout, create_shadow_warp_bind_group,
-    create_shadow_warp_layout,
+    create_room_shadow_mask_gpu_batch, create_room_shadow_mask_layout, create_shadow_caster_layout,
+    create_shadow_sample_layout, create_shadow_warp_bind_group, create_shadow_warp_layout,
 };
 use crate::mirror_mesh::build_mirror_mesh;
 use crate::ofuda_mesh::build_ofuda_mesh;
@@ -844,6 +844,8 @@ pub struct WgpuRenderer {
     /// pipeline). Each `LitMeshInstance` owns one bind
     /// group built against this layout.
     shadow_caster_layout: wgpu::BindGroupLayout,
+    /// Group 2 of the bake-only room shadow mask pipeline.
+    room_shadow_mask_layout: wgpu::BindGroupLayout,
     /// Group 1 of the shadow VS — `HallwayDistortion` (zeroed ⇒ no warp). Bound for every shadow draw.
     shadow_warp_disabled_bind_group: wgpu::BindGroup,
     /// Frame-shared uniform: light_view_proj + (enabled, bias, texel size).
@@ -860,6 +862,8 @@ pub struct WgpuRenderer {
     shadow_pipeline_instanced: wgpu::RenderPipeline,
     /// Room GLB shadow pass — double-sided so thin shelves / panels cast.
     shadow_pipeline_room_env: wgpu::RenderPipeline,
+    /// Bake-only room GLB pass that writes depth plus receiver/occluder mask.
+    room_shadow_mask_pipeline: wgpu::RenderPipeline,
     /// Optional GPU timestamp profiler. Built once at startup; activated
     /// on demand from the Debug menu via `start_gpu_profile`.
     gpu_profiler: crate::gpu_profiler::GpuProfiler,
@@ -927,9 +931,9 @@ pub(crate) use screenshot::ScreenshotStaging;
 pub(crate) use targets::RenderTarget;
 pub(crate) use tile_pipeline::{TileGlbPipelineKey, TileMeshGpuSet, TilePrimitiveGpu};
 pub(crate) use uniforms::{
-    BloomParams, FlameViewUniform, Globals, ProbeGiFrameUniform, RoomEnvUniform, Tile3dInstance,
-    TileFrameUniform, TileOutlineFrameUniform, TileOutlineInstance, TileShadowInstance,
-    TonemapParams,
+    BloomParams, FlameViewUniform, Globals, ProbeGiFrameUniform, RoomEnvUniform,
+    RoomShadowMaskUniform, Tile3dInstance, TileFrameUniform, TileOutlineFrameUniform,
+    TileOutlineInstance, TileShadowInstance, TonemapParams,
 };
 
 pub(super) use constants::{

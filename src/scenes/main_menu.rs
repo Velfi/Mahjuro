@@ -22,7 +22,7 @@ use crate::render::scene_light_sample::{
 use crate::render::theme::{color, metrics, typography};
 use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{
-    GpuInstance, MAIN_MENU_PICK_MOON, PointLight, SpotLight, TextAlign, TextLabel,
+    GpuInstance, MAIN_MENU_PICK_MOON, PointLight, TextAlign, TextLabel,
 };
 use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
@@ -177,13 +177,8 @@ fn main_menu_scene_punctual(
     h: f32,
     env_scale: f32,
     tune: &RoomEnvLightingTune,
-) -> (Vec<ScenePunctualLight>, Vec<Option<String>>, Vec<SpotLight>) {
+) -> (Vec<ScenePunctualLight>, Vec<Option<String>>) {
     let room_glb = main_menu_glb::main_menu_glb_has_embedded_lights();
-    let spots = if room_glb {
-        main_menu_glb::main_menu_embedded_spot_lights_runtime(w, h, env_scale, tune)
-    } else {
-        Vec::new()
-    };
     let (mut punctual, mut nodes): (Vec<ScenePunctualLight>, Vec<Option<String>>) = if room_glb {
         let tagged =
             main_menu_glb::main_menu_embedded_point_lights_runtime_tagged(w, h, env_scale, tune);
@@ -218,12 +213,11 @@ fn main_menu_scene_punctual(
     let fill_len = fill.len();
     punctual.extend(fill.into_iter().map(ScenePunctualLight::Smooth));
     nodes.extend(std::iter::repeat_n(None, fill_len));
-    (punctual, nodes, spots)
+    (punctual, nodes)
 }
 
 struct MainMenuRainLighting {
     punctual: Vec<ScenePunctualLight>,
-    spots: Vec<SpotLight>,
     occluders: Vec<PunctualOccluderAabb>,
 }
 
@@ -233,7 +227,7 @@ fn build_main_menu_rain_lighting(
     env_scale: f32,
     tune: &RoomEnvLightingTune,
 ) -> MainMenuRainLighting {
-    let (punctual, _nodes, spots) = main_menu_scene_punctual(w, h, env_scale, tune);
+    let (punctual, _nodes) = main_menu_scene_punctual(w, h, env_scale, tune);
     let occluders = main_menu_glb::main_menu_rain_env_model_matrix(h, env_scale)
         .map(|model| {
             PunctualOccluderAabb::from_room_collision_meshes(
@@ -244,7 +238,6 @@ fn build_main_menu_rain_lighting(
         .unwrap_or_default();
     MainMenuRainLighting {
         punctual,
-        spots,
         occluders,
     }
 }
@@ -278,7 +271,7 @@ fn main_menu_rain_light_sample_ctx<'a>(
         inv_doc_scale,
         linear_exposure,
         punctual: &bundle.punctual,
-        spots: &bundle.spots,
+        spots: &[],
         occluders: &bundle.occluders,
     }
 }
@@ -301,8 +294,7 @@ fn push_main_menu_room_frame(
     let room_glb = main_menu_glb::main_menu_glb_has_embedded_lights();
     frame.scene_lighting.embedded_gltf_punctual = room_glb;
     frame.scene_lighting.room_glb_brdf = room_glb;
-    let (punctual, nodes, spots) = main_menu_scene_punctual(w, h, env_scale, tune);
-    frame.scene_lighting.set_gltf_embedded_spot_lights(spots);
+    let (punctual, nodes) = main_menu_scene_punctual(w, h, env_scale, tune);
     frame.scene_lighting.punctual = punctual;
     frame.scene_lighting.punctual_gltf_nodes = nodes;
 }

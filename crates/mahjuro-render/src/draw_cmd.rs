@@ -84,9 +84,6 @@ pub struct SceneLighting {
     /// Parallel to [`Self::punctual`]: glTF node name when sourced from embedded room lights.
     pub punctual_gltf_nodes: Vec<Option<String>>,
     pub spot_lights: Vec<SpotLight>,
-    /// Set when [`Self::spot_lights`] were loaded from embedded glTF (`KHR_lights_punctual` spots).
-    /// Programmatic spots must not set this — see [`Self::set_gltf_embedded_spot_lights`].
-    pub spot_lights_from_gltf: bool,
     /// Room environment mesh uses `room_glb.wgsl` when true, else `tile_3d.wgsl`.
     pub room_glb_brdf: bool,
     /// Embedded `KHR_lights_punctual` active for this room (inverse-square lights + exposure path).
@@ -137,16 +134,9 @@ impl SceneLighting {
             .and_then(|n| n.as_deref())
     }
 
-    /// Assign spot lights decoded from a room `.glb` (unsupported on the punctual shadow path).
-    pub fn set_gltf_embedded_spot_lights(&mut self, spots: Vec<SpotLight>) {
-        self.spot_lights = spots;
-        self.spot_lights_from_gltf = !self.spot_lights.is_empty();
-    }
-
     #[inline]
     pub fn clear_spot_lights(&mut self) {
         self.spot_lights.clear();
-        self.spot_lights_from_gltf = false;
     }
 }
 

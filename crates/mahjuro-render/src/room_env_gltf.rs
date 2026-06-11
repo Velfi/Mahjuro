@@ -338,20 +338,6 @@ pub struct RoomGltfEmbeddedPointLight {
     pub range_doc: Option<f32>,
 }
 
-/// [`KHR_lights_punctual`] spot light — cone aims along node **−Z** in document space.
-#[derive(Clone, Copy, Debug)]
-pub struct RoomGltfEmbeddedSpotLight {
-    pub pos_doc: Vec3,
-    pub dir_doc: Vec3,
-    pub color_linear: [f32; 3],
-    pub is_candle: bool,
-    pub is_lantern: bool,
-    pub intensity: f32,
-    pub range_doc: Option<f32>,
-    pub inner_cone_rad: f32,
-    pub outer_cone_rad: f32,
-}
-
 /// Perspective camera baked into a room glTF (positions in **document units**).
 #[derive(Clone, Copy, Debug)]
 pub struct RoomGltfEmbeddedCamera {
@@ -1218,7 +1204,6 @@ pub fn harvest_khr_punctual_light(
     lantern_node_prefix: &str,
     log_asset_label: &str,
     points: &mut Vec<RoomGltfEmbeddedPointLight>,
-    spots: &mut Vec<RoomGltfEmbeddedSpotLight>,
 ) {
     use gltf::khr_lights_punctual::Kind;
 
@@ -1241,38 +1226,9 @@ pub fn harvest_khr_punctual_light(
                 range_doc,
             });
         }
-        Kind::Spot {
-            inner_cone_angle,
-            outer_cone_angle,
-        } => {
-            let z_axis = world.z_axis.truncate();
-            let z_len = z_axis.length();
-            if z_len < 1e-20 {
-                log::warn!(
-                    "{log_asset_label}: spot light {:?} has degenerate orientation — skipping",
-                    node_name
-                );
-                return;
-            }
-            let dir_doc = (-z_axis / z_len).normalize();
-            let pos_doc = world.transform_point3(Vec3::ZERO);
-            let outer_rad = outer_cone_angle.max(1e-4);
-            let inner_rad = inner_cone_angle.min(outer_rad).max(0.0);
-            spots.push(RoomGltfEmbeddedSpotLight {
-                pos_doc,
-                dir_doc,
-                color_linear,
-                is_candle,
-                is_lantern,
-                intensity,
-                range_doc,
-                inner_cone_rad: inner_rad,
-                outer_cone_rad: outer_rad,
-            });
-        }
-        Kind::Directional => {
+        _ => {
             log::debug!(
-                "{log_asset_label}: skipping directional light on node {:?}",
+                "{log_asset_label}: skipping unsupported non-point light on node {:?}",
                 node_name
             );
         }
@@ -1343,7 +1299,6 @@ pub struct RoomEnvWalkState<'a> {
     pub rain_surface_meshes: &'a mut Vec<RoomCollisionMesh>,
     pub embedded_cameras: &'a mut EmbeddedCameraHarvest,
     pub embedded_point_lights: &'a mut Vec<RoomGltfEmbeddedPointLight>,
-    pub embedded_spot_lights: &'a mut Vec<RoomGltfEmbeddedSpotLight>,
     pub buffers: &'a [Vec<u8>],
     pub capped_images: &'a [Option<CappedGltfImage>],
     pub texture_bake_cache: &'a mut TextureBakeCache,
@@ -1379,7 +1334,6 @@ pub fn walk_room_env_node(
             state.lantern_node_prefix,
             label,
             state.embedded_point_lights,
-            state.embedded_spot_lights,
         );
     }
 

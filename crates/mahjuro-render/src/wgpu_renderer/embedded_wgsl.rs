@@ -64,6 +64,11 @@ pub const SHADOW: &str = concat!(
     "\n",
     wgsl_file!("shadow.wgsl")
 );
+pub const ROOM_SHADOW_MASK: &str = concat!(
+    wgsl_file!("hallway_vertex_warp.wgsl"),
+    "\n",
+    wgsl_file!("room_shadow_mask.wgsl")
+);
 pub const IMAGE_QUAD: &str = wgsl_file!("image_quad.wgsl");
 pub const BLOOM_EXTRACT: &str = wgsl_file!("bloom_extract.wgsl");
 pub const BLOOM_BLUR: &str = wgsl_file!("bloom_blur.wgsl");
@@ -104,6 +109,17 @@ mod composition_drift {
             compose(mahjuro_bake_stamp::shader_program::SHADOW),
             "embedded_wgsl::SHADOW drifted from shader_program::SHADOW; \
              update both the macro and the bake stamp input list together"
+        );
+    }
+
+    #[test]
+    fn room_shadow_mask_matches_shader_program_list() {
+        assert_eq!(
+            super::ROOM_SHADOW_MASK,
+            compose(mahjuro_bake_stamp::shader_program::ROOM_SHADOW_MASK),
+            "embedded_wgsl::ROOM_SHADOW_MASK drifted from \
+             shader_program::ROOM_SHADOW_MASK; update both the macro and the bake \
+             stamp input list together"
         );
     }
 

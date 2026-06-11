@@ -30,6 +30,7 @@ override LIT_MESH_TABLE_SSR: bool = true;
 struct MeshUniform {
     view_proj: mat4x4<f32>,
     model: mat4x4<f32>,
+    normal_model: mat4x4<f32>,
     base_color: vec4<f32>,
     // x = material_kind, y = specular_strength (emissive scale for kind 20),
     // z = specular_power, w = decal / talisman slot (see lit_mesh.rs)
@@ -273,7 +274,7 @@ fn vs_main(
     @location(2) uv: vec2<f32>,
     @location(3) _tangent_pad: vec4<f32>,
 ) -> VsOut {
-    var world_normal = normalize((mesh.model * vec4<f32>(n, 0.0)).xyz);
+    var world_normal = normalize((mesh.normal_model * vec4<f32>(n, 0.0)).xyz);
     var world_pos_out = (mesh.model * vec4<f32>(pos, 1.0)).xyz;
 
     // Lacquered wood (kind 3 — the table): evaluate the procedural wood
@@ -1155,13 +1156,13 @@ fn fs_main(
     // The derivatives were computed above; here we push the flat-face normal
     // sideways so the groove walls catch the candlelight. The perturbation
     // is in tangent space (UV-aligned), re-oriented into world space via the
-    // model matrix's upper 3×3 (plaques/tablets only translate + uniformly
-    // scale, so this is exact). Fades to zero outside the glyph boundary.
+    // uploaded inverse-transpose normal transform. Fades to zero outside the
+    // glyph boundary.
     if (has_decal) {
         let edge_mag = abs(decal_dhdu) + abs(decal_dhdv);
         if (edge_mag > 0.001) {
             let perturbed_local = normalize(vec3<f32>(-decal_dhdu, 1.0, -decal_dhdv));
-            let perturbed_world = normalize((mesh.model * vec4<f32>(perturbed_local, 0.0)).xyz);
+            let perturbed_world = normalize((mesh.normal_model * vec4<f32>(perturbed_local, 0.0)).xyz);
             // Blend based on edge strength so flat-alpha interiors keep
             // their original normal (the paint surface inside the groove
             // is still flat — only the walls tilt).
@@ -1174,9 +1175,9 @@ fn fs_main(
     // Sample noise at two scales and finite-difference it into a
     // tangent-space normal so the cover catches raking light as if
     // pebbled. Same model-matrix re-orientation pattern as the carved
-    // decal — the book is a uniformly-scaled local +Y face after the
-    // shop's `cam_rot`, so the upper-3×3 transform is exact. Skipped on
-    // page-edge fragments (paper is flat, not pebbled).
+    // decal, but uses the uploaded normal transform so non-uniformly scaled
+    // covers keep their highlights aligned. Skipped on page-edge fragments
+    // (paper is flat, not pebbled).
     if (is_leather && in.uv.x < 1.5) {
         let p = in.local_pos * 32.0;
         let eps = 0.04;
@@ -1187,7 +1188,7 @@ fn fs_main(
         let dhdu = (n_x - n_c) * grain_amp;
         let dhdv = (n_z - n_c) * grain_amp;
         let perturbed_local = normalize(vec3<f32>(-dhdu, 1.0, -dhdv));
-        let perturbed_world = normalize((mesh.model * vec4<f32>(perturbed_local, 0.0)).xyz);
+        let perturbed_world = normalize((mesh.normal_model * vec4<f32>(perturbed_local, 0.0)).xyz);
         n = normalize(mix(n, perturbed_world, 0.45));
     }
 
@@ -1199,7 +1200,7 @@ fn fs_main(
     // and only crack cells flex the highlight.
     if (is_porcelain && crack_mask > 0.001) {
         let perturbed_local = normalize(in.local_n + crack_local_perturb);
-        let perturbed_world = normalize((mesh.model * vec4<f32>(perturbed_local, 0.0)).xyz);
+        let perturbed_world = normalize((mesh.normal_model * vec4<f32>(perturbed_local, 0.0)).xyz);
         n = normalize(mix(n, perturbed_world, clamp(crack_mask * 0.6, 0.0, 0.6)));
     }
 
@@ -1343,7 +1344,7 @@ fn fs_main(
             }
 
             let n_w = normalize(vec3<f32>(-dhdu_total, 1.0, -dhdv_total));
-            water_n = normalize((mesh.model * vec4<f32>(n_w, 0.0)).xyz);
+            water_n = normalize((mesh.normal_model * vec4<f32>(n_w, 0.0)).xyz);
             water_albedo = albedo;
             water_spec_strength = 0.85;
             water_spec_power = 220.0;
@@ -1501,7 +1502,7 @@ fn fs_main(
             let dhdu = (h_r - h_l) * bump;
             let dhdv = (h_u - h_d) * bump;
             let n_local = normalize(vec3<f32>(-dhdu, 1.0, -dhdv));
-            let n_world_perturbed = normalize((mesh.model * vec4(n_local, 0.0)).xyz);
+            let n_world_perturbed = normalize((mesh.normal_model * vec4(n_local, 0.0)).xyz);
             let cap_blend = smoothstep(0.55, 0.92, in.local_n.y);
             n = normalize(mix(n, n_world_perturbed, cap_blend));
             let carve = smoothstep(0.26, 0.68, h_c);
@@ -1607,9 +1608,9 @@ fn fs_main(
                     && in.local_n.z > 0.98;
                 if (shelf_flat_cap) {
                     let n_local = normalize(vec3(-dhdu, dhdv, 1.0));
-                    n = normalize((mesh.model * vec4<f32>(n_local, 0.0)).xyz);
+                    n = normalize((mesh.normal_model * vec4<f32>(n_local, 0.0)).xyz);
                 } else {
-                    n = normalize((mesh.model * vec4(in.local_n, 0.0)).xyz);
+                    n = normalize((mesh.normal_model * vec4(in.local_n, 0.0)).xyz);
                 }
             } else {
                 // Screen-space derivative tangent basis: works for any

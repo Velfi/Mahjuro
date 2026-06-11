@@ -9,6 +9,7 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::room_gi_bake::RoomGiRoom;
+use glam::Vec3;
 use mahjuro_assets::asset_path;
 
 const MAGIC: &[u8; 4] = b"MSH1";
@@ -222,6 +223,549 @@ const CONTACT_AO_DEPTH_EPS: f32 = 0.003;
 const CONTACT_AO_STRENGTH: f32 = 10.0;
 const CONTACT_AO_MAX_DARKEN: f32 = 0.58;
 
+#[derive(Clone, Copy, Debug)]
+struct ContactAoTuning {
+    radius: i32,
+    depth_eps: f32,
+    strength: f32,
+    max_darken: f32,
+    max_neighbor_depth_delta: f32,
+    surface_depth_coherence_eps: f32,
+    same_prim_normal_min_dot: f32,
+    same_prim_scale: f32,
+    cross_prim_normal_min_dot: f32,
+}
+
+impl ContactAoTuning {
+    fn for_room(room: RoomGiRoom) -> Self {
+        let default = Self {
+            radius: 2,
+            depth_eps: CONTACT_AO_DEPTH_EPS,
+            strength: CONTACT_AO_STRENGTH,
+            max_darken: CONTACT_AO_MAX_DARKEN,
+            max_neighbor_depth_delta: 0.075,
+            surface_depth_coherence_eps: 0.018,
+            same_prim_normal_min_dot: 0.78,
+            same_prim_scale: 0.18,
+            cross_prim_normal_min_dot: -0.20,
+        };
+        match room {
+            RoomGiRoom::Shop => Self {
+                strength: 6.5,
+                max_darken: 0.38,
+                max_neighbor_depth_delta: 0.050,
+                surface_depth_coherence_eps: 0.014,
+                same_prim_normal_min_dot: 0.84,
+                same_prim_scale: 0.05,
+                cross_prim_normal_min_dot: -0.10,
+                ..default
+            },
+            RoomGiRoom::Hallway => Self {
+                strength: CONTACT_AO_STRENGTH,
+                max_darken: CONTACT_AO_MAX_DARKEN,
+                max_neighbor_depth_delta: 0.080,
+                surface_depth_coherence_eps: 0.080,
+                same_prim_scale: 1.0,
+                ..default
+            },
+            RoomGiRoom::MainMenu => Self {
+                strength: 7.5,
+                max_darken: 0.44,
+                max_neighbor_depth_delta: 0.060,
+                ..default
+            },
+            RoomGiRoom::Gameplay => Self {
+                strength: 8.0,
+                max_darken: 0.46,
+                max_neighbor_depth_delta: 0.065,
+                ..default
+            },
+            RoomGiRoom::Archive | RoomGiRoom::Stairway => default,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PrimitiveContactAoClass {
+    pub receiver: f32,
+    pub occluder: f32,
+}
+
+impl PrimitiveContactAoClass {
+    const DEFAULT: Self = Self {
+        receiver: 1.0,
+        occluder: 1.0,
+    };
+}
+
+#[derive(Clone, Debug)]
+struct RoomShadowSurfaceMap {
+    width: usize,
+    height: usize,
+    depth: Vec<f32>,
+    normal: Vec<Vec3>,
+    normal_valid: Vec<bool>,
+    prim_id: Vec<u32>,
+    receiver: Vec<f32>,
+    occluder: Vec<f32>,
+}
+
+impl RoomShadowSurfaceMap {
+    fn new(width: u32, height: u32) -> Self {
+        let len = width as usize * height as usize;
+        Self {
+            width: width as usize,
+            height: height as usize,
+            depth: vec![1.0; len],
+            normal: vec![Vec3::Z; len],
+            normal_valid: vec![false; len],
+            prim_id: vec![0; len],
+            receiver: vec![0.0; len],
+            occluder: vec![0.0; len],
+        }
+    }
+
+    fn covered_texels(&self) -> usize {
+        self.prim_id.iter().filter(|&&id| id != 0).count()
+    }
+
+    fn has_surface(&self, idx: usize) -> bool {
+        self.prim_id[idx] != 0 && self.depth[idx].is_finite() && self.depth[idx] < 1.0
+    }
+}
+
+/// Build contact AO from a GPU-rendered room-shadow depth map and a matching
+/// GPU-rendered receiver/occluder mask. This is the production bake path: both
+/// inputs come from the same room-shadow capture pass, so AO classification
+/// cannot drift from the depth layer that runtime samples.
+pub fn bake_contact_ao_for_room_from_mask(
+    room: RoomGiRoom,
+    width: u32,
+    height: u32,
+    depth_bytes: &[u8],
+    mask_bytes: &[u8],
+    normal_bytes: &[u8],
+) -> anyhow::Result<Vec<u8>> {
+    anyhow::ensure!(
+        depth_bytes.len() == width as usize * height as usize * 4,
+        "room shadow AO {room:?}: depth byte len mismatch"
+    );
+    anyhow::ensure!(
+        mask_bytes.len() == width as usize * height as usize * 4,
+        "room shadow AO {room:?}: mask byte len mismatch"
+    );
+    anyhow::ensure!(
+        normal_bytes.len() == width as usize * height as usize * 4,
+        "room shadow AO {room:?}: normal byte len mismatch"
+    );
+    let surface = build_room_shadow_surface_map_from_mask(
+        width,
+        height,
+        depth_bytes,
+        mask_bytes,
+        normal_bytes,
+    );
+    anyhow::ensure!(
+        surface.covered_texels() > 0,
+        "room shadow AO {room:?}: GPU surface mask captured no usable room texels"
+    );
+    let tuning = ContactAoTuning::for_room(room);
+    let ao = bake_contact_ao_with_surface_map(width, height, depth_bytes, &surface, tuning);
+    let stats = contact_ao_stats(width, height, depth_bytes, &surface, &ao, tuning);
+    log_contact_ao_stats(room, &stats);
+    debug_dump_contact_ao_inputs(room, width, height, depth_bytes, &surface);
+    Ok(ao)
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ContactAoStats {
+    pixels: usize,
+    depth_covered: usize,
+    surface_covered: usize,
+    surface_on_depth: usize,
+    coherent: usize,
+    dark: usize,
+    gpu_depth_min: Option<f32>,
+    gpu_depth_max: Option<f32>,
+    surface_depth_min: Option<f32>,
+    surface_depth_max: Option<f32>,
+    depth_delta_min: Option<f32>,
+    depth_delta_p50: Option<f32>,
+    depth_delta_p90: Option<f32>,
+    signed_delta_p50: Option<f32>,
+    signed_delta_p90: Option<f32>,
+}
+
+fn contact_ao_stats(
+    width: u32,
+    height: u32,
+    depth_bytes: &[u8],
+    surface: &RoomShadowSurfaceMap,
+    ao: &[u8],
+    tuning: ContactAoTuning,
+) -> ContactAoStats {
+    let mut depth = vec![0.0f32; width as usize * height as usize];
+    let mut depth_covered = 0usize;
+    let mut surface_on_depth = 0usize;
+    let mut coherent = 0usize;
+    let mut deltas = Vec::new();
+    let mut signed_deltas = Vec::new();
+    let mut gpu_depth_min = f32::INFINITY;
+    let mut gpu_depth_max = f32::NEG_INFINITY;
+    let mut surface_depth_min = f32::INFINITY;
+    let mut surface_depth_max = f32::NEG_INFINITY;
+    for (i, chunk) in depth_bytes.chunks_exact(4).enumerate() {
+        let d = f32::from_le_bytes(chunk.try_into().unwrap());
+        depth[i] = d;
+        if d > 0.001 && d < 0.999 {
+            depth_covered += 1;
+            gpu_depth_min = gpu_depth_min.min(d);
+            gpu_depth_max = gpu_depth_max.max(d);
+            if surface.has_surface(i) {
+                surface_on_depth += 1;
+                let signed = surface.depth[i] - d;
+                deltas.push(signed.abs());
+                signed_deltas.push(signed);
+                surface_depth_min = surface_depth_min.min(surface.depth[i]);
+                surface_depth_max = surface_depth_max.max(surface.depth[i]);
+            }
+            if surface_depth_coherent(surface, &depth, i, tuning) {
+                coherent += 1;
+            }
+        }
+    }
+    deltas.sort_by(f32::total_cmp);
+    signed_deltas.sort_by(f32::total_cmp);
+    let depth_delta_min = deltas.first().copied();
+    let depth_delta_p50 = percentile_sorted(&deltas, 0.50);
+    let depth_delta_p90 = percentile_sorted(&deltas, 0.90);
+    let signed_delta_p50 = percentile_sorted(&signed_deltas, 0.50);
+    let signed_delta_p90 = percentile_sorted(&signed_deltas, 0.90);
+    let dark = ao.iter().filter(|&&b| b < 250).count();
+    let pixels = (width as usize * height as usize).max(1);
+    ContactAoStats {
+        pixels,
+        depth_covered,
+        surface_covered: surface.covered_texels(),
+        surface_on_depth,
+        coherent,
+        dark,
+        gpu_depth_min: gpu_depth_min.is_finite().then_some(gpu_depth_min),
+        gpu_depth_max: gpu_depth_max.is_finite().then_some(gpu_depth_max),
+        surface_depth_min: surface_depth_min.is_finite().then_some(surface_depth_min),
+        surface_depth_max: surface_depth_max.is_finite().then_some(surface_depth_max),
+        depth_delta_min,
+        depth_delta_p50,
+        depth_delta_p90,
+        signed_delta_p50,
+        signed_delta_p90,
+    }
+}
+
+fn log_contact_ao_stats(room: RoomGiRoom, stats: &ContactAoStats) {
+    log::info!(
+        "room shadow AO {room:?}: depth_covered={:.3}% surface_covered={:.3}% coherent={:.3}% dark_ao={:.3}%",
+        stats.depth_covered as f32 * 100.0 / stats.pixels as f32,
+        stats.surface_covered as f32 * 100.0 / stats.pixels as f32,
+        stats.coherent as f32 * 100.0 / stats.pixels as f32,
+        stats.dark as f32 * 100.0 / stats.pixels as f32,
+    );
+    if stats.depth_covered > 0 {
+        log::info!(
+            "room shadow AO {room:?}: surface_on_depth={:.3}% depth_delta_min={:?} p50={:?} p90={:?} signed_p50={:?} signed_p90={:?} gpu_depth={:?}..{:?} surface_depth={:?}..{:?}",
+            stats.surface_on_depth as f32 * 100.0 / stats.depth_covered as f32,
+            stats.depth_delta_min,
+            stats.depth_delta_p50,
+            stats.depth_delta_p90,
+            stats.signed_delta_p50,
+            stats.signed_delta_p90,
+            stats.gpu_depth_min,
+            stats.gpu_depth_max,
+            stats.surface_depth_min,
+            stats.surface_depth_max,
+        );
+    }
+}
+
+fn percentile_sorted(values: &[f32], percentile: f32) -> Option<f32> {
+    if values.is_empty() {
+        return None;
+    }
+    let idx = ((values.len() - 1) as f32 * percentile.clamp(0.0, 1.0)).round() as usize;
+    values.get(idx).copied()
+}
+
+fn debug_dump_contact_ao_inputs(
+    room: RoomGiRoom,
+    width: u32,
+    height: u32,
+    depth_bytes: &[u8],
+    surface: &RoomShadowSurfaceMap,
+) {
+    let dir = if let Some(dir) = std::env::var_os("MAHJURO_ROOM_SHADOW_DEBUG_DUMP") {
+        std::path::PathBuf::from(dir)
+    } else {
+        return;
+    };
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        log::warn!("room shadow AO {room:?}: debug dump mkdir failed: {e:#}");
+        return;
+    }
+    let slug = room.shadow_asset_path().replace(['/', '.'], "_");
+    let mut depth = vec![1.0f32; width as usize * height as usize];
+    for (i, chunk) in depth_bytes.chunks_exact(4).enumerate() {
+        depth[i] = f32::from_le_bytes(chunk.try_into().unwrap());
+    }
+    let gpu = make_pgm(width, height, |i| depth_to_u8(depth[i]));
+    let surf = make_pgm(width, height, |i| {
+        if surface.has_surface(i) {
+            depth_to_u8(surface.depth[i])
+        } else {
+            0
+        }
+    });
+    let cover = make_ppm(width, height, |i| {
+        let g = depth[i] > 0.001 && depth[i] < 0.999;
+        let s = surface.has_surface(i);
+        match (g, s) {
+            (true, true) => [255, 220, 48],
+            (true, false) => [220, 48, 48],
+            (false, true) => [48, 200, 80],
+            (false, false) => [0, 0, 0],
+        }
+    });
+    let delta = make_ppm(width, height, |i| {
+        if !(depth[i] > 0.001 && depth[i] < 0.999 && surface.has_surface(i)) {
+            return [0, 0, 0];
+        }
+        let d = surface.depth[i] - depth[i];
+        if d.abs() <= ContactAoTuning::for_room(room).surface_depth_coherence_eps {
+            [32, 220, 64]
+        } else if d > 0.0 {
+            let v = ((d / 0.35).clamp(0.0, 1.0) * 255.0) as u8;
+            [v, 0, 0]
+        } else {
+            let v = (((-d) / 0.35).clamp(0.0, 1.0) * 255.0) as u8;
+            [0, 64, v]
+        }
+    });
+    for (name, bytes) in [
+        ("gpu_depth.pgm", gpu),
+        ("surface_depth.pgm", surf),
+        ("coverage.ppm", cover),
+        ("delta.ppm", delta),
+    ] {
+        let path = dir.join(format!("{slug}_{name}"));
+        if let Err(e) = std::fs::write(&path, bytes) {
+            log::warn!(
+                "room shadow AO {room:?}: debug dump {} failed: {e:#}",
+                path.display()
+            );
+        }
+    }
+}
+
+fn make_pgm(width: u32, height: u32, mut pixel: impl FnMut(usize) -> u8) -> Vec<u8> {
+    let mut out = format!("P5\n{} {}\n255\n", width, height).into_bytes();
+    out.reserve(width as usize * height as usize);
+    for i in 0..width as usize * height as usize {
+        out.push(pixel(i));
+    }
+    out
+}
+
+fn make_ppm(width: u32, height: u32, mut pixel: impl FnMut(usize) -> [u8; 3]) -> Vec<u8> {
+    let mut out = format!("P6\n{} {}\n255\n", width, height).into_bytes();
+    out.reserve(width as usize * height as usize * 3);
+    for i in 0..width as usize * height as usize {
+        out.extend_from_slice(&pixel(i));
+    }
+    out
+}
+
+fn depth_to_u8(d: f32) -> u8 {
+    if d > 0.001 && d < 0.999 && d.is_finite() {
+        ((1.0 - d.clamp(0.0, 1.0)) * 255.0).round() as u8
+    } else {
+        0
+    }
+}
+
+fn build_room_shadow_surface_map_from_mask(
+    width: u32,
+    height: u32,
+    depth_bytes: &[u8],
+    mask_bytes: &[u8],
+    normal_bytes: &[u8],
+) -> RoomShadowSurfaceMap {
+    let mut map = RoomShadowSurfaceMap::new(width, height);
+    for i in 0..width as usize * height as usize {
+        let d = f32::from_le_bytes(depth_bytes[i * 4..i * 4 + 4].try_into().unwrap());
+        let r = mask_bytes[i * 4] as f32 / 255.0;
+        let g = mask_bytes[i * 4 + 1] as f32 / 255.0;
+        let prim_lo = mask_bytes[i * 4 + 2] as u32;
+        let prim_hi = mask_bytes[i * 4 + 3] as u32;
+        let prim_id = prim_lo | (prim_hi << 8);
+        if prim_id == 0 || !(0.001..0.999).contains(&d) || !d.is_finite() {
+            continue;
+        }
+        map.depth[i] = d;
+        map.prim_id[i] = prim_id;
+        map.receiver[i] = r;
+        map.occluder[i] = g;
+        let n = Vec3::new(
+            normal_bytes[i * 4] as f32 / 255.0 * 2.0 - 1.0,
+            normal_bytes[i * 4 + 1] as f32 / 255.0 * 2.0 - 1.0,
+            normal_bytes[i * 4 + 2] as f32 / 255.0 * 2.0 - 1.0,
+        );
+        let len_sq = n.length_squared();
+        if len_sq > 0.25 && len_sq.is_finite() {
+            map.normal[i] = n / len_sq.sqrt();
+            map.normal_valid[i] = true;
+        }
+    }
+    map
+}
+
+pub fn primitive_contact_ao_class(
+    room: RoomGiRoom,
+    node_name: Option<&str>,
+    material_name: Option<&str>,
+) -> PrimitiveContactAoClass {
+    let mut class = PrimitiveContactAoClass::DEFAULT;
+    if room != RoomGiRoom::Shop {
+        return class;
+    }
+
+    let node = node_name.unwrap_or("").to_ascii_lowercase();
+    let material = material_name.unwrap_or("").to_ascii_lowercase();
+
+    if contains_any(&node, &["mysterious_sheet", "cloth", "sheet"])
+        || contains_any(&material, &["sheet fabric"])
+    {
+        class.receiver = class.receiver.min(0.10);
+        class.occluder = class.occluder.min(0.35);
+    }
+
+    if contains_any(&node, &["cubby", "recess", "hole"]) || contains_any(&material, &["red velvet"])
+    {
+        class.receiver = class.receiver.min(0.22);
+        class.occluder = class.occluder.min(0.70);
+    }
+
+    if contains_any(&node, &["pillow"]) || contains_any(&material, &["ratten wicker", "wicker"]) {
+        class.receiver = class.receiver.min(0.50);
+        class.occluder = class.occluder.min(0.75);
+    }
+
+    class
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+#[inline]
+#[cfg(test)]
+fn normalized_or(v: Vec3, fallback: Vec3) -> Vec3 {
+    let len_sq = v.length_squared();
+    if len_sq > 1e-12 && len_sq.is_finite() {
+        v / len_sq.sqrt()
+    } else {
+        fallback
+    }
+}
+
+fn bake_contact_ao_with_surface_map(
+    width: u32,
+    height: u32,
+    depth_bytes: &[u8],
+    surface: &RoomShadowSurfaceMap,
+    tuning: ContactAoTuning,
+) -> Vec<u8> {
+    let w = width as usize;
+    let h = height as usize;
+    debug_assert_eq!(surface.width, w);
+    debug_assert_eq!(surface.height, h);
+    let mut depth = vec![0.0f32; w * h];
+    for (i, chunk) in depth_bytes.chunks_exact(4).enumerate() {
+        depth[i] = f32::from_le_bytes(chunk.try_into().unwrap());
+    }
+    let mut ao = vec![255u8; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            let d = depth[i];
+            let receiver = surface.receiver[i];
+            if d >= 1.0 || receiver <= 0.0 || !surface_depth_coherent(surface, &depth, i, tuning) {
+                ao[i] = 255;
+                continue;
+            }
+
+            let mut occ = 0.0f32;
+            let mut n = 0.0f32;
+            for dy in -tuning.radius..=tuning.radius {
+                for dx in -tuning.radius..=tuning.radius {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    let nx = ((x as i32 + dx).clamp(0, w as i32 - 1)) as usize;
+                    let ny = ((y as i32 + dy).clamp(0, h as i32 - 1)) as usize;
+                    let ni = ny * w + nx;
+                    if surface.occluder[ni] <= 0.0
+                        || !surface_depth_coherent(surface, &depth, ni, tuning)
+                    {
+                        continue;
+                    }
+                    let nd = depth[ni];
+                    let delta = (nd - d).max(0.0);
+                    if delta < tuning.depth_eps || delta > tuning.max_neighbor_depth_delta {
+                        continue;
+                    }
+                    let normal_dot = surface.normal[i].dot(surface.normal[ni]);
+                    let same_prim =
+                        surface.prim_id[i] != 0 && surface.prim_id[i] == surface.prim_id[ni];
+                    let normals_valid = surface.normal_valid[i] && surface.normal_valid[ni];
+                    let mut weight = surface.occluder[ni];
+                    if same_prim {
+                        if normals_valid && normal_dot < tuning.same_prim_normal_min_dot {
+                            continue;
+                        }
+                        if !normals_valid {
+                            weight *= tuning.same_prim_scale;
+                        }
+                    } else if normals_valid && normal_dot < tuning.cross_prim_normal_min_dot {
+                        continue;
+                    }
+                    if weight <= 0.0 {
+                        continue;
+                    }
+                    occ += delta * tuning.strength * weight;
+                    n += 1.0;
+                }
+            }
+            let darken = if n > 0.0 {
+                (occ / n).clamp(0.0, tuning.max_darken) * receiver
+            } else {
+                0.0
+            };
+            ao[i] = ((1.0 - darken) * 255.0).round() as u8;
+        }
+    }
+    ao
+}
+
+fn surface_depth_coherent(
+    surface: &RoomShadowSurfaceMap,
+    gpu_depth: &[f32],
+    idx: usize,
+    tuning: ContactAoTuning,
+) -> bool {
+    surface.has_surface(idx)
+        && gpu_depth[idx].is_finite()
+        && (surface.depth[idx] - gpu_depth[idx]).abs() <= tuning.surface_depth_coherence_eps
+}
+
 /// Build a simple contact-AO field from a baked depth map (light-space depth texels).
 pub fn bake_contact_ao_from_depth(width: u32, height: u32, depth_bytes: &[u8]) -> Vec<u8> {
     let w = width as usize;
@@ -283,15 +827,17 @@ pub fn room_shadow_bake_is_effective(bake: &RoomShadowBake) -> bool {
     if depth_covered as f32 / pixel_count < 0.005 {
         return false;
     }
-    // Archive cubby-only bakes store all-white contact AO; runtime does not sample `.msh` yet.
-    if bake.room == RoomGiRoom::Archive {
-        return true;
-    }
     let Some(ao) = bake.ao_bytes.as_ref() else {
         return true;
     };
     let dark = ao.iter().filter(|&&b| b < 250).count();
-    dark as f32 / ao.len().max(1) as f32 >= 0.001
+    contact_ao_dark_effective(dark, ao.len(), depth_covered as usize)
+}
+
+fn contact_ao_dark_effective(dark: usize, ao_len: usize, depth_covered: usize) -> bool {
+    let dark_frac_pixels = dark as f32 / ao_len.max(1) as f32;
+    let dark_frac_covered = dark as f32 / depth_covered.max(1) as f32;
+    dark_frac_pixels >= 0.001 || dark_frac_covered >= 0.02
 }
 
 /// Game runtime must load valid committed `.msh` files. Offline bakers skip this so stale
@@ -342,15 +888,6 @@ fn load_room_shadow_bake(room: RoomGiRoom) -> Option<Arc<RoomShadowBake>> {
 }
 
 fn decode_room_shadow_bytes(room: RoomGiRoom, path: &str) -> Option<Arc<RoomShadowBake>> {
-    if let Some(mmap) = asset_path::get_mmap(path) {
-        return RoomShadowBake::decode_for_room(&mmap, room)
-            .map(Arc::new)
-            .map_err(|e| {
-                log::warn!("{path}: {e:#}");
-                e
-            })
-            .ok();
-    }
     let file = asset_path::load_asset_bytes(path)?;
     RoomShadowBake::decode_for_room(&file, room)
         .map(Arc::new)
@@ -516,6 +1053,36 @@ mod tests {
     }
 
     #[test]
+    fn cached_shop_shadow_matches_required_asset_load() {
+        use crate::room_gi_bake::RoomGiRoom;
+
+        let cached = cached_room_shadow_bake(RoomGiRoom::Shop).expect("cached shop shadow");
+        let required = require_room_shadow_bake(RoomGiRoom::Shop).expect("required shop shadow");
+        assert_eq!(cached.width, required.width);
+        assert_eq!(cached.height, required.height);
+        assert_eq!(cached.light_view_proj, required.light_view_proj);
+        assert_eq!(cached.depth_bytes.as_ref(), required.depth_bytes.as_ref());
+        assert_eq!(cached.ao_bytes.as_deref(), required.ao_bytes.as_deref());
+        assert!(room_shadow_bake_is_effective(&cached));
+    }
+
+    #[test]
+    fn committed_room_shadow_bakes_are_effective() {
+        for room in [
+            RoomGiRoom::Shop,
+            RoomGiRoom::Hallway,
+            RoomGiRoom::Archive,
+            RoomGiRoom::MainMenu,
+            RoomGiRoom::Stairway,
+            RoomGiRoom::Gameplay,
+        ] {
+            let bake = require_room_shadow_bake(room).expect("room shadow bake should load");
+            validate_room_shadow_bake_effective(&bake, room)
+                .expect("room shadow bake should have usable depth and AO");
+        }
+    }
+
+    #[test]
     fn effective_when_depth_has_coverage_and_ao_varies() {
         let w = 8u32;
         let h = 8u32;
@@ -536,7 +1103,7 @@ mod tests {
     }
 
     #[test]
-    fn archive_effective_with_depth_and_all_white_ao() {
+    fn archive_all_white_ao_is_not_effective() {
         let w = 512u32;
         let h = 512u32;
         let mut depth = vec![0u8; (w * h * 4) as usize];
@@ -552,7 +1119,164 @@ mod tests {
             depth_bytes: Arc::from(depth),
             ao_bytes: Some(Arc::from(vec![255u8; (w * h) as usize])),
         };
+        assert!(!room_shadow_bake_is_effective(&bake));
+        assert!(validate_room_shadow_bake_effective(&bake, RoomGiRoom::Archive).is_err());
+    }
+
+    #[test]
+    fn effective_when_sparse_depth_has_relative_ao_coverage() {
+        let w = 512u32;
+        let h = 512u32;
+        let mut depth = vec![0u8; (w * h * 4) as usize];
+        for i in 0..2000 {
+            depth[i * 4..(i + 1) * 4].copy_from_slice(&0.4f32.to_le_bytes());
+        }
+        let mut ao = vec![255u8; (w * h) as usize];
+        for b in ao.iter_mut().take(50) {
+            *b = 220;
+        }
+        let bake = RoomShadowBake {
+            room: RoomGiRoom::Hallway,
+            width: w,
+            height: h,
+            light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+            depth_bias: 0.005,
+            depth_bytes: Arc::from(depth),
+            ao_bytes: Some(Arc::from(ao)),
+        };
         assert!(room_shadow_bake_is_effective(&bake));
-        assert!(validate_room_shadow_bake_effective(&bake, RoomGiRoom::Archive).is_ok());
+    }
+
+    fn test_ao_tuning() -> ContactAoTuning {
+        ContactAoTuning {
+            radius: 1,
+            depth_eps: 0.001,
+            strength: 10.0,
+            max_darken: 0.80,
+            max_neighbor_depth_delta: 0.10,
+            surface_depth_coherence_eps: 0.005,
+            same_prim_normal_min_dot: 0.90,
+            same_prim_scale: 0.0,
+            cross_prim_normal_min_dot: -0.20,
+        }
+    }
+
+    fn depth_bytes(values: &[f32]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(values.len() * 4);
+        for value in values {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        out
+    }
+
+    fn class_mask_bytes(classes: &[(f32, f32, u16)]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(classes.len() * 4);
+        for &(receiver, occluder, prim_id) in classes {
+            out.push((receiver.clamp(0.0, 1.0) * 255.0).round() as u8);
+            out.push((occluder.clamp(0.0, 1.0) * 255.0).round() as u8);
+            out.push((prim_id & 0x00ff) as u8);
+            out.push((prim_id >> 8) as u8);
+        }
+        out
+    }
+
+    fn normal_mask_bytes(normals: &[Vec3]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(normals.len() * 4);
+        for &normal in normals {
+            let n = normalized_or(normal, Vec3::Z);
+            for channel in [n.x, n.y, n.z] {
+                out.push(((channel * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0).round() as u8);
+            }
+            out.push(255);
+        }
+        out
+    }
+
+    fn small_surface_map(depth: &[f32]) -> RoomShadowSurfaceMap {
+        let mut surface = RoomShadowSurfaceMap::new(3, 1);
+        for (i, d) in depth.iter().copied().enumerate() {
+            surface.depth[i] = d;
+            surface.normal[i] = Vec3::Z;
+            surface.normal_valid[i] = true;
+            surface.prim_id[i] = i as u32 + 1;
+            surface.receiver[i] = 1.0;
+            surface.occluder[i] = 1.0;
+        }
+        surface
+    }
+
+    #[test]
+    fn gpu_mask_surface_map_decodes_normals_for_ao_coherence() {
+        let depth = [0.40, 0.40, 0.44];
+        let bytes = depth_bytes(&depth);
+        let mask = class_mask_bytes(&[(1.0, 1.0, 1), (1.0, 1.0, 1), (1.0, 1.0, 1)]);
+        let normals = normal_mask_bytes(&[Vec3::Z, Vec3::Z, Vec3::X]);
+        let surface = build_room_shadow_surface_map_from_mask(3, 1, &bytes, &mask, &normals);
+
+        assert!(surface.normal_valid[1]);
+        assert!(surface.normal_valid[2]);
+        assert!(surface.normal[1].dot(surface.normal[2]) < 0.05);
+
+        let ao = bake_contact_ao_with_surface_map(3, 1, &bytes, &surface, test_ao_tuning());
+        assert_eq!(ao[1], 255);
+    }
+
+    #[test]
+    fn gpu_mask_ao_requires_matching_normal_buffer() {
+        let depth = depth_bytes(&[0.40, 0.40, 0.44]);
+        let mask = class_mask_bytes(&[(1.0, 1.0, 1), (1.0, 1.0, 2), (1.0, 1.0, 3)]);
+
+        let err = bake_contact_ao_for_room_from_mask(RoomGiRoom::Shop, 3, 1, &depth, &mask, &[])
+            .expect_err("missing normal buffer must fail");
+        assert!(err.to_string().contains("normal byte len mismatch"));
+    }
+
+    #[test]
+    fn classified_ao_darkens_only_valid_receiver_texels() {
+        let depth = [0.40, 0.40, 0.44];
+        let bytes = depth_bytes(&depth);
+        let mut surface = small_surface_map(&depth);
+        surface.receiver[1] = 0.0;
+
+        let ao = bake_contact_ao_with_surface_map(3, 1, &bytes, &surface, test_ao_tuning());
+        assert_eq!(ao[1], 255);
+
+        surface.receiver[1] = 1.0;
+        let ao = bake_contact_ao_with_surface_map(3, 1, &bytes, &surface, test_ao_tuning());
+        assert!(ao[1] < 255, "valid receiver should darken from neighbor");
+    }
+
+    #[test]
+    fn classified_ao_requires_neighbor_occluders() {
+        let depth = [0.40, 0.40, 0.44];
+        let bytes = depth_bytes(&depth);
+        let mut surface = small_surface_map(&depth);
+        surface.occluder[2] = 0.0;
+
+        let ao = bake_contact_ao_with_surface_map(3, 1, &bytes, &surface, test_ao_tuning());
+        assert_eq!(ao[1], 255);
+    }
+
+    #[test]
+    fn classified_ao_suppresses_same_primitive_hard_edges() {
+        let depth = [0.40, 0.40, 0.44];
+        let bytes = depth_bytes(&depth);
+        let mut surface = small_surface_map(&depth);
+        surface.prim_id[2] = surface.prim_id[1];
+        surface.normal[2] = Vec3::X;
+
+        let ao = bake_contact_ao_with_surface_map(3, 1, &bytes, &surface, test_ao_tuning());
+        assert_eq!(ao[1], 255);
+    }
+
+    #[test]
+    fn classified_ao_rejects_surface_depth_mismatch() {
+        let depth = [0.40, 0.40, 0.44];
+        let bytes = depth_bytes(&depth);
+        let mut surface = small_surface_map(&depth);
+        surface.depth[2] = 0.30;
+
+        let ao = bake_contact_ao_with_surface_map(3, 1, &bytes, &surface, test_ao_tuning());
+        assert_eq!(ao[1], 255);
     }
 }

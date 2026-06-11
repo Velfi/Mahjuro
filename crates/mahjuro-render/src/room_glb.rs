@@ -148,13 +148,11 @@ pub fn decode_shop_glb_into_cache() {
                 );
                 if cpu.embedded_perspective_camera.is_some()
                     || !cpu.embedded_point_lights.is_empty()
-                    || !cpu.embedded_spot_lights.is_empty()
                 {
                     log::trace!(
-                        "shop.glb scene extras: perspective_camera={} point_lights={} spot_lights={}",
+                        "shop.glb scene extras: perspective_camera={} point_lights={}",
                         cpu.embedded_perspective_camera.is_some(),
                         cpu.embedded_point_lights.len(),
-                        cpu.embedded_spot_lights.len(),
                     );
                 }
                 Some(cpu)
@@ -470,7 +468,6 @@ pub type RoomEnvPrimitiveCpu = renv::RoomEnvPrimitiveCpu;
 pub type RoomCollisionMesh = renv::RoomCollisionMesh;
 pub type RoomEnvironmentBounds = renv::RoomEnvironmentBounds;
 pub type RoomGlbEmbeddedPointLight = renv::RoomGltfEmbeddedPointLight;
-pub type RoomGlbEmbeddedSpotLight = renv::RoomGltfEmbeddedSpotLight;
 pub type RoomGlbEmbeddedCamera = renv::RoomGltfEmbeddedCamera;
 
 pub use crate::room_env_gltf::glb_punctual_range_world_upload;
@@ -578,7 +575,6 @@ pub struct RoomGlbCpu {
     /// All embedded perspective cameras keyed by lowercase glTF node name (e.g. hallway `default` / `boss`).
     pub embedded_cameras_by_name: FxHashMap<String, RoomGlbEmbeddedCamera>,
     pub embedded_point_lights: Vec<RoomGlbEmbeddedPointLight>,
-    pub embedded_spot_lights: Vec<RoomGlbEmbeddedSpotLight>,
     /// Invisible `rain_hit_*` shells for CPU rain splashes (main menu, etc.).
     pub rain_surface_meshes: Vec<RoomCollisionMesh>,
     /// [`rain_surface_meshes`] merged for per-drop raycasts (built at glTF load).
@@ -799,7 +795,6 @@ pub fn load_room_glb_from_bytes(
     let mut collision_meshes = Vec::new();
     let mut embedded_cameras = EmbeddedCameraHarvest::default();
     let mut embedded_point_lights = Vec::new();
-    let mut embedded_spot_lights = Vec::new();
     let mut rain_surface_meshes = Vec::new();
 
     let mut node_bind_poses = FxHashMap::default();
@@ -815,7 +810,6 @@ pub fn load_room_glb_from_bytes(
         rain_surface_meshes: &mut rain_surface_meshes,
         embedded_cameras: &mut embedded_cameras,
         embedded_point_lights: &mut embedded_point_lights,
-        embedded_spot_lights: &mut embedded_spot_lights,
         buffers: &buffers,
         capped_images: &capped_images,
         texture_bake_cache: &mut texture_bake_cache,
@@ -834,14 +828,6 @@ pub fn load_room_glb_from_bytes(
 
     let rain_surface_merged =
         renv::RoomCollisionMesh::merge_rain_surfaces(&rain_surface_meshes).map(std::sync::Arc::new);
-    if !embedded_spot_lights.is_empty() {
-        log::error!(
-            "{}: {} embedded spot light(s) in glTF — remove spot nodes; use programmatic \
-             `SceneLighting::spot_lights` instead (punctual-only shadow path)",
-            hooks.log_asset_label(),
-            embedded_spot_lights.len(),
-        );
-    }
     let decoded_cpu_payload_bytes =
         crate::room_gpu_profile::count_cpu_payload(&environment_primitives).total_bytes();
     Ok(RoomGlbCpu {
@@ -856,7 +842,6 @@ pub fn load_room_glb_from_bytes(
         embedded_perspective_camera,
         embedded_cameras_by_name,
         embedded_point_lights,
-        embedded_spot_lights,
         rain_surface_meshes,
         rain_surface_merged,
         node_bind_poses,
@@ -933,23 +918,6 @@ pub fn shop_embedded_point_lights_runtime(
     .into_iter()
     .map(|t| t.light)
     .collect()
-}
-
-/// glTF spot lights for the shop room.
-pub fn shop_embedded_spot_lights_runtime(
-    w: f32,
-    h: f32,
-    env_h: f32,
-    tune: &RoomEnvLightingTune,
-) -> Vec<crate::wgpu_renderer::SpotLight> {
-    with_shop_glb_cpu(|opt| {
-        opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu, w, h, env_h, tune, "shop.glb",
-            )
-        })
-        .unwrap_or_default()
-    })
 }
 
 /// Shop camera from embedded GLB perspective camera, scaled like marker geometry.
@@ -1200,7 +1168,6 @@ mod tests {
             embedded_perspective_camera: None,
             embedded_cameras_by_name: Default::default(),
             embedded_point_lights: Vec::new(),
-            embedded_spot_lights: Vec::new(),
             rain_surface_meshes: Vec::new(),
             rain_surface_merged: None,
             node_bind_poses: Default::default(),

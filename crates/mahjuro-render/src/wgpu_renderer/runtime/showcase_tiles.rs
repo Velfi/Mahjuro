@@ -1,4 +1,6 @@
-use crate::table_transform::{rot_euler_xyz_rad, translate_rot_scale};
+use crate::table_transform::{
+    normal_matrix_cols3_from_model, rot_euler_xyz_rad, translate_rot_scale,
+};
 
 use super::*;
 
@@ -222,6 +224,7 @@ impl WgpuRenderer {
                 pending.push(PendingShowcaseTile {
                     instance: Tile3dInstance {
                         model: model.to_cols_array(),
+                        normal_model: normal_matrix_cols3_from_model(model),
                         tile_visual_params: sc_bcf,
                         tile_decal_atlas_uv: self.decal_atlas_uv_for(&p.tile),
                         tile_material_seed: p.tile.id as f32,
@@ -244,6 +247,7 @@ impl WgpuRenderer {
                     self.tile_outline_instances_staging
                         .push(TileOutlineInstance {
                             model: outline_model.to_cols_array(),
+                            normal_model: normal_matrix_cols3_from_model(outline_model),
                             base_color_factor: outline_bcf,
                         });
                 }

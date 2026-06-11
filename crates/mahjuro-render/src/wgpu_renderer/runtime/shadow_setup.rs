@@ -7,6 +7,7 @@ use crate::projected_light_shadow::{
     ProjectedShadowLightSetup, PunctualShadowBuild, build_punctual_shadow_setups,
     punctual_shadow_setups_changed,
 };
+use crate::room_gi_bake::RoomGiRoom;
 use crate::scene_keys;
 use mahjuro_gfx_types::ShadowQuality;
 
@@ -40,6 +41,21 @@ pub fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
 }
 
 impl ActiveRoomEnv {
+    /// Runtime `.msh` contact-AO bake for this room, if one should be sampled.
+    ///
+    /// Archive intentionally stays punctual-only for now; see
+    /// `docs/agents/room-shadows-and-baking.md`.
+    pub fn baked_shadow_room(self) -> Option<RoomGiRoom> {
+        match self {
+            Self::Shop => Some(RoomGiRoom::Shop),
+            Self::Hallway => Some(RoomGiRoom::Hallway),
+            Self::Stairway => Some(RoomGiRoom::Stairway),
+            Self::MainMenu => Some(RoomGiRoom::MainMenu),
+            Self::Gameplay => Some(RoomGiRoom::Gameplay),
+            Self::Archive | Self::ShadowTest => None,
+        }
+    }
+
     pub fn environment_bounds_doc(self) -> Option<crate::room_env_gltf::RoomEnvironmentBounds> {
         match self {
             Self::Gameplay => crate::gameplay_glb::with_gameplay_glb_cpu(|o| {
@@ -90,6 +106,29 @@ impl ActiveRoomEnv {
             _ => None,
         }
     }
+}
+
+#[inline]
+pub fn active_baked_shadow_room(frame: &UiFrame, scene_key: Option<&str>) -> Option<RoomGiRoom> {
+    active_room_env(frame)
+        .or_else(|| scene_key.and_then(ActiveRoomEnv::from_scene_key))
+        .and_then(ActiveRoomEnv::baked_shadow_room)
+}
+
+#[inline]
+pub fn skip_room_env_live_shadow_pass(
+    active_room_env: ActiveRoomEnv,
+    active_baked_room: Option<RoomGiRoom>,
+) -> bool {
+    // Archive is punctual-lit only for now. It does not sample `archive.msh`,
+    // but drawing the whole static archive shell into the live punctual shadow
+    // map produces large room-shaped slabs on the collection UI.
+    if matches!(active_room_env, ActiveRoomEnv::Archive) {
+        return true;
+    }
+    active_room_env
+        .baked_shadow_room()
+        .is_some_and(|room| Some(room) == active_baked_room)
 }
 
 pub(super) struct ProjectedShadowFrame {
@@ -243,23 +282,6 @@ impl WgpuRenderer {
         self.queue
             .write_buffer(&self.shadow_globals_buffer, 0, bytemuck::bytes_of(&globals));
     }
-
-    /// Realtime shadows are punctual-only; glTF spot lights are a content error.
-    pub(super) fn warn_if_spot_lights_present(&self, frame: &UiFrame) {
-        if frame.scene_lighting.spot_lights.is_empty()
-            || !frame.scene_lighting.spot_lights_from_gltf
-        {
-            return;
-        }
-        static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            log::error!(
-                "scene submitted {} glTF spot light(s); remove embedded spots from the room \
-                 `.glb` or use programmatic spots only (realtime spot shadows are unsupported)",
-                frame.scene_lighting.spot_lights.len(),
-            );
-        }
-    }
 }
 
 pub(super) struct Object3dShadowCtx<'a> {
@@ -281,6 +303,7 @@ impl WgpuRenderer {
             bytemuck::bytes_of(&ShadowCasterUniform {
                 light_view_proj: light_view_proj_arr,
                 model: glam::Mat4::IDENTITY.to_cols_array(),
+                normal_model: glam::Mat4::IDENTITY.to_cols_array(),
             }),
         );
         for &(kind, slot_i) in object3d_draw_list {
@@ -348,7 +371,7 @@ impl WgpuRenderer {
         }
     }
 
-    pub(super) fn write_room_env_shadow_caster(
+    pub(crate) fn write_room_env_shadow_caster(
         &self,
         gpu: &crate::wgpu_renderer::ShopEnvironmentGpu,
         light_view_proj: [f32; 16],
@@ -368,6 +391,8 @@ impl WgpuRenderer {
                 bytemuck::bytes_of(&ShadowCasterUniform {
                     light_view_proj,
                     model: prim_model.to_cols_array(),
+                    normal_model: crate::table_transform::normal_matrix_from_model(prim_model)
+                        .to_cols_array(),
                 }),
             );
         }
@@ -375,8 +400,36 @@ impl WgpuRenderer {
     }
 }
 
-/// Static room shells always participate in the live depth pre-pass when shadows are on.
+/// Static room shells skip the live depth pre-pass when an offline `.msh` bake is active,
+/// or for room-specific exceptions that should not cast live projected shadows.
 #[inline]
-pub fn room_env_shadow_upload_active(shadow_quality_active: bool) -> bool {
-    shadow_quality_active
+pub fn room_env_shadow_upload_active(
+    shadow_quality_active: bool,
+    skip_live_room_env_shadow: bool,
+) -> bool {
+    shadow_quality_active && !skip_live_room_env_shadow
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_skips_static_live_room_shadow_without_sampling_baked_ao() {
+        assert_eq!(ActiveRoomEnv::Archive.baked_shadow_room(), None);
+        assert!(skip_room_env_live_shadow_pass(ActiveRoomEnv::Archive, None));
+    }
+
+    #[test]
+    fn baked_rooms_skip_static_live_shadow_only_when_their_bake_is_active() {
+        assert!(!skip_room_env_live_shadow_pass(ActiveRoomEnv::Shop, None));
+        assert!(skip_room_env_live_shadow_pass(
+            ActiveRoomEnv::Shop,
+            Some(RoomGiRoom::Shop)
+        ));
+        assert!(!skip_room_env_live_shadow_pass(
+            ActiveRoomEnv::Shop,
+            Some(RoomGiRoom::Hallway)
+        ));
+    }
 }

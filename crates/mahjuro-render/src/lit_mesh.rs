@@ -11,6 +11,7 @@ use std::num::NonZeroU64;
 
 use wgpu::util::DeviceExt;
 
+use crate::table_transform::normal_matrix_from_model;
 use crate::theme::color;
 use crate::tile_glb::Vertex3dTex;
 use crate::wgpu_renderer::MAX_POINT_LIGHTS;
@@ -209,6 +210,7 @@ pub const LIT_MESH_INSTANCE_PLAY_MIRROR_GLOW: usize = 0;
 pub struct MeshUniform {
     pub view_proj: [f32; 16],
     pub model: [f32; 16],
+    pub normal_model: [f32; 16],
     pub base_color: [f32; 4],
     /// (kind, specular_strength, specular_power, decal_or_talisman_slot)
     pub material_params: [f32; 4],
@@ -262,6 +264,7 @@ impl LitMeshGpu {
 pub struct ShadowCasterUniform {
     pub light_view_proj: [f32; 16],
     pub model: [f32; 16],
+    pub normal_model: [f32; 16],
 }
 
 /// GPU + bind-group context needed by `LitMeshInstance::set_decal` to
@@ -325,6 +328,7 @@ impl LitMeshInstance {
         let initial_main = MeshUniform {
             view_proj: identity,
             model: identity,
+            normal_model: identity,
             base_color: [1.0; 4],
             material_params: [0.0; 4],
             instance_params: [0.0; 4],
@@ -359,6 +363,7 @@ impl LitMeshInstance {
         let initial_shadow = ShadowCasterUniform {
             light_view_proj: identity,
             model: identity,
+            normal_model: identity,
         };
         let shadow_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("lit-mesh-shadow-uniform"),
@@ -518,6 +523,7 @@ impl LitMeshInstance {
         let u = ShadowCasterUniform {
             light_view_proj,
             model: model.to_cols_array(),
+            normal_model: normal_matrix_from_model(model).to_cols_array(),
         };
         let mut last = self.last_shadow_uniform.borrow_mut();
         if *last == u {
@@ -586,6 +592,7 @@ impl LitMeshInstance {
         let u = MeshUniform {
             view_proj,
             model: model.to_cols_array(),
+            normal_model: normal_matrix_from_model(model).to_cols_array(),
             base_color: material.base_color,
             material_params: [
                 material.kind as u32 as f32,
@@ -617,6 +624,7 @@ impl LitMeshInstance {
         let u = MeshUniform {
             view_proj,
             model: model.to_cols_array(),
+            normal_model: normal_matrix_from_model(model).to_cols_array(),
             base_color,
             material_params: [
                 material.kind as u32 as f32,
@@ -694,6 +702,7 @@ pub fn create_room_env_shadow_gpu_batch(
     let initial = ShadowCasterUniform {
         light_view_proj: identity,
         model: identity,
+        normal_model: identity,
     };
     let mut buffers = Vec::with_capacity(count);
     let mut bind_groups = Vec::with_capacity(count);
@@ -715,6 +724,63 @@ pub fn create_room_env_shadow_gpu_batch(
         bind_groups.push(shadow_bind_group);
     }
     (buffers, bind_groups)
+}
+
+/// Per-primitive bake mask buffers + bind groups for room GLB shadow captures.
+pub fn create_room_shadow_mask_gpu_batch(
+    device: &wgpu::Device,
+    room_shadow_mask_layout: &wgpu::BindGroupLayout,
+    classes: &[crate::room_shadow_bake::PrimitiveContactAoClass],
+    label: &str,
+) -> (Vec<wgpu::Buffer>, Vec<wgpu::BindGroup>) {
+    use crate::wgpu_renderer::RoomShadowMaskUniform;
+
+    let mut buffers = Vec::with_capacity(classes.len());
+    let mut bind_groups = Vec::with_capacity(classes.len());
+    for (i, class) in classes.iter().copied().enumerate() {
+        let prim_id = (i + 1).min(u16::MAX as usize) as u16;
+        let initial = RoomShadowMaskUniform {
+            class: [
+                class.receiver.clamp(0.0, 1.0),
+                class.occluder.clamp(0.0, 1.0),
+                (prim_id & 0x00ff) as f32 / 255.0,
+                (prim_id >> 8) as f32 / 255.0,
+            ],
+        };
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{label}-{i}")),
+            contents: bytemuck::bytes_of(&initial),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{label}-bg-{i}")),
+            layout: room_shadow_mask_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+        buffers.push(buffer);
+        bind_groups.push(bind_group);
+    }
+    (buffers, bind_groups)
+}
+
+pub fn create_room_shadow_mask_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    let sz = std::mem::size_of::<crate::wgpu_renderer::RoomShadowMaskUniform>() as u64;
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("room-shadow-mask-layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: NonZeroU64::new(sz),
+            },
+            count: None,
+        }],
+    })
 }
 
 pub fn create_shadow_caster_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {

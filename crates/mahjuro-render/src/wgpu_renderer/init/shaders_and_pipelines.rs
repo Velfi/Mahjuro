@@ -125,10 +125,12 @@ pub(super) struct ShadersAndPipelinesInit {
     pub shadow_baked_depth_dummy_texture: wgpu::Texture,
     pub shadow_baked_depth_dummy_view: wgpu::TextureView,
     pub shadow_caster_layout: wgpu::BindGroupLayout,
+    pub room_shadow_mask_layout: wgpu::BindGroupLayout,
     pub shadow_compare_sampler: wgpu::Sampler,
     pub shadow_globals_buffer: wgpu::Buffer,
     pub shadow_pipeline: wgpu::RenderPipeline,
     pub shadow_pipeline_room_env: wgpu::RenderPipeline,
+    pub room_shadow_mask_pipeline: wgpu::RenderPipeline,
     pub shadow_sample_bind_group: wgpu::BindGroup,
     pub shadow_sample_layout: wgpu::BindGroupLayout,
     pub shadow_warp_disabled_bind_group: wgpu::BindGroup,
@@ -231,6 +233,7 @@ pub(super) fn init_shaders_and_pipelines(
         tile_glow: tile_glow_shader,
         lit_mesh: lit_mesh_shader,
         shadow: shadow_shader,
+        room_shadow_mask: room_shadow_mask_shader,
         image: image_shader,
         bloom_extract: bloom_extract_shader,
         bloom_blur: bloom_blur_shader,
@@ -592,6 +595,7 @@ pub(super) fn init_shaders_and_pipelines(
         ..Default::default()
     });
     let shadow_caster_layout = create_shadow_caster_layout(&device);
+    let room_shadow_mask_layout = create_room_shadow_mask_layout(&device);
     let shadow_warp_layout = create_shadow_warp_layout(&device);
     let shadow_warp_dummy_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("shadow-warp-disabled-uniform"),
@@ -772,6 +776,7 @@ pub(super) fn init_shaders_and_pipelines(
             contents: bytemuck::bytes_of(&crate::lit_mesh::ShadowCasterUniform {
                 light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
                 model: glam::Mat4::IDENTITY.to_cols_array(),
+                normal_model: glam::Mat4::IDENTITY.to_cols_array(),
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -1730,6 +1735,21 @@ pub(super) fn init_shaders_and_pipelines(
             wgpu::VertexAttribute {
                 offset: 96,
                 shader_location: 12,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 112,
+                shader_location: 13,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 128,
+                shader_location: 14,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 144,
+                shader_location: 15,
                 format: wgpu::VertexFormat::Float32x2,
             },
         ],
@@ -1946,6 +1966,21 @@ pub(super) fn init_shaders_and_pipelines(
             wgpu::VertexAttribute {
                 offset: 64,
                 shader_location: 10,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 80,
+                shader_location: 11,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 96,
+                shader_location: 12,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 112,
+                shader_location: 13,
                 format: wgpu::VertexFormat::Float32x4,
             },
         ],
@@ -2398,6 +2433,68 @@ pub(super) fn init_shaders_and_pipelines(
         multiview_mask: None,
         cache: None,
     });
+    let room_shadow_mask_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("room-shadow-mask-pl"),
+        bind_group_layouts: &[
+            Some(&shadow_caster_layout),
+            Some(&shadow_warp_layout),
+            Some(&room_shadow_mask_layout),
+        ],
+        immediate_size: 0,
+    });
+    let room_shadow_mask_pipeline =
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("room-shadow-mask-pipeline"),
+            layout: Some(&room_shadow_mask_pl),
+            vertex: wgpu::VertexState {
+                module: &room_shadow_mask_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &room_shadow_mask_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(shadow_depth_state.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
     let tile_shadow_instance_vertex_layout = wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<super::super::TileShadowInstance>()
             as wgpu::BufferAddress,
@@ -3084,10 +3181,12 @@ pub(super) fn init_shaders_and_pipelines(
         shadow_baked_depth_dummy_texture,
         shadow_baked_depth_dummy_view,
         shadow_caster_layout,
+        room_shadow_mask_layout,
         shadow_compare_sampler,
         shadow_globals_buffer,
         shadow_pipeline,
         shadow_pipeline_room_env,
+        room_shadow_mask_pipeline,
         shadow_sample_bind_group,
         shadow_sample_layout,
         shadow_warp_disabled_bind_group,

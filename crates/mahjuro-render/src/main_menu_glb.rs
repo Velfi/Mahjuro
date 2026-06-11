@@ -19,7 +19,7 @@ use crate::room_env_gltf::{self, RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::room_glb::{
     self, MarkerScreenRectParams, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes,
 };
-use crate::wgpu_renderer::{PointLight, SpotLight};
+use crate::wgpu_renderer::PointLight;
 use crate::world_space::surface_anchor_from_world_xyz;
 
 /// Doc→world height scale for [`main_menu.glb`](../../../assets/3d/main_menu.glb) vs [`crate::room_glb::SHOP_ENV_HEIGHT_SCALE`].
@@ -671,27 +671,6 @@ pub fn main_menu_embedded_point_lights_runtime(
         .into_iter()
         .map(|t| t.light)
         .collect()
-}
-
-pub fn main_menu_embedded_spot_lights_runtime(
-    w: f32,
-    h: f32,
-    env_h: f32,
-    tune: &RoomEnvLightingTune,
-) -> Vec<SpotLight> {
-    with_main_menu_glb_cpu(|opt| {
-        opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu,
-                w,
-                h,
-                env_h,
-                tune,
-                "main_menu.glb",
-            )
-        })
-        .unwrap_or_default()
-    })
 }
 
 #[cfg(test)]

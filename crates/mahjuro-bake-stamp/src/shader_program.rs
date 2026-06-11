@@ -16,6 +16,13 @@
 /// prepended `HallwayDistortion` / `apply_hallway_distortion` symbols.
 pub const SHADOW: &[&str] = &["shaders/hallway_vertex_warp.wgsl", "shaders/shadow.wgsl"];
 
+/// Files composed into `embedded_wgsl::ROOM_SHADOW_MASK`: the same hallway warp
+/// prelude followed by the bake-only receiver/occluder mask shader.
+pub const ROOM_SHADOW_MASK: &[&str] = &[
+    "shaders/hallway_vertex_warp.wgsl",
+    "shaders/room_shadow_mask.wgsl",
+];
+
 /// Files the `scene_pbr_with_hallway_warp!` macro prepends *before* its room-body
 /// argument, in macro order.
 pub const SCENE_PBR_WITH_HALLWAY_WARP_PREFIX: &[&str] = &[

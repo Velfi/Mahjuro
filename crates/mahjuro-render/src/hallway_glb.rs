@@ -17,7 +17,7 @@ use glam::Vec3;
 use crate::draw_cmd::CameraParams;
 use crate::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
-use crate::wgpu_renderer::{PointLight, SpotLight};
+use crate::wgpu_renderer::PointLight;
 use mahjuro_core::core::rules::ChamberKind;
 
 /// glTF node names for pick-blind actions (must match Blender objects).
@@ -784,28 +784,6 @@ pub fn hallway_embedded_point_lights_runtime(
         .into_iter()
         .map(|t| t.light)
         .collect()
-}
-
-/// glTF spot lights for [`UiFrame::spot_lights`].
-pub fn hallway_embedded_spot_lights_runtime(
-    w: f32,
-    h: f32,
-    env_h: f32,
-    tune: &RoomEnvLightingTune,
-) -> Vec<SpotLight> {
-    with_hallway_glb_cpu(|opt| {
-        opt.map(|cpu| {
-            crate::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu,
-                w,
-                h,
-                env_h,
-                tune,
-                "hallway.glb",
-            )
-        })
-        .unwrap_or_default()
-    })
 }
 
 #[cfg(test)]

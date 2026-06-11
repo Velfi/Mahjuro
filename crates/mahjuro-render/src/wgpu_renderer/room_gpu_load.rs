@@ -199,6 +199,22 @@ fn room_env_pbr_uniform(
     pbr_uniform
 }
 
+fn room_shadow_mask_classes(
+    room: crate::room_gi_bake::RoomGiRoom,
+    env_prims: &[RoomEnvPrimitiveCpu],
+) -> Vec<crate::room_shadow_bake::PrimitiveContactAoClass> {
+    env_prims
+        .iter()
+        .map(|prim| {
+            crate::room_shadow_bake::primitive_contact_ao_class(
+                room,
+                prim.gltf_node_name.as_deref(),
+                prim.material_name.as_deref(),
+            )
+        })
+        .collect()
+}
+
 fn sampler_class_hash(sampler: crate::gltf_helpers::GltfSamplerCpu) -> u64 {
     use std::hash::{Hash, Hasher};
     fn wrap_tag(wrap: gltf::texture::WrappingMode) -> u8 {
@@ -281,6 +297,7 @@ pub(super) struct GameplayRoomGpuUpload {
     prim_count: usize,
     next_prim: usize,
     prims: Vec<TilePrimitiveGpu>,
+    shadow_mask_classes: Vec<crate::room_shadow_bake::PrimitiveContactAoClass>,
     room_tex_cache: RoomEnvTextureCache,
     _white_albedo_tex: wgpu::Texture,
     white_albedo_view: wgpu::TextureView,
@@ -301,6 +318,13 @@ enum IncrementalRoomEnvKind {
 }
 
 impl IncrementalRoomEnvKind {
+    fn room(self) -> crate::room_gi_bake::RoomGiRoom {
+        match self {
+            Self::Shop => crate::room_gi_bake::RoomGiRoom::Shop,
+            Self::Hallway => crate::room_gi_bake::RoomGiRoom::Hallway,
+        }
+    }
+
     fn scene_key(self) -> &'static str {
         match self {
             Self::Shop => scene_keys::SHOP,
@@ -336,6 +360,13 @@ impl IncrementalRoomEnvKind {
         }
     }
 
+    fn shadow_mask_label(self) -> &'static str {
+        match self {
+            Self::Shop => "shop-env-shadow-mask",
+            Self::Hallway => "hallway-env-shadow-mask",
+        }
+    }
+
     fn uniform_label(self) -> &'static str {
         match self {
             Self::Shop => "shop-env-uniform",
@@ -349,6 +380,7 @@ pub(super) struct IncrementalRoomEnvGpuUpload {
     prim_count: usize,
     next_prim: usize,
     prims: Vec<TilePrimitiveGpu>,
+    shadow_mask_classes: Vec<crate::room_shadow_bake::PrimitiveContactAoClass>,
     room_tex_cache: RoomEnvTextureCache,
     _white_albedo_tex: wgpu::Texture,
     white_albedo_view: wgpu::TextureView,
@@ -391,6 +423,7 @@ pub(super) struct RoomGpuUploadCtx<'a> {
     pub queue: &'a wgpu::Queue,
     pub tile_material_layout: &'a wgpu::BindGroupLayout,
     pub shadow_caster_layout: &'a wgpu::BindGroupLayout,
+    pub room_shadow_mask_layout: &'a wgpu::BindGroupLayout,
     pub shadow_warp_layout: &'a wgpu::BindGroupLayout,
     pub tile_default_normal_view: &'a wgpu::TextureView,
     pub tile_glb_default_mr_view: &'a wgpu::TextureView,
@@ -588,6 +621,16 @@ fn load_shop_room_gpu(
                 prims.len(),
                 "shop-env-shadow",
             );
+            let (shadow_mask_uniform_buffers, shadow_mask_bind_groups) =
+                create_room_shadow_mask_gpu_batch(
+                    ctx.device,
+                    ctx.room_shadow_mask_layout,
+                    &room_shadow_mask_classes(
+                        crate::room_gi_bake::RoomGiRoom::Shop,
+                        &cpu.environment_primitives,
+                    ),
+                    "shop-env-shadow-mask",
+                );
             let shadow_warp_bind_group = create_shadow_warp_bind_group(
                 ctx.device,
                 ctx.shadow_warp_layout,
@@ -599,6 +642,8 @@ fn load_shop_room_gpu(
                 distortion_buffer,
                 shadow_uniform_buffers,
                 shadow_bind_groups,
+                _shadow_mask_uniform_buffers: shadow_mask_uniform_buffers,
+                shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
                 archive_sign_decal_texture: None,
@@ -805,6 +850,16 @@ fn load_hallway_room_gpu(
                 prims.len(),
                 "hallway-env-shadow",
             );
+            let (shadow_mask_uniform_buffers, shadow_mask_bind_groups) =
+                create_room_shadow_mask_gpu_batch(
+                    ctx.device,
+                    ctx.room_shadow_mask_layout,
+                    &room_shadow_mask_classes(
+                        crate::room_gi_bake::RoomGiRoom::Hallway,
+                        &cpu.environment_primitives,
+                    ),
+                    "hallway-env-shadow-mask",
+                );
             let shadow_warp_bind_group = create_shadow_warp_bind_group(
                 ctx.device,
                 ctx.shadow_warp_layout,
@@ -816,6 +871,8 @@ fn load_hallway_room_gpu(
                 distortion_buffer,
                 shadow_uniform_buffers,
                 shadow_bind_groups,
+                _shadow_mask_uniform_buffers: shadow_mask_uniform_buffers,
+                shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
                 archive_sign_decal_texture: None,
@@ -1008,6 +1065,16 @@ fn load_main_menu_room_gpu(
                 prims.len(),
                 "main_menu-env-shadow",
             );
+            let (shadow_mask_uniform_buffers, shadow_mask_bind_groups) =
+                create_room_shadow_mask_gpu_batch(
+                    ctx.device,
+                    ctx.room_shadow_mask_layout,
+                    &room_shadow_mask_classes(
+                        crate::room_gi_bake::RoomGiRoom::MainMenu,
+                        &cpu.environment_primitives,
+                    ),
+                    "main_menu-env-shadow-mask",
+                );
             let shadow_warp_bind_group = create_shadow_warp_bind_group(
                 ctx.device,
                 ctx.shadow_warp_layout,
@@ -1019,6 +1086,8 @@ fn load_main_menu_room_gpu(
                 distortion_buffer,
                 shadow_uniform_buffers,
                 shadow_bind_groups,
+                _shadow_mask_uniform_buffers: shadow_mask_uniform_buffers,
+                shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
                 archive_sign_decal_texture: None,
@@ -1211,6 +1280,16 @@ fn load_staircase_room_gpu(
                 prims.len(),
                 "staircase-env-shadow",
             );
+            let (shadow_mask_uniform_buffers, shadow_mask_bind_groups) =
+                create_room_shadow_mask_gpu_batch(
+                    ctx.device,
+                    ctx.room_shadow_mask_layout,
+                    &room_shadow_mask_classes(
+                        crate::room_gi_bake::RoomGiRoom::Stairway,
+                        &cpu.environment_primitives,
+                    ),
+                    "staircase-env-shadow-mask",
+                );
             let shadow_warp_bind_group = create_shadow_warp_bind_group(
                 ctx.device,
                 ctx.shadow_warp_layout,
@@ -1222,6 +1301,8 @@ fn load_staircase_room_gpu(
                 distortion_buffer,
                 shadow_uniform_buffers,
                 shadow_bind_groups,
+                _shadow_mask_uniform_buffers: shadow_mask_uniform_buffers,
+                shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
                 archive_sign_decal_texture: None,
@@ -1416,6 +1497,16 @@ fn load_shadow_test_room_gpu(
                 prims.len(),
                 "shadow-test-room-env-shadow",
             );
+            let (shadow_mask_uniform_buffers, shadow_mask_bind_groups) =
+                create_room_shadow_mask_gpu_batch(
+                    ctx.device,
+                    ctx.room_shadow_mask_layout,
+                    &room_shadow_mask_classes(
+                        crate::room_gi_bake::RoomGiRoom::Hallway,
+                        &cpu.environment_primitives,
+                    ),
+                    "shadow-test-room-env-shadow-mask",
+                );
             let shadow_warp_bind_group = create_shadow_warp_bind_group(
                 ctx.device,
                 ctx.shadow_warp_layout,
@@ -1427,6 +1518,8 @@ fn load_shadow_test_room_gpu(
                 distortion_buffer,
                 shadow_uniform_buffers,
                 shadow_bind_groups,
+                _shadow_mask_uniform_buffers: shadow_mask_uniform_buffers,
+                shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
                 archive_sign_decal_texture: None,
@@ -1741,6 +1834,16 @@ fn load_archive_room_gpu(
                 prims.len(),
                 "archive-env-shadow",
             );
+            let (shadow_mask_uniform_buffers, shadow_mask_bind_groups) =
+                create_room_shadow_mask_gpu_batch(
+                    ctx.device,
+                    ctx.room_shadow_mask_layout,
+                    &room_shadow_mask_classes(
+                        crate::room_gi_bake::RoomGiRoom::Archive,
+                        &cpu.environment_primitives,
+                    ),
+                    "archive-env-shadow-mask",
+                );
             let shadow_warp_bind_group = create_shadow_warp_bind_group(
                 ctx.device,
                 ctx.shadow_warp_layout,
@@ -1752,6 +1855,8 @@ fn load_archive_room_gpu(
                 distortion_buffer,
                 shadow_uniform_buffers,
                 shadow_bind_groups,
+                _shadow_mask_uniform_buffers: shadow_mask_uniform_buffers,
+                shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
                 archive_sign_decal_texture: Some(archive_sign_decal_tex),
@@ -1779,16 +1884,28 @@ fn begin_incremental_room_env_gpu_upload(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> Option<IncrementalRoomEnvGpuUpload> {
-    let prim_count = match kind {
+    let (prim_count, shadow_mask_classes) = match kind {
         IncrementalRoomEnvKind::Shop => crate::room_glb::with_shop_glb_cpu(|cpu_opt| {
-            cpu_opt
-                .map(|cpu| cpu.environment_primitives.len())
-                .filter(|&n| n > 0)
+            cpu_opt.and_then(|cpu| {
+                let n = cpu.environment_primitives.len();
+                (n > 0).then(|| {
+                    (
+                        n,
+                        room_shadow_mask_classes(kind.room(), &cpu.environment_primitives),
+                    )
+                })
+            })
         })?,
         IncrementalRoomEnvKind::Hallway => crate::hallway_glb::with_hallway_glb_cpu(|cpu_opt| {
-            cpu_opt
-                .map(|cpu| cpu.environment_primitives.len())
-                .filter(|&n| n > 0)
+            cpu_opt.and_then(|cpu| {
+                let n = cpu.environment_primitives.len();
+                (n > 0).then(|| {
+                    (
+                        n,
+                        room_shadow_mask_classes(kind.room(), &cpu.environment_primitives),
+                    )
+                })
+            })
         })?,
     };
     let (white_tex, white_view) = white_albedo(device, queue);
@@ -1798,6 +1915,7 @@ fn begin_incremental_room_env_gpu_upload(
         prim_count,
         next_prim: 0,
         prims: Vec::with_capacity(prim_count),
+        shadow_mask_classes,
         room_tex_cache: RoomEnvTextureCache::new(),
         _white_albedo_tex: white_tex,
         white_albedo_view: white_view,
@@ -1918,6 +2036,7 @@ fn finalize_incremental_room_env_gpu_upload(
         kind,
         prim_count,
         prims,
+        shadow_mask_classes,
         decal_view,
         ..
     } = upload;
@@ -1986,6 +2105,12 @@ fn finalize_incremental_room_env_gpu_upload(
         prim_count,
         kind.shadow_label(),
     );
+    let (shadow_mask_uniform_buffers, shadow_mask_bind_groups) = create_room_shadow_mask_gpu_batch(
+        ctx.device,
+        ctx.room_shadow_mask_layout,
+        &shadow_mask_classes,
+        kind.shadow_mask_label(),
+    );
     let shadow_warp_bind_group = create_shadow_warp_bind_group(
         ctx.device,
         ctx.shadow_warp_layout,
@@ -1999,6 +2124,8 @@ fn finalize_incremental_room_env_gpu_upload(
             distortion_buffer,
             shadow_uniform_buffers,
             shadow_bind_groups,
+            _shadow_mask_uniform_buffers: shadow_mask_uniform_buffers,
+            shadow_mask_bind_groups,
             shadow_warp_bind_group,
             bind_groups,
             archive_sign_decal_texture: None,
@@ -2162,6 +2289,10 @@ fn begin_gameplay_room_gpu_upload(
             prim_count,
             next_prim: 0,
             prims: Vec::with_capacity(prim_count),
+            shadow_mask_classes: room_shadow_mask_classes(
+                crate::room_gi_bake::RoomGiRoom::Gameplay,
+                &cpu.environment_primitives,
+            ),
             room_tex_cache: RoomEnvTextureCache::new(),
             _white_albedo_tex: white_tex,
             white_albedo_view: white_view,
@@ -2191,6 +2322,7 @@ fn finalize_gameplay_room_gpu_upload(
     let GameplayRoomGpuUpload {
         prim_count,
         prims,
+        shadow_mask_classes,
         gameplay_decal_view,
         cash_in_prim_indices,
         score_roller_prim_groups,
@@ -2264,6 +2396,12 @@ fn finalize_gameplay_room_gpu_upload(
         prim_count,
         "gameplay-env-shadow",
     );
+    let (shadow_mask_uniform_buffers, shadow_mask_bind_groups) = create_room_shadow_mask_gpu_batch(
+        ctx.device,
+        ctx.room_shadow_mask_layout,
+        &shadow_mask_classes,
+        "gameplay-env-shadow-mask",
+    );
     let shadow_warp_bind_group = create_shadow_warp_bind_group(
         ctx.device,
         ctx.shadow_warp_layout,
@@ -2275,6 +2413,8 @@ fn finalize_gameplay_room_gpu_upload(
         distortion_buffer,
         shadow_uniform_buffers,
         shadow_bind_groups,
+        _shadow_mask_uniform_buffers: shadow_mask_uniform_buffers,
+        shadow_mask_bind_groups,
         shadow_warp_bind_group,
         bind_groups,
         archive_sign_decal_texture: None,
@@ -3075,6 +3215,7 @@ impl WgpuRenderer {
             queue: &self.queue,
             tile_material_layout: &self.tile_material_layout,
             shadow_caster_layout: &self.shadow_caster_layout,
+            room_shadow_mask_layout: &self.room_shadow_mask_layout,
             shadow_warp_layout: &self.shadow_warp_layout,
             tile_default_normal_view: &self.tile_env_normal_view,
             tile_glb_default_mr_view: &self.tile_env_mr_view,
