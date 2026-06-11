@@ -754,7 +754,7 @@ pub fn guide_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
         .into_segments()
 }
 
-/// Wall ledger: back, navigate grid, cycle count view.
+/// Wall ledger: back, navigate grid, select tile.
 pub fn wall_ledger_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
     HintRow::new()
         .push(
@@ -785,17 +785,6 @@ pub fn wall_ledger_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
             HintBind::alternatives(
                 "navigate",
                 vec![HintKey::Dpad, HintKey::Keyboard("keyboard_arrows")],
-            )
-            .into(),
-        )
-        .sep()
-        .push(
-            HintBind::alternatives(
-                "view",
-                vec![
-                    HintKey::for_input(input_mode, UiAction::InvertSelection, "keyboard_z"),
-                    HintKey::for_input(input_mode, UiAction::Delete, "keyboard_x"),
-                ],
             )
             .into(),
         )

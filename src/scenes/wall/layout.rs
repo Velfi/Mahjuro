@@ -20,6 +20,15 @@ pub fn text_line_h(font_px: f32) -> f32 {
     font_px * PLAIN_TEXT_LINE_STEP_MUL
 }
 
+/// Vertical space for the wall-summary remaining/total progress bar (counts + labels).
+pub fn wall_progress_bar_block_h(layout: &WallLayout) -> f32 {
+    let count_line = text_line_h(layout.count_px);
+    let bar_h = (count_line * 0.38).max(10.0);
+    let count_row = count_line.max(bar_h);
+    let label_line = text_line_h(layout.caption_px);
+    count_row + 2.0 + label_line
+}
+
 #[inline]
 pub fn read_boost(window_w: f32, window_h: f32) -> f32 {
     (window_w.min(window_h) / 720.0).clamp(1.0, 1.38)
@@ -132,9 +141,10 @@ pub fn wall_layout(w: f32, h: f32, jr: f32) -> WallLayout {
     let scale = metrics::scene_scale(w, h);
     let title_px = typography::size(typography::H24, h) * jr.min(1.08);
     let body_px = typography::size(typography::H36, h) * jr.min(1.05);
-    let small_px = typography::size(typography::H42, h) * jr.min(1.02);
+    let small_px = typography::size(typography::H42, h) * jr.min(1.05);
     let count_px = typography::size(typography::H28, h) * jr.min(1.06);
-    let caption_px = small_px * 0.82;
+    // H42 is the smallest named tier; do not shrink below it (was * 0.82 → ~21 px).
+    let caption_px = small_px;
 
     let content_x = w * 0.04;
     let content_w = w * 0.92;
@@ -149,12 +159,12 @@ pub fn wall_layout(w: f32, h: f32, jr: f32) -> WallLayout {
     let header_y = title.title_y - 2.0 * jr;
     let header_h = title.subtitle_y + text_line_h(small_px) - header_y + 1.0 * jr;
     let tab_y = header_y + header_h;
-    let tab_h = (h * 0.034).clamp(22.0 * jr, 36.0 * jr);
-    let panel_top = tab_y + tab_h;
+    let tab_h = 0.0;
+    let panel_top = tab_y + (6.0 * jr).max(4.0);
     let footer_reserve = wall_footer_reserve(w, h);
     let panel_h = h - footer_reserve - panel_top - 6.0 * jr;
 
-    let summary_w = content_w * 0.245;
+    let summary_w = content_w * 0.28;
     let summary_x = content_x;
     let grid_x = summary_x + summary_w + content_w * 0.008;
     let grid_w = content_x + content_w - grid_x;
@@ -180,10 +190,9 @@ pub fn wall_layout(w: f32, h: f32, jr: f32) -> WallLayout {
     }
     let cell_h = row_cell_h[0];
 
-    let sidebar_gap = (6.0 * jr).max(5.0);
-    let detail_h = (panel_h * 0.44).clamp(140.0 * jr, 300.0 * jr);
-    let detail_y = panel_top + panel_h - detail_h;
-    let summary_h = (detail_y - panel_top - sidebar_gap).max(100.0 * jr);
+    let summary_h = panel_h;
+    let detail_y = panel_top + panel_h;
+    let detail_h = 0.0;
 
     WallLayout {
         content_x,
@@ -263,16 +272,6 @@ pub fn row_suit_color(row_idx: usize) -> [f32; 4] {
     }
 }
 
-pub fn view_toggle_rect(_w: f32, layout: &WallLayout) -> [f32; 4] {
-    let tw = layout.content_w * 0.36;
-    [
-        layout.content_x + layout.content_w - tw,
-        layout.tab_y,
-        tw,
-        layout.tab_h,
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,7 +294,7 @@ mod tests {
     fn summary_panel_width_in_target_range() {
         let layout = wall_layout(1920.0, 1080.0, 1.0);
         let frac = layout.summary_w / layout.content_w;
-        assert!(frac >= 0.23 && frac <= 0.27);
+        assert!(frac >= 0.26 && frac <= 0.30);
     }
 
     #[test]
@@ -334,6 +333,6 @@ mod tests {
         assert!(used <= 1080.0 + 1.0);
         assert!(main / 1080.0 > 0.56);
         assert!(footer / 1080.0 < 0.07);
-        assert!(layout.detail_h / 1080.0 > 0.10);
+        assert!(layout.summary_h / 1080.0 > 0.50);
     }
 }

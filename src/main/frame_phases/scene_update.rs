@@ -134,7 +134,7 @@ pub fn run(app: &mut App, locals: &mut FrameLocals) {
         let input = app.input.as_ref();
         let right = input.map(|i| i.right_stick_scroll_axis).unwrap_or(0.0);
         match active_scene {
-            Scene::YakuJournal(_) | Scene::Credits(_) => right,
+            Scene::YakuJournal(_) | Scene::Credits(_) | Scene::WallLedger(_) => right,
             Scene::Archive(scene) if scene.is_chronicle_tab() => right,
             Scene::Defeat(_) | Scene::Victory(_) => {
                 let left = input.map(|i| i.left_stick_scroll_axis).unwrap_or(0.0);

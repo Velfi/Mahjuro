@@ -12,6 +12,13 @@ pub enum WallLedgerMode {
     ShopPreview,
 }
 
+impl WallLedgerMode {
+    /// Hand, meld, and discard copy counts are only meaningful during live play.
+    pub fn shows_round_locations(self) -> bool {
+        matches!(self, Self::Live)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct WallTileEntry {
     pub tile: Tile,

@@ -1,4 +1,4 @@
-//! Tile ledger grid — row bands, recessed slips, quiet exhausted state.
+//! Tile ledger grid — row bands and tile slips without per-cell counters.
 
 use std::collections::HashMap;
 
@@ -6,9 +6,7 @@ use crate::core::tile::{Suit, Tile};
 use crate::game::engine::GameEngine;
 use crate::game::run::RunState;
 use crate::game::wall_ledger::{WallLedgerFaceGroup, WallTileEntry};
-use crate::game::wall_stats::{
-    AbundanceState, WallCountView, WallStats, abundance_color, abundance_state_for_display,
-};
+use crate::game::wall_stats::WallStats;
 use crate::render::doc_tile_camera::TOP_DOWN_TILE_ROTATION;
 use crate::render::draw_cmd::ShowcaseTilePlacement;
 use crate::render::theme::color;
@@ -20,12 +18,12 @@ use super::super::layout::{
     row_label_font_px, row_suit_color, text_line_h,
 };
 use super::super::state::WallScreenState;
-use super::text::{push_text, push_text_maybe_clip};
+use super::text::{push_text_maybe_clip};
+use super::tile_placement::{
+    ledger_grid_tile_size, ledger_tile_brightness, showcase_tile_center_in_rect,
+};
 
-const EXHAUSTED_BRIGHTNESS: f32 = 0.22;
-const EXHAUSTED_SCALE: f32 = 0.84;
-const COUNTER_BAND_FRAC: f32 = 0.23;
-const TILE_SIZE_MUL: f32 = 1.06;
+const EXHAUSTED_SCALE: f32 = 0.90;
 
 pub fn draw_tile_ledger_grid(
     frame: &mut crate::render::draw_cmd::UiFrame,
@@ -37,10 +35,11 @@ pub fn draw_tile_ledger_grid(
     groups: &HashMap<(Suit, u8), &WallLedgerFaceGroup>,
     run: &RunState,
     focus: Option<LedgerNav>,
-    h: f32,
+    window_w: f32,
+    window_h: f32,
 ) {
     draw_row_bands(frame, layout);
-    draw_row_labels(frame, texts, layout, h);
+    draw_row_labels(frame, texts, layout, window_h);
 
     for (idx, entry) in stats.entries.iter().enumerate() {
         if !screen.face_visible(entry) {
@@ -49,43 +48,37 @@ pub fn draw_tile_ledger_grid(
         let Some(cell) = grid_cell_rect(layout, idx) else {
             continue;
         };
-        let exhausted = entry.display_count == 0;
+        let exhausted = entry.locations.in_wall == 0;
         let focused = focus == Some(LedgerNav::Tile(idx))
             || (screen.selected.suit == entry.suit && screen.selected.rank == entry.rank);
 
-        let (slip, tile_area, count_rect, was_rect) = cell_areas(cell, layout);
+        let (slip, tile_area) = cell_areas(cell);
         push_tile_slip(frame, slip, exhausted, focused);
 
         if let Some(group) = groups.get(&(entry.suit, entry.rank)) {
             if let Some(rep) = representative_entry(&group.copies) {
-                push_cell_tile(placements, rep, exhausted, tile_area, run);
+                push_cell_tile(
+                    placements,
+                    rep,
+                    exhausted,
+                    focused,
+                    tile_area,
+                    run,
+                    window_w,
+                    window_h,
+                );
             }
         } else {
             push_cell_tile_from_face(
-                placements, entry.suit, entry.rank, exhausted, tile_area, run,
-            );
-        }
-
-        let abundance = abundance_state_for_display(entry.suit, entry.display_count, screen.view);
-        let count_color = count_color_for_cell(exhausted, focused, abundance);
-        push_text(
-            texts,
-            count_rect,
-            format!("×{}", entry.display_count),
-            layout.count_px * 1.06,
-            count_color,
-            !exhausted || focused || abundance == AbundanceState::Abundant,
-            TextAlign::Center,
-        );
-        if entry.total > 0 && screen.view == WallCountView::Remaining {
-            push_text(
-                texts,
-                was_rect,
-                format!("was {}", entry.total),
-                layout.caption_px * 0.60,
-                color::alpha(color::UMBER, if exhausted { 0.28 } else { 0.42 }),
-                false,
-                TextAlign::Center,
+                placements,
+                entry.suit,
+                entry.rank,
+                exhausted,
+                focused,
+                tile_area,
+                run,
+                window_w,
+                window_h,
             );
         }
 
@@ -94,14 +87,15 @@ pub fn draw_tile_ledger_grid(
             + entry.modifiers.polychrome
             + entry.modifiers.debuffed;
         if mod_mark > 0 {
-            push_text(
+            push_text_maybe_clip(
                 texts,
                 [slip[0] + slip[2] - 11.0, slip[1] + 2.0, 10.0, 10.0],
                 "◆",
-                layout.caption_px * 0.7,
+                layout.caption_px,
                 color::alpha(color::GOLD, 0.85),
                 false,
                 TextAlign::Center,
+                None,
             );
         }
     }
@@ -174,11 +168,7 @@ fn draw_row_labels(
     }
 }
 
-fn cell_areas(cell: [f32; 4], layout: &WallLayout) -> ([f32; 4], [f32; 4], [f32; 4], [f32; 4]) {
-    let counter_h = (cell[3] * COUNTER_BAND_FRAC)
-        .max(text_line_h(layout.count_px) + text_line_h(layout.caption_px) + 1.0)
-        .min(cell[3] * 0.38);
-    let tile_h = (cell[3] - counter_h).max(1.0);
+fn cell_areas(cell: [f32; 4]) -> ([f32; 4], [f32; 4]) {
     let slip_inset = 1.0;
     let slip = [
         cell[0] + slip_inset,
@@ -186,16 +176,7 @@ fn cell_areas(cell: [f32; 4], layout: &WallLayout) -> ([f32; 4], [f32; 4], [f32;
         cell[2] - slip_inset * 2.0,
         cell[3] - 1.0,
     ];
-    let tile_area = [slip[0], slip[1], slip[2], tile_h - 0.5];
-    let counter_top = cell[1] + tile_h;
-    let count_rect = [cell[0], counter_top, cell[2], counter_h * 0.55];
-    let was_rect = [
-        cell[0],
-        counter_top + counter_h * 0.50,
-        cell[2],
-        counter_h * 0.45,
-    ];
-    (slip, tile_area, count_rect, was_rect)
+    (slip, slip)
 }
 
 fn push_tile_slip(
@@ -220,7 +201,7 @@ fn push_tile_slip(
         push_focus_corner(frame, slip[0] + slip[2] - 5.0, slip[1] + 2.0);
         frame.quad(GpuInstance {
             rect: slip,
-            color: color::alpha(color::WALNUT_BRIGHT, if exhausted { 0.12 } else { 0.18 }),
+            color: color::alpha(color::WALNUT_BRIGHT, if exhausted { 0.18 } else { 0.34 }),
             user: 0,
         });
         if exhausted {
@@ -229,7 +210,7 @@ fn push_tile_slip(
     } else if !exhausted {
         frame.quad(GpuInstance {
             rect: slip,
-            color: color::alpha(color::WALNUT_BRIGHT, 0.06),
+            color: color::alpha(color::WALNUT_BRIGHT, 0.14),
             user: 0,
         });
     }
@@ -257,16 +238,6 @@ fn push_corner_stamp(frame: &mut crate::render::draw_cmd::UiFrame, slip: [f32; 4
         color: color::alpha(color::RUBY, alpha),
         user: 0,
     });
-}
-
-fn count_color_for_cell(exhausted: bool, focused: bool, abundance: AbundanceState) -> [f32; 4] {
-    if exhausted {
-        color::alpha(color::RUBY, if focused { 0.72 } else { 0.46 })
-    } else if abundance == AbundanceState::Abundant {
-        color::alpha(color::JADE, 0.98)
-    } else {
-        abundance_color(abundance)
-    }
 }
 
 fn push_border(frame: &mut crate::render::draw_cmd::UiFrame, rect: [f32; 4], t: f32, c: [f32; 4]) {
@@ -303,14 +274,20 @@ fn push_cell_tile(
     placements: &mut Vec<ShowcaseTilePlacement>,
     entry: &WallTileEntry,
     exhausted: bool,
+    focused: bool,
     tile_area: [f32; 4],
     run: &RunState,
+    window_w: f32,
+    window_h: f32,
 ) {
     push_cell_tile_inner(
         placements,
         GameEngine::display_tile(entry.tile, run),
         exhausted,
+        focused,
         tile_area,
+        window_w,
+        window_h,
     );
 }
 
@@ -319,15 +296,21 @@ fn push_cell_tile_from_face(
     suit: Suit,
     rank: u8,
     exhausted: bool,
+    focused: bool,
     tile_area: [f32; 4],
     run: &RunState,
+    window_w: f32,
+    window_h: f32,
 ) {
     let tile = Tile::new(suit, rank, 0);
     push_cell_tile_inner(
         placements,
         GameEngine::display_tile(tile, run),
         exhausted,
+        focused,
         tile_area,
+        window_w,
+        window_h,
     );
 }
 
@@ -335,23 +318,22 @@ fn push_cell_tile_inner(
     placements: &mut Vec<ShowcaseTilePlacement>,
     tile: Tile,
     exhausted: bool,
+    focused: bool,
     tile_area: [f32; 4],
+    window_w: f32,
+    window_h: f32,
 ) {
-    let tile_size = (tile_area[2] * 0.92 * TILE_SIZE_MUL).min(tile_area[3] * 0.94 * TILE_SIZE_MUL);
+    let tile_size = ledger_grid_tile_size(tile_area, focused);
     placements.push(ShowcaseTilePlacement {
         tile,
-        center_pos: [
-            tile_area[0] + tile_area[2] * 0.5,
-            tile_area[1] + tile_area[3] * 0.5,
-            0.0,
-        ],
+        center_pos: showcase_tile_center_in_rect(tile_area, tile_size, window_w, window_h),
         rotation: TOP_DOWN_TILE_ROTATION,
         scale: if exhausted { EXHAUSTED_SCALE } else { 1.0 },
         size_px: tile_size,
-        brightness: if exhausted { EXHAUSTED_BRIGHTNESS } else { 1.0 },
+        brightness: ledger_tile_brightness(exhausted, focused),
         opacity: 1.0,
-        selected: false,
-        hovered: false,
+        selected: focused && !exhausted,
+        hovered: focused && exhausted,
         outline: false,
         glow: false,
         glow_color: None,

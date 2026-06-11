@@ -45,7 +45,8 @@ use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::clip::intersect_rect;
 use crate::ui::focus_nav::{
-    FocusDir, FocusNavDebugSnapshot, FocusNavState, debug_snapshot_from_candidates, push_focus_ring,
+    FocusDir, FocusMemory, FocusNavDebugSnapshot, FocusNavState, debug_snapshot_from_candidates,
+    push_focus_ring,
 };
 use crate::ui::input::UiAction;
 use crate::ui::smooth_scroll::SmoothScroll;
@@ -161,6 +162,8 @@ pub struct TreeState {
     scroll_clip_rect: Option<[f32; 4]>,
     /// Auto-inferred spatial navigation for flat items.
     focus_nav: FocusNavState<FocusId>,
+    /// Optional explicit edges from the last [`Self::update_flat`] call.
+    last_flat_edges: Vec<(FocusId, FocusDir, FocusId)>,
 }
 
 #[derive(Clone, Copy)]
@@ -189,6 +192,7 @@ impl TreeState {
             anchor_height: 0.0,
             scroll_clip_rect: None,
             focus_nav: FocusNavState::new(),
+            last_flat_edges: Vec::new(),
         }
     }
 
@@ -211,6 +215,10 @@ impl TreeState {
         self.focused
     }
 
+    pub fn focus_nav_memory(&self) -> &FocusMemory {
+        self.focus_nav.memory()
+    }
+
     /// Hover/click resolution for a flat list of pre-computed (id, rect, action)
     /// hit targets. Use this for scenes that already know their item rects
     /// (e.g. GLB-projected hand slots, custom card grids, hand-laid tab bars)
@@ -223,8 +231,19 @@ impl TreeState {
         items: &[FlatItem<A>],
         input: TreeInput<'_>,
     ) -> Option<A> {
+        self.update_flat_with_edges(items, input, &[])
+    }
+
+    pub fn update_flat_with_edges<A: Copy>(
+        &mut self,
+        items: &[FlatItem<A>],
+        input: TreeInput<'_>,
+        edges: &[(FocusId, FocusDir, FocusId)],
+    ) -> Option<A> {
         self.focus_changed = false;
         self.last_window = input.window;
+        self.last_flat_edges.clear();
+        self.last_flat_edges.extend_from_slice(edges);
         // Build the layout cache from the explicit rects.
         self.layout.clear();
         for it in items {
@@ -266,10 +285,10 @@ impl TreeState {
         // Keyboard / gamepad nav — spatial nearest-neighbour over item rects.
         for a in input.actions {
             match a {
-                UiAction::FocusDown => self.move_focus_spatial(FocusDir::Down),
-                UiAction::FocusUp => self.move_focus_spatial(FocusDir::Up),
-                UiAction::FocusNext => self.move_focus_spatial(FocusDir::Right),
-                UiAction::FocusPrev => self.move_focus_spatial(FocusDir::Left),
+                UiAction::FocusDown => self.move_focus_spatial(FocusDir::Down, edges),
+                UiAction::FocusUp => self.move_focus_spatial(FocusDir::Up, edges),
+                UiAction::FocusNext => self.move_focus_spatial(FocusDir::Right, edges),
+                UiAction::FocusPrev => self.move_focus_spatial(FocusDir::Left, edges),
                 UiAction::Confirm | UiAction::CommitDiscard => {
                     let f = self.focused?;
                     if let Some(it) = items.iter().find(|i| i.id == f) {
@@ -310,7 +329,7 @@ impl TreeState {
             items.iter().map(|it| (it.id, it.rect)).collect();
         debug_snapshot_from_candidates(
             &candidates,
-            &[],
+            &self.last_flat_edges,
             self.focused(),
             self.focus_nav.memory(),
             |id| {
@@ -688,19 +707,19 @@ impl TreeState {
         let focused = self.focused?;
         match action {
             UiAction::FocusDown => {
-                self.move_focus_spatial(FocusDir::Down);
+                self.move_focus_spatial(FocusDir::Down, &[]);
                 None
             }
             UiAction::FocusUp => {
-                self.move_focus_spatial(FocusDir::Up);
+                self.move_focus_spatial(FocusDir::Up, &[]);
                 None
             }
             UiAction::FocusNext => {
-                self.move_focus_spatial(FocusDir::Right);
+                self.move_focus_spatial(FocusDir::Right, &[]);
                 None
             }
             UiAction::FocusPrev => {
-                self.move_focus_spatial(FocusDir::Left);
+                self.move_focus_spatial(FocusDir::Left, &[]);
                 None
             }
             UiAction::Confirm | UiAction::CommitDiscard => self.activate_id(tree, focused),
@@ -708,7 +727,7 @@ impl TreeState {
         }
     }
 
-    fn move_focus_spatial(&mut self, dir: FocusDir) {
+    fn move_focus_spatial(&mut self, dir: FocusDir, edges: &[(FocusId, FocusDir, FocusId)]) {
         let Some(id) = self.focused else {
             return;
         };
@@ -718,7 +737,7 @@ impl TreeState {
             .filter(|l| l.enabled)
             .map(|l| (l.id, l.rect))
             .collect();
-        self.focus_nav.load_candidates(&candidates, &[]);
+        self.focus_nav.load_candidates(&candidates, edges);
         if let Some(next) = self.focus_nav.pick(id, dir) {
             self.set_focus_changed(Some(next));
         }
