@@ -763,13 +763,7 @@ mod tests {
             .standard_groups
             .iter()
             .find(|g| g.suit == drawn.suit && g.rank == drawn.rank);
-        let loc = face_location_counts(
-            drawn.suit,
-            drawn.rank,
-            group,
-            &run,
-            WallLedgerMode::Live,
-        );
+        let loc = face_location_counts(drawn.suit, drawn.rank, group, &run, WallLedgerMode::Live);
         assert_eq!(loc.in_wall, 3);
         assert_eq!(loc.in_hand, 1);
         assert_eq!(loc.discarded, 0);

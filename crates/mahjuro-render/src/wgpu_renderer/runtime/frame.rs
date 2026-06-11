@@ -363,6 +363,7 @@ impl WgpuRenderer {
         };
         let punctual_bake = PunctualLightBakeParams {
             src: &lighting.punctual,
+            gltf_nodes: &lighting.punctual_gltf_nodes,
             candle_count: frame.candle_light_count,
             flame_height_world: frame.flame_height_world,
             lit_mesh_punctual_intensity_scale: lit_mesh_inv_scale,

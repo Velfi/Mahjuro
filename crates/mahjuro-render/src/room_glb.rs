@@ -356,9 +356,8 @@ pub const TILE_GLTF_PUNCTUAL_SCALE: f32 = 1.0;
 pub const SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX: &str = "light_candle";
 
 /// Linear RGB multiplier for punctual lights on nodes matching [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`].
-/// Warm shift for candle reads; other lights keep glTF linear RGB.
-pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] =
-    crate::theme::color::rgb(crate::theme::color::PARCHMENT);
+/// Warm flame tint for candle reads; other lights keep glTF linear RGB.
+pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] = [1.0, 0.58, 0.20];
 
 /// glTF **node** name prefix for punctual lights that should read as lanterns
 /// (`light_lantern`, `light_lantern.001`, `light_lantern_06`, …).
@@ -1152,6 +1151,30 @@ mod tests {
         assert!(
             ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL"),
             "archive decal feature flag missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_ROOM_CANDLE_WAX"),
+            "candle wax feature flag missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("candle_flame_capsule_closest_pos"),
+            "candle point lights should use a soft capsule emitter approximation"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("wax_translucent_glow"),
+            "candle wax translucency path missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("candle_indirect_bounce"),
+            "cheap candle GI / indirect bounce term missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("candle_reflection_streaks"),
+            "polished candle reflection streak term missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("candle_streak_tangent"),
+            "candle reflection streaks should use a stable surface tangent"
         );
         assert!(
             ROOM_GLB_WGSL.contains("exponential_height_fog_alpha"),
