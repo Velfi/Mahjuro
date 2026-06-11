@@ -1290,6 +1290,73 @@ mod cases {
     }
 
     #[test]
+    fn capacity_full_non_winning_shape_autocashes() {
+        let mut run = test_run();
+        let mut bus = bus();
+        let (tiles, sets) = capacity_full_non_winning_structure();
+        assert!(!crate::core::structure::is_winning_structure_shape(
+            &tiles, &sets
+        ));
+        assert!(crate::core::structure::structure_cannot_grow_further(
+            &tiles, &sets, HAND_SIZE
+        ));
+        run.structure_tiles = tiles;
+        run.structure_sets = sets;
+
+        run.try_autotrigger_structure_full(&mut bus);
+
+        assert!(run.structure_sets.is_empty());
+        assert!(run.structure_tiles.is_empty());
+        assert!(run.round_score > 0);
+    }
+
+    fn capacity_full_non_winning_structure() -> (Vec<Tile>, Vec<DetectedMeld>) {
+        let tiles = vec![
+            Tile::new(Suit::Manzu, 1, 1),
+            Tile::new(Suit::Manzu, 1, 2),
+            Tile::new(Suit::Manzu, 1, 3),
+            Tile::new(Suit::Manzu, 2, 4),
+            Tile::new(Suit::Manzu, 2, 5),
+            Tile::new(Suit::Manzu, 2, 6),
+            Tile::new(Suit::Manzu, 3, 7),
+            Tile::new(Suit::Manzu, 3, 8),
+            Tile::new(Suit::Manzu, 4, 9),
+            Tile::new(Suit::Manzu, 4, 10),
+            Tile::new(Suit::Manzu, 5, 11),
+            Tile::new(Suit::Manzu, 5, 12),
+            Tile::new(Suit::Manzu, 6, 13),
+            Tile::new(Suit::Manzu, 6, 14),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![1, 2, 3],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![4, 5, 6],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![7, 8],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![9, 10],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![11, 12],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![13, 14],
+            },
+        ];
+        (tiles, sets)
+    }
+
+    #[test]
     fn house_rule_blocks_autocash_until_discards_are_spent() {
         let mut run = test_run();
         let mut bus = bus();
@@ -1454,6 +1521,29 @@ mod cases {
         // Add a leftover.
         run.toggle_select(4);
         assert!(!run.is_selection_valid(), "triplet + leftover is invalid");
+    }
+
+    #[test]
+    fn is_selection_valid_rejects_structure_capacity_overflow() {
+        let mut run = test_run();
+        run.structure_tiles = (0..12)
+            .map(|i| Tile::new(Suit::Pinzu, 1, 10_000 + i))
+            .collect();
+        run.toggle_select(0);
+        run.toggle_select(1);
+        run.toggle_select(2);
+        assert!(
+            run.try_validate_with_wildcards(
+                &run.hand.iter().zip(run.selected.iter()).filter(|&(_, &s)| s).map(|(t, _)| *t).collect::<Vec<_>>()
+            )
+            .is_some(),
+            "triplet melds should still validate"
+        );
+        assert!(
+            !run.is_selection_valid(),
+            "valid melds that overflow structure capacity are not playable"
+        );
+        assert_eq!(run.play_rejection_callout(), Some("Too many melds"));
     }
 
     #[test]
@@ -1717,6 +1807,46 @@ mod cases {
                 !naive_yaku.contains(&YakuKind::Toitoi),
                 "regression guard: preview must not use validator-first split"
             );
+        }
+    }
+
+    #[test]
+    fn yaku_preview_stable_with_many_flowers() {
+        use crate::core::yaku::{YakuKind, yaku_after_pool_filter};
+
+        let mut selected: Vec<Tile> = vec![
+            Tile::new(Suit::Manzu, 1, 0),
+            Tile::new(Suit::Manzu, 9, 1),
+            Tile::new(Suit::Dragon, 1, 2),
+            Tile::new(Suit::Dragon, 1, 3),
+            Tile::new(Suit::Wind, 1, 4),
+            Tile::new(Suit::Wind, 1, 5),
+        ];
+        for i in 0..6 {
+            selected.push(Tile::new(Suit::Flower, (i % 4 + 1) as u8, 100 + i));
+        }
+
+        let mut run = test_run();
+        run.available_yaku = vec![YakuKind::Yakuhai, YakuKind::Honroutou];
+        run.hand = selected.clone();
+        run.selected = vec![true; selected.len()];
+
+        let mut first: Option<Vec<YakuKind>> = None;
+        for _ in 0..32 {
+            let (preview_sets, preview_effective, preview_original) =
+                run.melds_for_yaku_preview(&selected);
+            let yaku = yaku_after_pool_filter(
+                &preview_effective,
+                &preview_sets,
+                Some(1),
+                None,
+                Some(preview_original.as_slice()),
+                &run.available_yaku,
+            );
+            match &first {
+                None => first = Some(yaku),
+                Some(expected) => assert_eq!(yaku, *expected, "yaku preview must not flicker"),
+            }
         }
     }
 

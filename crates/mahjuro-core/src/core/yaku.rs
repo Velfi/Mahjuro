@@ -221,6 +221,20 @@ impl YakuKind {
         }
     }
 
+    /// Tablet label with an optional stack count (`"Yakuhai 3x"`).
+    pub fn gameplay_tablet_label_with_count(
+        self,
+        count: u32,
+        discovered: bool,
+    ) -> std::borrow::Cow<'static, str> {
+        let base = self.gameplay_tablet_label(discovered);
+        if count <= 1 {
+            std::borrow::Cow::Borrowed(base)
+        } else {
+            std::borrow::Cow::Owned(format!("{base} {count}x"))
+        }
+    }
+
     /// Sort key for reference UIs (journal, guide): lowest base payout first.
     pub fn cmp_by_base_score(a: &Self, b: &Self) -> std::cmp::Ordering {
         a.mult_bonus()
@@ -252,6 +266,42 @@ impl YakuKind {
             YakuKind::ChickenHand,
         ]
     }
+
+    /// Journal / guide display order (`Self::all`). Used for in-play yaku tablets.
+    pub fn tablet_display_index(self) -> usize {
+        Self::all()
+            .iter()
+            .position(|&k| k == self)
+            .unwrap_or(usize::MAX)
+    }
+
+    /// Stable sort for fired-yaku tablet rows and cascade overlays.
+    pub fn sort_for_tablets(kinds: &mut [Self]) {
+        kinds.sort_by_key(|k| k.tablet_display_index());
+    }
+
+    /// Collapse duplicate kinds (e.g. three Yakuhai) into one tablet entry.
+    /// Call [`Self::sort_for_tablets`] on `kinds` first.
+    pub fn consolidate_for_tablets(kinds: &[Self]) -> Vec<YakuTabletEntry> {
+        let mut out: Vec<YakuTabletEntry> = Vec::new();
+        for &kind in kinds {
+            if let Some(last) = out.last_mut()
+                && last.kind == kind
+            {
+                last.count += 1;
+            } else {
+                out.push(YakuTabletEntry { kind, count: 1 });
+            }
+        }
+        out
+    }
+}
+
+/// One engraved yaku tablet in the in-play row (duplicates merged).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct YakuTabletEntry {
+    pub kind: YakuKind,
+    pub count: u32,
 }
 
 /// Live preview of a yaku for the current selection: how close the player is
@@ -600,20 +650,40 @@ fn count_yakuhai(
 ) -> u32 {
     sets.iter()
         .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
-        .filter(|s| {
-            s.tile_ids
-                .first()
-                .and_then(|id| tiles.iter().find(|t| t.id == *id))
-                .is_some_and(|t| match t.suit {
-                    Suit::Dragon => true,
-                    Suit::Wind => {
-                        round_wind.is_some_and(|w| t.rank == w)
-                            || bonus_round_wind.is_some_and(|w| t.rank == w)
-                    }
-                    _ => false,
-                })
-        })
+        .filter(|s| is_yakuhai_meld(s, tiles, round_wind, bonus_round_wind))
         .count() as u32
+}
+
+/// True when a triplet/kong is dragon pon or round/bonus round wind pon.
+/// Flower wildcards may fill the third slot — tile order must not matter.
+fn is_yakuhai_meld(
+    meld: &DetectedMeld,
+    tiles: &[Tile],
+    round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
+) -> bool {
+    let honor_faces: Vec<(Suit, u8)> = meld
+        .tile_ids
+        .iter()
+        .filter_map(|id| tiles.iter().find(|t| t.id == *id))
+        .filter(|t| !t.is_flower())
+        .map(|t| (t.suit, t.rank))
+        .collect();
+    if honor_faces.is_empty() {
+        return false;
+    }
+    let (suit, rank) = honor_faces[0];
+    if !honor_faces.iter().all(|face| *face == (suit, rank)) {
+        return false;
+    }
+    match suit {
+        Suit::Dragon => true,
+        Suit::Wind => {
+            round_wind.is_some_and(|w| rank == w)
+                || bonus_round_wind.is_some_and(|w| rank == w)
+        }
+        _ => false,
+    }
 }
 
 /// Tanyao (formerly `AllSimples`): every non-flower tile is a numbered suit
@@ -1557,6 +1627,82 @@ mod tests {
         ];
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert_eq!(yaku.iter().filter(|y| **y == YakuKind::Yakuhai).count(), 2);
+    }
+
+    #[test]
+    fn sort_for_tablets_uses_journal_display_order() {
+        let mut kinds = vec![
+            YakuKind::Yakuhai,
+            YakuKind::Honroutou,
+            YakuKind::Tanyao,
+        ];
+        YakuKind::sort_for_tablets(&mut kinds);
+        assert_eq!(
+            kinds,
+            vec![YakuKind::Tanyao, YakuKind::Honroutou, YakuKind::Yakuhai]
+        );
+    }
+
+    #[test]
+    fn consolidate_for_tablets_merges_duplicate_yakuhai() {
+        let mut kinds = vec![
+            YakuKind::Toitoi,
+            YakuKind::Yakuhai,
+            YakuKind::FullHand,
+            YakuKind::Yakuhai,
+            YakuKind::Honroutou,
+            YakuKind::Yakuhai,
+        ];
+        YakuKind::sort_for_tablets(&mut kinds);
+        let entries = YakuKind::consolidate_for_tablets(&kinds);
+        assert_eq!(
+            entries,
+            vec![
+                YakuTabletEntry {
+                    kind: YakuKind::Toitoi,
+                    count: 1,
+                },
+                YakuTabletEntry {
+                    kind: YakuKind::Honroutou,
+                    count: 1,
+                },
+                YakuTabletEntry {
+                    kind: YakuKind::FullHand,
+                    count: 1,
+                },
+                YakuTabletEntry {
+                    kind: YakuKind::Yakuhai,
+                    count: 3,
+                },
+            ]
+        );
+        assert_eq!(
+            YakuKind::Yakuhai.gameplay_tablet_label_with_count(3, true),
+            "Yakuhai 3x"
+        );
+    }
+
+    #[test]
+    fn count_yakuhai_ignores_flower_slot_order() {
+        let tiles = vec![
+            t(Suit::Dragon, 1, 0),
+            t(Suit::Dragon, 1, 1),
+            t(Suit::Flower, 1, 100),
+        ];
+        let dragon_first = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: vec![0, 1, 100],
+        }];
+        let flower_first = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: vec![100, 0, 1],
+        }];
+        for sets in [dragon_first, flower_first] {
+            assert!(
+                detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Yakuhai),
+                "flower-assisted dragon triplet must count regardless of tile order"
+            );
+        }
     }
 
     #[test]

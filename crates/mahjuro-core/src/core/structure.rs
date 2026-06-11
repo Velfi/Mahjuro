@@ -1,6 +1,6 @@
 //! Structure scoring: commit melds from hand into a held area, then trigger to score.
 
-use crate::core::hand::DetectedMeld;
+use crate::core::hand::{kong_structure_bonus, DetectedMeld};
 use crate::core::rules::RuleModifier;
 use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::{YakuKind, detect_yaku_with_wind, is_complete_winning_hand};
@@ -35,6 +35,24 @@ pub fn played_meld_chips(tiles: &[Tile], sets: &[DetectedMeld]) -> i32 {
 
 pub fn is_winning_structure_shape(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
     is_complete_winning_hand(tiles, sets)
+}
+
+/// Smallest legal play into structure is a pair (2 tiles).
+const MIN_MELD_COMMIT_TILES: usize = 2;
+
+/// True when structure has no room left for another meld under the standard tile
+/// budget (`hand_size` tiles, plus kong overflow).
+pub fn structure_cannot_grow_further(
+    tiles: &[Tile],
+    sets: &[DetectedMeld],
+    hand_size: usize,
+) -> bool {
+    if sets.is_empty() {
+        return false;
+    }
+    let capacity = hand_size + kong_structure_bonus(sets.iter());
+    let remaining = capacity.saturating_sub(tiles.len());
+    remaining < MIN_MELD_COMMIT_TILES
 }
 
 fn structure_contains_honor(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
@@ -216,5 +234,35 @@ mod tests {
         };
         let pool = star_tile_yaku_pool(&[], Some(meta), &tiles, &sets);
         assert_eq!(pool, vec![YakuKind::ChickenHand]);
+    }
+
+    #[test]
+    fn structure_cannot_grow_further_at_tile_capacity() {
+        let tiles: Vec<Tile> = (0..14).map(|i| tile(Suit::Manzu, 1, i)).collect();
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: (0..14).collect(),
+        }];
+        assert!(structure_cannot_grow_further(&tiles, &sets, 14));
+    }
+
+    #[test]
+    fn structure_cannot_grow_further_with_one_slot_remaining() {
+        let tiles: Vec<Tile> = (0..13).map(|i| tile(Suit::Manzu, 1, i)).collect();
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: (0..13).collect(),
+        }];
+        assert!(structure_cannot_grow_further(&tiles, &sets, 14));
+    }
+
+    #[test]
+    fn structure_can_still_grow_with_pair_slot_remaining() {
+        let tiles: Vec<Tile> = (0..12).map(|i| tile(Suit::Manzu, 1, i)).collect();
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: (0..12).collect(),
+        }];
+        assert!(!structure_cannot_grow_further(&tiles, &sets, 14));
     }
 }

@@ -12,7 +12,27 @@ use super::DetectedMeld;
 use super::MeldKind;
 
 /// Canonical key for a decomposition — one `(kind, sorted faces)` per set.
-type DecompositionKey = Vec<(MeldKind, Vec<(Suit, u8)>)>;
+pub type DecompositionKey = Vec<(MeldKind, Vec<(Suit, u8)>)>;
+
+/// Stable sort key for two decompositions of the same tile multiset. Used to
+/// break ties when score and shape affinity are equal (e.g. many flower splits).
+pub fn decomposition_canonical_key(tiles: &[Tile], sets: &[DetectedMeld]) -> DecompositionKey {
+    let tile_lookup = |id: u32| tiles.iter().find(|t| t.id == id).copied();
+    let mut keyed: DecompositionKey = sets
+        .iter()
+        .map(|s| {
+            let mut faces: Vec<(Suit, u8)> = s
+                .tile_ids
+                .iter()
+                .filter_map(|&id| tile_lookup(id).map(|t| (t.suit, t.rank)))
+                .collect();
+            faces.sort();
+            (s.kind, faces)
+        })
+        .collect();
+    keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    keyed
+}
 
 /// Group tiles by face (suit+rank), keeping one id list per face key.
 /// Flower tiles are excluded — they're wildcards, not a groupable face.
@@ -158,23 +178,8 @@ pub fn enumerate_decompositions(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<V
     let mut all: Vec<Vec<DetectedMeld>> = Vec::new();
     let mut seen: FxHashSet<DecompositionKey> = FxHashSet::default();
 
-    let tile_lookup = |id: u32| tiles.iter().find(|t| t.id == id).copied();
-    let canonicalize = |sets: &[DetectedMeld]| -> DecompositionKey {
-        let mut keyed: DecompositionKey = sets
-            .iter()
-            .map(|s| {
-                let mut faces: Vec<(Suit, u8)> = s
-                    .tile_ids
-                    .iter()
-                    .filter_map(|&id| tile_lookup(id).map(|t| (t.suit, t.rank)))
-                    .collect();
-                faces.sort();
-                (s.kind, faces)
-            })
-            .collect();
-        keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-        keyed
-    };
+    let canonicalize =
+        |sets: &[DetectedMeld]| -> DecompositionKey { decomposition_canonical_key(tiles, sets) };
 
     for (flower_melds, mut wildcards) in flower_meld_partitions_for_rules(&flower_ids, rules) {
         if regular.is_empty() {
