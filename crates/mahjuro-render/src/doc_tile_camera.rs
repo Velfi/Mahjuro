@@ -24,14 +24,8 @@ pub fn doc_tile_camera(h: f32) -> CameraParams {
     let cam_scale = h / 1600.0;
     let eye = [0.0, -200.0 * cam_scale, 2040.0 * cam_scale];
     let target = [0.0, -50.0 * cam_scale, 0.0];
-    let half_height = calibrated_ortho_half_height(
-        h,
-        eye,
-        target,
-        [0.0, 0.0, 1.0],
-        true,
-        DOC_TILE_ROTATION,
-    );
+    let half_height =
+        calibrated_ortho_half_height(h, eye, target, [0.0, 0.0, 1.0], true, DOC_TILE_ROTATION);
     CameraParams {
         eye,
         target,
@@ -255,7 +249,10 @@ mod tests {
         let center = width_at(w * 0.5);
         let right = width_at(w * 0.88);
         assert!((left - center).abs() < 0.5, "left {left} center {center}");
-        assert!((right - center).abs() < 0.5, "right {right} center {center}");
+        assert!(
+            (right - center).abs() < 0.5,
+            "right {right} center {center}"
+        );
     }
 
     #[test]
@@ -321,6 +318,9 @@ mod tests {
         };
         let center = width_at(w * 0.5, h * 0.5);
         let corner = width_at(w * 0.12, h * 0.15);
-        assert!((center - corner).abs() < 0.5, "center {center} corner {corner}");
+        assert!(
+            (center - corner).abs() < 0.5,
+            "center {center} corner {corner}"
+        );
     }
 }

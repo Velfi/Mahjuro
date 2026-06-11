@@ -251,9 +251,11 @@ pub fn fill_gpu_instances(
     out: &mut Vec<GpuFlameInstance>,
 ) -> usize {
     out.clear();
-    out.extend(emitters.iter().map(|e| {
-        GpuFlameInstance::from_emitter(e, time_s, config, manual)
-    }));
+    out.extend(
+        emitters
+            .iter()
+            .map(|e| GpuFlameInstance::from_emitter(e, time_s, config, manual)),
+    );
     out.len()
 }
 

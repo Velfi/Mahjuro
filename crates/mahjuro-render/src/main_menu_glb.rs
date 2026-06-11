@@ -555,7 +555,9 @@ pub fn main_menu_moon_trailer_start_camera(
             eye: eye.to_array(),
             target: moon.to_array(),
             up: end_cam.up,
-            projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: end_cam.fovy_deg() },
+            projection: crate::draw_cmd::CameraProjection::Perspective {
+                fovy_deg: end_cam.fovy_deg(),
+            },
             clip_near: end_cam.clip_near,
             clip_far: end_cam.clip_far,
         })

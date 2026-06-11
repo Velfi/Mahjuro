@@ -5,7 +5,7 @@ use crate::render::theme::{color, metrics};
 use crate::render::wgpu_renderer::TextAlign;
 use crate::scenes::header_chrome::{HeaderChromeMetrics, HeaderTitleLayout};
 
-use super::super::layout::{text_line_h, WallLayout};
+use super::super::layout::{WallLayout, text_line_h};
 use super::text::push_text;
 
 pub fn draw_wall_header(
@@ -49,7 +49,12 @@ pub fn draw_wall_header(
 
     push_text(
         texts,
-        [title.copy_x, title.title_y, w * 0.34, text_line_h(layout.title_px)],
+        [
+            title.copy_x,
+            title.title_y,
+            w * 0.34,
+            text_line_h(layout.title_px),
+        ],
         "The Wall",
         layout.title_px,
         color::CHAMPAGNE,
@@ -75,7 +80,12 @@ pub fn draw_wall_header(
     let remain_x = layout.content_x + layout.content_w - remain_w;
     push_text(
         texts,
-        [remain_x, title.title_y, remain_w, text_line_h(layout.body_px)],
+        [
+            remain_x,
+            title.title_y,
+            remain_w,
+            text_line_h(layout.body_px),
+        ],
         format!("{} / {} remaining", stats.total_remaining, stats.total_wall),
         layout.body_px * 0.96,
         color::CHAMPAGNE,

@@ -87,8 +87,10 @@ fn noise3(x: f32, y: f32, z: f32) -> f32 {
     let n011 = corner(0.0, 1.0, 1.0, fx, fy - 1.0, fz - 1.0);
     let n111 = corner(1.0, 1.0, 1.0, fx - 1.0, fy - 1.0, fz - 1.0);
 
-    let nx00 = n000 + (n100 - n000) * wx + (n010 - n000) * wy + (n110 - n100 - n010 + n000) * wx * wy;
-    let nx10 = n001 + (n101 - n001) * wx + (n011 - n001) * wy + (n111 - n101 - n011 + n001) * wx * wy;
+    let nx00 =
+        n000 + (n100 - n000) * wx + (n010 - n000) * wy + (n110 - n100 - n010 + n000) * wx * wy;
+    let nx10 =
+        n001 + (n101 - n001) * wx + (n011 - n001) * wy + (n111 - n101 - n011 + n001) * wx * wy;
     nx00 + (nx10 - nx00) * wz
 }
 
@@ -202,11 +204,7 @@ pub fn sim_displacement(
     let pin = base_pin_weight(y01);
 
     let (dx, dz, dy_out) = if params.wind_strength <= 0.0 {
-        (
-            nx * breathe * pin,
-            nz * breathe * pin,
-            dy * pin,
-        )
+        (nx * breathe * pin, nz * breathe * pin, dy * pin)
     } else {
         (
             (turb * 0.022 * params.turbulence * y01 + nx * breathe) * pin,
@@ -215,11 +213,7 @@ pub fn sim_displacement(
         )
     };
 
-    (
-        dx * plume_scale,
-        dy_out * plume_scale,
-        dz * plume_scale,
-    )
+    (dx * plume_scale, dy_out * plume_scale, dz * plume_scale)
 }
 
 /// Fast turbulence sample for vertex brightness flicker (matches `flame.wgsl`).

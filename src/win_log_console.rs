@@ -18,9 +18,7 @@ pub fn prepare_rust_log_output() -> RustLogOutput {
             return RustLogOutput::Console(LineWriter::new(file));
         }
     }
-    RustLogOutput::File(
-        mahjuro_distribution::PlatformPaths::data_root().join("mahjuro.log"),
-    )
+    RustLogOutput::File(mahjuro_distribution::PlatformPaths::data_root().join("mahjuro.log"))
 }
 
 #[cfg(all(windows, not(debug_assertions)))]
@@ -28,7 +26,7 @@ fn try_attach_parent_console() -> bool {
     const ERROR_ACCESS_DENIED: u32 = 5;
 
     unsafe {
-        use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+        use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
 
         AttachConsole(ATTACH_PARENT_PROCESS) != 0
             || windows_sys::Win32::Foundation::GetLastError() == ERROR_ACCESS_DENIED

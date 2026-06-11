@@ -482,37 +482,36 @@ impl super::CommandEncoder {
                 S::RayGeneration | S::AnyHit | S::ClosestHit | S::Miss => (None, false, None),
             };
             let allow = super::CommandState::stage_may_bind_sizes_bytes_at_slot(
-                sizes_slot,
-                upload_sz,
-                mask,
+                sizes_slot, upload_sz, mask,
             );
-            let clear_sizes_slot = |this: &mut super::CommandEncoder, slot: naga::back::msl::Slot| {
-                let s = slot as usize;
-                encoder.set_buffer(None, 0, slot as NSUInteger);
-                match stage {
-                    S::Vertex => super::CommandState::clear_stage_buffer_slot(
-                        &mut this.state.vs_arg_cache,
-                        s,
-                    ),
-                    S::Fragment => super::CommandState::clear_stage_buffer_slot(
-                        &mut this.state.fs_arg_cache,
-                        s,
-                    ),
-                    S::Task => super::CommandState::clear_stage_buffer_slot(
-                        &mut this.state.ts_arg_cache,
-                        s,
-                    ),
-                    S::Mesh => super::CommandState::clear_stage_buffer_slot(
-                        &mut this.state.ms_arg_cache,
-                        s,
-                    ),
-                    S::Compute => super::CommandState::clear_stage_buffer_slot(
-                        &mut this.state.cs_arg_cache,
-                        s,
-                    ),
-                    S::RayGeneration | S::AnyHit | S::ClosestHit | S::Miss => {}
-                }
-            };
+            let clear_sizes_slot =
+                |this: &mut super::CommandEncoder, slot: naga::back::msl::Slot| {
+                    let s = slot as usize;
+                    encoder.set_buffer(None, 0, slot as NSUInteger);
+                    match stage {
+                        S::Vertex => super::CommandState::clear_stage_buffer_slot(
+                            &mut this.state.vs_arg_cache,
+                            s,
+                        ),
+                        S::Fragment => super::CommandState::clear_stage_buffer_slot(
+                            &mut this.state.fs_arg_cache,
+                            s,
+                        ),
+                        S::Task => super::CommandState::clear_stage_buffer_slot(
+                            &mut this.state.ts_arg_cache,
+                            s,
+                        ),
+                        S::Mesh => super::CommandState::clear_stage_buffer_slot(
+                            &mut this.state.ms_arg_cache,
+                            s,
+                        ),
+                        S::Compute => super::CommandState::clear_stage_buffer_slot(
+                            &mut this.state.cs_arg_cache,
+                            s,
+                        ),
+                        S::RayGeneration | S::AnyHit | S::ClosestHit | S::Miss => {}
+                    }
+                };
             if allow {
                 if let Some((index, sizes)) = self
                     .state
@@ -1578,7 +1577,12 @@ impl crate::CommandEncoder for super::CommandEncoder {
         let active_vertex_slots: HashSet<u64> = pipeline
             .vs_info
             .as_ref()
-            .map(|info| info.vertex_buffer_mappings.iter().map(|m| m.id as u64).collect())
+            .map(|info| {
+                info.vertex_buffer_mappings
+                    .iter()
+                    .map(|m| m.id as u64)
+                    .collect()
+            })
             .unwrap_or_default();
         let stale: Vec<u64> = self
             .state
@@ -1682,8 +1686,8 @@ impl crate::CommandEncoder for super::CommandEncoder {
 
         // Nil layout slots not referenced by this entry's MSL (`[[buffer(i)]]` set).
         if let Some(mask) = pipeline.vs_metal_buffer_bindings_mask {
-            let cap = (pipeline.vs_layout_buffer_count as usize)
-                .min(super::METAL_MAX_LOW_TABLE_BUFFERS);
+            let cap =
+                (pipeline.vs_layout_buffer_count as usize).min(super::METAL_MAX_LOW_TABLE_BUFFERS);
             for idx in 0..cap {
                 if mask & (1u32 << idx) == 0 {
                     unsafe {
@@ -1694,8 +1698,8 @@ impl crate::CommandEncoder for super::CommandEncoder {
             }
         }
         if let Some(mask) = pipeline.fs_metal_buffer_bindings_mask {
-            let cap = (pipeline.fs_layout_buffer_count as usize)
-                .min(super::METAL_MAX_LOW_TABLE_BUFFERS);
+            let cap =
+                (pipeline.fs_layout_buffer_count as usize).min(super::METAL_MAX_LOW_TABLE_BUFFERS);
             for idx in 0..cap {
                 if mask & (1u32 << idx) == 0 {
                     unsafe {
@@ -1707,8 +1711,8 @@ impl crate::CommandEncoder for super::CommandEncoder {
         }
 
         if pipeline.fs_info.is_none() {
-            let fb_cap = (pipeline.fs_layout_buffer_count as usize)
-                .min(super::METAL_MAX_LOW_TABLE_BUFFERS);
+            let fb_cap =
+                (pipeline.fs_layout_buffer_count as usize).min(super::METAL_MAX_LOW_TABLE_BUFFERS);
             for idx in 0..fb_cap {
                 unsafe {
                     encoder.setFragmentBuffer_offset_atIndex(None, 0, idx);
@@ -1735,8 +1739,8 @@ impl crate::CommandEncoder for super::CommandEncoder {
 
         if pipeline.vs_info.is_some() {
             if let Some(tex_mask) = pipeline.vs_metal_texture_bindings_mask {
-                let lim =
-                    (pipeline.vs_layout_texture_count as usize).min(super::METAL_MAX_STAGE_TEXTURES);
+                let lim = (pipeline.vs_layout_texture_count as usize)
+                    .min(super::METAL_MAX_STAGE_TEXTURES);
                 for idx in 0..lim {
                     if (tex_mask & (1u128 << idx)) == 0 {
                         unsafe {
@@ -1749,8 +1753,8 @@ impl crate::CommandEncoder for super::CommandEncoder {
         }
         if pipeline.fs_info.is_some() {
             if let Some(tex_mask) = pipeline.fs_metal_texture_bindings_mask {
-                let lim =
-                    (pipeline.fs_layout_texture_count as usize).min(super::METAL_MAX_STAGE_TEXTURES);
+                let lim = (pipeline.fs_layout_texture_count as usize)
+                    .min(super::METAL_MAX_STAGE_TEXTURES);
                 for idx in 0..lim {
                     if (tex_mask & (1u128 << idx)) == 0 {
                         unsafe {
@@ -1837,10 +1841,10 @@ impl crate::CommandEncoder for super::CommandEncoder {
                 pipeline.vs_metal_buffer_bindings_mask_parsed,
             );
             if allow_vs_sizes {
-                if let Some((index, sizes)) = self
-                    .state
-                    .make_sizes_buffer_update(naga::ShaderStage::Vertex, &mut self.temp.binding_sizes)
-                {
+                if let Some((index, sizes)) = self.state.make_sizes_buffer_update(
+                    naga::ShaderStage::Vertex,
+                    &mut self.temp.binding_sizes,
+                ) {
                     unsafe {
                         encoder.setVertexBytes_length_atIndex(
                             NonNull::new(sizes.as_ptr().cast_mut().cast()).unwrap(),
@@ -1992,11 +1996,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
         };
         if !skip_bind {
             unsafe {
-                encoder.setVertexBuffer_offset_atIndex(
-                    Some(&binding.buffer.raw),
-                    off,
-                    metal_i,
-                )
+                encoder.setVertexBuffer_offset_atIndex(Some(&binding.buffer.raw), off, metal_i)
             };
         }
         self.state.bound_vertex_metal_indices.insert(buffer_index);

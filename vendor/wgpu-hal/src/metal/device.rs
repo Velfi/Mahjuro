@@ -123,11 +123,20 @@ enum MslBindingAttrKind {
 fn parse_msl_binding_attr_inner(inner: &str) -> Option<(MslBindingAttrKind, u32)> {
     let inner = inner.trim_start();
     let (kind, after_kw) = if inner.starts_with("buffer") {
-        (MslBindingAttrKind::Buffer, inner.get(6..).unwrap_or("").trim_start())
+        (
+            MslBindingAttrKind::Buffer,
+            inner.get(6..).unwrap_or("").trim_start(),
+        )
     } else if inner.starts_with("texture") {
-        (MslBindingAttrKind::Texture, inner.get(7..).unwrap_or("").trim_start())
+        (
+            MslBindingAttrKind::Texture,
+            inner.get(7..).unwrap_or("").trim_start(),
+        )
     } else if inner.starts_with("sampler") {
-        (MslBindingAttrKind::Sampler, inner.get(7..).unwrap_or("").trim_start())
+        (
+            MslBindingAttrKind::Sampler,
+            inner.get(7..).unwrap_or("").trim_start(),
+        )
     } else {
         return None;
     };
@@ -600,9 +609,8 @@ impl super::Device {
                     }
                 }
 
-                let metal_buffer_bindings_mask = Some(
-                    msl_buffer_mask_opt.unwrap_or(0) | naga_buffer_argument_mask,
-                );
+                let metal_buffer_bindings_mask =
+                    Some(msl_buffer_mask_opt.unwrap_or(0) | naga_buffer_argument_mask);
 
                 Ok(CompiledShader {
                     library,
@@ -1830,9 +1838,8 @@ impl crate::Device for super::Device {
                         desc.layout.total_counters.fs.buffers,
                         desc.layout.per_stage_map.fs.sizes_buffer,
                     );
-                    let fs_metal_buffer_bindings_mask = Some(
-                        fs_metal_buffer_bindings_mask_parsed.unwrap_or(0) | layout_buf_mask,
-                    );
+                    let fs_metal_buffer_bindings_mask =
+                        Some(fs_metal_buffer_bindings_mask_parsed.unwrap_or(0) | layout_buf_mask);
 
                     unsafe { descriptor.setFragmentFunction(Some(&fs.function)) };
                     if supports_mutability {

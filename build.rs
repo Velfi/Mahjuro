@@ -39,6 +39,8 @@
 
 #[path = "build/asset_pack_bake.rs"]
 mod asset_pack_bake;
+#[path = "build/dxc_redist.rs"]
+mod dxc_redist;
 #[path = "build/offline_bake.rs"]
 mod offline_bake;
 #[path = "build/relic_bake.rs"]
@@ -51,8 +53,6 @@ mod room_gpu_bake;
 mod room_shadow_bake;
 #[path = "build/showcase_decal_bake.rs"]
 mod showcase_decal_bake;
-#[path = "build/dxc_redist.rs"]
-mod dxc_redist;
 
 use std::env;
 use std::fs;

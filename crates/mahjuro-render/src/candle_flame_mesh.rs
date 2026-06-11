@@ -4,7 +4,7 @@
 //! shader; **uv** stores rest radial fraction for the cap ring.
 
 use crate::lit_mesh::MeshCpu;
-use crate::plume_sim::{flame_envelope_width, flame_height_at, y01_from_height, FLAME_BASE};
+use crate::plume_sim::{FLAME_BASE, flame_envelope_width, flame_height_at, y01_from_height};
 use crate::tile_glb::Vertex3dTex;
 
 const CAP_STEPS: usize = 6;

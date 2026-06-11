@@ -298,8 +298,7 @@ fn init_render_scale_and_depth_resources(
         adapter_name,
         integrated_gpu,
         Some(&adapter_memory),
-    )
-    {
+    ) {
         match memory_model {
             mahjuro_gfx_types::GraphicsMemoryModel::UnifiedMemory { .. } => log::warn!(
                 "adapter '{adapter_name}' reports unified memory and a constrained bandwidth/memory class; startup/upload budgets may need tuning"

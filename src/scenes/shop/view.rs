@@ -175,7 +175,9 @@ pub(super) fn shop_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
                 eye: [0.0 * cs, -1517.6 * cs, 1557.2 * cs],
                 target: [0.0, 0.0, 0.0],
                 up: [0.0, 0.0, 1.0],
-                projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: 58.0 },
+                projection: crate::render::draw_cmd::CameraProjection::Perspective {
+                    fovy_deg: 58.0,
+                },
                 clip_near: None,
                 clip_far: None,
             }
@@ -1332,7 +1334,12 @@ fn hover_tooltip_content(
             } else {
                 color::RUBY
             };
-            Some((item.name(), item.description(shop.memorial_snapshot.as_ref()), cta, col))
+            Some((
+                item.name(),
+                item.description(shop.memorial_snapshot.as_ref()),
+                cta,
+                col,
+            ))
         }
         ShopHit::Ribbon(i) => {
             let oi = i.checked_sub(n_for_sale_zodiacs)?;
@@ -1367,7 +1374,12 @@ fn hover_tooltip_content(
             } else {
                 color::RUBY
             };
-            Some((item.name(), item.description(shop.memorial_snapshot.as_ref()), cta, col))
+            Some((
+                item.name(),
+                item.description(shop.memorial_snapshot.as_ref()),
+                cta,
+                col,
+            ))
         }
         ShopHit::Talisman(i) => {
             let oi = i.checked_sub(n_for_sale_talismans)?;

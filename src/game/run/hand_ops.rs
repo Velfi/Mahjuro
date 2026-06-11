@@ -169,11 +169,7 @@ impl RunState {
         };
         use crate::core::hand::kong_structure_bonus;
         use crate::game::game_mode::HAND_SIZE;
-        let kongs_after = kong_structure_bonus(
-            self.structure_sets
-                .iter()
-                .chain(sets.iter()),
-        );
+        let kongs_after = kong_structure_bonus(self.structure_sets.iter().chain(sets.iter()));
         if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
             return self.play_rejection_callout().map(str::to_string);
         }
@@ -197,11 +193,7 @@ impl RunState {
         };
         use crate::core::hand::kong_structure_bonus;
         use crate::game::game_mode::HAND_SIZE;
-        let kongs_after = kong_structure_bonus(
-            self.structure_sets
-                .iter()
-                .chain(sets.iter()),
-        );
+        let kongs_after = kong_structure_bonus(self.structure_sets.iter().chain(sets.iter()));
         if self.structure_tiles.len() + scoring_tiles.len() <= HAND_SIZE + kongs_after {
             return None;
         }

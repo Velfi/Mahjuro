@@ -17,19 +17,19 @@ use super::{tile_by_id, tile_is_debuffed};
 
 fn meld_all_tiles_match(s: &DetectedMeld, tiles: &[Tile], pred: impl Fn(&Tile) -> bool) -> bool {
     !s.tile_ids.is_empty()
-        && s.tile_ids.iter().all(|&tid| {
-            tile_by_id(tiles, tid).is_some_and(|t| pred(t))
-        })
+        && s.tile_ids
+            .iter()
+            .all(|&tid| tile_by_id(tiles, tid).is_some_and(|t| pred(t)))
 }
 
 fn structure_has_suit_meld(sets: &[DetectedMeld], tiles: &[Tile], suit: Suit) -> bool {
-    sets.iter().any(|s| meld_all_tiles_match(s, tiles, |t| t.suit == suit))
+    sets.iter()
+        .any(|s| meld_all_tiles_match(s, tiles, |t| t.suit == suit))
 }
 
 fn structure_has_dragon_meld(sets: &[DetectedMeld], tiles: &[Tile], rank: u8) -> bool {
-    sets.iter().any(|s| {
-        meld_all_tiles_match(s, tiles, |t| t.suit == Suit::Dragon && t.rank == rank)
-    })
+    sets.iter()
+        .any(|s| meld_all_tiles_match(s, tiles, |t| t.suit == Suit::Dragon && t.rank == rank))
 }
 
 pub(crate) fn apply_post_yaku_relic_modifiers(

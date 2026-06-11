@@ -18,7 +18,9 @@ pub use validation::{
 
 /// Extra tile capacity granted by kongs in structure (standard 4-tile kong +1,
 /// 5-tile kong +2 vs a triplet's three tiles).
-pub fn kong_structure_bonus(sets: impl IntoIterator<Item = impl std::borrow::Borrow<DetectedMeld>>) -> usize {
+pub fn kong_structure_bonus(
+    sets: impl IntoIterator<Item = impl std::borrow::Borrow<DetectedMeld>>,
+) -> usize {
     sets.into_iter()
         .filter(|s| s.borrow().kind == MeldKind::Kong)
         .map(|s| s.borrow().tile_ids.len().saturating_sub(3))

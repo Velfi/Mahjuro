@@ -539,12 +539,8 @@ pub fn push_ordeal_record_rows(
             clip,
             color::alpha(color::BRASS, 0.12),
         );
-        let ordeal_name = chart_primitives::truncate_text_to_width(
-            row.ordeal.name(),
-            name_w,
-            caption_px,
-            false,
-        );
+        let ordeal_name =
+            chart_primitives::truncate_text_to_width(row.ordeal.name(), name_w, caption_px, false);
         push_colored_label_clipped(
             labels,
             [x, ry, name_w, row_h],

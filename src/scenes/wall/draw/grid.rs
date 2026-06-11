@@ -7,7 +7,7 @@ use crate::game::engine::GameEngine;
 use crate::game::run::RunState;
 use crate::game::wall_ledger::{WallLedgerFaceGroup, WallTileEntry};
 use crate::game::wall_stats::{
-    abundance_color, abundance_state_for_display, AbundanceState, WallCountView, WallStats,
+    AbundanceState, WallCountView, WallStats, abundance_color, abundance_state_for_display,
 };
 use crate::render::doc_tile_camera::TOP_DOWN_TILE_ROTATION;
 use crate::render::draw_cmd::ShowcaseTilePlacement;
@@ -16,8 +16,8 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign};
 
 use super::super::focus::LedgerNav;
 use super::super::layout::{
-    grid_cell_rect, grid_row_rect, row_label_font_px, row_suit_color, text_line_h,
-    LEDGER_FOCUS_GLOW, LEDGER_FOCUS_OUTLINE, ROW_LABELS, WallLayout,
+    LEDGER_FOCUS_GLOW, LEDGER_FOCUS_OUTLINE, ROW_LABELS, WallLayout, grid_cell_rect, grid_row_rect,
+    row_label_font_px, row_suit_color, text_line_h,
 };
 use super::super::state::WallScreenState;
 use super::text::{push_text, push_text_maybe_clip};
@@ -61,7 +61,9 @@ pub fn draw_tile_ledger_grid(
                 push_cell_tile(placements, rep, exhausted, tile_area, run);
             }
         } else {
-            push_cell_tile_from_face(placements, entry.suit, entry.rank, exhausted, tile_area, run);
+            push_cell_tile_from_face(
+                placements, entry.suit, entry.rank, exhausted, tile_area, run,
+            );
         }
 
         let abundance = abundance_state_for_display(entry.suit, entry.display_count, screen.view);
@@ -148,14 +150,14 @@ fn draw_row_labels(
         let line_h = text_line_h(label_px);
         let label_y = row_y + (cell_h - line_h) * 0.5;
         let dot_y_offset = (line_h - dot) * 0.5;
-        let label_clip = [
-            layout.grid_content_x,
-            row_y,
-            layout.label_col_w,
-            cell_h,
-        ];
+        let label_clip = [layout.grid_content_x, row_y, layout.label_col_w, cell_h];
         frame.quad(GpuInstance {
-            rect: [layout.grid_content_x + 1.0, label_y + dot_y_offset, dot, dot],
+            rect: [
+                layout.grid_content_x + 1.0,
+                label_y + dot_y_offset,
+                dot,
+                dot,
+            ],
             color: color::alpha(row_suit_color(row_idx), 0.70),
             user: 0,
         });
@@ -257,11 +259,7 @@ fn push_corner_stamp(frame: &mut crate::render::draw_cmd::UiFrame, slip: [f32; 4
     });
 }
 
-fn count_color_for_cell(
-    exhausted: bool,
-    focused: bool,
-    abundance: AbundanceState,
-) -> [f32; 4] {
+fn count_color_for_cell(exhausted: bool, focused: bool, abundance: AbundanceState) -> [f32; 4] {
     if exhausted {
         color::alpha(color::RUBY, if focused { 0.72 } else { 0.46 })
     } else if abundance == AbundanceState::Abundant {
@@ -295,7 +293,10 @@ fn push_border(frame: &mut crate::render::draw_cmd::UiFrame, rect: [f32; 4], t: 
 }
 
 fn representative_entry<'a>(entries: &'a [WallTileEntry]) -> Option<&'a WallTileEntry> {
-    entries.iter().find(|e| !e.drawn).or_else(|| entries.first())
+    entries
+        .iter()
+        .find(|e| !e.drawn)
+        .or_else(|| entries.first())
 }
 
 fn push_cell_tile(

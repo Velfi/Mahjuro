@@ -68,7 +68,9 @@ pub fn push_defeat_memorial_tableau(
         eye: eye.to_array(),
         target: look_target.to_array(),
         up: [0.0, 0.0, 1.0],
-        projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: DEFEAT_FOVY_DEG },
+        projection: crate::render::draw_cmd::CameraProjection::Perspective {
+            fovy_deg: DEFEAT_FOVY_DEG,
+        },
         clip_near: Some(0.05),
         clip_far: None,
     };

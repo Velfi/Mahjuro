@@ -1,8 +1,6 @@
 use super::*;
 
-use crate::scene_transition::{
-    PendingSceneDestination, SceneTag, transition_spec_for_edge,
-};
+use crate::scene_transition::{PendingSceneDestination, SceneTag, transition_spec_for_edge};
 use crate::sdl_shell::SdlShell;
 use crate::ui::input::RumbleLabOp;
 

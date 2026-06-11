@@ -21,8 +21,6 @@ mod cascade_tuning_timeline;
 #[cfg(feature = "game")]
 mod crash_guard;
 #[cfg(feature = "game")]
-mod win_log_console;
-#[cfg(feature = "game")]
 mod debug_menu;
 #[cfg(feature = "game")]
 mod debug_overlays;
@@ -65,6 +63,8 @@ pub mod sfx_id;
 mod shell_open;
 #[cfg(feature = "game")]
 mod trailer_mode;
+#[cfg(feature = "game")]
+mod win_log_console;
 pub use mahjuro_render::physical_size;
 #[cfg(feature = "game")]
 #[path = "main/scene_transition.rs"]
@@ -302,10 +302,7 @@ fn init_env_logger() {
                     builder.target(env_logger::Target::Pipe(Box::new(LineWriter::new(f))));
                 }
                 Err(e) => {
-                    eprintln!(
-                        "Mahjuro: could not open log file {}: {e}",
-                        path.display()
-                    );
+                    eprintln!("Mahjuro: could not open log file {}: {e}", path.display());
                 }
             }
         }

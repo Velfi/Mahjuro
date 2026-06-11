@@ -269,7 +269,14 @@ fn collect_decompositions(
             tile_ids: remaining[..count].iter().map(|t| t.id).collect(),
         });
         let rest: Vec<Tile> = remaining[count..].to_vec();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
+        collect_decompositions(
+            &rest,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            on_found,
+        );
         found.pop();
     }
 
@@ -285,7 +292,14 @@ fn collect_decompositions(
             tile_ids: vec![remaining[0].id, remaining[1].id, remaining[2].id],
         });
         let rest: Vec<Tile> = remaining[3..].to_vec();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
+        collect_decompositions(
+            &rest,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            on_found,
+        );
         found.pop();
     }
 
@@ -309,7 +323,14 @@ fn collect_decompositions(
             tile_ids: vec![remaining[0].id, remaining[1].id],
         });
         let rest: Vec<Tile> = remaining[2..].to_vec();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
+        collect_decompositions(
+            &rest,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            on_found,
+        );
         found.pop();
     }
 
@@ -325,7 +346,14 @@ fn collect_decompositions(
                 tile_ids: vec![remaining[0].id, remaining[1].id, fid],
             });
             let rest: Vec<Tile> = remaining[2..].to_vec();
-            collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
+            collect_decompositions(
+                &rest,
+                flower_pool,
+                found,
+                allow_wrap,
+                allow_five_tile_kong,
+                on_found,
+            );
             found.pop();
             flower_pool.push(fid);
         }
@@ -372,7 +400,14 @@ fn collect_sequence(
                 .enumerate()
                 .filter_map(|(i, t)| (i != 0 && i != mid_idx && i != hi_idx).then_some(*t))
                 .collect();
-            collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
+            collect_decompositions(
+                &rest,
+                flower_pool,
+                found,
+                allow_wrap,
+                allow_five_tile_kong,
+                on_found,
+            );
             found.pop();
         }
     }
@@ -431,7 +466,14 @@ fn collect_wrap_sequence(
                     .enumerate()
                     .filter_map(|(i, t)| (i != 0 && i != mid_idx && i != hi_idx).then_some(*t))
                     .collect();
-                collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
+                collect_decompositions(
+                    &rest,
+                    flower_pool,
+                    found,
+                    allow_wrap,
+                    allow_five_tile_kong,
+                    on_found,
+                );
                 found.pop();
             }
         }
@@ -463,7 +505,14 @@ fn collect_sequence_with_flower(
             .enumerate()
             .filter_map(|(i, t)| (i != 0 && i != mid_idx).then_some(*t))
             .collect();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
+        collect_decompositions(
+            &rest,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            on_found,
+        );
         found.pop();
         flower_pool.push(fid);
     }
@@ -483,7 +532,14 @@ fn collect_sequence_with_flower(
             .enumerate()
             .filter_map(|(i, t)| (i != 0 && i != hi_idx).then_some(*t))
             .collect();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
+        collect_decompositions(
+            &rest,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            on_found,
+        );
         found.pop();
         flower_pool.push(fid);
     }
@@ -504,7 +560,14 @@ fn collect_sequence_with_flower(
             .enumerate()
             .filter_map(|(i, t)| (i != 0 && i != next_idx).then_some(*t))
             .collect();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
+        collect_decompositions(
+            &rest,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            on_found,
+        );
         found.pop();
         flower_pool.push(fid);
     }
@@ -549,7 +612,14 @@ fn collect_wrap_sequence_with_flower(
             .enumerate()
             .filter_map(|(i, t)| (i != 0 && i != present_idx).then_some(*t))
             .collect();
-        collect_decompositions(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong, on_found);
+        collect_decompositions(
+            &rest,
+            flower_pool,
+            found,
+            allow_wrap,
+            allow_five_tile_kong,
+            on_found,
+        );
         found.pop();
         flower_pool.push(fid);
     }
@@ -740,7 +810,8 @@ pub(super) fn backtrack_decompose_flowers(
             tile_ids: remaining[..count].iter().map(|t| t.id).collect(),
         });
         let rest: Vec<Tile> = remaining[count..].to_vec();
-        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong)
+        {
             return true;
         }
         found.pop();
@@ -759,7 +830,8 @@ pub(super) fn backtrack_decompose_flowers(
         };
         found.push(set);
         let rest: Vec<Tile> = remaining[3..].to_vec();
-        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong)
+        {
             return true;
         }
         found.pop();
@@ -788,7 +860,8 @@ pub(super) fn backtrack_decompose_flowers(
         };
         found.push(set);
         let rest: Vec<Tile> = remaining[2..].to_vec();
-        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong)
+        {
             return true;
         }
         found.pop();
@@ -811,7 +884,13 @@ pub(super) fn backtrack_decompose_flowers(
             };
             found.push(set);
             let rest: Vec<Tile> = remaining[2..].to_vec();
-            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
+            if backtrack_decompose_flowers(
+                &rest,
+                flower_pool,
+                found,
+                allow_wrap,
+                allow_five_tile_kong,
+            ) {
                 return true;
             }
             found.pop();
@@ -868,7 +947,13 @@ fn try_sequence(
                     rest.push(*t);
                 }
             }
-            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
+            if backtrack_decompose_flowers(
+                &rest,
+                flower_pool,
+                found,
+                allow_wrap,
+                allow_five_tile_kong,
+            ) {
                 return true;
             }
             found.pop();
@@ -936,7 +1021,13 @@ fn try_wrap_sequence(
                         rest.push(*t);
                     }
                 }
-                if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
+                if backtrack_decompose_flowers(
+                    &rest,
+                    flower_pool,
+                    found,
+                    allow_wrap,
+                    allow_five_tile_kong,
+                ) {
                     return true;
                 }
                 found.pop();
@@ -977,7 +1068,13 @@ fn try_sequence_with_flower(
                     rest.push(*t);
                 }
             }
-            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
+            if backtrack_decompose_flowers(
+                &rest,
+                flower_pool,
+                found,
+                allow_wrap,
+                allow_five_tile_kong,
+            ) {
                 return true;
             }
             found.pop();
@@ -1006,7 +1103,13 @@ fn try_sequence_with_flower(
                     rest.push(*t);
                 }
             }
-            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
+            if backtrack_decompose_flowers(
+                &rest,
+                flower_pool,
+                found,
+                allow_wrap,
+                allow_five_tile_kong,
+            ) {
                 return true;
             }
             found.pop();
@@ -1037,7 +1140,13 @@ fn try_sequence_with_flower(
                     rest.push(*t);
                 }
             }
-            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
+            if backtrack_decompose_flowers(
+                &rest,
+                flower_pool,
+                found,
+                allow_wrap,
+                allow_five_tile_kong,
+            ) {
                 return true;
             }
             found.pop();
@@ -1095,7 +1204,8 @@ fn try_wrap_sequence_with_flower(
                 rest.push(*t);
             }
         }
-        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong) {
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap, allow_five_tile_kong)
+        {
             return true;
         }
         found.pop();

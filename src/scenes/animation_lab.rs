@@ -186,7 +186,9 @@ impl AnimationLabScene {
                 eye: eye.to_array(),
                 target: target.to_array(),
                 up: [0.0, 0.0, 1.0],
-                projection: crate::render::draw_cmd::CameraProjection::Perspective { fovy_deg: 42.0 },
+                projection: crate::render::draw_cmd::CameraProjection::Perspective {
+                    fovy_deg: 42.0,
+                },
                 clip_near: Some((radius * 0.02).max(0.05)),
                 clip_far: Some(radius * 40.0),
             };

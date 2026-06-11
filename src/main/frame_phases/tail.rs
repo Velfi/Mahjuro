@@ -1,6 +1,6 @@
 use super::locals::FrameLocals;
-use crate::audio;
 use crate::App;
+use crate::audio;
 use crate::sdl_shell::SdlShell;
 
 pub fn run(app: &mut App, shell: &mut SdlShell, locals: &mut FrameLocals) {
@@ -20,4 +20,3 @@ pub fn run(app: &mut App, shell: &mut SdlShell, locals: &mut FrameLocals) {
         app.audio.play_sfx(audio::SfxId::UiConfirm);
     }
 }
-

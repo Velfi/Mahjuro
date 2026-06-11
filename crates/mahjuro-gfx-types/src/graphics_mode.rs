@@ -44,8 +44,7 @@ impl AdapterMemoryProbe {
     }
 
     pub fn shared_system_mib(self) -> Option<u64> {
-        self.shared_system_bytes
-            .map(|b| b / (1024 * 1024))
+        self.shared_system_bytes.map(|b| b / (1024 * 1024))
     }
 
     /// True when OS-reported discrete VRAM is below [`AUTO_LOW_MEMORY_VRAM_THRESHOLD_MIB`].
@@ -252,8 +251,7 @@ impl GraphicsMode {
         let model = GraphicsMemoryModel::classify_adapter_with_memory(name, integrated_gpu, memory);
         match model {
             GraphicsMemoryModel::UnifiedMemory { .. } => {
-                adapter_name_suggests_apple_silicon(name)
-                    || adapter_name_suggests_steam_deck(name)
+                adapter_name_suggests_apple_silicon(name) || adapter_name_suggests_steam_deck(name)
             }
             GraphicsMemoryModel::DedicatedVram { .. } => false,
             GraphicsMemoryModel::Unknown => false,

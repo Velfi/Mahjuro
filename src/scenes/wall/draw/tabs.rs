@@ -5,7 +5,7 @@ use crate::render::theme::color;
 use crate::render::wgpu_renderer::TextAlign;
 
 use super::super::focus::LedgerNav;
-use super::super::layout::{view_toggle_rect, WallLayout};
+use super::super::layout::{WallLayout, view_toggle_rect};
 use super::text::push_text;
 
 pub fn draw_wall_tabs(
@@ -27,12 +27,7 @@ pub fn draw_wall_tabs(
     });
 
     frame.quad(crate::render::wgpu_renderer::GpuInstance {
-        rect: [
-            layout.content_x,
-            layout.panel_top,
-            layout.content_w,
-            1.0,
-        ],
+        rect: [layout.content_x, layout.panel_top, layout.content_w, 1.0],
         color: color::alpha(color::STONE, 0.18),
         user: 0,
     });

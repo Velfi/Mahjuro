@@ -2915,88 +2915,91 @@ impl WgpuRenderer {
 
         if !pending_transition_at_black {
             match scene_key {
-            Some(scene_keys::MAIN_MENU) | Some("main_menu_exterior") => {
-                if !room_env_upload_done {
-                    let before = self.rooms_gpu_loaded;
-                    self.ensure_main_menu_room_gpu();
-                    if self.rooms_gpu_loaded != before {
-                        room_env_upload_done = true;
+                Some(scene_keys::MAIN_MENU) | Some("main_menu_exterior") => {
+                    if !room_env_upload_done {
+                        let before = self.rooms_gpu_loaded;
+                        self.ensure_main_menu_room_gpu();
+                        if self.rooms_gpu_loaded != before {
+                            room_env_upload_done = true;
+                        }
+                    }
+                    crate::room_preload::advance_hub_cpu_prefetch_chain(true);
+                    if !room_env_upload_done {
+                        self.ensure_talisman_textures();
+                    }
+                    match continue_warmup {
+                        crate::room_preload::ContinueRoomWarmup::Shop => {
+                            self.maybe_upload_one_room_env(
+                                &mut room_env_upload_done,
+                                ROOM_SHOP,
+                                crate::room_glb::shop_cpu_ready_for_gpu_upload(),
+                                |r| r.ensure_shop_room_gpu(),
+                            );
+                        }
+                        crate::room_preload::ContinueRoomWarmup::Hallway => {
+                            self.maybe_upload_one_room_env(
+                                &mut room_env_upload_done,
+                                ROOM_SHOP,
+                                crate::room_glb::shop_cpu_ready_for_gpu_upload(),
+                                |r| r.ensure_shop_room_gpu(),
+                            );
+                            self.maybe_upload_one_room_env(
+                                &mut room_env_upload_done,
+                                ROOM_HALLWAY,
+                                crate::hallway_glb::hallway_cpu_ready_for_gpu_upload(),
+                                |r| r.ensure_hallway_room_gpu(),
+                            );
+                        }
+                        crate::room_preload::ContinueRoomWarmup::Gameplay => {
+                            upload_gameplay(
+                                self,
+                                gameplay_eager_upload_budget_ms(self.graphics_mode),
+                            );
+                        }
+                        crate::room_preload::ContinueRoomWarmup::None => {}
                     }
                 }
-                crate::room_preload::advance_hub_cpu_prefetch_chain(true);
-                if !room_env_upload_done {
-                    self.ensure_talisman_textures();
-                }
-                match continue_warmup {
-                    crate::room_preload::ContinueRoomWarmup::Shop => {
-                        self.maybe_upload_one_room_env(
-                            &mut room_env_upload_done,
-                            ROOM_SHOP,
-                            crate::room_glb::shop_cpu_ready_for_gpu_upload(),
-                            |r| r.ensure_shop_room_gpu(),
-                        );
+                Some(scene_keys::SHOP)
+                | Some("showcase")
+                | Some(scene_keys::HALLWAY)
+                | Some("pick_chamber") => {
+                    self.maybe_upload_one_room_env(
+                        &mut room_env_upload_done,
+                        ROOM_SHOP,
+                        crate::room_glb::shop_cpu_ready_for_gpu_upload(),
+                        |r| r.ensure_shop_room_gpu(),
+                    );
+                    self.maybe_upload_one_room_env(
+                        &mut room_env_upload_done,
+                        ROOM_HALLWAY,
+                        crate::hallway_glb::hallway_cpu_ready_for_gpu_upload(),
+                        |r| r.ensure_hallway_room_gpu(),
+                    );
+                    if self.rooms_gpu_loaded & ROOM_HALLWAY != 0
+                        && self.rooms_gpu_loaded & ROOM_GAMEPLAY == 0
+                    {
+                        crate::room_preload::start_gameplay_cpu_prefetch();
                     }
-                    crate::room_preload::ContinueRoomWarmup::Hallway => {
-                        self.maybe_upload_one_room_env(
-                            &mut room_env_upload_done,
-                            ROOM_SHOP,
-                            crate::room_glb::shop_cpu_ready_for_gpu_upload(),
-                            |r| r.ensure_shop_room_gpu(),
-                        );
-                        self.maybe_upload_one_room_env(
-                            &mut room_env_upload_done,
-                            ROOM_HALLWAY,
-                            crate::hallway_glb::hallway_cpu_ready_for_gpu_upload(),
-                            |r| r.ensure_hallway_room_gpu(),
-                        );
+                    if matches!(scene_key, Some(scene_keys::HALLWAY) | Some("pick_chamber")) {
+                        upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
+                    } else if matches!(scene_key, Some(scene_keys::SHOP) | Some("showcase")) {
+                        upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
                     }
-                    crate::room_preload::ContinueRoomWarmup::Gameplay => {
-                        upload_gameplay(self, gameplay_eager_upload_budget_ms(self.graphics_mode));
-                    }
-                    crate::room_preload::ContinueRoomWarmup::None => {}
                 }
-            }
-            Some(scene_keys::SHOP)
-            | Some("showcase")
-            | Some(scene_keys::HALLWAY)
-            | Some("pick_chamber") => {
-                self.maybe_upload_one_room_env(
-                    &mut room_env_upload_done,
-                    ROOM_SHOP,
-                    crate::room_glb::shop_cpu_ready_for_gpu_upload(),
-                    |r| r.ensure_shop_room_gpu(),
-                );
-                self.maybe_upload_one_room_env(
-                    &mut room_env_upload_done,
-                    ROOM_HALLWAY,
-                    crate::hallway_glb::hallway_cpu_ready_for_gpu_upload(),
-                    |r| r.ensure_hallway_room_gpu(),
-                );
-                if self.rooms_gpu_loaded & ROOM_HALLWAY != 0
-                    && self.rooms_gpu_loaded & ROOM_GAMEPLAY == 0
-                {
-                    crate::room_preload::start_gameplay_cpu_prefetch();
+                Some(scene_keys::ARCHIVE) | Some("collection") => {
+                    self.maybe_upload_one_room_env(
+                        &mut room_env_upload_done,
+                        ROOM_ARCHIVE,
+                        crate::archive_glb::archive_cpu_ready_for_gpu_upload(),
+                        |r| r.ensure_archive_room_gpu(),
+                    );
                 }
-                if matches!(scene_key, Some(scene_keys::HALLWAY) | Some("pick_chamber")) {
-                    upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
-                } else if matches!(scene_key, Some(scene_keys::SHOP) | Some("showcase")) {
-                    upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
-                }
-            }
-            Some(scene_keys::ARCHIVE) | Some("collection") => {
-                self.maybe_upload_one_room_env(
-                    &mut room_env_upload_done,
-                    ROOM_ARCHIVE,
-                    crate::archive_glb::archive_cpu_ready_for_gpu_upload(),
-                    |r| r.ensure_archive_room_gpu(),
-                );
-            }
-            Some(scene_keys::GAMEPLAY)
-            | Some(scene_keys::VICTORY)
-            | Some(scene_keys::DEFEAT)
-            | Some("game_over")
-            | Some("tutorial") => upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS),
-            _ => {}
+                Some(scene_keys::GAMEPLAY)
+                | Some(scene_keys::VICTORY)
+                | Some(scene_keys::DEFEAT)
+                | Some("game_over")
+                | Some("tutorial") => upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS),
+                _ => {}
             }
         }
 

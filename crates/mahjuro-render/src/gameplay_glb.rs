@@ -1393,7 +1393,9 @@ pub fn gameplay_cash_in_camera_for_screen_rect(
             eye: (focus + view_dir * dist).to_array(),
             target: focus.to_array(),
             up: base.up,
-            projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: base.fovy_deg() },
+            projection: crate::draw_cmd::CameraProjection::Perspective {
+                fovy_deg: base.fovy_deg(),
+            },
             clip_near: Some((dist * 0.02).max(0.25)),
             clip_far: Some(dist * 40.0),
         };
@@ -1414,7 +1416,9 @@ pub fn gameplay_cash_in_camera_for_screen_rect(
         eye: (focus + view_dir * dist).to_array(),
         target: focus.to_array(),
         up: base.up,
-        projection: crate::draw_cmd::CameraProjection::Perspective { fovy_deg: base.fovy_deg() },
+        projection: crate::draw_cmd::CameraProjection::Perspective {
+            fovy_deg: base.fovy_deg(),
+        },
         clip_near: Some((dist * 0.02).max(0.25)),
         clip_far: Some(dist * 40.0),
     };

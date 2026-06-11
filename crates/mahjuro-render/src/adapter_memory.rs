@@ -34,7 +34,10 @@ pub fn probe_adapter_memory(adapter: &wgpu::Adapter) -> AdapterMemoryProbe {
     match adapter.get_info().backend {
         #[cfg(windows)]
         wgpu::Backend::Dx12 => probe_dx12(adapter),
-        #[cfg(all(not(target_arch = "wasm32"), any(target_os = "linux", target_os = "android", target_os = "windows")))]
+        #[cfg(all(
+            not(target_arch = "wasm32"),
+            any(target_os = "linux", target_os = "android", target_os = "windows")
+        ))]
         wgpu::Backend::Vulkan => probe_vulkan(adapter),
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         wgpu::Backend::Metal => probe_metal(adapter),
@@ -55,7 +58,10 @@ fn probe_dx12(adapter: &wgpu::Adapter) -> AdapterMemoryProbe {
     caps_to_probe(caps)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), any(target_os = "linux", target_os = "android", target_os = "windows")))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "linux", target_os = "android", target_os = "windows")
+))]
 fn probe_vulkan(adapter: &wgpu::Adapter) -> AdapterMemoryProbe {
     use wgpu_hal::api::Vulkan;
     let caps = unsafe {

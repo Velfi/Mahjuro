@@ -1257,7 +1257,12 @@ fn draw_plaque(
     };
 
     let mut text_x = pill_x + pill_w + inline_gap;
-    let text_clip = [text_x, header_y, (text_right - text_x).max(0.0), header_line_h];
+    let text_clip = [
+        text_x,
+        header_y,
+        (text_right - text_x).max(0.0),
+        header_line_h,
+    ];
 
     if matches!(state, ProgressionState::Unseen) {
         let mystery_glyph = line_font * 1.02;

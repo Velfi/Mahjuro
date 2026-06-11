@@ -206,7 +206,9 @@ impl FlameDebugOverlay {
     fn action_label(row: usize) -> (&'static str, ButtonVariant) {
         match row {
             FLAME_TRIGGER_GUST_ROW => ("Trigger gust (per candle)", ButtonVariant::Primary),
-            FLAME_TRIGGER_ROOM_GUST_ROW => ("Trigger room gust (all candles)", ButtonVariant::Primary),
+            FLAME_TRIGGER_ROOM_GUST_ROW => {
+                ("Trigger room gust (all candles)", ButtonVariant::Primary)
+            }
             FLAME_SAVE_ROW => ("Save for shop / gameplay", ButtonVariant::Primary),
             FLAME_RESET_ROW => ("Reset to defaults", ButtonVariant::Danger),
             _ => ("Close", ButtonVariant::Subtle),

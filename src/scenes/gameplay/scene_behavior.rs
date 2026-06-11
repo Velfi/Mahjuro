@@ -1555,16 +1555,14 @@ impl SceneBehavior for GameplayScene {
             focus_rect_graph.push((FocusTarget::Ordeal, rect));
         }
         focus_rect_graph.push((FocusTarget::RoundWind, round_wind_rect));
-        let (score_rect, target_rect) =
-            super::score_counter::resolve_score_roller_bank_focus_rects(
-                layout.window_w,
-                layout.window_h,
-                &scene_camera,
-                env_h,
-            );
+        let (score_rect, target_rect) = super::score_counter::resolve_score_roller_bank_focus_rects(
+            layout.window_w,
+            layout.window_h,
+            &scene_camera,
+            env_h,
+        );
         if score_rect[2] > 1.0 && score_rect[3] > 1.0 {
-            focus_rect_graph
-                .push((FocusTarget::ScoreRoller(ScoreRollerBank::Score), score_rect));
+            focus_rect_graph.push((FocusTarget::ScoreRoller(ScoreRollerBank::Score), score_rect));
         }
         if target_rect[2] > 1.0 && target_rect[3] > 1.0 {
             focus_rect_graph.push((

@@ -377,15 +377,17 @@ fn run_log_receipt_layout(
     let min_px = 8.0_f32;
 
     let mut row_font_px = target_font_px.max(min_px);
-    let mut score_w = chart_primitives::measure_text_width(RUN_LOG_SCORE_SAMPLE, row_font_px, true)
-        + 6.0;
-    let mut id_w =
-        chart_primitives::measure_text_width(RUN_LOG_ID_SAMPLE, row_font_px, true) + 4.0;
+    let mut score_w =
+        chart_primitives::measure_text_width(RUN_LOG_SCORE_SAMPLE, row_font_px, true) + 6.0;
+    let mut id_w = chart_primitives::measure_text_width(RUN_LOG_ID_SAMPLE, row_font_px, true) + 4.0;
     while row_font_px > min_px
-        && (score_w > inner_w * 0.38 || id_w > inner_w * 0.26 || score_w + id_w + col_gap * 2.0 + 28.0 > inner_w)
+        && (score_w > inner_w * 0.38
+            || id_w > inner_w * 0.26
+            || score_w + id_w + col_gap * 2.0 + 28.0 > inner_w)
     {
         row_font_px -= 0.5;
-        score_w = chart_primitives::measure_text_width(RUN_LOG_SCORE_SAMPLE, row_font_px, true) + 6.0;
+        score_w =
+            chart_primitives::measure_text_width(RUN_LOG_SCORE_SAMPLE, row_font_px, true) + 6.0;
         id_w = chart_primitives::measure_text_width(RUN_LOG_ID_SAMPLE, row_font_px, true) + 4.0;
     }
 
