@@ -19,7 +19,7 @@ use super::header::draw_wall_header;
 use super::summary::draw_wall_summary_panel;
 use super::tabs::draw_wall_tabs;
 
-pub fn draw_strategic_frame(scene: &StrategicWallScene, ctx: DrawCtx<'_>) -> UiFrame {
+pub fn draw_strategic_frame(scene: &StrategicWallScene, mut ctx: DrawCtx<'_>) -> UiFrame {
     let w = ctx.layout.window_w;
     let h = ctx.layout.window_h;
     let jr = read_boost(w, h);
@@ -45,6 +45,9 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, ctx: DrawCtx<'_>) -> UiF
 
     push_back_button(&mut frame, &scene.focus.tree, w, h);
 
+    let focus = scene.focused_nav();
+    let flat_items = scene.flat_items(w, &layout, &frame_ctx.stats);
+
     let mut texts = Vec::new();
     draw_wall_header(&mut frame, &mut texts, w, h, jr, &layout, &frame_ctx.stats);
     draw_wall_tabs(
@@ -52,7 +55,7 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, ctx: DrawCtx<'_>) -> UiF
         &mut texts,
         &layout,
         scene.screen.view,
-        scene.focus.focus,
+        focus,
     );
     draw_wall_summary_panel(
         &mut frame,
@@ -60,7 +63,7 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, ctx: DrawCtx<'_>) -> UiF
         &layout,
         &frame_ctx.stats,
         scene.screen.view,
-        scene.focus.focus,
+        focus,
     );
 
     draw_grid_panel_chrome(&mut frame, &layout);
@@ -75,9 +78,15 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, ctx: DrawCtx<'_>) -> UiF
         &frame_ctx.stats,
         &groups,
         ctx.run,
-        scene.focus.focus,
+        focus,
         h,
     );
+
+    scene
+        .focus
+        .tree
+        .register_flat_buttons(&flat_items, &mut frame.buttons);
+    ctx.stash_focus_nav_tree_flat(&scene.focus.tree, &flat_items, |a| format!("{a:?}"));
 
     let group = groups
         .get(&(scene.screen.selected.suit, scene.screen.selected.rank))
