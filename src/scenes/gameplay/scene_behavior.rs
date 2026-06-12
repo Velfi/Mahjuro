@@ -2,7 +2,7 @@ use super::focus::{GameplayButton, ScoreRollerBank};
 use super::*;
 use super::{animation_state, cascade_controller, input_handler};
 use crate::core::consumable::Consumable;
-use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
+use crate::core::relic::{RelicId, all_relic_defs};
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextLabel};
 use crate::scenes::options;
@@ -1588,8 +1588,7 @@ impl SceneBehavior for GameplayScene {
                                 .map(|d| d.name.to_string())
                                 .unwrap_or_else(|| "Relic".into());
                             let rare = def.map(|d| format!("{:?}", d.rarity)).unwrap_or_default();
-                            let desc = relic_description_live(
-                                rid,
+                            let desc = rid.description_live(
                                 &run.relic_counters,
                                 run.yen,
                                 Some((&run.relics, i)),

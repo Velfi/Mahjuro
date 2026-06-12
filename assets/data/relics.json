@@ -900,6 +900,19 @@
     ]
   },
   {
+    "id": "rescued_by_probes",
+    "name": "Rescued By Probes",
+    "description": "When you would lose a blind for lack of plays, destroy this relic and gain +1 play",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Desert survey probes answer a thumper's call — one last rhythm buys you another turn.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
     "id": "ghost_hand",
     "name": "Ghost Hand",
     "description": "Cashing in a structure: +{{ghost_hand_chips}} chips from the value of your current hand",

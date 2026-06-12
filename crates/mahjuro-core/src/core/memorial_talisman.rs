@@ -29,7 +29,7 @@ struct MemorialPresentationRaw {
 
 struct MemorialPresentation {
     name: &'static str,
-    description: &'static str,
+    description_template: &'static str,
     accent: [f32; 4],
 }
 
@@ -44,7 +44,7 @@ fn memorial_presentations() -> &'static HashMap<MemorialTalismanKind, MemorialPr
                     r.id,
                     MemorialPresentation {
                         name: Box::leak(r.name.into_boxed_str()),
-                        description: Box::leak(r.description.into_boxed_str()),
+                        description_template: Box::leak(r.description.into_boxed_str()),
                         accent: r.accent,
                     },
                 )
@@ -116,14 +116,13 @@ impl MemorialTalismanKind {
         presentation(self).name
     }
 
-    /// Static template from JSON (may contain `{{token}}` placeholders).
-    pub fn description(self) -> &'static str {
-        presentation(self).description
-    }
-
-    /// Tooltip copy with live values from the frozen defeat journal.
-    pub fn description_live(self, snapshot: Option<&MemorialJournalSnapshot>) -> String {
-        crate::core::memorial_desc_template::memorial_description_live(self, snapshot)
+    /// Tooltip / inspect copy; pass the defeat journal snapshot when available.
+    pub fn description(self, snapshot: Option<&MemorialJournalSnapshot>) -> String {
+        crate::core::memorial_desc_template::expand_memorial_description_templates(
+            self,
+            presentation(self).description_template,
+            snapshot,
+        )
     }
 
     pub fn accent_color(self) -> [f32; 4] {

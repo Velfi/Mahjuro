@@ -548,7 +548,7 @@ impl ConsumableShopItem {
                 )
             }
             Consumable::Talisman(t) => t.description().to_string(),
-            Consumable::Memorial(m) => m.description_live(memorial_snapshot),
+            Consumable::Memorial(m) => m.description(memorial_snapshot),
         }
     }
 }

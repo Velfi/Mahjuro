@@ -192,11 +192,13 @@ fn upload_bc7_mip_chain(
     format: wgpu::TextureFormat,
     bc7_supported: bool,
 ) -> (wgpu::Texture, wgpu::TextureView, usize) {
-    use crate::relic_gpu_residency::{bc7_mip_level_count, bc7_upload_chain_bytes, rgba_mip_bytes};
+    use crate::relic_gpu_residency::{
+        bc7_mip_level_count, bc7_upload_chain_bytes, bc7_upload_chain_valid, rgba_mip_bytes,
+    };
 
     if bc7_supported
         && !chain.bc7_bytes.is_empty()
-        && crate::relic_gpu_residency::bc7_block_aligned(chain.base_width, chain.base_height)
+        && bc7_upload_chain_valid(chain.base_width, chain.base_height, chain.mip_count)
     {
         let upload_mip_count = bc7_mip_level_count(chain.base_width, chain.base_height)
             .min(chain.mip_count.max(1));

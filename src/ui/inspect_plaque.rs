@@ -442,7 +442,7 @@ pub fn gameplay_consumable_description_full(
             z.level_up_chips_per_level(),
         ),
         Consumable::Talisman(t) => t.description().to_string(),
-        Consumable::Memorial(m) => m.description_live(memorial_snapshot),
+        Consumable::Memorial(m) => m.description(memorial_snapshot),
     }
 }
 

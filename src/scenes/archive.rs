@@ -2291,8 +2291,7 @@ fn description_for(
         return "Locked — keep playing to reveal this entry.".to_string();
     }
     match &art.kind {
-        ArtifactKind::Relic(id) => crate::core::relic::relic_description_live(
-            *id,
+        ArtifactKind::Relic(id) => id.description_live(
             &run.relic_counters,
             run.yen,
             None,
@@ -2301,7 +2300,7 @@ fn description_for(
         ),
         ArtifactKind::Talisman(kind) => kind.description().to_string(),
         ArtifactKind::MemorialTalisman(kind) => {
-            kind.description_live(run.memorial_snapshot.as_ref())
+            kind.description(run.memorial_snapshot.as_ref())
         }
         ArtifactKind::Zodiac(kind) => format!(
             "Levelled by the {} zodiac ribbon (+{:.2} mult, +{} chips per level).",

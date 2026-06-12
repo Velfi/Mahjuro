@@ -65,7 +65,8 @@
       { "key": "name", "type": "string" },
       { "key": "description", "type": "string" },
       { "key": "shop_price", "type": "number", "step": 1 },
-      { "key": "texture_file", "type": "string" }
+      { "key": "texture_file", "type": "string" },
+      { "key": "roll", "type": "json" }
     ]
   },
   "zodiacs": {

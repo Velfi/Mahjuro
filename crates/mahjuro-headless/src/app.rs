@@ -154,7 +154,7 @@ impl HeadlessApp {
         let hero = UnlockPage {
             category: "New Relic".into(),
             name: chosen.name.into(),
-            description: chosen.description.into(),
+            description: chosen.id.description(),
             relic_id: Some(chosen.id),
             accent_color: accent,
         };

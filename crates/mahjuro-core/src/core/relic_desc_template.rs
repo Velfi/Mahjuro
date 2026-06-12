@@ -1,7 +1,8 @@
 //! `{{token}}` placeholders inside `assets/data/relics.json` descriptions.
 //!
-//! Expanded at display time via [`expand_relic_description_templates`] so shop,
-//! gameplay, and collection tooltips show live counters. When [`RelicDescContext::live`]
+//! Expanded at display time via [`RelicId::description`] and [`RelicId::description_live`]
+//! so shop, gameplay, and collection tooltips show live counters. When
+//! [`RelicDescContext::live`] is false (archive catalog), live tokens fall back
 //! is false (archive catalog), live tokens fall back to design-time defaults so
 //! run state is not leaked. Unknown tokens stay literal so typos are visible.
 

@@ -626,6 +626,91 @@ mod cases {
     }
 
     #[test]
+    fn rescued_by_probes_salvages_out_of_plays() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.plays_remaining = 0;
+        run.relics.active.push(RelicId::RescuedByProbes);
+
+        run.refill_hand(&mut bus);
+
+        assert!(
+            !bus.queue
+                .iter()
+                .any(|ev| matches!(ev, GameEvent::GameOver { .. })),
+            "Rescued By Probes should prevent GameOver when out of plays"
+        );
+        assert_eq!(run.plays_remaining, 1);
+        assert!(
+            !run.relics.has(RelicId::RescuedByProbes),
+            "Rescued By Probes should be destroyed"
+        );
+        assert!(bus.queue.iter().any(|ev| matches!(
+            ev,
+            GameEvent::RelicActivated(RelicId::RescuedByProbes)
+        )));
+    }
+
+    #[test]
+    fn rescued_by_probes_preferred_over_second_wind_on_out_of_plays() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.plays_remaining = 0;
+        run.relics.active.push(RelicId::RescuedByProbes);
+        run.relics.active.push(RelicId::SecondWind);
+
+        run.refill_hand(&mut bus);
+
+        assert!(
+            !bus.queue
+                .iter()
+                .any(|ev| matches!(ev, GameEvent::GameOver { .. })),
+            "Rescued By Probes should prevent GameOver when out of plays"
+        );
+        assert!(
+            !bus.queue.iter().any(|ev| matches!(
+                ev,
+                GameEvent::RoundComplete {
+                    reached_target: false,
+                    ..
+                }
+            )),
+            "Second Wind should not forfeit the blind when Rescued By Probes salvages"
+        );
+        assert_eq!(run.plays_remaining, 1);
+        assert!(
+            !run.relics.has(RelicId::RescuedByProbes),
+            "Rescued By Probes should be destroyed"
+        );
+        assert!(
+            run.relics.has(RelicId::SecondWind),
+            "Second Wind should remain when Rescued By Probes salvages"
+        );
+    }
+
+    #[test]
+    fn rescued_by_probes_does_not_salvage_no_actions_remaining() {
+        let (mut run, mut bus) = dead_hand_no_actions_fixture();
+        run.relics.active.push(RelicId::RescuedByProbes);
+
+        run.refill_hand(&mut bus);
+
+        assert!(
+            bus.queue.iter().any(|ev| matches!(
+                ev,
+                GameEvent::GameOver {
+                    reason: GameOverReason::NoActionsRemaining,
+                }
+            )),
+            "Rescued By Probes should not salvage dead-hand defeat"
+        );
+        assert!(
+            run.relics.has(RelicId::RescuedByProbes),
+            "Rescued By Probes should remain when not triggered"
+        );
+    }
+
+    #[test]
     fn exhausted_preferred_over_boss_mark_for_out_of_plays() {
         let mut run = test_run();
         let mut bus = bus();

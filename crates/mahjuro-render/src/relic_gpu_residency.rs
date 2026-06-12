@@ -15,8 +15,38 @@ pub(crate) fn bc7_block_aligned(width: u32, height: u32) -> bool {
     width % 4 == 0 && height % 4 == 0
 }
 
+#[cfg(feature = "relic_bc7_bake")]
 pub(crate) fn align_bc7_dim(v: u32) -> u32 {
     v.next_multiple_of(4).max(4)
+}
+
+#[cfg(feature = "relic_bc7_bake")]
+/// Base size for BC7 mip halving: 4-aligned and power-of-two so every mip stays block-aligned.
+pub(crate) fn align_bc7_base_dim(v: u32) -> u32 {
+    let aligned = align_bc7_dim(v.max(1));
+    if aligned.is_power_of_two() {
+        aligned
+    } else {
+        aligned.next_power_of_two()
+    }
+}
+
+/// True when every mip we would upload via `Queue::write_texture` is BC7 block-aligned.
+pub(crate) fn bc7_upload_chain_valid(base_w: u32, base_h: u32, mip_count: u32) -> bool {
+    if !bc7_block_aligned(base_w, base_h) {
+        return false;
+    }
+    let upload_mip_count = bc7_mip_level_count(base_w, base_h).min(mip_count.max(1));
+    let mut w = base_w.max(1);
+    let mut h = base_h.max(1);
+    for _ in 0..upload_mip_count {
+        if !bc7_block_aligned(w, h) {
+            return false;
+        }
+        w = (w / 2).max(1);
+        h = (h / 2).max(1);
+    }
+    true
 }
 
 /// BC7 uses 4×4 blocks; wgpu rejects `Queue::write_texture` below that size.
@@ -120,7 +150,20 @@ mod tests {
     fn bc7_block_aligned_checks_multiples_of_four() {
         assert!(bc7_block_aligned(1024, 1256));
         assert!(!bc7_block_aligned(1254, 1254));
+    }
+
+    #[cfg(feature = "relic_bc7_bake")]
+    #[test]
+    fn bc7_base_dim_is_power_of_two() {
         assert_eq!(align_bc7_dim(1254), 1256);
         assert_eq!(align_bc7_dim(1), 4);
+        assert_eq!(align_bc7_base_dim(1254), 2048);
+        assert_eq!(align_bc7_base_dim(1024), 1024);
+    }
+
+    #[test]
+    fn bc7_upload_chain_valid_requires_power_of_two_base() {
+        assert!(bc7_upload_chain_valid(1024, 1024, 9));
+        assert!(!bc7_upload_chain_valid(1256, 1256, 9));
     }
 }
