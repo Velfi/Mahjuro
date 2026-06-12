@@ -448,20 +448,12 @@ pub fn gameplay_consumable_description_full(
 
 /// Title and rules body for the dora plinth (cta is always empty).
 pub fn dora_focus_tooltip_strings(
-    dora_enabled: bool,
     dora_faces: &[(crate::core::tile::Suit, u8)],
 ) -> (String, String, String) {
     use crate::core::scoring::DORA_CHIPS_PER_TILE;
     use crate::core::tile::Tile;
 
     let desc = format!("Dora tiles score +{DORA_CHIPS_PER_TILE} extra.");
-    if !dora_enabled {
-        return (
-            "Dora".to_string(),
-            String::new(),
-            format!("Unlocks at Wing 4. {desc}"),
-        );
-    }
     if dora_faces.is_empty() {
         return ("Dora".to_string(), String::new(), desc);
     }

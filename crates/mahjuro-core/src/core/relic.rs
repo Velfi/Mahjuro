@@ -911,7 +911,7 @@ pub struct ScoreRoundBundle {
     pub is_final_play: bool,
 }
 
-/// Dora indicators, yaku unlock gating, and zodiac yaku levels.
+/// Dora indicators, yaku availability (Kokushi secret), and zodiac yaku levels.
 pub struct ScorePatternBundle {
     pub dora_faces: Vec<(Suit, u8)>,
     pub available_yaku: Vec<crate::core::yaku::YakuKind>,
