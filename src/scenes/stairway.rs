@@ -1312,7 +1312,7 @@ impl SceneBehavior for StairwayScene {
             &mut frame.buttons,
         );
         if !pause_quads.is_empty() {
-            frame.quads(pause_quads);
+            frame.overlay_quads(pause_quads);
         }
         if !pause_text.is_empty() {
             frame.texts(pause_text);
