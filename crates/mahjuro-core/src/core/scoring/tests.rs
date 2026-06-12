@@ -2,9 +2,18 @@ use super::*;
 use crate::core::hand::{DetectedMeld, MeldKind, find_pairs_and_triplets};
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
-    ScoreRoundBundle, ScoreTileBundle,
+    ScoreRoundBundle, ScoreTileBundle, kindling_mult_bonus,
 };
 use crate::core::tile::{Suit, Tile, TileEnhancement};
+use crate::core::yaku::YakuKind;
+
+fn with_tanyao_chips(base_meld_chips: i32) -> i32 {
+    base_meld_chips + YakuKind::Tanyao.chip_bonus()
+}
+
+fn with_tanyao_mult(extra_mult: f64) -> f64 {
+    SCORING_BASE_MULT + YakuKind::Tanyao.mult_bonus() + extra_mult
+}
 
 fn ctx_with(relics: &RelicState, scored_last_turn: bool) -> ScoreContext<'_> {
     ScoreContext {
@@ -53,9 +62,13 @@ fn bare_triplet_of_threes() {
     ];
     let sets = find_pairs_and_triplets(&hand);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
-    assert_eq!(breakdown.base_chips, 9);
-    assert_eq!(breakdown.final_mult, 1.0);
-    assert_eq!(breakdown.total, 9);
+    let base_chips = 9;
+    let chips = with_tanyao_chips(base_chips);
+    let mult = with_tanyao_mult(0.0);
+    assert_eq!(breakdown.base_chips, base_chips);
+    assert_eq!(breakdown.final_chips, chips);
+    assert_eq!(breakdown.final_mult, mult);
+    assert_eq!(breakdown.total, combine(chips, mult));
 }
 
 #[test]
@@ -80,9 +93,12 @@ fn triplet_boost_adds_chips_to_triplet() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::TripletBoost]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 59);
-    assert_eq!(breakdown.final_mult, 1.5);
-    assert_eq!(breakdown.total, 88);
+    let base_chips = 9;
+    let chips = with_tanyao_chips(base_chips) + TRIPLET_BOOST_CHIPS;
+    let mult = with_tanyao_mult(TRIPLET_BOOST_MULT_PER_TRIPLET);
+    assert_eq!(breakdown.final_chips, chips);
+    assert_eq!(breakdown.final_mult, mult);
+    assert_eq!(breakdown.total, combine(chips, mult));
     assert!(breakdown.steps.iter().any(|s| s.source == "Triplet Boost"));
 }
 
@@ -236,8 +252,11 @@ fn minimalist_mults_single_meld() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::Minimalist]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 129);
-    assert_eq!(breakdown.final_mult, 3.0);
+    let base_chips = 9;
+    let chips = with_tanyao_chips(base_chips) + MINIMALIST_CHIPS;
+    let mult = with_tanyao_mult(MINIMALIST_MULT);
+    assert_eq!(breakdown.final_chips, chips);
+    assert_eq!(breakdown.final_mult, mult);
     assert!(breakdown.steps.iter().any(|s| s.source == "Minimalist"));
 }
 
@@ -300,7 +319,11 @@ fn plain_dealing_adds_chips_per_simple_tile() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::PlainDealing]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 69);
+    let base_chips = 15;
+    let simple_tiles = 3;
+    let chips =
+        with_tanyao_chips(base_chips) + PLAIN_DEALING_CHIPS_PER_SIMPLE_TILE * simple_tiles;
+    assert_eq!(breakdown.final_chips, chips);
     assert!(breakdown.steps.iter().any(|s| s.source == "Plain Dealing"));
 }
 
@@ -314,7 +337,10 @@ fn even_keel_adds_chips_for_middle_ranks() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::EvenKeel]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 51);
+    let base_chips = 15;
+    let even_keel_tiles = 3;
+    let chips = with_tanyao_chips(base_chips) + EVEN_KEEL_CHIPS_PER_TILE * even_keel_tiles;
+    assert_eq!(breakdown.final_chips, chips);
     assert!(breakdown.steps.iter().any(|s| s.source == "Even Keel"));
 }
 
@@ -510,7 +536,8 @@ fn open_gate_mults_all_simple_structure() {
     ];
     let r = relics(vec![RelicId::OpenGate]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_mult, 9.0);
+    let mult = SCORING_BASE_MULT + YakuKind::Tanyao.mult_bonus() + OPEN_GATE_MULT;
+    assert_eq!(breakdown.final_mult, mult);
     assert!(breakdown.steps.iter().any(|s| s.source == "Open Gate"));
     assert!(breakdown.steps.iter().any(|s| s.source == "Tanyao"));
 }
@@ -653,8 +680,11 @@ fn chain_reaction_adds_mult_when_scored_last_turn() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::ChainReaction]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, true), &[]);
-    assert_eq!(breakdown.final_mult, 7.0);
-    assert_eq!(breakdown.total, 105);
+    let base_chips = 15;
+    let chips = with_tanyao_chips(base_chips);
+    let mult = with_tanyao_mult(CHAIN_REACTION_MULT);
+    assert_eq!(breakdown.final_mult, mult);
+    assert_eq!(breakdown.total, combine(chips, mult));
 }
 
 #[test]
@@ -667,7 +697,7 @@ fn chain_reaction_inactive_when_not_scored_last_turn() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::ChainReaction]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_mult, 1.0);
+    assert_eq!(breakdown.final_mult, with_tanyao_mult(0.0));
 }
 
 #[test]
@@ -710,8 +740,11 @@ fn kindling_adds_mult_from_prior_cashins_this_chamber() {
         structure: None,
     };
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    // 2 prior cash-ins × 0.4 = 0.8 → base 1.0 + 0.8 = 1.8
-    assert_eq!(breakdown.final_mult, 1.8);
+    let prior_cashins = 2;
+    let mult = SCORING_BASE_MULT
+        + YakuKind::Tanyao.mult_bonus()
+        + kindling_mult_bonus(prior_cashins);
+    assert_eq!(breakdown.final_mult, mult);
     assert!(breakdown.steps.iter().any(|s| s.source == "Kindling"));
 }
 

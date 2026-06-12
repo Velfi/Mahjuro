@@ -99,6 +99,17 @@ impl ShopFocus {
             Self::WallHud => None,
         }
     }
+
+    pub(super) fn chrome_id(self) -> crate::ui::widget_tree::FocusId {
+        use crate::ui::widget_tree::FocusId;
+        FocusId(match self {
+            Self::Dish(id) if id == super::pick_ids::PICK_JOURNAL_BOOK => 0xD011,
+            Self::Restock => 0xD012,
+            Self::NextRound => 0xD013,
+            Self::WallHud => 0xD014,
+            _ => 0xD000,
+        })
+    }
 }
 
 /// Map a `ShopHit` (from a click *or* a focus Confirm) to the
@@ -140,6 +151,87 @@ pub(super) fn shop_action_for_hit(
         ShopHit::Dish(id) => tile_pack_index_from_pick(id).map(ShopAction::BuyPack),
         ShopHit::TilePack(id) => tile_pack_index_from_pick(id).map(ShopAction::BuyPack),
         ShopHit::EnvSpawnSlot(_) | ShopHit::EnvInvSlot(_) | ShopHit::EnvConsumableOrd(_) => None,
+    }
+}
+
+/// Map focus to a buy/use action without yen or inventory validation.
+pub(super) fn focused_shop_buy_action(
+    focus: Option<ShopFocus>,
+    items: &[ShopItem],
+    zodiac_items: &[ConsumableShopItem],
+    talisman_items: &[ConsumableShopItem],
+    shop: &ShopReadModel,
+) -> Option<ShopAction> {
+    let hit = focus?.to_hit()?;
+    shop_action_for_hit(hit, items, zodiac_items, talisman_items, shop)
+}
+
+/// True when the player is trying to buy something listed for sale but lacks yen.
+/// Other blockers (sold out, inventory full) return false.
+pub(super) fn shop_buy_insufficient_gold(
+    action: ShopAction,
+    run: &RunState,
+    items: &[ShopItem],
+    zodiac_items: &[ConsumableShopItem],
+    talisman_items: &[ConsumableShopItem],
+    pack_items: &[TilePackShopItem],
+) -> bool {
+    let mode = &run.mode;
+    let relics = &run.relics;
+    match action {
+        ShopAction::BuyCard(idx) => {
+            let Some(item) = items.get(idx) else {
+                return false;
+            };
+            if item.sold {
+                return false;
+            }
+            if run.relics.is_full() && item.relic != RelicId::BrocadePouch {
+                return false;
+            }
+            run.yen < item.price as i32
+        }
+        ShopAction::BuyZodiac(idx) => {
+            let Some(item) = zodiac_items.get(idx) else {
+                return false;
+            };
+            if item.sold {
+                return false;
+            }
+            let price = item.price(mode, relics);
+            run.yen < price as i32
+        }
+        ShopAction::BuyTalisman(idx) => {
+            let Some(item) = talisman_items.get(idx) else {
+                return false;
+            };
+            if item.sold {
+                return false;
+            }
+            if run.consumables.is_full() {
+                return false;
+            }
+            let price = item.price(mode, relics);
+            run.yen < price as i32
+        }
+        ShopAction::BuyPack(pack_idx) => {
+            let Some(pack) = pack_items.get(pack_idx) else {
+                return false;
+            };
+            if pack.sold {
+                return false;
+            }
+            let price = mode.scale_shop_price(super::apply_merchants_eye_discount(
+                pack.kind.shop_price(),
+                relics,
+            ));
+            run.yen < price as i32
+        }
+        ShopAction::UseConsumable(_)
+        | ShopAction::SellRelic(_)
+        | ShopAction::SellConsumable(_)
+        | ShopAction::MoveRelicLeft(_)
+        | ShopAction::MoveRelicRight(_) => false,
     }
 }
 
@@ -223,8 +315,7 @@ pub(super) fn focused_buy_action(
     run: &RunState,
     shop: &ShopReadModel,
 ) -> Option<ShopAction> {
-    let hit = focus?.to_hit()?;
-    let action = shop_action_for_hit(hit, items, zodiac_items, talisman_items, shop)?;
+    let action = focused_shop_buy_action(focus, items, zodiac_items, talisman_items, shop)?;
     shop_buy_action_valid(action, run, items, zodiac_items, talisman_items, pack_items)
         .then_some(action)
 }

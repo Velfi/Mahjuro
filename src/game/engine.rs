@@ -939,8 +939,7 @@ impl<'a> GameEngine<'a> {
         rejection: ShopCommandRejection,
     ) -> ShopCommandOutcome {
         if rejection == ShopCommandRejection::InsufficientGold {
-            self.bus
-                .push(GameEvent::UiSound(crate::sfx_id::SfxId::UiCancel));
+            self.bus.push(GameEvent::InvalidAction);
         }
         ShopCommandOutcome::rejected(command, before, rejection)
     }

@@ -106,22 +106,22 @@ pub fn draw_wall_detail_panel(
         TextAlign::Left,
         clip,
     );
-    y += caption_lh + 4.0;
+    y += caption_lh + 6.0;
 
-    let copy_rows: &[(&str, usize)] = if mode.shows_round_locations() {
-        &[
-            ("In wall", details.locations.in_wall),
-            ("In hand", details.locations.in_hand),
-            ("Played", details.locations.played),
-            ("Discarded", details.locations.discarded),
-        ]
-    } else {
-        &[("In wall", details.locations.in_wall)]
-    };
-    for (label, count) in copy_rows {
-        draw_location_stat_row(texts, layout, rect, pad, inner_w, y, label, *count, clip);
-        y += caption_lh + 2.0;
-    }
+    draw_copies_panel(
+        frame,
+        texts,
+        layout,
+        rect,
+        pad,
+        inner_w,
+        y,
+        details,
+        mode,
+        scroll_clip,
+        clip,
+    );
+    y += copies_panel_height(layout, mode);
 
     y += 4.0;
 
@@ -181,6 +181,240 @@ pub fn draw_wall_detail_panel(
                 glossary: GlossaryMode::Prose,
                 vertical_align: Some(TextBlockVerticalAlign::Top),
             },
+        );
+    }
+}
+
+const COPIES_COL_GAP: f32 = 12.0;
+const COPIES_COL_INSET: f32 = 8.0;
+const COPIES_VALUE_W: f32 = 40.0;
+const COPIES_BLOCK_PAD_V: f32 = 7.0;
+
+fn copies_row_count(mode: WallLedgerMode) -> usize {
+    let copy_rows = if mode.shows_round_locations() { 4 } else { 1 };
+    copy_rows.max(4)
+}
+
+fn copies_row_h(layout: &WallLayout) -> f32 {
+    text_line_h(layout.caption_px) + 3.0
+}
+
+fn copies_micro_header_h(layout: &WallLayout) -> f32 {
+    text_line_h(layout.caption_px) + 2.0
+}
+
+pub(crate) fn copies_panel_height(layout: &WallLayout, mode: WallLedgerMode) -> f32 {
+    COPIES_BLOCK_PAD_V * 2.0
+        + copies_micro_header_h(layout)
+        + copies_row_h(layout) * copies_row_count(mode) as f32
+}
+
+fn draw_copies_panel(
+    frame: &mut UiFrame,
+    texts: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
+    layout: &WallLayout,
+    rect: [f32; 4],
+    pad: f32,
+    inner_w: f32,
+    y: f32,
+    details: &SelectedTileDetails,
+    mode: WallLedgerMode,
+    scroll_clip: [f32; 4],
+    clip: Option<[f32; 4]>,
+) {
+    let col_w = ((inner_w - COPIES_COL_GAP) * 0.5).max(1.0);
+    let block_x = rect[0] + pad;
+    let left_x = block_x;
+    let right_x = left_x + col_w + COPIES_COL_GAP;
+    let divider_x = left_x + col_w + COPIES_COL_GAP * 0.5;
+    let row_h = copies_row_h(layout);
+    let micro_h = copies_micro_header_h(layout);
+    let block_h = copies_panel_height(layout, mode);
+    let block_rect = [block_x, y, inner_w, block_h];
+
+    if rect_intersects(block_rect, scroll_clip) {
+        frame.quad(GpuInstance {
+            rect: block_rect,
+            color: color::alpha(color::WALNUT_INK, 0.42),
+            user: 0,
+        });
+        push_border(frame, block_rect, 1.0, color::alpha(color::BRASS, 0.14));
+        let data_top = y + COPIES_BLOCK_PAD_V + micro_h;
+        let data_h = block_h - COPIES_BLOCK_PAD_V * 2.0 - micro_h;
+        frame.quad(GpuInstance {
+            rect: [divider_x - 0.5, data_top, 1.0, data_h],
+            color: color::alpha(color::BRASS, 0.28),
+            user: 0,
+        });
+    }
+
+    let micro_y = y + COPIES_BLOCK_PAD_V;
+    let micro_color = color::alpha(color::BRASS, 0.62);
+    draw_stat_row(
+        texts,
+        layout,
+        left_x,
+        col_w,
+        micro_y,
+        "WHERE",
+        "",
+        micro_color,
+        micro_color,
+        true,
+        clip,
+        true,
+    );
+    draw_stat_row(
+        texts,
+        layout,
+        right_x,
+        col_w,
+        micro_y,
+        "SUPPLY",
+        "",
+        micro_color,
+        micro_color,
+        true,
+        clip,
+        true,
+    );
+
+    let copy_rows: &[(&str, usize)] = if mode.shows_round_locations() {
+        &[
+            ("In wall", details.locations.in_wall),
+            ("In hand", details.locations.in_hand),
+            ("Played", details.locations.played),
+            ("Discarded", details.locations.discarded),
+        ]
+    } else {
+        &[("In wall", details.locations.in_wall)]
+    };
+    let modifier_rows: [(&str, usize, [f32; 4]); 3] = [
+        ("Pearl", details.modifiers.pearl, color::JADE),
+        ("Gilded", details.modifiers.gilded, color::GOLD),
+        ("Poly", details.modifiers.polychrome, color::keyword::FLOWER),
+    ];
+    let row_count = copies_row_count(mode);
+    let data_top = y + COPIES_BLOCK_PAD_V + micro_h;
+
+    for row_idx in 0..row_count {
+        let row_y = data_top + row_idx as f32 * row_h;
+        if row_idx < copy_rows.len() {
+            let (label, count) = copy_rows[row_idx];
+            let (value_color, emphasis) = count_value_style(count);
+            draw_stat_row(
+                texts,
+                layout,
+                left_x,
+                col_w,
+                row_y,
+                label,
+                &format!("{count}"),
+                color::STONE,
+                value_color,
+                emphasis,
+                clip,
+                false,
+            );
+        }
+        if row_idx == 0 {
+            let draw = details.draw_probability;
+            let draw_pct = format!("{:.1}%", draw * 100.0);
+            let (value_color, emphasis) = if draw > 0.0005 {
+                (color::CHAMPAGNE, true)
+            } else {
+                (color::alpha(color::UMBER, 0.62), false)
+            };
+            draw_stat_row(
+                texts,
+                layout,
+                right_x,
+                col_w,
+                row_y,
+                "Draw %",
+                &draw_pct,
+                color::STONE,
+                value_color,
+                emphasis,
+                clip,
+                false,
+            );
+        } else if row_idx <= modifier_rows.len() {
+            let (label, count, accent) = modifier_rows[row_idx - 1];
+            let label_color = if count > 0 {
+                color::alpha(accent, 0.94)
+            } else {
+                color::alpha(color::STONE, 0.72)
+            };
+            let (value_color, emphasis) = if count > 0 {
+                (color::alpha(accent, 0.96), true)
+            } else {
+                (color::alpha(color::UMBER, 0.55), false)
+            };
+            draw_stat_row(
+                texts,
+                layout,
+                right_x,
+                col_w,
+                row_y,
+                label,
+                &format!("{count}"),
+                label_color,
+                value_color,
+                emphasis,
+                clip,
+                false,
+            );
+        }
+    }
+}
+
+fn count_value_style(count: usize) -> ([f32; 4], bool) {
+    if count > 0 {
+        (color::CHAMPAGNE, true)
+    } else {
+        (color::alpha(color::UMBER, 0.58), false)
+    }
+}
+
+fn draw_stat_row(
+    texts: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
+    layout: &WallLayout,
+    x: f32,
+    col_w: f32,
+    y: f32,
+    label: &str,
+    value: &str,
+    label_color: [f32; 4],
+    value_color: [f32; 4],
+    value_emphasis: bool,
+    clip: Option<[f32; 4]>,
+    header_only: bool,
+) {
+    let line = text_line_h(layout.caption_px);
+    let label_x = x + COPIES_COL_INSET;
+    let value_x = x + col_w - COPIES_COL_INSET - COPIES_VALUE_W;
+    let label_w = (value_x - label_x - 6.0).max(1.0);
+    push_text_maybe_clip(
+        texts,
+        [label_x, y, label_w, line],
+        label,
+        layout.caption_px,
+        label_color,
+        header_only,
+        TextAlign::Left,
+        clip,
+    );
+    if !header_only {
+        push_text_maybe_clip(
+            texts,
+            [value_x, y, COPIES_VALUE_W, line],
+            value,
+            layout.caption_px,
+            value_color,
+            value_emphasis,
+            TextAlign::Right,
+            clip,
         );
     }
 }
@@ -245,46 +479,6 @@ fn draw_tile_preview(
     );
 }
 
-fn draw_location_stat_row(
-    texts: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
-    layout: &WallLayout,
-    rect: [f32; 4],
-    pad: f32,
-    inner_w: f32,
-    y: f32,
-    label: &str,
-    count: usize,
-    clip: Option<[f32; 4]>,
-) {
-    const VALUE_W: f32 = 28.0;
-    let line = text_line_h(layout.caption_px);
-    let value_x = rect[0] + pad + inner_w - VALUE_W;
-    push_text_maybe_clip(
-        texts,
-        [rect[0] + pad, y, value_x - rect[0] - pad - 4.0, line],
-        label,
-        layout.caption_px,
-        color::STONE,
-        false,
-        TextAlign::Left,
-        clip,
-    );
-    push_text_maybe_clip(
-        texts,
-        [value_x, y, VALUE_W, line],
-        format!("{count}"),
-        layout.caption_px,
-        if count > 0 {
-            color::CHAMPAGNE
-        } else {
-            color::alpha(color::UMBER, 0.62)
-        },
-        count > 0,
-        TextAlign::Right,
-        clip,
-    );
-}
-
 fn push_divider(frame: &mut UiFrame, x: f32, y: f32, w: f32) {
     frame.quad(GpuInstance {
         rect: [x, y, w, 1.0],
@@ -325,22 +519,9 @@ fn push_border(frame: &mut UiFrame, rect: [f32; 4], t: f32, c: [f32; 4]) {
 }
 
 fn modifier_summary(m: &ModifierBreakdown) -> Option<String> {
-    let mut parts = Vec::new();
-    if m.pearl > 0 {
-        parts.push(format!("Pearl ×{}", m.pearl));
-    }
-    if m.gilded > 0 {
-        parts.push(format!("Gilded ×{}", m.gilded));
-    }
-    if m.polychrome > 0 {
-        parts.push(format!("Poly ×{}", m.polychrome));
-    }
     if m.debuffed > 0 {
-        parts.push(format!("Debuff ×{}", m.debuffed));
-    }
-    if parts.is_empty() {
-        None
+        Some(format!("Debuff ×{}", m.debuffed))
     } else {
-        Some(parts.join(" · "))
+        None
     }
 }

@@ -1,6 +1,5 @@
 //! Main-menu hub: [`main_menu.glb`](../../assets/3d/main_menu.glb) when embedded, else black.
 
-use std::cell::RefCell;
 use std::time::Instant;
 
 use crate::core::moon_quips;
@@ -26,10 +25,11 @@ use crate::render::wgpu_renderer::{
 };
 use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
-use crate::ui::focus_nav::{self, FocusDir, FocusNavState};
+use crate::ui::focus_nav;
 use crate::ui::input::UiAction;
 use crate::ui::styled_text;
 use crate::ui::tooltip;
+use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::lamp_moths::{self, BUG_COUNT};
 use super::shop::ShopScene;
@@ -128,6 +128,29 @@ enum HubFocus {
     Archive,
     Options,
     Quit,
+}
+
+impl HubFocus {
+    fn id(self) -> FocusId {
+        FocusId(match self {
+            HubFocus::Continue => 0x1200,
+            HubFocus::NewGame => 0x1201,
+            HubFocus::Archive => 0x1202,
+            HubFocus::Options => 0x1203,
+            HubFocus::Quit => 0x1204,
+        })
+    }
+
+    fn from_id(id: FocusId) -> Option<Self> {
+        Some(match id.0 {
+            0x1200 => HubFocus::Continue,
+            0x1201 => HubFocus::NewGame,
+            0x1202 => HubFocus::Archive,
+            0x1203 => HubFocus::Options,
+            0x1204 => HubFocus::Quit,
+            _ => return None,
+        })
+    }
 }
 
 fn menu_items(in_progress: bool) -> Vec<HubFocus> {
@@ -318,9 +341,7 @@ pub(crate) fn scene_from_resume(
 }
 
 pub struct MainMenuScene {
-    focus: Option<HubFocus>,
-    focus_nav: FocusNavState<HubFocus>,
-    last_focus_rects: RefCell<Vec<(HubFocus, [f32; 4])>>,
+    tree: TreeState,
     cursor_pos: (f32, f32),
     last_frame: Instant,
     age_secs: f32,
@@ -343,9 +364,7 @@ impl Default for MainMenuScene {
 impl MainMenuScene {
     pub fn new() -> Self {
         Self {
-            focus: None,
-            focus_nav: FocusNavState::new(),
-            last_focus_rects: RefCell::new(Vec::new()),
+            tree: TreeState::new(),
             cursor_pos: (0.0, 0.0),
             last_frame: Instant::now(),
             age_secs: 0.0,
@@ -403,6 +422,20 @@ impl MainMenuScene {
 struct HubLayout {
     logo_rect: [f32; 4],
     menu_rects: Vec<(HubFocus, [f32; 4])>,
+}
+
+fn hub_flat_items(w: f32, h: f32, in_progress: bool) -> Vec<FlatItem<HubFocus>> {
+    let items = menu_items(in_progress);
+    let layout = MainMenuScene::hub_layout(w, h, &items);
+    layout
+        .menu_rects
+        .into_iter()
+        .map(|(action, rect)| FlatItem::new(action.id(), rect, action))
+        .collect()
+}
+
+fn hub_focus(tree: &TreeState) -> Option<HubFocus> {
+    tree.focused().and_then(HubFocus::from_id)
 }
 
 /// Walnut speech bubble beside the projected moon hit rect.
@@ -516,52 +549,33 @@ impl SceneBehavior for MainMenuScene {
             );
         }
         let in_progress = GameEngine::run_in_progress(ctx.run);
-        let items = menu_items(in_progress);
-
-        if self.focus.is_none() || !items.contains(&self.focus.unwrap()) {
-            self.focus = Some(default_focus(in_progress));
-        }
-        let prev_focus = self.focus;
-
-        let focus_rects = self.last_focus_rects.borrow().clone();
-        self.focus_nav.load_candidates(&focus_rects, &[]);
-
-        let pointer_pick =
-            if ctx.input_mode == crate::ui::input::InputMode::Cursor && !focus_rects.is_empty() {
-                focus_nav::focus_target_at_cursor(&focus_rects, ctx.cursor_pos.0, ctx.cursor_pos.1)
-            } else {
-                None
-            };
-
-        if ctx.input_mode == crate::ui::input::InputMode::Cursor
-            && let Some(m) = pointer_pick
+        let flat = hub_flat_items(ctx.layout.window_w, ctx.layout.window_h, in_progress);
+        if hub_focus(&self.tree).is_none()
+            || hub_focus(&self.tree).is_some_and(|f| !menu_items(in_progress).contains(&f))
         {
-            self.focus = Some(m);
+            self.tree
+                .set_focus(default_focus(in_progress).id());
         }
 
-        let mut activated = false;
-        for action in ctx.actions {
-            match action {
-                UiAction::FocusUp | UiAction::FocusPrev => {
-                    if let Some(cur) = self.focus
-                        && let Some(next) = self.focus_nav.pick(cur, FocusDir::Up)
-                    {
-                        self.focus = Some(next);
-                    }
-                }
-                UiAction::FocusDown | UiAction::FocusNext => {
-                    if let Some(cur) = self.focus
-                        && let Some(next) = self.focus_nav.pick(cur, FocusDir::Down)
-                    {
-                        self.focus = Some(next);
-                    }
-                }
-                UiAction::Confirm => activated = true,
-                UiAction::Cancel | UiAction::Pause => {
-                    ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                    self.focus = Some(HubFocus::Quit);
-                }
-                _ => {}
+        let action = self.tree.update_flat(
+            &flat,
+            TreeInput {
+                actions: ctx.actions,
+                button_clicks: ctx.button_clicks,
+                cursor_pos: ctx.cursor_pos,
+                window: (ctx.layout.window_w, ctx.layout.window_h),
+                input_mode: ctx.input_mode,
+                scroll_lines: 0.0,
+            },
+        );
+        if self.tree.take_focus_changed() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
+
+        for a in ctx.actions {
+            if matches!(a, UiAction::Cancel | UiAction::Pause) {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+                self.tree.set_focus(HubFocus::Quit.id());
             }
         }
 
@@ -577,31 +591,17 @@ impl SceneBehavior for MainMenuScene {
             ctx.bus.push(GameEvent::UiSound(SfxId::TileClick));
         }
 
-        if !ctx.button_clicks.is_empty()
-            && !moon_clicked
-            && let Some(m) = pointer_pick
-        {
-            self.focus = Some(m);
-            activated = true;
-        }
-
-        if self.focus != prev_focus {
-            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-        }
-
-        if activated {
-            // Allow activation even while a row still shows loading dots.
-            // Scene transition holds at full black until destination room GPU data is ready.
-            let confirm_sfx = match self.focus {
-                Some(HubFocus::NewGame) => SfxId::NewGameStinger,
+        if let Some(item) = action {
+            let confirm_sfx = match item {
+                HubFocus::NewGame => SfxId::NewGameStinger,
                 _ => SfxId::UiConfirm,
             };
             ctx.bus.push(GameEvent::UiSound(confirm_sfx));
-            match self.focus {
-                Some(HubFocus::Continue) => {
+            match item {
+                HubFocus::Continue => {
                     return Some(SceneIntent::Continue(ctx.resume_scene));
                 }
-                Some(HubFocus::NewGame) => {
+                HubFocus::NewGame => {
                     if ctx.tutorial_eligible {
                         return Some(SceneIntent::TileSelect { tutorial: true });
                     }
@@ -610,16 +610,15 @@ impl SceneBehavior for MainMenuScene {
                     }
                     return Some(SceneIntent::StartRunDefaultMaterialAndShop);
                 }
-                Some(HubFocus::Archive) => {
+                HubFocus::Archive => {
                     return Some(SceneIntent::Archive);
                 }
-                Some(HubFocus::Options) => {
+                HubFocus::Options => {
                     return Some(SceneIntent::Options);
                 }
-                Some(HubFocus::Quit) => {
+                HubFocus::Quit => {
                     *ctx.quit_requested = true;
                 }
-                None => {}
             }
         }
 
@@ -692,20 +691,18 @@ impl SceneBehavior for MainMenuScene {
             None
         } else {
             let in_progress = ctx.game_in_progress;
-            let items = menu_items(in_progress);
-            let layout = Self::hub_layout(w, h, &items);
-            let focus_rects = layout.menu_rects.clone();
-            *self.last_focus_rects.borrow_mut() = focus_rects.clone();
+            let flat = hub_flat_items(w, h, in_progress);
+            let layout = Self::hub_layout(w, h, &menu_items(in_progress));
 
-            if let Some(focus) = self.focus
-                && let Some(&(_, rect)) = focus_rects.iter().find(|(t, _)| *t == focus)
+            if let Some(focus) = hub_focus(&self.tree)
+                && let Some(&(_, rect)) = layout.menu_rects.iter().find(|(t, _)| *t == focus)
             {
                 focus_nav::push_focus_ring(rect, scale, w, h, &mut quads);
             }
 
             let menu_font = typography::size(typography::H36, h);
             let label_color = color::PARCHMENT;
-            for &(item, rect) in &focus_rects {
+            for &(item, rect) in &layout.menu_rects {
                 let loading = ctx.hub_loading.for_item(item);
                 let mut label_alpha = 1.0;
                 if loading {
@@ -731,7 +728,7 @@ impl SceneBehavior for MainMenuScene {
                     MAIN_MENU_PICK_MOON,
                 ));
             }
-            buttons.push(ButtonDef::scene((0.0, 0.0, w, h), 0));
+            self.tree.register_flat_buttons(&flat, &mut buttons);
             Some(layout)
         };
 
@@ -808,14 +805,8 @@ impl SceneBehavior for MainMenuScene {
         );
 
         if !trailer_shot {
-            let focus_rects = self.last_focus_rects.borrow().clone();
-            ctx.stash_focus_nav_graph(
-                &focus_rects,
-                &[],
-                self.focus,
-                self.focus_nav.memory(),
-                |f| format!("{f:?}"),
-            );
+            let flat = hub_flat_items(w, h, ctx.game_in_progress);
+            ctx.stash_focus_nav_tree_flat(&self.tree, &flat, |f| format!("{f:?}"));
         }
 
         frame

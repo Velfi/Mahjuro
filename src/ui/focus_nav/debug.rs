@@ -53,50 +53,6 @@ pub fn debug_snapshot_from_candidates<T: Copy + PartialEq>(
     snap
 }
 
-pub fn publish_debug_snapshot(
-    enabled: bool,
-    out: Option<&mut Option<FocusNavDebugSnapshot>>,
-    snapshot: FocusNavDebugSnapshot,
-) {
-    if enabled && let Some(slot) = out {
-        *slot = Some(snapshot);
-    }
-}
-
-pub fn publish_focus_nav_snapshot<T: Copy + PartialEq>(
-    enabled: bool,
-    out: Option<&mut Option<FocusNavDebugSnapshot>>,
-    nav: &FocusNavState<T>,
-    current: Option<T>,
-    label: impl Fn(T) -> String,
-) {
-    if !enabled {
-        return;
-    }
-    if let Some(slot) = out {
-        *slot = Some(nav.debug_snapshot(current, label));
-    }
-}
-
-pub fn publish_focus_nav_graph<T: Copy + PartialEq>(
-    enabled: bool,
-    out: Option<&mut Option<FocusNavDebugSnapshot>>,
-    candidates: &[(T, [f32; 4])],
-    edges: &[(T, FocusDir, T)],
-    current: Option<T>,
-    memory: &FocusMemory,
-    label: impl Fn(T) -> String,
-) {
-    if !enabled {
-        return;
-    }
-    if let Some(slot) = out {
-        *slot = Some(debug_snapshot_from_candidates(
-            candidates, edges, current, memory, label,
-        ));
-    }
-}
-
 /// Draw row bands, node rects, group tint, explicit edges, and axis memory.
 pub fn push_focus_nav_debug_overlay(
     snap: &FocusNavDebugSnapshot,

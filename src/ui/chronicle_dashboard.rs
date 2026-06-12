@@ -351,69 +351,64 @@ fn run_log_list_viewport_h(layout: ChroniclePaneLayout, title_h: f32, gap: f32) 
     (layout.content_h() - title_h - gap * 0.25).max(1.0)
 }
 
-/// Compact run receipt columns (`#` + outcome · ordeal · score).
+/// Compact run receipt columns (`#` + outcome · ordeal).
 struct RunLogReceiptLayout {
     id_x: f32,
     id_w: f32,
     boss_x: f32,
     boss_w: f32,
-    score_x: f32,
-    score_w: f32,
     /// Single row font size shared by all receipt columns.
     row_font_px: f32,
 }
 
 const RUN_LOG_ID_SAMPLE: &str = "99 Loss";
-const RUN_LOG_SCORE_SAMPLE: &str = "999. M cp";
+/// Cap for the `#` + outcome column; ordeal name uses the remainder.
+const RUN_LOG_ID_MAX_FRAC: f32 = 0.32;
+const RUN_LOG_BOSS_MIN_W: f32 = 28.0;
 
 fn run_log_receipt_layout(
     base_x: f32,
     pane_w: f32,
     row_inset: f32,
     target_font_px: f32,
+    min_font_px: f32,
 ) -> RunLogReceiptLayout {
     let inner_x = base_x + row_inset;
     let inner_w = (pane_w - row_inset * 2.0).max(80.0);
-    let col_gap = 5.0;
-    let min_px = 8.0_f32;
+    let col_gap = 6.0;
+    let min_px = min_font_px.max(8.0);
 
     let mut row_font_px = target_font_px.max(min_px);
-    let mut score_w =
-        chart_primitives::measure_text_width(RUN_LOG_SCORE_SAMPLE, row_font_px, true) + 6.0;
-    let mut id_w = chart_primitives::measure_text_width(RUN_LOG_ID_SAMPLE, row_font_px, true) + 4.0;
-    while row_font_px > min_px
-        && (score_w > inner_w * 0.38
-            || id_w > inner_w * 0.26
-            || score_w + id_w + col_gap * 2.0 + 28.0 > inner_w)
-    {
+    let (id_w, boss_x, boss_w) = loop {
+        let measured_id =
+            chart_primitives::measure_text_width(RUN_LOG_ID_SAMPLE, row_font_px, true) + 6.0;
+        let id_w = measured_id.min(inner_w * RUN_LOG_ID_MAX_FRAC);
+        let boss_x = inner_x + id_w + col_gap;
+        let boss_w = inner_x + inner_w - boss_x;
+        if boss_w >= RUN_LOG_BOSS_MIN_W || row_font_px <= min_px {
+            break (id_w, boss_x, boss_w);
+        }
         row_font_px -= 0.5;
-        score_w =
-            chart_primitives::measure_text_width(RUN_LOG_SCORE_SAMPLE, row_font_px, true) + 6.0;
-        id_w = chart_primitives::measure_text_width(RUN_LOG_ID_SAMPLE, row_font_px, true) + 4.0;
-    }
-
-    score_w = score_w.clamp(54.0, 78.0).min(inner_w * 0.38);
-    id_w = id_w.clamp(44.0, 56.0).min(inner_w * 0.26);
-    let score_x = inner_x + inner_w - score_w;
-    let id_x = inner_x;
-    let boss_x = id_x + id_w + col_gap;
-    let boss_w = (score_x - boss_x - col_gap).max(24.0);
+    };
 
     RunLogReceiptLayout {
-        id_x,
+        id_x: inner_x,
         id_w,
         boss_x,
         boss_w,
-        score_x,
-        score_w,
         row_font_px,
     }
+}
+
+fn run_log_row_text_layout(row_y: f32, row_h: f32, font_px: f32) -> (f32, f32) {
+    let row_text_h = rhythm::line_h(font_px);
+    let text_y = row_y + (row_h - row_text_h) * 0.5;
+    (text_y, row_text_h)
 }
 
 struct RunLogListLayout {
     list_top: f32,
     header_band_h: f32,
-    summary_row_h: f32,
 }
 
 fn run_log_list_layout(
@@ -427,7 +422,6 @@ fn run_log_list_layout(
     RunLogListLayout {
         list_top: panes.content_y() + y_bias + title_h + gap * 0.25,
         header_band_h: cap_h + row_pad * 0.45,
-        summary_row_h: cap_h + row_pad * 0.65,
     }
 }
 
@@ -456,10 +450,10 @@ fn run_log_row_y(
     if list_i == 0 {
         (
             layout.list_top + layout.header_band_h - scroll,
-            layout.summary_row_h,
+            run_row_h,
         )
     } else {
-        let runs_top = layout.list_top + layout.header_band_h + layout.summary_row_h;
+        let runs_top = layout.list_top + layout.header_band_h + run_row_h;
         (
             runs_top + (list_i - 1) as f32 * run_row_h - scroll,
             run_row_h,
@@ -475,7 +469,7 @@ fn run_log_list_content_height(
     if entry_count == 0 {
         return layout.header_band_h + run_row_h * 2.0;
     }
-    layout.header_band_h + layout.summary_row_h + (entry_count.saturating_sub(1)) as f32 * run_row_h
+    layout.header_band_h + entry_count as f32 * run_row_h
 }
 
 #[inline]
@@ -974,17 +968,19 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
 
     let list_layout = run_log_list_layout(panes, title_h, gap, cap_h, row_pad, y_bias);
     let header_y = list_layout.list_top - scroll;
+    let pane_h = panes.inner_h + panes.margin * 2.0;
+    let min_font_px = typography::readable_floor_px(pane_h);
     let receipt = run_log_receipt_layout(
         panes.left_content_x(),
         panes.left_content_w(),
         row_inset,
-        caption_px,
+        body,
+        min_font_px,
     );
     let hdr = color::alpha(color::STONE, 0.72);
     for (hx, hw, label, align) in [
         (receipt.id_x, receipt.id_w, "#", TextAlign::Left),
         (receipt.boss_x, receipt.boss_w, "Ordeal", TextAlign::Left),
-        (receipt.score_x, receipt.score_w, "Score", TextAlign::Right),
     ] {
         push_label_clipped(
             emit.labels,
@@ -1001,7 +997,7 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
         );
     }
 
-    let runs_top = list_layout.list_top + list_layout.header_band_h + list_layout.summary_row_h;
+    let runs_top = list_layout.list_top + list_layout.header_band_h + panes.run_row_h;
     chart_primitives::push_quad(
         emit.quads,
         [
@@ -1057,15 +1053,8 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
             continue;
         }
         let selected = focused == Some(list_i);
-        let receipt = run_log_receipt_layout(
-            panes.left_content_x(),
-            panes.left_content_w(),
-            row_inset,
-            caption_px,
-        );
         let row_font_px = receipt.row_font_px;
-        let row_text_h = (row_h - row_pad * 0.5).max(rhythm::line_h(row_font_px));
-        let text_y = row_y + row_pad * 0.25;
+        let (text_y, row_text_h) = run_log_row_text_layout(row_y, row_h, row_font_px);
 
         if selected {
             push_quad_clipped(
@@ -1117,7 +1106,7 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
                     } else {
                         color::alpha(color::PARCHMENT, 0.96)
                     },
-                    font_px: Some(caption_px),
+                    font_px: Some(row_font_px),
                     align: TextAlign::Left,
                     ..Default::default()
                 },
@@ -1133,7 +1122,6 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
         let outcome_color = archive_career::chronicle_run_outcome_color(rec);
         let run_is_new =
             crate::core::archive_seen::chronicle_run_is_new(hist_idx, chronicle_last_seen_run_len);
-        let score = archive_career::format_run_log_score(rec.total_score_earned);
         let id_line = format!(
             "{display:>2} {}",
             archive_career::chronicle_run_outcome_short(rec)
@@ -1192,24 +1180,6 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
                 },
             );
         }
-        let score_rect = [receipt.score_x, text_y, receipt.score_w, row_text_h];
-        let score_color = if selected {
-            color::CHAMPAGNE
-        } else if let Some(rank) = archive_career::chronicle_run_score_rank(progress, rec) {
-            archive_career::chronicle_score_rank_color(rank)
-        } else {
-            archive_career::chronicle_chips_color()
-        };
-        push_colored_label_clipped(
-            emit.labels,
-            score_rect,
-            clip,
-            &score,
-            score_color,
-            row_font_px,
-            TextAlign::Right,
-            true,
-        );
     }
 }
 

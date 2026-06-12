@@ -4,6 +4,7 @@
 use super::pick_ids::PICK_JOURNAL_BOOK;
 use super::shared::ShopFocus;
 use crate::ui::focus_nav::{FocusDir, FocusNavState, rect_center};
+use crate::ui::widget_tree::{FlatItem, TreeState};
 
 #[inline]
 pub(in crate::scenes::shop) fn shop_focus_is_chrome(f: ShopFocus) -> bool {
@@ -143,6 +144,56 @@ pub(in crate::scenes::shop) fn shop_inspect_nav_pick(
     dir: FocusDir,
 ) -> Option<ShopFocus> {
     shop_pool_nav_pick(nav, inspect_rects, cur, dir)
+}
+
+pub(in crate::scenes::shop) fn flat_chrome_items(
+    focus_rects: &[(ShopFocus, [f32; 4])],
+) -> Vec<FlatItem<ShopFocus>> {
+    focus_rects
+        .iter()
+        .filter(|(f, _)| shop_focus_is_chrome(*f))
+        .map(|(f, r)| FlatItem::new(f.chrome_id(), *r, *f))
+        .collect()
+}
+
+pub(in crate::scenes::shop) fn register_shop_chrome_buttons(
+    tree: &TreeState,
+    focus_rects: &[(ShopFocus, [f32; 4])],
+    buttons: &mut Vec<crate::scenes::ButtonDef>,
+) {
+    tree.register_flat_buttons(&flat_chrome_items(focus_rects), buttons);
+}
+
+/// Keep [`TreeState`] aligned with scene focus when HUD chrome is active.
+pub(in crate::scenes::shop) fn sync_chrome_tree_from_focus(
+    tree: &mut TreeState,
+    chrome: &[FlatItem<ShopFocus>],
+    focus: Option<ShopFocus>,
+) {
+    let Some(f) = focus else {
+        return;
+    };
+    if !shop_focus_is_chrome(f) {
+        return;
+    }
+    let id = f.chrome_id();
+    if chrome.iter().any(|i| i.id == id) {
+        tree.set_focus(id);
+    }
+}
+
+/// Mirror chrome-tree focus back onto the scene after keyboard/cursor nav.
+pub(in crate::scenes::shop) fn sync_focus_from_chrome_tree(
+    focus: &mut Option<ShopFocus>,
+    tree: &TreeState,
+    chrome: &[FlatItem<ShopFocus>],
+) {
+    let Some(id) = tree.focused() else {
+        return;
+    };
+    if let Some(f) = chrome.iter().find(|i| i.id == id).map(|i| i.action) {
+        *focus = Some(f);
+    }
 }
 
 #[cfg(test)]

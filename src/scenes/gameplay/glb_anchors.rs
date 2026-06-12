@@ -452,6 +452,30 @@ pub fn resolve_player_gold_anchor(
     resolve_player_gold_pose(w, h, env_height_scale).map(|p| p.anchor)
 }
 
+/// Best-effort fly target for economy (Yen) score popups — the player gold pile.
+pub fn resolve_yen_popup_fly_dest(
+    layout: &crate::ui::layout::LayoutResult,
+    env_height_scale: f32,
+) -> crate::render::world_space::LayoutAnchorPx {
+    if let Ok(anchor) = resolve_player_gold_anchor(
+        layout.window_w,
+        layout.window_h,
+        env_height_scale,
+    ) {
+        return crate::render::world_space::LayoutAnchorPx {
+            px: anchor[0],
+            py: anchor[1],
+            lift_z: anchor[2],
+        };
+    }
+    let (px, py) = layout.fallback_modifier_point(0.12, 0.72);
+    crate::render::world_space::LayoutAnchorPx {
+        px,
+        py,
+        lift_z: layout.mm(40.0),
+    }
+}
+
 /// `player_gold` spawn pose for coin pile / flying coins.
 pub fn resolve_player_gold_pose(
     w: f32,

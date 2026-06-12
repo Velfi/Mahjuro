@@ -143,11 +143,18 @@ pub(super) fn tick_active_cascade(
                         cascade_showcase.as_ref(),
                         ctx.room_gltf_height_scale,
                     );
-                    let fly_dest = super::score_counter::resolve_score_popup_fly_dest(
-                        ctx.layout,
-                        &scene.positions,
-                        ctx.room_gltf_height_scale,
-                    );
+                    let fly_dest = if step.kind == StepKind::Yen {
+                        super::glb_anchors::resolve_yen_popup_fly_dest(
+                            ctx.layout,
+                            ctx.room_gltf_height_scale,
+                        )
+                    } else {
+                        super::score_counter::resolve_score_popup_fly_dest(
+                            ctx.layout,
+                            &scene.positions,
+                            ctx.room_gltf_height_scale,
+                        )
+                    };
                     let reel_xy = (fly_dest.px, fly_dest.py);
                     let reel_lift = Some(fly_dest.lift_z);
                     let magnitude = chip_delta.abs().max(1) as f32 + mult_delta.abs() as f32;

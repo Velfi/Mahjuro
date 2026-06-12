@@ -6,6 +6,7 @@ use crate::render::theme::color;
 use crate::render::vocabulary_colors::GlossaryMode;
 use crate::ui::styled_text::styled_line_block_height_at_font_px;
 
+use super::draw::copies_panel_height;
 use super::layout::{WallLayout, text_line_h, wall_progress_bar_block_h};
 
 pub struct SidebarScrollLayout {
@@ -94,9 +95,8 @@ pub fn measure_detail_panel_height(
     y += preview_size * 1.08 + 10.0;
 
     y += text_line_h(layout.body_px) + 8.0;
-    y += caption_lh + 4.0;
-    let copy_rows = if mode.shows_round_locations() { 4 } else { 1 };
-    y += (caption_lh + 2.0) * copy_rows as f32;
+    y += caption_lh + 6.0;
+    y += copies_panel_height(layout, mode);
     y += 4.0;
 
     if modifier_summary(&details.modifiers).is_some() {
@@ -120,23 +120,10 @@ pub fn measure_detail_panel_height(
 }
 
 fn modifier_summary(m: &ModifierBreakdown) -> Option<String> {
-    let mut parts = Vec::new();
-    if m.pearl > 0 {
-        parts.push(format!("Pearl ×{}", m.pearl));
-    }
-    if m.gilded > 0 {
-        parts.push(format!("Gilded ×{}", m.gilded));
-    }
-    if m.polychrome > 0 {
-        parts.push(format!("Poly ×{}", m.polychrome));
-    }
     if m.debuffed > 0 {
-        parts.push(format!("Debuff ×{}", m.debuffed));
-    }
-    if parts.is_empty() {
-        None
+        Some(format!("Debuff ×{}", m.debuffed))
     } else {
-        Some(parts.join(" · "))
+        None
     }
 }
 

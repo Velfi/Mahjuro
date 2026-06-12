@@ -47,7 +47,6 @@ wgpu.workspace = true
 wgpu-hal.workspace = true
 lyon_path.workspace = true
 lyon_tessellation.workspace = true
-rayon.workspace = true
 chrono.workspace = true
 sdl3 = { workspace = true, optional = true }
 crossbeam-channel.workspace = true

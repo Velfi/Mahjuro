@@ -96,6 +96,8 @@ fn ign(p: vec2<f32>) -> f32 {
 // extruded glyphs pass spec_power >= 40 (see object3d_placement.rs); talisman
 // tablets use ~32 and keep the legacy rainbow polychrome look.
 const POLYCHROME_LIGHT_GOLD: vec3<f32> = vec3<f32>(1.0, 0.68, 0.08);
+/// Bright band for Yen score pops (`RELIC_GOLD` base).
+const YEN_POLYCHROME_BAND: vec3<f32> = vec3<f32>(1.0, 198.0 / 255.0, 0.0);
 const POLYCHROME_SATURATION: f32 = 1.42;
 
 fn saturate_rgb(rgb: vec3<f32>, amount: f32) -> vec3<f32> {
@@ -107,6 +109,13 @@ fn is_house_polychrome_base(base: vec3<f32>) -> bool {
     return base.r > 0.75 && base.g < 0.25 && base.b < 0.20;
 }
 
+fn is_yen_polychrome_base(base: vec3<f32>) -> bool {
+    // RELIC_GOLD token (~#D7C692) — score-pop Yen steps.
+    return base.r > 0.78 && base.r < 0.90
+        && base.g > 0.72 && base.g < 0.85
+        && base.b > 0.50 && base.b < 0.65;
+}
+
 fn score_glyph_band_albedo(local_pos: vec3<f32>, base: vec3<f32>, time: f32) -> vec3<f32> {
     let drift = time * 0.8;
     let warp = sin(time * 2.2 + local_pos.y * 7.0) * 0.28
@@ -114,19 +123,25 @@ fn score_glyph_band_albedo(local_pos: vec3<f32>, base: vec3<f32>, time: f32) -> 
     let coord = local_pos.x * 5.0 + local_pos.y * 3.2 + warp + drift;
     let wave = 0.5 + 0.5 * sin(coord * 6.28318);
     let house = is_house_polychrome_base(base);
-    let band = select(smoothstep(0.32, 0.68, wave), smoothstep(0.26, 0.74, wave), house);
-    let bright = select(
-        min(base * 1.55 + vec3<f32>(0.12), vec3<f32>(1.0)),
-        saturate_rgb(min(POLYCHROME_LIGHT_GOLD * 1.08, vec3<f32>(1.0)), POLYCHROME_SATURATION),
-        house,
-    );
-    let dark = select(
-        base * 0.42,
-        saturate_rgb(base * 0.58, POLYCHROME_SATURATION * 1.08),
-        house,
-    );
-    var albedo = mix(dark, bright, band);
+    let yen = is_yen_polychrome_base(base);
+    let wide_band = house || yen;
+    let band = select(smoothstep(0.32, 0.68, wave), smoothstep(0.26, 0.74, wave), wide_band);
+    var bright: vec3<f32>;
     if (house) {
+        bright = saturate_rgb(min(POLYCHROME_LIGHT_GOLD * 1.08, vec3<f32>(1.0)), POLYCHROME_SATURATION);
+    } else if (yen) {
+        bright = saturate_rgb(min(YEN_POLYCHROME_BAND, vec3<f32>(1.0)), POLYCHROME_SATURATION);
+    } else {
+        bright = min(base * 1.55 + vec3<f32>(0.12), vec3<f32>(1.0));
+    }
+    var dark: vec3<f32>;
+    if (house || yen) {
+        dark = saturate_rgb(base * 0.58, POLYCHROME_SATURATION * 1.08);
+    } else {
+        dark = base * 0.42;
+    }
+    var albedo = mix(dark, bright, band);
+    if (wide_band) {
         albedo = saturate_rgb(albedo, 1.12);
     }
     return albedo;
@@ -2442,16 +2457,23 @@ fn fs_main(
         let time = lights.extras.y;
         albedo = score_glyph_band_albedo(in.local_pos, mesh.base_color.rgb, time);
         let house = is_house_polychrome_base(mesh.base_color.rgb);
+        let yen = is_yen_polychrome_base(mesh.base_color.rgb);
         let edge = 1.0 - ndv_view;
-        let rim = pow(edge, 1.8) * select(0.22, 0.30, house);
-        let rim_tint = select(
-            mesh.base_color.rgb * 1.4 + vec3<f32>(0.08),
-            saturate_rgb(
+        let rim = pow(edge, 1.8) * select(0.22, 0.30, house || yen);
+        var rim_tint: vec3<f32>;
+        if (house) {
+            rim_tint = saturate_rgb(
                 mix(mesh.base_color.rgb * 0.58, POLYCHROME_LIGHT_GOLD, 0.62),
                 POLYCHROME_SATURATION,
-            ),
-            house,
-        );
+            );
+        } else if (yen) {
+            rim_tint = saturate_rgb(
+                mix(mesh.base_color.rgb * 0.58, YEN_POLYCHROME_BAND, 0.62),
+                POLYCHROME_SATURATION,
+            );
+        } else {
+            rim_tint = mesh.base_color.rgb * 1.4 + vec3<f32>(0.08);
+        }
         albedo = mix(albedo, rim_tint, rim);
     }
     if (is_enamel) {
@@ -2570,7 +2592,8 @@ fn fs_main(
     var emissive = vec3<f32>(0.0);
     if (is_score_glyph) {
         let house = is_house_polychrome_base(mesh.base_color.rgb);
-        emissive = albedo * select(0.98, 1.20, house);
+        let yen = is_yen_polychrome_base(mesh.base_color.rgb);
+        emissive = albedo * select(0.98, 1.20, house || yen);
     } else if (is_poly && mesh.material_params.z >= 40.0) {
         emissive = mesh.base_color.rgb * 0.85;
     }

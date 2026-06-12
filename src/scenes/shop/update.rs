@@ -4,6 +4,7 @@ use crate::scenes::{
     GuideScene, OverlayRequest, Scene, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
     WallLedgerScene, YakuJournalScene, options,
 };
+use crate::ui::widget_tree::TreeInput;
 
 /// Player inventory row is hit-tested via 3D picks only; exclude its rects from
 /// cursor-mode [`focus_target_at_cursor`] so empty padding does not steal focus.
@@ -51,6 +52,34 @@ impl ShopScene {
         ))));
     }
 
+    /// Activate a HUD chrome focus target (Leave, Restock, Journal, Wall HUD).
+    fn dispatch_chrome_focus(
+        &mut self,
+        focus: ShopFocus,
+        ctx: &mut UpdateCtx<'_>,
+    ) -> SceneTransition {
+        match focus {
+            ShopFocus::NextRound => Some(self.continue_intent()),
+            ShopFocus::Restock => {
+                self.try_restock(ctx.run, ctx.bus);
+                None
+            }
+            ShopFocus::WallHud => {
+                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
+                    Scene::WallLedger(WallLedgerScene::shop_preview()),
+                )));
+                None
+            }
+            ShopFocus::Dish(id) if id == PICK_JOURNAL_BOOK => {
+                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::YakuJournal(
+                    YakuJournalScene::new(),
+                ))));
+                None
+            }
+            _ => None,
+        }
+    }
+
     /// Mouse pick dispatch for shop hits (3D props + screen-space UI buttons).
     pub(super) fn dispatch_shop_pick_from_hit(
         &mut self,
@@ -71,14 +100,7 @@ impl ShopScene {
             return Some(self.continue_intent());
         }
         if matches!(hit, ShopHit::Dish(id) if id == PICK_RESTOCK_PROP) {
-            if !self.restock_exit_active()
-                && self.mode == ShopMode::Standard
-                && ctx
-                    .run
-                    .can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
-            {
-                self.restock(ctx.run, ctx.bus);
-            }
+            self.try_restock(ctx.run, ctx.bus);
             return None;
         }
         if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
@@ -93,22 +115,37 @@ impl ShopScene {
             &self.zodiac_items,
             &self.talisman_items,
             &shop,
-        ) && shop_buy_action_valid(
-            action,
-            ctx.run,
-            &self.items,
-            &self.zodiac_items,
-            &self.talisman_items,
-            &self.pack_items,
         ) {
-            self.apply_buy_action(
+            if shop_buy_action_valid(
                 action,
                 ctx.run,
-                ctx.bus,
-                ctx.cursor_pos,
-                ctx.overlay_request,
-                (ctx.layout.window_w, ctx.layout.window_h),
-            );
+                &self.items,
+                &self.zodiac_items,
+                &self.talisman_items,
+                &self.pack_items,
+            ) {
+                self.apply_buy_action(
+                    action,
+                    ctx.run,
+                    ctx.bus,
+                    ctx.cursor_pos,
+                    ctx.overlay_request,
+                    (ctx.layout.window_w, ctx.layout.window_h),
+                );
+            } else if shop_buy_insufficient_gold(
+                action,
+                ctx.run,
+                &self.items,
+                &self.zodiac_items,
+                &self.talisman_items,
+                &self.pack_items,
+            ) {
+                ctx.bus
+                    .push(crate::game::event_bus::GameEvent::InvalidAction);
+                self.focus = Some(ShopFocus::from_hit(hit));
+            } else {
+                self.focus = Some(ShopFocus::from_hit(hit));
+            }
         } else {
             self.focus = Some(ShopFocus::from_hit(hit));
         }
@@ -134,7 +171,7 @@ impl ShopScene {
         run: &crate::game::run::RunState,
     ) -> bool {
         let shop = GameEngine::read_shop(run);
-        let focus_rects = self.last_focus_rects.borrow().clone();
+        let focus_rects = self.focus_session.rects();
         let inspect_rects: Vec<(ShopFocus, [f32; 4])> = focus_rects
             .into_iter()
             .filter(|(focus, _)| {
@@ -416,7 +453,7 @@ impl ShopScene {
         // The shop's focus graph is rebuilt every draw frame from projected
         // screen rects of every focusable element. Reuse the previous frame's
         // snapshot here for cursor hit-testing and directional nav.
-        let focus_rects = self.last_focus_rects.borrow().clone();
+        let focus_rects = self.focus_session.rects();
 
         // Cursor-mode sync: when the player is using the mouse, hover is focus.
         if ctx.input_mode == InputMode::Cursor {
@@ -438,9 +475,53 @@ impl ShopScene {
                     .copied()
                     .filter(|(f, _)| !shop_owned_inventory_focus(self, *f))
                     .collect();
-                focus_target_at_cursor(&cursor_rects, cx, cy)
+                crate::ui::focus_nav::focus_target_at_cursor(&cursor_rects, cx, cy)
             };
             self.focus = new_focus;
+        }
+
+        // Cancel → exit button before chrome-tree input so focus and tree stay aligned.
+        let cancel_pressed = ctx
+            .actions
+            .iter()
+            .any(|a| matches!(a, UiAction::Cancel));
+        if cancel_pressed {
+            self.cancel_all_hold_prompts(ctx.bus);
+            self.focus = Some(ShopFocus::NextRound);
+        }
+
+        let chrome = super::focus::flat_chrome_items(&focus_rects);
+        let chrome_focused = self
+            .focus
+            .is_some_and(super::focus::shop_focus_is_chrome);
+        if chrome_focused {
+            super::focus::sync_chrome_tree_from_focus(&mut self.chrome_tree, &chrome, self.focus);
+        }
+        let tree_actions: Vec<UiAction> = if chrome_focused {
+            ctx.actions.to_vec()
+        } else {
+            ctx.actions
+                .iter()
+                .copied()
+                .filter(|a| !matches!(a, UiAction::Confirm | UiAction::CommitDiscard))
+                .collect()
+        };
+        if let Some(chrome_focus) = self.chrome_tree.update_flat(
+            &chrome,
+            TreeInput {
+                actions: &tree_actions,
+                button_clicks: ctx.button_clicks,
+                cursor_pos: ctx.cursor_pos,
+                window: (ctx.layout.window_w, ctx.layout.window_h),
+                input_mode: ctx.input_mode,
+                scroll_lines: 0.0,
+            },
+        ) {
+            self.focus = Some(chrome_focus);
+            return self.dispatch_chrome_focus(chrome_focus, &mut ctx);
+        }
+        if chrome_focused || self.chrome_tree.take_focus_changed() {
+            super::focus::sync_focus_from_chrome_tree(&mut self.focus, &self.chrome_tree, &chrome);
         }
 
         let w = ctx.layout.window_w;
@@ -506,14 +587,33 @@ impl ShopScene {
             if matches!(a, UiAction::Confirm)
                 && ctx.input_mode != InputMode::Cursor
                 && self.confirm_buy_hold_started.is_none()
-                && self.buy_hold_valid_for(ctx.run, &shop)
             {
-                self.confirm_buy_hold_started = Some(crate::ui::prompt_hold_ring::begin_hold(
-                    now,
-                    ctx.bus,
-                    self.buy_hold_valid_for(ctx.run, &shop),
-                ));
-                continue;
+                if self.buy_hold_valid_for(ctx.run, &shop) {
+                    self.confirm_buy_hold_started = Some(crate::ui::prompt_hold_ring::begin_hold(
+                        now,
+                        ctx.bus,
+                        true,
+                    ));
+                    continue;
+                }
+                if let Some(action) = focused_shop_buy_action(
+                    self.focus,
+                    &self.items,
+                    &self.zodiac_items,
+                    &self.talisman_items,
+                    &shop,
+                ) && shop_buy_insufficient_gold(
+                    action,
+                    ctx.run,
+                    &self.items,
+                    &self.zodiac_items,
+                    &self.talisman_items,
+                    &self.pack_items,
+                ) {
+                    ctx.bus
+                        .push(crate::game::event_bus::GameEvent::InvalidAction);
+                    continue;
+                }
             }
 
             let dir: Option<FocusDir> = match a {
@@ -589,14 +689,8 @@ impl ShopScene {
                     if matches!(focus, ShopFocus::NextRound) {
                         return Some(self.continue_intent());
                     }
-                    if matches!(focus, ShopFocus::Restock)
-                        && !self.restock_exit_active()
-                        && self.mode == ShopMode::Standard
-                        && ctx
-                            .run
-                            .can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
-                    {
-                        self.restock(ctx.run, ctx.bus);
+                    if matches!(focus, ShopFocus::Restock) {
+                        self.try_restock(ctx.run, ctx.bus);
                         continue;
                     }
                     if matches!(focus, ShopFocus::WallHud) {
@@ -621,33 +715,39 @@ impl ShopScene {
                                 &self.zodiac_items,
                                 &self.talisman_items,
                                 &shop,
-                            ) && shop_buy_action_valid(
-                                action,
-                                ctx.run,
-                                &self.items,
-                                &self.zodiac_items,
-                                &self.talisman_items,
-                                &self.pack_items,
                             ) {
-                                self.cancel_all_hold_prompts(ctx.bus);
-                                self.apply_buy_action(
+                                if shop_buy_action_valid(
                                     action,
                                     ctx.run,
-                                    ctx.bus,
-                                    ctx.cursor_pos,
-                                    ctx.overlay_request,
-                                    (w, h),
-                                );
+                                    &self.items,
+                                    &self.zodiac_items,
+                                    &self.talisman_items,
+                                    &self.pack_items,
+                                ) {
+                                    self.cancel_all_hold_prompts(ctx.bus);
+                                    self.apply_buy_action(
+                                        action,
+                                        ctx.run,
+                                        ctx.bus,
+                                        ctx.cursor_pos,
+                                        ctx.overlay_request,
+                                        (w, h),
+                                    );
+                                } else if shop_buy_insufficient_gold(
+                                    action,
+                                    ctx.run,
+                                    &self.items,
+                                    &self.zodiac_items,
+                                    &self.talisman_items,
+                                    &self.pack_items,
+                                ) {
+                                    ctx.bus
+                                        .push(crate::game::event_bus::GameEvent::InvalidAction);
+                                }
                             }
                         }
                     }
                 }
-                continue;
-            }
-
-            if matches!(a, UiAction::Cancel) {
-                self.cancel_all_hold_prompts(ctx.bus);
-                self.focus = Some(ShopFocus::NextRound);
                 continue;
             }
         }
@@ -655,21 +755,6 @@ impl ShopScene {
         for a in ctx.actions {
             if matches!(a, UiAction::CommitDiscard) {
                 return Some(self.continue_intent());
-            }
-        }
-        for &cid in ctx.button_clicks {
-            if cid == SHOP_NEXT_ROUND_ID {
-                return Some(self.continue_intent());
-            }
-            if cid == SHOP_RESTOCK_ID
-                && !self.restock_exit_active()
-                && self.mode == ShopMode::Standard
-                && ctx
-                    .run
-                    .can_afford_shop_restock(self.restock_cost(ctx.run.mode.season))
-            {
-                self.restock(ctx.run, ctx.bus);
-                return None;
             }
         }
 

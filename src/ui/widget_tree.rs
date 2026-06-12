@@ -254,12 +254,10 @@ impl TreeState {
             });
         }
 
-        // Resolve focused id.
-        if let Some(id) = self.focused {
-            if !self.layout.iter().any(|l| l.id == id) {
-                self.focused = self.layout.first().map(|l| l.id);
-            }
-        } else {
+        // Resolve focused id. When the scene uses a scrollable flat list, the focused
+        // item may sit offscreen until the scene adjusts scroll and rebuilds rects —
+        // preserve the id instead of jumping to the first on-screen target.
+        if self.focused.is_none() {
             self.focused = self.layout.first().map(|l| l.id);
         }
 
@@ -1030,5 +1028,34 @@ mod tests {
         );
         // Hover sets focus → Play; then FocusNext moves to Skip.
         assert_eq!(tree.focused(), Some(FocusId(2)));
+    }
+
+    #[test]
+    fn update_flat_preserves_offscreen_focus_id() {
+        let mut tree = TreeState::new();
+        tree.set_focus(FocusId(99));
+
+        let items = vec![FlatItem::new(
+            FocusId(1),
+            [100.0, 100.0, 200.0, 100.0],
+            "visible",
+        )];
+
+        let _ = tree.update_flat(
+            &items,
+            TreeInput {
+                actions: &[],
+                button_clicks: &[],
+                cursor_pos: (0.0, 0.0),
+                window: (1280.0, 720.0),
+                input_mode: InputMode::Controller,
+                scroll_lines: 0.0,
+            },
+        );
+        assert_eq!(
+            tree.focused(),
+            Some(FocusId(99)),
+            "scrollable lists may rebuild items after adjusting scroll"
+        );
     }
 }

@@ -15,6 +15,12 @@ use super::tea_bonus::{
 };
 use super::{tile_by_id, tile_is_debuffed};
 
+pub const TRIPLET_BOOST_MULT_PER_TRIPLET: f64 = 0.5;
+pub const MINIMALIST_CHIPS: i32 = 120;
+pub const MINIMALIST_MULT: f64 = 2.0;
+pub const OPEN_GATE_MULT: f64 = 6.0;
+pub const CHAIN_REACTION_MULT: f64 = 6.0;
+
 fn meld_all_tiles_match(s: &DetectedMeld, tiles: &[Tile], pred: impl Fn(&Tile) -> bool) -> bool {
     !s.tile_ids.is_empty()
         && s.tile_ids
@@ -136,7 +142,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 *chips,
                 mult,
                 "Triplet Boost",
-                0.5 * trip_count as f64,
+                TRIPLET_BOOST_MULT_PER_TRIPLET * trip_count as f64,
             );
         }
     }
@@ -227,7 +233,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::ChainReaction) && ctx.round.scored_last_turn {
-        push_mult(steps, *chips, mult, "Chain Reaction", 6.0);
+        push_mult(steps, *chips, mult, "Chain Reaction", CHAIN_REACTION_MULT);
     }
 
     if has(RelicId::ClosedGate) {
@@ -256,7 +262,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                     && (2..=8).contains(&t.rank)
             });
         if all_simple {
-            push_mult(steps, *chips, mult, "Open Gate", 6.0);
+            push_mult(steps, *chips, mult, "Open Gate", OPEN_GATE_MULT);
         }
     }
 
@@ -319,8 +325,8 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::Minimalist) && sets.len() == 1 && sets[0].kind != MeldKind::Single {
-        push_chips(steps, chips, *mult, "Minimalist", 120);
-        push_mult(steps, *chips, mult, "Minimalist", 2.0);
+        push_chips(steps, chips, *mult, "Minimalist", MINIMALIST_CHIPS);
+        push_mult(steps, *chips, mult, "Minimalist", MINIMALIST_MULT);
     }
 
     if has(RelicId::TurtleShell) && ctx.economy.yen > 0 {
