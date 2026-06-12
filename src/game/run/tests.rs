@@ -1298,7 +1298,36 @@ mod cases {
             &tiles, &sets
         ));
         assert!(crate::core::structure::structure_cannot_grow_further(
-            &tiles, &sets, HAND_SIZE
+            &tiles,
+            &sets,
+            HAND_SIZE,
+            &[],
+        ));
+        run.structure_tiles = tiles;
+        run.structure_sets = sets;
+
+        run.try_autotrigger_structure_full(&mut bus);
+
+        assert!(run.structure_sets.is_empty());
+        assert!(run.structure_tiles.is_empty());
+        assert!(run.round_score > 0);
+    }
+
+    #[test]
+    fn bureaucrat_ten_tiles_autocashes_when_must_play_five() {
+        let mut run = test_run();
+        run.round_rules.push(RuleModifier::MustPlayFive);
+        let mut bus = bus();
+        let tiles: Vec<Tile> = (0..10).map(|i| Tile::new(Suit::Manzu, 1, i)).collect();
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: (0..10).collect(),
+        }];
+        assert!(crate::core::structure::structure_cannot_grow_further(
+            &tiles,
+            &sets,
+            HAND_SIZE,
+            &[RuleModifier::MustPlayFive],
         ));
         run.structure_tiles = tiles;
         run.structure_sets = sets;

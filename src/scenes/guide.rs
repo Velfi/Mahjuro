@@ -1183,9 +1183,9 @@ pub(crate) fn yaku_guide_detail(yk: YakuKind, kokushi_discovered: bool) -> YakuG
             breaks_if: "The honor group is only a pair, or the wind is not the round or bonus round wind.",
         },
         YakuKind::Toitoi => YakuGuideDetail {
-            rule: "All melds are triplets or kongs. No sequences allowed.",
-            requires: "Triplets/kongs only",
-            breaks_if: "The hand contains any sequence.",
+            rule: "At least two triplets or kongs and no sequences.",
+            requires: "2+ triplets/kongs · no sequences",
+            breaks_if: "The structure has fewer than two triplets/kongs, or any sequence appears.",
         },
         YakuKind::Honitsu => YakuGuideDetail {
             rule: "One number suit plus honors only. No other number suits.",
@@ -1193,17 +1193,17 @@ pub(crate) fn yaku_guide_detail(yk: YakuKind, kokushi_discovered: bool) -> YakuG
             breaks_if: "A second number suit appears.",
         },
         YakuKind::Iipeikou => YakuGuideDetail {
-            rule: "Two identical sequences in the same suit on a full 14-tile hand.",
-            requires: "Full hand · two identical sequences · same suit",
-            breaks_if: "The matching sequences use different suits, or the hand is not a full hand.",
+            rule: "Two identical sequences in the same suit. Does not stack with Ryanpeikou — only the stronger peikou pattern scores.",
+            requires: "Two identical sequences · same suit",
+            breaks_if: "The matching sequences use different suits, or Ryanpeikou also qualifies.",
         },
         YakuKind::Junchan => YakuGuideDetail {
-            rule: "All tiles are terminals or honors. Every meld contains a terminal or honor.",
-            requires: "Terminal-touching melds · no middle-only melds",
-            breaks_if: "A meld has no terminal or honor.",
+            rule: "No honors. Every meld and the pair contain a number 1 or 9, with at least one sequence. Only the strongest matching terminal pattern scores (Junchan beats Honroutou and Chanta).",
+            requires: "Number terminals in every group · at least one sequence · no honors",
+            breaks_if: "Any honor appears, any group lacks a 1 or 9, or the hand is all triplets/pairs of terminals only.",
         },
         YakuKind::Honroutou => YakuGuideDetail {
-            rule: "Every tile is a terminal or honor.",
+            rule: "Every tile is a terminal or honor. Does not stack with Junchan or Chanta — only the strongest matching terminal pattern scores.",
             requires: "Terminals · honors · no simples",
             breaks_if: "Any rank 2–8 tile appears.",
         },
@@ -1242,12 +1242,12 @@ pub(crate) fn yaku_guide_detail(yk: YakuKind, kokushi_discovered: bool) -> YakuG
             breaks_if: "Any required terminal or honor is missing, or the duplicate is not one of those tile types.",
         },
         YakuKind::Chanta => YakuGuideDetail {
-            rule: "Every meld contains a terminal (1 or 9) or an honor. The pair may be a simple 2–8 tile.",
-            requires: "Each meld touches a terminal or honor",
-            breaks_if: "Any meld is made only of ranks 2–8 with no terminal or honor.",
+            rule: "Every meld and the pair contain a terminal (1 or 9) or an honor. At least one honor, one simple (2–8), and one sequence. Does not stack with Junchan or Honroutou — only the strongest matching terminal pattern scores.",
+            requires: "Terminal/honor in every group · honor present · simple present · sequence present",
+            breaks_if: "Any group is middle-only, the pair is simple-only, or the hand has no honor or no sequence.",
         },
         YakuKind::Ryanpeikou => YakuGuideDetail {
-            rule: "Two different sequences, each duplicated, in the same number suit on a full 14-tile hand.",
+            rule: "Two different sequences, each duplicated, in the same number suit on a full 14-tile hand. Supersedes Iipeikou when both qualify.",
             requires: "Full hand · two pairs of identical sequences · one suit",
             breaks_if: "Only one duplicated sequence, or duplicates are split across suits.",
         },
@@ -5795,23 +5795,23 @@ fn layout_tile_groups_with_max(
 pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
     match yk {
         YakuKind::Tanyao => "All tiles 2\u{2013}8, no honors/terminals",
-        YakuKind::Toitoi => "All triplets/kongs, no sequences",
+        YakuKind::Toitoi => "2+ triplets/kongs, no sequences",
         YakuKind::FullHand => "Complete 14-tile hand: 4+4+4+4+2 (4 melds + 1 pair)",
         YakuKind::Yakuhai => "Each dragon or matching wind triplet/kong; This yaku stacks",
-        YakuKind::Iipeikou => "Two identical sequences on a full hand",
-        YakuKind::Junchan => "All 1/9/honors; each meld has a terminal or honor",
+        YakuKind::Iipeikou => "Two identical sequences on a full hand; exclusive with Ryanpeikou",
+        YakuKind::Junchan => "No honors; every group has a number 1 or 9; at least one sequence",
         YakuKind::SanshokuDoujun => "Same sequence in all 3 suits",
         YakuKind::Ittsu => "1\u{2013}9 straight in one suit",
         YakuKind::Honitsu => "One number suit + honors only",
         YakuKind::Chinitsu => "All one number suit, no honors",
-        YakuKind::Honroutou => "Only 1s, 9s, and honors",
+        YakuKind::Honroutou => "Only 1s, 9s, and honors; exclusive with Junchan/Chanta",
         YakuKind::Chiitoitsu => "Seven distinct pairs",
         YakuKind::KokushiMusou => {
             "One of each 1/9 and honor, plus one extra copy of any of those tiles"
         }
         YakuKind::ChickenHand => "Legal hand with no yaku",
-        YakuKind::Chanta => "Every meld has a terminal or honor; pair may be simple",
-        YakuKind::Ryanpeikou => "Two duplicated sequences in one suit on a full hand",
+        YakuKind::Chanta => "Every group has a terminal or honor; needs honor, simple, and a sequence",
+        YakuKind::Ryanpeikou => "Two duplicated sequences in one suit on a full hand; beats Iipeikou",
         YakuKind::SanshokuDoukou => "Same-rank triplet in all three number suits",
         YakuKind::Pinfu => "Four sequences + 2–8 pair on a full hand",
     }

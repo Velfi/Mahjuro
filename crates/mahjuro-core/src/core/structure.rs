@@ -40,19 +40,30 @@ pub fn is_winning_structure_shape(tiles: &[Tile], sets: &[DetectedMeld]) -> bool
 /// Smallest legal play into structure is a pair (2 tiles).
 const MIN_MELD_COMMIT_TILES: usize = 2;
 
+/// Fewest tiles the player can commit on the next play under active round rules.
+pub fn structure_min_commit_tiles(rules: &[RuleModifier]) -> usize {
+    if rules.contains(&RuleModifier::MustPlayFive) {
+        5
+    } else {
+        MIN_MELD_COMMIT_TILES
+    }
+}
+
 /// True when structure has no room left for another meld under the standard tile
-/// budget (`hand_size` tiles, plus kong overflow).
+/// budget (`hand_size` tiles, plus kong overflow) and the active commit rules
+/// (e.g. Bureaucratic Form requires exactly five tiles per play).
 pub fn structure_cannot_grow_further(
     tiles: &[Tile],
     sets: &[DetectedMeld],
     hand_size: usize,
+    rules: &[RuleModifier],
 ) -> bool {
     if sets.is_empty() {
         return false;
     }
     let capacity = hand_size + kong_structure_bonus(sets.iter());
     let remaining = capacity.saturating_sub(tiles.len());
-    remaining < MIN_MELD_COMMIT_TILES
+    remaining < structure_min_commit_tiles(rules)
 }
 
 fn structure_contains_honor(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
@@ -243,7 +254,7 @@ mod tests {
             kind: MeldKind::Triplet,
             tile_ids: (0..14).collect(),
         }];
-        assert!(structure_cannot_grow_further(&tiles, &sets, 14));
+        assert!(structure_cannot_grow_further(&tiles, &sets, 14, &[]));
     }
 
     #[test]
@@ -253,7 +264,7 @@ mod tests {
             kind: MeldKind::Triplet,
             tile_ids: (0..13).collect(),
         }];
-        assert!(structure_cannot_grow_further(&tiles, &sets, 14));
+        assert!(structure_cannot_grow_further(&tiles, &sets, 14, &[]));
     }
 
     #[test]
@@ -263,6 +274,29 @@ mod tests {
             kind: MeldKind::Triplet,
             tile_ids: (0..12).collect(),
         }];
-        assert!(!structure_cannot_grow_further(&tiles, &sets, 14));
+        assert!(!structure_cannot_grow_further(&tiles, &sets, 14, &[]));
+    }
+
+    #[test]
+    fn must_play_five_blocks_growth_with_four_slots_remaining() {
+        let rules = [RuleModifier::MustPlayFive];
+        let tiles: Vec<Tile> = (0..10).map(|i| tile(Suit::Manzu, 1, i)).collect();
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: (0..10).collect(),
+        }];
+        assert!(!structure_cannot_grow_further(&tiles, &sets, 14, &[]));
+        assert!(structure_cannot_grow_further(&tiles, &sets, 14, &rules));
+    }
+
+    #[test]
+    fn must_play_five_allows_one_more_five_tile_play() {
+        let rules = [RuleModifier::MustPlayFive];
+        let tiles: Vec<Tile> = (0..9).map(|i| tile(Suit::Manzu, 1, i)).collect();
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: (0..9).collect(),
+        }];
+        assert!(!structure_cannot_grow_further(&tiles, &sets, 14, &rules));
     }
 }

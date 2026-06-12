@@ -42,10 +42,11 @@ pub(crate) fn setup_wall_ledger_screenshot_state(run: &mut RunState) {
     use mahjuro::core::debuff::TileDebuff;
     use mahjuro::core::deck::{Wall, build_wall};
     use mahjuro::core::tile::Suit;
-    use mahjuro::core::tile_pack::TilePackKind;
+    use mahjuro::core::tile_pack::{TilePackInstance, TilePackKind};
 
     setup_shop_state(run);
-    run.tile_packs.push(TilePackKind::Souzu);
+    run.tile_packs
+        .push(TilePackInstance::new(TilePackKind::Souzu));
     run.wall = Wall::from_unshuffled(build_wall());
     for _ in 0..88 {
         run.wall.draw();

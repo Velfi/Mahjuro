@@ -22,7 +22,7 @@ use crate::core::structure::is_winning_structure_shape;
 use crate::core::tag::TagKind;
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
-use crate::core::tile_pack::{PACK_ID_STRIDE, PACK_TILE_ID_BASE, TilePackKind};
+use crate::core::tile_pack::{PACK_ID_STRIDE, PACK_TILE_ID_BASE, TilePackInstance, TilePackKind};
 use crate::core::yaku::YakuKind;
 use crate::game::engine_state::GameplayCoreState;
 use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
@@ -477,14 +477,15 @@ impl<'a> GameEngine<'a> {
     pub fn debug_add_pack(run: &mut RunState, kind: TilePackKind) -> Vec<Tile> {
         let pack_idx = run.tile_packs.len();
         let start_id = PACK_TILE_ID_BASE + (pack_idx as u32) * PACK_ID_STRIDE;
-        let mut tiles = kind.generate_tiles(start_id);
+        let instance = TilePackInstance::new(kind);
+        let mut tiles = instance.tiles_at(start_id);
         if let Some(enh) = kind.pre_enhancement() {
             for t in &mut tiles {
                 run.tile_enhancements.insert(t.id, enh);
                 t.enhancement = Some(enh);
             }
         }
-        run.tile_packs.push(kind);
+        run.tile_packs.push(instance);
         tiles
     }
 
@@ -1128,14 +1129,15 @@ impl<'a> GameEngine<'a> {
                     .apply_yen_delta(-(price as i32), Some(&mut self.bus));
                 let pack_idx = self.run.tile_packs.len();
                 let start_id = PACK_TILE_ID_BASE + (pack_idx as u32) * PACK_ID_STRIDE;
-                let mut tiles = kind.generate_tiles(start_id);
+                let instance = TilePackInstance::new(kind);
+                let mut tiles = instance.tiles_at(start_id);
                 if let Some(enh) = kind.pre_enhancement() {
                     for t in &mut tiles {
                         self.run.tile_enhancements.insert(t.id, enh);
                         t.enhancement = Some(enh);
                     }
                 }
-                self.run.tile_packs.push(kind);
+                self.run.tile_packs.push(instance);
                 self.run.defeat_journal.shop_pack_buys =
                     self.run.defeat_journal.shop_pack_buys.saturating_add(1);
                 self.bus.push(GameEvent::PackBought);

@@ -321,7 +321,6 @@ pub fn append_splash_frame(
             });
         }
 
-        let label_h = layout.label_rect[3];
         frame.text(TextLabel {
             rect: layout.label_rect,
             text: "loading...".into(),
@@ -331,7 +330,7 @@ pub fn append_splash_frame(
                 layout.text_color[2],
                 layout.text_color[3] * ui_a,
             ],
-            font_px: Some(typography::size(typography::H32, label_h)),
+            font_px: Some(typography::size(typography::H32, screen_h)),
             ..Default::default()
         });
     }

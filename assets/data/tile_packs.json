@@ -2,7 +2,7 @@
   {
     "id": "honors",
     "name": "Honors Pack",
-    "description": "+7 honors tiles to the wall",
+    "description": "+4 honors tiles to the wall",
     "shop_price": 6,
     "texture_file": "pack_honors.png"
   },

@@ -364,7 +364,7 @@ pub struct RunState {
     /// Tile packs purchased from the shop. Each pack permanently injects
     /// extra tiles into the wall every round. Append-only.
     #[serde(default)]
-    pub tile_packs: Vec<crate::core::tile_pack::TilePackKind>,
+    pub tile_packs: Vec<crate::core::tile_pack::TilePackInstance>,
     /// Permanent extra tile faces added by Joker Tile at each chamber start.
     #[serde(default)]
     pub joker_extra_faces: Vec<(crate::core::tile::Suit, u8)>,

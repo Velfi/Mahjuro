@@ -37,7 +37,7 @@ use crate::core::scoring::{
 use crate::core::structure::StructureTriggerMeta;
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
-use crate::core::tile_pack::TilePackKind;
+use crate::core::tile_pack::{TilePackInstance, TilePackKind};
 use crate::core::zodiac::{YakuLevels, ZodiacKind};
 use crate::game::event_bus::GameOverReason;
 use crate::game::event_bus::{EventBus, GameEvent};
@@ -1852,7 +1852,7 @@ fn sample_random_hand_with_extra_pack(
     size: usize,
 ) -> Vec<Tile> {
     let mut packs = run.tile_packs.clone();
-    packs.push(extra_pack);
+    packs.push(TilePackInstance::new(extra_pack));
     let mut wall = Wall::from_filtered_with_packs(
         &run.removed_tile_ids,
         &packs,
@@ -2790,12 +2790,13 @@ fn visit_shop(
                 let pack_idx = run.tile_packs.len();
                 let start_id = crate::core::tile_pack::PACK_TILE_ID_BASE
                     + (pack_idx as u32) * crate::core::tile_pack::PACK_ID_STRIDE;
+                let instance = TilePackInstance::new(kind);
                 if let Some(enh) = kind.pre_enhancement() {
-                    for t in kind.generate_tiles(start_id) {
+                    for t in instance.tiles_at(start_id) {
                         run.tile_enhancements.insert(t.id, enh);
                     }
                 }
-                run.tile_packs.push(kind);
+                run.tile_packs.push(instance);
                 stats.yen_spent += price;
                 *stats.packs_picked.entry(kind.name()).or_insert(0) += 1;
                 bot_log!(

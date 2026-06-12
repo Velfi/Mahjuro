@@ -556,11 +556,13 @@ impl RunState {
         }
         let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
         let bonus_rw = self.bonus_round_wind_for_yaku();
+        let commit_rules = self.validation_rules_for_structure_commits();
         if !is_winning_structure_shape(&self.structure_tiles, &self.structure_sets)
             && !structure_cannot_grow_further(
                 &self.structure_tiles,
                 &self.structure_sets,
                 HAND_SIZE,
+                &commit_rules,
             )
         {
             return;
