@@ -51,7 +51,7 @@ Watch for `gpu mem profile: pressure=` (includes `relic_gpu=`, `decal_atlas_cpu=
 
 ## Relic textures (RLC2)
 
-Offline bakes (`data/relic_baked/*.rlc`, format **RLC2**) store BC7 mip chains (1024² albedo, 512² relief) plus small RGBA fallbacks. Runtime uploads BC7 when `TEXTURE_COMPRESSION_BC` is available.
+Offline bakes (`data/relic_baked/*.rlc`, format **RLC2**) store BC7 mip chains at source albedo/relief resolution plus full-size RGBA fallbacks. Runtime uploads BC7 when `TEXTURE_COMPRESSION_BC` is available.
 
 - **Low memory:** on-demand decode + GPU LRU cap of **24** (one archive relic page is 3×7 = **21** slots) ([`impl_relic_residency.rs`](../../crates/mahjuro-render/src/wgpu_renderer/impl_relic_residency.rs)); no startup batch.
 - **Performance / Visuals:** eager batch after hub CPU prefetch completes and pressure is Normal; batch reads bypass the asset byte LRU.

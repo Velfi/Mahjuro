@@ -15,10 +15,6 @@ pub const SLUG_BYTES: usize = 64;
 
 const FLAG_HAS_MESH: u32 = 1;
 
-const ALBEDO_BAKE_MAX_SIDE: u32 = 1024;
-const RELIEF_BAKE_MAX_SIDE: u32 = 512;
-const FALLBACK_MAX_SIDE: u32 = 256;
-
 struct RelicSlugTables {
     by_id: rustc_hash::FxHashMap<RelicId, &'static str>,
     by_slug: rustc_hash::FxHashMap<&'static str, RelicId>,
@@ -76,24 +72,6 @@ pub fn mip_chain_count(mut w: u32, mut h: u32) -> u32 {
     count.max(1)
 }
 
-fn downscale_rgba(
-    rgba: &[u8],
-    width: u32,
-    height: u32,
-    max_side: u32,
-) -> (Vec<u8>, u32, u32) {
-    if width.max(height) <= max_side {
-        return (rgba.to_vec(), width, height);
-    }
-    let scale = max_side as f32 / width.max(height) as f32;
-    let nw = ((width as f32 * scale).round() as u32).max(1);
-    let nh = ((height as f32 * scale).round() as u32).max(1);
-    let img = image::RgbaImage::from_raw(width, height, rgba.to_vec())
-        .unwrap_or_else(|| image::RgbaImage::new(1, 1));
-    let resized = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Lanczos3);
-    (resized.into_raw(), nw, nh)
-}
-
 #[cfg(feature = "relic_bc7_bake")]
 fn rgba_mip_chain_bc7(rgba: &[u8], width: u32, height: u32) -> Vec<(Vec<u8>, u32, u32)> {
     let mut chain = Vec::new();
@@ -144,15 +122,9 @@ fn encode_bc7_mip_chain(
         bc7_out.extend_from_slice(&level_bytes);
     }
 
-    let (fallback_rgba, fb_w, fb_h) = if let Some((fb, fw, fh)) = chain
-        .iter()
-        .find(|(_, w, h)| (*w).max(*h) <= FALLBACK_MAX_SIDE)
-        .map(|(b, w, h)| (b.clone(), *w, *h))
-    {
-        (fb, fw, fh)
-    } else {
-        let (fb, fw, fh) = downscale_rgba(rgba, width, height, FALLBACK_MAX_SIDE);
-        (fb, fw, fh)
+    let (fallback_rgba, fb_w, fb_h) = {
+        let (fb, fw, fh) = chain.first().expect("relic mip chain");
+        (fb.clone(), *fw, *fh)
     };
 
     Ok((bc7_out, base_w, base_h, mip_count, fallback_rgba, fb_w, fb_h))
@@ -165,8 +137,7 @@ fn encode_bc7_mip_chain(
     height: u32,
     _srgb: bool,
 ) -> anyhow::Result<(Vec<u8>, u32, u32, u32, Vec<u8>, u32, u32)> {
-    let (fb, fw, fh) = downscale_rgba(rgba, width, height, FALLBACK_MAX_SIDE);
-    Ok((Vec::new(), width, height, 1, fb, fw, fh))
+    Ok((Vec::new(), width, height, 1, rgba.to_vec(), width, height))
 }
 
 /// Validate the structure of a baked relic blob without materializing pixel/mesh Vecs.
@@ -244,19 +215,15 @@ pub fn encode_baked_relic(msg: &DecodedRelicImage) -> anyhow::Result<Vec<u8>> {
     let mut slug_buf = [0u8; SLUG_BYTES];
     slug_buf[..slug.len()].copy_from_slice(slug.as_bytes());
 
-    let (albedo_rgba, albedo_w, albedo_h) =
-        downscale_rgba(&msg.rgba, msg.width, msg.height, ALBEDO_BAKE_MAX_SIDE);
-    let (relief_rgba, relief_w, relief_h) = downscale_rgba(
-        &msg.relief_rgba,
-        msg.relief_width,
-        msg.relief_height,
-        RELIEF_BAKE_MAX_SIDE,
-    );
-
     let (albedo_bc7, albedo_base_w, albedo_base_h, albedo_mips, albedo_fb, albedo_fb_w, albedo_fb_h) =
-        encode_bc7_mip_chain(&albedo_rgba, albedo_w, albedo_h, true)?;
+        encode_bc7_mip_chain(&msg.rgba, msg.width, msg.height, true)?;
     let (relief_bc7, relief_base_w, relief_base_h, relief_mips, relief_fb, relief_fb_w, relief_fb_h) =
-        encode_bc7_mip_chain(&relief_rgba, relief_w, relief_h, false)?;
+        encode_bc7_mip_chain(
+            &msg.relief_rgba,
+            msg.relief_width,
+            msg.relief_height,
+            false,
+        )?;
 
     let mesh = msg.mesh_cpu.as_ref();
     let flags = if mesh.is_some() { FLAG_HAS_MESH } else { 0 };
