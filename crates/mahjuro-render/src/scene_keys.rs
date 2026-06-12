@@ -35,11 +35,11 @@ pub fn normalize_scene_key(slug: &str) -> &str {
     let eq = |name: &str| s.eq_ignore_ascii_case(name);
     if eq(MAIN_MENU) || eq("main_menu_exterior") || eq("start_screen") || eq("main-menu") {
         MAIN_MENU
-    } else if eq(SHOP) {
+    } else if eq(SHOP) || eq("showcase") {
         SHOP
     } else if eq(HALLWAY) || eq("pick_chamber") || eq("pick_blind") {
         HALLWAY
-    } else if eq(GAMEPLAY) {
+    } else if eq(GAMEPLAY) || eq("tutorial") {
         GAMEPLAY
     } else if eq(ARCHIVE) || eq("collection") {
         ARCHIVE
@@ -63,6 +63,8 @@ mod tests {
     #[test]
     fn normalize_maps_legacy_scene_slugs() {
         assert_eq!(normalize_scene_key("pick_chamber"), HALLWAY);
+        assert_eq!(normalize_scene_key("showcase"), SHOP);
+        assert_eq!(normalize_scene_key("tutorial"), GAMEPLAY);
         assert_eq!(normalize_scene_key("main_menu_exterior"), MAIN_MENU);
         assert_eq!(normalize_scene_key("collection"), ARCHIVE);
         assert_eq!(normalize_scene_key("staircase"), STAIRWAY);

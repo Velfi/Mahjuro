@@ -61,6 +61,9 @@ Peak RSS during the hub tour is the critical RAM number — note the Activity Mo
 | Peak process RSS (sampled) | TBD | **2381 MiB** (~3 min) | **2645 MiB** (~6 min) | Longer soak → higher peak |
 | Peak process RSS (time -l) | TBD | **~3245 MiB** | **~3524 MiB** | |
 | Max frame hitch at scene fade | < 50 ms | **321 ms** (hallway) | **321 ms** (hallway), **102 ms** (staircase) | **10 ms** (hallway) after hitch fix — talisman GPU warm moved off shop upload path |
+| Relic GPU (profiled, Low memory hub) | ≤ 35 MiB LRU | — | — | on-demand cap 24 (archive page = 21); RLC2 BC7 pack ~243 MiB on disk |
+| Decal atlas CPU (profiled) | ≤ 60 MiB | — | — | LRU 1 atlas; original downscaled to 4096 px long side on Low memory |
+| Music PCM (profiled) | ≤ 40 MiB live set | — | — | evict non-active tracks on BGM start |
 | Device lost / OOM | none | **none** | **none** | |
 | Concurrent CPU decodes at menu | ≤ 1 | shop + archive early | shop + archive early | Throttle gates *starting* new work; in-flight chain still overlaps on this path |
 

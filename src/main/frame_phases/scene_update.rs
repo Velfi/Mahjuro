@@ -77,7 +77,10 @@ pub fn run(app: &mut App, locals: &mut FrameLocals) {
             pending_scene_key,
             pending_transition_at_black,
         );
-        r.ensure_rooms_for_scene_key(scene_key);
+        // Destination room uploads run in poll_room_prefetch while held at full black.
+        if !pending_transition_at_black {
+            r.ensure_rooms_for_scene_key(scene_key);
+        }
         FramePicks {
             hand: if matches!(scene_key, Some("gameplay") | Some("tutorial"))
                 || tile_stress_lab_open

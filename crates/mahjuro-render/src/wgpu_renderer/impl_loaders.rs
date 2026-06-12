@@ -81,46 +81,20 @@ impl WgpuRenderer {
     /// Drain any decoded relic images from the background loader and upload them
     /// to the GPU.  Called once per frame; a no-op once all images are loaded.
     pub(crate) fn poll_relic_textures(&mut self) {
-        self.ensure_relic_loader_started();
-        let Some(ref rx) = self.relic_rx else { return };
+        if self.graphics_mode == mahjuro_gfx_types::GraphicsMode::LowMemory {
+            self.ensure_relic_ondemand_channel();
+        } else {
+            self.ensure_relic_loader_started();
+        }
+        let Some(ref rx) = self.relic_rx else {
+            return;
+        };
+        let batch_mode = self.graphics_mode != mahjuro_gfx_types::GraphicsMode::LowMemory;
         let mut finished = false;
-        // Non-blocking drain: upload every image that's ready this frame.
+        let mut pending = Vec::new();
         loop {
             match rx.try_recv() {
-                Ok(img) => {
-                    if let Some(cpu) = img.mesh_cpu {
-                        let tris = crate::relic_dish::relic_mesh_pick_triangles(&cpu);
-                        self.relic_tri_lists.insert(img.id, tris);
-                        self.relic_meshes.insert(
-                            img.id,
-                            LitMeshGpu::new(
-                                &self.device,
-                                &cpu,
-                                &format!("relic-mesh-{:?}", img.id),
-                            ),
-                        );
-                    }
-                    let t_upload = std::time::Instant::now();
-                    let (_tex, view) = upload_rgba_texture(
-                        &self.device,
-                        &self.queue,
-                        img.name,
-                        &img.rgba,
-                        img.width,
-                        img.height,
-                    );
-                    let (_relief_tex, relief_view) = upload_rgba_texture_linear(
-                        &self.device,
-                        &self.queue,
-                        &format!("{}-relief", img.name),
-                        &img.relief_rgba,
-                        img.relief_width,
-                        img.relief_height,
-                    );
-                    self.relic_profile_upload_cpu += t_upload.elapsed();
-                    self.relic_textures
-                        .insert(img.id, RelicTextureGpu { view, relief_view });
-                }
+                Ok(img) => pending.push(img),
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     finished = true;
@@ -128,7 +102,11 @@ impl WgpuRenderer {
                 }
             }
         }
-        if finished {
+        let _ = rx;
+        for img in pending {
+            self.install_relic_gpu(img);
+        }
+        if finished && batch_mode {
             crate::startup_profile::record(
                 "relic.texture_upload_main",
                 self.relic_profile_upload_cpu,
@@ -140,7 +118,7 @@ impl WgpuRenderer {
                 "all {} relic textures uploaded to GPU (spawn → last upload)",
                 self.relic_textures.len(),
             );
-            self.relic_rx = None; // drop the channel
+            self.relic_rx = None;
             self.relic_load_finished = true;
             if !self.is_loading() {
                 crate::startup_profile::note_async_boot_complete();

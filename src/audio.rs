@@ -4,7 +4,7 @@
 //! SFX and music (OGG/Vorbis) are decoded to PCM once at load time so the
 //! device thread never runs decoders during playback.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::io::Cursor;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1004,7 +1004,48 @@ impl AudioManager {
         {
             log::debug!("Loaded BGM {path} ({id:?})");
             self.music_data.insert(id, clip);
+            self.sync_music_pcm_profile();
         }
+    }
+
+    fn music_pcm_bytes(&self) -> usize {
+        self.music_data
+            .values()
+            .map(|clip| clip.samples.len() * std::mem::size_of::<i16>())
+            .sum()
+    }
+
+    fn sync_music_pcm_profile(&self) {
+        mahjuro_render::gpu_memory_profile::set_music_pcm_bytes(self.music_pcm_bytes());
+    }
+
+    /// Drop decoded tracks that are not part of the live playback set.
+    fn trim_music_cache(&mut self) {
+        let mut keep = FxHashSet::default();
+        if let Some(id) = self.music_active_id {
+            keep.insert(id);
+        }
+        if let Some(id) = self.pending_post_jingle_music {
+            keep.insert(id);
+        }
+        if let Some(id) = self.last_music {
+            keep.insert(id);
+        }
+        for (_, id) in &self.pending_music {
+            keep.insert(*id);
+        }
+        for id in [
+            MusicId::GameplayIntro,
+            MusicId::Gameplay,
+            MusicId::GameplayIntenseIntro,
+            MusicId::GameplayIntense,
+        ] {
+            if self.music_data.contains_key(&id) {
+                keep.insert(id);
+            }
+        }
+        self.music_data.retain(|id, _| keep.contains(id));
+        self.sync_music_pcm_profile();
     }
 
     /// Decode round BGM clips ahead of the hallway → gameplay transition.
@@ -1021,6 +1062,7 @@ impl AudioManager {
 
     fn start_music_track(&mut self, id: MusicId) {
         self.ensure_music_loaded(id);
+        self.trim_music_cache();
         let Some(clip) = self.music_data.get(&id).cloned() else {
             log::debug!("start_music_track({id:?}): no data");
             return;

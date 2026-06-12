@@ -33,6 +33,18 @@ impl WgpuRenderer {
         if self.relic_load_finished || self.relic_rx.is_some() {
             return;
         }
+        if self.graphics_mode == mahjuro_gfx_types::GraphicsMode::LowMemory {
+            return;
+        }
+        let snapshot = self.gpu_memory_pressure_snapshot();
+        if crate::gpu_memory_pressure::eager_warm_pressure(&snapshot, self.graphics_mode)
+            != crate::gpu_memory_pressure::GpuMemoryPressure::Normal
+        {
+            return;
+        }
+        if !crate::room_preload::hub_chain_cpu_prefetch_ready() {
+            return;
+        }
         self.ensure_relic_instance_pool();
         self.relic_load_start = Some(Instant::now());
         self.relic_rx = Some(spawn_relic_loader());

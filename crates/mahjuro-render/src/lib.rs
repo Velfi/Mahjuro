@@ -65,6 +65,7 @@ pub mod rain_tuning;
 pub mod raycast;
 pub mod relic_bake;
 pub mod relic_dish;
+pub mod relic_gpu_residency;
 pub mod relic_pipeline;
 pub mod ribbon_mesh;
 pub mod river_mesh;

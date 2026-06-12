@@ -1069,6 +1069,10 @@ pub(super) fn build_renderer_new(
     #[cfg(feature = "windowed")]
     drop(boot_splash);
 
+    let bc7_textures_supported = device
+        .features()
+        .contains(wgpu::Features::TEXTURE_COMPRESSION_BC);
+
     Ok(WgpuRenderer {
         target,
         device,
@@ -1311,6 +1315,11 @@ pub(super) fn build_renderer_new(
         creation_time: Instant::now(),
         vhs_grain_frame: 0,
         relic_textures: rustc_hash::FxHashMap::default(),
+        relic_gpu_lru: std::collections::VecDeque::new(),
+        relic_gpu_meta: rustc_hash::FxHashMap::default(),
+        relic_loading: std::collections::HashSet::new(),
+        relic_ondemand_tx: None,
+        bc7_textures_supported,
         gameplay_hud_pools_ready: false,
         talisman_textures_ready: false,
         relic_rx,

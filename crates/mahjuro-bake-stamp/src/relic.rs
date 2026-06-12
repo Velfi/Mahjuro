@@ -1,4 +1,4 @@
-//! Relic RLC1 bake stamp.
+//! Relic RLC2 bake stamp.
 //!
 //! Inputs: `assets/data/relics.json`, every PNG under `assets/textures/relics/`,
 //! and the three runtime-side relic codec files (`relic_pipeline.rs`, `relic_bake.rs`,
@@ -14,12 +14,14 @@ use crate::{BakeKind, Fnv64, hash_paths};
 pub struct Relic;
 
 impl BakeKind for Relic {
-    const LABEL: &'static str = "relic RLC1 bake";
+    const LABEL: &'static str = "relic RLC2 bake";
     const STAMP_PATH: &'static str = "assets/data/relic_baked/.inputs_stamp";
     const OUT_DIR: &'static str = "assets/data/relic_baked";
     const SKIP_ENV: &'static str = "MAHJURO_SKIP_RELIC_BAKE";
-    const BUILD_TOOL_CMD: &'static str = "cargo build -p mahjuro-render --bin mahjuro-bake-relics";
-    const REBAKE_CMD: &'static str = "cargo run -p mahjuro-render --bin mahjuro-bake-relics";
+    const BUILD_TOOL_CMD: &'static str =
+        "cargo build -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake";
+    const REBAKE_CMD: &'static str =
+        "cargo run -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake";
     const COMMIT_PATHS: &'static str =
         "assets/data/relic_baked/*.rlc assets/data/relic_baked/.inputs_stamp";
 
@@ -38,7 +40,7 @@ impl BakeKind for Relic {
 
     fn compute_inputs_hash(repo: &Path) -> String {
         let mut h = Fnv64::new();
-        h.write(b"relic-rlc1-v1\n");
+        h.write(b"relic-rlc2-v2\n");
         for path in Self::stamp_input_paths(repo) {
             if path.is_file() {
                 hash_paths(&mut h, repo, std::slice::from_ref(&path));

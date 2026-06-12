@@ -10,7 +10,7 @@
 #   gi, shadow   room bakes (mahjuro-bake)
 #   room         gi + shadow
 #   decal        showcase atlases
-#   relic        relic RLC1
+#   relic        relic RLC2
 #   all          room + decal + relic
 #
 # Examples:
@@ -73,7 +73,7 @@ if [[ "$want_decal" -eq 1 ]]; then
 fi
 
 if [[ "$want_relic" -eq 1 ]]; then
-    echo "==> relic RLC1 bakes"
+    echo "==> relic RLC2 bakes"
     cargo run -p mahjuro-render --bin mahjuro-bake-relics
 fi
 

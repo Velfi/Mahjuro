@@ -261,5 +261,13 @@ mod tests {
             room_gpu_bit_for_scene_key("gameplay", mahjuro_gfx_types::GraphicsMode::LowMemory),
             Some(ROOM_GAMEPLAY)
         );
+        assert_eq!(
+            room_gpu_bit_for_scene_key("showcase", mahjuro_gfx_types::GraphicsMode::LowMemory),
+            Some(ROOM_SHOP)
+        );
+        assert_eq!(
+            room_gpu_bit_for_scene_key("tutorial", mahjuro_gfx_types::GraphicsMode::LowMemory),
+            Some(ROOM_GAMEPLAY)
+        );
     }
 }

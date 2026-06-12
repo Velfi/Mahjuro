@@ -167,7 +167,7 @@ def should_skip(rel: str) -> bool:
         ".bin",
     }:
         return True
-    # Source relic art — runtime loads pre-baked RLC1 under data/relic_baked/.
+    # Source relic art — runtime loads pre-baked RLC2 under data/relic_baked/.
     if rel.startswith("textures/relics/"):
         return True
     return False

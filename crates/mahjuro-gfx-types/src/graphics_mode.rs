@@ -116,6 +116,9 @@ impl GraphicsMemoryModel {
     }
 }
 
+/// One archive relic-tab page is 3×7 = 21 slots (`archive_glb::ARCHIVE_SLOT_COUNT`).
+pub const LOW_MEMORY_RELIC_GPU_RESIDENTS: usize = 24;
+
 impl GraphicsMode {
     pub fn next(self) -> Self {
         match self {
@@ -176,6 +179,34 @@ impl GraphicsMode {
         match self {
             Self::LowMemory => 1,
             Self::Performance | Self::Visuals => 4,
+        }
+    }
+
+    /// Maximum relic albedo+relief textures kept on the GPU at once.
+    /// `None` = eager batch load all relics (Performance / Visuals).
+    #[inline]
+    pub fn max_relic_gpu_residents(self) -> Option<usize> {
+        match self {
+            Self::LowMemory => Some(LOW_MEMORY_RELIC_GPU_RESIDENTS),
+            Self::Performance | Self::Visuals => None,
+        }
+    }
+
+    /// Maximum decoded 2D tile atlas PNGs retained in CPU RAM.
+    #[inline]
+    pub fn max_decal_atlas_cpu_cache(self) -> usize {
+        match self {
+            Self::LowMemory => 1,
+            Self::Performance | Self::Visuals => 2,
+        }
+    }
+
+    /// Longest side of a decoded 2D tile atlas PNG on this preset.
+    #[inline]
+    pub fn decal_atlas_max_decode_side(self) -> u32 {
+        match self {
+            Self::LowMemory => 4096,
+            Self::Performance | Self::Visuals => u32::MAX,
         }
     }
 

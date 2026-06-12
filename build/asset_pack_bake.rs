@@ -119,7 +119,7 @@ fn should_skip_pack_input(rel: &str) -> bool {
             return true;
         }
     }
-    // Source relic art — runtime loads pre-baked RLC1 under data/relic_baked/.
+    // Source relic art — runtime loads pre-baked RLC2 under data/relic_baked/.
     if rel.starts_with("textures/relics/") {
         return true;
     }

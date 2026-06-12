@@ -265,8 +265,20 @@ fn resident_fallback(residents: usize, cap: usize) -> GpuMemoryPressure {
     }
 }
 
+fn log_budget_suffix(counters: &crate::gpu_memory_profile::MemoryBudgetCounters) -> String {
+    format!(
+        " relic_gpu={} MiB decal_atlas_cpu={} MiB music_pcm={} MiB",
+        counters.relic_gpu_bytes / (1024 * 1024),
+        counters.decal_atlas_cpu_bytes / (1024 * 1024),
+        counters.music_pcm_bytes / (1024 * 1024),
+    )
+}
+
 /// Log when the pressure tier changes (always at `info` when profiling env is set).
-pub fn log_pressure_transition(snapshot: &PressureSnapshot) {
+pub fn log_pressure_transition(
+    snapshot: &PressureSnapshot,
+    counters: &crate::gpu_memory_profile::MemoryBudgetCounters,
+) {
     let tag = snapshot.pressure as u8;
     if LAST_LOGGED.swap(tag, Ordering::Relaxed) == tag {
         return;
@@ -274,13 +286,14 @@ pub fn log_pressure_transition(snapshot: &PressureSnapshot) {
     if !crate::gpu_memory_profile::enabled() {
         return;
     }
+    let budget = log_budget_suffix(counters);
     match (
         snapshot.allocated_bytes,
         snapshot.reserved_bytes,
         snapshot.os_usage_bytes,
     ) {
         (Some(alloc), Some(res), Some(os)) => log::info!(
-            "gpu mem profile: pressure={} residents={}/{} allocated={} MiB reserved={} MiB os_usage={} MiB os_budget={} MiB effective_usage={} MiB",
+            "gpu mem profile: pressure={} residents={}/{} allocated={} MiB reserved={} MiB os_usage={} MiB os_budget={} MiB effective_usage={} MiB{budget}",
             snapshot.pressure.label(),
             snapshot.room_gpu_residents,
             snapshot.max_room_gpu_residents,
@@ -289,21 +302,24 @@ pub fn log_pressure_transition(snapshot: &PressureSnapshot) {
             os / (1024 * 1024),
             snapshot.os_budget_bytes.unwrap_or(0) / (1024 * 1024),
             effective_pressure_bytes(Some(alloc), Some(res), Some(os)).unwrap_or(0) / (1024 * 1024),
+            budget = budget,
         ),
         (Some(alloc), Some(res), None) => log::info!(
-            "gpu mem profile: pressure={} residents={}/{} allocated={} MiB reserved={} MiB usage={} MiB",
+            "gpu mem profile: pressure={} residents={}/{} allocated={} MiB reserved={} MiB usage={} MiB{budget}",
             snapshot.pressure.label(),
             snapshot.room_gpu_residents,
             snapshot.max_room_gpu_residents,
             alloc / (1024 * 1024),
             res / (1024 * 1024),
             effective_usage_bytes(Some(alloc), Some(res)).unwrap_or(0) / (1024 * 1024),
+            budget = budget,
         ),
         _ => log::info!(
-            "gpu mem profile: pressure={} residents={}/{} (allocator report unavailable)",
+            "gpu mem profile: pressure={} residents={}/{} (allocator report unavailable){budget}",
             snapshot.pressure.label(),
             snapshot.room_gpu_residents,
             snapshot.max_room_gpu_residents,
+            budget = budget,
         ),
     }
 }
