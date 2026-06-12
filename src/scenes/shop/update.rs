@@ -4,8 +4,6 @@ use crate::scenes::{
     GuideScene, OverlayRequest, Scene, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
     WallLedgerScene, YakuJournalScene, options,
 };
-use crate::ui::widget_tree::TreeInput;
-
 /// Player inventory row is hit-tested via 3D picks only; exclude its rects from
 /// cursor-mode [`focus_target_at_cursor`] so empty padding does not steal focus.
 #[inline]
@@ -50,34 +48,6 @@ impl ShopScene {
                 orbit,
             ))),
         ))));
-    }
-
-    /// Activate a HUD chrome focus target (Leave, Restock, Journal, Wall HUD).
-    fn dispatch_chrome_focus(
-        &mut self,
-        focus: ShopFocus,
-        ctx: &mut UpdateCtx<'_>,
-    ) -> SceneTransition {
-        match focus {
-            ShopFocus::NextRound => Some(self.continue_intent()),
-            ShopFocus::Restock => {
-                self.try_restock(ctx.run, ctx.bus);
-                None
-            }
-            ShopFocus::WallHud => {
-                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::WallLedger(
-                    WallLedgerScene::shop_preview(),
-                ))));
-                None
-            }
-            ShopFocus::Dish(id) if id == PICK_JOURNAL_BOOK => {
-                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::YakuJournal(
-                    YakuJournalScene::new(),
-                ))));
-                None
-            }
-            _ => None,
-        }
     }
 
     /// Mouse pick dispatch for shop hits (3D props + screen-space UI buttons).
@@ -480,43 +450,11 @@ impl ShopScene {
             self.focus = new_focus;
         }
 
-        // Cancel → exit button before chrome-tree input so focus and tree stay aligned.
+        // Cancel → exit button.
         let cancel_pressed = ctx.actions.iter().any(|a| matches!(a, UiAction::Cancel));
         if cancel_pressed {
             self.cancel_all_hold_prompts(ctx.bus);
             self.focus = Some(ShopFocus::NextRound);
-        }
-
-        let chrome = super::focus::flat_chrome_items(&focus_rects);
-        let chrome_focused = self.focus.is_some_and(super::focus::shop_focus_is_chrome);
-        if chrome_focused {
-            super::focus::sync_chrome_tree_from_focus(&mut self.chrome_tree, &chrome, self.focus);
-        }
-        let tree_actions: Vec<UiAction> = if chrome_focused {
-            ctx.actions.to_vec()
-        } else {
-            ctx.actions
-                .iter()
-                .copied()
-                .filter(|a| !matches!(a, UiAction::Confirm | UiAction::CommitDiscard))
-                .collect()
-        };
-        if let Some(chrome_focus) = self.chrome_tree.update_flat(
-            &chrome,
-            TreeInput {
-                actions: &tree_actions,
-                button_clicks: ctx.button_clicks,
-                cursor_pos: ctx.cursor_pos,
-                window: (ctx.layout.window_w, ctx.layout.window_h),
-                input_mode: ctx.input_mode,
-                scroll_lines: 0.0,
-            },
-        ) {
-            self.focus = Some(chrome_focus);
-            return self.dispatch_chrome_focus(chrome_focus, &mut ctx);
-        }
-        if chrome_focused || self.chrome_tree.take_focus_changed() {
-            super::focus::sync_focus_from_chrome_tree(&mut self.focus, &self.chrome_tree, &chrome);
         }
 
         let w = ctx.layout.window_w;

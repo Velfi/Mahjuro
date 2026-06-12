@@ -233,7 +233,6 @@ impl ShopScene {
             focus,
             focus_nav: crate::ui::focus_nav::FocusNavState::new(),
             focus_session: crate::ui::focus_nav::RectFocusSession::new(),
-            chrome_tree: crate::ui::widget_tree::TreeState::new(),
             score_popups: ScorePopupSystem::new(),
             particles: ParticleSystem::new(),
             last_frame: Instant::now(),

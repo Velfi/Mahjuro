@@ -56,8 +56,6 @@ use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, ShopHit, TextAlign, TextLabel};
 use crate::ui::focus_nav::{FocusDir, FocusNavState, RectFocusSession};
 use crate::ui::input::{InputMode, UiAction};
-use crate::ui::widget_tree::TreeState;
-
 use super::pause_menu::PauseMenu;
 pub(crate) use super::{Scene, SceneIntent, SceneTransition, UpdateCtx};
 
@@ -80,8 +78,6 @@ pub struct ShopScene {
     focus_nav: FocusNavState<ShopFocus>,
     /// Focus rect graph from the previous draw frame (stock + chrome for spatial nav).
     focus_session: RectFocusSession<ShopFocus>,
-    /// HUD chrome buttons (Leave, Restock, Journal, Wall HUD).
-    chrome_tree: TreeState,
     /// Floating 3D text popups for zodiac level-up feedback.
     score_popups: ScorePopupSystem,
     /// Particle burst effects for zodiac level-up feedback.

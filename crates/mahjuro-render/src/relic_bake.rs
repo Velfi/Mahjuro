@@ -94,19 +94,20 @@ fn downscale_rgba(
     (resized.into_raw(), nw, nh)
 }
 
-fn rgba_mip_chain(rgba: &[u8], width: u32, height: u32) -> Vec<(Vec<u8>, u32, u32)> {
+#[cfg(feature = "relic_bc7_bake")]
+fn rgba_mip_chain_bc7(rgba: &[u8], width: u32, height: u32) -> Vec<(Vec<u8>, u32, u32)> {
     let mut chain = Vec::new();
     let mut w = width.max(1);
     let mut h = height.max(1);
     let mut level = rgba.to_vec();
     loop {
         chain.push((level.clone(), w, h));
-        if w == 1 && h == 1 {
+        if w <= 4 && h <= 4 {
             break;
         }
         let img = image::RgbaImage::from_raw(w, h, level).expect("relic mip rgba");
-        w = (w / 2).max(1);
-        h = (h / 2).max(1);
+        w = (w / 2).max(4);
+        h = (h / 2).max(4);
         level = image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle).into_raw();
     }
     chain
@@ -121,7 +122,7 @@ fn encode_bc7_mip_chain(
 ) -> anyhow::Result<(Vec<u8>, u32, u32, u32, Vec<u8>, u32, u32)> {
     use intel_tex_2::{RgbaSurface, bc7};
 
-    let chain = rgba_mip_chain(rgba, width, height);
+    let chain = rgba_mip_chain_bc7(rgba, width, height);
     let mip_count = chain.len() as u32;
     let (base_w, base_h) = (chain[0].1, chain[0].2);
     let settings = if srgb {
