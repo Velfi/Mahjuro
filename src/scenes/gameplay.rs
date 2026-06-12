@@ -1178,8 +1178,10 @@ impl GameplayScene {
             let mut selection_valid = false;
 
             if !selected_tiles.is_empty() {
+                let validates = run.try_validate_with_wildcards(&selected_tiles).is_some();
                 let (preview_melds, _, is_valid) = run.preview_selection_melds(&selected_tiles);
                 selection_valid = is_valid;
+                has_capacity_error = validates && !is_valid;
 
                 if is_valid {
                     let id_to_index: rustc_hash::FxHashMap<u32, usize> = run
@@ -1203,20 +1205,6 @@ impl GameplayScene {
                         .collect();
                     meld_index_groups.sort_by_key(|group| group[0]);
 
-                    if let Some((sets, scoring_tiles)) =
-                        run.try_validate_with_wildcards(&selected_tiles)
-                    {
-                        let kongs_after = crate::core::hand::kong_structure_bonus(
-                            run.structure_sets().iter().chain(sets.iter()),
-                        );
-                        use crate::game::game_mode::HAND_SIZE;
-                        if run.structure_tiles().len() + scoring_tiles.len()
-                            > HAND_SIZE + kongs_after
-                            || run.plays_remaining == 0
-                        {
-                            has_capacity_error = true;
-                        }
-                    }
                 }
             }
 

@@ -63,9 +63,7 @@ impl RunState {
 
         self.tiles_played = self.tiles_played.saturating_add(scoring_tiles.len() as u32);
 
-        let current_tile_count = self.structure_tiles.len();
-        let kongs_after = kong_structure_bonus(self.structure_sets.iter().chain(sets.iter()));
-        if current_tile_count + scoring_tiles.len() > HAND_SIZE + kongs_after {
+        if !self.selection_commit_capacity_ok(&sets, scoring_tiles.len()) {
             bus.push(GameEvent::InvalidAction);
             return 0;
         }
@@ -882,7 +880,8 @@ impl RunState {
             scoring_tiles.len() >= HAND_SIZE && scoring_tiles.len() == HAND_SIZE + kong_bonus;
         let bias = infer_decomposition_bias(&self.hand);
         let rules = self.validation_rules_for_structure_commits();
-        let alternatives = enumerate_decompositions(scoring_tiles, &rules);
+        let mut alternatives = enumerate_decompositions(scoring_tiles, &rules);
+        alternatives.retain(|sets| self.selection_commit_capacity_ok(sets, scoring_tiles.len()));
         if alternatives.is_empty() {
             return default_sets;
         }
@@ -1076,10 +1075,9 @@ impl RunState {
             let Some((new_sets, scoring_tiles)) = self.try_validate_with_wildcards(&tiles) else {
                 continue;
             };
-
-            let kongs_after =
-                kong_structure_bonus(self.structure_sets.iter().chain(new_sets.iter()));
-            if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
+            let best_sets =
+                self.pick_best_decomposition(new_sets, &scoring_tiles, &tiles);
+            if !self.selection_commit_capacity_ok(&best_sets, scoring_tiles.len()) {
                 continue;
             }
             return true;

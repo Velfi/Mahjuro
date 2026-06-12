@@ -92,7 +92,8 @@ impl RunState {
         }
         if let Some((sets, scoring_tiles)) = self.try_validate_with_wildcards(tiles) {
             let sets = self.pick_best_decomposition(sets, &scoring_tiles, tiles);
-            return (sets, Vec::new(), true);
+            let is_valid = self.selection_commit_capacity_ok(&sets, scoring_tiles.len());
+            return (sets, Vec::new(), is_valid);
         }
         let rules = self.validation_rules_for_structure_commits();
         let (melds, bad) = crate::core::hand::staging_preview_melds(tiles, &rules);
@@ -133,6 +134,18 @@ impl RunState {
         !self.is_selection_valid() && self.selection_blocked_by_ordeal_rules(&selected_tiles)
     }
 
+    /// Whether committing `sets` would fit the current structure tile budget.
+    pub(crate) fn selection_commit_capacity_ok(
+        &self,
+        sets: &[DetectedMeld],
+        scoring_tile_count: usize,
+    ) -> bool {
+        use crate::core::hand::kong_structure_bonus;
+        use crate::game::game_mode::HAND_SIZE;
+        let kongs_after = kong_structure_bonus(self.structure_sets.iter().chain(sets.iter()));
+        self.structure_tiles.len() + scoring_tile_count <= HAND_SIZE + kongs_after
+    }
+
     /// Check if the current selection can be played into structure right now.
     pub fn is_selection_valid(&self) -> bool {
         if self.selected_count() == 0 {
@@ -149,11 +162,7 @@ impl RunState {
             return false;
         };
         let sets = self.pick_best_decomposition(sets, &scoring_tiles, &selected_tiles);
-        use crate::core::hand::kong_structure_bonus;
-        use crate::game::game_mode::HAND_SIZE;
-        let kongs_after =
-            kong_structure_bonus(self.structure_sets.iter().chain(sets.iter()));
-        self.structure_tiles.len() + scoring_tiles.len() <= HAND_SIZE + kongs_after
+        self.selection_commit_capacity_ok(&sets, scoring_tiles.len())
     }
 
     /// Player-facing copy for the current selection when Play is rejected.
