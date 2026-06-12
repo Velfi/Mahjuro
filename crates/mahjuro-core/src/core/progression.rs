@@ -486,12 +486,6 @@ impl PlayerProgress {
                 changed = true;
             }
         }
-        // Yaku and dora are level-gated (not tracked in a HashSet), so they
-        // are always "new" for their unlock level.
-        if !unlocks.yaku.is_empty() || unlocks.dora {
-            changed = true;
-        }
-
         if changed {
             Some(LevelUpResult {
                 new_level: level,
@@ -651,17 +645,10 @@ impl PlayerProgress {
         }
         from
     }
-
-    /// Whether dora tiles are active (plinth display, hand highlights, scoring).
-    pub fn dora_enabled(&self) -> bool {
-        true
-    }
 }
 
 struct LevelUnlocks {
     relics: Vec<RelicId>,
-    yaku: Vec<YakuKind>,
-    dora: bool,
 }
 
 /// What was unlocked when the player leveled up.
@@ -698,8 +685,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Kindling,
                 RelicId::KanDrum,
             ],
-            yaku: vec![],
-            dora: false,
         },
         // ── L2: Suit & rank chips (all three Serpents together) ──────────
         2 => LevelUnlocks {
@@ -711,8 +696,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::HighTide,
                 RelicId::EvenKeel,
             ],
-            yaku: vec![],
-            dora: false,
         },
         // ── L3: Basic economy + first scoring yaku ───────────────────────
         3 => LevelUnlocks {
@@ -724,8 +707,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Sweepstakes,
                 RelicId::PlainDealing,
             ],
-            yaku: vec![YakuKind::Toitoi, YakuKind::Tanyao],
-            dora: false,
         },
         // ── L4: Tempo & shop + flower intro ──────────────────────────────
         4 => LevelUnlocks {
@@ -738,8 +719,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::GardenKeeper,
                 RelicId::GlassCannon,
             ],
-            yaku: vec![],
-            dora: false,
         },
         // ── L5: Set composition + Ikebana flower payoff + Iipeikou/Honitsu
         5 => LevelUnlocks {
@@ -751,10 +730,8 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::TurtleShell,
                 RelicId::Ikebana,
             ],
-            yaku: vec![YakuKind::Iipeikou, YakuKind::Honitsu],
-            dora: false,
         },
-        // ── L6: Dora opens + honors/dragons + Lotus Bloom flower scaler ──
+        // ── L6: Honors/dragons + Lotus Bloom flower scaler ──
         6 => LevelUnlocks {
             relics: vec![
                 RelicId::DoraCrown,
@@ -768,8 +745,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::WallWeaver,
                 RelicId::LotusBloom,
             ],
-            yaku: vec![YakuKind::Chinitsu, YakuKind::Chiitoitsu],
-            dora: true,
         },
         // ── L7: Late-economy uncommons + hand-size modifiers ─────────────
         7 => LevelUnlocks {
@@ -783,8 +758,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::BigHands,
                 RelicId::TinyHands,
             ],
-            yaku: vec![],
-            dora: false,
         },
         // ── L8: Mid scaling specialists + Sanshoku/Honroutou ─────────────
         8 => LevelUnlocks {
@@ -798,8 +771,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Bonfire,
                 RelicId::StarTile,
             ],
-            yaku: vec![YakuKind::SanshokuDoujun, YakuKind::Honroutou],
-            dora: false,
         },
         // ── L9: Specialist rares + Junchan/Ittsu ─────────────────────────
         9 => LevelUnlocks {
@@ -811,8 +782,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::RiverRunner,
                 RelicId::GhostHand,
             ],
-            yaku: vec![YakuKind::Junchan, YakuKind::Ittsu],
-            dora: false,
         },
         // ── L10: Fragile transforms (burn-into-successor relics) ─────────
         10 => LevelUnlocks {
@@ -823,8 +792,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::TeaCeremony,
                 RelicId::XxxlEgg,
             ],
-            yaku: vec![],
-            dora: false,
         },
         // ── L11: Retriggers & polish ─────────────────────────────────────
         11 => LevelUnlocks {
@@ -835,8 +802,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::VoiceOfTheElite,
                 RelicId::Chrysalis,
             ],
-            yaku: vec![],
-            dora: false,
         },
         // ── L12: Conditional ×mult "Way of" relics + tough rules ─────────
         12 => LevelUnlocks {
@@ -850,8 +815,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::ChowLine,
                 RelicId::Disgust,
             ],
-            yaku: vec![],
-            dora: false,
         },
         // ── L13: Late rares (utility / scaling / chaos) ──────────────────
         13 => LevelUnlocks {
@@ -861,19 +824,13 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Snowball,
                 RelicId::Obsession,
             ],
-            yaku: vec![],
-            dora: false,
         },
         // ── L14: Capstones (legendaries + the most chaotic rares) ────────
         14 => LevelUnlocks {
             relics: level_14_relics(),
-            yaku: vec![],
-            dora: false,
         },
         _ => LevelUnlocks {
             relics: vec![],
-            yaku: vec![],
-            dora: false,
         },
     }
 }
@@ -1249,12 +1206,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn dora_always_enabled() {
-        let p = PlayerProgress::new();
-        assert!(p.dora_enabled());
     }
 
     #[test]

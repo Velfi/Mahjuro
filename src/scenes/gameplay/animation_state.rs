@@ -190,7 +190,6 @@ pub(super) fn build_ambient_table_objects(
     scene: &GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
     gameplay: &crate::game::engine::GameplayReadModel,
-    progress_dora_enabled: bool,
     frame: &mut crate::render::draw_cmd::UiFrame,
     tile_plinth_poses: &[crate::render::gameplay_glb::GameplayMarkerPose; 3],
     gold_pile_pose: crate::render::gameplay_glb::GameplayMarkerPose,
@@ -208,7 +207,7 @@ pub(super) fn build_ambient_table_objects(
     let tile_spacing = hand_slot_w * (24.0 / crate::ui::layout::TILE_WIDTH_MM);
     let tile_on_plinth_lift = |z: f32| z;
 
-    if !vis.hide_plinth_tiles && progress_dora_enabled {
+    if !vis.hide_plinth_tiles {
         let plinth = &tile_plinth_poses[0];
         let [plinth_cx, plinth_cy, plinth_lift] = plinth.anchor;
         let tile_lift = tile_on_plinth_lift(plinth_lift);

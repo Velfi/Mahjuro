@@ -987,7 +987,7 @@ impl App {
 
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 /// Build the paginated celebration modal for a level-up. Returns `None`
-/// when the level grants no new relics (rule unlocks are silent mechanics).
+/// when the level grants no new relics.
 pub fn build_level_up_modal(
     result: &crate::core::progression::LevelUpResult,
     window_w: f32,
