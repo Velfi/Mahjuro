@@ -1346,8 +1346,7 @@ fn draw_plaque(
     let (breaks_text, breaks_block_h) = if matches!(state, ProgressionState::Unseen) {
         (String::new(), 0.0)
     } else {
-        let detail =
-            super::guide::yaku_guide_detail(yk, ctx.progress.kokushi_musou_discovered());
+        let detail = super::guide::yaku_guide_detail(yk, ctx.progress.kokushi_musou_discovered());
         let text = format!("Breaks if: {}", detail.breaks_if);
         let block_h = super::guide::dense_text_block_height(&text, breaks_w, breaks_font);
         (text, block_h)

@@ -791,7 +791,8 @@ impl OptionsScene {
         } else {
             available_tilesets[0].clone()
         };
-        let (sfx_volume, sfx_volume_restore) = if !settings.sfx_enabled && settings.sfx_volume > 0.0 {
+        let (sfx_volume, sfx_volume_restore) = if !settings.sfx_enabled && settings.sfx_volume > 0.0
+        {
             (0.0, settings.sfx_volume)
         } else {
             (
@@ -1500,26 +1501,23 @@ impl OptionsScene {
         // ── Keyboard / gamepad (before tree so focus is aligned for Confirm) ──
         for a in actions {
             match a {
-                UiAction::FocusDown if matches!(self.chrome_action(), Some(OptionsChromeAction::Back)) => {}
+                UiAction::FocusDown
+                    if matches!(self.chrome_action(), Some(OptionsChromeAction::Back)) => {}
                 #[cfg(not(feature = "dist-steam"))]
                 UiAction::FocusDown
-                    if matches!(
-                        self.chrome_action(),
-                        Some(OptionsChromeAction::TilesetMods)
-                    ) =>
+                    if matches!(self.chrome_action(), Some(OptionsChromeAction::TilesetMods)) =>
                 {
                     self.tree.set_focus(OptionsChromeAction::Back.id());
                 }
                 #[cfg(not(feature = "dist-steam"))]
-                UiAction::FocusUp if matches!(self.chrome_action(), Some(OptionsChromeAction::Back)) => {
+                UiAction::FocusUp
+                    if matches!(self.chrome_action(), Some(OptionsChromeAction::Back)) =>
+                {
                     self.tree.set_focus(OptionsChromeAction::TilesetMods.id());
                 }
                 #[cfg(not(feature = "dist-steam"))]
                 UiAction::FocusUp
-                    if matches!(
-                        self.chrome_action(),
-                        Some(OptionsChromeAction::TilesetMods)
-                    ) =>
+                    if matches!(self.chrome_action(), Some(OptionsChromeAction::TilesetMods)) =>
                 {
                     self.focused = *ROWS.last().unwrap();
                     self.ensure_focused_visible(&layout);
@@ -1554,10 +1552,7 @@ impl OptionsScene {
                 }
                 #[cfg(not(feature = "dist-steam"))]
                 UiAction::Confirm | UiAction::CommitDiscard
-                    if matches!(
-                        self.chrome_action(),
-                        Some(OptionsChromeAction::TilesetMods)
-                    ) =>
+                    if matches!(self.chrome_action(), Some(OptionsChromeAction::TilesetMods)) =>
                 {
                     self.open_tileset_mods_requested = true;
                     self.confirm_requested = true;
@@ -1655,7 +1650,8 @@ impl OptionsScene {
             #[cfg(feature = "dist-steam")]
             if cid == STEAM_PUBLISH_ARROW_PREV_ID {
                 self.focused = Row::SteamPublishMod;
-                self.tree.set_focus(OptionsNav::row_id(Row::SteamPublishMod));
+                self.tree
+                    .set_focus(OptionsNav::row_id(Row::SteamPublishMod));
                 self.cycle_publish_mod(-1);
                 self.confirm_requested = true;
                 continue;
@@ -1663,7 +1659,8 @@ impl OptionsScene {
             #[cfg(feature = "dist-steam")]
             if cid == STEAM_PUBLISH_ARROW_NEXT_ID {
                 self.focused = Row::SteamPublishMod;
-                self.tree.set_focus(OptionsNav::row_id(Row::SteamPublishMod));
+                self.tree
+                    .set_focus(OptionsNav::row_id(Row::SteamPublishMod));
                 self.cycle_publish_mod(1);
                 self.confirm_requested = true;
                 continue;
@@ -1872,8 +1869,10 @@ impl OptionsScene {
         // ── Bottom buttons ───────────────────────────────────────────
         #[cfg(not(feature = "dist-steam"))]
         {
-            let mods_focused =
-                matches!(nav, Some(OptionsNav::Chrome(OptionsChromeAction::TilesetMods)));
+            let mods_focused = matches!(
+                nav,
+                Some(OptionsNav::Chrome(OptionsChromeAction::TilesetMods))
+            );
             let mods_bg = if mods_focused {
                 color::WALNUT_BRIGHT
             } else {
@@ -1930,10 +1929,8 @@ impl OptionsScene {
             ..Default::default()
         });
 
-        self.tree.register_flat_buttons(
-            &flat_nav_items(&layout, self.scroll.target()),
-            buttons,
-        );
+        self.tree
+            .register_flat_buttons(&flat_nav_items(&layout, self.scroll.target()), buttons);
 
         let version_text = if cfg!(debug_assertions) {
             "vNEXT".into()

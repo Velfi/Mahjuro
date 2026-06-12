@@ -65,9 +65,9 @@ impl ShopScene {
                 None
             }
             ShopFocus::WallHud => {
-                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
-                    Scene::WallLedger(WallLedgerScene::shop_preview()),
-                )));
+                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::WallLedger(
+                    WallLedgerScene::shop_preview(),
+                ))));
                 None
             }
             ShopFocus::Dish(id) if id == PICK_JOURNAL_BOOK => {
@@ -481,19 +481,14 @@ impl ShopScene {
         }
 
         // Cancel → exit button before chrome-tree input so focus and tree stay aligned.
-        let cancel_pressed = ctx
-            .actions
-            .iter()
-            .any(|a| matches!(a, UiAction::Cancel));
+        let cancel_pressed = ctx.actions.iter().any(|a| matches!(a, UiAction::Cancel));
         if cancel_pressed {
             self.cancel_all_hold_prompts(ctx.bus);
             self.focus = Some(ShopFocus::NextRound);
         }
 
         let chrome = super::focus::flat_chrome_items(&focus_rects);
-        let chrome_focused = self
-            .focus
-            .is_some_and(super::focus::shop_focus_is_chrome);
+        let chrome_focused = self.focus.is_some_and(super::focus::shop_focus_is_chrome);
         if chrome_focused {
             super::focus::sync_chrome_tree_from_focus(&mut self.chrome_tree, &chrome, self.focus);
         }
@@ -589,11 +584,8 @@ impl ShopScene {
                 && self.confirm_buy_hold_started.is_none()
             {
                 if self.buy_hold_valid_for(ctx.run, &shop) {
-                    self.confirm_buy_hold_started = Some(crate::ui::prompt_hold_ring::begin_hold(
-                        now,
-                        ctx.bus,
-                        true,
-                    ));
+                    self.confirm_buy_hold_started =
+                        Some(crate::ui::prompt_hold_ring::begin_hold(now, ctx.bus, true));
                     continue;
                 }
                 if let Some(action) = focused_shop_buy_action(

@@ -568,7 +568,8 @@ impl ShopScene {
         let shop = GameEngine::read_shop(run);
         let env_h = self.drawn_room_gltf_height_scale.get();
         let cam = shop_camera_params(w, h, env_h);
-        self.focus_session.stash(build_focus_rects(self, w, h, &cam, &shop, run));
+        self.focus_session
+            .stash(build_focus_rects(self, w, h, &cam, &shop, run));
     }
 }
 
@@ -1033,7 +1034,11 @@ pub(crate) fn render_shop_frame(
             (ShopFocus::NextRound, lr),
             (ShopFocus::WallHud, wall.block_rect),
         ];
-        super::focus::register_shop_chrome_buttons(&shop.chrome_tree, &chrome_rects, &mut frame.buttons);
+        super::focus::register_shop_chrome_buttons(
+            &shop.chrome_tree,
+            &chrome_rects,
+            &mut frame.buttons,
+        );
         // Catch-all for Object3D / GLB collision picks (inventory + props). Pushed
         // last so shelf + HUD rects win when they overlap the cursor.
         if ctx.picked_shop_object.is_some() {

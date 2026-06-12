@@ -11,7 +11,7 @@ mod validation;
 #[cfg(test)]
 pub use decomposition::find_pairs_and_triplets;
 pub use decomposition::{
-    decomposition_canonical_key, detect_all_sets, enumerate_decompositions, DecompositionKey,
+    DecompositionKey, decomposition_canonical_key, detect_all_sets, enumerate_decompositions,
 };
 pub use validation::{
     non_contributing_tile_ids, selection_rejection_hint, staging_preview_melds,

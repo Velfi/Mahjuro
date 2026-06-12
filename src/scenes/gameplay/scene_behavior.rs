@@ -1695,8 +1695,7 @@ impl SceneBehavior for GameplayScene {
                         }
                     }
                     FocusTarget::Dora => {
-                        let (title, cta, desc) =
-                            dora_focus_tooltip_strings(&gameplay.dora_faces);
+                        let (title, cta, desc) = dora_focus_tooltip_strings(&gameplay.dora_faces);
                         push_focus_tooltip_panel_2d(
                             &mut inspect_tooltip_quads,
                             &mut inspect_tooltip_texts,

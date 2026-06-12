@@ -457,11 +457,9 @@ pub fn resolve_yen_popup_fly_dest(
     layout: &crate::ui::layout::LayoutResult,
     env_height_scale: f32,
 ) -> crate::render::world_space::LayoutAnchorPx {
-    if let Ok(anchor) = resolve_player_gold_anchor(
-        layout.window_w,
-        layout.window_h,
-        env_height_scale,
-    ) {
+    if let Ok(anchor) =
+        resolve_player_gold_anchor(layout.window_w, layout.window_h, env_height_scale)
+    {
         return crate::render::world_space::LayoutAnchorPx {
             px: anchor[0],
             py: anchor[1],

@@ -448,10 +448,7 @@ fn run_log_row_y(
     scroll: f32,
 ) -> (f32, f32) {
     if list_i == 0 {
-        (
-            layout.list_top + layout.header_band_h - scroll,
-            run_row_h,
-        )
+        (layout.list_top + layout.header_band_h - scroll, run_row_h)
     } else {
         let runs_top = layout.list_top + layout.header_band_h + run_row_h;
         (

@@ -13,8 +13,8 @@ use crate::ui::controller_hints::{
 };
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
-use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use crate::ui::widget::{self, TextStyle};
+use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::{DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 

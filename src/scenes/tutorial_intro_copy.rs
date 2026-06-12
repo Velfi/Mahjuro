@@ -57,8 +57,7 @@ pub mod campaign {
         "Discard — remove unwanted tiles from your hand. Discards are a limited resource.";
     pub const GLOSSARY_PLAY: &str =
         "Play — send melds to your structure. Plays are a limited resource.";
-    pub const GLOSSARY_STRUCTURE: &str =
-        "Structure — played melds that will score when you cash in. The structure has a fluid, but limited number of slots for melds.";
+    pub const GLOSSARY_STRUCTURE: &str = "Structure — played melds that will score when you cash in. The structure has a fluid, but limited number of slots for melds.";
     pub const GLOSSARY_CASH_IN: &str =
         "Cash In — scores tiles in your structure and then resets it.";
 
@@ -95,11 +94,9 @@ pub mod lessons {
     pub const CASH_IN: &str = "Press **Cash In** to score your structure.";
     pub const DISCARD: &str = "Select a tile you don't need, then **Discard**.";
     pub const DISCARD_RETRY: &str = "Try a **Discard** to improve your hand.";
-    pub const SECOND_SCORE: &str =
-        "Play another meld, then **Cash In** again to reach the target.";
+    pub const SECOND_SCORE: &str = "Play another meld, then **Cash In** again to reach the target.";
     pub const FALLBACK_PLAY: &str = "Press **Play** to move your meld to Structure.";
-    pub const FALLBACK_CASH_IN: &str =
-        "Press **Cash In** when your structure is ready to score.";
+    pub const FALLBACK_CASH_IN: &str = "Press **Cash In** when your structure is ready to score.";
     pub const FALLBACK_TARGET: &str = "Reach the target score before you run out of plays.";
     pub const RIVER_TIP: &str = "Discarded tiles sit in the river — they don't score.";
 
@@ -121,10 +118,8 @@ pub mod summary {
     pub const TITLE_WON: &str = "Tutorial Complete";
     pub const TITLE_LOST: &str = "Tutorial Recap";
 
-    pub const SUBTITLE_WON: &str =
-        "You surpassed The Iconoclast and won, an auspicious beginning.";
-    pub const SUBTITLE_LOST: &str =
-        "You reached the finale but faltered against The Iconoclast. Perhaps you'll fare better next time.";
+    pub const SUBTITLE_WON: &str = "You surpassed The Iconoclast and won, an auspicious beginning.";
+    pub const SUBTITLE_LOST: &str = "You reached the finale but faltered against The Iconoclast. Perhaps you'll fare better next time.";
 
     pub const BULLET_SCORING: &str =
         "Select melds, **Play** to Structure, then **Cash In** to score (**chips** × **mult**).";

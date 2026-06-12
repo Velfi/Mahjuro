@@ -1,13 +1,13 @@
 //! Guided onboarding prompts during the Lessons blind.
 
 use crate::game::onboarding::finale_intro_message;
-use crate::scenes::tutorial_intro_copy::lessons as copy;
 use crate::game::run::RunState;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::DrawCtx;
+use crate::scenes::tutorial_intro_copy::lessons as copy;
 use crate::ui::styled_text;
 use crate::ui::widget::{self, TextStyle};
 

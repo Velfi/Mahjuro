@@ -1557,7 +1557,9 @@ mod cases {
         use crate::core::hand::decomposition_canonical_key;
         use crate::core::yaku::YakuKind;
 
-        let selected: Vec<Tile> = (0..16).map(|i| Tile::new(Suit::Pinzu, 9, 100 + i)).collect();
+        let selected: Vec<Tile> = (0..16)
+            .map(|i| Tile::new(Suit::Pinzu, 9, 100 + i))
+            .collect();
         let mut run = test_run();
         run.available_yaku = vec![
             YakuKind::Toitoi,
@@ -1592,9 +1594,9 @@ mod cases {
         }
         let first_key = decomposition_canonical_key(&selected, &pick_results[0]);
         assert!(
-            pick_results.iter().all(|sets| {
-                decomposition_canonical_key(&selected, sets) == first_key
-            }),
+            pick_results
+                .iter()
+                .all(|sets| { decomposition_canonical_key(&selected, sets) == first_key }),
             "pick_best must not flicker across frames"
         );
         assert!(
@@ -1617,7 +1619,9 @@ mod cases {
     fn sixteen_identical_tiles_rejected_when_structure_cannot_fit_any_split() {
         use crate::core::yaku::YakuKind;
 
-        let selected: Vec<Tile> = (0..16).map(|i| Tile::new(Suit::Pinzu, 9, 100 + i)).collect();
+        let selected: Vec<Tile> = (0..16)
+            .map(|i| Tile::new(Suit::Pinzu, 9, 100 + i))
+            .collect();
         let mut run = test_run();
         run.available_yaku = vec![YakuKind::Toitoi, YakuKind::Chinitsu];
         run.structure_tiles = (0..12)
@@ -1648,7 +1652,12 @@ mod cases {
         run.toggle_select(2);
         assert!(
             run.try_validate_with_wildcards(
-                &run.hand.iter().zip(run.selected.iter()).filter(|&(_, &s)| s).map(|(t, _)| *t).collect::<Vec<_>>()
+                &run.hand
+                    .iter()
+                    .zip(run.selected.iter())
+                    .filter(|&(_, &s)| s)
+                    .map(|(t, _)| *t)
+                    .collect::<Vec<_>>()
             )
             .is_some(),
             "triplet melds should still validate"

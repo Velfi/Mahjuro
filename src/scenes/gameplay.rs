@@ -83,9 +83,7 @@ pub(super) struct YakuPreviewCache {
 fn hash_structure_sets(sets: &[crate::core::hand::DetectedMeld]) -> u64 {
     let mut hash = 0u64;
     for set in sets {
-        hash = hash
-            .wrapping_mul(31)
-            .wrapping_add(set.kind as u8 as u64);
+        hash = hash.wrapping_mul(31).wrapping_add(set.kind as u8 as u64);
         for &id in &set.tile_ids {
             hash = hash.wrapping_mul(31).wrapping_add(id as u64);
         }
@@ -1209,7 +1207,6 @@ impl GameplayScene {
                         .filter(|group: &Vec<usize>| !group.is_empty())
                         .collect();
                     meld_index_groups.sort_by_key(|group| group[0]);
-
                 }
             }
 

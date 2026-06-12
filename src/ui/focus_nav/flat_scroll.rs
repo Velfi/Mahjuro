@@ -10,12 +10,7 @@
 /// Keep `index` inside the viewport `[scroll, scroll + visible)`.
 ///
 /// `total` is the number of indexed slots/rows; `visible` is how many fit on screen at once.
-pub fn clamp_index_into_viewport(
-    index: usize,
-    scroll: f32,
-    visible: usize,
-    total: usize,
-) -> f32 {
+pub fn clamp_index_into_viewport(index: usize, scroll: f32, visible: usize, total: usize) -> f32 {
     if total == 0 || visible == 0 {
         return 0.0;
     }

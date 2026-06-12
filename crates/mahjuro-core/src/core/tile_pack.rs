@@ -202,11 +202,7 @@ impl TilePackKind {
                 };
                 let mut ranks: Vec<u8> = (1..=9).collect();
                 ranks.shuffle(&mut rng);
-                ranks
-                    .into_iter()
-                    .take(8)
-                    .map(|rank| (suit, rank))
-                    .collect()
+                ranks.into_iter().take(8).map(|rank| (suit, rank)).collect()
             }
         }
     }
