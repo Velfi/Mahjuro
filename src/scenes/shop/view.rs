@@ -1034,11 +1034,7 @@ pub(crate) fn render_shop_frame(
             (ShopFocus::NextRound, lr),
             (ShopFocus::WallHud, wall.block_rect),
         ];
-        super::focus::register_shop_chrome_buttons(
-            &shop.chrome_tree,
-            &chrome_rects,
-            &mut frame.buttons,
-        );
+        super::focus::register_shop_chrome_buttons(&chrome_rects, &mut frame.buttons);
         // Catch-all for Object3D / GLB collision picks (inventory + props). Pushed
         // last so shelf + HUD rects win when they overlap the cursor.
         if ctx.picked_shop_object.is_some() {

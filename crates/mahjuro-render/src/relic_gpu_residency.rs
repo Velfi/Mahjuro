@@ -10,6 +10,22 @@ pub(crate) fn bc7_mip_bytes(width: u32, height: u32) -> usize {
     ((width + 3) / 4) as usize * ((height + 3) / 4) as usize * 16
 }
 
+/// BC7 uses 4×4 blocks; wgpu rejects `Queue::write_texture` below that size.
+pub(crate) fn bc7_mip_level_count(base_w: u32, base_h: u32) -> u32 {
+    let mut count = 0u32;
+    let mut w = base_w.max(4);
+    let mut h = base_h.max(4);
+    loop {
+        count += 1;
+        if w == 4 && h == 4 {
+            break;
+        }
+        w = (w / 2).max(4);
+        h = (h / 2).max(4);
+    }
+    count
+}
+
 pub(crate) fn bc7_chain_bytes(base_w: u32, base_h: u32, mip_count: u32) -> usize {
     let mut total = 0usize;
     let mut w = base_w.max(1);
@@ -20,6 +36,11 @@ pub(crate) fn bc7_chain_bytes(base_w: u32, base_h: u32, mip_count: u32) -> usize
         h = (h / 2).max(1);
     }
     total
+}
+
+/// Bytes for the BC7 mip subset that is safe to upload (stops at 4×4).
+pub(crate) fn bc7_upload_chain_bytes(base_w: u32, base_h: u32) -> usize {
+    bc7_chain_bytes(base_w, base_h, bc7_mip_level_count(base_w, base_h))
 }
 
 pub(crate) fn rgba_mip_bytes(width: u32, height: u32, mip_count: u32) -> usize {
@@ -67,5 +88,22 @@ pub(crate) fn trim_relic_lru(
         };
         let id = lru.remove(idx).expect("relic lru index");
         evict(id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bc7_mip_level_count_stops_at_4x4() {
+        assert_eq!(bc7_mip_level_count(1024, 1024), 9);
+        assert_eq!(bc7_mip_level_count(512, 512), 8);
+        assert_eq!(bc7_mip_level_count(4, 4), 1);
+    }
+
+    #[test]
+    fn bc7_upload_chain_smaller_than_full_chain() {
+        assert!(bc7_upload_chain_bytes(1024, 1024) < bc7_chain_bytes(1024, 1024, 11));
     }
 }

@@ -192,10 +192,11 @@ fn upload_bc7_mip_chain(
     format: wgpu::TextureFormat,
     bc7_supported: bool,
 ) -> (wgpu::Texture, wgpu::TextureView, usize) {
-    use crate::relic_gpu_residency::{bc7_chain_bytes, rgba_mip_bytes};
+    use crate::relic_gpu_residency::{bc7_mip_level_count, bc7_upload_chain_bytes, rgba_mip_bytes};
 
     if bc7_supported && !chain.bc7_bytes.is_empty() {
-        let mip_count = chain.mip_count.max(1);
+        let upload_mip_count = bc7_mip_level_count(chain.base_width, chain.base_height)
+            .min(chain.mip_count.max(1));
         let tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d {
@@ -203,7 +204,7 @@ fn upload_bc7_mip_chain(
                 height: chain.base_height.max(1),
                 depth_or_array_layers: 1,
             },
-            mip_level_count: mip_count,
+            mip_level_count: upload_mip_count,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
@@ -213,33 +214,35 @@ fn upload_bc7_mip_chain(
         let mut off = 0usize;
         let mut w = chain.base_width.max(1);
         let mut h = chain.base_height.max(1);
-        for mip in 0..mip_count {
+        for mip in 0..chain.mip_count.max(1) {
             let level_bytes = crate::relic_gpu_residency::bc7_mip_bytes(w, h);
-            let slice = &chain.bc7_bytes[off..off + level_bytes];
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &tex,
-                    mip_level: mip,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                slice,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(((w + 3) / 4) * 16),
-                    rows_per_image: Some((h + 3) / 4),
-                },
-                wgpu::Extent3d {
-                    width: w.max(1),
-                    height: h.max(1),
-                    depth_or_array_layers: 1,
-                },
-            );
+            if mip < upload_mip_count {
+                let slice = &chain.bc7_bytes[off..off + level_bytes];
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &tex,
+                        mip_level: mip,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    slice,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(((w + 3) / 4) * 16),
+                        rows_per_image: Some((h + 3) / 4),
+                    },
+                    wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
             off += level_bytes;
             w = (w / 2).max(1);
             h = (h / 2).max(1);
         }
-        let bytes = bc7_chain_bytes(chain.base_width, chain.base_height, mip_count);
+        let bytes = bc7_upload_chain_bytes(chain.base_width, chain.base_height);
         let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
         return (tex, view, bytes);
     }
