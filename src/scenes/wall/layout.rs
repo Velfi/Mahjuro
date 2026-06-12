@@ -122,7 +122,11 @@ pub fn row_label_col_width(w: f32, jr: f32, h: f32) -> f32 {
     let font_px = typography::tier_at_most(22.0 * jr, h);
     let text_need = row_label_text_width("FLOWERS", font_px);
     let dot_and_pad = 7.0 * jr + 8.0;
-    (dot_and_pad + text_need + 6.0).clamp(76.0 * jr, w * 0.058)
+    let min_w = 76.0 * jr;
+    let max_w = w * 0.058;
+    let lo = min_w.min(max_w);
+    let hi = min_w.max(max_w);
+    (dot_and_pad + text_need + 6.0).clamp(lo, hi)
 }
 
 /// Font size for a row label constrained by column width and row height.
@@ -303,6 +307,17 @@ mod tests {
         let font_px = row_label_font_px(text_w, layout.row_cell_h[4], 1080.0);
         assert!(row_label_text_width("FLOWERS", font_px) <= text_w + 1.0);
         assert!(row_label_text_width("HONORS", font_px) <= text_w + 1.0);
+    }
+
+    #[test]
+    fn row_label_column_width_on_narrow_window() {
+        // Regression: min (76*jr) can exceed max (w*0.058) on ~1366px-wide windows.
+        let w = 1366.0;
+        let h = 768.0;
+        let jr = read_boost(w, h);
+        let layout = wall_layout(w, h, jr);
+        assert!(layout.label_col_w.is_finite());
+        assert!(layout.label_col_w > 0.0);
     }
 
     #[test]
