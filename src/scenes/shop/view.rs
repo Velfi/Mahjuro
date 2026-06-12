@@ -568,7 +568,7 @@ impl ShopScene {
         let shop = GameEngine::read_shop(run);
         let env_h = self.drawn_room_gltf_height_scale.get();
         let cam = shop_camera_params(w, h, env_h);
-        *self.last_focus_rects.borrow_mut() = build_focus_rects(self, w, h, &cam, &shop, run);
+        self.focus_session.stash(build_focus_rects(self, w, h, &cam, &shop, run));
     }
 }
 
@@ -943,8 +943,8 @@ pub(crate) fn render_shop_frame(
         let _g = crate::render::cpu_profiler::scope("draw_frame.shop_hover_tooltip");
         let f = ShopFocus::from_hit(hit);
         let tooltip_anchor = shop
-            .last_focus_rects
-            .borrow()
+            .focus_session
+            .rects()
             .iter()
             .find(|(g, _)| *g == f)
             .map(|(_, r)| *r);
@@ -1023,27 +1023,17 @@ pub(crate) fn render_shop_frame(
             ));
         }
         let jr = journal_btn_rect(w, h, &cam, env_h);
-        frame.buttons.push(ButtonDef::scene(
-            (jr[0], jr[1], jr[2], jr[3]),
-            SHOP_CLICK_JOURNAL,
-        ));
         let rr = restock_btn_rect(w, h, &cam, env_h);
-        frame.buttons.push(ButtonDef::scene(
-            (rr[0], rr[1], rr[2], rr[3]),
-            SHOP_CLICK_RESTOCK,
-        ));
         let lr = leave_btn_rect(w, h, &cam, env_h);
-        frame.buttons.push(ButtonDef::scene(
-            (lr[0], lr[1], lr[2], lr[3]),
-            SHOP_CLICK_LEAVE,
-        ));
         let wall_count = crate::game::wall_ledger::shop_wall_hud_count(ctx.run);
         let wall = crate::render::wall_display::wall_hud_layout(w, h, wall_count);
-        let wr = wall.block_rect;
-        frame.buttons.push(ButtonDef::scene(
-            (wr[0], wr[1], wr[2], wr[3]),
-            SHOP_CLICK_WALL,
-        ));
+        let chrome_rects = [
+            (ShopFocus::Dish(super::PICK_JOURNAL_BOOK), jr),
+            (ShopFocus::Restock, rr),
+            (ShopFocus::NextRound, lr),
+            (ShopFocus::WallHud, wall.block_rect),
+        ];
+        super::focus::register_shop_chrome_buttons(&shop.chrome_tree, &chrome_rects, &mut frame.buttons);
         // Catch-all for Object3D / GLB collision picks (inventory + props). Pushed
         // last so shelf + HUD rects win when they overlap the cursor.
         if ctx.picked_shop_object.is_some() {
@@ -1214,7 +1204,7 @@ pub(crate) fn render_shop_frame(
     if shop.pause_menu.paused {
         shop.pause_menu.stash_focus_nav_debug(&mut ctx, w, h);
     } else {
-        let focus_rects = shop.last_focus_rects.borrow().clone();
+        let focus_rects = shop.focus_session.rects();
         ctx.stash_focus_nav_graph(
             &focus_rects,
             &[],
@@ -2716,8 +2706,8 @@ pub(in crate::scenes::shop) fn snap_focus_after_shop_purchase(
 
     let from_center = prev_focus.and_then(|pf| {
         scene
-            .last_focus_rects
-            .borrow()
+            .focus_session
+            .rects()
             .iter()
             .find_map(|(t, r)| (*t == pf).then_some(rect_center(*r)))
     });

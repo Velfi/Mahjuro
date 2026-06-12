@@ -232,7 +232,8 @@ impl ShopScene {
             pause_menu: PauseMenu::new(),
             focus,
             focus_nav: crate::ui::focus_nav::FocusNavState::new(),
-            last_focus_rects: std::cell::RefCell::new(Vec::new()),
+            focus_session: crate::ui::focus_nav::RectFocusSession::new(),
+            chrome_tree: crate::ui::widget_tree::TreeState::new(),
             score_popups: ScorePopupSystem::new(),
             particles: ParticleSystem::new(),
             last_frame: Instant::now(),
@@ -441,6 +442,22 @@ impl ShopScene {
             run,
             shop,
         ) else {
+            if let Some(action) = super::shared::focused_shop_buy_action(
+                self.focus,
+                &self.items,
+                &self.zodiac_items,
+                &self.talisman_items,
+                shop,
+            ) && super::shared::shop_buy_insufficient_gold(
+                action,
+                run,
+                &self.items,
+                &self.zodiac_items,
+                &self.talisman_items,
+                &self.pack_items,
+            ) {
+                bus.push(crate::game::event_bus::GameEvent::InvalidAction);
+            }
             self.cancel_confirm_buy_hold(bus);
             return;
         };
@@ -520,6 +537,23 @@ impl ShopScene {
                     ))),
                 ))));
             }
+        }
+    }
+
+    /// Attempt restock when allowed; plays invalid-action SFX when yen is too low.
+    pub(super) fn try_restock(
+        &mut self,
+        run: &mut crate::game::run::RunState,
+        bus: &mut crate::game::event_bus::EventBus,
+    ) {
+        if self.restock_exit_active() || self.mode == ShopMode::Tutorial {
+            return;
+        }
+        let cost = self.restock_cost(run.mode.season);
+        if run.can_afford_shop_restock(cost) {
+            self.restock(run, bus);
+        } else if cost > 0 {
+            bus.push(crate::game::event_bus::GameEvent::InvalidAction);
         }
     }
 

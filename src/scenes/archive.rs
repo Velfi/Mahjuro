@@ -1386,16 +1386,35 @@ impl SceneBehavior for ArchiveScene {
         // back to column/row index rules (horizontal archive window scroll,
         // etc.). The tree handles hover + clicks and stays in sync via
         // `apply_artifact_focus` (`set_focus` on `SelectArtifact`).
-        let action = self.tree.update_flat(
+        let tree_actions: Vec<UiAction> = ctx
+            .actions
+            .iter()
+            .copied()
+            .filter(|a| {
+                matches!(
+                    a,
+                    UiAction::Confirm
+                        | UiAction::CommitDiscard
+                        | UiAction::Cancel
+                        | UiAction::Pause
+                )
+            })
+            .collect();
+        let nav_edges: Vec<(FocusId, FocusDir, FocusId)> = archive_nav_edges(&items)
+            .into_iter()
+            .map(|(from, dir, to)| (from.id(), dir, to.id()))
+            .collect();
+        let action = self.tree.update_flat_with_edges(
             &items,
             TreeInput {
-                actions: &[],
+                actions: &tree_actions,
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
                 input_mode: ctx.input_mode,
                 scroll_lines: 0.0,
             },
+            &nav_edges,
         );
         let focus_changed = self.tree.take_focus_changed();
         if focus_changed {

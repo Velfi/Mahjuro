@@ -2280,7 +2280,6 @@ version = "0.6.2-5"
 dependencies = [
  "anyhow",
  "chrono",
- "glam 0.30.10",
  "log",
  "mahjuro-assets",
  "mahjuro-gfx-types",
@@ -2368,7 +2367,6 @@ dependencies = [
  "pollster",
  "rand 0.10.1",
  "raw-window-handle",
- "rayon",
  "rustc-hash 2.1.2",
  "sdl3",
  "serde",

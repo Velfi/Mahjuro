@@ -28,9 +28,16 @@ pub use effective_relic::EffectiveRelics;
 mod layer_input;
 mod pipeline;
 mod pre_yaku_layer;
+pub use pre_yaku_layer::{
+    EVEN_KEEL_CHIPS_PER_TILE, PLAIN_DEALING_CHIPS_PER_SIMPLE_TILE, TRIPLET_BOOST_CHIPS,
+};
 mod presentation;
 mod push_steps;
 mod relic_mult_layer;
+pub use relic_mult_layer::{
+    CHAIN_REACTION_MULT, MINIMALIST_CHIPS, MINIMALIST_MULT, OPEN_GATE_MULT,
+    TRIPLET_BOOST_MULT_PER_TRIPLET,
+};
 mod tea_bonus;
 #[cfg(test)]
 mod tests;
@@ -38,6 +45,9 @@ mod tests;
 use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::tile::Tile;
 use crate::core::yaku::YakuKind;
+
+/// Mult before yaku or relic bonuses.
+pub const SCORING_BASE_MULT: f64 = 1.0;
 
 #[cfg(test)]
 pub use pipeline::score_sets;

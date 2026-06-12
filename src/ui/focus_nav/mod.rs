@@ -17,15 +17,16 @@
 //! ```
 //!
 mod debug;
+mod flat_scroll;
 mod graph;
+mod rect_focus;
 mod scope;
 mod session;
 
-pub use debug::{
-    FocusNavDebugSnapshot, debug_snapshot_from_candidates, publish_debug_snapshot,
-    publish_focus_nav_graph, publish_focus_nav_snapshot, push_focus_nav_debug_overlay,
-};
+pub use debug::{FocusNavDebugSnapshot, debug_snapshot_from_candidates, push_focus_nav_debug_overlay};
+pub use flat_scroll::clamp_index_into_viewport;
 pub use graph::FocusMemory;
+pub use rect_focus::RectFocusSession;
 pub use scope::FocusScope;
 pub use session::FocusNavState;
 

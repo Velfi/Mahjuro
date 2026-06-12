@@ -384,9 +384,9 @@ impl GameplayScene {
                 "[Debug] demo cascade: gameplay.glb score frame unavailable; using fallbacks"
             );
         }
-        let fly_dest = score_counter::resolve_score_popup_fly_dest(layout, &self.positions, 1.0);
-        let dest = (fly_dest.px, fly_dest.py);
-        let dest_lift = Some(fly_dest.lift_z);
+        let score_fly_dest =
+            score_counter::resolve_score_popup_fly_dest(layout, &self.positions, 1.0);
+        let yen_fly_dest = glb_anchors::resolve_yen_popup_fly_dest(layout, 1.0);
 
         // Source positions: hand slot centers if available, else fall back
         // to a horizontal spread across the modifier strip.
@@ -412,6 +412,11 @@ impl GameplayScene {
         ];
         for (i, (kind, label, mag)) in steps.iter().enumerate() {
             let src = sources[i % sources.len()];
+            let fly_dest = if *kind == StepKind::Yen {
+                &yen_fly_dest
+            } else {
+                &score_fly_dest
+            };
             let timing = crate::render::score_popups::PopupMotionTiming::shipping_default();
             self.score_popups.spawn(
                 *label,
@@ -420,8 +425,8 @@ impl GameplayScene {
                     py: src.1,
                     lift_z: crate::render::score_popups::TABLE_POPUP_LIFT_Z,
                 },
-                dest,
-                dest_lift,
+                (fly_dest.px, fly_dest.py),
+                Some(fly_dest.lift_z),
                 *kind,
                 *mag,
                 timing,

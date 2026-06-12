@@ -1158,7 +1158,7 @@ fn push_guide_header_nav(
     }
 }
 
-/// Long-form copy for a yaku page (Guide only; journal uses [`yaku_page`] rule text).
+/// Long-form copy for the in-game guide. Journal and shop use [`yaku_shape_text`].
 pub(crate) struct YakuGuideDetail {
     pub rule: &'static str,
     pub requires: &'static str,
@@ -1418,7 +1418,7 @@ fn draw_yaku_entry(
     );
 }
 
-fn push_dense_text(
+pub(crate) fn push_dense_text(
     frame: &mut UiFrame,
     rect: [f32; 4],
     text: &str,
@@ -1433,6 +1433,19 @@ fn push_dense_text(
         color,
         widget::PLAIN_TEXT_LINE_STEP_MUL,
     )
+}
+
+pub(crate) fn dense_text_block_height(text: &str, width: f32, font_px: f32) -> f32 {
+    let line_mul = widget::PLAIN_TEXT_LINE_STEP_MUL;
+    let wrapped = styled_text::wrap_colored_text_multiline(
+        text,
+        width,
+        font_px / 0.99,
+        color::PARCHMENT,
+        false,
+        GlossaryMode::Prose,
+    );
+    font_px * line_mul * wrapped.len().max(1) as f32
 }
 
 fn push_dense_text_lines(
@@ -1523,10 +1536,10 @@ fn push_dense_text_lines_aligned(
     block_h
 }
 
-/// Build tile groups for a yaku example hand. The rule string matches [`yaku_guide_detail`]
-/// for journal / reference UIs.
+/// Build tile groups for a yaku example hand. The rule string is [`yaku_shape_text`]
+/// (journal plaque + table Rule column).
 pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
-    let detail = yaku_guide_detail(yk, true);
+    let rule = yaku_shape_text(yk);
     let seq_color: [f32; 4] = [0.35, 0.70, 0.85, 0.9];
     let trip_color: [f32; 4] = color::GOLD;
     let pair_color: [f32; 4] = color::CHAMPAGNE;
@@ -1718,11 +1731,11 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
         ]),
         YakuKind::Junchan => meld_groups(&[
             (
-                "Triplet",
-                MeldKind::Triplet,
+                "Sequence",
+                MeldKind::Sequence,
                 Suit::Manzu,
-                &[1, 1, 1],
-                trip_color,
+                &[1, 2, 3],
+                seq_color,
             ),
             (
                 "Triplet",
@@ -1739,13 +1752,13 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 trip_color,
             ),
             (
-                "Triplet",
-                MeldKind::Triplet,
-                Suit::Dragon,
-                &[2, 2, 2],
-                trip_color,
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[7, 8, 9],
+                seq_color,
             ),
-            ("Pair", MeldKind::Pair, Suit::Souzu, &[9, 9], pair_color),
+            ("Pair", MeldKind::Pair, Suit::Pinzu, &[9, 9], pair_color),
         ]),
         YakuKind::Ittsu => meld_groups(&[
             (
@@ -1865,7 +1878,7 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 &[9, 9, 9],
                 trip_color,
             ),
-            ("Pair", MeldKind::Pair, Suit::Manzu, &[5, 5], pair_color),
+            ("Pair", MeldKind::Pair, Suit::Manzu, &[1, 1], pair_color),
         ]),
         YakuKind::Ryanpeikou => meld_groups(&[
             (
@@ -1985,7 +1998,7 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             ("Pair", MeldKind::Pair, Suit::Wind, &[2, 2], pair_color),
         ]),
     };
-    (detail.rule, groups)
+    (rule, groups)
 }
 
 /// `(label, kind, suit, ranks, accent)` descriptor for a single meld row.
@@ -5791,29 +5804,29 @@ fn layout_tile_groups_with_max(
     (placements, labels)
 }
 
-/// Short structure-shape description for each yaku
+/// Short, journal-friendly rule text for each yaku.
 pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
     match yk {
-        YakuKind::Tanyao => "All tiles 2\u{2013}8, no honors/terminals",
-        YakuKind::Toitoi => "2+ triplets/kongs, no sequences",
-        YakuKind::FullHand => "Complete 14-tile hand: 4+4+4+4+2 (4 melds + 1 pair)",
-        YakuKind::Yakuhai => "Each dragon or matching wind triplet/kong; This yaku stacks",
-        YakuKind::Iipeikou => "Two identical sequences on a full hand; exclusive with Ryanpeikou",
-        YakuKind::Junchan => "No honors; every group has a number 1 or 9; at least one sequence",
-        YakuKind::SanshokuDoujun => "Same sequence in all 3 suits",
+        YakuKind::ChickenHand => "Valid hand with no other yaku",
+        YakuKind::Tanyao => "All tiles ranked 2\u{2013}8",
+        YakuKind::Toitoi => "At least two triplets/kongs, no sequences",
+        YakuKind::FullHand => "Four melds and one pair (not seven pairs)",
+        YakuKind::Yakuhai => "Each dragon or matching wind triplet/kong; stacks",
+        YakuKind::Iipeikou => "Two identical sequences in the same suit",
+        YakuKind::Ryanpeikou => "Two doubled sequences in one suit (full hand)",
+        YakuKind::SanshokuDoujun => "Same sequence in all three suits",
+        YakuKind::SanshokuDoukou => "Same-rank triplet in all three suits",
         YakuKind::Ittsu => "1\u{2013}9 straight in one suit",
-        YakuKind::Honitsu => "One number suit + honors only",
-        YakuKind::Chinitsu => "All one number suit, no honors",
-        YakuKind::Honroutou => "Only 1s, 9s, and honors; exclusive with Junchan/Chanta",
-        YakuKind::Chiitoitsu => "Seven distinct pairs",
-        YakuKind::KokushiMusou => {
-            "One of each 1/9 and honor, plus one extra copy of any of those tiles"
+        YakuKind::Honitsu => "One number suit plus honors only",
+        YakuKind::Chinitsu => "Single number suit, no honors",
+        YakuKind::Junchan => "Every group has a 1 or 9; needs a sequence, no honors",
+        YakuKind::Honroutou => "Only terminals and honors (1, 9, winds, dragons)",
+        YakuKind::Chanta => {
+            "Every group has a terminal or honor; needs honor, simple, and a sequence"
         }
-        YakuKind::ChickenHand => "Legal hand with no yaku",
-        YakuKind::Chanta => "Every group has a terminal or honor; needs honor, simple, and a sequence",
-        YakuKind::Ryanpeikou => "Two duplicated sequences in one suit on a full hand; beats Iipeikou",
-        YakuKind::SanshokuDoukou => "Same-rank triplet in all three number suits",
-        YakuKind::Pinfu => "Four sequences + 2–8 pair on a full hand",
+        YakuKind::Chiitoitsu => "Seven distinct pairs",
+        YakuKind::KokushiMusou => "One of each terminal and honor, plus one duplicate",
+        YakuKind::Pinfu => "Four sequences plus a 2\u{2013}8 pair (full hand)",
     }
 }
 

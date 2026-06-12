@@ -4,9 +4,10 @@
 //! *onto* the table rather than into a book. Each yaku is rendered as a
 //! signature-tile icon in a grid on the lacquered wood surface; the focused
 //! yaku's canonical 14-tile hand sits in a top-anchored plaque beneath a
-//! single-line header (`[Lv N] Name: description` + payout), with the
-//! scrollable table beneath it. Margins tighten on short screens (e.g. Steam Deck),
-//! drawn from the same `yaku_page()` data the guide teaches with (so
+//! single-line header (`[Lv N] Name: description` + payout), canonical hand
+//! tiles, then a wrapped `Breaks if:` note, with the scrollable table beneath.
+//! Margins tighten on short screens (e.g. Steam Deck),
+//! drawn from the same `yaku_page()` tile examples the guide teaches with (so
 //! the plaque hand is guaranteed to score as its named yaku — see the
 //! scoring test in guide).
 //!
@@ -156,7 +157,7 @@ fn yaku_table_layout(
     let (_, chrome_bottom) = journal_header_chrome(window_w, window_h);
     let top_safe = chrome_bottom + window_h * (0.008 - 0.005 * jc);
     let gap_below_plaque = window_h * (0.018 - 0.011 * jc);
-    let plaque_h = window_h * (0.365 - 0.028 * jc);
+    let plaque_h = window_h * (0.395 - 0.028 * jc);
     let bottom_safe = screen_footer_reserve(window_w, window_h);
     let plaque_top = top_safe;
 
@@ -283,12 +284,13 @@ impl YakuJournalScene {
     }
 
     fn ensure_selected_visible(&mut self, visible_rows: usize, max_scroll: f32) {
-        let top = self.target_scroll_rows.floor() as usize;
-        if self.selected < top {
-            self.target_scroll_rows = self.selected as f32;
-        } else if self.selected >= top + visible_rows {
-            self.target_scroll_rows = (self.selected + 1 - visible_rows) as f32;
-        }
+        let total = max_scroll as usize + visible_rows;
+        self.target_scroll_rows = crate::ui::focus_nav::clamp_index_into_viewport(
+            self.selected,
+            self.target_scroll_rows,
+            visible_rows,
+            total,
+        );
         self.target_scroll_rows = self.target_scroll_rows.clamp(0.0, max_scroll);
     }
 
@@ -369,6 +371,28 @@ impl SceneBehavior for YakuJournalScene {
             }
         }
 
+        for a in ctx.actions {
+            match a {
+                UiAction::PagePrev => {
+                    if total_rows > 0 {
+                        let page = table.visible_rows.max(1);
+                        self.selected = self.selected.saturating_sub(page);
+                        self.ensure_selected_visible(table.visible_rows, max_scroll);
+                        self.tree.set_focus(JournalNav::Row(self.selected).id());
+                    }
+                }
+                UiAction::PageNext => {
+                    if total_rows > 0 {
+                        let page = table.visible_rows.max(1);
+                        self.selected = (self.selected + page).min(total_rows.saturating_sub(1));
+                        self.ensure_selected_visible(table.visible_rows, max_scroll);
+                        self.tree.set_focus(JournalNav::Row(self.selected).id());
+                    }
+                }
+                _ => {}
+            }
+        }
+
         let items = self.flat_items(w, h, &table, self.target_scroll_rows, total_rows);
         let nav_action = self.tree.update_flat(
             &items,
@@ -397,27 +421,6 @@ impl SceneBehavior for YakuJournalScene {
             None => {}
         }
 
-        for a in ctx.actions {
-            match a {
-                UiAction::PagePrev => {
-                    if total_rows > 0 {
-                        let page = table.visible_rows.max(1);
-                        self.selected = self.selected.saturating_sub(page);
-                        self.ensure_selected_visible(table.visible_rows, max_scroll);
-                        self.tree.set_focus(JournalNav::Row(self.selected).id());
-                    }
-                }
-                UiAction::PageNext => {
-                    if total_rows > 0 {
-                        let page = table.visible_rows.max(1);
-                        self.selected = (self.selected + page).min(total_rows.saturating_sub(1));
-                        self.ensure_selected_visible(table.visible_rows, max_scroll);
-                        self.tree.set_focus(JournalNav::Row(self.selected).id());
-                    }
-                }
-                _ => {}
-            }
-        }
         self.tick_scroll();
         self.clamp_scroll(max_scroll);
         None
@@ -1100,7 +1103,7 @@ fn push_chips_mult_stat_line_right(
 /// yaku.
 ///
 /// Header is one line — `[Lv N] Name: description` with chips/mult on the
-/// right — then the canonical hand tiles directly beneath.
+/// right — then the canonical hand tiles, then a wrapped `Breaks if:` line.
 #[allow(clippy::too_many_arguments)]
 fn draw_plaque(
     frame: &mut UiFrame,
@@ -1337,6 +1340,24 @@ fn draw_plaque(
         }
     }
 
+    let breaks_font = typography::size(typography::H24, h);
+    let breaks_gap = header_pad * 0.25;
+    let breaks_w = face_w - header_pad * 2.0;
+    let (breaks_text, breaks_block_h) = if matches!(state, ProgressionState::Unseen) {
+        (String::new(), 0.0)
+    } else {
+        let detail =
+            super::guide::yaku_guide_detail(yk, ctx.progress.kokushi_musou_discovered());
+        let text = format!("Breaks if: {}", detail.breaks_if);
+        let block_h = super::guide::dense_text_block_height(&text, breaks_w, breaks_font);
+        (text, block_h)
+    };
+    let breaks_reserve = if breaks_block_h > 0.0 {
+        breaks_block_h + breaks_gap
+    } else {
+        0.0
+    };
+
     // ── Canonical hand (or sealed placeholder) ───────────────────
     let hand_tiles: Vec<Tile> = groups
         .iter()
@@ -1347,7 +1368,7 @@ fn draw_plaque(
     }
 
     let hand_top = header_y + header_line_h + header_pad * 0.35;
-    let hand_bot = face_y + face_h - header_pad * 0.2;
+    let hand_bot = face_y + face_h - header_pad * 0.2 - breaks_reserve;
     let hand_band_h = (hand_bot - hand_top).max(0.0);
 
     let num_gaps = groups.len().saturating_sub(1);
@@ -1415,5 +1436,16 @@ fn draw_plaque(
             }
             cursor_x += hand_gap;
         }
+    }
+
+    if breaks_block_h > 0.0 {
+        let breaks_y = face_y + face_h - header_pad * 0.35 - breaks_block_h;
+        super::guide::push_dense_text(
+            frame,
+            [face_x + header_pad, breaks_y, breaks_w, breaks_block_h],
+            &breaks_text,
+            breaks_font,
+            color::STONE,
+        );
     }
 }

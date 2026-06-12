@@ -13,11 +13,31 @@ use crate::ui::controller_hints::{
 };
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
+use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use crate::ui::widget::{self, TextStyle};
 
-use super::{ButtonDef, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
+use super::{DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 const BACK_ID: u32 = 0xF310;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CreditsAction {
+    Back,
+}
+
+impl CreditsAction {
+    fn id(self) -> FocusId {
+        FocusId(BACK_ID)
+    }
+}
+
+fn credits_flat_items(layout: &Layout) -> Vec<FlatItem<CreditsAction>> {
+    vec![FlatItem::new(
+        CreditsAction::Back.id(),
+        [layout.back_x, layout.back_y, layout.back_w, layout.back_h],
+        CreditsAction::Back,
+    )]
+}
 
 #[derive(Clone, Copy, Debug)]
 struct Layout {
@@ -149,6 +169,7 @@ pub struct CreditsScene {
     scroll: SmoothScroll,
     back_focused: bool,
     lines: Vec<CreditLine>,
+    tree: TreeState,
 }
 
 impl CreditsScene {
@@ -166,6 +187,7 @@ impl CreditsScene {
             scroll: SmoothScroll::new(),
             back_focused: false,
             lines: build_lines(credits_catalog(), attribution_catalog()),
+            tree: TreeState::new(),
         }
     }
 
@@ -206,19 +228,27 @@ impl SceneBehavior for CreditsScene {
         }
 
         if ctx.input_mode == InputMode::Cursor {
-            let (cx, cy) = ctx.cursor_pos;
-            let over_back = cx >= layout.back_x
-                && cx <= layout.back_x + layout.back_w
-                && cy >= layout.back_y
-                && cy <= layout.back_y + layout.back_h;
-            self.back_focused = over_back;
+            self.back_focused = self
+                .tree
+                .focused()
+                .is_some_and(|id| id == CreditsAction::Back.id());
         }
 
-        for &cid in ctx.button_clicks {
-            if cid == BACK_ID {
-                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                return self.go_back(ctx.overlay_request);
-            }
+        let flat = credits_flat_items(&layout);
+        if self.tree.update_flat(
+            &flat,
+            TreeInput {
+                actions: ctx.actions,
+                button_clicks: ctx.button_clicks,
+                cursor_pos: ctx.cursor_pos,
+                window: (ctx.layout.window_w, ctx.layout.window_h),
+                input_mode: ctx.input_mode,
+                scroll_lines: 0.0,
+            },
+        ) == Some(CreditsAction::Back)
+        {
+            ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+            return self.go_back(ctx.overlay_request);
         }
 
         let max_scroll = self.scroll.max();
@@ -238,11 +268,13 @@ impl SceneBehavior for CreditsScene {
                         self.scroll.scroll_by(1.0);
                     } else if ctx.input_mode != InputMode::Cursor {
                         self.back_focused = true;
+                        self.tree.set_focus(CreditsAction::Back.id());
                     }
                 }
                 UiAction::FocusNext => {
                     if !self.back_focused && ctx.input_mode != InputMode::Cursor {
                         self.back_focused = true;
+                        self.tree.set_focus(CreditsAction::Back.id());
                     }
                 }
                 UiAction::FocusPrev => {
@@ -503,10 +535,8 @@ impl SceneBehavior for CreditsScene {
             align: TextAlign::Center,
             ..Default::default()
         });
-        buttons.push(ButtonDef::scene(
-            (layout.back_x, layout.back_y, layout.back_w, layout.back_h),
-            BACK_ID,
-        ));
+        self.tree
+            .register_flat_buttons(&credits_flat_items(&layout), &mut buttons);
 
         let mut frame = UiFrame::new();
         frame.quads(instances);

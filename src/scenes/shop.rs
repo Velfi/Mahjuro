@@ -54,8 +54,9 @@ use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, ShopHit, TextAlign, TextLabel};
-use crate::ui::focus_nav::{FocusDir, FocusNavState, focus_target_at_cursor};
+use crate::ui::focus_nav::{FocusDir, FocusNavState, RectFocusSession};
 use crate::ui::input::{InputMode, UiAction};
+use crate::ui::widget_tree::TreeState;
 
 use super::pause_menu::PauseMenu;
 pub(crate) use super::{Scene, SceneIntent, SceneTransition, UpdateCtx};
@@ -77,12 +78,10 @@ pub struct ShopScene {
     /// the 3D pick when present; otherwise screen rects (shelf slots + HUD buttons).
     focus: Option<ShopFocus>,
     focus_nav: FocusNavState<ShopFocus>,
-    /// Focus rect graph captured at the end of the previous `draw_frame`,
-    /// consumed by `update()` for cursor hit-tests and spatial navigation.
-    /// One frame stale — same pattern as `projected_relic_rects` and the
-    /// gameplay scene's identical mechanism. Wrapped in a `RefCell` because
-    /// `draw_frame` takes `&self` but needs to update this stash.
-    last_focus_rects: std::cell::RefCell<Vec<(ShopFocus, [f32; 4])>>,
+    /// Focus rect graph from the previous draw frame (stock + chrome for spatial nav).
+    focus_session: RectFocusSession<ShopFocus>,
+    /// HUD chrome buttons (Leave, Restock, Journal, Wall HUD).
+    chrome_tree: TreeState,
     /// Floating 3D text popups for zodiac level-up feedback.
     score_popups: ScorePopupSystem,
     /// Particle burst effects for zodiac level-up feedback.
@@ -129,10 +128,6 @@ const SHOP_HELP_BADGE_ID: u32 = 0x9100;
 pub const SHOP_3D_HIT_ID: u32 = 0x9200;
 /// Cursor-mode preview hint icon while item inspect is open.
 pub const SHOP_INSPECT_PREVIEW_ID: u32 = 0x9201;
-/// Click id for the Leave / advance 2D button (kept for focus-nav compat).
-const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
-/// Click id for the Restock 2D button (kept for focus-nav compat).
-const SHOP_RESTOCK_ID: u32 = 0x9400;
 /// How long a relic glow + wiggle lasts after activation.
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
 /// Pitch relic cuboids toward the camera ([`crate::render::table_transform::rot_fixed_axes_deg`]).
@@ -184,6 +179,7 @@ impl ShopScene {
         .is_some()
     }
 
+    #[cfg(feature = "game")]
     #[inline]
     pub(crate) fn sell_hold_in_progress(&self) -> bool {
         self.west_sell_hold_started.is_some()
@@ -207,6 +203,7 @@ impl ShopScene {
         )
     }
 
+    #[cfg(feature = "game")]
     #[inline]
     pub(crate) fn buy_hold_in_progress(&self) -> bool {
         self.confirm_buy_hold_started.is_some()
@@ -276,7 +273,7 @@ impl ShopScene {
     /// `--shop-focus` flag so headless captures can preview hover-only
     /// chrome (focus rings, plaques, spotlights).
     ///
-    /// Slugs: `journal`, `bell`, `abacus`, `relic:N`,
+    /// Slugs: `journal`, `leave`, `restock`, `relic:N`,
     /// `ribbon:N`, `talisman:N`, `pack:N`. Returns an error string for
     /// unknown slugs or out-of-range indices, so the CLI can bail
     /// rather than rendering with wrong focus.
@@ -297,11 +294,11 @@ impl ShopScene {
         } else {
             match slug {
                 "journal" => ShopFocus::Dish(PICK_JOURNAL_BOOK),
-                "bell" | "leave" | "next-round" => ShopFocus::NextRound,
-                "abacus" | "restock" => ShopFocus::Restock,
+                "leave" => ShopFocus::NextRound,
+                "restock" => ShopFocus::Restock,
                 other => {
                     return Err(format!(
-                        "--shop-focus '{other}' — supported: journal, bell, abacus, relic:N, ribbon:N, talisman:N, pack:N"
+                        "--shop-focus '{other}' — supported: journal, leave, restock, relic:N, ribbon:N, talisman:N, pack:N"
                     ));
                 }
             }
@@ -333,6 +330,21 @@ impl ShopScene {
 mod tests {
     use super::*;
     use crate::game::game_mode::GameMode;
+
+    #[test]
+    fn shop_focus_screenshot_slugs_reject_legacy_aliases() {
+        let mut run = crate::game::run::RunState::new(GameMode::standard());
+        let mut shop = ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
+
+        for slug in ["bell", "next-round", "abacus"] {
+            assert!(
+                shop.set_focus_for_screenshot(slug).is_err(),
+                "legacy alias '{slug}' should be rejected"
+            );
+        }
+        assert!(shop.set_focus_for_screenshot("leave").is_ok());
+        assert!(shop.set_focus_for_screenshot("restock").is_ok());
+    }
 
     #[test]
     fn patron_gift_shop_always_contains_a_free_relic() {

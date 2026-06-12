@@ -26,7 +26,8 @@ pub struct ScreenshotCli {
     pub ordeal: Option<String>,
     #[arg(long)]
     pub fresh_progress: bool,
-    /// Drive shop focus to a specific prop or item before capture (shop scene only).
+    /// Drive shop focus before capture (shop scene only). Slugs: `journal`, `leave`,
+    /// `restock`, `relic:N`, `ribbon:N`, `talisman:N`, `pack:N`.
     #[arg(long)]
     pub shop_focus: Option<String>,
     /// Drive archive/collection focus before capture (`humility`, `relic:42`, …).

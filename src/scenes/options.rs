@@ -14,6 +14,7 @@ use crate::ui::controller_hints::{
 };
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
+use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use std::cell::Cell;
 
 use crate::render::draw_cmd::UiFrame;
@@ -30,8 +31,6 @@ fn volume_restore_default(current: f32) -> f32 {
 /// Gamma adjustment step per input press.
 const GAMMA_STEP: f32 = 0.05;
 
-/// Click-id base for TOC links (high range to avoid collisions).
-const TOC_ID_BASE: u32 = 0xF200;
 /// Click-id for the fixed bottom buttons (below the scroll area).
 const BACK_ID: u32 = 0xF210;
 #[cfg(not(feature = "dist-steam"))]
@@ -576,13 +575,123 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-enum BottomFocus {
-    #[default]
-    None,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OptionsChromeAction {
+    Toc(Section),
+    Back,
     #[cfg(not(feature = "dist-steam"))]
     TilesetMods,
-    Back,
+}
+
+impl OptionsChromeAction {
+    fn id(self) -> FocusId {
+        FocusId(match self {
+            Self::Toc(section) => 0xF200 + section_index(section) as u32,
+            Self::Back => BACK_ID,
+            #[cfg(not(feature = "dist-steam"))]
+            Self::TilesetMods => TILESET_MODS_FOLDER_ID,
+        })
+    }
+
+    fn from_id(id: FocusId) -> Option<Self> {
+        if id.0 == BACK_ID {
+            return Some(Self::Back);
+        }
+        #[cfg(not(feature = "dist-steam"))]
+        if id.0 == TILESET_MODS_FOLDER_ID {
+            return Some(Self::TilesetMods);
+        }
+        if id.0 >= 0xF200 && id.0 < 0xF200 + SECTIONS.len() as u32 {
+            return SECTIONS
+                .get((id.0 - 0xF200) as usize)
+                .map(|&section| Self::Toc(section));
+        }
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OptionsNav {
+    Row(Row),
+    Chrome(OptionsChromeAction),
+}
+
+impl OptionsNav {
+    fn row_id(row: Row) -> FocusId {
+        FocusId(row.click_id())
+    }
+
+    fn from_id(id: FocusId) -> Option<Self> {
+        if let Some(chrome) = OptionsChromeAction::from_id(id) {
+            return Some(Self::Chrome(chrome));
+        }
+        Row::from_click_id(id.0).map(Self::Row)
+    }
+
+    fn is_chrome(self) -> bool {
+        matches!(self, Self::Chrome(_))
+    }
+}
+
+fn section_index(section: Section) -> usize {
+    SECTIONS.iter().position(|&s| s == section).unwrap_or(0)
+}
+
+fn flat_chrome_items(layout: &PanelLayout) -> Vec<FlatItem<OptionsChromeAction>> {
+    let mut items = Vec::new();
+    for (i, &section) in SECTIONS.iter().enumerate() {
+        let y = layout.toc_start_y + i as f32 * (layout.toc_item_h + layout.toc_gap);
+        let rect = [layout.toc_x, y, layout.toc_w, layout.toc_item_h];
+        items.push(FlatItem::new(
+            OptionsChromeAction::Toc(section).id(),
+            rect,
+            OptionsChromeAction::Toc(section),
+        ));
+    }
+    #[cfg(not(feature = "dist-steam"))]
+    items.push(FlatItem::new(
+        OptionsChromeAction::TilesetMods.id(),
+        [
+            layout.tileset_mods_x,
+            layout.back_y,
+            layout.tileset_mods_w,
+            layout.back_h,
+        ],
+        OptionsChromeAction::TilesetMods,
+    ));
+    items.push(FlatItem::new(
+        OptionsChromeAction::Back.id(),
+        [layout.back_x, layout.back_y, layout.back_w, layout.back_h],
+        OptionsChromeAction::Back,
+    ));
+    items
+}
+
+fn flat_nav_items(layout: &PanelLayout, scroll: f32) -> Vec<FlatItem<OptionsNav>> {
+    let mut items: Vec<FlatItem<OptionsNav>> = flat_chrome_items(layout)
+        .into_iter()
+        .map(|item| FlatItem {
+            id: item.id,
+            rect: item.rect,
+            action: OptionsNav::Chrome(item.action),
+            tooltip: item.tooltip,
+        })
+        .collect();
+
+    let slot_step = layout.slot_h + layout.slot_gap;
+    for (ci, slot) in CONTENT.iter().enumerate() {
+        let ContentSlot::Row(row) = slot else {
+            continue;
+        };
+        let ry = layout.content_start_y + (ci as f32 - scroll) * slot_step;
+        items.push(FlatItem::new(
+            OptionsNav::row_id(*row),
+            [layout.content_x, ry, layout.content_w, layout.slot_h],
+            OptionsNav::Row(*row),
+        ));
+    }
+
+    items
 }
 
 /// Frame input for [`OptionsScene::update_input`].
@@ -601,8 +710,6 @@ pub struct OptionsInput<'a> {
 
 pub struct OptionsScene {
     focused: Row,
-    /// Keyboard focus on a bottom-bar button (below the scroll area).
-    bottom_focus: BottomFocus,
     /// Latched when user input changes focus to a different row/back button.
     focus_changed: bool,
     confirm_requested: bool,
@@ -661,6 +768,7 @@ pub struct OptionsScene {
     pub glyph_prompt: crate::persistence::GlyphPromptSetting,
     /// Last cursor position (updated each [`Self::update_input`] for arrow hover).
     cursor_pos: (f32, f32),
+    tree: TreeState,
 }
 
 impl Default for OptionsScene {
@@ -693,7 +801,6 @@ impl OptionsScene {
         };
         let mut scene = Self {
             focused: Row::Master,
-            bottom_focus: BottomFocus::None,
             focus_changed: false,
             confirm_requested: false,
             cancel_requested: false,
@@ -739,7 +846,9 @@ impl OptionsScene {
             discard_undo_enabled: settings.discard_undo_enabled,
             glyph_prompt: settings.glyph_prompt,
             cursor_pos: (0.0, 0.0),
+            tree: TreeState::new(),
         };
+        scene.tree.set_focus(OptionsNav::row_id(Row::Master));
         #[cfg(feature = "dist-steam")]
         {
             scene.refresh_publish_mod_candidates();
@@ -1069,14 +1178,14 @@ impl OptionsScene {
 
     /// Adjust scroll so `self.focused` is visible.
     fn ensure_focused_visible(&self, layout: &PanelLayout) {
-        let idx = content_index_of_row(self.focused) as f32;
-        let scroll = self.scroll.target();
-        let vis = layout.visible_slots as f32;
-        if idx < scroll {
-            self.scroll.set_target(idx);
-        } else if idx >= scroll + vis {
-            self.scroll.set_target(idx - vis + 1.0);
-        }
+        let idx = content_index_of_row(self.focused);
+        let scroll = crate::ui::focus_nav::clamp_index_into_viewport(
+            idx,
+            self.scroll.target(),
+            layout.visible_slots,
+            CONTENT.len(),
+        );
+        self.scroll.set_target(scroll);
     }
 
     /// Adjust the focused row's value rightward (increase slider, next cycle).
@@ -1275,6 +1384,78 @@ impl OptionsScene {
         false
     }
 
+    fn nav_focus(&self) -> Option<OptionsNav> {
+        self.tree.focused().and_then(OptionsNav::from_id)
+    }
+
+    fn chrome_action(&self) -> Option<OptionsChromeAction> {
+        match self.nav_focus()? {
+            OptionsNav::Chrome(action) => Some(action),
+            OptionsNav::Row(_) => None,
+        }
+    }
+
+    fn sync_tree_to_focused_row(&mut self) {
+        if self.nav_focus().is_some_and(|n| n.is_chrome()) {
+            return;
+        }
+        self.tree.set_focus(OptionsNav::row_id(self.focused));
+    }
+
+    fn sync_focused_from_tree(&mut self) {
+        if let Some(OptionsNav::Row(row)) = self.nav_focus() {
+            self.focused = row;
+        }
+    }
+
+    fn apply_nav_action(
+        &mut self,
+        nav: OptionsNav,
+        layout: &PanelLayout,
+        cursor_pos: (f32, f32),
+    ) -> bool {
+        match nav {
+            OptionsNav::Chrome(chrome) => self.apply_chrome_action(chrome, layout),
+            OptionsNav::Row(row) => {
+                self.focused = row;
+                self.confirm_requested = true;
+                let close = self.apply_click(row, layout, cursor_pos);
+                if row.is_slider() && Self::cursor_on_slider_track(layout, cursor_pos) {
+                    self.dragging_slider = Some(row);
+                }
+                close
+            }
+        }
+    }
+
+    fn apply_chrome_action(&mut self, action: OptionsChromeAction, _layout: &PanelLayout) -> bool {
+        match action {
+            OptionsChromeAction::Toc(section) => {
+                let target = content_index_of_section(section) as f32;
+                self.scroll.set_target(target);
+                if let Some(first_row) = CONTENT[target as usize..].iter().find_map(|s| match s {
+                    ContentSlot::Row(r) => Some(*r),
+                    _ => None,
+                }) {
+                    self.focused = first_row;
+                    self.tree.set_focus(OptionsNav::row_id(first_row));
+                }
+                false
+            }
+            OptionsChromeAction::Back => {
+                self.save_settings();
+                self.cancel_requested = true;
+                true
+            }
+            #[cfg(not(feature = "dist-steam"))]
+            OptionsChromeAction::TilesetMods => {
+                self.open_tileset_mods_requested = true;
+                self.confirm_requested = true;
+                false
+            }
+        }
+    }
+
     // ── Public interface (shared with pause-menu overlay) ──────────────
 
     /// Process one frame of input. Returns `true` if the user requested to
@@ -1299,10 +1480,10 @@ impl OptionsScene {
         self.cursor_pos = cursor_pos;
         let layout = compute_layout(window_w, window_h);
         self.sync_scroll(&layout);
-        let prev_focus = (self.focused, self.bottom_focus);
+        let prev_tree_focus = self.tree.focused();
+        let prev_focused_row = self.focused;
 
         // ── Scroll wheel ───────────────────────────────────────────────
-        // Apply when the cursor is over the content area.
         if scroll_lines.abs() > 0.001 {
             let (cx, cy) = cursor_pos;
             let content_end_y = layout.content_start_y
@@ -1312,192 +1493,85 @@ impl OptionsScene {
                 && cy >= layout.content_start_y
                 && cy <= content_end_y
             {
-                // Pass the raw float so trackpad momentum isn't rounded away.
                 self.scroll.scroll_by(-scroll_lines);
             }
         }
 
-        // ── Mouse hover ────────────────────────────────────────────────
-        // Match widget-tree / main-menu: only the mouse drives hover in cursor
-        // mode so controller / keyboard focus is not overwritten by a parked cursor.
-        if input_mode == InputMode::Cursor {
-            let (cx, cy) = cursor_pos;
-            let scroll = self.scroll.target() as usize;
-            for (vi, ci) in (scroll..CONTENT.len()).enumerate() {
-                if vi >= layout.visible_slots {
-                    break;
-                }
-                if let ContentSlot::Row(row) = CONTENT[ci] {
-                    let ry = layout.content_start_y + vi as f32 * (layout.slot_h + layout.slot_gap);
-                    if cx >= layout.content_x
-                        && cx <= layout.content_x + layout.content_w
-                        && cy >= ry
-                        && cy <= ry + layout.slot_h
-                    {
-                        self.focused = row;
-                        self.bottom_focus = BottomFocus::None;
-                    }
-                }
-            }
-            let in_bottom_bar = cy >= layout.back_y && cy <= layout.back_y + layout.back_h;
-            #[cfg(not(feature = "dist-steam"))]
-            if in_bottom_bar
-                && cx >= layout.tileset_mods_x
-                && cx <= layout.tileset_mods_x + layout.tileset_mods_w
-            {
-                self.bottom_focus = BottomFocus::TilesetMods;
-            }
-            if in_bottom_bar && cx >= layout.back_x && cx <= layout.back_x + layout.back_w {
-                self.bottom_focus = BottomFocus::Back;
-            }
-        }
-
-        // ── Button clicks ──────────────────────────────────────────────
-        for &cid in button_clicks {
-            // TOC link?
-            if cid >= TOC_ID_BASE && cid < TOC_ID_BASE + SECTIONS.len() as u32 {
-                let section = SECTIONS[(cid - TOC_ID_BASE) as usize];
-                let target = content_index_of_section(section) as f32;
-                self.scroll.set_target(target);
-                if let Some(first_row) = CONTENT[target as usize..].iter().find_map(|s| match s {
-                    ContentSlot::Row(r) => Some(*r),
-                    _ => None,
-                }) {
-                    self.focused = first_row;
-                    self.bottom_focus = BottomFocus::None;
-                }
-                continue;
-            }
-            #[cfg(not(feature = "dist-steam"))]
-            if cid == TILESET_MODS_FOLDER_ID {
-                self.bottom_focus = BottomFocus::TilesetMods;
-                self.open_tileset_mods_requested = true;
-                self.confirm_requested = true;
-                continue;
-            }
-            if cid == BACK_ID {
-                self.save_settings();
-                self.cancel_requested = true;
-                return true;
-            }
-            if cid == TILESET_ARROW_PREV_ID {
-                self.focused = Row::Tileset;
-                self.bottom_focus = BottomFocus::None;
-                self.cycle_tileset(-1);
-                self.save_settings();
-                self.confirm_requested = true;
-                continue;
-            }
-            if cid == TILESET_ARROW_NEXT_ID {
-                self.focused = Row::Tileset;
-                self.bottom_focus = BottomFocus::None;
-                self.cycle_tileset(1);
-                self.save_settings();
-                self.confirm_requested = true;
-                continue;
-            }
-            #[cfg(feature = "dist-steam")]
-            if cid == STEAM_PUBLISH_ARROW_PREV_ID {
-                self.focused = Row::SteamPublishMod;
-                self.bottom_focus = BottomFocus::None;
-                self.cycle_publish_mod(-1);
-                self.confirm_requested = true;
-                continue;
-            }
-            #[cfg(feature = "dist-steam")]
-            if cid == STEAM_PUBLISH_ARROW_NEXT_ID {
-                self.focused = Row::SteamPublishMod;
-                self.bottom_focus = BottomFocus::None;
-                self.cycle_publish_mod(1);
-                self.confirm_requested = true;
-                continue;
-            }
-            if let Some(row) = Row::from_click_id(cid) {
-                self.focused = row;
-                self.bottom_focus = BottomFocus::None;
-                self.confirm_requested = true;
-                let close = self.apply_click(row, &layout, cursor_pos);
-                if row.is_slider() && Self::cursor_on_slider_track(&layout, cursor_pos) {
-                    self.dragging_slider = Some(row);
-                }
-                if close {
-                    return true;
-                }
-                return false;
-            }
-        }
-
-        if mouse_left_down && let Some(row) = self.dragging_slider {
-            self.set_slider_from_cursor(row, &layout, cursor_pos);
-            self.save_settings();
-        }
-
-        // ── Keyboard / gamepad ─────────────────────────────────────────
+        // ── Keyboard / gamepad (before tree so focus is aligned for Confirm) ──
         for a in actions {
             match a {
-                UiAction::FocusDown if self.bottom_focus == BottomFocus::Back => {}
+                UiAction::FocusDown if matches!(self.chrome_action(), Some(OptionsChromeAction::Back)) => {}
                 #[cfg(not(feature = "dist-steam"))]
-                UiAction::FocusDown if self.bottom_focus == BottomFocus::TilesetMods => {
-                    self.bottom_focus = BottomFocus::Back;
+                UiAction::FocusDown
+                    if matches!(
+                        self.chrome_action(),
+                        Some(OptionsChromeAction::TilesetMods)
+                    ) =>
+                {
+                    self.tree.set_focus(OptionsChromeAction::Back.id());
                 }
                 #[cfg(not(feature = "dist-steam"))]
-                UiAction::FocusUp if self.bottom_focus == BottomFocus::Back => {
-                    self.bottom_focus = BottomFocus::TilesetMods;
+                UiAction::FocusUp if matches!(self.chrome_action(), Some(OptionsChromeAction::Back)) => {
+                    self.tree.set_focus(OptionsChromeAction::TilesetMods.id());
                 }
                 #[cfg(not(feature = "dist-steam"))]
-                UiAction::FocusUp if self.bottom_focus == BottomFocus::TilesetMods => {
-                    self.bottom_focus = BottomFocus::None;
+                UiAction::FocusUp
+                    if matches!(
+                        self.chrome_action(),
+                        Some(OptionsChromeAction::TilesetMods)
+                    ) =>
+                {
                     self.focused = *ROWS.last().unwrap();
                     self.ensure_focused_visible(&layout);
+                    self.tree.set_focus(OptionsNav::row_id(self.focused));
                 }
-                UiAction::FocusDown => {
+                UiAction::FocusDown if self.nav_focus().is_some_and(|n| !n.is_chrome()) => {
                     let idx = ROWS.iter().position(|&r| r == self.focused).unwrap_or(0);
                     if idx + 1 < ROWS.len() {
                         self.focused = ROWS[idx + 1];
                         self.ensure_focused_visible(&layout);
+                        self.tree.set_focus(OptionsNav::row_id(self.focused));
                     } else {
                         #[cfg(not(feature = "dist-steam"))]
-                        {
-                            self.bottom_focus = BottomFocus::TilesetMods;
-                        }
+                        self.tree.set_focus(OptionsChromeAction::TilesetMods.id());
                         #[cfg(feature = "dist-steam")]
-                        {
-                            self.bottom_focus = BottomFocus::Back;
-                        }
+                        self.tree.set_focus(OptionsChromeAction::Back.id());
                     }
                 }
-                UiAction::FocusUp => {
+                UiAction::FocusUp if self.nav_focus().is_some_and(|n| !n.is_chrome()) => {
                     let idx = ROWS.iter().position(|&r| r == self.focused).unwrap_or(0);
                     if idx > 0 {
                         self.focused = ROWS[idx - 1];
                         self.ensure_focused_visible(&layout);
+                        self.tree.set_focus(OptionsNav::row_id(self.focused));
                     }
                 }
-                UiAction::FocusNext => {
-                    if self.bottom_focus == BottomFocus::None {
-                        self.adjust_row_right();
-                    }
+                UiAction::FocusNext if self.nav_focus().is_some_and(|n| !n.is_chrome()) => {
+                    self.adjust_row_right();
                 }
-                UiAction::FocusPrev => {
-                    if self.bottom_focus == BottomFocus::None {
-                        self.adjust_row_left();
-                    }
+                UiAction::FocusPrev if self.nav_focus().is_some_and(|n| !n.is_chrome()) => {
+                    self.adjust_row_left();
                 }
                 #[cfg(not(feature = "dist-steam"))]
                 UiAction::Confirm | UiAction::CommitDiscard
-                    if self.bottom_focus == BottomFocus::TilesetMods =>
+                    if matches!(
+                        self.chrome_action(),
+                        Some(OptionsChromeAction::TilesetMods)
+                    ) =>
                 {
                     self.open_tileset_mods_requested = true;
                     self.confirm_requested = true;
                 }
                 UiAction::Confirm | UiAction::CommitDiscard
-                    if self.bottom_focus == BottomFocus::Back =>
+                    if matches!(self.chrome_action(), Some(OptionsChromeAction::Back)) =>
                 {
                     self.save_settings();
                     self.cancel_requested = true;
                     return true;
                 }
-                UiAction::Confirm | UiAction::CommitDiscard => {
+                UiAction::Confirm | UiAction::CommitDiscard
+                    if self.nav_focus().is_some_and(|n| !n.is_chrome()) =>
+                {
                     self.confirm_requested = true;
                     if self.apply_click(self.focused, &layout, cursor_pos) {
                         return true;
@@ -1511,7 +1585,99 @@ impl OptionsScene {
                 _ => {}
             }
         }
-        self.focus_changed = prev_focus != (self.focused, self.bottom_focus);
+
+        // Build flat targets after scroll/focus changes so offscreen rows appear once
+        // `ensure_focused_visible` updates the scroll target.
+        let items = flat_nav_items(&layout, self.scroll.target());
+        self.sync_tree_to_focused_row();
+
+        let chrome_active = self.nav_focus().is_some_and(|n| n.is_chrome());
+        let tree_actions: Vec<UiAction> = if chrome_active {
+            actions.to_vec()
+        } else {
+            actions
+                .iter()
+                .copied()
+                .filter(|a| {
+                    !matches!(
+                        a,
+                        UiAction::Confirm
+                            | UiAction::CommitDiscard
+                            | UiAction::FocusUp
+                            | UiAction::FocusDown
+                            | UiAction::FocusPrev
+                            | UiAction::FocusNext
+                    )
+                })
+                .collect()
+        };
+
+        if let Some(nav) = self.tree.update_flat(
+            &items,
+            TreeInput {
+                actions: &tree_actions,
+                button_clicks,
+                cursor_pos,
+                window: (window_w, window_h),
+                input_mode,
+                scroll_lines: 0.0,
+            },
+        ) && self.apply_nav_action(nav, &layout, cursor_pos)
+        {
+            return true;
+        }
+        let tree_focus_changed = self.tree.take_focus_changed();
+        if tree_focus_changed {
+            self.sync_focused_from_tree();
+            if self.nav_focus().is_none_or(|n| !n.is_chrome()) {
+                self.ensure_focused_visible(&layout);
+            }
+        }
+
+        // ── Inline cycle arrows (separate hit targets) ─────────────────
+        for &cid in button_clicks {
+            if cid == TILESET_ARROW_PREV_ID {
+                self.focused = Row::Tileset;
+                self.tree.set_focus(OptionsNav::row_id(Row::Tileset));
+                self.cycle_tileset(-1);
+                self.save_settings();
+                self.confirm_requested = true;
+                continue;
+            }
+            if cid == TILESET_ARROW_NEXT_ID {
+                self.focused = Row::Tileset;
+                self.tree.set_focus(OptionsNav::row_id(Row::Tileset));
+                self.cycle_tileset(1);
+                self.save_settings();
+                self.confirm_requested = true;
+                continue;
+            }
+            #[cfg(feature = "dist-steam")]
+            if cid == STEAM_PUBLISH_ARROW_PREV_ID {
+                self.focused = Row::SteamPublishMod;
+                self.tree.set_focus(OptionsNav::row_id(Row::SteamPublishMod));
+                self.cycle_publish_mod(-1);
+                self.confirm_requested = true;
+                continue;
+            }
+            #[cfg(feature = "dist-steam")]
+            if cid == STEAM_PUBLISH_ARROW_NEXT_ID {
+                self.focused = Row::SteamPublishMod;
+                self.tree.set_focus(OptionsNav::row_id(Row::SteamPublishMod));
+                self.cycle_publish_mod(1);
+                self.confirm_requested = true;
+                continue;
+            }
+        }
+
+        if mouse_left_down && let Some(row) = self.dragging_slider {
+            self.set_slider_from_cursor(row, &layout, cursor_pos);
+            self.save_settings();
+        }
+
+        self.focus_changed = tree_focus_changed
+            || self.tree.focused() != prev_tree_focus
+            || self.focused != prev_focused_row;
         false
     }
 
@@ -1548,9 +1714,14 @@ impl OptionsScene {
 
         // ── TOC column ─────────────────────────────────────────────────
         let active_sec = section_at_scroll(smooth);
+        let nav = self.nav_focus();
         for (i, &section) in SECTIONS.iter().enumerate() {
             let y = layout.toc_start_y + i as f32 * (layout.toc_item_h + layout.toc_gap);
-            let is_active = section == active_sec;
+            let toc_focused = matches!(
+                nav,
+                Some(OptionsNav::Chrome(OptionsChromeAction::Toc(s))) if s == section
+            );
+            let is_active = section == active_sec || toc_focused;
 
             if is_active {
                 instances.push(GpuInstance {
@@ -1577,10 +1748,6 @@ impl OptionsScene {
                 align: TextAlign::Left,
                 ..Default::default()
             });
-            buttons.push(ButtonDef::scene(
-                (layout.toc_x, y, layout.toc_w, layout.toc_item_h),
-                TOC_ID_BASE + i as u32,
-            ));
         }
 
         // ── Scrollable content ─────────────────────────────────────────
@@ -1604,7 +1771,7 @@ impl OptionsScene {
                 + vi as f32 * (layout.slot_h + layout.slot_gap)
                 + frac_offset;
             let slot_rect = [layout.content_x, slot_y, layout.content_w, layout.slot_h];
-            let Some(clipped_slot_rect) = intersect_rect(slot_rect, content_clip_rect) else {
+            let Some(_clipped_slot_rect) = intersect_rect(slot_rect, content_clip_rect) else {
                 continue;
             };
             match CONTENT[ci] {
@@ -1636,7 +1803,7 @@ impl OptionsScene {
                     }
                 }
                 ContentSlot::Row(row) => {
-                    let is_focused = self.bottom_focus == BottomFocus::None && row == self.focused;
+                    let is_focused = matches!(nav, Some(OptionsNav::Row(r)) if r == row);
                     self.draw_row(
                         instances,
                         text_labels,
@@ -1648,15 +1815,6 @@ impl OptionsScene {
                         track_h,
                         &cols,
                     );
-                    buttons.push(ButtonDef::scene(
-                        (
-                            clipped_slot_rect[0],
-                            clipped_slot_rect[1],
-                            clipped_slot_rect[2],
-                            clipped_slot_rect[3],
-                        ),
-                        row.click_id(),
-                    ));
                 }
             }
         }
@@ -1714,7 +1872,8 @@ impl OptionsScene {
         // ── Bottom buttons ───────────────────────────────────────────
         #[cfg(not(feature = "dist-steam"))]
         {
-            let mods_focused = self.bottom_focus == BottomFocus::TilesetMods;
+            let mods_focused =
+                matches!(nav, Some(OptionsNav::Chrome(OptionsChromeAction::TilesetMods)));
             let mods_bg = if mods_focused {
                 color::WALNUT_BRIGHT
             } else {
@@ -1746,18 +1905,9 @@ impl OptionsScene {
                 color: mods_text,
                 ..Default::default()
             });
-            buttons.push(ButtonDef::scene(
-                (
-                    layout.tileset_mods_x,
-                    layout.back_y,
-                    layout.tileset_mods_w,
-                    layout.back_h,
-                ),
-                TILESET_MODS_FOLDER_ID,
-            ));
         }
 
-        let back_focused = self.bottom_focus == BottomFocus::Back;
+        let back_focused = matches!(nav, Some(OptionsNav::Chrome(OptionsChromeAction::Back)));
         let back_bg = if back_focused {
             color::WALNUT_BRIGHT
         } else {
@@ -1779,10 +1929,11 @@ impl OptionsScene {
             color: back_text,
             ..Default::default()
         });
-        buttons.push(ButtonDef::scene(
-            (layout.back_x, layout.back_y, layout.back_w, layout.back_h),
-            BACK_ID,
-        ));
+
+        self.tree.register_flat_buttons(
+            &flat_nav_items(&layout, self.scroll.target()),
+            buttons,
+        );
 
         let version_text = if cfg!(debug_assertions) {
             "vNEXT".into()

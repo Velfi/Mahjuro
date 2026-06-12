@@ -874,7 +874,7 @@ impl TutorialCampaignScene {
     ) -> TutorialTilesCopyLayout {
         let body_nominal = typography::size(typography::H32, h);
         let min_cap = body_nominal * 0.55;
-        let max_cap = body_nominal * 0.82;
+        let max_cap = body_nominal * 1.25;
         let section_gap = h * 0.006;
         let copy_bottom_pad = h * 0.008;
         let available = (copy_floor - content_top - copy_bottom_pad).max(1.0);

@@ -13,6 +13,10 @@ use super::tea_bonus::{
 };
 use super::{tile_by_id, tile_is_debuffed};
 
+pub const TRIPLET_BOOST_CHIPS: i32 = 50;
+pub const PLAIN_DEALING_CHIPS_PER_SIMPLE_TILE: i32 = 18;
+pub const EVEN_KEEL_CHIPS_PER_TILE: i32 = 12;
+
 #[inline]
 fn effective_point_value(t: &Tile, ctx: &ScoreContext<'_>) -> i32 {
     if tile_is_debuffed(t, ctx.tiles.debuffs) {
@@ -87,7 +91,7 @@ pub(crate) fn apply_pre_yaku_scoring(
     for s in sets {
         match s.kind {
             MeldKind::Triplet | MeldKind::Kong if has_triplet_boost => {
-                push_chips(steps, chips, *mult, "Triplet Boost", 50);
+                push_chips(steps, chips, *mult, "Triplet Boost", TRIPLET_BOOST_CHIPS);
             }
             MeldKind::Sequence if has_sequence_surge => {
                 push_chips(steps, chips, *mult, "Sequence Surge", 50);
@@ -122,7 +126,13 @@ pub(crate) fn apply_pre_yaku_scoring(
                 .filter(|t| tile_is_simple_number(t))
                 .count() as i32;
             if simple_count > 0 {
-                push_chips(steps, chips, *mult, "Plain Dealing", 18 * simple_count);
+                push_chips(
+                    steps,
+                    chips,
+                    *mult,
+                    "Plain Dealing",
+                    PLAIN_DEALING_CHIPS_PER_SIMPLE_TILE * simple_count,
+                );
             }
         }
         if has_even_keel {
@@ -134,7 +144,13 @@ pub(crate) fn apply_pre_yaku_scoring(
                 .filter(|t| tile_is_even_keel_rank(t))
                 .count() as i32;
             if mid_count > 0 {
-                push_chips(steps, chips, *mult, "Even Keel", 12 * mid_count);
+                push_chips(
+                    steps,
+                    chips,
+                    *mult,
+                    "Even Keel",
+                    EVEN_KEEL_CHIPS_PER_TILE * mid_count,
+                );
             }
         }
     }
