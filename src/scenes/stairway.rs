@@ -24,7 +24,7 @@ use crate::ui::controller_hints::{
     HintStyle, decimation_footer_row, hint_style_with_alpha, push_screen_footer_hint,
     screen_footer_reserve, stairway_prompt_footer_row,
 };
-use crate::ui::focus_nav::{self, FocusDir, FocusNavState};
+use crate::ui::focus_nav;
 use crate::ui::input::{InputMode, MarqueeSelect, UiAction};
 use crate::ui::inspect_plaque::{estimated_flavor_line_count, flavor_spans_layout_width};
 use crate::ui::styled_text;
@@ -85,19 +85,76 @@ impl PromptAction {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DecimationAction {
+    Tile(usize),
     Seal,
     Cancel,
     Continue,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DecimationFocus {
-    Tile(usize),
-    Seal,
-    Cancel,
+const DECIMATION_NAV_BASE: u32 = 0xC100;
+const DECIMATION_TILE_BASE: u32 = 0xC200;
+
+impl DecimationAction {
+    fn id(self) -> FocusId {
+        match self {
+            Self::Cancel => FocusId(DECIMATION_NAV_BASE),
+            Self::Seal => FocusId(DECIMATION_NAV_BASE + 1),
+            Self::Continue => FocusId(DECIMATION_NAV_BASE + 2),
+            Self::Tile(i) => FocusId(DECIMATION_TILE_BASE + i as u32),
+        }
+    }
+
+    fn from_id(id: FocusId) -> Option<Self> {
+        if id == Self::Cancel.id() {
+            Some(Self::Cancel)
+        } else if id == Self::Seal.id() {
+            Some(Self::Seal)
+        } else if id == Self::Continue.id() {
+            Some(Self::Continue)
+        } else if id.0 >= DECIMATION_TILE_BASE {
+            Some(Self::Tile((id.0 - DECIMATION_TILE_BASE) as usize))
+        } else {
+            None
+        }
+    }
+
+    fn label(self) -> String {
+        match self {
+            Self::Tile(i) => format!("tile {i}"),
+            Self::Cancel => "Back".into(),
+            Self::Seal => "Seal".into(),
+            Self::Continue => "Continue to shop".into(),
+        }
+    }
 }
 
 const DECIMATION_SCROLL_LINES_PX: f32 = 52.0;
+
+fn decimation_flat_items(
+    layout: &ScrollableTilePickerLayout<DecimationAction>,
+) -> Vec<FlatItem<DecimationAction>> {
+    let mut items = Vec::with_capacity(layout.pick_tile_rects.len() + layout.flat_items.len());
+    for (i, rect) in layout.pick_tile_rects.iter().enumerate() {
+        items.push(FlatItem::new(
+            DecimationAction::Tile(i).id(),
+            *rect,
+            DecimationAction::Tile(i),
+        ));
+    }
+    for it in &layout.flat_items {
+        items.push(FlatItem::new(it.action.id(), it.rect, it.action));
+    }
+    items
+}
+
+fn focused_decimation_tile(tree: &TreeState) -> Option<usize> {
+    tree.focused()
+        .and_then(DecimationAction::from_id)
+        .and_then(|a| match a {
+            DecimationAction::Tile(i) => Some(i),
+            _ => None,
+        })
+}
 
 struct DecimationPickingChrome {
     back: [f32; 4],
@@ -176,8 +233,6 @@ pub struct StairwayScene {
     phase: StairwayPhase,
     tree: TreeState,
     tile_scroll_y: f32,
-    focus: Option<DecimationFocus>,
-    focus_nav: FocusNavState<DecimationFocus>,
     hovered_tile: Option<usize>,
     marquee: Option<MarqueeSelect>,
     particles: ParticleSystem,
@@ -203,8 +258,6 @@ impl StairwayScene {
             phase: StairwayPhase::Prompt,
             tree: TreeState::default(),
             tile_scroll_y: 0.0,
-            focus: None,
-            focus_nav: FocusNavState::new(),
             hovered_tile: None,
             marquee: None,
             particles: ParticleSystem::new(),
@@ -227,10 +280,12 @@ impl StairwayScene {
                 selected,
                 display_tiles,
             },
-            tree: TreeState::default(),
+            tree: {
+                let mut tree = TreeState::default();
+                tree.set_focus(DecimationAction::Tile(2).id());
+                tree
+            },
             tile_scroll_y: 0.0,
-            focus: Some(DecimationFocus::Tile(2)),
-            focus_nav: FocusNavState::new(),
             hovered_tile: Some(2),
             marquee: None,
             particles: ParticleSystem::new(),
@@ -268,10 +323,12 @@ impl StairwayScene {
                 house,
                 display_tiles,
             },
-            tree: TreeState::default(),
+            tree: {
+                let mut tree = TreeState::default();
+                tree.set_focus(DecimationAction::Seal.id());
+                tree
+            },
             tile_scroll_y: 0.0,
-            focus: Some(DecimationFocus::Seal),
-            focus_nav: FocusNavState::new(),
             hovered_tile: None,
             marquee: None,
             particles: ParticleSystem::new(),
@@ -361,79 +418,6 @@ impl StairwayScene {
         scroll_dirty
     }
 
-    fn chrome_focus_targets(
-        footer: &[(DecimationAction, [f32; 4])],
-    ) -> Vec<(DecimationFocus, [f32; 4])> {
-        footer
-            .iter()
-            .filter_map(|&(action, rect)| {
-                let focus = match action {
-                    DecimationAction::Seal => DecimationFocus::Seal,
-                    DecimationAction::Cancel => DecimationFocus::Cancel,
-                    DecimationAction::Continue => return None,
-                };
-                Some((focus, rect))
-            })
-            .collect()
-    }
-
-    fn tile_focus_targets(
-        layout: &ScrollableTilePickerLayout<DecimationAction>,
-    ) -> Vec<(DecimationFocus, [f32; 4])> {
-        layout
-            .pick_tile_rects
-            .iter()
-            .enumerate()
-            .map(|(i, rect)| (DecimationFocus::Tile(i), *rect))
-            .collect()
-    }
-
-    fn focus_targets_for_layout(
-        layout: &ScrollableTilePickerLayout<DecimationAction>,
-        chrome: &[(DecimationAction, [f32; 4])],
-    ) -> Vec<(DecimationFocus, [f32; 4])> {
-        let mut targets = Self::tile_focus_targets(layout);
-        targets.extend(Self::chrome_focus_targets(chrome));
-        targets
-    }
-
-    fn focus_rect(
-        focus: DecimationFocus,
-        layout: &ScrollableTilePickerLayout<DecimationAction>,
-        chrome: &[(DecimationAction, [f32; 4])],
-    ) -> Option<[f32; 4]> {
-        match focus {
-            DecimationFocus::Tile(i) => layout.pick_tile_rects.get(i).copied(),
-            DecimationFocus::Seal => chrome
-                .iter()
-                .find(|(a, _)| matches!(a, DecimationAction::Seal))
-                .map(|(_, r)| *r),
-            DecimationFocus::Cancel => chrome
-                .iter()
-                .find(|(a, _)| matches!(a, DecimationAction::Cancel))
-                .map(|(_, r)| *r),
-        }
-    }
-
-    fn clamp_focus_to_layout(
-        &mut self,
-        layout: &ScrollableTilePickerLayout<DecimationAction>,
-        chrome: &[(DecimationAction, [f32; 4])],
-    ) {
-        let targets = Self::focus_targets_for_layout(layout, chrome);
-        if targets.is_empty() {
-            self.focus = None;
-            return;
-        }
-        if self
-            .focus
-            .is_some_and(|f| Self::focus_rect(f, layout, chrome).is_some())
-        {
-            return;
-        }
-        self.focus = Some(targets[0].0);
-    }
-
     fn ensure_tile_focus_visible(
         &mut self,
         tile_idx: usize,
@@ -453,19 +437,12 @@ impl StairwayScene {
         }
     }
 
-    fn tile_focus_index(&self) -> Option<usize> {
-        match self.focus {
-            Some(DecimationFocus::Tile(i)) => Some(i),
-            _ => None,
-        }
-    }
-
     fn decimation_section_index(
+        &self,
         layout: &ScrollableTilePickerLayout<DecimationAction>,
-        focus: Option<DecimationFocus>,
         scroll_y: f32,
     ) -> usize {
-        if let Some(DecimationFocus::Tile(i)) = focus {
+        if let Some(i) = focused_decimation_tile(&self.tree) {
             return layout
                 .sections
                 .iter()
@@ -489,7 +466,7 @@ impl StairwayScene {
         if sections.is_empty() {
             return false;
         }
-        let current = Self::decimation_section_index(layout, self.focus, self.tile_scroll_y);
+        let current = self.decimation_section_index(layout, self.tile_scroll_y);
         let len = sections.len();
         let next = if forward {
             (current + 1) % len
@@ -499,9 +476,22 @@ impl StairwayScene {
         let section = sections[next];
         self.marquee = None;
         self.tile_scroll_y = section.header_content_y.min(layout.scroll.max_scroll_y);
-        self.focus = Some(DecimationFocus::Tile(section.first_pick_index));
+        self.tree
+            .set_focus(DecimationAction::Tile(section.first_pick_index).id());
         bus.push(GameEvent::UiSound(SfxId::UiConfirm));
         true
+    }
+
+    fn sync_scroll_to_focused_tile(
+        &mut self,
+        layout: &ScrollableTilePickerLayout<DecimationAction>,
+    ) -> bool {
+        let Some(idx) = focused_decimation_tile(&self.tree) else {
+            return false;
+        };
+        let before = self.tile_scroll_y;
+        self.ensure_tile_focus_visible(idx, layout);
+        (self.tile_scroll_y - before).abs() > 0.5
     }
 
     fn apply_decimation_marquee(
@@ -580,6 +570,7 @@ impl StairwayScene {
             house,
             display_tiles: display_tiles.clone(),
         };
+        self.tree.set_focus(DecimationAction::Continue.id());
         true
     }
 }
@@ -737,10 +728,21 @@ impl StairwayScene {
         )
     }
 
+    fn ensure_prompt_focus(&mut self, items: &[FlatItem<PromptAction>]) {
+        let focused = self.tree.focused();
+        if items.iter().any(|it| Some(it.id) == focused) {
+            return;
+        }
+        if let Some(first) = items.first() {
+            self.tree.set_focus(first.id);
+        }
+    }
+
     fn update_prompt(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let items = prompt_items(w, h);
+        self.ensure_prompt_focus(&items);
         let action = self.tree.update_flat(
             &items,
             TreeInput {
@@ -765,7 +767,7 @@ impl StairwayScene {
                     display_tiles,
                 };
                 self.tile_scroll_y = 0.0;
-                self.focus = Some(DecimationFocus::Tile(0));
+                self.tree.set_focus(DecimationAction::Tile(0).id());
                 self.marquee = None;
                 None
             }
@@ -790,16 +792,6 @@ impl StairwayScene {
 
         let picking_chrome = decimation_picking_chrome(w, h);
         let chrome = decimation_picking_chrome_actions(&picking_chrome);
-        let can_seal = can_seal_decimation(ctx.run, &selected);
-
-        let manual_nav = matches!(ctx.input_mode, InputMode::Controller | InputMode::Keyboard);
-        let hover_for_layout = if manual_nav {
-            self.tile_focus_index()
-        } else if ctx.input_mode == InputMode::Cursor {
-            ctx.picked_hand_tile
-        } else {
-            None
-        };
 
         if ctx.scroll_lines.abs() > f32::EPSILON && !self.dragging_scrollbar {
             self.tile_scroll_y =
@@ -807,13 +799,14 @@ impl StairwayScene {
         }
 
         let scale = metrics::scene_scale(w, h);
+        let hover_slot = focused_decimation_tile(&self.tree).or(ctx.picked_hand_tile);
         let mut layout = self.decimation_layout(
             w,
             h,
             face_aspect,
             &display_tiles,
             &selected,
-            hover_for_layout,
+            hover_slot,
             &chrome,
             picking_chrome.viewport,
         );
@@ -824,51 +817,15 @@ impl StairwayScene {
                 face_aspect,
                 &display_tiles,
                 &selected,
-                hover_for_layout,
+                hover_slot,
                 &chrome,
                 picking_chrome.viewport,
             );
         }
         self.tile_scroll_y = layout.scroll.scroll_y;
-        let mut scroll_dirty = false;
-        self.clamp_focus_to_layout(&layout, &chrome);
-
-        let focus_targets = Self::focus_targets_for_layout(&layout, &chrome);
 
         let mut back_to_prompt = false;
         let mut seal_now = false;
-
-        if ctx.input_mode == InputMode::Cursor && !self.dragging_scrollbar {
-            let (cx, cy) = ctx.cursor_pos;
-            let scrollbar_blocks = tile_picker_scrollbar(
-                picking_chrome.viewport,
-                scale,
-                layout.scroll.content_height,
-                layout.scroll.scroll_y,
-                layout.scroll.max_scroll_y,
-            )
-            .is_some_and(|sb| point_in_rect(cx, cy, sb.hit_track));
-            if !scrollbar_blocks {
-                if let Some(idx) = ctx.picked_hand_tile {
-                    self.focus = Some(DecimationFocus::Tile(idx));
-                } else if let Some(target) =
-                    focus_nav::focus_target_at_cursor(&focus_targets, cx, cy)
-                {
-                    self.focus = Some(target);
-                }
-            }
-        }
-
-        let marquee_slot = if ctx.input_mode == InputMode::Cursor {
-            ctx.picked_hand_tile.or_else(|| self.tile_focus_index())
-        } else {
-            self.tile_focus_index()
-        };
-        if let (Some(m), Some(idx)) = (self.marquee.as_mut(), marquee_slot)
-            && idx != m.current_slot
-        {
-            Self::apply_decimation_marquee(m, idx, &layout, &mut selected, ctx.bus);
-        }
 
         let mut tree_actions: Vec<UiAction> = Vec::new();
         for &a in ctx.actions {
@@ -885,96 +842,30 @@ impl StairwayScene {
                     if !selected.is_empty() {
                         selected.clear();
                     } else {
-                        self.focus = Some(DecimationFocus::Cancel);
+                        self.tree.set_focus(DecimationAction::Cancel.id());
                     }
                     break;
                 }
-                UiAction::InvertSelection if manual_nav => {
+                UiAction::InvertSelection
+                    if matches!(ctx.input_mode, InputMode::Controller | InputMode::Keyboard) =>
+                {
                     self.marquee = None;
-                    self.focus = Some(DecimationFocus::Seal);
+                    self.tree.set_focus(DecimationAction::Seal.id());
                 }
                 UiAction::TabNext | UiAction::NavigateHudNext => {
-                    if self.step_decimation_section(&layout, true, ctx.bus) {
-                        scroll_dirty = true;
-                    }
+                    let _ = self.step_decimation_section(&layout, true, ctx.bus);
                 }
                 UiAction::TabPrev | UiAction::NavigateHudPrev => {
-                    if self.step_decimation_section(&layout, false, ctx.bus) {
-                        scroll_dirty = true;
-                    }
+                    let _ = self.step_decimation_section(&layout, false, ctx.bus);
                 }
                 UiAction::PageNext => {
-                    self.tile_scroll_y += layout.scroll.viewport[3] * 0.85;
-                    scroll_dirty = true;
+                    self.tile_scroll_y = (self.tile_scroll_y + layout.scroll.viewport[3] * 0.85)
+                        .min(layout.scroll.max_scroll_y);
                 }
                 UiAction::PagePrev => {
                     self.tile_scroll_y =
                         (self.tile_scroll_y - layout.scroll.viewport[3] * 0.85).max(0.0);
-                    scroll_dirty = true;
                 }
-                UiAction::FocusUp => {
-                    if manual_nav {
-                        self.step_spatial_focus(FocusDir::Up, &layout, &chrome, &focus_targets);
-                    } else {
-                        tree_actions.push(a);
-                    }
-                }
-                UiAction::FocusDown => {
-                    if manual_nav {
-                        self.step_spatial_focus(FocusDir::Down, &layout, &chrome, &focus_targets);
-                    } else {
-                        tree_actions.push(a);
-                    }
-                }
-                UiAction::FocusPrev => {
-                    if manual_nav {
-                        self.step_spatial_focus(FocusDir::Left, &layout, &chrome, &focus_targets);
-                    } else {
-                        tree_actions.push(a);
-                    }
-                }
-                UiAction::FocusNext => {
-                    if manual_nav {
-                        self.step_spatial_focus(FocusDir::Right, &layout, &chrome, &focus_targets);
-                    } else {
-                        tree_actions.push(a);
-                    }
-                }
-                UiAction::Confirm | UiAction::CommitDiscard => match self.focus {
-                    Some(DecimationFocus::Tile(i)) => {
-                        self.marquee = Some(Self::begin_decimation_marquee(
-                            i,
-                            &layout.pick_tile_ids,
-                            &mut selected,
-                            ctx.bus,
-                        ));
-                    }
-                    Some(DecimationFocus::Seal) if can_seal => {
-                        ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                        self.marquee = None;
-                        seal_now = true;
-                    }
-                    Some(DecimationFocus::Seal) => {
-                        ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                    }
-                    Some(DecimationFocus::Cancel) => {
-                        ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                        self.marquee = None;
-                        back_to_prompt = true;
-                    }
-                    _ if ctx.input_mode == InputMode::Cursor && ctx.picked_hand_tile.is_some() => {
-                        if let Some(idx) = ctx.picked_hand_tile {
-                            self.marquee = Some(Self::begin_decimation_marquee(
-                                idx,
-                                &layout.pick_tile_ids,
-                                &mut selected,
-                                ctx.bus,
-                            ));
-                        }
-                    }
-                    _ if manual_nav => {}
-                    _ => tree_actions.push(a),
-                },
                 UiAction::ConfirmRelease => {
                     self.marquee = None;
                 }
@@ -982,31 +873,41 @@ impl StairwayScene {
             }
         }
 
-        if manual_nav {
-            self.hovered_tile = self.tile_focus_index();
-        } else if ctx.input_mode == InputMode::Cursor {
-            self.hovered_tile = ctx.picked_hand_tile;
-        } else {
-            self.hovered_tile = None;
-        }
-
-        let marquee_slot = if ctx.input_mode == InputMode::Cursor {
-            ctx.picked_hand_tile.or_else(|| self.tile_focus_index())
-        } else {
-            self.tile_focus_index()
-        };
-        if let (Some(m), Some(idx)) = (self.marquee.as_mut(), marquee_slot)
-            && idx != m.current_slot
+        if ctx.input_mode == InputMode::Cursor
+            && !self.dragging_scrollbar
+            && let Some(idx) = ctx.picked_hand_tile
         {
-            Self::apply_decimation_marquee(m, idx, &layout, &mut selected, ctx.bus);
+            self.tree.set_focus(DecimationAction::Tile(idx).id());
         }
 
-        if let Some(DecimationFocus::Tile(idx)) = self.focus {
-            let before = self.tile_scroll_y;
-            self.ensure_tile_focus_visible(idx, &layout);
-            if (self.tile_scroll_y - before).abs() > 0.5 {
-                scroll_dirty = true;
-            }
+        let mut scroll_dirty = self.sync_scroll_to_focused_tile(&layout);
+        if scroll_dirty {
+            layout = self.decimation_layout(
+                w,
+                h,
+                face_aspect,
+                &display_tiles,
+                &selected,
+                focused_decimation_tile(&self.tree).or(ctx.picked_hand_tile),
+                &chrome,
+                picking_chrome.viewport,
+            );
+            self.tile_scroll_y = layout.scroll.scroll_y;
+        }
+
+        let items = decimation_flat_items(&layout);
+        let input = TreeInput {
+            actions: &tree_actions,
+            button_clicks: ctx.button_clicks,
+            cursor_pos: ctx.cursor_pos,
+            window: (w, h),
+            input_mode: ctx.input_mode,
+            scroll_lines: 0.0,
+        };
+        let fired = self.tree.update_flat(&items, input);
+        if self.tree.take_focus_changed() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+            scroll_dirty = self.sync_scroll_to_focused_tile(&layout) || scroll_dirty;
         }
 
         if scroll_dirty {
@@ -1016,11 +917,50 @@ impl StairwayScene {
                 face_aspect,
                 &display_tiles,
                 &selected,
-                self.tile_focus_index(),
+                focused_decimation_tile(&self.tree).or(ctx.picked_hand_tile),
                 &chrome,
                 picking_chrome.viewport,
             );
             self.tile_scroll_y = layout.scroll.scroll_y;
+        }
+
+        self.hovered_tile = ctx
+            .picked_hand_tile
+            .or_else(|| focused_decimation_tile(&self.tree));
+
+        let marquee_slot = ctx
+            .picked_hand_tile
+            .or_else(|| focused_decimation_tile(&self.tree));
+        if let (Some(m), Some(idx)) = (self.marquee.as_mut(), marquee_slot)
+            && idx != m.current_slot
+        {
+            Self::apply_decimation_marquee(m, idx, &layout, &mut selected, ctx.bus);
+        }
+
+        let can_seal = can_seal_decimation(ctx.run, &selected);
+        match fired {
+            Some(DecimationAction::Tile(i)) => {
+                self.marquee = Some(Self::begin_decimation_marquee(
+                    i,
+                    &layout.pick_tile_ids,
+                    &mut selected,
+                    ctx.bus,
+                ));
+            }
+            Some(DecimationAction::Seal) if can_seal => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                self.marquee = None;
+                seal_now = true;
+            }
+            Some(DecimationAction::Seal) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+            }
+            Some(DecimationAction::Cancel) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+                self.marquee = None;
+                back_to_prompt = true;
+            }
+            _ => {}
         }
 
         if let StairwayPhase::Picking {
@@ -1033,72 +973,15 @@ impl StairwayScene {
 
         if back_to_prompt {
             self.phase = StairwayPhase::Prompt;
+            self.marquee = None;
+            let items = prompt_items(w, h);
+            self.ensure_prompt_focus(&items);
             return None;
         }
         if seal_now {
             self.seal_decimation(ctx.run, ctx.bus);
-            return None;
-        }
-
-        let can_seal_after = can_seal_decimation(
-            ctx.run,
-            match &self.phase {
-                StairwayPhase::Picking { selected, .. } => selected.as_slice(),
-                _ => &[],
-            },
-        );
-
-        let input = TreeInput {
-            actions: &tree_actions,
-            button_clicks: ctx.button_clicks,
-            cursor_pos: ctx.cursor_pos,
-            window: (w, h),
-            input_mode: ctx.input_mode,
-            scroll_lines: ctx.scroll_lines,
-        };
-        let fired = self.tree.update_flat(&layout.flat_items, input);
-        if self.tree.take_focus_changed() {
-            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-        }
-        let can_seal = can_seal_after;
-        match fired {
-            Some(DecimationAction::Cancel) if ctx.input_mode == InputMode::Cursor => {
-                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                self.marquee = None;
-                self.phase = StairwayPhase::Prompt;
-            }
-            Some(DecimationAction::Seal) if can_seal && ctx.input_mode == InputMode::Cursor => {
-                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                self.marquee = None;
-                self.seal_decimation(ctx.run, ctx.bus);
-            }
-            Some(DecimationAction::Seal) if ctx.input_mode == InputMode::Cursor => {
-                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-            }
-            _ => {}
         }
         None
-    }
-
-    fn step_spatial_focus(
-        &mut self,
-        dir: FocusDir,
-        layout: &ScrollableTilePickerLayout<DecimationAction>,
-        chrome: &[(DecimationAction, [f32; 4])],
-        focus_targets: &[(DecimationFocus, [f32; 4])],
-    ) {
-        let Some(current) = self
-            .focus
-            .or_else(|| focus_targets.first().map(|(target, _)| *target))
-        else {
-            return;
-        };
-        self.focus_nav.load_candidates(focus_targets, &[]);
-        if let Some(next) = self.focus_nav.pick(current, dir) {
-            self.focus = Some(next);
-        } else if self.focus.is_none() {
-            self.clamp_focus_to_layout(layout, chrome);
-        }
     }
 
     fn begin_burn(
@@ -1164,6 +1047,17 @@ impl StairwayScene {
             0.0,
             &footer,
         );
+        let items: Vec<FlatItem<DecimationAction>> = layout
+            .flat_items
+            .iter()
+            .map(|it| {
+                FlatItem::new(
+                    it.action.id(),
+                    it.rect,
+                    it.action,
+                )
+            })
+            .collect();
 
         let input = TreeInput {
             actions: ctx.actions,
@@ -1173,7 +1067,7 @@ impl StairwayScene {
             input_mode: ctx.input_mode,
             scroll_lines: ctx.scroll_lines,
         };
-        let fired = self.tree.update_flat(&layout.flat_items, input);
+        let fired = self.tree.update_flat(&items, input);
         if matches!(fired, Some(DecimationAction::Continue)) {
             self.begin_burn(player, house, display_tiles, ctx.bus, w, h, face_aspect);
         }
@@ -1421,15 +1315,14 @@ impl StairwayScene {
         };
 
         let tile_clip = layout.scroll.viewport;
-        let focus_ring_rect = matches!(ctx.input_mode, InputMode::Controller | InputMode::Keyboard)
-            .then_some(self.focus)
-            .flatten()
-            .and_then(|f| match f {
-                DecimationFocus::Tile(_) => Self::focus_rect(f, &layout, &chrome),
+        let items = decimation_flat_items(&layout);
+        let focused = self.tree.focused();
+        let focus_ring_rect = focused
+            .and_then(DecimationAction::from_id)
+            .and_then(|a| match a {
+                DecimationAction::Tile(i) => layout.pick_tile_rects.get(i).copied(),
                 _ => None,
             });
-
-        let focus_targets = Self::focus_targets_for_layout(&layout, &chrome);
 
         if !layout.placements.is_empty() {
             frame.showcase_tile_batch_clipped(layout.placements, Some(tile_clip));
@@ -1485,18 +1378,8 @@ impl StairwayScene {
             push_tile_picker_scrollbar(&mut frame, &sb, self.dragging_scrollbar);
         }
 
-        let back_focused = matches!(self.focus, Some(DecimationFocus::Cancel))
-            || layout
-                .flat_items
-                .iter()
-                .find(|it| matches!(it.action, DecimationAction::Cancel))
-                .is_some_and(|it| self.tree.focused() == Some(it.id));
-        let seal_focused = matches!(self.focus, Some(DecimationFocus::Seal))
-            || layout
-                .flat_items
-                .iter()
-                .find(|it| matches!(it.action, DecimationAction::Seal))
-                .is_some_and(|it| self.tree.focused() == Some(it.id));
+        let back_focused = focused == Some(DecimationAction::Cancel.id());
+        let seal_focused = focused == Some(DecimationAction::Seal.id());
         let can_seal = selected.len() == PLAYER_PICKS;
         let seal_label = decimation_seal_button_label(selected.len());
         for it in layout
@@ -1504,15 +1387,10 @@ impl StairwayScene {
             .iter()
             .filter(|it| matches!(it.action, DecimationAction::Seal | DecimationAction::Cancel))
         {
-            let is_focused = match it.action {
-                DecimationAction::Cancel => back_focused,
-                DecimationAction::Seal => seal_focused,
-                DecimationAction::Continue => false,
-            };
-            let label = match it.action {
-                DecimationAction::Cancel => "Back",
-                DecimationAction::Seal => seal_label.as_str(),
-                DecimationAction::Continue => continue,
+            let (is_focused, label) = match it.action {
+                DecimationAction::Cancel => (back_focused, "Back"),
+                DecimationAction::Seal => (seal_focused, seal_label.as_str()),
+                _ => continue,
             };
             let bg = match it.action {
                 DecimationAction::Seal if can_seal => {
@@ -1586,7 +1464,7 @@ impl StairwayScene {
         frame.texts(subtitle_labels);
 
         self.tree
-            .register_flat_buttons(&layout.flat_items, &mut frame.buttons);
+            .register_flat_buttons(&items, &mut frame.buttons);
 
         push_screen_footer_hint(
             &mut frame,
@@ -1595,13 +1473,7 @@ impl StairwayScene {
             HintStyle::standard(w, h),
         );
 
-        ctx.stash_focus_nav_graph(
-            &focus_targets,
-            &[],
-            self.focus,
-            self.focus_nav.memory(),
-            |f| format!("{f:?}"),
-        );
+        ctx.stash_focus_nav_tree_flat(&self.tree, &items, DecimationAction::label);
         frame
     }
 
@@ -1767,11 +1639,14 @@ impl StairwayScene {
                     ..Default::default()
                 });
             }
+            let items: Vec<FlatItem<DecimationAction>> = layout
+                .flat_items
+                .iter()
+                .map(|it| FlatItem::new(it.action.id(), it.rect, it.action))
+                .collect();
             self.tree
-                .register_flat_buttons(&layout.flat_items, &mut frame.buttons);
-            ctx.stash_focus_nav_tree_flat(&self.tree, &layout.flat_items, |_| {
-                "Continue to shop".into()
-            });
+                .register_flat_buttons(&items, &mut frame.buttons);
+            ctx.stash_focus_nav_tree_flat(&self.tree, &items, DecimationAction::label);
         }
 
         frame

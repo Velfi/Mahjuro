@@ -72,6 +72,25 @@ pub fn mip_chain_count(mut w: u32, mut h: u32) -> u32 {
     count.max(1)
 }
 
+/// Pad RGBA to BC7 block dimensions (transparent pixels on the right/bottom).
+fn pad_rgba_to_bc7_blocks(rgba: &[u8], width: u32, height: u32) -> (Vec<u8>, u32, u32) {
+    use crate::relic_gpu_residency::{align_bc7_dim, bc7_block_aligned};
+
+    let aligned_w = align_bc7_dim(width.max(1));
+    let aligned_h = align_bc7_dim(height.max(1));
+    if bc7_block_aligned(width, height) {
+        return (rgba.to_vec(), width, height);
+    }
+    let mut out = vec![0u8; (aligned_w as usize) * (aligned_h as usize) * 4];
+    for y in 0..height {
+        let src = (y * width * 4) as usize;
+        let dst = (y * aligned_w * 4) as usize;
+        let row = (width * 4) as usize;
+        out[dst..dst + row].copy_from_slice(&rgba[src..src + row]);
+    }
+    (out, aligned_w, aligned_h)
+}
+
 #[cfg(feature = "relic_bc7_bake")]
 fn rgba_mip_chain_bc7(rgba: &[u8], width: u32, height: u32) -> Vec<(Vec<u8>, u32, u32)> {
     let mut chain = Vec::new();
@@ -100,9 +119,10 @@ fn encode_bc7_mip_chain(
 ) -> anyhow::Result<(Vec<u8>, u32, u32, u32, Vec<u8>, u32, u32)> {
     use intel_tex_2::{RgbaSurface, bc7};
 
-    let chain = rgba_mip_chain_bc7(rgba, width, height);
+    let (bc7_rgba, bc7_w, bc7_h) = pad_rgba_to_bc7_blocks(rgba, width, height);
+    let chain = rgba_mip_chain_bc7(&bc7_rgba, bc7_w, bc7_h);
     let mip_count = chain.len() as u32;
-    let (base_w, base_h) = (chain[0].1, chain[0].2);
+    let (base_w, base_h) = (bc7_w, bc7_h);
     let settings = if srgb {
         bc7::opaque_fast_settings()
     } else {
@@ -122,12 +142,15 @@ fn encode_bc7_mip_chain(
         bc7_out.extend_from_slice(&level_bytes);
     }
 
-    let (fallback_rgba, fb_w, fb_h) = {
-        let (fb, fw, fh) = chain.first().expect("relic mip chain");
-        (fb.clone(), *fw, *fh)
-    };
-
-    Ok((bc7_out, base_w, base_h, mip_count, fallback_rgba, fb_w, fb_h))
+    Ok((
+        bc7_out,
+        base_w,
+        base_h,
+        mip_count,
+        rgba.to_vec(),
+        width,
+        height,
+    ))
 }
 
 #[cfg(not(feature = "relic_bc7_bake"))]
@@ -177,6 +200,18 @@ fn validate_baked_relic_bytes(expected_id: RelicId, bytes: &[u8]) -> anyhow::Res
         .checked_add(header.relief_fallback_len as usize)
         .context("relic bake: relief fallback overflow")?;
     anyhow::ensure!(bytes.len() >= off, "relic bake: truncated textures");
+    anyhow::ensure!(
+        crate::relic_gpu_residency::bc7_block_aligned(header.albedo_base_w, header.albedo_base_h),
+        "relic bake: albedo BC7 size {}x{} is not 4-aligned",
+        header.albedo_base_w,
+        header.albedo_base_h
+    );
+    anyhow::ensure!(
+        crate::relic_gpu_residency::bc7_block_aligned(header.relief_base_w, header.relief_base_h),
+        "relic bake: relief BC7 size {}x{} is not 4-aligned",
+        header.relief_base_w,
+        header.relief_base_h
+    );
     if header.flags & FLAG_HAS_MESH != 0 {
         validate_mesh_tail(bytes, off, header.vertex_count, header.index_count)?;
     }

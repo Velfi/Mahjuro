@@ -10,6 +10,15 @@ pub(crate) fn bc7_mip_bytes(width: u32, height: u32) -> usize {
     ((width + 3) / 4) as usize * ((height + 3) / 4) as usize * 16
 }
 
+/// BC7 block compression requires width and height to be multiples of 4.
+pub(crate) fn bc7_block_aligned(width: u32, height: u32) -> bool {
+    width % 4 == 0 && height % 4 == 0
+}
+
+pub(crate) fn align_bc7_dim(v: u32) -> u32 {
+    v.next_multiple_of(4).max(4)
+}
+
 /// BC7 uses 4×4 blocks; wgpu rejects `Queue::write_texture` below that size.
 pub(crate) fn bc7_mip_level_count(base_w: u32, base_h: u32) -> u32 {
     let mut count = 0u32;
@@ -105,5 +114,13 @@ mod tests {
     #[test]
     fn bc7_upload_chain_smaller_than_full_chain() {
         assert!(bc7_upload_chain_bytes(1024, 1024) < bc7_chain_bytes(1024, 1024, 11));
+    }
+
+    #[test]
+    fn bc7_block_aligned_checks_multiples_of_four() {
+        assert!(bc7_block_aligned(1024, 1256));
+        assert!(!bc7_block_aligned(1254, 1254));
+        assert_eq!(align_bc7_dim(1254), 1256);
+        assert_eq!(align_bc7_dim(1), 4);
     }
 }
