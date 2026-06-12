@@ -677,8 +677,7 @@ fn is_yakuhai_meld(
     match suit {
         Suit::Dragon => true,
         Suit::Wind => {
-            round_wind.is_some_and(|w| rank == w)
-                || bonus_round_wind.is_some_and(|w| rank == w)
+            round_wind.is_some_and(|w| rank == w) || bonus_round_wind.is_some_and(|w| rank == w)
         }
         _ => false,
     }
@@ -1817,11 +1816,7 @@ mod tests {
 
     #[test]
     fn sort_for_tablets_uses_journal_display_order() {
-        let mut kinds = vec![
-            YakuKind::Yakuhai,
-            YakuKind::Honroutou,
-            YakuKind::Tanyao,
-        ];
+        let mut kinds = vec![YakuKind::Yakuhai, YakuKind::Honroutou, YakuKind::Tanyao];
         YakuKind::sort_for_tablets(&mut kinds);
         assert_eq!(
             kinds,

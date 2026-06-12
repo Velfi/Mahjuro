@@ -173,7 +173,8 @@ mod tests {
         use crate::core::tile_pack::{TilePackInstance, TilePackKind};
 
         let mut run = RunState::new_with_material(crate::persistence::TileMaterial::Bamboo);
-        run.tile_packs.push(TilePackInstance::new(TilePackKind::Manzu));
+        run.tile_packs
+            .push(TilePackInstance::new(TilePackKind::Manzu));
         let ledger = read_wall_ledger(&run, WallLedgerMode::ShopPreview);
         assert!(ledger.pack_groups.is_empty());
         let manzu_copies: usize = ledger

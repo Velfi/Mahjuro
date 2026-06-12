@@ -19,9 +19,7 @@ use crate::render::vocabulary_colors::GlossaryMode;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::render::world_space::LayoutAnchorPx;
 use crate::sfx_id::SfxId;
-use crate::ui::controller_hints::{
-    HintStyle, menu_footer_row, push_screen_footer_hint,
-};
+use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
 use crate::ui::focus_nav;
 use crate::ui::input::UiAction;
 use crate::ui::placement::PlacementAnchor;
@@ -315,7 +313,11 @@ fn tutorial_page_subtitle(page: &TutorialPage) -> Option<&str> {
     }
 }
 
-fn tutorial_content_band(w: f32, h: f32, subtitle: Option<&str>) -> (GuideLayout, GuideNavHeader, f32, f32) {
+fn tutorial_content_band(
+    w: f32,
+    h: f32,
+    subtitle: Option<&str>,
+) -> (GuideLayout, GuideNavHeader, f32, f32) {
     let layout = GuideLayout::new(w, h);
     let nav_header = guide_nav_header(w, h, layout.header_chrome().back, subtitle);
     let jr = (w.min(h) / 720.0).clamp(1.0, 1.38);
@@ -829,11 +831,7 @@ impl TutorialCampaignScene {
         for line in tiles::HONOR_LINES {
             natural_h += block(line, typography::H32, color::PARCHMENT);
         }
-        natural_h += block(
-            tiles::FLOWERS_HEADING,
-            typography::H28,
-            color::CHAMPAGNE,
-        );
+        natural_h += block(tiles::FLOWERS_HEADING, typography::H28, color::CHAMPAGNE);
         for line in tiles::FLOWER_LINES {
             natural_h += block(line, typography::H32, color::PARCHMENT);
         }
@@ -1399,8 +1397,8 @@ impl TutorialCampaignScene {
             .unwrap_or(1);
         let mut tile_size = Self::tutorial_tiles_row_size(max_tiles, tile_span_w, min_gap);
         let row_count = groups.len().max(1);
-        let natural_h =
-            (pad * 2.0 + tile_size) * row_count as f32 + row_gap * row_count.saturating_sub(1) as f32;
+        let natural_h = (pad * 2.0 + tile_size) * row_count as f32
+            + row_gap * row_count.saturating_sub(1) as f32;
         if natural_h > available_h * 0.96 {
             tile_size *= (available_h * 0.96 / natural_h).clamp(0.5, 1.0);
         }
@@ -1423,7 +1421,12 @@ impl TutorialCampaignScene {
         scale: f32,
         content_top: f32,
         content_floor: f32,
-    ) -> (Vec<ShowcaseTilePlacement>, Vec<TutorialTilesSideLabel>, f32, f32) {
+    ) -> (
+        Vec<ShowcaseTilePlacement>,
+        Vec<TutorialTilesSideLabel>,
+        f32,
+        f32,
+    ) {
         let plan = Self::plan_tutorial_tiles_grid_layout(
             page.groups,
             col_w,
@@ -2112,7 +2115,9 @@ impl SceneBehavior for TutorialCampaignScene {
         if let Some(rect) = match self.tree.focused() {
             Some(id) if id == TutorialNav::TryDiscard.id() => ctx.proj.bowl_rect,
             Some(id) if id == TutorialNav::TryPlay.id() => ctx.proj.mirror_rect,
-            Some(id) if id == TutorialNav::TryTrigger.id() => ctx.proj.wood_tablet_rects.first().copied(),
+            Some(id) if id == TutorialNav::TryTrigger.id() => {
+                ctx.proj.wood_tablet_rects.first().copied()
+            }
             _ => None,
         } {
             focus_nav::push_focus_ring(rect, scale, w, h, &mut fg_quads);
@@ -2207,13 +2212,11 @@ mod tests {
 
     fn tiles_page_copy_metrics(w: f32, h: f32) -> (f32, f32, f32, f32) {
         let scale = metrics::scene_scale(w, h);
-        let (layout, nav_header, content_top, content_bottom) =
-            tutorial_content_band(w, h, None);
+        let (layout, nav_header, content_top, content_bottom) = tutorial_content_band(w, h, None);
         let _ = nav_header;
         let left_w = layout.content_w * 0.38;
         let copy_w = left_w;
-        let copy_floor =
-            TutorialCampaignScene::tutorial_tiles_copy_floor(content_bottom, scale);
+        let copy_floor = TutorialCampaignScene::tutorial_tiles_copy_floor(content_bottom, scale);
         (copy_w, content_top, copy_floor, content_bottom)
     }
 

@@ -553,8 +553,7 @@ impl SceneBehavior for MainMenuScene {
         if hub_focus(&self.tree).is_none()
             || hub_focus(&self.tree).is_some_and(|f| !menu_items(in_progress).contains(&f))
         {
-            self.tree
-                .set_focus(default_focus(in_progress).id());
+            self.tree.set_focus(default_focus(in_progress).id());
         }
 
         let action = self.tree.update_flat(

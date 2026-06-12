@@ -829,9 +829,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
         14 => LevelUnlocks {
             relics: level_14_relics(),
         },
-        _ => LevelUnlocks {
-            relics: vec![],
-        },
+        _ => LevelUnlocks { relics: vec![] },
     }
 }
 

@@ -1,6 +1,6 @@
 //! Structure scoring: commit melds from hand into a held area, then trigger to score.
 
-use crate::core::hand::{kong_structure_bonus, DetectedMeld};
+use crate::core::hand::{DetectedMeld, kong_structure_bonus};
 use crate::core::rules::RuleModifier;
 use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::{YakuKind, detect_yaku_with_wind, is_complete_winning_hand};

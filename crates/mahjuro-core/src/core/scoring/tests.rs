@@ -321,8 +321,7 @@ fn plain_dealing_adds_chips_per_simple_tile() {
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
     let base_chips = 15;
     let simple_tiles = 3;
-    let chips =
-        with_tanyao_chips(base_chips) + PLAIN_DEALING_CHIPS_PER_SIMPLE_TILE * simple_tiles;
+    let chips = with_tanyao_chips(base_chips) + PLAIN_DEALING_CHIPS_PER_SIMPLE_TILE * simple_tiles;
     assert_eq!(breakdown.final_chips, chips);
     assert!(breakdown.steps.iter().any(|s| s.source == "Plain Dealing"));
 }
@@ -741,9 +740,8 @@ fn kindling_adds_mult_from_prior_cashins_this_chamber() {
     };
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
     let prior_cashins = 2;
-    let mult = SCORING_BASE_MULT
-        + YakuKind::Tanyao.mult_bonus()
-        + kindling_mult_bonus(prior_cashins);
+    let mult =
+        SCORING_BASE_MULT + YakuKind::Tanyao.mult_bonus() + kindling_mult_bonus(prior_cashins);
     assert_eq!(breakdown.final_mult, mult);
     assert!(breakdown.steps.iter().any(|s| s.source == "Kindling"));
 }

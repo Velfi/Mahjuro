@@ -19,9 +19,7 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use crate::render::draw_cmd::UiFrame;
 use crate::render::world_space::{LayoutAnchorPx, layout_px_py_from_norm};
 
-use super::{
-    BackgroundId, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx,
-};
+use super::{BackgroundId, DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ModalAction {

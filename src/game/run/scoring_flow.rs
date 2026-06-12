@@ -3,7 +3,10 @@ use crate::{
     OrdealKindExt,
     core::{
         debuff::TileDebuff,
-        hand::{DetectedMeld, MeldKind, decomposition_canonical_key, enumerate_decompositions, kong_structure_bonus},
+        hand::{
+            DetectedMeld, MeldKind, decomposition_canonical_key, enumerate_decompositions,
+            kong_structure_bonus,
+        },
         hand_intent::{decomposition_affinity, infer_decomposition_bias},
         ordeal::{self, OrdealKind},
         relic::{
@@ -1077,8 +1080,7 @@ impl RunState {
             let Some((new_sets, scoring_tiles)) = self.try_validate_with_wildcards(&tiles) else {
                 continue;
             };
-            let best_sets =
-                self.pick_best_decomposition(new_sets, &scoring_tiles, &tiles);
+            let best_sets = self.pick_best_decomposition(new_sets, &scoring_tiles, &tiles);
             if !self.selection_commit_capacity_ok(&best_sets, scoring_tiles.len()) {
                 continue;
             }
@@ -1113,8 +1115,7 @@ impl RunState {
 }
 
 fn preview_yaku_bundle_weight(yaku: &[YakuKind]) -> i64 {
-    yaku
-        .iter()
+    yaku.iter()
         .map(|y| y.chip_bonus() as i64 + (y.mult_bonus() * 100.0).round() as i64)
         .sum()
 }

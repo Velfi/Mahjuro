@@ -1701,29 +1701,34 @@ pub(super) fn build_yaku_panel_and_tablets(
     use crate::core::yaku::{YakuKind, YakuTabletEntry};
     use crate::render::draw_cmd::{Object3d, Object3dKind, ShowcaseTilePlacement};
 
-    let (yaku_preview_sets, yaku_preview_effective_tiles, _yaku_preview_original_tiles, tablet_yaku, is_chicken_hand) =
-        if let Some(showcase) = cascade_showcase_ref {
-            let mut scored = cascade_scored_yaku
-                .map(|yaku| yaku.to_vec())
-                .unwrap_or_default();
-            YakuKind::sort_for_tablets(&mut scored);
-            (
-                showcase.sets.clone(),
-                showcase.tiles.clone(),
-                showcase.tiles.clone(),
-                scored,
-                false,
-            )
-        } else {
-            let cache = &scene.yaku_preview_cache;
-            (
-                cache.sets.clone(),
-                cache.effective_tiles.clone(),
-                cache.original_tiles.clone(),
-                cache.active_yaku.clone(),
-                cache.is_chicken_hand,
-            )
-        };
+    let (
+        yaku_preview_sets,
+        yaku_preview_effective_tiles,
+        _yaku_preview_original_tiles,
+        tablet_yaku,
+        is_chicken_hand,
+    ) = if let Some(showcase) = cascade_showcase_ref {
+        let mut scored = cascade_scored_yaku
+            .map(|yaku| yaku.to_vec())
+            .unwrap_or_default();
+        YakuKind::sort_for_tablets(&mut scored);
+        (
+            showcase.sets.clone(),
+            showcase.tiles.clone(),
+            showcase.tiles.clone(),
+            scored,
+            false,
+        )
+    } else {
+        let cache = &scene.yaku_preview_cache;
+        (
+            cache.sets.clone(),
+            cache.effective_tiles.clone(),
+            cache.original_tiles.clone(),
+            cache.active_yaku.clone(),
+            cache.is_chicken_hand,
+        )
+    };
 
     let mut structure_showcase: Vec<ShowcaseTilePlacement> = Vec::new();
 
@@ -1909,11 +1914,7 @@ pub(super) fn build_yaku_panel_and_tablets(
 }
 
 /// Inset play-mirror click target — matches focus rects and hover tooltip.
-fn play_button_hit_at_cursor(
-    focus_rects: &[(FocusTarget, [f32; 4])],
-    cx: f32,
-    cy: f32,
-) -> bool {
+fn play_button_hit_at_cursor(focus_rects: &[(FocusTarget, [f32; 4])], cx: f32, cy: f32) -> bool {
     focus_rects.iter().any(|(target, rect)| {
         matches!(target, FocusTarget::Button(GameplayButton::Play)) && rect_contains(*rect, cx, cy)
     })
