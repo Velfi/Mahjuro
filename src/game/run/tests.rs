@@ -1524,6 +1524,91 @@ mod cases {
     }
 
     #[test]
+    fn sixteen_identical_tiles_play_validity_matches_capacity_fitting_pick() {
+        use crate::core::hand::decomposition_canonical_key;
+        use crate::core::yaku::YakuKind;
+
+        let selected: Vec<Tile> = (0..16).map(|i| Tile::new(Suit::Pinzu, 9, 100 + i)).collect();
+        let mut run = test_run();
+        run.available_yaku = vec![
+            YakuKind::Toitoi,
+            YakuKind::Honroutou,
+            YakuKind::Chanta,
+            YakuKind::FullHand,
+            YakuKind::Chinitsu,
+            YakuKind::Junchan,
+        ];
+        run.hand = selected.clone();
+        run.selected = vec![true; 16];
+        run.plays_remaining = 1;
+
+        assert!(
+            run.is_selection_valid(),
+            "16 identical tiles should be playable on an empty structure"
+        );
+
+        let (sets, scoring) = run.try_validate_with_wildcards(&selected).expect("valid");
+        let best = run.pick_best_decomposition(sets, &scoring, &selected);
+        assert!(
+            run.selection_commit_capacity_ok(&best, scoring.len()),
+            "pick_best must choose a capacity-fitting split"
+        );
+
+        let mut pick_results = Vec::new();
+        let mut validity = Vec::new();
+        for _ in 0..32 {
+            let (sets, scoring) = run.try_validate_with_wildcards(&selected).expect("valid");
+            pick_results.push(run.pick_best_decomposition(sets, &scoring, &selected));
+            validity.push(run.is_selection_valid());
+        }
+        let first_key = decomposition_canonical_key(&selected, &pick_results[0]);
+        assert!(
+            pick_results.iter().all(|sets| {
+                decomposition_canonical_key(&selected, sets) == first_key
+            }),
+            "pick_best must not flicker across frames"
+        );
+        assert!(
+            validity.iter().all(|&v| v),
+            "play validity must stay enabled: {validity:?}"
+        );
+
+        // One tile already in structure: triplet-heavy splits no longer fit, but kongs still do.
+        run.structure_tiles = vec![Tile::new(Suit::Manzu, 1, 9_999)];
+        let (sets, scoring) = run.try_validate_with_wildcards(&selected).expect("valid");
+        let best = run.pick_best_decomposition(sets, &scoring, &selected);
+        assert!(
+            run.selection_commit_capacity_ok(&best, scoring.len()),
+            "pick_best must stay within structure capacity"
+        );
+        assert!(run.is_selection_valid());
+    }
+
+    #[test]
+    fn sixteen_identical_tiles_rejected_when_structure_cannot_fit_any_split() {
+        use crate::core::yaku::YakuKind;
+
+        let selected: Vec<Tile> = (0..16).map(|i| Tile::new(Suit::Pinzu, 9, 100 + i)).collect();
+        let mut run = test_run();
+        run.available_yaku = vec![YakuKind::Toitoi, YakuKind::Chinitsu];
+        run.structure_tiles = (0..12)
+            .map(|i| Tile::new(Suit::Manzu, 1, 10_000 + i))
+            .collect();
+        run.hand = selected.clone();
+        run.selected = vec![true; 16];
+        run.plays_remaining = 1;
+
+        assert!(
+            run.try_validate_with_wildcards(&selected).is_some(),
+            "melds still validate"
+        );
+        assert!(
+            !run.is_selection_valid(),
+            "no decomposition should fit 12 + 16 tiles in structure"
+        );
+    }
+
+    #[test]
     fn is_selection_valid_rejects_structure_capacity_overflow() {
         let mut run = test_run();
         run.structure_tiles = (0..12)
