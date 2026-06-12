@@ -28,9 +28,10 @@ OUT_PNG = ROOT / "assets/textures/boot_loading_msdf.png"
 OUT_JSON = ROOT / "assets/data/boot_loading_msdf.json"
 
 TEXT = "loading..."
-FONT_PX = 48
-PAD = 24
-SPREAD_PX = 8.0
+# 4× the original 48px bake — sharper on Retina when the boot plate downscales the atlas.
+FONT_PX = 192
+PAD = FONT_PX // 2
+SPREAD_PX = FONT_PX / 6.0
 
 
 def edt_outside(mask: list[list[bool]]) -> list[list[float]]:

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use glam::{Mat4, Vec3};
 
-use crate::core::tile_pack::{PACK_TILE_ID_BASE, TilePackKind};
+use crate::core::tile_pack::{PACK_TILE_ID_BASE, TilePackInstance, TilePackKind};
 use crate::persistence::TilePreset;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseRenderHints, ShowcaseTilePlacement,
@@ -65,7 +65,7 @@ impl TilePackPresenter {
         _run: &crate::game::run::RunState,
         pack_kind: TilePackKind,
     ) -> Self {
-        let tiles = pack_kind.generate_tiles(PACK_TILE_ID_BASE);
+        let tiles = TilePackInstance::new(pack_kind).tiles_at(PACK_TILE_ID_BASE);
         Self::new(PackCelebration::screenshot_reveal_settled(
             tiles,
             pack_kind.name(),

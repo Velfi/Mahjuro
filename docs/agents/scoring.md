@@ -55,12 +55,13 @@ There is **no** universal rule like "yaku = 2+ melds." Each yaku has its own req
 
 - **Yakuhai** — honor triplet/kong (can trigger on a single meld)
 - **Toitoi** — 2+ triplets/kongs, no sequences
-- **Tanyao** — mostly 2–8 tiles, no terminals/honors
+- **Tanyao** — all tiles 2–8, no terminals/honors (≥3 tiles, one meld)
 - **Full Hand** — 4 melds + 1 pair
 - **Chiitoitsu** — 7 pairs
-- **Honitsu / Chinitsu** — one-suit hands
-- **Chanta** — every meld has a terminal/honor (pair may be simple)
-- **Iipeikou / Ryanpeikou** — duplicate sequence(s) on a full hand
+- **Honitsu / Chinitsu** — one-suit hands (mutually exclusive: Chinitsu wins when both qualify)
+- **Junchan / Honroutou / Chanta** — terminal-family patterns (tiered exclusive: Junchan > Honroutou > Chanta; only the strictest match scores). Riichi-style: Junchan has no honors and needs a sequence; Chanta needs every group (including pair) to touch a terminal/honor, plus at least one honor, one simple, and one sequence
+- **Chanta** — every meld and pair has a terminal/honor; requires honor + simple + sequence
+- **Iipeikou / Ryanpeikou** — duplicate sequence(s); Iipeikou works on partial structure, Ryanpeikou needs a full hand
 - **Sanshoku Doujun / Sanshoku Doukou** — same sequence or same triplet rank in all three suits
 - **Pinfu** — four sequences + 2–8 number pair on a full hand
 - etc.
@@ -71,9 +72,10 @@ Sample base yaku payouts (level 1):
 
 | Yaku | +Mult | +Chips |
 |------|-------|--------|
-| Tanyao | 2.0 | 30 |
-| Toitoi | 3.0 | 42 |
-| Yakuhai | 3.0 | 40 |
+| Tanyao | 2.5 | 90 |
+| Toitoi | 2.0 | 70 |
+| Yakuhai | 2.0 | 75 |
+| Pinfu / Iipeikou | 5.0 | 105 |
 | Full Hand | 5.0 | 60 |
 | Chiitoitsu | 6.5 | 85 |
 | Kokushi | 10.0 | 130 |

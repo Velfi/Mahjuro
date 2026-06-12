@@ -214,7 +214,7 @@ impl Wall {
     /// minus permanently removed ids) without shuffling or wrapping in [`Wall`].
     pub fn build_composition_tiles(
         removed: &rustc_hash::FxHashSet<u32>,
-        packs: &[crate::core::tile_pack::TilePackKind],
+        packs: &[crate::core::tile_pack::TilePackInstance],
         enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
         transformed: &std::collections::BTreeMap<u32, Tile>,
         overflow: bool,
@@ -229,7 +229,7 @@ impl Wall {
         tiles.extend(build_joker_extras(joker_extras));
         for (i, pack) in packs.iter().enumerate() {
             let start_id = PACK_TILE_ID_BASE + (i as u32) * PACK_ID_STRIDE;
-            let mut pack_tiles = pack.generate_tiles(start_id);
+            let mut pack_tiles = pack.tiles_at(start_id);
             for t in &mut pack_tiles {
                 if let Some(&enh) = enhancements.get(&t.id) {
                     t.enhancement = Some(enh);
@@ -246,7 +246,7 @@ impl Wall {
 
     pub fn from_filtered_with_packs(
         removed: &rustc_hash::FxHashSet<u32>,
-        packs: &[crate::core::tile_pack::TilePackKind],
+        packs: &[crate::core::tile_pack::TilePackInstance],
         enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
         transformed: &std::collections::BTreeMap<u32, Tile>,
         overflow: bool,
@@ -265,7 +265,7 @@ impl Wall {
     /// Unshuffled wall matching the next round's composition — for shop preview UI.
     pub fn preview_composition(
         removed: &rustc_hash::FxHashSet<u32>,
-        packs: &[crate::core::tile_pack::TilePackKind],
+        packs: &[crate::core::tile_pack::TilePackInstance],
         enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
         transformed: &std::collections::BTreeMap<u32, Tile>,
         overflow: bool,

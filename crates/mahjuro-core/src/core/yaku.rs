@@ -98,8 +98,9 @@ pub enum YakuKind {
     Honitsu,
     /// Single number suit, no honors. Tied to the Rat zodiac.
     Chinitsu,
-    /// All tiles are terminals (1/9) or honors; every meld contains a terminal
-    /// or honor. Tied to the Goat zodiac (stacks with Honroutou when both apply).
+    /// Number-suit terminals only (no honors); every meld and the pair contain
+    /// a 1 or 9; at least one sequence. Tied to the Goat zodiac. Tiered
+    /// exclusive with Honroutou and Chanta.
     Junchan,
     /// Every tile is either a terminal (1 or 9) or an honor. Tied to the
     /// Tiger zodiac.
@@ -115,8 +116,8 @@ pub enum YakuKind {
     /// chips × 1 mult — legal, but worth very little. Tied to the Rooster
     /// zodiac.
     ChickenHand,
-    /// Every meld contains a terminal or honor; the pair may be 2–8. Tied to
-    /// the Phoenix zodiac.
+    /// Every meld and the pair contain a terminal or honor; at least one honor,
+    /// one simple (2–8), and one sequence. Tied to the Phoenix zodiac.
     Chanta,
     /// Two pairs of identical sequences in one number suit on a full hand.
     /// Tied to the Rabbit zodiac (with Iipeikou).
@@ -142,9 +143,9 @@ impl YakuKind {
 
     fn base_mult_bonus(self) -> f64 {
         match self {
-            YakuKind::Tanyao => 2.0,
+            YakuKind::Tanyao => 2.5,
             YakuKind::Yakuhai => 2.0,
-            YakuKind::Toitoi => 2.5,
+            YakuKind::Toitoi => 2.0,
             YakuKind::Chanta => 3.5,
             _ => yaku_def(self).mult_bonus,
         }
@@ -158,11 +159,11 @@ impl YakuKind {
 
     fn base_chip_bonus(self) -> i32 {
         match self {
-            YakuKind::Tanyao => 75,
+            YakuKind::Tanyao => 90,
             YakuKind::Yakuhai => 75,
-            YakuKind::Toitoi => 75,
-            YakuKind::Pinfu => 85,
-            YakuKind::Iipeikou => 85,
+            YakuKind::Toitoi => 70,
+            YakuKind::Pinfu => 105,
+            YakuKind::Iipeikou => 105,
             YakuKind::Chanta => 90,
             _ => yaku_def(self).chip_bonus,
         }
@@ -425,11 +426,10 @@ pub fn detect_yaku_with_wind(
     if is_kokushi_musou(sets, tiles) {
         found.push(YakuKind::KokushiMusou);
     }
-    if is_iipeikou(tiles, sets) {
-        found.push(YakuKind::Iipeikou);
-    }
     if is_ryanpeikou(tiles, sets) {
         found.push(YakuKind::Ryanpeikou);
+    } else if is_iipeikou(tiles, sets) {
+        found.push(YakuKind::Iipeikou);
     }
     if is_sanshoku_doujun(sets, tiles) {
         found.push(YakuKind::SanshokuDoujun);
@@ -445,14 +445,12 @@ pub fn detect_yaku_with_wind(
     } else if is_honitsu(composition) {
         found.push(YakuKind::Honitsu);
     }
-    if is_chanta(sets, tiles) && !is_kokushi_musou(sets, tiles) {
-        found.push(YakuKind::Chanta);
-    }
     if is_junchan(sets, composition) && !is_kokushi_musou(sets, tiles) {
         found.push(YakuKind::Junchan);
-    }
-    if is_honroutou(composition) && !is_kokushi_musou(sets, tiles) {
+    } else if is_honroutou(composition) && !is_kokushi_musou(sets, tiles) {
         found.push(YakuKind::Honroutou);
+    } else if is_chanta(sets, tiles) && !is_kokushi_musou(sets, tiles) {
+        found.push(YakuKind::Chanta);
     }
     if is_pinfu(tiles, sets) {
         found.push(YakuKind::Pinfu);
@@ -687,11 +685,11 @@ fn is_yakuhai_meld(
 }
 
 /// Tanyao (formerly `AllSimples`): every non-flower tile is a numbered suit
-/// with rank 2–8. Requires ≥ 5 non-flower tiles so a single tile or pair
-/// doesn't trivially qualify. Flowers are neutral — they don't break Tanyao.
+/// with rank 2–8. Requires ≥ 3 non-flower tiles (one meld) so simple
+/// structure can score yaku as early as honor triplets. Flowers are neutral.
 fn is_tanyao(tiles: &[Tile]) -> bool {
     let regular: Vec<&Tile> = tiles.iter().filter(|t| !t.is_flower()).collect();
-    regular.len() >= 5
+    regular.len() >= 3
         && regular
             .iter()
             .all(|t| t.is_number_tile() && t.rank >= 2 && t.rank <= 8)
@@ -725,13 +723,19 @@ fn is_chiitoitsu(sets: &[DetectedMeld]) -> bool {
     true
 }
 
-/// Chanta (半チャン): every non-pair meld contains a terminal or honor; pair may be 2–8.
+/// Chanta (混全帯幺九): every meld and the pair touch a terminal or honor; at
+/// least one honor, one simple (2–8), and one sequence (riichi-style).
 fn is_chanta(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
-    let melds: Vec<_> = sets.iter().filter(|s| s.kind != MeldKind::Pair).collect();
-    if melds.len() < 2 {
+    if sets.len() < 2 {
         return false;
     }
-    melds.iter().all(|s| meld_has_yaochu(s, tiles))
+    if !sets.iter().all(|s| meld_has_yaochu(s, tiles)) {
+        return false;
+    }
+    if !sets.iter().any(|s| s.kind == MeldKind::Sequence) {
+        return false;
+    }
+    composition_has_honor(tiles) && composition_has_simple_number(tiles)
 }
 
 /// Ryanpeikou: two different sequences each duplicated in one number suit.
@@ -827,12 +831,8 @@ fn is_pinfu(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
             .all(|t| t.is_number_tile() && t.rank >= 2 && t.rank <= 8)
 }
 
-/// Iipeikou: two identical sequences in the same suit on a complete winning hand
-/// (no open melds in Mahjuro — full-hand cash-in only).
+/// Iipeikou: two identical sequences in the same suit (partial structure ok).
 fn is_iipeikou(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
-    if !is_complete_winning_hand(tiles, sets) {
-        return false;
-    }
     let mut seq_keys: Vec<(Suit, u8)> = sets
         .iter()
         .filter(|s| s.kind == MeldKind::Sequence)
@@ -943,7 +943,7 @@ fn is_honitsu(tiles: &[Tile]) -> bool {
     has_honor && number_suit.is_some()
 }
 
-/// Terminal or honor present in a meld (yaochu for chanta/junchan meld checks).
+/// Terminal or honor present in a meld (yaochu for chanta meld checks).
 fn meld_has_yaochu(s: &DetectedMeld, tiles: &[Tile]) -> bool {
     s.tile_ids.iter().any(|id| {
         tiles.iter().find(|t| t.id == *id).is_some_and(|t| {
@@ -953,13 +953,55 @@ fn meld_has_yaochu(s: &DetectedMeld, tiles: &[Tile]) -> bool {
     })
 }
 
-/// Junchan (純全帯幺九): every tile is 1/9 or honor, and every meld contains a
-/// terminal or honor. Stacks with Honroutou on the same hand in real riichi.
+fn tile_is_number_terminal(t: &Tile) -> bool {
+    t.is_number_tile() && (t.rank == 1 || t.rank == 9)
+}
+
+fn meld_has_number_terminal(s: &DetectedMeld, tiles: &[Tile]) -> bool {
+    s.tile_ids.iter().any(|id| {
+        tiles
+            .iter()
+            .find(|t| t.id == *id)
+            .is_some_and(tile_is_number_terminal)
+    })
+}
+
+fn composition_has_honor(tiles: &[Tile]) -> bool {
+    tiles
+        .iter()
+        .filter(|t| !t.is_flower())
+        .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
+}
+
+fn composition_has_simple_number(tiles: &[Tile]) -> bool {
+    tiles
+        .iter()
+        .filter(|t| !t.is_flower())
+        .any(|t| t.is_number_tile() && (2..=8).contains(&t.rank))
+}
+
+fn composition_all_number_terminals(tiles: &[Tile]) -> bool {
+    let regular: Vec<&Tile> = tiles.iter().filter(|t| !t.is_flower()).collect();
+    !regular.is_empty() && regular.iter().all(|t| tile_is_number_terminal(t))
+}
+
+/// Junchan (純全帯幺九): no honors; every meld and the pair contain a number
+/// 1 or 9; at least one sequence; not all tiles are number terminals only
+/// (that shape scores Honroutou). Tiered exclusive with Honroutou and Chanta.
 fn is_junchan(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
-    if sets.len() < 2 || !is_honroutou(tiles) {
+    if sets.len() < 2 {
         return false;
     }
-    sets.iter().all(|s| meld_has_yaochu(s, tiles))
+    if composition_has_honor(tiles) {
+        return false;
+    }
+    if !sets.iter().all(|s| meld_has_number_terminal(s, tiles)) {
+        return false;
+    }
+    if !sets.iter().any(|s| s.kind == MeldKind::Sequence) {
+        return false;
+    }
+    !composition_all_number_terminals(tiles)
 }
 
 /// Honroutou: every non-flower tile is a terminal (1/9) or an honor (no 2-8
@@ -1402,6 +1444,27 @@ mod tests {
         ];
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Honroutou));
+        assert!(!yaku.contains(&YakuKind::Junchan));
+    }
+
+    #[test]
+    fn terminal_yaku_honroutou_without_junchan() {
+        // One meld in structure: Honroutou qualifies, Junchan needs ≥2 sets.
+        let tiles = vec![
+            t(Suit::Souzu, 1, 0),
+            t(Suit::Souzu, 1, 1),
+            t(Suit::Souzu, 1, 2),
+            t(Suit::Wind, 1, 3),
+            t(Suit::Wind, 1, 4),
+        ];
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: vec![0, 1, 2],
+        }];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Honroutou));
+        assert!(!yaku.contains(&YakuKind::Junchan));
+        assert!(!yaku.contains(&YakuKind::Chanta));
     }
 
     #[test]
@@ -1559,7 +1622,7 @@ mod tests {
     }
 
     #[test]
-    fn junchan_allows_honors_and_stacks_with_honroutou() {
+    fn honroutou_tiered_exclusive_over_junchan_when_honors_present() {
         let tiles = vec![
             t(Suit::Manzu, 1, 0),
             t(Suit::Manzu, 1, 1),
@@ -1600,9 +1663,132 @@ mod tests {
         ];
         assert!(is_full_hand(&tiles, &sets));
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
-        assert!(yaku.contains(&YakuKind::Junchan));
         assert!(yaku.contains(&YakuKind::Honroutou));
+        assert!(!yaku.contains(&YakuKind::Junchan));
+        assert!(!yaku.contains(&YakuKind::Chanta));
         assert!(yaku.contains(&YakuKind::FullHand));
+    }
+
+    #[test]
+    fn detect_junchan_riichi_no_honors_requires_sequence() {
+        let tiles = vec![
+            t(Suit::Manzu, 1, 0),
+            t(Suit::Manzu, 2, 1),
+            t(Suit::Manzu, 3, 2),
+            t(Suit::Manzu, 7, 3),
+            t(Suit::Manzu, 8, 4),
+            t(Suit::Manzu, 9, 5),
+            t(Suit::Souzu, 1, 6),
+            t(Suit::Souzu, 1, 7),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![6, 7],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Junchan));
+        assert!(!yaku.contains(&YakuKind::Honroutou));
+        assert!(!yaku.contains(&YakuKind::Chanta));
+    }
+
+    #[test]
+    fn terminal_yaku_tiered_exclusive_full_honor_hand() {
+        let tiles = vec![
+            t(Suit::Dragon, 1, 0),
+            t(Suit::Dragon, 1, 1),
+            t(Suit::Dragon, 1, 2),
+            t(Suit::Dragon, 2, 3),
+            t(Suit::Dragon, 2, 4),
+            t(Suit::Dragon, 2, 5),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![3, 4, 5],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Honroutou));
+        assert!(!yaku.contains(&YakuKind::Junchan));
+        assert!(!yaku.contains(&YakuKind::Chanta));
+    }
+
+    #[test]
+    fn terminal_yaku_chanta_rejects_simple_only_pair() {
+        let tiles = vec![
+            t(Suit::Manzu, 1, 0),
+            t(Suit::Manzu, 2, 1),
+            t(Suit::Manzu, 3, 2),
+            t(Suit::Souzu, 7, 3),
+            t(Suit::Souzu, 8, 4),
+            t(Suit::Souzu, 9, 5),
+            t(Suit::Pinzu, 5, 6),
+            t(Suit::Pinzu, 5, 7),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![6, 7],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(!yaku.contains(&YakuKind::Chanta));
+        assert!(!yaku.contains(&YakuKind::Junchan));
+        assert!(!yaku.contains(&YakuKind::Honroutou));
+    }
+
+    #[test]
+    fn terminal_yaku_chanta_requires_honor_and_terminal_pair() {
+        let tiles = vec![
+            t(Suit::Manzu, 1, 0),
+            t(Suit::Manzu, 2, 1),
+            t(Suit::Manzu, 3, 2),
+            t(Suit::Souzu, 7, 3),
+            t(Suit::Souzu, 8, 4),
+            t(Suit::Souzu, 9, 5),
+            t(Suit::Wind, 1, 6),
+            t(Suit::Wind, 1, 7),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![6, 7],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Chanta));
+        assert!(!yaku.contains(&YakuKind::Honroutou));
+        assert!(!yaku.contains(&YakuKind::Junchan));
     }
 
     #[test]
@@ -1706,7 +1892,7 @@ mod tests {
     }
 
     #[test]
-    fn iipeikou_requires_complete_winning_hand() {
+    fn detect_iipeikou_on_partial_structure() {
         let tiles = vec![
             t(Suit::Manzu, 2, 0),
             t(Suit::Manzu, 3, 1),
@@ -1726,7 +1912,23 @@ mod tests {
             },
         ];
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
-        assert!(!yaku.contains(&YakuKind::Iipeikou));
+        assert!(yaku.contains(&YakuKind::Iipeikou));
+        assert!(yaku.contains(&YakuKind::Tanyao));
+    }
+
+    #[test]
+    fn detect_tanyao_on_single_simple_meld() {
+        let tiles = vec![
+            t(Suit::Souzu, 2, 0),
+            t(Suit::Souzu, 3, 1),
+            t(Suit::Souzu, 4, 2),
+        ];
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Sequence,
+            tile_ids: vec![0, 1, 2],
+        }];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Tanyao));
     }
 
     #[test]
@@ -1773,8 +1975,8 @@ mod tests {
 
     #[test]
     fn mult_bonus_values() {
-        assert_eq!(YakuKind::Toitoi.mult_bonus(), 2.5);
-        assert_eq!(YakuKind::Tanyao.mult_bonus(), 2.0);
+        assert_eq!(YakuKind::Toitoi.mult_bonus(), 2.0);
+        assert_eq!(YakuKind::Tanyao.mult_bonus(), 2.5);
         assert_eq!(YakuKind::FullHand.mult_bonus(), 5.0);
         assert_eq!(YakuKind::Chinitsu.mult_bonus(), 5.5);
     }
@@ -1808,6 +2010,7 @@ mod tests {
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Chanta));
         assert!(!yaku.contains(&YakuKind::Junchan));
+        assert!(!yaku.contains(&YakuKind::Honroutou));
     }
 
     #[test]
@@ -1852,7 +2055,7 @@ mod tests {
         ];
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Ryanpeikou));
-        assert!(yaku.contains(&YakuKind::Iipeikou));
+        assert!(!yaku.contains(&YakuKind::Iipeikou));
         assert!(yaku.contains(&YakuKind::FullHand));
     }
 
@@ -2007,11 +2210,11 @@ mod tests {
 
     #[test]
     fn mult_bonus_at_levels_up() {
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(1), 2.5);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(2), 3.0);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 4.5);
-        assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 75);
-        assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 195);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(1), 2.0);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(2), 2.5);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 4.0);
+        assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 70);
+        assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 190);
     }
 
     #[test]
