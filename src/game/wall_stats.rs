@@ -755,6 +755,9 @@ mod tests {
         run.wall = Wall::from_unshuffled(build_wall());
         run.wall.draw();
         let drawn = run.wall.all_tiles()[0];
+        // The randomly dealt starting hand may already contain copies of
+        // `drawn`'s face; clear it so the in_hand count is deterministic.
+        run.hand_mut().clear();
         run.hand_mut().push(drawn);
         run.chronicle
             .note_discarded_tile(&Tile::new(Suit::Wind, 1, 0));
