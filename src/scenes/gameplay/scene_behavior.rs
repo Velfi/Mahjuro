@@ -452,7 +452,9 @@ impl SceneBehavior for GameplayScene {
         //      controller focus.
         //
         //   3. PAUSE OVERLAY (`pause_quads` + `pause_text`) — built only
-        //      when the pause menu is open; sits above focus rings.
+        //      when the pause menu is open; sits above focus rings. Quads
+        //      use the post-tonemap overlay path so HDR room bloom/emissives
+        //      cannot paint back over the pause scrim.
         //
         //   4. ONBOARDING OVERLAY (`onboarding_hints`) — post-tonemap
         //      `overlay_quads` + text; pushed last so lessons / finale
@@ -2041,7 +2043,7 @@ impl SceneBehavior for GameplayScene {
         // PAUSE OVERLAY: dim panel + buttons + text built earlier into
         // its own buffers. Sits above the hover layer so the pause menu
         // always visually wins.
-        frame.quads(pause_quads);
+        frame.overlay_quads(pause_quads);
         frame.texts(pause_text);
 
         // Projected rects for the discard river + play mirror: hit-test order

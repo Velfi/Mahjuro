@@ -840,10 +840,13 @@ impl SceneBehavior for HallwayScene {
         }
 
         // Pause menu overlay. Drop scene buttons while paused so the
-        // pause menu's own buttons are the only clickable surfaces.
+        // pause menu's own buttons are the only clickable surfaces. Draw
+        // pause chrome post-tonemap so room bloom cannot bleed above it.
         if self.pause_menu.paused {
             buttons.clear();
         }
+        let mut pause_quads: Vec<GpuInstance> = Vec::new();
+        let mut pause_text: Vec<TextLabel> = Vec::new();
         self.pause_menu.draw(
             crate::ui::layout::ViewportCtx {
                 window_w: w,
@@ -851,8 +854,8 @@ impl SceneBehavior for HallwayScene {
             },
             scale,
             crate::scenes::options::options_scroll_fade_backdrop(true),
-            &mut quads,
-            &mut texts,
+            &mut pause_quads,
+            &mut pause_text,
             &mut buttons,
         );
         if self.pause_menu.paused {
@@ -865,6 +868,8 @@ impl SceneBehavior for HallwayScene {
         if !icon_cmds.is_empty() {
             frame.image_quads(icon_cmds);
         }
+        frame.overlay_quads(pause_quads);
+        frame.texts(pause_text);
 
         frame.buttons = buttons;
         if !hide_scene_hud {

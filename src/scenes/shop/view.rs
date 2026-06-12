@@ -988,7 +988,8 @@ pub(crate) fn render_shop_frame(
     }
 
     // Pointer targets in stack order: specific zones first (main loop uses first hit).
-    // Pause overlay quads/texts are appended last so they composite above shelf geometry.
+    // Pause overlay chrome uses post-tonemap quads so HDR room bloom/emissives
+    // cannot paint back over the pause scrim.
     if shop.pause_menu.paused {
         let _g = crate::render::cpu_profiler::scope("draw_frame.shop_pause_menu");
         let mut pause_quads: Vec<GpuInstance> = Vec::new();
@@ -1005,7 +1006,7 @@ pub(crate) fn render_shop_frame(
             &mut pause_text,
             &mut pause_buttons,
         );
-        frame.quads(pause_quads);
+        frame.overlay_quads(pause_quads);
         frame.texts(pause_text);
         pause_buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
         frame.buttons = pause_buttons;
