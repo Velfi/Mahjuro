@@ -715,7 +715,9 @@ impl RunState {
                 bus.push(GameEvent::OrdealDefeated(bk));
             }
         } else if let Some(reason) = self.round_failure_reason() {
-            if self.try_second_wind_salvage(reason, bus) {
+            if self.try_rescued_by_probes_salvage(reason, bus) {
+                // round continues with +1 play
+            } else if self.try_second_wind_salvage(reason, bus) {
                 self.round_end_queued = true;
             } else if !self.try_talisman_salvage(reason, bus) {
                 bus.push(GameEvent::GameOver { reason });
@@ -741,6 +743,22 @@ impl RunState {
         if self.round_failure_reason().is_none() {
             bus.push(GameEvent::ScoreUpdated);
         }
+        true
+    }
+
+    /// When a round would end for lack of plays, Rescued By Probes is destroyed and
+    /// the player gains one extra play so the blind can continue.
+    fn try_rescued_by_probes_salvage(
+        &mut self,
+        reason: GameOverReason,
+        bus: &mut EventBus,
+    ) -> bool {
+        if reason != GameOverReason::OutOfPlays || !self.relics.has(RelicId::RescuedByProbes) {
+            return false;
+        }
+        let _ = self.destroy_relic_with_activation_fx(RelicId::RescuedByProbes, Some(bus));
+        self.plays_remaining = self.plays_remaining.saturating_add(1);
+        bus.push(GameEvent::ScoreUpdated);
         true
     }
 

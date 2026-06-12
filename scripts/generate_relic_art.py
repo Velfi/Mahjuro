@@ -962,6 +962,17 @@ RELICS = [
         "Orange flame, charcoal black embers, warm wood browns, gold highlights.",
     ),
     (
+        "rescued_by_probes",
+        "Rescued By Probes",
+        "A soft-enamel pin of a desert survey probe mounted on a thumper percussion "
+        "stake — chunky bronze hammer housing at the base mid-strike, concentric "
+        "sand-ripple rings in recessed amber enamel radiating from the impact point, "
+        "slim probe body rising above with a dish antenna, sensor lens, and small "
+        "stabilizer fins. Vertical die-cut silhouette; the probe reads as answering "
+        "the thumper's call. Crisp pin, everything sharp and in focus.",
+        "Weathered bronze and gunmetal, burnt-sienna sand ripples, dusty amber sensor lens, copper strike sparks.",
+    ),
+    (
         "river_runner",
         "River Runner",
         "A swift river current curling around a sequence of tiles, showing "

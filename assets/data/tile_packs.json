@@ -4,41 +4,115 @@
     "name": "Honors Pack",
     "description": "+4 honors tiles to the wall",
     "shop_price": 6,
-    "texture_file": "pack_honors.png"
+    "texture_file": "pack_honors.png",
+    "roll": {
+      "count": 4,
+      "pool": [
+        { "suit": "Wind", "rank": 1 },
+        { "suit": "Wind", "rank": 2 },
+        { "suit": "Wind", "rank": 3 },
+        { "suit": "Wind", "rank": 4 },
+        { "suit": "Dragon", "rank": 1 },
+        { "suit": "Dragon", "rank": 2 },
+        { "suit": "Dragon", "rank": 3 }
+      ]
+    }
   },
   {
     "id": "terminals",
     "name": "Terminals Pack",
     "description": "+6 terminal tiles to the wall",
     "shop_price": 6,
-    "texture_file": "pack_terminals.png"
+    "texture_file": "pack_terminals.png",
+    "roll": {
+      "count": 6,
+      "pool": [
+        { "suit": "Manzu", "rank": 1 },
+        { "suit": "Manzu", "rank": 9 },
+        { "suit": "Souzu", "rank": 1 },
+        { "suit": "Souzu", "rank": 9 },
+        { "suit": "Pinzu", "rank": 1 },
+        { "suit": "Pinzu", "rank": 9 }
+      ]
+    }
   },
   {
     "id": "flowers",
     "name": "Flowers Pack",
     "description": "+4 flower wildcards to the wall",
     "shop_price": 5,
-    "texture_file": "pack_flowers.png"
+    "texture_file": "pack_flowers.png",
+    "roll": {
+      "count": 4,
+      "pool": [
+        { "suit": "Flower", "rank": 1 },
+        { "suit": "Flower", "rank": 2 },
+        { "suit": "Flower", "rank": 3 },
+        { "suit": "Flower", "rank": 4 }
+      ]
+    }
   },
   {
     "id": "souzu",
     "name": "Souzu Pack",
     "description": "+8 souzu tiles to the wall",
     "shop_price": 7,
-    "texture_file": "pack_souzu.png"
+    "texture_file": "pack_souzu.png",
+    "roll": {
+      "count": 8,
+      "pool": [
+        { "suit": "Souzu", "rank": 1 },
+        { "suit": "Souzu", "rank": 2 },
+        { "suit": "Souzu", "rank": 3 },
+        { "suit": "Souzu", "rank": 4 },
+        { "suit": "Souzu", "rank": 5 },
+        { "suit": "Souzu", "rank": 6 },
+        { "suit": "Souzu", "rank": 7 },
+        { "suit": "Souzu", "rank": 8 },
+        { "suit": "Souzu", "rank": 9 }
+      ]
+    }
   },
   {
     "id": "pinzu",
     "name": "Pinzu Pack",
     "description": "+8 pinzu tiles to the wall",
     "shop_price": 7,
-    "texture_file": "pack_pinzu.png"
+    "texture_file": "pack_pinzu.png",
+    "roll": {
+      "count": 8,
+      "pool": [
+        { "suit": "Pinzu", "rank": 1 },
+        { "suit": "Pinzu", "rank": 2 },
+        { "suit": "Pinzu", "rank": 3 },
+        { "suit": "Pinzu", "rank": 4 },
+        { "suit": "Pinzu", "rank": 5 },
+        { "suit": "Pinzu", "rank": 6 },
+        { "suit": "Pinzu", "rank": 7 },
+        { "suit": "Pinzu", "rank": 8 },
+        { "suit": "Pinzu", "rank": 9 }
+      ]
+    }
   },
   {
     "id": "manzu",
     "name": "Manzu Pack",
     "description": "+8 manzu tiles to the wall",
     "shop_price": 7,
-    "texture_file": "pack_manzu.png"
+    "texture_file": "pack_manzu.png",
+    "roll": {
+      "count": 8,
+      "pool": [
+        { "suit": "Manzu", "rank": 1 },
+        { "suit": "Manzu", "rank": 2 },
+        { "suit": "Manzu", "rank": 3 },
+        { "suit": "Manzu", "rank": 4 },
+        { "suit": "Manzu", "rank": 5 },
+        { "suit": "Manzu", "rank": 6 },
+        { "suit": "Manzu", "rank": 7 },
+        { "suit": "Manzu", "rank": 8 },
+        { "suit": "Manzu", "rank": 9 }
+      ]
+    }
   }
 ]

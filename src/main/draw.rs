@@ -1001,7 +1001,7 @@ pub fn build_level_up_modal(
             pages.push(UnlockPage {
                 category: "New Relic".into(),
                 name: def.name.into(),
-                description: def.description.into(),
+                description: rid.description(),
                 relic_id: Some(*rid),
                 accent_color: accent,
             });

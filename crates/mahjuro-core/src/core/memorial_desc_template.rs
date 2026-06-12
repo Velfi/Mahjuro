@@ -1,6 +1,6 @@
 //! `{{token}}` placeholders inside `assets/data/memorial_talismans.json` descriptions.
 //!
-//! Expanded at display time via [`memorial_description_live`] so tooltips show
+//! Expanded at display time via [`MemorialTalismanKind::description`] so tooltips show
 //! values from the frozen defeat journal (blinds skipped, discards, favored yaku, …).
 //! Unknown tokens stay literal so typos are visible during development.
 
@@ -94,14 +94,6 @@ pub fn expand_memorial_description_templates(
     }
     out.push_str(rest);
     out
-}
-
-/// Live tooltip / inspect copy for a memorial talisman.
-pub fn memorial_description_live(
-    kind: MemorialTalismanKind,
-    snapshot: Option<&MemorialJournalSnapshot>,
-) -> String {
-    expand_memorial_description_templates(kind, kind.description(), snapshot)
 }
 
 #[cfg(test)]

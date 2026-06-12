@@ -73,16 +73,20 @@ pub fn mip_chain_count(mut w: u32, mut h: u32) -> u32 {
 }
 
 /// Pad RGBA to BC7 block dimensions (transparent pixels on the right/bottom).
+#[cfg(feature = "relic_bc7_bake")]
 fn pad_rgba_to_bc7_blocks(rgba: &[u8], width: u32, height: u32) -> (Vec<u8>, u32, u32) {
-    use crate::relic_gpu_residency::{align_bc7_dim, bc7_block_aligned};
+    use crate::relic_gpu_residency::{align_bc7_base_dim, bc7_upload_chain_valid};
 
-    let aligned_w = align_bc7_dim(width.max(1));
-    let aligned_h = align_bc7_dim(height.max(1));
-    if bc7_block_aligned(width, height) {
+    let aligned_w = align_bc7_base_dim(width);
+    let aligned_h = align_bc7_base_dim(height);
+    if aligned_w == width
+        && aligned_h == height
+        && bc7_upload_chain_valid(width, height, mip_chain_count(width, height))
+    {
         return (rgba.to_vec(), width, height);
     }
     let mut out = vec![0u8; (aligned_w as usize) * (aligned_h as usize) * 4];
-    for y in 0..height {
+    for y in 0..height.min(aligned_h) {
         let src = (y * width * 4) as usize;
         let dst = (y * aligned_w * 4) as usize;
         let row = (width * 4) as usize;

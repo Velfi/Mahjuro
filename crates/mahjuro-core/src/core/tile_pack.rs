@@ -1,59 +1,96 @@
 //! Tile packs — purchasable booster packs that permanently add extra tiles
 //! to the wall for the rest of the run.
 //!
-//! Shop copy, prices, and box-art filenames live in `assets/data/tile_packs.json`.
-//! Tile generation (`roll_faces` / [`TilePackInstance::tiles_at`]) and foil /
-//! seal colors (see [`crate::pack_palette`]) stay in Rust.
+//! Shop copy, prices, box-art filenames, and tile roll rules live in
+//! `assets/data/tile_packs.json`. Foil / seal colors (see [`crate::pack_palette`])
+//! stay in Rust for rendering parity with cover-art bakes.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use rand::RngExt;
-use rand::prelude::{IndexedRandom, SliceRandom};
+use rand::prelude::IndexedRandom;
 use serde::{Deserialize, Serialize};
 
-use super::tile::{Suit, Tile, TileEnhancement};
+use super::tile::{Suit, Tile, TileEnhancement, TileFace};
 use crate::core::json_asset::load_json_asset;
 
+/// Draw `count` tiles independently from `pool` (with replacement).
+#[derive(Clone, Debug, Deserialize)]
+struct TilePackRollDef {
+    count: u32,
+    pool: Vec<TileFace>,
+}
+
+impl TilePackRollDef {
+    fn tile_count(&self) -> usize {
+        self.count as usize
+    }
+
+    fn roll_faces(&self) -> Vec<(Suit, u8)> {
+        assert!(
+            !self.pool.is_empty(),
+            "tile pack roll requires a non-empty pool"
+        );
+        let mut rng = rand::rng();
+        (0..self.count)
+            .map(|_| {
+                let face = self.pool.choose(&mut rng).expect("non-empty pool");
+                (face.suit, face.rank)
+            })
+            .collect()
+    }
+}
+
 #[derive(Deserialize)]
-struct TilePackPresentationRaw {
+struct TilePackDefRaw {
     id: TilePackKind,
     name: String,
     description: String,
     shop_price: u32,
     texture_file: String,
+    roll: TilePackRollDef,
 }
 
-struct TilePackPresentation {
+struct TilePackDef {
     name: &'static str,
     description: &'static str,
     shop_price: u32,
     texture_file: &'static str,
+    roll: TilePackRollDef,
 }
 
-fn tile_pack_presentations() -> &'static HashMap<TilePackKind, TilePackPresentation> {
-    static MAP: OnceLock<HashMap<TilePackKind, TilePackPresentation>> = OnceLock::new();
-    MAP.get_or_init(|| {
+struct TilePackCatalog {
+    order: Vec<TilePackKind>,
+    by_kind: HashMap<TilePackKind, TilePackDef>,
+}
+
+fn tile_pack_catalog() -> &'static TilePackCatalog {
+    static CATALOG: OnceLock<TilePackCatalog> = OnceLock::new();
+    CATALOG.get_or_init(|| {
         const PATH: &str = "data/tile_packs.json";
-        let raw: Vec<TilePackPresentationRaw> = load_json_asset(PATH, "tile pack data");
-        raw.into_iter()
-            .map(|r| {
-                (
-                    r.id,
-                    TilePackPresentation {
-                        name: Box::leak(r.name.into_boxed_str()),
-                        description: Box::leak(r.description.into_boxed_str()),
-                        shop_price: r.shop_price,
-                        texture_file: Box::leak(r.texture_file.into_boxed_str()),
-                    },
-                )
-            })
-            .collect()
+        let raw: Vec<TilePackDefRaw> = load_json_asset(PATH, "tile pack data");
+        let mut order = Vec::with_capacity(raw.len());
+        let mut by_kind = HashMap::with_capacity(raw.len());
+        for entry in raw {
+            order.push(entry.id);
+            by_kind.insert(
+                entry.id,
+                TilePackDef {
+                    name: Box::leak(entry.name.into_boxed_str()),
+                    description: Box::leak(entry.description.into_boxed_str()),
+                    shop_price: entry.shop_price,
+                    texture_file: Box::leak(entry.texture_file.into_boxed_str()),
+                    roll: entry.roll,
+                },
+            );
+        }
+        TilePackCatalog { order, by_kind }
     })
 }
 
-fn tile_pack_presentation(kind: TilePackKind) -> &'static TilePackPresentation {
-    tile_pack_presentations()
+fn tile_pack_def(kind: TilePackKind) -> &'static TilePackDef {
+    tile_pack_catalog()
+        .by_kind
         .get(&kind)
         .unwrap_or_else(|| panic!("tile pack data missing for {kind:?}"))
 }
@@ -116,22 +153,19 @@ fn faces_to_tiles(faces: &[(Suit, u8)], start_id: u32) -> Vec<Tile> {
 
 impl TilePackKind {
     pub fn all() -> &'static [Self] {
-        &[
-            Self::Honors,
-            Self::Terminals,
-            Self::Flowers,
-            Self::Souzu,
-            Self::Pinzu,
-            Self::Manzu,
-        ]
+        &tile_pack_catalog().order
     }
 
     pub fn name(self) -> &'static str {
-        tile_pack_presentation(self).name
+        tile_pack_def(self).name
     }
 
     pub fn description(self) -> &'static str {
-        tile_pack_presentation(self).description
+        tile_pack_def(self).description
+    }
+
+    pub fn tile_count(self) -> usize {
+        tile_pack_def(self).roll.tile_count()
     }
 
     /// Plastic sleeve tint on pack edges — multiplied under the cover
@@ -145,7 +179,7 @@ impl TilePackKind {
     /// Must match the slug baked into [`crate::pack_palette`] and
     /// the files under `assets/textures/tile_packs/`.
     pub fn asset_filename(self) -> &'static str {
-        tile_pack_presentation(self).texture_file
+        tile_pack_def(self).texture_file
     }
 
     /// Wax-seal color for the merchant-envelope detail centered on the pack
@@ -159,52 +193,12 @@ impl TilePackKind {
     }
 
     pub fn shop_price(self) -> u32 {
-        tile_pack_presentation(self).shop_price
+        tile_pack_def(self).shop_price
     }
 
     /// Roll a random tile composition for this pack kind.
     pub fn roll_faces(self) -> Vec<(Suit, u8)> {
-        let mut rng = rand::rng();
-
-        match self {
-            Self::Honors => {
-                const HONORS: [(Suit, u8); 7] = [
-                    (Suit::Wind, 1),
-                    (Suit::Wind, 2),
-                    (Suit::Wind, 3),
-                    (Suit::Wind, 4),
-                    (Suit::Dragon, 1),
-                    (Suit::Dragon, 2),
-                    (Suit::Dragon, 3),
-                ];
-                (0..4)
-                    .map(|_| *HONORS.choose(&mut rng).expect("honor pool"))
-                    .collect()
-            }
-            Self::Terminals => {
-                let suits = [Suit::Manzu, Suit::Souzu, Suit::Pinzu];
-                let mut faces = Vec::with_capacity(6);
-                for &terminal_rank in &[1u8, 9] {
-                    for _ in 0..3 {
-                        let suit = suits[rng.random_range(0..3)];
-                        faces.push((suit, terminal_rank));
-                    }
-                }
-                faces
-            }
-            Self::Flowers => (1..=4).map(|rank| (Suit::Flower, rank)).collect(),
-            Self::Souzu | Self::Pinzu | Self::Manzu => {
-                let suit = match self {
-                    Self::Souzu => Suit::Souzu,
-                    Self::Pinzu => Suit::Pinzu,
-                    Self::Manzu => Suit::Manzu,
-                    _ => unreachable!(),
-                };
-                let mut ranks: Vec<u8> = (1..=9).collect();
-                ranks.shuffle(&mut rng);
-                ranks.into_iter().take(8).map(|rank| (suit, rank)).collect()
-            }
-        }
+        tile_pack_def(self).roll.roll_faces()
     }
 
     /// The enhancement that should be pre-stamped on this pack's tiles
@@ -229,15 +223,16 @@ mod tests {
             TilePackKind::Pinzu,
             TilePackKind::Manzu,
         ];
-        let map = tile_pack_presentations();
+        let catalog = tile_pack_catalog();
         assert_eq!(
-            map.len(),
+            catalog.by_kind.len(),
             ALL.len(),
             "tile_packs.json entry count does not match TilePackKind variant count"
         );
         for &k in ALL {
-            let _ = tile_pack_presentation(k);
+            let _ = tile_pack_def(k);
         }
+        assert_eq!(catalog.order.len(), ALL.len());
     }
 
     #[test]
@@ -253,16 +248,25 @@ mod tests {
     }
 
     #[test]
-    fn roll_faces_produces_expected_counts() {
+    fn roll_faces_produces_configured_counts() {
         for &kind in TilePackKind::all() {
             let faces = kind.roll_faces();
-            let expected = match kind {
-                TilePackKind::Honors => 4,
-                TilePackKind::Terminals => 6,
-                TilePackKind::Flowers => 4,
-                TilePackKind::Souzu | TilePackKind::Pinzu | TilePackKind::Manzu => 8,
-            };
-            assert_eq!(faces.len(), expected, "{kind:?}");
+            assert_eq!(faces.len(), kind.tile_count(), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn roll_faces_only_draw_from_pool() {
+        let pool: std::collections::HashSet<(Suit, u8)> = tile_pack_def(TilePackKind::Terminals)
+            .roll
+            .pool
+            .iter()
+            .map(|f| (f.suit, f.rank))
+            .collect();
+        for _ in 0..32 {
+            for face in TilePackKind::Terminals.roll_faces() {
+                assert!(pool.contains(&face), "rolled {face:?} not in pool");
+            }
         }
     }
 

@@ -15,7 +15,7 @@ use super::{
 };
 use crate::core::consumable::Consumable;
 use crate::core::relic::{
-    Rarity, RelicId, all_relic_defs, relic_description_live, relic_sell_price_live,
+    Rarity, RelicId, all_relic_defs, relic_sell_price_live,
 };
 use crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
 use crate::game::engine::{GameEngine, ShopReadModel, consumable_sell_price_for_mode};
@@ -1280,8 +1280,7 @@ fn hover_tooltip_content(
             } else {
                 color::RUBY
             };
-            let desc = relic_description_live(
-                item.relic,
+            let desc = item.relic.description_live(
                 &shop.relic_counters,
                 shop.yen,
                 None,
@@ -1297,8 +1296,7 @@ fn hover_tooltip_content(
             let name = def
                 .map(|d| d.name.to_string())
                 .unwrap_or_else(|| "Relic".into());
-            let desc = relic_description_live(
-                rid,
+            let desc = rid.description_live(
                 &shop.relic_counters,
                 shop.yen,
                 Some((&shop.relic_state, oi)),

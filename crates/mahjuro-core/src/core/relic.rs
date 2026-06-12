@@ -93,6 +93,7 @@ pub enum RelicId {
     PlainDealing,
     QuickDraw,
     Rakuware,
+    RescuedByProbes,
     RiverRunner,
     #[serde(rename = "xxxl_egg")]
     XxxlEgg,
@@ -227,6 +228,7 @@ impl RelicId {
             RelicId::XxxlEgg => "xxxl_egg.png",
             RelicId::TeaCeremony => "tea_ceremony.png",
             RelicId::Rakuware => "rakuware.png",
+            RelicId::RescuedByProbes => "rescued_by_probes.png",
             RelicId::GhostHand => "ghost_hand.png",
             RelicId::Humility => "humility.png",
             RelicId::Obsession => "obsession.png",
@@ -350,7 +352,7 @@ pub fn flavor_spans_cache_key(spans: &[RelicFlavorSpan]) -> String {
 pub struct RelicDef {
     pub id: RelicId,
     pub name: &'static str,
-    pub description: &'static str,
+    description_template: &'static str,
     pub rarity: Rarity,
     /// Optional flavor lines for inspect UI only; empty when absent in data.
     pub flavor: &'static [RelicFlavorSpan],
@@ -425,6 +427,74 @@ impl RelicId {
     pub fn render_mask_path(self) -> String {
         let stem = self.asset_filename().trim_end_matches(".png");
         format!("textures/relics/{}_mask.png", stem)
+    }
+
+    fn description_template(self) -> &'static str {
+        all_relic_defs()
+            .iter()
+            .find(|d| d.id == self)
+            .map(|d| d.description_template)
+            .unwrap_or("")
+    }
+
+    /// Tooltip copy with design-time defaults (archive catalog, unlock celebrations).
+    pub fn description(self) -> String {
+        self.description_live(&std::collections::BTreeMap::new(), 0, None, None, None)
+    }
+
+    /// Live tooltip with run counters and optional inventory focus.
+    ///
+    /// When `inventory_focus` is `Some((relics, slot_index))`, Mirror Tile and
+    /// Shadow Hand append inventory help after the expanded template.
+    ///
+    /// Live counter tokens are only filled from run state when `inventory_focus`
+    /// is `Some` (gameplay / shop). Pass `None` for design-time defaults.
+    pub fn description_live(
+        self,
+        counters: &std::collections::BTreeMap<RelicId, i32>,
+        gold: i32,
+        inventory_focus: Option<(&RelicState, usize)>,
+        ghost_hand_chips_preview: Option<i32>,
+        wing: Option<u32>,
+    ) -> String {
+        use crate::core::relic_desc_template::{RelicDescContext, expand_relic_description_templates};
+
+        let base = self.description_template();
+        let (relics, slot) = match inventory_focus {
+            Some((relics, slot)) => (Some(relics), Some(slot)),
+            None => (None, None),
+        };
+        let ctx = RelicDescContext {
+            id: self,
+            counters,
+            gold,
+            relics,
+            slot,
+            ghost_hand_chips_preview,
+            wing,
+            live: inventory_focus.is_some(),
+        };
+        let mut s = expand_relic_description_templates(base, &ctx);
+        if inventory_focus.is_some() {
+            if self == RelicId::MirrorTile {
+                if let Some((relics, slot)) = inventory_focus {
+                    let extra = format_mirror_tile_inventory_help(relics, slot);
+                    if !extra.is_empty() {
+                        s.push_str("\n\n");
+                        s.push_str(&extra);
+                    }
+                }
+            } else if self == RelicId::ShadowHand {
+                if let Some((relics, slot)) = inventory_focus {
+                    let extra = format_shadow_hand_inventory_help(relics, slot);
+                    if !extra.is_empty() {
+                        s.push_str("\n\n");
+                        s.push_str(&extra);
+                    }
+                }
+            }
+        }
+        s
     }
 }
 
@@ -525,66 +595,6 @@ pub fn relic_sell_price_live(
     sell
 }
 
-/// Return a live description for relics whose counters change their tooltip.
-///
-/// When `inventory_focus` is `Some((relics, slot_index))`, Mirror Tile and
-/// Shadow Hand append inventory help after the expanded template.
-///
-/// Live counter tokens in `assets/data/relics.json` are only filled from run
-/// state when `inventory_focus` is `Some` (gameplay / shop). Archive catalog
-/// passes `None` and gets design-time defaults so entries don't leak run state.
-pub fn relic_description_live(
-    id: RelicId,
-    counters: &std::collections::BTreeMap<RelicId, i32>,
-    gold: i32,
-    inventory_focus: Option<(&RelicState, usize)>,
-    ghost_hand_chips_preview: Option<i32>,
-    wing: Option<u32>,
-) -> String {
-    use crate::core::relic_desc_template::{RelicDescContext, expand_relic_description_templates};
-
-    let base = all_relic_defs()
-        .iter()
-        .find(|d| d.id == id)
-        .map(|d| d.description)
-        .unwrap_or("");
-    let (relics, slot) = match inventory_focus {
-        Some((relics, slot)) => (Some(relics), Some(slot)),
-        None => (None, None),
-    };
-    let ctx = RelicDescContext {
-        id,
-        counters,
-        gold,
-        relics,
-        slot,
-        ghost_hand_chips_preview,
-        wing,
-        live: inventory_focus.is_some(),
-    };
-    let mut s = expand_relic_description_templates(base, &ctx);
-    if inventory_focus.is_some() {
-        if id == RelicId::MirrorTile {
-            if let Some((relics, slot)) = inventory_focus {
-                let extra = format_mirror_tile_inventory_help(relics, slot);
-                if !extra.is_empty() {
-                    s.push_str("\n\n");
-                    s.push_str(&extra);
-                }
-            }
-        } else if id == RelicId::ShadowHand {
-            if let Some((relics, slot)) = inventory_focus {
-                let extra = format_shadow_hand_inventory_help(relics, slot);
-                if !extra.is_empty() {
-                    s.push_str("\n\n");
-                    s.push_str(&extra);
-                }
-            }
-        }
-    }
-    s
-}
-
 pub fn all_relic_defs() -> &'static [RelicDef] {
     static DEFS: OnceLock<Vec<RelicDef>> = OnceLock::new();
     DEFS.get_or_init(load_relic_defs).as_slice()
@@ -617,7 +627,7 @@ fn load_relic_defs() -> Vec<RelicDef> {
             RelicDef {
                 id: r.id,
                 name: Box::leak(r.name.into_boxed_str()),
-                description: Box::leak(r.description.into_boxed_str()),
+                description_template: Box::leak(r.description.into_boxed_str()),
                 rarity: r.rarity,
                 flavor,
             }
@@ -854,6 +864,7 @@ fn relic_scoring_copy_dup_is_incompatible(target: RelicId) -> bool {
             | RelicId::MerchantsEye
             | RelicId::IGotAGuy
             | RelicId::SecondWind
+            | RelicId::RescuedByProbes
             | RelicId::BigHands
             | RelicId::TinyHands
             | RelicId::BrocadePouch
@@ -1174,6 +1185,7 @@ mod tests {
                     | RelicId::XxxlEgg
                     | RelicId::TeaCeremony
                     | RelicId::Rakuware
+                    | RelicId::RescuedByProbes
                     | RelicId::GhostHand
                     | RelicId::Humility
                     | RelicId::Obsession
@@ -1287,6 +1299,7 @@ mod tests {
                 RelicId::XxxlEgg,
                 RelicId::TeaCeremony,
                 RelicId::Rakuware,
+                RelicId::RescuedByProbes,
                 RelicId::GhostHand,
                 RelicId::Humility,
                 RelicId::Obsession,
