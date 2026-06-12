@@ -670,8 +670,10 @@ impl WgpuRenderer {
                             let want_tex = if *silhouette {
                                 None
                             } else if self.relic_textures.contains_key(relic_id) {
+                                self.touch_relic_gpu(*relic_id);
                                 Some(*relic_id)
                             } else {
+                                self.request_relic_gpu(*relic_id);
                                 None
                             };
                             if self.relic_slot_texture[slot_i] != want_tex {

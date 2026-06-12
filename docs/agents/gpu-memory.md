@@ -6,11 +6,11 @@ best-effort mode and are not part of the supported matrix.
 
 ## Presets
 
-| Options → Graphics | Shadows | Internal resolution | Room GPU cap | Decal atlas cache |
-| --- | --- | --- | --- | --- |
-| **Low memory** | Off | 100% | 2 rooms | 1 tileset |
-| **Performance** | Off | 100% | 6 | 4 |
-| **Visuals** | High | 100% | 6 | 4 |
+| Options → Graphics | Shadows | Internal resolution | Room GPU cap | Showcase decal GPU | Relic GPU | 2D atlas CPU |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Low memory** | Off | 100% | 2 rooms | 1 tileset | 24 LRU on-demand | 1 atlas, decode ≤4096 px |
+| **Performance** | Off | 100% | 6 | 4 | eager batch (BC7 RLC2) | 2 atlases |
+| **Visuals** | High | 100% | 6 | 4 | eager batch (BC7 RLC2) | 2 atlases |
 
 Low memory also disables HDR swapchain output even if HDR is toggled in Options.
 
@@ -47,7 +47,16 @@ Performance/Visuals use 75%/90% of budget (or fixed 6144/8192 MiB when budget is
 On Metal (no allocator report), pressure falls back to resident count vs
 [`GraphicsMode::max_room_gpu_residents`](../../crates/mahjuro-gfx-types/src/graphics_mode.rs).
 
-Watch for `gpu mem profile: pressure=` and `gpu mem profile: eager preload` lines when profiling.
+Watch for `gpu mem profile: pressure=` (includes `relic_gpu=`, `decal_atlas_cpu=`, `music_pcm=` suffixes) and `gpu mem profile: eager preload` lines when profiling.
+
+## Relic textures (RLC2)
+
+Offline bakes (`data/relic_baked/*.rlc`, format **RLC2**) store BC7 mip chains (1024² albedo, 512² relief) plus small RGBA fallbacks. Runtime uploads BC7 when `TEXTURE_COMPRESSION_BC` is available.
+
+- **Low memory:** on-demand decode + GPU LRU cap of **24** (one archive relic page is 3×7 = **21** slots) ([`impl_relic_residency.rs`](../../crates/mahjuro-render/src/wgpu_renderer/impl_relic_residency.rs)); no startup batch.
+- **Performance / Visuals:** eager batch after hub CPU prefetch completes and pressure is Normal; batch reads bypass the asset byte LRU.
+
+Rebake: `cargo run -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake --release`
 
 Thresholds can be overridden with `MAHJURO_GPU_MEM_CONSTRAINED_MIB` and
 `MAHJURO_GPU_MEM_CRITICAL_MIB` (see [launch options](launch-options.md)).

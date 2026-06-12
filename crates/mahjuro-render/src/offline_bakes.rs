@@ -1,6 +1,6 @@
 //! Required offline bakes at renderer init.
 //!
-//! Showcase decal atlases, room `.mgi`/`.msh`, and relic RLC1 payloads are validated
+//! Showcase decal atlases, room `.mgi`/`.msh`, and relic RLC2 payloads are validated
 //! eagerly when committed bakes are required. `build.rs` stamp checks still enforce
 //! outputs at compile time; runtime checks catch missing assets in dev skips or bad packs.
 

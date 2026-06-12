@@ -15,6 +15,7 @@ path = "src/bin/mahjuro-bake-relics.rs"
 [features]
 default = []
 clipboard = ["dep:arboard"]
+relic_bc7_bake = ["dep:intel_tex_2"]
 # SDL window/surface path for the interactive game; off for CPU-only bake binaries.
 windowed = ["dep:sdl3"]
 # Headless room/shadow bakes via mahjuro-headless (relaxes strict main_menu init).
@@ -53,3 +54,5 @@ crossbeam-channel.workspace = true
 bumpalo.workspace = true
 memmap2.workspace = true
 zstd.workspace = true
+lru.workspace = true
+intel_tex_2 = { version = "0.5", optional = true }

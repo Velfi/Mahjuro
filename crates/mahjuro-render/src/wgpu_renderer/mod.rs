@@ -419,6 +419,16 @@ pub struct WgpuRenderer {
     creation_time: Instant,
     /// Cached relic icon textures, populated asynchronously from the loader thread.
     relic_textures: FxHashMap<RelicId, RelicTextureGpu>,
+    /// LRU order of resident relic textures (front = most recent; Low memory cap).
+    relic_gpu_lru: std::collections::VecDeque<RelicId>,
+    /// GPU byte estimates per resident relic (profiling + eviction accounting).
+    relic_gpu_meta: FxHashMap<RelicId, crate::gpu_types::RelicGpuMeta>,
+    /// Relic IDs with an in-flight decode job.
+    relic_loading: std::collections::HashSet<RelicId>,
+    /// Sender for Low-memory on-demand relic decode jobs (channel stays open for the session).
+    relic_ondemand_tx: Option<std::sync::mpsc::Sender<DecodedRelicImage>>,
+    /// Adapter exposes BC7 block-compressed textures (RLC2 upload path).
+    bc7_textures_supported: bool,
     /// Per-frame relic draw slots — populated lazily via [`init_deferred`](init_deferred).
     relic_instances: Vec<LitMeshInstance>,
     gameplay_hud_pools_ready: bool,
@@ -876,6 +886,7 @@ pub struct WgpuRenderer {
 mod impl_loaders;
 mod impl_pipelines;
 mod impl_public;
+mod impl_relic_residency;
 mod impl_room_gi;
 mod impl_room_shadow;
 mod impl_screenshot;

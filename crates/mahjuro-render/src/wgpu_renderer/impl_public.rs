@@ -94,6 +94,7 @@ impl WgpuRenderer {
         let mode_changed = self.graphics_mode != mode;
         self.graphics_mode = mode;
         crate::room_preload::set_prefetch_graphics_mode(mode);
+        crate::decal::set_decal_graphics_mode(mode);
         self.render_scale = new_scale;
         if scale_changed && self.size.width > 0 && self.size.height > 0 {
             self.resize(self.size);
@@ -118,6 +119,15 @@ impl WgpuRenderer {
     #[inline]
     pub(super) fn integrated_low_memory_gpu(&self) -> bool {
         self.integrated_gpu && self.graphics_mode == mahjuro_gfx_types::GraphicsMode::LowMemory
+    }
+
+    /// On integrated + Low memory (1-room cap), only the pinned scene may upload to GPU.
+    #[inline]
+    pub(super) fn integrated_low_memory_allows_room_gpu_upload(&self, bit: u8) -> bool {
+        if !self.integrated_low_memory_gpu() {
+            return true;
+        }
+        self.poll_pinned_room_gpu_bit == Some(bit)
     }
 
     /// Room bits that must not be evicted: active scene plus any in-flight GPU upload.
@@ -179,7 +189,8 @@ impl WgpuRenderer {
 
     pub(super) fn refresh_gpu_memory_pressure(&mut self) {
         let snapshot = self.gpu_memory_pressure_snapshot();
-        crate::gpu_memory_pressure::log_pressure_transition(&snapshot);
+        let counters = self.memory_budget_counters();
+        crate::gpu_memory_pressure::log_pressure_transition(&snapshot, &counters);
         self.gpu_memory_pressure = snapshot.pressure;
     }
 
@@ -361,7 +372,9 @@ impl WgpuRenderer {
     /// full-screen backdrop plates) still have GPU uploads pending. Used by the
     /// headless screenshot harness; **splash** does not gate on this (see `frame_tick`).
     pub fn is_loading(&self) -> bool {
-        self.relic_rx.is_some() || self.background_rx.is_some()
+        self.background_rx.is_some()
+            || (self.graphics_mode != mahjuro_gfx_types::GraphicsMode::LowMemory
+                && self.relic_rx.is_some())
     }
 
     /// Drain relic / background decode queues and queue GPU uploads. Normally

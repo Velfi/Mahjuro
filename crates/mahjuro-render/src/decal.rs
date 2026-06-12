@@ -11,7 +11,36 @@
 use mahjuro_core::core::relic::RelicFlavorSpan;
 use mahjuro_core::core::tile::{Suit, Tile, TileEnhancement};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+static DECAL_GRAPHICS_MODE: AtomicU8 =
+    AtomicU8::new(mahjuro_gfx_types::GraphicsMode::Visuals as u8);
+
+/// Sync decode caps with the active graphics preset (called from [`crate::wgpu_renderer::WgpuRenderer::set_graphics_budget`]).
+pub fn set_decal_graphics_mode(mode: mahjuro_gfx_types::GraphicsMode) {
+    DECAL_GRAPHICS_MODE.store(mode as u8, Ordering::Relaxed);
+    if let Ok(mut state) = atlas_cache_state().lock() {
+        let cap = mode.max_decal_atlas_cpu_cache();
+        while state.positive.len() > cap {
+            state.positive.pop_lru();
+        }
+        refresh_decal_atlas_cpu_profile(&state.positive);
+    }
+}
+
+fn active_decal_graphics_mode() -> mahjuro_gfx_types::GraphicsMode {
+    match DECAL_GRAPHICS_MODE.load(Ordering::Relaxed) {
+        x if x == mahjuro_gfx_types::GraphicsMode::Performance as u8 => {
+            mahjuro_gfx_types::GraphicsMode::Performance
+        }
+        x if x == mahjuro_gfx_types::GraphicsMode::LowMemory as u8 => {
+            mahjuro_gfx_types::GraphicsMode::LowMemory
+        }
+        _ => mahjuro_gfx_types::GraphicsMode::Visuals,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -123,27 +152,51 @@ struct Atlas {
     origins: FxHashMap<String, (u32, u32)>,
 }
 
-fn atlas_cache() -> &'static Mutex<FxHashMap<String, Option<std::sync::Arc<Atlas>>>> {
-    static CACHE: OnceLock<Mutex<FxHashMap<String, Option<std::sync::Arc<Atlas>>>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
+struct AtlasCacheState {
+    positive: lru::LruCache<String, std::sync::Arc<Atlas>>,
+    negative: FxHashSet<String>,
+}
+
+fn atlas_cache_state() -> &'static Mutex<AtlasCacheState> {
+    static CACHE: OnceLock<Mutex<AtlasCacheState>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        Mutex::new(AtlasCacheState {
+            positive: lru::LruCache::new(NonZeroUsize::new(2).unwrap()),
+            negative: FxHashSet::default(),
+        })
+    })
+}
+
+fn refresh_decal_atlas_cpu_profile(cache: &lru::LruCache<String, std::sync::Arc<Atlas>>) {
+    let bytes: usize = cache
+        .iter()
+        .map(|(_, atlas)| atlas.rgba.len())
+        .sum();
+    crate::gpu_memory_profile::set_decal_atlas_cpu_bytes(bytes);
 }
 
 /// Load+decode an atlas for `tile_set`, caching the result. Returns `None` if
 /// the set has no atlas.toml, the atlas PNG is missing, or either fails to
 /// parse. Subsequent calls for the same set are O(1).
 fn load_atlas(tile_set: &str) -> Option<std::sync::Arc<Atlas>> {
-    let mut cache = atlas_cache().lock().ok()?;
-    if let Some(slot) = cache.get(tile_set) {
-        return slot.clone();
+    let mut state = atlas_cache_state().lock().ok()?;
+    if state.negative.contains(tile_set) {
+        return None;
+    }
+    if let Some(atlas) = state.positive.get(tile_set) {
+        return Some(atlas.clone());
     }
     let result = decode_atlas(tile_set).map(std::sync::Arc::new);
     if result.is_none() {
         log::warn!(
             "tileset '{tile_set}' has no loadable atlas (expected sets/{tile_set}/atlas.toml + atlas.png)"
         );
+        state.negative.insert(tile_set.to_string());
+        return None;
     }
-    cache.insert(tile_set.to_string(), result.clone());
+    let arc = result.clone().unwrap();
+    state.positive.put(tile_set.to_string(), arc.clone());
+    refresh_decal_atlas_cpu_profile(&state.positive);
     result
 }
 
@@ -171,7 +224,20 @@ fn decode_atlas(tile_set: &str) -> Option<Atlas> {
     let decoder = image::ImageReader::new(std::io::Cursor::new(png_bytes.as_slice()))
         .with_guessed_format()
         .ok()?;
-    let img = decoder.decode().ok()?.to_rgba8();
+    let mut img = decoder.decode().ok()?.to_rgba8();
+    let mode = active_decal_graphics_mode();
+    let max_side = mode.decal_atlas_max_decode_side();
+    let (orig_w, orig_h) = img.dimensions();
+    let mut tile_w = tile_w;
+    let mut tile_h = tile_h;
+    if orig_w.max(orig_h) > max_side {
+        let scale = max_side as f32 / orig_w.max(orig_h) as f32;
+        let nw = ((orig_w as f32 * scale).round() as u32).max(1);
+        let nh = ((orig_h as f32 * scale).round() as u32).max(1);
+        img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Lanczos3);
+        tile_w = ((tile_w as f32 * scale).round() as u32).max(1);
+        tile_h = ((tile_h as f32 * scale).round() as u32).max(1);
+    }
 
     let mut origins: FxHashMap<String, (u32, u32)> =
         FxHashMap::with_capacity_and_hasher(layout.len(), Default::default());

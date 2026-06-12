@@ -1,4 +1,4 @@
-//! Relic load/decode for the runtime renderer and the offline RLC1 baker.
+//! Relic load/decode for the runtime renderer and the offline RLC2 baker.
 //!
 //! **Runtime** loads pre-baked `data/relic_baked/<slug>.rlc` only (see [`crate::relic_bake`]).
 //! Source PNGs under `textures/relics/` are bake-time inputs for `mahjuro-bake-relics` and are
@@ -224,6 +224,8 @@ pub fn decode_relic_assets(
             relief_width,
             relief_height,
             mesh_cpu,
+            albedo_bc7: None,
+            relief_bc7: None,
         },
         mesh_build,
     ))
@@ -241,7 +243,7 @@ fn spawn_relic_bake_loader() -> mpsc::Receiver<DecodedRelicImage> {
         let mut decoded = 0usize;
         for d in all_relic_defs() {
             let path = crate::relic_bake::baked_relic_asset_path(d.id);
-            match crate::relic_bake::load_baked_relic(d.id) {
+            match crate::relic_bake::load_baked_relic_uncached(d.id) {
                 Ok(msg) => {
                     decoded += 1;
                     if tx.send(msg).is_err() {
@@ -260,7 +262,7 @@ fn spawn_relic_bake_loader() -> mpsc::Receiver<DecodedRelicImage> {
         crate::startup_profile::record("relic.decode_thread", thread_total);
         crate::startup_profile::record("relic.decode_cpu", thread_total);
         crate::startup_profile::record("relic.mesh_build_thread", std::time::Duration::ZERO);
-        log::debug!("relic-loader (RLC1): loaded {decoded} baked relics in {thread_total:?}",);
+        log::debug!("relic-loader (RLC2): loaded {decoded} baked relics in {thread_total:?}",);
     });
     rx
 }

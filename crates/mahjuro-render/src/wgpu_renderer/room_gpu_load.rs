@@ -103,9 +103,7 @@ fn room_upload_runtime_phase(scene_key: Option<&str>) -> crate::room_gpu_profile
     use crate::room_gpu_profile::RuntimePhase;
     match scene_key {
         None => RuntimePhase::StartupBlocking,
-        Some(scene_keys::GAMEPLAY | scene_keys::DEFEAT | "game_over" | "tutorial") => {
-            RuntimePhase::GameplayInteractive
-        }
+        Some(scene_keys::GAMEPLAY | scene_keys::DEFEAT) => RuntimePhase::GameplayInteractive,
         Some(scene_keys::VICTORY) => RuntimePhase::MenuInteractive,
         Some(_) => RuntimePhase::MenuInteractive,
     }
@@ -469,6 +467,41 @@ fn try_commit_room_environment_gpu_upload(
         return None;
     }
     Some((prims, gpu_wrap.unwrap()))
+}
+
+/// Rooms whose blocking-upload stall was already logged; cleared when the room recovers.
+static BLOCKING_UPLOAD_STALL_LOGGED: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(0);
+
+/// Whether a blocking (unlimited-budget) room upload loop can still make progress.
+///
+/// The upload tick returns `false` while the room's CPU mesh cache is absent; the
+/// blocking drivers spin on the tick, so they must bail when no decode is in flight
+/// and none can be queued (low-memory eviction drops the cache, and the re-queued
+/// prefetch is refused while another room holds the only decode slot). Spinning in
+/// that state hangs the main thread on a black screen.
+fn blocking_room_upload_can_progress(id: RoomGpuResidentId) -> bool {
+    use std::sync::atomic::Ordering;
+    let desc = id.desc();
+    if (desc.cpu_ready_for_gpu_upload)() {
+        BLOCKING_UPLOAD_STALL_LOGGED.fetch_and(!desc.bit(), Ordering::Relaxed);
+        return true;
+    }
+    (desc.start_cpu_prefetch)();
+    if desc
+        .prefetch_slot
+        .is_some_and(crate::room_preload::room_prefetch_in_flight)
+    {
+        return true;
+    }
+    if BLOCKING_UPLOAD_STALL_LOGGED.fetch_or(desc.bit(), Ordering::Relaxed) & desc.bit() == 0 {
+        log::warn!(
+            "{} blocking GPU upload stalled: CPU cache not resident and no decode in flight; \
+             deferring to per-frame retry",
+            desc.glb,
+        );
+    }
+    false
 }
 
 /// Low-memory GPU eviction: drop CPU mesh RAM (see [`RoomGpuResidentDesc::clear_cpu_cache_for_gpu_evict`]).
@@ -2693,12 +2726,20 @@ impl WgpuRenderer {
     }
 
     fn drive_shop_room_gpu_upload(&mut self, budget_ms: f32) {
+        if !self.integrated_low_memory_allows_room_gpu_upload(ROOM_SHOP) {
+            self.cancel_shop_room_gpu_upload();
+            return;
+        }
         if self.rooms_gpu_loaded & ROOM_SHOP != 0 {
             self.cancel_shop_room_gpu_upload();
             return;
         }
         if budget_ms >= 1.0e6 {
-            while !self.tick_shop_room_gpu_upload(budget_ms) {}
+            while !self.tick_shop_room_gpu_upload(budget_ms) {
+                if !blocking_room_upload_can_progress(RoomGpuResidentId::Shop) {
+                    break;
+                }
+            }
         } else {
             let _ = self.tick_shop_room_gpu_upload(budget_ms);
         }
@@ -2834,12 +2875,20 @@ impl WgpuRenderer {
     }
 
     fn drive_hallway_room_gpu_upload(&mut self, budget_ms: f32) {
+        if !self.integrated_low_memory_allows_room_gpu_upload(ROOM_HALLWAY) {
+            self.cancel_hallway_room_gpu_upload();
+            return;
+        }
         if self.rooms_gpu_loaded & ROOM_HALLWAY != 0 {
             self.cancel_hallway_room_gpu_upload();
             return;
         }
         if budget_ms >= 1.0e6 {
-            while !self.tick_hallway_room_gpu_upload(budget_ms) {}
+            while !self.tick_hallway_room_gpu_upload(budget_ms) {
+                if !blocking_room_upload_can_progress(RoomGpuResidentId::Hallway) {
+                    break;
+                }
+            }
         } else {
             let _ = self.tick_hallway_room_gpu_upload(budget_ms);
         }
@@ -2988,11 +3037,19 @@ impl WgpuRenderer {
     }
 
     fn drive_gameplay_room_gpu_upload(&mut self, budget_ms: f32) {
+        if !self.integrated_low_memory_allows_room_gpu_upload(ROOM_GAMEPLAY) {
+            self.cancel_gameplay_room_gpu_upload();
+            return;
+        }
         if self.rooms_gpu_loaded & ROOM_GAMEPLAY != 0 {
             return;
         }
         if budget_ms >= 1.0e6 {
-            while !self.tick_gameplay_room_gpu_upload(budget_ms) {}
+            while !self.tick_gameplay_room_gpu_upload(budget_ms) {
+                if !blocking_room_upload_can_progress(RoomGpuResidentId::Gameplay) {
+                    break;
+                }
+            }
         } else {
             let _ = self.tick_gameplay_room_gpu_upload(budget_ms);
         }
@@ -3044,32 +3101,40 @@ impl WgpuRenderer {
 
     /// Preload room GPU data for picking before [`Self::render`] builds ops.
     pub fn ensure_rooms_for_scene_key(&mut self, key: Option<&str>) {
-        match key {
-            Some(scene_keys::MAIN_MENU) | Some("main_menu_exterior") => {
-                self.ensure_main_menu_room_gpu();
-            }
-            Some(scene_keys::SHOP) | Some("showcase") => {
-                self.ensure_shop_room_gpu();
-            }
-            Some(scene_keys::HALLWAY) | Some("pick_chamber") => {
-                self.ensure_shop_room_gpu();
-                self.ensure_hallway_room_gpu();
-            }
-            Some(scene_keys::STAIRWAY) => self.ensure_staircase_room_gpu(),
-            Some(scene_keys::ARCHIVE) => self.ensure_archive_room_gpu(),
-            Some(scene_keys::VICTORY) => {
-                if victory_uses_3d_moon(self.graphics_mode) {
-                    self.ensure_main_menu_room_gpu();
-                }
-            }
-            Some(scene_keys::GAMEPLAY) | Some(scene_keys::DEFEAT) => {
-                self.ensure_gameplay_room_gpu();
-            }
-            // Legacy aliases
-            Some("staircase") => self.ensure_staircase_room_gpu(),
-            Some("collection") => self.ensure_archive_room_gpu(),
-            Some("game_over") => self.ensure_gameplay_room_gpu(),
+        let Some(key) = key else {
+            return;
+        };
+        let norm = scene_keys::normalize_scene_key(key);
+        if norm == scene_keys::HALLWAY {
+            self.ensure_shop_room_gpu();
+        }
+        if let Some(bit) = self.room_gpu_bit_for_scene_key(key) {
+            self.ensure_room_gpu_for_bit(bit);
+        }
+    }
+
+    fn ensure_room_gpu_for_bit(&mut self, bit: u8) {
+        match bit {
+            ROOM_MAIN_MENU => self.ensure_main_menu_room_gpu(),
+            ROOM_SHOP => self.ensure_shop_room_gpu(),
+            ROOM_HALLWAY => self.ensure_hallway_room_gpu(),
+            ROOM_STAIRCASE => self.ensure_staircase_room_gpu(),
+            ROOM_ARCHIVE => self.ensure_archive_room_gpu(),
+            ROOM_GAMEPLAY => self.ensure_gameplay_room_gpu(),
             _ => {}
+        }
+    }
+
+    /// Drop progressive room uploads that are not allowed for the current pin.
+    fn cancel_unpinned_room_gpu_uploads(&mut self) {
+        if !self.integrated_low_memory_allows_room_gpu_upload(ROOM_SHOP) {
+            self.cancel_shop_room_gpu_upload();
+        }
+        if !self.integrated_low_memory_allows_room_gpu_upload(ROOM_HALLWAY) {
+            self.cancel_hallway_room_gpu_upload();
+        }
+        if !self.integrated_low_memory_allows_room_gpu_upload(ROOM_GAMEPLAY) {
+            self.cancel_gameplay_room_gpu_upload();
         }
     }
 
@@ -3109,6 +3174,9 @@ impl WgpuRenderer {
         } else {
             scene_key.and_then(|k| self.room_gpu_bit_for_scene_key(k))
         };
+        if self.integrated_low_memory_gpu() {
+            self.cancel_unpinned_room_gpu_uploads();
+        }
         self.refresh_gpu_memory_pressure();
         crate::room_preload::try_drain_room_cpu_prefetch_threads();
         crate::room_preload::kick_eager_all_room_cpu_prefetches();
@@ -3129,8 +3197,8 @@ impl WgpuRenderer {
         };
 
         if !pending_transition_at_black {
-            match scene_key {
-                Some(scene_keys::MAIN_MENU) | Some("main_menu_exterior") => {
+            match scene_key.map(scene_keys::normalize_scene_key) {
+                Some(scene_keys::MAIN_MENU) => {
                     if !room_env_upload_done {
                         let before = self.rooms_gpu_loaded;
                         self.ensure_main_menu_room_gpu();
@@ -3174,10 +3242,7 @@ impl WgpuRenderer {
                         crate::room_preload::ContinueRoomWarmup::None => {}
                     }
                 }
-                Some(scene_keys::SHOP)
-                | Some("showcase")
-                | Some(scene_keys::HALLWAY)
-                | Some("pick_chamber") => {
+                Some(scene_keys::SHOP) | Some(scene_keys::HALLWAY) => {
                     self.maybe_upload_one_room_env(
                         &mut room_env_upload_done,
                         ROOM_SHOP,
@@ -3195,13 +3260,9 @@ impl WgpuRenderer {
                     {
                         crate::room_preload::start_gameplay_cpu_prefetch();
                     }
-                    if matches!(scene_key, Some(scene_keys::HALLWAY) | Some("pick_chamber")) {
-                        upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
-                    } else if matches!(scene_key, Some(scene_keys::SHOP) | Some("showcase")) {
-                        upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
-                    }
+                    upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
                 }
-                Some(scene_keys::ARCHIVE) | Some("collection") => {
+                Some(scene_keys::ARCHIVE) => {
                     self.maybe_upload_one_room_env(
                         &mut room_env_upload_done,
                         ROOM_ARCHIVE,
@@ -3218,10 +3279,9 @@ impl WgpuRenderer {
                         }
                     }
                 }
-                Some(scene_keys::GAMEPLAY)
-                | Some(scene_keys::DEFEAT)
-                | Some("game_over")
-                | Some("tutorial") => upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS),
+                Some(scene_keys::GAMEPLAY) | Some(scene_keys::DEFEAT) => {
+                    upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
+                }
                 _ => {}
             }
         }
@@ -3230,8 +3290,8 @@ impl WgpuRenderer {
             if pending_transition_at_black {
                 self.drive_pending_scene_room_gpu_at_black(pending);
             } else {
-                match pending {
-                    scene_keys::MAIN_MENU | "main_menu_exterior" => {
+                match scene_keys::normalize_scene_key(pending) {
+                    scene_keys::MAIN_MENU => {
                         crate::room_preload::start_main_menu_cpu_prefetch();
                         self.maybe_upload_one_room_env(
                             &mut room_env_upload_done,
@@ -3251,11 +3311,11 @@ impl WgpuRenderer {
                             );
                         }
                     }
-                    scene_keys::GAMEPLAY | scene_keys::DEFEAT | "game_over" | "tutorial" => {
+                    scene_keys::GAMEPLAY | scene_keys::DEFEAT => {
                         crate::room_preload::start_gameplay_cpu_prefetch();
                         upload_gameplay(self, GAMEPLAY_ROOM_GPU_UPLOAD_BUDGET_MS);
                     }
-                    scene_keys::HALLWAY | "pick_chamber" => {
+                    scene_keys::HALLWAY => {
                         crate::room_preload::start_hallway_cpu_prefetch();
                         self.maybe_upload_one_room_env(
                             &mut room_env_upload_done,
@@ -3264,7 +3324,7 @@ impl WgpuRenderer {
                             |r| r.ensure_hallway_room_gpu(),
                         );
                     }
-                    scene_keys::SHOP | "showcase" => {
+                    scene_keys::SHOP => {
                         crate::room_preload::start_shop_cpu_prefetch();
                         self.maybe_upload_one_room_env(
                             &mut room_env_upload_done,
@@ -3273,7 +3333,7 @@ impl WgpuRenderer {
                             |r| r.ensure_shop_room_gpu(),
                         );
                     }
-                    scene_keys::ARCHIVE | "collection" => {
+                    scene_keys::ARCHIVE => {
                         crate::room_preload::start_archive_cpu_prefetch();
                         self.maybe_upload_one_room_env(
                             &mut room_env_upload_done,
@@ -3282,7 +3342,7 @@ impl WgpuRenderer {
                             |r| r.ensure_archive_room_gpu(),
                         );
                     }
-                    scene_keys::STAIRWAY | "staircase" => {
+                    scene_keys::STAIRWAY => {
                         if !room_env_upload_done && self.rooms_gpu_loaded & ROOM_STAIRCASE == 0 {
                             let before = self.rooms_gpu_loaded;
                             self.ensure_staircase_room_gpu();
@@ -3326,6 +3386,9 @@ impl WgpuRenderer {
         let desc = id.desc();
         let bit = desc.bit();
         if self.rooms_gpu_loaded & bit != 0 {
+            return;
+        }
+        if !self.integrated_low_memory_allows_room_gpu_upload(bit) {
             return;
         }
         if !room_cpu_env_ready(desc.cpu_ready_for_gpu_upload) {
@@ -3464,6 +3527,10 @@ impl WgpuRenderer {
 
     pub(super) fn ensure_shop_room_gpu(&mut self) {
         let desc = RoomGpuResidentId::Shop.desc();
+        if !self.integrated_low_memory_allows_room_gpu_upload(desc.bit()) {
+            self.cancel_shop_room_gpu_upload();
+            return;
+        }
         if self.rooms_gpu_loaded & desc.bit() != 0 {
             return;
         }
@@ -3636,6 +3703,9 @@ impl WgpuRenderer {
 
     pub(super) fn ensure_archive_room_gpu(&mut self) {
         let desc = RoomGpuResidentId::Archive.desc();
+        if !self.integrated_low_memory_allows_room_gpu_upload(desc.bit()) {
+            return;
+        }
         if self.rooms_gpu_loaded & desc.bit() != 0 {
             return;
         }
@@ -3933,9 +4003,8 @@ impl WgpuRenderer {
     fn drive_pending_scene_room_gpu_at_black(&mut self, pending: &str) {
         let budget = TRANSITION_BLACK_ROOM_GPU_UPLOAD_BUDGET_MS;
         let key = scene_keys::normalize_scene_key(pending);
-        let dest_bit = self.room_gpu_bit_for_scene_key(key);
-        if self.integrated_low_memory_gpu() {
-            if let Some(bit) = dest_bit {
+        if let Some(bit) = self.room_gpu_bit_for_scene_key(key) {
+            if self.integrated_low_memory_gpu() {
                 self.evict_room_gpu_residents_except(bit);
             }
         }
@@ -3974,37 +4043,7 @@ impl WgpuRenderer {
                 self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Gameplay);
                 self.drive_gameplay_room_gpu_upload(budget);
             }
-            _ => match pending {
-                "main_menu_exterior" => {
-                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::MainMenu);
-                    self.ensure_main_menu_room_gpu();
-                }
-                "showcase" => {
-                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Shop);
-                    self.drive_shop_room_gpu_upload(budget);
-                }
-                "pick_chamber" => {
-                    if self.rooms_gpu_loaded & ROOM_SHOP == 0 {
-                        self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Shop);
-                        self.drive_shop_room_gpu_upload(budget);
-                    }
-                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Hallway);
-                    self.drive_hallway_room_gpu_upload(budget);
-                }
-                "collection" => {
-                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Archive);
-                    self.ensure_archive_room_gpu();
-                }
-                "staircase" => {
-                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Staircase);
-                    self.ensure_staircase_room_gpu();
-                }
-                "game_over" | "tutorial" => {
-                    self.ensure_room_cpu_resident_for_transition(RoomGpuResidentId::Gameplay);
-                    self.drive_gameplay_room_gpu_upload(budget);
-                }
-                _ => {}
-            },
+            _ => {}
         }
     }
 
@@ -4059,12 +4098,6 @@ impl WgpuRenderer {
     ) {
         if *done || !ready || self.rooms_gpu_loaded & bit != 0 {
             return;
-        }
-        if self.integrated_low_memory_gpu() {
-            let protected = self.room_gpu_evict_protected_bits();
-            if protected != 0 && protected & bit == 0 {
-                return;
-            }
         }
         if !self.preflight_room_gpu_headroom_for_upload(true) {
             return;

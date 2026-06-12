@@ -2,9 +2,37 @@
 //! or `MAHJURO_GPU_MEM_PROFILE=1`).
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 static ENABLED: OnceLock<bool> = OnceLock::new();
+static MUSIC_PCM_BYTES: AtomicUsize = AtomicUsize::new(0);
+static DECAL_ATLAS_CPU_BYTES: AtomicUsize = AtomicUsize::new(0);
+
+/// Process-RAM estimate for decoded music PCM (updated by the audio manager).
+pub fn set_music_pcm_bytes(bytes: usize) {
+    MUSIC_PCM_BYTES.store(bytes, Ordering::Relaxed);
+}
+
+/// Process-RAM estimate for decoded 2D tile atlas PNGs (updated by the decal cache).
+pub fn set_decal_atlas_cpu_bytes(bytes: usize) {
+    DECAL_ATLAS_CPU_BYTES.store(bytes, Ordering::Relaxed);
+}
+
+pub fn music_pcm_bytes() -> usize {
+    MUSIC_PCM_BYTES.load(Ordering::Relaxed)
+}
+
+pub fn decal_atlas_cpu_bytes() -> usize {
+    DECAL_ATLAS_CPU_BYTES.load(Ordering::Relaxed)
+}
+
+/// Optional CPU-side memory counters logged alongside GPU pressure transitions.
+pub struct MemoryBudgetCounters {
+    pub relic_gpu_bytes: usize,
+    pub decal_atlas_cpu_bytes: usize,
+    pub music_pcm_bytes: usize,
+}
 
 pub fn enabled() -> bool {
     *ENABLED.get_or_init(|| {

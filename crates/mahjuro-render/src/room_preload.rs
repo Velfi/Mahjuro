@@ -41,16 +41,29 @@ pub(super) const SLOT_ARCHIVE: u8 = 2;
 pub(super) const SLOT_HALLWAY: u8 = 3;
 pub(super) const SLOT_GAMEPLAY: u8 = 4;
 
+fn slot_by_id(slot_id: u8) -> Option<&'static PrefetchSlot> {
+    match slot_id {
+        SLOT_MAIN_MENU => Some(&MAIN_MENU_PREFETCH),
+        SLOT_SHOP => Some(&SHOP_PREFETCH),
+        SLOT_ARCHIVE => Some(&ARCHIVE_PREFETCH),
+        SLOT_HALLWAY => Some(&HALLWAY_PREFETCH),
+        SLOT_GAMEPLAY => Some(&GAMEPLAY_PREFETCH),
+        _ => None,
+    }
+}
+
 fn mark_prefetch_done(slot_id: u8) {
-    let slot = match slot_id {
-        SLOT_MAIN_MENU => &MAIN_MENU_PREFETCH,
-        SLOT_SHOP => &SHOP_PREFETCH,
-        SLOT_ARCHIVE => &ARCHIVE_PREFETCH,
-        SLOT_HALLWAY => &HALLWAY_PREFETCH,
-        SLOT_GAMEPLAY => &GAMEPLAY_PREFETCH,
-        _ => return,
-    };
-    slot.state.store(PREFETCH_DONE, Ordering::Release);
+    if let Some(slot) = slot_by_id(slot_id) {
+        slot.state.store(PREFETCH_DONE, Ordering::Release);
+    }
+}
+
+/// True while a worker is decoding this room's GLB (see [`RoomGpuResidentDesc::prefetch_slot`]).
+///
+/// [`RoomGpuResidentDesc::prefetch_slot`]: crate::room_gpu_resident::RoomGpuResidentDesc::prefetch_slot
+pub fn room_prefetch_in_flight(slot_id: u8) -> bool {
+    slot_by_id(slot_id)
+        .is_some_and(|slot| slot.state.load(Ordering::Acquire) == PREFETCH_IN_FLIGHT)
 }
 
 struct PrefetchSlot {
@@ -204,7 +217,7 @@ fn cpu_prefetch_may_start() -> bool {
 /// Hub/run chain decodes must not compete with boot-critical `main_menu.glb` CPU work.
 /// After boot, main-menu CPU RAM may be cleared on GPU eviction; do not block the run chain on
 /// `main_menu_cpu_decoded()` staying true.
-fn hub_chain_cpu_prefetch_ready() -> bool {
+pub(crate) fn hub_chain_cpu_prefetch_ready() -> bool {
     if MAIN_MENU_PREFETCH.state.load(Ordering::Acquire) == PREFETCH_IN_FLIGHT {
         return false;
     }
@@ -219,15 +232,9 @@ fn hub_chain_cpu_prefetch_ready() -> bool {
 }
 
 pub(super) fn reset_room_prefetch_slot(slot_id: u8) {
-    let slot = match slot_id {
-        SLOT_MAIN_MENU => &MAIN_MENU_PREFETCH,
-        SLOT_SHOP => &SHOP_PREFETCH,
-        SLOT_ARCHIVE => &ARCHIVE_PREFETCH,
-        SLOT_HALLWAY => &HALLWAY_PREFETCH,
-        SLOT_GAMEPLAY => &GAMEPLAY_PREFETCH,
-        _ => return,
-    };
-    slot.state.store(PREFETCH_IDLE, Ordering::Release);
+    if let Some(slot) = slot_by_id(slot_id) {
+        slot.state.store(PREFETCH_IDLE, Ordering::Release);
+    }
 }
 
 pub fn start_main_menu_cpu_prefetch() {

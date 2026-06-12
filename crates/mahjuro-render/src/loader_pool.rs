@@ -114,7 +114,7 @@ pub fn submit_pack_mount(job: impl FnOnce() + Send + 'static) {
     submit(LoaderPriority::PackMount, Box::new(job));
 }
 
-/// Relic RLC1 batch decode (P3).
+/// Relic RLC2 batch decode (P3).
 pub fn submit_relic_batch(job: impl FnOnce() + Send + 'static) {
     submit(LoaderPriority::RelicBatch, Box::new(job));
 }

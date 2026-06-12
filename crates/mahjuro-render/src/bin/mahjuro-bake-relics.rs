@@ -2,7 +2,7 @@
 //!
 //! On success, refreshes `assets/data/relic_baked/.inputs_stamp` with the same FNV-1a
 //! hash that `mahjuro`'s `build.rs` recomputes, so the next `cargo build` won't
-//! panic with "relic RLC1 bake is out of date".
+//! panic with "relic RLC2 bake is out of date".
 
 use mahjuro_bake_stamp::BakeKind;
 use mahjuro_bake_stamp::relic::Relic;

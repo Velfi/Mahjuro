@@ -44,9 +44,9 @@ Static rooms also ship `assets/data/room_gi/<room>.mgi` (MGI1: emissive probe SH
 
 Rebake after changing room GLB layout, probe grid, or [`ROOM_EMISSIVE_PROBE_DIR_SAMPLES`](../../crates/mahjuro-render/src/room_glb.rs) / [`ROOM_EMISSIVE_PROBE_MARCH_STEPS`](../../crates/mahjuro-render/src/room_glb.rs).
 
-## Relic RLC1 bakes
+## Relic RLC2 bakes
 
-`assets/data/relic_baked/<slug>.rlc` — mask-cut albedo + relief + mesh. Runtime loads RLC1 only (source PNGs under `textures/relics/` are bake-time inputs and are excluded from release asset packs).
+`assets/data/relic_baked/<slug>.rlc` — mask-cut albedo + relief + mesh (BC7 mip chains). Runtime loads RLC2 only (source PNGs under `textures/relics/` are bake-time inputs and are excluded from release asset packs).
 
 **Rebake** (refreshes `.inputs_stamp` automatically):
 

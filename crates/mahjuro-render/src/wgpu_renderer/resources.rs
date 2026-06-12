@@ -184,6 +184,131 @@ pub(super) fn upload_rgba_texture(
     (tex, view)
 }
 
+fn upload_bc7_mip_chain(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    chain: &crate::gpu_types::RelicBc7MipChain,
+    format: wgpu::TextureFormat,
+    bc7_supported: bool,
+) -> (wgpu::Texture, wgpu::TextureView, usize) {
+    use crate::relic_gpu_residency::{bc7_chain_bytes, rgba_mip_bytes};
+
+    if bc7_supported && !chain.bc7_bytes.is_empty() {
+        let mip_count = chain.mip_count.max(1);
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width: chain.base_width.max(1),
+                height: chain.base_height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: mip_count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let mut off = 0usize;
+        let mut w = chain.base_width.max(1);
+        let mut h = chain.base_height.max(1);
+        for mip in 0..mip_count {
+            let level_bytes = crate::relic_gpu_residency::bc7_mip_bytes(w, h);
+            let slice = &chain.bc7_bytes[off..off + level_bytes];
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &tex,
+                    mip_level: mip,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                slice,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(((w + 3) / 4) * 16),
+                    rows_per_image: Some((h + 3) / 4),
+                },
+                wgpu::Extent3d {
+                    width: w.max(1),
+                    height: h.max(1),
+                    depth_or_array_layers: 1,
+                },
+            );
+            off += level_bytes;
+            w = (w / 2).max(1);
+            h = (h / 2).max(1);
+        }
+        let bytes = bc7_chain_bytes(chain.base_width, chain.base_height, mip_count);
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        return (tex, view, bytes);
+    }
+
+    let (tex, view) = upload_rgba_texture_linear(
+        device,
+        queue,
+        label,
+        &chain.fallback_rgba,
+        chain.fallback_width.max(1),
+        chain.fallback_height.max(1),
+    );
+    let bytes = rgba_mip_bytes(chain.fallback_width, chain.fallback_height, 1);
+    (tex, view, bytes)
+}
+
+/// Upload relic albedo (sRGB) — BC7 mip chain when supported, else RGBA fallback.
+pub(super) fn upload_relic_albedo_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    img: &crate::gpu_types::DecodedRelicImage,
+    bc7_supported: bool,
+) -> (wgpu::Texture, wgpu::TextureView, usize) {
+    if let Some(ref chain) = img.albedo_bc7 {
+        return upload_bc7_mip_chain(
+            device,
+            queue,
+            label,
+            chain,
+            wgpu::TextureFormat::Bc7RgbaUnormSrgb,
+            bc7_supported,
+        );
+    }
+    let (tex, view) = upload_rgba_texture(device, queue, label, &img.rgba, img.width, img.height);
+    let bytes = (img.width as usize) * (img.height as usize) * 4;
+    (tex, view, bytes)
+}
+
+/// Upload relic relief (linear) — BC7 mip chain when supported, else RGBA fallback.
+pub(super) fn upload_relic_relief_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    img: &crate::gpu_types::DecodedRelicImage,
+    bc7_supported: bool,
+) -> (wgpu::Texture, wgpu::TextureView, usize) {
+    if let Some(ref chain) = img.relief_bc7 {
+        return upload_bc7_mip_chain(
+            device,
+            queue,
+            label,
+            chain,
+            wgpu::TextureFormat::Bc7RgbaUnorm,
+            bc7_supported,
+        );
+    }
+    let (tex, view) = upload_rgba_texture_linear(
+        device,
+        queue,
+        label,
+        &img.relief_rgba,
+        img.relief_width,
+        img.relief_height,
+    );
+    let bytes = (img.relief_width as usize) * (img.relief_height as usize) * 4;
+    (tex, view, bytes)
+}
+
 pub(crate) fn white_albedo(
     device: &wgpu::Device,
     queue: &wgpu::Queue,

@@ -479,6 +479,12 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     {
         required_features |= wgpu::Features::FLOAT32_FILTERABLE;
     }
+    if adapter
+        .features()
+        .contains(wgpu::Features::TEXTURE_COMPRESSION_BC)
+    {
+        required_features |= wgpu::Features::TEXTURE_COMPRESSION_BC;
+    }
 
     log::debug!("wgpu: requesting logical device…");
     let _device_scope = crate::startup_profile::scope("wgpu.device");

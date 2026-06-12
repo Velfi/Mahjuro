@@ -1,4 +1,4 @@
-//! Invoked from `build/offline_bake.rs`: verify committed relic RLC1 bakes match inputs.
+//! Invoked from `build/offline_bake.rs`: verify committed relic RLC2 bakes match inputs.
 
 use mahjuro_bake_stamp::relic::{Relic, rerun_if_changed_paths};
 
