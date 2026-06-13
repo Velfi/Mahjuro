@@ -1416,8 +1416,8 @@ pub fn push_colored_line_clipped(
     mono: bool,
     glossary: GlossaryMode,
 ) {
-    let clip = clip_rect.unwrap_or(rect);
-    let Some(clipped) = intersect_rect(rect, clip) else {
+    let viewport_clip = clip_rect.unwrap_or(rect);
+    let Some(scissor) = intersect_rect(rect, viewport_clip) else {
         return;
     };
     let segments = colored_line_segments(text, default, glossary);
@@ -1428,29 +1428,29 @@ pub fn push_colored_line_clipped(
     };
     let Some(font) = font else {
         out.push(TextLabel {
-            rect: clipped,
+            rect,
             text: text.into(),
             color: default,
             font_px: Some(font_px),
             align,
-            clip_rect: Some(clipped),
+            clip_rect: Some(scissor),
             mono,
             ..Default::default()
         });
         return;
     };
-    let fit_px = fit_tinted_line_font_px(font, &segments, clipped[2], font_px);
+    let fit_px = fit_tinted_line_font_px(font, &segments, rect[2], font_px);
     let total_w = measure_tinted_run(font, &segments, fit_px);
-    let mut x = line_start_x(clipped[0], clipped[2], total_w, align);
+    let mut x = line_start_x(rect[0], rect[2], total_w, align);
     push_tinted_segment_run(
         out,
         &segments,
         font,
         fit_px,
-        clipped[1],
-        clipped[3],
+        rect[1],
+        rect[3],
         &mut x,
-        Some(clipped),
+        Some(scissor),
         mono,
         default,
         false,

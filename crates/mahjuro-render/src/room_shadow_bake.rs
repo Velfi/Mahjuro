@@ -16,6 +16,13 @@ const MAGIC: &[u8; 4] = b"MSH1";
 pub const VERSION: u32 = mahjuro_bake_stamp::room_shadow::MSH_FORMAT_VERSION;
 /// Window height used by `mahjuro-bake` room shadow captures (see `bake_cli.rs`).
 pub const ROOM_SHADOW_BAKE_REFERENCE_H: f32 = 1080.0;
+/// Offline room-shadow depth / contact-AO capture resolution (independent of live
+/// `ShadowQuality::point_map_size`, which is 0 when shadows are Off at init).
+pub const ROOM_SHADOW_BAKE_MAP_SIZE: u32 = 512;
+/// Live shadow tier forced during offline `.msh` GPU capture so punctual shadow
+/// setup runs at full fidelity even when settings have shadows Off.
+pub const ROOM_SHADOW_BAKE_CAPTURE_QUALITY: mahjuro_gfx_types::ShadowQuality =
+    mahjuro_gfx_types::ShadowQuality::High;
 
 /// Scale runtime world positions into bake-space before sampling `.msh` contact AO.
 #[inline]

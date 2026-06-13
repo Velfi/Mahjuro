@@ -241,7 +241,9 @@ impl WgpuRenderer {
                     let outline_scale = scale * OUTLINE_GROW;
                     let outline_model = translate_rot_scale(center, oriented, outline_scale);
                     let mut outline_bcf = sc_bcf;
-                    if p.hovered && p.selected {
+                    if let Some(sel) = p.outline_sel {
+                        outline_bcf[1] = sel;
+                    } else if p.hovered && p.selected {
                         outline_bcf[1] = 1.5;
                     }
                     self.tile_outline_instances_staging

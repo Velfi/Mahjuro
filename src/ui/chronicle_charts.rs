@@ -514,19 +514,20 @@ pub fn push_ordeal_record_rows(
     row_h: f32,
     rows: &[OrdealRecordRow],
     caption_px: f32,
-    micro_px: f32,
-    _body_px: f32,
+    _micro_px: f32,
+    body_px: f32,
 ) {
-    let gutter = 6.0;
-    let row_font_px = caption_px;
-    let wl_font_px = micro_px;
-    let score_w = (chart_primitives::measure_text_width("999. M cp", row_font_px, true) + 6.0)
-        .clamp(54.0, 78.0)
-        .min(w * 0.34);
-    let wl_w = (chart_primitives::measure_text_width("99W · 99L", wl_font_px, true) + 4.0)
-        .clamp(52.0, 72.0)
-        .min(w * 0.24);
-    let name_w = (w - score_w - wl_w - gutter * 2.0).max(40.0);
+    let gutter = (caption_px * 0.22).max(4.0);
+    let stat_font_px = caption_px;
+    let score_font_px = body_px;
+    // Widths track font size so high-res layouts do not auto-shrink stats into the floor.
+    let score_w = (score_font_px * 9.0)
+        .max(chart_primitives::measure_text_width("999.9 M cp", score_font_px, true) + gutter)
+        .min(w * 0.42);
+    let wl_w = (stat_font_px * 7.0)
+        .max(chart_primitives::measure_text_width("99W · 99L", stat_font_px, true) + gutter * 0.75)
+        .min(w * 0.30);
+    let name_w = (w - score_w - wl_w - gutter * 2.0).max(stat_font_px * 3.0);
     let wl_x = x + name_w + gutter;
     let score_x = x + w - score_w;
     for (i, row) in rows.iter().take(5).enumerate() {
@@ -558,23 +559,26 @@ pub fn push_ordeal_record_rows(
                 rect: [wl_x, ry, wl_w, row_h],
                 text: wl,
                 color: color::alpha(color::STONE, 0.88),
-                font_px: Some(micro_px),
+                font_px: Some(stat_font_px),
                 align: TextAlign::Left,
                 mono: true,
                 ..Default::default()
             },
         );
         let score_text = archive_career::format_chips_compact(row.best_score);
-        let score_rect = [score_x, ry, score_w, row_h];
-        push_colored_label_clipped(
+        push_label_clipped(
             labels,
-            score_rect,
+            [score_x, ry, score_w, row_h],
             clip,
-            &score_text,
-            archive_career::chronicle_chips_color(),
-            row_font_px,
-            TextAlign::Right,
-            true,
+            TextLabel {
+                rect: [score_x, ry, score_w, row_h],
+                text: score_text,
+                color: archive_career::chronicle_chips_color(),
+                font_px: Some(score_font_px),
+                align: TextAlign::Right,
+                mono: true,
+                ..Default::default()
+            },
         );
     }
 }
