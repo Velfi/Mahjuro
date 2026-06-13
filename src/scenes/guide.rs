@@ -37,7 +37,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{
-    GlossaryMode, color_for_token, text_effect_for_glossary_tint,
+    GlossaryMode, text_effect_for_glossary_tint,
 };
 use crate::render::wgpu_renderer::{
     GpuInstance, PointLight, TextAlign, TextBlockVerticalAlign, TextLabel,
@@ -1168,98 +1168,98 @@ pub(crate) struct YakuGuideDetail {
 pub(crate) fn yaku_guide_detail(yk: YakuKind, kokushi_discovered: bool) -> YakuGuideDetail {
     match yk {
         YakuKind::ChickenHand => YakuGuideDetail {
-            rule: "A valid hand that triggers no other yaku.",
-            requires: "Valid hand · no other yaku",
-            breaks_if: "Any other yaku is triggered.",
+            rule: "Fallback score when the hand wins but no other pattern applies.",
+            requires: "Standard winning shape",
+            breaks_if: "Another yaku is present.",
         },
         YakuKind::Tanyao => YakuGuideDetail {
-            rule: "All tiles are simples. A simple is a number tile ranked 2–8.",
+            rule: "Every tile is a simple — a number ranked 2–8.",
             requires: "Simples only",
-            breaks_if: "The hand contains a terminal, wind, or dragon.",
+            breaks_if: "Any terminal, wind, or dragon.",
         },
         YakuKind::Yakuhai => YakuGuideDetail {
-            rule: "Each dragon or matching wind triplet/kong; stacks.",
-            requires: "One qualifying honor triplet/kong per Yakuhai",
-            breaks_if: "The honor group is only a pair, or the wind is not the round or bonus round wind.",
+            rule: "Each dragon triplet/kong scores; so does a wind triplet/kong matching round or bonus round winds. Stacks.",
+            requires: "Honor triplet or kong per Yakuhai",
+            breaks_if: "Honor is only a pair, or wind doesn't match round/bonus round.",
         },
         YakuKind::Toitoi => YakuGuideDetail {
-            rule: "At least two triplets or kongs and no sequences.",
-            requires: "2+ triplets/kongs · no sequences",
-            breaks_if: "The structure has fewer than two triplets/kongs, or any sequence appears.",
+            rule: "At least two triplets or kongs; sequences don't count.",
+            requires: "2+ triplets/kongs",
+            breaks_if: "Any sequence appears.",
         },
         YakuKind::Honitsu => YakuGuideDetail {
-            rule: "One number suit plus honors only. No other number suits.",
-            requires: "One number suit · honors allowed",
+            rule: "Tiles from one number suit, optionally mixed with honors.",
+            requires: "Single number suit",
             breaks_if: "A second number suit appears.",
         },
         YakuKind::Iipeikou => YakuGuideDetail {
-            rule: "Two identical sequences in the same suit. Does not stack with Ryanpeikou — only the stronger peikou pattern scores.",
-            requires: "Two identical sequences · same suit",
-            breaks_if: "The matching sequences use different suits, or Ryanpeikou also qualifies.",
+            rule: "Two identical sequences in the same suit. Ryanpeikou replaces this when both qualify.",
+            requires: "Two matching sequences · one suit",
+            breaks_if: "Sequences differ or span suits.",
         },
         YakuKind::Junchan => YakuGuideDetail {
-            rule: "No honors. Every meld and the pair contain a number 1 or 9, with at least one sequence. Only the strongest matching terminal pattern scores (Junchan beats Honroutou and Chanta).",
-            requires: "Number terminals in every group · at least one sequence · no honors",
-            breaks_if: "Any honor appears, any group lacks a 1 or 9, or the hand is all triplets/pairs of terminals only.",
+            rule: "Every group contains a 1 or 9; needs at least one sequence. No honors. Beats Honroutou and Chanta when multiple qualify.",
+            requires: "1 or 9 in every group · one sequence",
+            breaks_if: "All groups are terminal-only triplets/pairs (Honroutou instead).",
         },
         YakuKind::Honroutou => YakuGuideDetail {
-            rule: "Every tile is a terminal or honor. Does not stack with Junchan or Chanta — only the strongest matching terminal pattern scores.",
-            requires: "Terminals · honors · no simples",
-            breaks_if: "Any rank 2–8 tile appears.",
+            rule: "Only terminals (1, 9) and honors — no simples. Beats Chanta when both qualify.",
+            requires: "Terminals and honors only",
+            breaks_if: "Any number tile 2–8 appears.",
         },
         YakuKind::FullHand => YakuGuideDetail {
-            rule: "A complete 14-tile hand made from 4 melds and 1 pair. Seven pairs does not count.",
+            rule: "Standard 14-tile shape: four melds plus one pair.",
             requires: "4 melds · 1 pair",
             breaks_if: if kokushi_discovered {
-                "The hand is seven pairs, thirteen-orphans style, incomplete, or built from the wrong group sizes."
+                "Seven pairs, thirteen orphans, or wrong group sizes."
             } else {
-                "The hand is seven pairs, incomplete, or built from the wrong group sizes."
+                "Seven pairs or wrong group sizes."
             },
         },
         YakuKind::Chinitsu => YakuGuideDetail {
-            rule: "All tiles come from a single number suit. No honors.",
-            requires: "One number suit only · no honors",
-            breaks_if: "Any honor appears, or any second number suit appears.",
+            rule: "Pure suit — every tile from one number suit.",
+            requires: "Single number suit · no honors",
+            breaks_if: "Any honor or second number suit appears.",
         },
         YakuKind::SanshokuDoujun => YakuGuideDetail {
-            rule: "The same numerical sequence appears in all three number suits.",
-            requires: "One matching sequence in Manzu · Souzu · Pinzu",
-            breaks_if: "The sequences use different ranks, or one number suit is missing.",
+            rule: "The same sequence (e.g. 4-5-6) appears once in each number suit.",
+            requires: "Matching sequence · Manzu · Souzu · Pinzu",
+            breaks_if: "Ranks differ or a suit is missing.",
         },
         YakuKind::Ittsu => YakuGuideDetail {
-            rule: "A 1–9 straight in one suit: three sequences covering 1-2-3, 4-5-6, and 7-8-9.",
-            requires: "Same suit · 1-2-3 · 4-5-6 · 7-8-9",
-            breaks_if: "The sequences are split across suits, or one of the three sequence ranges is missing.",
+            rule: "Three sequences forming 1–9 in a single suit (1-2-3, 4-5-6, 7-8-9).",
+            requires: "All three ranges · same suit",
+            breaks_if: "Sequences split across suits.",
         },
         YakuKind::Chiitoitsu => YakuGuideDetail {
-            rule: "Seven distinct pairs. This is an alternate hand shape and does not use melds.",
-            requires: "7 distinct pairs",
-            breaks_if: "A pair type is repeated, or the hand is scored as normal melds.",
+            rule: "Alternate shape: seven distinct pairs instead of four melds.",
+            requires: "7 different pair types",
+            breaks_if: "Any pair type repeats.",
         },
         YakuKind::KokushiMusou => YakuGuideDetail {
-            rule: "One of each terminal and honor, plus one duplicate. This creates twelve singles and one pair.",
-            requires: "All terminals · all honors · one duplicate",
-            breaks_if: "Any required terminal or honor is missing, or the duplicate is not one of those tile types.",
+            rule: "One of each terminal and honor, plus one duplicate among them.",
+            requires: "All 13 types · one duplicate",
+            breaks_if: "A type is missing or duplicate isn't a terminal/honor.",
         },
         YakuKind::Chanta => YakuGuideDetail {
-            rule: "Every meld and the pair contain a terminal (1 or 9) or an honor. At least one honor, one simple (2–8), and one sequence. Does not stack with Junchan or Honroutou — only the strongest matching terminal pattern scores.",
-            requires: "Terminal/honor in every group · honor present · simple present · sequence present",
-            breaks_if: "Any group is middle-only, the pair is simple-only, or the hand has no honor or no sequence.",
+            rule: "Every group touches a terminal or honor, with at least one honor, one simple, and one sequence. Weakest of the terminal-family yaku — Junchan or Honroutou replace it when they qualify.",
+            requires: "Terminal/honor in every group · honor · simple · sequence",
+            breaks_if: "A group is all simples (middle-only), or the pair lacks a terminal/honor.",
         },
         YakuKind::Ryanpeikou => YakuGuideDetail {
-            rule: "Two different sequences, each duplicated, in the same number suit on a full 14-tile hand. Supersedes Iipeikou when both qualify.",
-            requires: "Full hand · two pairs of identical sequences · one suit",
-            breaks_if: "Only one duplicated sequence, or duplicates are split across suits.",
+            rule: "Two different sequences, each appearing twice, all in one suit. Full hand; replaces Iipeikou.",
+            requires: "Two duplicated sequences · same suit · full hand",
+            breaks_if: "Only one sequence is duplicated, or suits differ.",
         },
         YakuKind::SanshokuDoukou => YakuGuideDetail {
-            rule: "The same rank triplet or kong appears in Manzu, Souzu, and Pinzu.",
-            requires: "Matching rank · triplet/kong in all three number suits",
-            breaks_if: "A number suit is missing that rank, or the groups are sequences instead of triplets.",
+            rule: "The same rank triplet (or kong) in all three number suits.",
+            requires: "Same rank · triplet/kong · all three suits",
+            breaks_if: "Groups are sequences, not triplets.",
         },
         YakuKind::Pinfu => YakuGuideDetail {
-            rule: "A full hand of four sequences and a pair ranked 2–8 in a number suit (no honor pair).",
-            requires: "Full hand · four sequences · simple number pair",
-            breaks_if: "Any triplet/kong appears, or the pair is a wind or dragon.",
+            rule: "All sequences, no triplets — pair is a simple (2–8) in a number suit. Full hand.",
+            requires: "4 sequences · simple number pair",
+            breaks_if: "Triplets/kongs or honor pair.",
         },
     }
 }
@@ -3764,7 +3764,7 @@ pub fn push_gameplay_cash_in_overlay(
     w: f32,
     h: f32,
     cash_in_visual: [f32; 4],
-    room_env_key: &'static str,
+    _room_env_key: &'static str,
 ) -> bool {
     let env_h = ctx.room_gltf_height_scale.max(0.01);
     let Some(cam) = gameplay_glb::gameplay_cash_in_camera_for_screen_rect_if_present(
@@ -3772,6 +3772,8 @@ pub fn push_gameplay_cash_in_overlay(
         h,
         env_h,
         cash_in_visual,
+        0.62,
+        true,
     ) else {
         return false;
     };
@@ -3780,28 +3782,12 @@ pub fn push_gameplay_cash_in_overlay(
     frame.gameplay_cash_in_overlay_camera = Some(cam);
     frame.gameplay_env_cash_in_only = true;
     frame.gameplay_cash_in_button_visible = true;
-    frame.gameplay_cash_in_glow = 0.35;
+    frame.gameplay_cash_in_glow = 0.0;
+    frame.gameplay_cash_in_overlay_simple_shade = true;
 
     let room_glb_lights = gameplay_glb::gameplay_glb_has_embedded_lights();
     let mut overlay_lighting = SceneLighting::default();
-    overlay_lighting.embedded_gltf_punctual = room_glb_lights;
     overlay_lighting.room_glb_brdf = room_glb_lights;
-    if room_glb_lights {
-        let tune = ctx.room_env_for(room_env_key).0;
-        let (punctual, nodes) = crate::render::room_gltf_punctual::tagged_to_scene_punctual(
-            gameplay_glb::gameplay_embedded_point_lights_runtime_tagged(
-                w,
-                h,
-                env_h,
-                &tune,
-                0.0,
-                1.0,
-                ctx.flame_tuning.candle_flicker_amp,
-            ),
-        );
-        overlay_lighting.punctual = punctual;
-        overlay_lighting.punctual_gltf_nodes = nodes;
-    }
     frame.gameplay_cash_in_overlay_lighting = Some(overlay_lighting);
     true
 }
@@ -5152,6 +5138,7 @@ struct TilesExampleLabel {
     title_rect: [f32; 4],
     title: &'static str,
     subtitle: Option<&'static str>,
+    accent: [f32; 4],
 }
 
 /// Layout metadata for one guide example cell (tile group + optional yaku tablets).
@@ -5365,6 +5352,7 @@ fn layout_tiles_page_grid(
             title_rect: [col_x + pad, row_y + pad, label_col_w - pad, title_h],
             title: group.label,
             subtitle: group.subtitle,
+            accent: group.accent,
         });
         push_guide_tile_placements(
             &mut placements,
@@ -5578,6 +5566,7 @@ fn layout_tile_group_cell(
         } else {
             group.subtitle
         },
+        accent: group.accent,
     };
 
     let tiles_bottom = tile_center_y + max_tile * 0.5;
@@ -5614,11 +5603,10 @@ fn push_tiles_example_labels(
     let title_font = typography::size(typography::H24, h);
     let sub_font = typography::size(typography::H36, h);
     for lbl in labels {
-        let title_color = color_for_token(lbl.title, color::CHAMPAGNE, GlossaryMode::Prose);
         frame.text(TextLabel {
             rect: lbl.title_rect,
             text: lbl.title.into(),
-            color: title_color,
+            color: lbl.accent,
             align: TextAlign::Left,
             font_px: Some(title_font),
             bold: true,
@@ -5635,7 +5623,7 @@ fn push_tiles_example_labels(
                 sub_font * 1.02,
                 sub,
                 color::PARCHMENT,
-                GlossaryMode::Prose,
+                GlossaryMode::Panel,
             );
             for label in labels {
                 frame.text(label);

@@ -343,12 +343,15 @@ pub(crate) fn resolve_screenshot_scene(
             Scene::TileSelect(mahjuro::scenes::TileSelectScene::new()),
             false,
         ),
-        "guide" | "tile_guide" | "tiles_guide" => (
-            Scene::Guide(mahjuro::scenes::GuideScene::with_page(
-                screenshot_page_index(s),
-            )),
-            false,
-        ),
+        "guide" | "tile_guide" | "tiles_guide" => {
+            unlock_yaku = true;
+            (
+                Scene::Guide(mahjuro::scenes::GuideScene::with_page(
+                    screenshot_page_index(s),
+                )),
+                false,
+            )
+        }
         "tutorial" | "tutorial_campaign" => (
             Scene::TutorialCampaign(TutorialCampaignScene::with_page(screenshot_page_index(s))),
             false,
@@ -367,6 +370,10 @@ pub(crate) fn resolve_screenshot_scene(
         ),
         "tile_anchor_lab" => (
             Scene::TileAnchorLab(mahjuro::scenes::TileAnchorLabScene::new(false)),
+            false,
+        ),
+        "tile_stress_lab" => (
+            Scene::TileStressLab(mahjuro::scenes::TileStressLabScene::new(false)),
             false,
         ),
         "button_aabb_lab" => (
@@ -427,7 +434,7 @@ pub(crate) fn resolve_screenshot_scene(
                 "unsupported --scene '{other}' (supported: archive, archive_ordeals, chronicle, \
                 yaku_journal, wall_ledger, gameplay, gameplay_valid_play, gameplay_hero, round_win, hallway, stairway, decimation, shop, options, \
                 main_menu, tile_select, guide, tutorial, transition_playground, \
-                material_viewer, tile_anchor_lab, shadow_ao_lab, relic_unlock, game_over_level_up, defeat, victory, meta_level_up, \
+                material_viewer, tile_anchor_lab, tile_stress_lab, shadow_ao_lab, relic_unlock, game_over_level_up, defeat, victory, meta_level_up, \
                 showcase, zodiac_celebration, tile_pack_celebration)"
             )
         }

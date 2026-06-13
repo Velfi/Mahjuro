@@ -397,30 +397,33 @@ impl WgpuRenderer {
             ],
         });
 
+        let globals = Globals {
+            screen: [new_size.width as f32, new_size.height as f32],
+            time: self.creation_time.elapsed().as_secs_f32(),
+            // Gamma will be re-uploaded on the next render() call.
+            gamma: 1.0,
+            cursor_pos: [new_size.width as f32 * 0.5, new_size.height as f32 * 0.5],
+            transition_progress: 0.0,
+            quality_level: 2.0,
+            moon_phase: self.main_menu_moon_phase_debug.resolved_phase(),
+            _globals_pad: [
+                0.0,
+                if crate::main_menu_glb::main_menu_pride_rainbow_active(
+                    self.main_menu_pride_rainbow_debug,
+                ) {
+                    1.0
+                } else {
+                    0.0
+                },
+                0.0,
+            ],
+        };
+        self.queue
+            .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
         self.queue.write_buffer(
-            &self.globals_buffer,
+            &self.globals_scene_hdr_buffer,
             0,
-            bytemuck::bytes_of(&Globals {
-                screen: [new_size.width as f32, new_size.height as f32],
-                time: self.creation_time.elapsed().as_secs_f32(),
-                // Gamma will be re-uploaded on the next render() call.
-                gamma: 1.0,
-                cursor_pos: [new_size.width as f32 * 0.5, new_size.height as f32 * 0.5],
-                transition_progress: 0.0,
-                quality_level: 2.0,
-                moon_phase: self.main_menu_moon_phase_debug.resolved_phase(),
-                _globals_pad: [
-                    0.0,
-                    if crate::main_menu_glb::main_menu_pride_rainbow_active(
-                        self.main_menu_pride_rainbow_debug,
-                    ) {
-                        1.0
-                    } else {
-                        0.0
-                    },
-                    0.0,
-                ],
-            }),
+            bytemuck::bytes_of(&globals),
         );
         let inv_bw = 1.0 / bloom_w as f32;
         let inv_bh = 1.0 / bloom_h as f32;

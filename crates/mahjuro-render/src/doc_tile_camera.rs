@@ -1,6 +1,10 @@
 //! Shared orthographic cameras for doc-style tile rendering (guide, tutorial, wall ledger).
 //!
 //! Oblique [`doc_tile_camera`] matches the legacy guide perspective at reference height 1600.
+//!
+//! Tile brightness on flat black UI is tuned via [`crate::room_glb::RoomEnvLightingTune::DOC_TILE`]
+//! (linear exposure + ambient), not by cranking point-light intensity — see
+//! [`crate::tuning::scene_look::DOC_TILE_SCENE_KEYS`].
 //! Top-down [`wall_ledger_camera`] matches the wall ledger, chronicle strips, and yaku journal grid
 //! (`pixel_to_world` placement).
 //! [`CameraProjection::Orthographic`] keeps projected tile size uniform across each layout.
@@ -19,7 +23,7 @@ const DOC_REF_W: f32 = 2560.0;
 const DOC_REF_H: f32 = 1600.0;
 const DOC_CALIB_TILE_SIZE_PX: f32 = 120.0;
 
-/// Canonical ortho camera for guide, tutorial, and tile-anchor lab doc presets.
+/// Canonical ortho camera for guide, tutorial, material viewer, and tile-anchor lab doc presets.
 pub fn doc_tile_camera(h: f32) -> CameraParams {
     let cam_scale = h / 1600.0;
     let eye = [0.0, -200.0 * cam_scale, 2040.0 * cam_scale];

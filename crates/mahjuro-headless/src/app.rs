@@ -418,6 +418,13 @@ impl HeadlessApp {
                 mahjuro_render::tuning::scene_look::room_env_frame_from_scene_look(&look, room),
             ));
         }
+        mahjuro_render::tuning::scene_look::push_doc_tile_env_frame_tunes(
+            &mut env_frame_tunes,
+            &self.scene_look,
+            None,
+            None,
+            |room| room,
+        );
         let mut focus_nav_snapshot = None;
         let ctx = DrawCtx::new(
             &layout,

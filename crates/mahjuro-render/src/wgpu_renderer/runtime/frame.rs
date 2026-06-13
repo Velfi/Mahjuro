@@ -310,33 +310,40 @@ impl WgpuRenderer {
             } else {
                 0.0
             };
+        let globals = Globals {
+            screen: [w_f, h_f],
+            time: self.creation_time.elapsed().as_secs_f32(),
+            gamma: gamma.max(0.01),
+            cursor_pos: [cx, cy],
+            transition_progress: frame.transition_progress,
+            quality_level: effects_quality.quality_level_f32(),
+            moon_phase: self.main_menu_moon_phase_debug.resolved_phase(),
+            _globals_pad: [
+                cascade_quality_level,
+                if crate::main_menu_glb::main_menu_pride_rainbow_active(
+                    self.main_menu_pride_rainbow_debug,
+                ) {
+                    1.0
+                } else {
+                    0.0
+                },
+                if frame.moonlit_water_hide_disc {
+                    0.0
+                } else {
+                    1.0
+                },
+            ],
+        };
+        self.queue
+            .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
+        let scene_hdr_globals = Globals {
+            gamma: 1.0,
+            ..globals
+        };
         self.queue.write_buffer(
-            &self.globals_buffer,
+            &self.globals_scene_hdr_buffer,
             0,
-            bytemuck::bytes_of(&Globals {
-                screen: [w_f, h_f],
-                time: self.creation_time.elapsed().as_secs_f32(),
-                gamma: gamma.max(0.01),
-                cursor_pos: [cx, cy],
-                transition_progress: frame.transition_progress,
-                quality_level: effects_quality.quality_level_f32(),
-                moon_phase: self.main_menu_moon_phase_debug.resolved_phase(),
-                _globals_pad: [
-                    cascade_quality_level,
-                    if crate::main_menu_glb::main_menu_pride_rainbow_active(
-                        self.main_menu_pride_rainbow_debug,
-                    ) {
-                        1.0
-                    } else {
-                        0.0
-                    },
-                    if frame.moonlit_water_hide_disc {
-                        0.0
-                    } else {
-                        1.0
-                    },
-                ],
-            }),
+            bytemuck::bytes_of(&scene_hdr_globals),
         );
         let bg_cam = if frame.camera_override_after_depth_clear.is_some() {
             frame.camera_override.as_ref()

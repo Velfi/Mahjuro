@@ -577,7 +577,15 @@ impl WgpuRenderer {
         } else {
             0.0
         };
-        let (exposure, ambient_x) = if embedded_gltf_punctual {
+        let cash_in_overlay = frame.gameplay_cash_in_overlay_camera.is_some()
+            && frame.gameplay_cash_in_overlay_lighting.is_some();
+        let simple_shade = frame.gameplay_cash_in_overlay_simple_shade && cash_in_overlay;
+        let (exposure, ambient_x) = if cash_in_overlay && !simple_shade {
+            (
+                crate::room_glb::GAMEPLAY_CASH_IN_OVERLAY_LINEAR_EXPOSURE,
+                crate::room_glb::SHOP_ENV_AMBIENT_SCALE,
+            )
+        } else if embedded_gltf_punctual {
             (env_tune.room_glb_linear_hdr_gain(), env_tune.ambient_scale)
         } else {
             (0.0, 0.0)
@@ -587,12 +595,16 @@ impl WgpuRenderer {
             model: model.to_cols_array(),
             room_debug_params: [
                 1.0,
-                if frame.shop_env_unlit_debug { 1.0 } else { 0.0 },
+                if frame.shop_env_unlit_debug || simple_shade {
+                    1.0
+                } else {
+                    0.0
+                },
                 0.0,
                 crate::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
             ],
             cam_pos: camera.cam_pos.to_array(),
-            room_linear_exposure: if frame.shop_env_unlit_debug {
+            room_linear_exposure: if frame.shop_env_unlit_debug || simple_shade {
                 1.0
             } else {
                 exposure

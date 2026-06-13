@@ -1252,8 +1252,13 @@ fn cash_in_bounds_corners_world(
     cpu: &RoomGlbCpu,
     win_h: f32,
     env_height_scale: f32,
+    btn_bounds_only: bool,
 ) -> Option<Vec<Vec3>> {
-    let bounds_doc = cash_in_mesh_bounds_doc(cpu)?;
+    let bounds_doc = if btn_bounds_only {
+        *cpu.marker_mesh_bounds_doc.get(BTN_CASH_IN)?
+    } else {
+        cash_in_mesh_bounds_doc(cpu)?
+    };
     let center_doc = cpu
         .environment_bounds_doc
         .map(|b| b.center())
@@ -1337,9 +1342,15 @@ pub fn gameplay_cash_in_camera_for_screen_rect(
     env_height_scale: f32,
     cpu: &RoomGlbCpu,
     target_rect: [f32; 4],
+    fill_fraction: f32,
+    btn_bounds_only: bool,
 ) -> Option<CameraParams> {
-    let corners_world = cash_in_bounds_corners_world(cpu, win_h, env_height_scale)?;
-    let bounds_doc = cash_in_mesh_bounds_doc(cpu)?;
+    let corners_world = cash_in_bounds_corners_world(cpu, win_h, env_height_scale, btn_bounds_only)?;
+    let bounds_doc = if btn_bounds_only {
+        *cpu.marker_mesh_bounds_doc.get(BTN_CASH_IN)?
+    } else {
+        cash_in_mesh_bounds_doc(cpu)?
+    };
     let center_doc = cpu
         .environment_bounds_doc
         .map(|b| b.center())
@@ -1357,8 +1368,8 @@ pub fn gameplay_cash_in_camera_for_screen_rect(
 
     let want_cx = target_rect[0] + target_rect[2] * 0.5;
     let want_cy = target_rect[1] + target_rect[3] * 0.5;
-    let want_w = target_rect[2] * 0.90;
-    let want_h = target_rect[3] * 0.90;
+    let want_w = target_rect[2] * fill_fraction.clamp(0.35, 1.0);
+    let want_h = target_rect[3] * fill_fraction.clamp(0.35, 1.0);
     let extent = corners_world
         .iter()
         .map(|c| (*c - focus).length())
@@ -1431,6 +1442,8 @@ pub fn gameplay_cash_in_camera_for_screen_rect_if_present(
     win_h: f32,
     env_height_scale: f32,
     target_rect: [f32; 4],
+    fill_fraction: f32,
+    btn_bounds_only: bool,
 ) -> Option<CameraParams> {
     with_gameplay_glb_cpu(|opt| {
         opt.and_then(|cpu| {
@@ -1440,6 +1453,8 @@ pub fn gameplay_cash_in_camera_for_screen_rect_if_present(
                 env_height_scale,
                 cpu,
                 target_rect,
+                fill_fraction,
+                btn_bounds_only,
             )
         })
     })
@@ -1479,9 +1494,9 @@ mod tests {
         let win_h = 1080.0_f32;
         let env_h = 1.0_f32;
         let target = [820.0, 318.0, 168.0, 52.0];
-        let cam = gameplay_cash_in_camera_for_screen_rect(win_w, win_h, env_h, &cpu, target)
+        let cam = gameplay_cash_in_camera_for_screen_rect(win_w, win_h, env_h, &cpu, target, 0.90, false)
             .expect("cam");
-        let corners = cash_in_bounds_corners_world(&cpu, win_h, env_h).expect("corners");
+        let corners = cash_in_bounds_corners_world(&cpu, win_h, env_h, false).expect("corners");
         let projected = project_world_corners_screen(&cam, win_w, win_h, &corners);
         let px = projected[0].max(target[0]);
         let py = projected[1].max(target[1]);

@@ -173,6 +173,46 @@ pub const GLTF_ENV_SCENE_KEYS: &[&str] = &[
     "tutorial",
 ];
 
+/// Orthographic / oblique [`ShowcaseTileBatch`](crate::draw_cmd::DrawCmd::ShowcaseTileBatch)
+/// on flat UI backdrops (no embedded room GLB). These scenes need [`RoomEnvLightingTune::DOC_TILE`]
+/// so tiles stay readable under the HDR + ACES path — prefer exposure/ambient over brighter
+/// point lights (specular streaks on black).
+pub const DOC_TILE_SCENE_KEYS: &[&str] = &[
+    "guide",
+    "yaku_journal",
+    "tile_anchor_lab",
+    "tile_stress_lab",
+    "material_viewer",
+    "tile_select",
+];
+
+/// Append per-frame env tunes for doc-tile scenes not already covered by [`GLTF_ENV_SCENE_KEYS`].
+pub fn push_doc_tile_env_frame_tunes(
+    env_frame_tunes: &mut Vec<(&'static str, RoomEnvFrameTune)>,
+    scene_look: &SceneLookTuningSet,
+    overlay_persist_key: Option<&str>,
+    overlay_look: Option<SceneLookTuning>,
+    apply_room: impl Fn(RoomEnvLightingTune) -> RoomEnvLightingTune,
+) {
+    for &key in DOC_TILE_SCENE_KEYS {
+        if env_frame_tunes.iter().any(|(k, _)| *k == key) {
+            continue;
+        }
+        let look = resolve_scene_look_with_overlay(
+            scene_look,
+            overlay_persist_key,
+            overlay_look,
+            Some(key),
+        );
+        let room = if scene_look.has_override(Some(key)) {
+            apply_room(look.room)
+        } else {
+            apply_room(RoomEnvLightingTune::DOC_TILE)
+        };
+        env_frame_tunes.push((key, room_env_frame_from_scene_look(&look, room)));
+    }
+}
+
 /// Build per-frame room env tuning from a resolved scene look bundle.
 pub fn room_env_frame_from_scene_look(
     look: &SceneLookTuning,

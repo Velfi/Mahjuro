@@ -227,11 +227,13 @@ impl ShowcaseRenderHints {
     /// [`Object3d::pos`] decoding — almost always [`pixel_to_world`].
     ///
     /// Shop / archive encode world centers via [`crate::world_space::object3d_pos_triple_for_world_center`];
-    /// only tile-pack celebration uses raw screen pixels + ray-plane here.
+    /// tile-pack celebration and doc-tile object3d (material viewer) use screen pixels + ray-plane.
     #[inline]
     pub fn object3d_uses_ray_plane(self, active_scene_key: Option<&str>) -> bool {
-        matches!(active_scene_key, Some("tile_pack_celebration"))
-            || (active_scene_key == Some("showcase") && self.tile_pack_celebration_tonemap)
+        matches!(
+            active_scene_key,
+            Some("tile_pack_celebration" | "material_viewer")
+        ) || (active_scene_key == Some("showcase") && self.tile_pack_celebration_tonemap)
     }
 }
 
@@ -1073,6 +1075,9 @@ pub struct UiFrame {
     pub gameplay_cash_in_overlay_camera: Option<CameraParams>,
     /// Lighting paired with [`Self::gameplay_cash_in_overlay_camera`] (gameplay embedded punctual).
     pub gameplay_cash_in_overlay_lighting: Option<SceneLighting>,
+    /// Guide scoring flow: flat albedo + simple N·L for the isolated cash-in draw (avoids
+    /// close-up metallic PBR reading as a solid gold bar).
+    pub gameplay_cash_in_overlay_simple_shade: bool,
     /// Sustained pulse (0..1) for the cash-in control; scales with played meld count.
     pub gameplay_cash_in_glow: f32,
     /// Horizontal wiggle (screen px) for hold-to-cash-in vibration.
@@ -1135,6 +1140,7 @@ impl UiFrame {
             gameplay_env_cash_in_only: false,
             gameplay_cash_in_overlay_camera: None,
             gameplay_cash_in_overlay_lighting: None,
+            gameplay_cash_in_overlay_simple_shade: false,
             gameplay_cash_in_glow: 0.0,
             gameplay_cash_in_wiggle_x: 0.0,
             gameplay_cash_in_wiggle: 0.0,

@@ -35,7 +35,8 @@ pub(super) struct ProcessOpCtx<'a> {
     pub relic_debuff_buffer: Option<&'a wgpu::Buffer>,
     /// True when the active render pass color attachment is linear HDR
     /// (`Rgba16Float`): Pass A (`scene_color_view`), journal scene, or HDR
-    /// swapchain text overlay.
+    /// swapchain text overlay. Uses `globals_scene_hdr_bind_group` so 2D shaders
+    /// skip in-shader gamma; `tonemap_composite` applies the user slider once.
     pub scene_hdr_attachment: bool,
     /// Color attachment width for this pass (`render_size` in Pass A, window `size` in overlay).
     pub pass_target_w: u32,
@@ -44,6 +45,24 @@ pub(super) struct ProcessOpCtx<'a> {
 }
 
 impl WgpuRenderer {
+    #[inline]
+    fn globals_bind_group_for(&self, scene_hdr_attachment: bool) -> &wgpu::BindGroup {
+        if scene_hdr_attachment {
+            &self.globals_scene_hdr_bind_group
+        } else {
+            &self.globals_bind_group
+        }
+    }
+
+    #[inline]
+    fn moonlit_water_bind_group_for(&self, scene_hdr_attachment: bool) -> &wgpu::BindGroup {
+        if scene_hdr_attachment {
+            &self.moonlit_water_scene_hdr_bind_group
+        } else {
+            &self.moonlit_water_bind_group
+        }
+    }
+
     /// Instanced draw for `tile_3d.wgsl` meshes (showcase tiles and glTF coins).
     fn draw_tile_gltf_instanced<'a>(
         &'a self,
@@ -193,7 +212,7 @@ impl WgpuRenderer {
                     } else {
                         &self.image_pipeline
                     });
-                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                     pass.set_bind_group(1, &bg_tex.bind_group, &[]);
                     pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(
@@ -207,22 +226,22 @@ impl WgpuRenderer {
             }
             RenderOp::Starfield => {
                 pass.set_pipeline(&self.starfield_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                 pass.draw(0..3, 0..1);
             }
             RenderOp::GoldenDust => {
                 pass.set_pipeline(&self.golden_dust_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                 pass.draw(0..3, 0..1);
             }
             RenderOp::MoonlitWater => {
                 pass.set_pipeline(&self.moonlit_water_pipeline);
-                pass.set_bind_group(0, &self.moonlit_water_bind_group, &[]);
+                pass.set_bind_group(0, self.moonlit_water_bind_group_for(scene_hdr_attachment), &[]);
                 pass.draw(0..3, 0..1);
             }
             RenderOp::SunlitWater => {
                 pass.set_pipeline(&self.sunlit_water_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                 pass.draw(0..3, 0..1);
             }
             RenderOp::ShootingStarCascade => {
@@ -321,7 +340,7 @@ impl WgpuRenderer {
                                     && glyph_popup_glows[slot_i].color[3] > 0.001
                                 {
                                     pass.set_pipeline(&self.tile_glow_pipeline);
-                                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                                    pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                                     pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                                     pass.set_vertex_buffer(1, gpb.slice(..));
                                     pass.set_index_buffer(
@@ -458,7 +477,7 @@ impl WgpuRenderer {
                 // frame had glow > 0 (Object3dKind::Relic accumulates).
                 if let Some(rgb) = relic_glow_buffer {
                     pass.set_pipeline(&self.tile_glow_pipeline);
-                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                     pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, rgb.slice(..));
                     pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
@@ -473,7 +492,7 @@ impl WgpuRenderer {
                     } else {
                         &self.image_pipeline
                     });
-                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                     pass.set_bind_group(1, &gpu.bind_group, &[]);
                     pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, buf.slice(..));
@@ -544,7 +563,7 @@ impl WgpuRenderer {
                     let has_glow = batch.iter().any(|p| p.glow);
                     if has_glow && let Some(tgb) = tile_glow_buffer {
                         pass.set_pipeline(&self.tile_glow_pipeline);
-                        pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                        pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                         pass.set_vertex_buffer(1, tgb.slice(..));
                         pass.set_index_buffer(
@@ -640,7 +659,7 @@ impl WgpuRenderer {
                     &self.quad_pipeline_display
                 };
                 pass.set_pipeline(pipe);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(
                     1,
@@ -667,7 +686,7 @@ impl WgpuRenderer {
                     }
                 };
                 pass.set_pipeline(pipe);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(
                     1,
@@ -680,7 +699,7 @@ impl WgpuRenderer {
             RenderOp::OverlayQuadBatch { buf_idx, count } => {
                 let slice = overlay_quad_buffers[*buf_idx];
                 pass.set_pipeline(&self.quad_pipeline_display);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(
                     1,
@@ -693,7 +712,7 @@ impl WgpuRenderer {
             RenderOp::OverlaySquircleQuadBatch { buf_idx, count } => {
                 let slice = ctx.overlay_squircle_quad_buffers[*buf_idx];
                 pass.set_pipeline(&self.squircle_quad_pipeline_display);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(
                     1,
@@ -706,7 +725,7 @@ impl WgpuRenderer {
             RenderOp::GradientQuadBatch { buf_idx, count } => {
                 let slice = gradient_quad_buffers[*buf_idx];
                 pass.set_pipeline(&self.gradient_quad_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(
                     1,
@@ -724,7 +743,7 @@ impl WgpuRenderer {
                     &self.arc_ring_quad_pipeline_display
                 };
                 pass.set_pipeline(pipe);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(
                     1,
@@ -742,7 +761,7 @@ impl WgpuRenderer {
                     &self.squircle_quad_pipeline_display
                 };
                 pass.set_pipeline(pipe);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(
                     1,
@@ -760,7 +779,7 @@ impl WgpuRenderer {
                         &self.flame_pipeline,
                         &self.flame_core_pipeline,
                     ];
-                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                     pass.set_bind_group(1, &self.flame_view_bind_group, &[]);
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, flame_buffers[*buf_idx].slice(..));
@@ -788,7 +807,7 @@ impl WgpuRenderer {
                 } else {
                     &self.text_pipeline
                 });
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
                 pass.set_bind_group(1, &td.bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(1, td.inst_buf.slice(..));
@@ -860,7 +879,7 @@ impl WgpuRenderer {
         } else {
             &self.image_pipeline
         });
-        pass.set_bind_group(0, &self.globals_bind_group, &[]);
+        pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
         pass.set_bind_group(1, &gpu.bind_group, &[]);
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         pass.set_vertex_buffer(1, inst_buffer.slice(..));

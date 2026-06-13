@@ -30,6 +30,8 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    // Post-tonemap overlay passes use user `globals.gamma`; Pass A binds
+    // `globals_scene_hdr` (gamma = 1.0) and defers to `tonemap_composite`.
     let inv_g = 1.0 / max(globals.gamma, 0.01);
     let rgb = pow(in.color.rgb, vec3<f32>(inv_g));
     return vec4<f32>(rgb, in.color.a);

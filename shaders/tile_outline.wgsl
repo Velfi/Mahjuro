@@ -24,7 +24,7 @@ struct PointLight {
 };
 struct PointLights {
     count: vec4<u32>,
-    // extras.x = display gamma exponent; rest reserved.
+    // extras.x = reserved (display gamma; outline writes HDR, tonemap is composite).
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
@@ -209,18 +209,12 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         gain = 5.28;
     }
     lit = lit * gain;
-    let inv_g = 1.0 / max(lights.extras.x, 0.01);
-    var out_rgb: vec3<f32>;
-    if (outline_frame.hdr_tonemap.x > 0.5) {
-        // Linear HDR path: write the un-tonemapped HDR; `tonemap_composite.wgsl`
-        // applies the single ACES pass + sRGB encode (per-shader `lights.extras.x`
-        // gamma slider is intentionally a no-op here).
-        var hdr = lit + outline_frame.hdr_tonemap.z * base_color * vec3<f32>(0.08);
-        hdr = hdr * outline_frame.hdr_tonemap.y;
-        // Clamp to prevent Rgba16Float overflow (Infinity) which causes NaN during bloom bilinear filtering on Metal
-        out_rgb = min(hdr, vec3<f32>(65000.0));
-    } else {
-        out_rgb = pow(lit, vec3<f32>(inv_g));
-    }
+    let linear_exposure = outline_frame.hdr_tonemap.y;
+    let ambient_scale = outline_frame.hdr_tonemap.z;
+    // Linear HDR: write un-tonemapped scene color; `tonemap_composite.wgsl` applies ACES + sRGB.
+    var hdr = lit + ambient_scale * base_color * vec3<f32>(0.08);
+    hdr = hdr * linear_exposure;
+    // Clamp to prevent Rgba16Float overflow (Infinity) which causes NaN during bloom bilinear filtering on Metal
+    let out_rgb = min(hdr, vec3<f32>(65000.0));
     return vec4<f32>(out_rgb, 1.0);
 }

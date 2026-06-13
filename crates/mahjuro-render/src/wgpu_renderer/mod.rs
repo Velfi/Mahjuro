@@ -150,6 +150,7 @@ pub struct WgpuRenderer {
     moonlit_water_pipeline: wgpu::RenderPipeline,
     // Owns the GPU resource that `moonlit_water_bind_group` samples from.
     moonlit_water_bind_group: wgpu::BindGroup,
+    moonlit_water_scene_hdr_bind_group: wgpu::BindGroup,
     sunlit_water_pipeline: wgpu::RenderPipeline,
     /// Expensive shooting-star cascade transition renders into a half-res
     /// offscreen target to keep costs bounded at large resolutions; these
@@ -185,6 +186,9 @@ pub struct WgpuRenderer {
     tile_glow_pipeline: wgpu::RenderPipeline,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
+    /// `Globals` with `gamma = 1.0` for draws into linear HDR `scene_color`.
+    globals_scene_hdr_buffer: wgpu::Buffer,
+    globals_scene_hdr_bind_group: wgpu::BindGroup,
     tile_material_layout: wgpu::BindGroupLayout,
     room_env_material_layout: wgpu::BindGroupLayout,
     /// Zeroed [`crate::hallway_glb::HallwayDistortion`] for `tile_3d` / showcase bind groups (binding 8).

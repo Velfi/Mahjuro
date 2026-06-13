@@ -259,6 +259,20 @@ pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = 1.0;
 /// (punctual-forward interior); tune via debug overlay [`RoomEnvLightingTune::ambient_scale`].
 pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
 
+/// Linear HDR gain for doc-style showcase tiles (guide, journal, …) on flat UI backdrops.
+/// Higher than [`SHOP_ENV_LINEAR_EXPOSURE`] — sparse punctual + ACES reads darker than the
+/// old per-shader gamma path unless we add hemisphere fill.
+pub const DOC_TILE_LINEAR_EXPOSURE: f32 = 1.0;
+
+/// Hemispheric ambient for doc tiles (`tile_3d` / `lit_mesh` frame globals).
+pub const DOC_TILE_AMBIENT_SCALE: f32 = 5.0;
+
+/// Guide scoring-flow cash-in overlay: brighter than the full-room embedded path so the
+/// isolated camera read is visible, but stay on the gameplay punctual curve — doc-tile
+/// exposure blows the engraved label into solid gold.
+pub const GAMEPLAY_CASH_IN_OVERLAY_LINEAR_EXPOSURE: f32 =
+    SHOP_ENV_LINEAR_EXPOSURE * 12.0 * ROOM_GLB_LINEAR_EXPOSURE_BASE;
+
 /// glTF **node** name prefix for punctual lights that should read as warm candles
 /// (`light_candle`, `light_candle.001`, `light_candle_06`, …).
 pub const SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX: &str = "light_candle";
@@ -316,6 +330,15 @@ impl RoomEnvLightingTune {
         gltf_emissive_scale: SHOP_GLTF_EMISSIVE_SCALE,
         candle_light_color_mul: SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL,
         lantern_light_color_mul: SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL,
+    };
+
+    /// Showcase tiles on flat UI (guide, journal, …): boost linear exposure + ambient
+    /// fill instead of stacking hotter point lights (which specular-streaks tile faces).
+    pub const DOC_TILE: Self = Self {
+        linear_exposure: DOC_TILE_LINEAR_EXPOSURE,
+        linear_exposure_base: 1.0,
+        ambient_scale: DOC_TILE_AMBIENT_SCALE,
+        ..Self::SOURCE_DEFAULTS
     };
 
     /// Linear HDR gain before tonemap when embedded glTF punctual is active.

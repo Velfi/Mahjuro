@@ -2112,6 +2112,7 @@ impl SceneBehavior for TutorialCampaignScene {
 
         let items = self.flat_items(w, h);
 
+        let mut focus_ring_quads = Vec::new();
         if let Some(rect) = match self.tree.focused() {
             Some(id) if id == TutorialNav::TryDiscard.id() => ctx.proj.bowl_rect,
             Some(id) if id == TutorialNav::TryPlay.id() => ctx.proj.mirror_rect,
@@ -2120,9 +2121,11 @@ impl SceneBehavior for TutorialCampaignScene {
             }
             _ => None,
         } {
-            focus_nav::push_focus_ring(rect, scale, w, h, &mut fg_quads);
+            focus_nav::push_focus_ring(rect, scale, w, h, &mut focus_ring_quads);
         }
 
+        // Panel fills and gutters before doc tiles (same order as guide melds page).
+        frame.quads(fg_quads);
         if !showcase_tiles.is_empty() {
             frame
                 .cmds
@@ -2191,7 +2194,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 intensity,
             });
         }
-        frame.quads(fg_quads);
+        frame.quads(focus_ring_quads);
         frame.texts(texts);
         self.tree.register_flat_buttons(&items, &mut frame.buttons);
         push_screen_footer_hint(
