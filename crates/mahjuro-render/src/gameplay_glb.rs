@@ -758,7 +758,9 @@ pub fn gameplay_pick_play_mirror(
     Ok(Object3d {
         pos: pose.anchor,
         extents,
-        rotation: pose.rotation_rad,
+        // GLB empty aims the mesh +Y cap into the table; flip so the polished
+        // face (+Y in mirror_mesh local space) points up for heightmap relief.
+        rotation: rotate_marker_pose_x_180(pose.rotation_rad),
         color: [1.0, 1.0, 1.0, 1.0],
         kind: Object3dKind::Mirror {
             valid_play_glow: 0.0,
@@ -1452,6 +1454,21 @@ mod tests {
         let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
         let cpu = load_gameplay_glb_from_bytes(bytes).expect("decode gameplay.glb");
         validate_gameplay_glb(cpu).expect("valid gameplay.glb");
+    }
+
+    #[test]
+    fn play_mirror_pick_orients_polished_face_up() {
+        use glam::Vec3;
+        let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
+        let cpu = load_gameplay_glb_from_bytes(bytes).expect("decode gameplay.glb");
+        let pick = gameplay_pick_play_mirror(1920.0, 1080.0, 1.0, &cpu, [0.0; 4])
+            .expect("play_mirror pick");
+        let rot = pick.rotation_matrix();
+        let face_up = rot.transform_vector3(Vec3::Y).normalize();
+        assert!(
+            face_up.z > 0.5,
+            "play mirror polished face should point up (+Z); got {face_up:?}"
+        );
     }
 
     #[test]
