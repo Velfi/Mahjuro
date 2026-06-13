@@ -25,12 +25,12 @@ const OUTER_R: f32 = 0.50;
 /// frame ends).
 const INNER_R: f32 = 0.42;
 /// Underside of the disc.
-const BOT_Y: f32 = -0.03;
+const BOT_Y: f32 = -0.04;
 /// Top of the bronze rim frame.
-const TOP_Y: f32 = 0.03;
+const TOP_Y: f32 = 0.04;
 /// Polished mirror face — slightly recessed below the rim so the rim
 /// reads as a raised frame.
-const FACE_Y: f32 = 0.012;
+const FACE_Y: f32 = 0.022;
 
 /// Local-space AABB half-extents tight to the mirror mesh, used by the
 /// gameplay raycast picker. Center offset on Y is `(TOP_Y + BOT_Y) * 0.5`.

@@ -31,7 +31,7 @@ pub fn flavor_spans_layout_width(
         .map(|line| line.chars().count())
         .max()
         .unwrap_or(0);
-    (longest_chars as f32 * char_w + body_px * 1.5).clamp(body_px * 4.0, max_width_px)
+    (longest_chars as f32 * char_w + body_px * 0.25).clamp(body_px, max_width_px)
 }
 
 /// Hard lines after span concat + `\n` breaks (matches flavor raster layout).
@@ -275,41 +275,43 @@ pub fn push_relic_flavor_inspect_panel(
     let rim = crate::render::theme::metrics::tooltip_border_px(window_w, window_h);
     let body_px = typography::size(typography::H32, window_h);
     let min_font_px = typography::readable_floor_px(window_h);
-    let max_inner_w = (window_w * 0.46).clamp(440.0, 720.0);
-    let inner_w = flavor_spans_layout_width(flavor, body_px, max_inner_w).clamp(400.0, max_inner_w);
-    let inner_w_u = inner_w.max(1.0) as u32;
+    let frame_inset = pad * 2.0 + FILL_INSET_PX * 2.0;
+    let max_inner_w = crate::render::theme::metrics::tooltip_max_panel_px(window_w, window_h)
+        .min((window_w - 2.0 * margin - frame_inset).max(body_px));
     let top_margin = window_h * 0.10;
     let bottom_margin = extra_bottom_reserve.max(0.0) + window_h * 0.02;
-    let frame_inset = pad * 2.0 + FILL_INSET_PX * 2.0;
     let available_inner_h =
         (window_h - top_margin - bottom_margin - frame_inset).max(body_px * 2.0);
     let available_inner_h_u = available_inner_h.max(1.0) as u32;
 
-    let (content_h, label_font_px) = if let Some(font) = load_ui_font() {
+    let (inner_w, content_h, label_font_px) = if let Some(font) = load_ui_font() {
         let fonts = DecalFonts {
             regular: font,
             italic: load_ui_font_italic(),
             emoji: None,
         };
-        let metrics =
+        let natural =
+            measure_flavor_spans_layout(&fonts, flavor, u32::MAX, u32::MAX, body_px, min_font_px);
+        let inner_w = natural.text_block_w.min(max_inner_w).max(body_px);
+        let inner_w_u = inner_w.max(1.0) as u32;
+        let mut metrics =
             measure_flavor_spans_layout(&fonts, flavor, inner_w_u, u32::MAX, body_px, min_font_px);
-        let metrics = if metrics.text_block_h > available_inner_h {
-            measure_flavor_spans_layout(
+        if metrics.text_block_h > available_inner_h {
+            metrics = measure_flavor_spans_layout(
                 &fonts,
                 flavor,
                 inner_w_u,
                 available_inner_h_u,
                 body_px,
                 min_font_px,
-            )
-        } else {
-            metrics
-        };
-        (metrics.text_block_h.ceil(), metrics.font_px)
+            );
+        }
+        (inner_w, metrics.text_block_h.ceil(), metrics.font_px)
     } else {
+        let inner_w = flavor_spans_layout_width(flavor, body_px, max_inner_w);
         let line_step = styled_text::colored_row_line_step(body_px);
         let content_lines = estimated_flavor_line_count(flavor, inner_w, body_px, 64);
-        (line_step * content_lines as f32, body_px)
+        (inner_w, line_step * content_lines as f32, body_px)
     };
 
     let panel_w = inner_w + frame_inset;
