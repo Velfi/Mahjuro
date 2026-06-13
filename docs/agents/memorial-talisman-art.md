@@ -49,7 +49,7 @@ Postprocess exaggeration: **2.4** (shop) / **2.0** (memorial) via `--exaggerate-
 
 `build_talisman_mesh_from_mask_asset()` extrudes each mask like enamel relic badges (caps on ±Z). Per-kind meshes cached in `talisman_meshes` / `memorial_talisman_meshes` (shelf and inspect orbit share the same mesh).
 
-`Object3dKind::{Talisman,MemorialTalisman}` rebind height → `albedo_tex`, mask → `relief_tex`. Chitin fragments outside the mask are discarded in `lit_mesh.wgsl` (threshold 8/255). Shop tablets get lustrous mother-of-pearl; memorial tablets (`material_params.w >= 128`) get subdued stone-pearl.
+`Object3dKind::{Talisman,MemorialTalisman}` rebind height → `albedo_tex`, mask → `relief_tex`. Chitin fragments outside the mask are discarded in `lit_mesh.wgsl` (threshold 8/255). Shop tablets get lustrous mother-of-pearl; memorial tablets (`material_params.w >= 128`) get subdued stone-pearl. See [lit mesh shader](lit-mesh-shader.md) for the chitin branch and profiling notes.
 
 ## Defeat screenshot from bot / career data
 

@@ -296,7 +296,7 @@ impl WgpuRenderer {
                 shop_punctual_inv_doc,
                 shop_punctual_display_case,
                 shop_cat_amb,
-                0.0,
+                crate::lit_mesh_profile::flags_f32(),
             ],
         }
     }

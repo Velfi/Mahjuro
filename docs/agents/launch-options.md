@@ -37,6 +37,7 @@ Headless tools (`mahjuro-bake`, `mahjuro-screenshot`) and bot/sweep always skip 
 | `MAHJURO_PRESENT_MODE` | WSI override: `fifo`, `mailbox`, `immediate`, `auto`, … |
 | `MAHJURO_SKIP_VULKAN_WSI_PROBE` | Force Vulkan without parent WSI smoke test. |
 | `MAHJURO_VULKAN_WIN_SURFACE_COPY` | Opt-in Windows Vulkan swapchain `COPY_SRC` (screenshots). |
+| `MAHJURO_LIT_MESH_PROFILE` | Headless/dev only: comma-separated A/B toggles for `lit_mesh.wgsl` cost isolation (`no_per_light_shadow`, `no_combined_shadow`, `no_shadow`, `no_pcf`, `no_spec`, `one_light`, `diffuse_only`). See [lit mesh shader](lit-mesh-shader.md). |
 
 `MAHJURO_DEBUG_MENU=1` at **compile** time enables the native debug menubar in release builds (always on in debug profile). See `build.rs`.
 
@@ -62,5 +63,10 @@ Asset-pack details: [tools/bake_assets/README.md](../../tools/bake_assets/README
 **`mahjuro-bake`** — offline room lightmap (`.lightmap.rlm`) / shadow (`.msh`) bakes. Requires `--features bake`.
 
 **`mahjuro-screenshot`** — one offscreen PNG. Requires `--features screenshot`. Scene list in `crates/mahjuro-headless/src/screenshot_cli.rs`.
+
+| Variable | When set |
+| --- | --- |
+| `MAHJURO_HEADLESS_GPU_PROFILE_FRAMES` | Average GPU pass timings over N frames after warmup (logs `main`, `shadow`, etc. via `mahjuro_render::gpu_profiler`). Used by `scripts/profile-lit-mesh-inspect.sh`. |
+| `MAHJURO_HEADLESS_SHADOW_QUALITY` | Headless shadow preset: `low`, `medium`, `high` (PCF tap count in `projected_shadow.wgsl`). |
 
 **`mahjuro-bake-relics`**, **`mahjuro-bake-decal-atlases`** — relic RLC1 and showcase decal atlases (`mahjuro-render` bins).

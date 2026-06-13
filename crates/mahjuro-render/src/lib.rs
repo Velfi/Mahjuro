@@ -35,6 +35,7 @@ pub mod gpu_types;
 pub mod hallway_glb;
 pub mod kenney_atlas;
 pub mod lit_mesh;
+pub mod lit_mesh_profile;
 pub mod loader_pool;
 #[cfg(feature = "windowed")]
 pub mod main_menu_effects_debug_overlay;

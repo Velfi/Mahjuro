@@ -154,10 +154,23 @@ pub(crate) fn build_shadow_globals(
 ) -> ShadowGlobals {
     let point_size = shadow_quality.point_map_size().max(1) as f32;
     let mut globals = ShadowGlobals::empty();
+    let point_texel = 1.0 / point_size;
+    let pcf_texel = if crate::lit_mesh_profile::pcf_single_tap() {
+        -1.0
+    } else {
+        match shadow_quality {
+            ShadowQuality::Off => -1.0,
+            ShadowQuality::Low => -1.0,
+            // Negative texel size selects 4-tap PCF in `projected_shadow.wgsl`.
+            ShadowQuality::Medium => -point_texel,
+            // Positive texel size selects 9-tap PCF (Visuals → High).
+            ShadowQuality::High => point_texel,
+        }
+    };
     globals.params = [
         if shadow_quality.active() { 1.0 } else { 0.0 },
         0.005,
-        1.0 / point_size,
+        pcf_texel,
         dynamic_receiver_shadow_strength.clamp(0.0, 1.0),
     ];
     for caster in &build.casters {

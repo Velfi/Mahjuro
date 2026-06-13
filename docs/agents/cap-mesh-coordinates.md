@@ -1,6 +1,6 @@
 # Cap-mesh coordinates (image → local → UV → shader)
 
-**World space** (Z-up table, screen pixels) is documented in [world-space.md](world-space.md). This note covers **lit-mesh cap extrusion**: how PNG silhouettes become model-space geometry and how albedo/heightmap UVs stay paired with vertex normals in WGSL.
+**World space** (Z-up table, screen pixels) is documented in [world-space.md](world-space.md). This note covers **lit-mesh cap extrusion**: how PNG silhouettes become model-space geometry and how albedo/heightmap UVs stay paired with vertex normals in WGSL. Full shader reference: [lit mesh shader](lit-mesh-shader.md).
 
 **Source of truth (Rust):** [`cap_extrude.rs`](../../crates/mahjuro-render/src/cap_extrude.rs) — use these helpers instead of ad-hoc `to_local` / `to_uv` closures.
 
