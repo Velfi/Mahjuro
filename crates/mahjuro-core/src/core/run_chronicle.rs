@@ -64,7 +64,8 @@ pub struct ChronicleScoreSnapshot {
     pub dora_chips: i32,
     pub relic_chips: i32,
     pub boss_mult_factor: f64,
-    pub season_mult_factor: f64,
+    #[serde(default)]
+    pub season_base_target: u32,
     pub streak_mult_factor: f64,
     pub total: u64,
 }
@@ -405,7 +406,7 @@ fn score_snapshot_from_breakdown(
         dora_chips,
         relic_chips,
         boss_mult_factor: boss_mult,
-        season_mult_factor: season.base_target_mult() as f64,
+        season_base_target: season.base_target(),
         streak_mult_factor: streak_mult.max(1.0),
         total: breakdown.total,
     }

@@ -708,7 +708,7 @@ impl AggregateStats {
         }
         let d = self.to_derived(
             YakuKind::all().len(),
-            crate::core::chamber_target::DEFAULT_BASE_TARGET,
+            crate::core::season::Season::Spring.base_target(),
             runs,
         );
         let pr = &d.per_run;

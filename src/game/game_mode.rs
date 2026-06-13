@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::chamber_target::DEFAULT_BASE_TARGET;
 use crate::core::relic::RelicId;
 use crate::core::season::Season;
 use crate::core::yaku::YakuKind;
@@ -60,7 +59,7 @@ impl GameMode {
     }
 
     /// Build a game mode for the given tile material AND difficulty season.
-    /// The season's numeric deltas (target mult, restock base cost, boss floor)
+    /// The season's numeric deltas (base target, restock base cost, boss floor)
     /// are folded in here so `RunState::new` and the shop never reach back to
     /// the season enum directly.
     /// Apply the mode's shop price multiplier to a base price. Returns at
@@ -77,9 +76,9 @@ impl GameMode {
             TileMaterial::Plastic => (0, 1, 0),
             TileMaterial::TortoiseShell => (0, 0, 10),
         };
-        // Apply the season's base-target multiplier once here; per-ante growth is
+        // Season sets the run's wing-1 chip base; per-wing growth is
         // `core::chamber_target::TARGET_SCALING`.
-        let base_target = ((DEFAULT_BASE_TARGET as f32) * season.base_target_mult()).round() as u32;
+        let base_target = season.base_target();
         Self {
             starting_yen: STARTING_GOLD + bonus_gold,
             starting_plays: STARTING_PLAYS + bonus_plays,
@@ -104,7 +103,7 @@ mod tests {
     fn spring_is_baseline() {
         let m = GameMode::standard();
         assert_eq!(m.season, Season::Spring);
-        assert_eq!(m.base_target, DEFAULT_BASE_TARGET);
+        assert_eq!(m.base_target, Season::Spring.base_target());
         assert!((m.price_multiplier - 1.0).abs() < 1e-6);
     }
 
@@ -112,10 +111,7 @@ mod tests {
     fn winter_scales_target() {
         let m = GameMode::with_material_and_season(TileMaterial::Bamboo, Season::Winter);
         assert_eq!(m.season, Season::Winter);
-        assert_eq!(
-            m.base_target,
-            ((DEFAULT_BASE_TARGET as f32) * 2.0).round() as u32
-        );
+        assert_eq!(m.base_target, Season::Winter.base_target());
         assert!((m.price_multiplier - 1.0).abs() < 1e-6);
     }
 

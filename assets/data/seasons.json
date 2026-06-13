@@ -3,31 +3,31 @@
     "id": "spring",
     "label": "Spring",
     "description": "Baseline difficulty.",
-    "base_target_mult": 1.0,
+    "base_target": 500,
     "restock_base_cost": 3,
     "ordeal_min_wing_floor": 0
   },
   {
     "id": "summer",
     "label": "Summer",
-    "description": "+25% targets.",
-    "base_target_mult": 1.25,
+    "description": "+100% targets.",
+    "base_target": 1000,
     "restock_base_cost": 3,
     "ordeal_min_wing_floor": 0
   },
   {
     "id": "autumn",
     "label": "Autumn",
-    "description": "+50% targets, +¥1 restock cost, earlier ordeals.",
-    "base_target_mult": 1.5,
+    "description": "+150% targets, +¥1 restock cost, earlier ordeals.",
+    "base_target": 1500,
     "restock_base_cost": 4,
     "ordeal_min_wing_floor": 1
   },
   {
     "id": "winter",
     "label": "Winter",
-    "description": "+100% targets, +¥2 restock cost, earliest ordeals.",
-    "base_target_mult": 2.0,
+    "description": "+200% targets, +¥2 restock cost, earliest ordeals.",
+    "base_target": 2000,
     "restock_base_cost": 5,
     "ordeal_min_wing_floor": 2
   }

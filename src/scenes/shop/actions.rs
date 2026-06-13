@@ -175,6 +175,10 @@ impl ShopScene {
         if mode != ShopMode::Tutorial {
             run.chronicle.note_shop_visit();
         }
+        // Ribbon celebrations from hallway tags may have left deferred popup
+        // state on older builds; never replay that on a fresh shop entry.
+        run.finished_zodiac_celebration = None;
+        run.pending_shop_focus_snap_after_celebration = false;
         let shop = GameEngine::read_shop(run);
         let extra_relics = GameEngine::shop_extra_relic_stock(run);
         let (mut items, zodiac_items, talisman_items, pack_items) = if mode == ShopMode::Tutorial {
@@ -529,11 +533,9 @@ impl ShopScene {
             } => {
                 bus.push(crate::game::event_bus::GameEvent::ZodiacReveal);
                 *overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Showcase(
-                    ShowcaseScene::new(ShowcasePresenter::Zodiac(ZodiacPresenter::new(
-                        zodiac_kind,
-                        yaku_name,
-                        new_level,
-                    ))),
+                    ShowcaseScene::new(ShowcasePresenter::Zodiac(
+                        ZodiacPresenter::new_shop_purchase(zodiac_kind, yaku_name, new_level),
+                    )),
                 ))));
             }
         }

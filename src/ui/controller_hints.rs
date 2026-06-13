@@ -632,6 +632,41 @@ pub fn menu_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
         .into_segments()
 }
 
+/// Choose Your Tiles: spatial nav, LB/RB or Z/X to cycle tile material, then confirm.
+pub fn tile_select_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    let mut row = HintRow::new().push(navigate_bind(input_mode).into());
+    match input_mode {
+        InputMode::Controller => {
+            row = row.sep().push(
+                HintBind::alternatives(
+                    "tiles",
+                    vec![
+                        HintKey::Shoulder(ShoulderSide::Left),
+                        HintKey::Shoulder(ShoulderSide::Right),
+                    ],
+                )
+                .into(),
+            );
+        }
+        InputMode::Keyboard => {
+            row = row.sep().push(
+                HintBind::alternatives(
+                    "tiles",
+                    vec![
+                        HintKey::Keyboard("keyboard_z"),
+                        HintKey::Keyboard("keyboard_x"),
+                    ],
+                )
+                .into(),
+            );
+        }
+        InputMode::Cursor => {}
+    }
+    row.sep()
+        .push(confirm_bind(input_mode, "select").into())
+        .into_segments()
+}
+
 /// Back + scroll affordances for read-only scroll panes.
 pub fn back_scroll_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
     HintRow::new()

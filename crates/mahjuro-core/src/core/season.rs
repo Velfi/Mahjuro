@@ -3,7 +3,8 @@
 //! A season is a small bundle of numeric modifiers — no new rules system,
 //! no per-season relic or yaku pools. The three knobs are:
 //!
-//! * `base_target_mult` — scales `GameMode::base_target` once at `RunState::new`.
+//! * `base_target` — wing-1 Small Chamber chip base copied into `GameMode::base_target`
+//!   at `RunState::new`.
 //! * `restock_base_cost` — base shop restock price; each paid restock this visit
 //!   adds another `restock_base_cost` on top.
 //! * `ordeal_min_wing_floor` — reduces `OrdealDef::min_ante` in the filter in
@@ -40,7 +41,7 @@ struct SeasonPresentationRaw {
     id: Season,
     label: String,
     description: String,
-    base_target_mult: f32,
+    base_target: u32,
     #[serde(alias = "reroll_base_cost")]
     restock_base_cost: u32,
     ordeal_min_wing_floor: u32,
@@ -49,7 +50,7 @@ struct SeasonPresentationRaw {
 struct SeasonPresentation {
     label: &'static str,
     description: &'static str,
-    base_target_mult: f32,
+    base_target: u32,
     restock_base_cost: u32,
     ordeal_min_wing_floor: u32,
 }
@@ -66,7 +67,7 @@ fn season_presentations() -> &'static HashMap<Season, SeasonPresentation> {
                     SeasonPresentation {
                         label: Box::leak(r.label.into_boxed_str()),
                         description: Box::leak(r.description.into_boxed_str()),
-                        base_target_mult: r.base_target_mult,
+                        base_target: r.base_target,
                         restock_base_cost: r.restock_base_cost,
                         ordeal_min_wing_floor: r.ordeal_min_wing_floor,
                     },
@@ -102,9 +103,9 @@ impl Season {
         season_presentation(self).description
     }
 
-    /// Base-target multiplier applied once at run start.
-    pub fn base_target_mult(self) -> f32 {
-        season_presentation(self).base_target_mult
+    /// Wing-1 Small Chamber chip base applied once at run start.
+    pub fn base_target(self) -> u32 {
+        season_presentation(self).base_target
     }
 
     /// Base restock cost in the shop — also the per-restock increment within a visit.
@@ -199,12 +200,12 @@ mod tests {
     }
 
     #[test]
-    fn multipliers_monotonic() {
-        let mut prev = 0.0f32;
+    fn base_targets_monotonic() {
+        let mut prev = 0u32;
         for s in Season::ALL {
-            let m = s.base_target_mult();
-            assert!(m >= prev, "base_target_mult not monotonic at {:?}", s);
-            prev = m;
+            let t = s.base_target();
+            assert!(t >= prev, "base_target not monotonic at {:?}", s);
+            prev = t;
         }
     }
 

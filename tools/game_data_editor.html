@@ -353,7 +353,7 @@
         "type": "string"
       },
       {
-        "key": "base_target_mult",
+        "key": "base_target",
         "type": "number",
         "step": "any"
       },
@@ -629,7 +629,7 @@
       if (!s || typeof s !== "object") return null;
       if ("mult_bonus" in s && "chip_bonus" in s) return "yaku";
       if ("tier" in s && "min_ante" in s) return "bosses";
-      if ("label" in s && "base_target_mult" in s) return "seasons";
+      if ("label" in s && "base_target" in s) return "seasons";
       if ("texture_file" in s) return "tile_packs";
       if (Array.isArray(s.accent) && s.accent.length) return "talismans";
       if ("gold_value" in s) return "tags";

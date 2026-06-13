@@ -690,8 +690,8 @@ pub fn run_detail_model(
             ));
         }
         score_lines.push(format!(
-            "Boss mult ×{:.2} · Season mult ×{:.2}",
-            snap.boss_mult_factor, snap.season_mult_factor
+            "Boss mult ×{:.2} · Season base {}",
+            snap.boss_mult_factor, snap.season_base_target
         ));
         score_lines.push(format!("Total {} chips", format_score(snap.total)));
     } else {

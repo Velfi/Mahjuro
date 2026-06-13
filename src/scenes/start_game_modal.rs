@@ -10,7 +10,9 @@ use crate::persistence::TileMaterial;
 use crate::render::theme::{ButtonState, ButtonVariant, button_colors, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
-use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
+use crate::ui::controller_hints::{
+    HintStyle, menu_footer_row, push_screen_footer_hint, tile_select_footer_row,
+};
 use crate::ui::focus_nav;
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, TextStyle};
@@ -699,10 +701,27 @@ impl SceneBehavior for TileSelectScene {
         let items = self.flat_items(w, h, ctx.progress, &self.positions);
         self.ensure_tree_focus(&items);
 
+        let mut tree_actions = Vec::new();
+        if self.tutorial_mode {
+            tree_actions.extend_from_slice(ctx.actions);
+        } else {
+            for &a in ctx.actions {
+                match a {
+                    UiAction::TabPrev | UiAction::InvertSelection => {
+                        self.activate_focus(ModalAction::MaterialPrev, &mut ctx);
+                    }
+                    UiAction::TabNext | UiAction::Delete => {
+                        self.activate_focus(ModalAction::MaterialNext, &mut ctx);
+                    }
+                    other => tree_actions.push(other),
+                }
+            }
+        }
+
         let action = self.tree.update_flat(
             &items,
             TreeInput {
-                actions: ctx.actions,
+                actions: &tree_actions,
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (w, h),
@@ -918,9 +937,9 @@ impl SceneBehavior for TileSelectScene {
         frame.quads(instances);
         frame.texts(text_labels);
         frame.tile_material_override = Some(self.material);
-        // Key light positioned above the tile cluster so the warm specular
-        // falls on the tiles themselves rather than puddling on the wood
-        // floor in front. Intensity dialed back so the hero art reads clean.
+        frame.showcase_render_hints.doc_tile_no_shadow = true;
+        // Soft key above the tile cluster — wide radius + parchment fill like
+        // guide / tutorial doc tiles so the preview reads on the black void.
         let kl = &self.positions.key_light;
         let (key_px, key_py) = layout_px_py_from_norm(w, h, kl.nx, kl.ny);
         let key_light = LayoutAnchorPx {
@@ -930,21 +949,21 @@ impl SceneBehavior for TileSelectScene {
         };
         frame.scene_lighting.set_smooth_points(vec![PointLight {
             pos: key_light.to_draw_cmd_triple(),
-            radius: h * 1.80,
-            color: [1.00, 0.88, 0.62],
-            intensity: 1.05,
+            radius: h * 3.0,
+            color: color::rgb(color::PARCHMENT),
+            intensity: 2.56,
         }]);
         let items = self.flat_items(w, h, ctx.progress, &self.positions);
         let mut buttons = Vec::new();
         self.tree.register_flat_buttons(&items, &mut buttons);
         frame.buttons = buttons;
         ctx.stash_focus_nav_tree_flat(&self.tree, &items, |a| format!("{a:?}"));
-        push_screen_footer_hint(
-            &mut frame,
-            &ctx,
-            menu_footer_row(ctx.input_mode),
-            HintStyle::standard(w, h),
-        );
+        let footer = if self.tutorial_mode {
+            menu_footer_row(ctx.input_mode)
+        } else {
+            tile_select_footer_row(ctx.input_mode)
+        };
+        push_screen_footer_hint(&mut frame, &ctx, footer, HintStyle::standard(w, h));
         frame.window_title = if self.tutorial_mode {
             "Mahjuro — Tutorial Prompt".into()
         } else {
