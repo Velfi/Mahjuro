@@ -121,6 +121,19 @@ impl App {
                 self.run.consumables.items.clear();
                 log::debug!("Cleared all consumables");
             }
+            DebugAction::FillRandomInventory => {
+                self.run.cheat_fill_random_relics_and_talismans();
+                log::debug!(
+                    "Filled inventory with {} relic(s) and {} talisman(s)",
+                    self.run.relics.active.len(),
+                    self.run
+                        .consumables
+                        .items
+                        .iter()
+                        .filter(|c| matches!(c, crate::core::consumable::Consumable::Talisman(_)))
+                        .count()
+                );
+            }
             DebugAction::ToggleShowFps => {
                 self.debug.show_fps = !self.debug.show_fps;
                 log::debug!("Show FPS: {}", self.debug.show_fps);

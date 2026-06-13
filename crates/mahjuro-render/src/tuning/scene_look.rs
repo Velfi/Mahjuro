@@ -180,6 +180,7 @@ pub const GLTF_ENV_SCENE_KEYS: &[&str] = &[
 pub const DOC_TILE_SCENE_KEYS: &[&str] = &[
     "guide",
     "yaku_journal",
+    "wall_ledger",
     "tile_anchor_lab",
     "tile_stress_lab",
     "material_viewer",

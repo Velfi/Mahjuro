@@ -9,13 +9,13 @@ use crate::render::doc_tile_camera::TOP_DOWN_TILE_ROTATION;
 use crate::render::draw_cmd::{ShowcaseTilePlacement, UiFrame};
 use crate::render::theme::{color, typography};
 use crate::render::vocabulary_colors::GlossaryMode;
-use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign};
+use crate::render::wgpu_renderer::{TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::ui::styled_text::{
     StyledBlockStyle, push_styled_text_block_at_font_px, styled_line_block_height_at_font_px,
 };
 
 use super::super::layout::{LEDGER_FOCUS_GLOW, LEDGER_FOCUS_OUTLINE, WallLayout, text_line_h};
-use super::text::{push_plaque, push_text_maybe_clip};
+use super::text::{push_clipped_quad, push_plaque_clipped, push_text_maybe_clip};
 use super::tile_placement::{ledger_tile_brightness, showcase_tile_center_in_rect};
 
 pub fn draw_wall_detail_panel(
@@ -34,12 +34,13 @@ pub fn draw_wall_detail_panel(
 ) {
     let clip = Some(scroll_clip);
     if rect_intersects(rect, scroll_clip) {
-        frame.quad(GpuInstance {
-            rect: [rect[0], rect[1], rect[2], 3.0],
-            color: color::alpha(color::BRASS, 0.44),
-            user: 0,
-        });
-        push_plaque(frame, rect, 0.88);
+        push_clipped_quad(
+            frame,
+            [rect[0], rect[1], rect[2], 3.0],
+            color::alpha(color::BRASS, 0.44),
+            scroll_clip,
+        );
+        push_plaque_clipped(frame, rect, 0.88, scroll_clip);
     }
 
     let pad = 10.0;
@@ -77,6 +78,7 @@ pub fn draw_wall_detail_panel(
             representative,
             window_w,
             window_h,
+            scroll_clip,
         );
     }
     y = preview_rect[1] + preview_rect[3] + 10.0;
@@ -142,7 +144,7 @@ pub fn draw_wall_detail_panel(
 
     y += 6.0;
     if rect_intersects([rect[0] + pad, y, inner_w, 1.0], scroll_clip) {
-        push_divider(frame, rect[0] + pad, y, inner_w);
+        push_divider(frame, rect[0] + pad, y, inner_w, scroll_clip);
     }
     y += 8.0;
 
@@ -187,8 +189,13 @@ pub fn draw_wall_detail_panel(
 
 const COPIES_COL_GAP: f32 = 12.0;
 const COPIES_COL_INSET: f32 = 8.0;
-const COPIES_VALUE_W: f32 = 40.0;
+/// Width for numeric values (`100.0%`, modifier counts). Sized for [`WallLayout::count_px`].
+fn copies_value_col_w(col_w: f32, count_px: f32) -> f32 {
+    let need = count_px * 4.6 * 0.58;
+    need.clamp(52.0, col_w * 0.44)
+}
 const COPIES_BLOCK_PAD_V: f32 = 7.0;
+const COPIES_HEADER_DATA_GAP: f32 = 4.0;
 
 fn copies_row_count(mode: WallLedgerMode) -> usize {
     let copy_rows = if mode.shows_round_locations() { 4 } else { 1 };
@@ -196,16 +203,19 @@ fn copies_row_count(mode: WallLedgerMode) -> usize {
 }
 
 fn copies_row_h(layout: &WallLayout) -> f32 {
-    text_line_h(layout.caption_px) + 3.0
+    text_line_h(layout.caption_px)
+        .max(text_line_h(layout.count_px))
+        + 3.0
 }
 
 fn copies_micro_header_h(layout: &WallLayout) -> f32 {
-    text_line_h(layout.caption_px) + 2.0
+    text_line_h(layout.caption_px)
 }
 
 pub(crate) fn copies_panel_height(layout: &WallLayout, mode: WallLedgerMode) -> f32 {
     COPIES_BLOCK_PAD_V * 2.0
         + copies_micro_header_h(layout)
+        + COPIES_HEADER_DATA_GAP
         + copies_row_h(layout) * copies_row_count(mode) as f32
 }
 
@@ -232,21 +242,27 @@ fn draw_copies_panel(
     let block_h = copies_panel_height(layout, mode);
     let block_rect = [block_x, y, inner_w, block_h];
 
-    if rect_intersects(block_rect, scroll_clip) {
-        frame.quad(GpuInstance {
-            rect: block_rect,
-            color: color::alpha(color::WALNUT_INK, 0.42),
-            user: 0,
-        });
-        push_border(frame, block_rect, 1.0, color::alpha(color::BRASS, 0.14));
-        let data_top = y + COPIES_BLOCK_PAD_V + micro_h;
-        let data_h = block_h - COPIES_BLOCK_PAD_V * 2.0 - micro_h;
-        frame.quad(GpuInstance {
-            rect: [divider_x - 0.5, data_top, 1.0, data_h],
-            color: color::alpha(color::BRASS, 0.28),
-            user: 0,
-        });
-    }
+    push_clipped_quad(
+        frame,
+        block_rect,
+        color::alpha(color::WALNUT_INK, 0.42),
+        scroll_clip,
+    );
+    push_border(
+        frame,
+        block_rect,
+        1.0,
+        color::alpha(color::BRASS, 0.14),
+        scroll_clip,
+    );
+    let data_top = y + COPIES_BLOCK_PAD_V + micro_h + COPIES_HEADER_DATA_GAP;
+    let data_h = block_h - COPIES_BLOCK_PAD_V * 2.0 - micro_h - COPIES_HEADER_DATA_GAP;
+    push_clipped_quad(
+        frame,
+        [divider_x - 0.5, data_top, 1.0, data_h],
+        color::alpha(color::BRASS, 0.28),
+        scroll_clip,
+    );
 
     let micro_y = y + COPIES_BLOCK_PAD_V;
     let micro_color = color::alpha(color::BRASS, 0.62);
@@ -295,7 +311,7 @@ fn draw_copies_panel(
         ("Poly", details.modifiers.polychrome, color::keyword::FLOWER),
     ];
     let row_count = copies_row_count(mode);
-    let data_top = y + COPIES_BLOCK_PAD_V + micro_h;
+    let data_top = y + COPIES_BLOCK_PAD_V + micro_h + COPIES_HEADER_DATA_GAP;
 
     for row_idx in 0..row_count {
         let row_y = data_top + row_idx as f32 * row_h;
@@ -391,13 +407,20 @@ fn draw_stat_row(
     clip: Option<[f32; 4]>,
     header_only: bool,
 ) {
-    let line = text_line_h(layout.caption_px);
+    let label_line = text_line_h(layout.caption_px);
+    let value_line = text_line_h(layout.count_px);
+    let row_line = if header_only {
+        label_line
+    } else {
+        label_line.max(value_line)
+    };
+    let value_w = copies_value_col_w(col_w, layout.count_px);
     let label_x = x + COPIES_COL_INSET;
-    let value_x = x + col_w - COPIES_COL_INSET - COPIES_VALUE_W;
+    let value_x = x + col_w - COPIES_COL_INSET - value_w;
     let label_w = (value_x - label_x - 6.0).max(1.0);
-    push_text_maybe_clip(
+    push_stat_text(
         texts,
-        [label_x, y, label_w, line],
+        [label_x, y, label_w, row_line],
         label,
         layout.caption_px,
         label_color,
@@ -406,17 +429,47 @@ fn draw_stat_row(
         clip,
     );
     if !header_only {
-        push_text_maybe_clip(
+        push_stat_text(
             texts,
-            [value_x, y, COPIES_VALUE_W, line],
+            [value_x, y, value_w, row_line],
             value,
-            layout.caption_px,
+            layout.count_px,
             value_color,
             value_emphasis,
             TextAlign::Right,
             clip,
         );
     }
+}
+
+fn push_stat_text(
+    texts: &mut Vec<TextLabel>,
+    rect: [f32; 4],
+    text: &str,
+    font_px: f32,
+    color: [f32; 4],
+    bold: bool,
+    align: TextAlign,
+    clip: Option<[f32; 4]>,
+) {
+    texts.push(TextLabel {
+        rect,
+        text: text.to_string(),
+        color,
+        font_px: Some(font_px),
+        align,
+        block_vertical_align: TextBlockVerticalAlign::Top,
+        scroll_offset: 0.0,
+        flavor_spans: None,
+        bold,
+        italic: false,
+        underline: false,
+        text_effect: crate::render::text_effect::TextEffectId::Flat,
+        rotation_quarters: 0,
+        baseline_shift_px: 0.0,
+        clip_rect: clip,
+        mono: false,
+    });
 }
 
 fn rect_intersects(a: [f32; 4], b: [f32; 4]) -> bool {
@@ -432,23 +485,32 @@ fn draw_tile_preview(
     representative: Option<&Tile>,
     window_w: f32,
     window_h: f32,
+    scroll_clip: [f32; 4],
 ) {
-    frame.quad(GpuInstance {
-        rect: [
+    push_clipped_quad(
+        frame,
+        [
             preview_rect[0] - 3.0,
             preview_rect[1] - 3.0,
             preview_rect[2] + 6.0,
             preview_rect[3] + 6.0,
         ],
-        color: LEDGER_FOCUS_GLOW,
-        user: 0,
-    });
-    frame.quad(GpuInstance {
-        rect: preview_rect,
-        color: color::alpha(color::WALNUT_INK, 0.55),
-        user: 0,
-    });
-    push_border(frame, preview_rect, 1.0, color::alpha(color::STONE, 0.16));
+        LEDGER_FOCUS_GLOW,
+        scroll_clip,
+    );
+    push_clipped_quad(
+        frame,
+        preview_rect,
+        color::alpha(color::WALNUT_INK, 0.55),
+        scroll_clip,
+    );
+    push_border(
+        frame,
+        preview_rect,
+        1.0,
+        color::alpha(color::STONE, 0.16),
+        scroll_clip,
+    );
 
     let exhausted = details.remaining == 0;
     if let Some(tile) = representative {
@@ -471,51 +533,48 @@ fn draw_tile_preview(
             overlay_rect_group: None,
         });
     }
-    push_border(frame, preview_rect, 1.5, LEDGER_FOCUS_OUTLINE);
+    push_border(frame, preview_rect, 1.5, LEDGER_FOCUS_OUTLINE, scroll_clip);
     push_focus_corner(
         frame,
         preview_rect[0] + preview_rect[2] - 6.0,
         preview_rect[1] + 4.0,
+        scroll_clip,
     );
 }
 
-fn push_divider(frame: &mut UiFrame, x: f32, y: f32, w: f32) {
-    frame.quad(GpuInstance {
-        rect: [x, y, w, 1.0],
-        color: color::alpha(color::STONE, 0.14),
-        user: 0,
-    });
+fn push_divider(frame: &mut UiFrame, x: f32, y: f32, w: f32, clip: [f32; 4]) {
+    push_clipped_quad(
+        frame,
+        [x, y, w, 1.0],
+        color::alpha(color::STONE, 0.14),
+        clip,
+    );
 }
 
-fn push_focus_corner(frame: &mut UiFrame, x: f32, y: f32) {
-    frame.quad(GpuInstance {
-        rect: [x, y, 4.0, 4.0],
-        color: color::alpha(LEDGER_FOCUS_OUTLINE, 0.85),
-        user: 0,
-    });
+fn push_focus_corner(frame: &mut UiFrame, x: f32, y: f32, clip: [f32; 4]) {
+    push_clipped_quad(
+        frame,
+        [x, y, 4.0, 4.0],
+        color::alpha(LEDGER_FOCUS_OUTLINE, 0.85),
+        clip,
+    );
 }
 
-fn push_border(frame: &mut UiFrame, rect: [f32; 4], t: f32, c: [f32; 4]) {
-    frame.quad(GpuInstance {
-        rect: [rect[0], rect[1], rect[2], t],
-        color: c,
-        user: 0,
-    });
-    frame.quad(GpuInstance {
-        rect: [rect[0], rect[1] + rect[3] - t, rect[2], t],
-        color: c,
-        user: 0,
-    });
-    frame.quad(GpuInstance {
-        rect: [rect[0], rect[1], t, rect[3]],
-        color: c,
-        user: 0,
-    });
-    frame.quad(GpuInstance {
-        rect: [rect[0] + rect[2] - t, rect[1], t, rect[3]],
-        color: c,
-        user: 0,
-    });
+fn push_border(frame: &mut UiFrame, rect: [f32; 4], t: f32, c: [f32; 4], clip: [f32; 4]) {
+    push_clipped_quad(frame, [rect[0], rect[1], rect[2], t], c, clip);
+    push_clipped_quad(
+        frame,
+        [rect[0], rect[1] + rect[3] - t, rect[2], t],
+        c,
+        clip,
+    );
+    push_clipped_quad(frame, [rect[0], rect[1], t, rect[3]], c, clip);
+    push_clipped_quad(
+        frame,
+        [rect[0] + rect[2] - t, rect[1], t, rect[3]],
+        c,
+        clip,
+    );
 }
 
 fn modifier_summary(m: &ModifierBreakdown) -> Option<String> {

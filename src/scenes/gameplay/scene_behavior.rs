@@ -922,11 +922,17 @@ impl SceneBehavior for GameplayScene {
             let mut hand_placements: Vec<crate::render::draw_cmd::ShowcaseTilePlacement> =
                 Vec::with_capacity(hand.len());
             let staging_preview_anchors = if meld_preview {
+                let layout_sets = if self.staging_layout.is_valid_meld {
+                    &self.yaku_preview_cache.sets
+                } else {
+                    &gameplay.structure_sets
+                };
                 input_handler::staging_preview_anchors_for_groups(
                     &glb_anchors.structure_marker_poses,
                     layout,
                     layout_scale,
                     env_h,
+                    layout_sets,
                     &gameplay.structure_sets,
                     &self.staging_layout.meld_index_groups,
                 )
