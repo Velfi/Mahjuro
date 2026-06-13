@@ -1,4 +1,6 @@
 // Xbox-style projected shadow sampling — one 2D depth layer per punctual caster.
+// `shadow_globals.params.z` PCF mode: `> 0` = 9-tap (High / Visuals), `< 0` = 4-tap at |z|
+// (Medium), `<= -1` = single compare tap (Low / `MAHJURO_LIT_MESH_PROFILE=no_pcf`).
 
 struct ShadowGlobals {
     params: vec4<f32>,
@@ -45,7 +47,21 @@ fn sample_projected_depth(
         return 1.0;
     }
     let depth_ref = proj.z - bias;
-    let texel = shadow_globals.params.z;
+    let pcf_cfg = shadow_globals.params.z;
+    if (pcf_cfg <= -1.0) {
+        return textureSampleCompareLevel(depth_tex, shadow_samp, uv, layer, depth_ref);
+    }
+    let texel = abs(pcf_cfg);
+    if (pcf_cfg < 0.0) {
+        var sum4 = 0.0;
+        for (var dy = 0; dy <= 1; dy = dy + 1) {
+            for (var dx = 0; dx <= 1; dx = dx + 1) {
+                let off = vec2<f32>(f32(dx) - 0.5, f32(dy) - 0.5) * texel;
+                sum4 = sum4 + textureSampleCompareLevel(depth_tex, shadow_samp, uv + off, layer, depth_ref);
+            }
+        }
+        return sum4 / 4.0;
+    }
     var sum = 0.0;
     for (var dy = -1; dy <= 1; dy = dy + 1) {
         for (var dx = -1; dx <= 1; dx = dx + 1) {

@@ -216,7 +216,7 @@ struct LitMeshFrameGlobals {
     hdr_tonemap: vec4<f32>,
     // x = 1/shop_env_world_scale for embedded glTF punctual (document-space falloff); 0 = world units.
     // y = shop catalog balance: 0 off, 1 storeroom shelf (`DISPLAY_CASE_STOREROOM`).
-    // z = catalog ambient mul; w = reserved.
+    // z = catalog ambient mul; w = headless profile flags (see `lit_mesh_profile.rs`).
     shop_punctual: vec4<f32>,
 };
 @group(3) @binding(1) var<uniform> lit_mesh_frame: LitMeshFrameGlobals;
@@ -1753,7 +1753,15 @@ fn fs_main(
     let coat_f0 = 0.04;
 
     let pt_n_main = lights.count.x;
+    let profile_flags = u32(lit_mesh_frame.shop_punctual.w + 0.5);
+    const PROF_NO_PER_LIGHT_SHADOW: u32 = 1u;
+    const PROF_NO_COMBINED_SHADOW: u32 = 2u;
+    const PROF_NO_SPEC: u32 = 4u;
+    const PROF_ONE_LIGHT: u32 = 8u;
     for (var i: u32 = 0u; i < pt_n_main; i = i + 1u) {
+        if ((profile_flags & PROF_ONE_LIGHT) != 0u && i > 0u) {
+            break;
+        }
         let pl = lights.lights[i];
         let point_sample = scene_pbr_sample_point_light(
             in.world_pos,
@@ -1775,7 +1783,8 @@ fn fs_main(
         let nl = max(ndl_raw, 0.0);
         let lambert = scene_punctual_diffuse_weight(ndl_raw);
         // Live punctual depth maps only (same path as the shadow & AO lab).
-        let projected_shadows_on = shadow_globals.params.x > 0.5;
+        let projected_shadows_on = shadow_globals.params.x > 0.5
+            && (profile_flags & PROF_NO_PER_LIGHT_SHADOW) == 0u;
         let cand_vis = select(
             1.0,
             punctual_shadow_vis(i, in.world_pos),
@@ -1819,7 +1828,7 @@ fn fs_main(
                 + radiance * back * back_thinness * back_scale * cand_vis;
         }
 
-        if (spec_strength > 0.001) {
+        if (spec_strength > 0.001 && (profile_flags & PROF_NO_SPEC) == 0u) {
             let h = normalize(l_dir + view_dir);
             let nh = max(dot(n, h), 0.0);
             // Two-lobe Blinn-Phong: a sharp grain highlight plus a
@@ -2255,7 +2264,7 @@ fn fs_main(
             back_acc = back_acc + sc * back_sp * back_thinness * back_scale;
         }
 
-        if (spec_strength > 0.001) {
+        if (spec_strength > 0.001 && (profile_flags & PROF_NO_SPEC) == 0u) {
             let h_sp = normalize(l_dir + view_dir);
             let nh_sp = max(dot(n, h_sp), 0.0);
             let sharp_sp = pow(nh_sp, spec_power);
@@ -2546,15 +2555,8 @@ fn fs_main(
         albedo = mix(albedo, warm_edge, rim);
     }
 
-    // Legacy combined min-shadow across all punctual depth layers. Per-light
-    // `punctual_shadow_vis` above already samples the correct layer per light;
-    // applying combined again double-darkens and reads misaligned maps as black slabs.
-    let projected_shadows_on = shadow_globals.params.x > 0.5;
-    var shadow_vis = select(
-        combined_mesh_shadow_vis(in.world_pos),
-        1.0,
-        projected_shadows_on,
-    );
+    // Per-light `punctual_shadow_vis` in the loop above — do not min all caster
+    // frustums on direct lighting (misaligns multi-light maps; same rule as tile_3d).
     // Offline `.msh` contact AO grounds catalog props on room surfaces (shop
     // counter, gameplay table edge) the same way `room_glb.wgsl` does for shells.
     let baked_contact_raw = sample_contact_ao(in.world_pos);
@@ -2563,7 +2565,7 @@ fn fs_main(
         baked_contact_raw,
         select(1.0, 0.32, shop_catalog_stock),
     );
-    let lit_shadowed = lit * shadow_vis * baked_contact;
+    let lit_shadowed = lit * baked_contact;
 
     var material_metallic = 0.0;
     if (is_conductor || is_goldnug) {
@@ -2605,13 +2607,21 @@ fn fs_main(
         baked_contact,
         select(0.60, 0.30, shop_catalog_stock),
     );
+    // Baked-shop rooms: dynamic props shadow ambient fill only (`room_glb.wgsl` path).
+    let dynamic_receiver_on = shadow_globals.params.w > 0.001
+        && (profile_flags & PROF_NO_COMBINED_SHADOW) == 0u;
+    let room_receiver_shadow_vis = select(
+        1.0,
+        dynamic_receiver_shadow_vis(in.world_pos),
+        dynamic_receiver_on,
+    );
     let shared_indirect = scene_world_hemisphere_lighting(
         n,
         albedo,
         material_metallic,
         scene_indirect_scale,
         scene_indirect_exposure,
-    ) * diffuse_scale * indirect_contact;
+    ) * diffuse_scale * indirect_contact * room_receiver_shadow_vis;
     let catalog_probe_indirect =
         albedo
         * shop_probe_irradiance
@@ -2627,7 +2637,7 @@ fn fs_main(
         material_roughness,
         scene_indirect_scale,
         scene_indirect_exposure,
-    ) * env_fresnel * env_spec_strength * indirect_contact;
+    ) * env_fresnel * env_spec_strength * indirect_contact * room_receiver_shadow_vis;
     // Reinhard-knee the coat accumulator on wood: with many candles
     // contributing additive white highlights, the lacquer lobe was
     // piling up past 1.0 and milkifying the deep walnut. The knee

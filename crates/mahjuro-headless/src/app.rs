@@ -8,6 +8,7 @@ use mahjuro::game::event_bus::EventBus;
 use mahjuro::game::run::RunState;
 use mahjuro::main_render_settings::RenderSettings;
 use mahjuro::persistence;
+use mahjuro::persistence::{GraphicsMode, ShadowQuality};
 use mahjuro::render::animation::AnimationController;
 use mahjuro::render::draw_cmd::{UiFrame, apply_modal_relic_staging};
 use mahjuro::render::wgpu_renderer::WgpuRenderer;
@@ -79,6 +80,7 @@ impl HeadlessApp {
         progress: mahjuro::core::progression::PlayerProgress,
     ) -> anyhow::Result<Self> {
         let settings = persistence::load_settings();
+        let graphics_mode = GraphicsMode::from_env_override().unwrap_or(settings.graphics_mode);
         let renderer = WgpuRenderer::new(mahjuro::render::wgpu_renderer::TargetInit::Headless {
             width,
             height,
@@ -99,7 +101,7 @@ impl HeadlessApp {
                 tile_material: settings.tile_material,
                 tileset_name: settings.tileset_name.clone(),
                 gamma: settings.gamma,
-                graphics_mode: settings.graphics_mode,
+                graphics_mode,
                 hdr_enabled: settings.hdr_enabled,
                 vhs_enabled: false,
             },
@@ -497,7 +499,7 @@ impl HeadlessApp {
             .tile_material_override
             .unwrap_or(self.gfx.tile_material);
         let active_tileset_name = self.gfx.tileset_name.clone();
-        let render_settings = self.effect_layers.wgpu_render_settings(
+        let mut render_settings = self.effect_layers.wgpu_render_settings(
             &mahjuro::effect_layers::WgpuRenderSettingsParams {
                 gfx: &self.gfx,
                 tile_preset: self.gfx.tile_preset,
@@ -507,6 +509,18 @@ impl HeadlessApp {
                 sort_settle_speed: 10.0,
             },
         );
+        if let Some(shadow_quality) = std::env::var("MAHJURO_HEADLESS_SHADOW_QUALITY")
+            .ok()
+            .as_deref()
+            .and_then(|raw| match raw {
+                "off" => Some(ShadowQuality::Off),
+                "low" => Some(ShadowQuality::Low),
+                "high" => Some(ShadowQuality::High),
+                _ => None,
+            })
+        {
+            render_settings.shadow_quality = shadow_quality;
+        }
         if let Err(e) = self.renderer.render(&frame, render_settings) {
             log::error!("headless render: {e:?}");
         }
@@ -524,6 +538,27 @@ impl HeadlessApp {
         warmup_frames: u32,
     ) -> anyhow::Result<()> {
         self.run_warmup(warmup_frames);
+        if let Some(profile_frames) = std::env::var("MAHJURO_HEADLESS_GPU_PROFILE_FRAMES")
+            .ok()
+            .and_then(|raw| raw.parse::<u32>().ok())
+            .filter(|frames| *frames > 0)
+        {
+            self.renderer.start_gpu_profile(profile_frames);
+            let mut done = false;
+            for _ in 0..(profile_frames + 32) {
+                self.tick();
+                if self.renderer.take_gpu_profile_just_completed() {
+                    done = true;
+                    break;
+                }
+            }
+            if !done {
+                log::warn!(
+                    "headless screenshot: GPU profile did not complete within {} ticks",
+                    profile_frames + 32
+                );
+            }
+        }
         self.renderer.queue_screenshot(output.clone());
         self.tick();
         if self.renderer.screenshot_pending() {
