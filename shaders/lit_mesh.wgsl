@@ -19,6 +19,7 @@
 //   21.0 = chitin      — abalone talisman tablets (oily iridescence / memorial stone)
 //   20.0 = emissive    — additive self-illumination (strength in specular_strength)
 //   23.0 = bronze_mirror — gameplay play mirror (conductor + view Fresnel + jade rim)
+//   24.0 = catalog paper — textured washi / paper shop stock balanced with catalog lighting
 //
 // All material variants share the candle/spot point-light loop from the tile
 // shader so the new geometry catches the same warm pools as the hand tiles.
@@ -38,7 +39,8 @@ struct MeshUniform {
 @group(0) @binding(0) var<uniform> mesh: MeshUniform;
 @group(0) @binding(1) var albedo_tex: texture_2d<f32>;
 @group(0) @binding(2) var albedo_samp: sampler;
-/// Relic relief data (linear): `.r` = height, `.g` = specular mask (soft-enamel pins).
+/// Material map data (linear): `.r` = height, `.g` = specular mask / roughness,
+/// `.b` = material-specific mask (catalog-paper embroidery thread).
 @group(0) @binding(3) var relief_tex: texture_2d<f32>;
 
 struct PointLight {
@@ -214,7 +216,7 @@ struct LitMeshFrameGlobals {
     hdr_tonemap: vec4<f32>,
     // x = 1/shop_env_world_scale for embedded glTF punctual (document-space falloff); 0 = world units.
     // y = shop catalog balance: 0 off, 1 storeroom shelf (`DISPLAY_CASE_STOREROOM`).
-    // z = art-forward ambient mul; w = reserved.
+    // z = catalog ambient mul; w = reserved.
     shop_punctual: vec4<f32>,
 };
 @group(3) @binding(1) var<uniform> lit_mesh_frame: LitMeshFrameGlobals;
@@ -688,7 +690,8 @@ fn fs_main(
     //   7 = PackWrap, 8 = Foil, 9 = Glass, 10 = Enamel,
     //   11 = Jade, 12 = Moonstone, 13 = Pearl, 14 = GoldNugget,
     //   15 = Polychrome, 16 = Porcelain, 17 = Brass, 18 = Leather,
-    //   19 = FeltGreen (legacy), 20 = Emissive, 21 = Chitin, 22 = Unshaded
+    //   19 = FeltGreen (legacy), 20 = Emissive, 21 = Chitin, 22 = Unshaded,
+    //   23 = BronzeMirror, 24 = CatalogPaper
     let is_wax       = (kind > 0.5 && kind < 1.5);
     let is_wick      = (kind > 1.5 && kind < 2.5);
     let is_wood      = (kind > 2.5 && kind < 4.5);
@@ -713,6 +716,7 @@ fn fs_main(
     let is_chitin    = (kind > 20.5 && kind < 21.5);
     let is_unshaded  = (kind > 21.5 && kind < 22.5);
     let is_bronze_mirror = (kind > 22.5 && kind < 23.5);
+    let is_catalog_paper = (kind > 23.5 && kind < 24.5);
     let phys_hdr = clamp(lit_mesh_frame.hdr_tonemap.x, 0.0, 1.0);
     // Shop storeroom catalog balance (see `shop_catalog_balance` in lit_mesh.rs).
     let shop_display_case_tuning = phys_hdr > 0.5 && lit_mesh_frame.shop_punctual.y > 0.5;
@@ -752,13 +756,13 @@ fn fs_main(
     // the per-kind heightmap index used by the relief sampling (no per-kind
     // shader branching keys off it any more — each MaterialKind has its own
     // dedicated branch).
-    // ── Shop shelf catalog balance ─────────────────────────────────────
+    // ── Shop shelf catalog lighting ────────────────────────────────────
     // Storeroom row (`shop_punctual.y == 1`, see `shop_catalog_balance` in lit_mesh.rs):
-    //   spec_forward — pack wrap, foil, talisman: gloss/holo-led pull-back.
-    //   shop_cat_amb — catalog-prop hemisphere fill scale for the shared scene PBR helpers.
+    // catalog stock shares contact/ambient handling, while direct light remains
+    // the actual scene-light response for each material.
     let shop_cat_amb = lit_mesh_frame.shop_punctual.z;
-    let shop_spec_forward = shop_display_case_tuning
-        && (is_pack_wrap || is_foil || is_talisman);
+    let shop_catalog_stock = shop_display_case_tuning
+        && (is_enamel || is_pack_wrap || is_foil || is_talisman || is_catalog_paper);
     let has_decal = mesh.material_params.w > 0.5
         && !is_talisman
         && !is_foil
@@ -766,6 +770,15 @@ fn fs_main(
         && !is_enamel
         && !is_wick;
     var albedo = mesh.base_color.rgb * tex_rgb;
+    if (is_catalog_paper) {
+        // Catalog paper textures are full authored albedo, not decals over a
+        // procedural tint. `base_color.a` still carries instance opacity.
+        albedo = tex_rgb;
+    }
+    var catalog_paper_material = vec4<f32>(0.5, 0.92, 0.0, 1.0);
+    if (is_catalog_paper) {
+        catalog_paper_material = textureSampleLevel(relief_tex, albedo_samp, in.uv, 0.0);
+    }
     if (has_decal) {
         // Start from the flat base colour, ignore the texture multiply —
         // the procedural branch below may overwrite it for wood, and the
@@ -1113,6 +1126,25 @@ fn fs_main(
         let perturbed_local = normalize(vec3<f32>(-dhdu, 1.0, -dhdv));
         let perturbed_world = normalize((mesh.normal_model * vec4<f32>(perturbed_local, 0.0)).xyz);
         n = normalize(mix(n, perturbed_world, 0.45));
+    }
+
+    // ── Catalog paper relief ────────────────────────────────────────
+    // Zodiac ribbons bind a dedicated linear material map at `relief_tex`:
+    // R = paper / embroidery height, G = roughness, B = thread mask.
+    if (is_catalog_paper && abs(in.local_n.z) > 0.65) {
+        let dim = vec2<f32>(textureDimensions(relief_tex, 0));
+        let texel = vec2<f32>(1.0 / max(dim.x, 1.0), 1.0 / max(dim.y, 1.0));
+        let h_l = textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(-texel.x, 0.0), 0.0).r;
+        let h_r = textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>( texel.x, 0.0), 0.0).r;
+        let h_d = textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(0.0, -texel.y), 0.0).r;
+        let h_u = textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(0.0,  texel.y), 0.0).r;
+        let bump = mix(0.78, 1.22, clamp(catalog_paper_material.b, 0.0, 1.0));
+        let dhdu = (h_r - h_l) * bump;
+        let dhdv = (h_u - h_d) * bump;
+        let sgn = select(-1.0, 1.0, in.local_n.z >= 0.0);
+        let perturbed_local = normalize(vec3<f32>(-dhdu, -dhdv, sgn));
+        let perturbed_world = normalize((mesh.normal_model * vec4<f32>(perturbed_local, 0.0)).xyz);
+        n = normalize(mix(n, perturbed_world, 0.34));
     }
 
     // ── Porcelain crazing normal perturbation ───────────────────────
@@ -1904,6 +1936,17 @@ fn fs_main(
                     let sheen = pow(1.0 - ndv, 2.5) * pow(nh, 4.0) * 0.45;
                     spec_acc = spec_acc + shadowed_radiance * sheen * polish_tint;
                 }
+            } else if (is_catalog_paper) {
+                // Matte paper has a broad, low-energy fiber sheen. Keep it
+                // warm and weak so dark ink stays dark under shelf lights;
+                // embroidery threads get a slightly tighter glint from the
+                // material map's B channel.
+                let ndv = max(dot(n, view_dir), 0.0);
+                let thread = clamp(catalog_paper_material.b, 0.0, 1.0);
+                let fiber = pow(nh, mix(3.5, 7.0, thread)) * mix(0.040, 0.105, thread);
+                let grazing = pow(1.0 - ndv, 2.8) * pow(nh, 2.0) * mix(0.030, 0.050, thread);
+                let paper_tint = vec3<f32>(0.96, 0.88, 0.72);
+                spec_acc = spec_acc + shadowed_radiance * (fiber + grazing) * paper_tint * spec_strength;
             } else if (is_chitin) {
                 // Nacre sheen is in the talisman block below.
             } else if (!is_score_glyph) {
@@ -2267,6 +2310,9 @@ fn fs_main(
     if (is_enamel) {
         diffuse_scale = 0.82;
     }
+    if (is_catalog_paper) {
+        diffuse_scale = 0.96;
+    }
     if (is_moonstone) {
         // Moonstone: push diffuse even lower so the body sits dark and
         // lets the schiller/rim/SSS carry almost the entire lighting
@@ -2293,13 +2339,6 @@ fn fs_main(
     if (decal_metallic > 0.001) {
         diffuse_scale = mix(diffuse_scale, 0.12, decal_metallic);
     }
-    let shop_display_case_d = shop_display_case_tuning;
-    if (shop_spec_forward && (is_foil || is_pack_wrap)) {
-        diffuse_scale = diffuse_scale * 0.58;
-    }
-    if (shop_display_case_d && is_talisman && !is_chitin) {
-        diffuse_scale = diffuse_scale * 0.62;
-    }
     if (is_wood) {
         let f_view = coat_f0 + (1.0 - coat_f0) * pow(1.0 - ndv_view, 5.0);
         diffuse_scale = 1.0 - f_view * 0.6;
@@ -2311,25 +2350,6 @@ fn fs_main(
         // glossy coat instead. Reinhard-style soft knee preserves the
         // ratio between channels so the chroma stays warm.
         lit = lit / (vec3<f32>(1.0) + lit * 0.55);
-    }
-    // Shop display-case enamel: diffuse is already balanced vs foil via shadow floor + albedo tint;
-    // skip extra `lit` knee so relics don't fall to black next to spec-heavy props.
-    // Conductors: soften only extreme hot spec (metal props), not enough to kill readable highlights.
-    if (shop_display_case_tuning && is_conductor) {
-        spec_acc = spec_acc / (vec3<f32>(1.0) + spec_acc * 0.07);
-    }
-    // Shop catalog: pull spec-forward gloss/holo so art-forward relics and ribbons keep up.
-    if (shop_spec_forward) {
-        if (is_pack_wrap || is_foil) {
-            spec_acc = spec_acc * 0.30;
-            sheen_acc = sheen_acc * 0.30;
-        } else if (is_chitin) {
-            spec_acc = spec_acc * 0.92;
-            sheen_acc = sheen_acc * 0.95;
-        } else if (is_talisman) {
-            spec_acc = spec_acc * 0.26;
-            sheen_acc = sheen_acc * 0.26;
-        }
     }
     if (is_pack_wrap) {
         // Soft-knee the clearcoat peak so cover art stays readable under
@@ -2419,9 +2439,6 @@ fn fs_main(
             );
             albedo = mix(albedo, holo, rim);
         }
-        if (shop_display_case_tuning && !is_chitin) {
-            albedo = albedo * 0.86;
-        }
     }
     // Score-pop glyphs: animated vivid colour bands (chips blue, mult red).
     if (is_score_glyph) {
@@ -2475,9 +2492,6 @@ fn fs_main(
         // on shadowed edges, which the per-light spec can't deliver.
         let rim_gain = mix(albedo, albedo * 0.6 + holo * 0.5, rim);
         albedo = rim_gain;
-        if (shop_display_case_tuning) {
-            albedo = albedo * 0.84;
-        }
     }
     if (is_glass) {
         let edge = 1.0 - ndv_view;
@@ -2522,11 +2536,6 @@ fn fs_main(
     // Legacy combined min-shadow across all punctual depth layers. Per-light
     // `punctual_shadow_vis` above already samples the correct layer per light;
     // applying combined again double-darkens and reads misaligned maps as black slabs.
-    // Shop catalog: spec-forward props get less direct diffuse.
-    var lit_display_case = lit;
-    if (shop_spec_forward) {
-        lit_display_case = lit_display_case * 0.42;
-    }
     let projected_shadows_on = shadow_globals.params.x > 0.5;
     var shadow_vis = select(
         combined_mesh_shadow_vis(in.world_pos),
@@ -2539,9 +2548,9 @@ fn fs_main(
     let baked_contact = mix(
         1.0,
         baked_contact_raw,
-        select(1.0, 0.32, shop_display_case_tuning),
+        select(1.0, 0.32, shop_catalog_stock),
     );
-    let lit_shadowed = lit_display_case * shadow_vis * baked_contact;
+    let lit_shadowed = lit * shadow_vis * baked_contact;
 
     var material_metallic = 0.0;
     if (is_conductor || is_goldnug) {
@@ -2562,6 +2571,8 @@ fn fs_main(
         material_roughness = 0.20;
     } else if (is_foil) {
         material_roughness = 0.18;
+    } else if (is_catalog_paper) {
+        material_roughness = clamp(catalog_paper_material.g, 0.55, 0.98);
     }
 
     // Shared scene indirect. Room lightmaps pre-divide environment by exposure
@@ -2569,7 +2580,7 @@ fn fs_main(
     // catalog props remain visible under the embedded-room HDR path.
     let scene_indirect_scale = max(
         lit_mesh_frame.hdr_tonemap.z,
-        select(0.0, shop_cat_amb, shop_display_case_tuning),
+        select(0.0, shop_cat_amb, shop_catalog_stock),
     );
     let scene_indirect_exposure = select(
         1.0,
@@ -2579,7 +2590,7 @@ fn fs_main(
     let indirect_contact = mix(
         1.0,
         baked_contact,
-        select(0.60, 0.30, shop_display_case_tuning),
+        select(0.60, 0.30, shop_catalog_stock),
     );
     let shared_indirect = scene_world_hemisphere_lighting(
         n,
@@ -2672,15 +2683,17 @@ fn fs_main(
     if (is_unshaded) {
         rgb = albedo;
     } else {
-        rgb = rgb
-            + albedo * lit_shadowed * diffuse_scale
-            + shared_indirect
-            + shared_specular_indirect
+        let direct_rgb =
+            albedo * lit_shadowed * diffuse_scale
             + sss_acc * sss_tint
             + back_acc * back_tint
             + spec_final
             + coat_final
-            + sheen_acc
+            + sheen_acc;
+        rgb = rgb
+            + direct_rgb
+            + shared_indirect
+            + shared_specular_indirect
             + emissive;
     }
 

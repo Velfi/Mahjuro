@@ -712,11 +712,15 @@ pub(super) fn load_metal_heightmap(
 pub(super) struct ZodiacRibbonTextures {
     /// Keeps GPU textures alive so the views remain valid.
     pub _textures: Vec<wgpu::Texture>,
+    pub _material_textures: Vec<wgpu::Texture>,
     pub views: Vec<wgpu::TextureView>,
+    pub material_views: Vec<wgpu::TextureView>,
 }
 
 /// Decode zodiac silk ribbon PNGs (one tall portrait per zodiac at
 /// `textures/zodiacs/zodiac_<slug>.png`) and upload them as sRGB textures.
+/// Matching `zodiac_<slug>_material.png` files are linear material maps:
+/// R = height, G = roughness, B = embroidered-thread mask.
 pub(super) fn load_zodiac_ribbon_textures(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -725,28 +729,68 @@ pub(super) fn load_zodiac_ribbon_textures(
     let zodiacs = ZodiacKind::all();
     let cap = zodiacs.len();
     let mut textures = Vec::with_capacity(cap);
+    let mut material_textures = Vec::with_capacity(cap);
     let mut views = Vec::with_capacity(cap);
+    let mut material_views = Vec::with_capacity(cap);
 
     for &z in zodiacs {
         let slug = z.slug();
         let path = format!("textures/zodiacs/zodiac_{}.png", slug);
+        let material_path = format!("textures/zodiacs/zodiac_{}_material.png", slug);
         let label = format!("zodiac-ribbon-{}", slug);
+        let material_label = format!("zodiac-ribbon-material-{}", slug);
         let (tex, view) = match mahjuro_assets::asset_path::get(&path) {
             Some(file) => {
                 let img = image::load_from_memory(&file.data)
                     .unwrap_or_else(|e| panic!("failed to decode {label} at {path}: {e}"))
                     .into_rgba8();
                 let (w, h) = img.dimensions();
-                upload_rgba_texture(device, queue, &label, &img.into_raw(), w, h)
+                let rgba = img.into_raw();
+                upload_rgba_texture_with_mips(&TextureUploadParams {
+                    device,
+                    queue,
+                    label,
+                    rgba: &rgba,
+                    width: w,
+                    height: h,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    mips: true,
+                })
             }
             None => panic!("zodiac ribbon texture missing at {path}"),
         };
+        let (material_tex, material_view) = match mahjuro_assets::asset_path::get(&material_path) {
+            Some(file) => {
+                let img = image::load_from_memory(&file.data)
+                    .unwrap_or_else(|e| {
+                        panic!("failed to decode {material_label} at {material_path}: {e}")
+                    })
+                    .into_rgba8();
+                let (w, h) = img.dimensions();
+                let rgba = img.into_raw();
+                upload_rgba_texture_with_mips(&TextureUploadParams {
+                    device,
+                    queue,
+                    label: material_label,
+                    rgba: &rgba,
+                    width: w,
+                    height: h,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    mips: true,
+                })
+            }
+            None => panic!("zodiac ribbon material map missing at {material_path}"),
+        };
         textures.push(tex);
+        material_textures.push(material_tex);
         views.push(view);
+        material_views.push(material_view);
     }
     ZodiacRibbonTextures {
         _textures: textures,
+        _material_textures: material_textures,
         views,
+        material_views,
     }
 }
 
