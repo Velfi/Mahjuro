@@ -211,8 +211,6 @@ pub fn skip_committed_bake_checks() -> bool {
     skip_env_set(SKIP_COMMITTED_BAKE_CHECKS_ENV)
 }
 
-pub const BUILD_BAKER_CMD: &str = "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo build -p mahjuro-headless --bin mahjuro-bake --features bake";
-
 #[derive(Debug, Clone)]
 pub struct BakeStatus {
     pub hash: String,
@@ -275,6 +273,16 @@ pub trait BakeKind {
     }
 }
 
+/// One-liner build + rebake command for stale-bake panic messages.
+pub fn rebake_fix_cmd<K: BakeKind>() -> String {
+    let build_cmd = if K::REBAKE_CMD.starts_with(SKIP_COMMITTED_BAKE_CHECKS_ENV) {
+        format!("{SKIP_COMMITTED_BAKE_CHECKS_ENV}=1 {}", K::BUILD_TOOL_CMD)
+    } else {
+        K::BUILD_TOOL_CMD.to_string()
+    };
+    format!("{build_cmd} && {}", K::REBAKE_CMD)
+}
+
 /// Format the panic message the build script uses when committed bakes are stale.
 pub fn out_of_date_message<K: BakeKind>(status: &BakeStatus) -> String {
     let detail = if !status.stamp_ok {
@@ -293,18 +301,14 @@ pub fn out_of_date_message<K: BakeKind>(status: &BakeStatus) -> String {
         concat!(
             "{label} is out of date.\n\n",
             "{detail}\n\n",
-            "To fix (needs a GPU):\n\n",
-            "1. Build the offline baker:\n",
-            "   {build_baker_cmd}\n\n",
-            "2. Rebake (the binary refreshes the stamp on success):\n",
-            "   {rebake_cmd}\n\n",
-            "3. Commit the baked files + stamp:\n",
+            "To fix (needs a GPU; refreshes the stamp on success):\n\n",
+            "{fix_cmd}\n\n",
+            "Commit the baked files + stamp:\n",
             "   git add {commit_paths}",
         ),
         label = K::LABEL,
         detail = detail,
-        build_baker_cmd = BUILD_BAKER_CMD,
-        rebake_cmd = K::REBAKE_CMD,
+        fix_cmd = rebake_fix_cmd::<K>(),
         commit_paths = K::COMMIT_PATHS,
     )
 }
@@ -361,6 +365,24 @@ mod tests {
         let hash = K::compute_inputs_hash(&repo);
         let stamp = std::fs::read_to_string(repo.join(K::STAMP_PATH)).expect("stamp file");
         assert_eq!(stamp.trim(), hash, "{}", K::REBAKE_CMD);
+    }
+
+    #[test]
+    fn rebake_fix_cmd_chains_build_and_run() {
+        assert_eq!(
+            rebake_fix_cmd::<RoomShadow>(),
+            concat!(
+                "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo build -p mahjuro-headless --bin mahjuro-bake --features bake && ",
+                "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds shadow"
+            )
+        );
+        assert_eq!(
+            rebake_fix_cmd::<ShowcaseDecal>(),
+            concat!(
+                "cargo build -p mahjuro-render --bin mahjuro-bake-decal-atlases && ",
+                "cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases"
+            )
+        );
     }
 
     #[test]
