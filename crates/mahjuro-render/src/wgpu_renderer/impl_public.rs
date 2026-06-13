@@ -99,10 +99,26 @@ impl WgpuRenderer {
         if scale_changed && self.size.width > 0 && self.size.height > 0 {
             self.resize(self.size);
         }
+        if mode_changed {
+            self.reset_relic_loader_state();
+        }
         if mode_changed || scale_changed {
             self.trim_room_gpu_residency();
             self.trim_showcase_decal_atlas_cache();
         }
+    }
+
+    /// Tear down the transient relic decode channel when the graphics preset
+    /// changes. The Low memory on-demand channel and the batch boot loader share
+    /// `relic_rx`; crossing the preset boundary must drop whichever is live so
+    /// the correct loader re-establishes itself next frame. Without this, leaving
+    /// Low memory leaves the on-demand channel open, pinning `is_loading()` true
+    /// forever (stuck main-menu loading dots) and blocking the batch loader.
+    fn reset_relic_loader_state(&mut self) {
+        self.relic_ondemand_tx = None;
+        self.relic_rx = None;
+        self.relic_loading.clear();
+        self.relic_load_finished = false;
     }
 
     pub(super) fn trim_showcase_decal_atlas_cache(&mut self) {
