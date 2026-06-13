@@ -449,9 +449,9 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     if (!front_facing) {
         Ngeom = -Ngeom;
     }
-    let T = normalize(in.t_w);
-    let B = normalize(in.b_w);
-    let n_world = normalize(nm.x * T + nm.y * B + nm.z * Ngeom);
+    let T = scene_safe_normalize(in.t_w, vec3<f32>(1.0, 0.0, 0.0));
+    let B = scene_safe_normalize(in.b_w, vec3<f32>(0.0, 1.0, 0.0));
+    let n_world = scene_safe_normalize(nm.x * T + nm.y * B + nm.z * Ngeom, Ngeom);
 
     var emissive = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb
         * pbr.emissive_factor.rgb
@@ -699,13 +699,15 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         lit_hdr = lit_hdr * sample_contact_ao(in.world_pos);
     }
     // Per-light projected shadows are applied in the punctual / spot loops above.
-    let emissive_out = emissive * boss_light_rgb_mul;
+    let emissive_out = min(emissive * boss_light_rgb_mul, vec3<f32>(65000.0));
     var hdr = lit_hdr + emissive_out;
     if (is_house_polychrome) {
         // House ordeal cash-in: keep band colours stable under candle swing.
         let self_lit = albedo * 0.90;
         hdr = mix(lit_hdr, self_lit, 0.62) + emissive_out;
     }
+    // Clamp to prevent Rgba16Float overflow (Infinity) which causes NaN during bloom bilinear filtering on Metal
+    hdr = min(hdr, vec3<f32>(65000.0));
     return ShopShaded(hdr, emissive_out, out_alpha);
 }
 

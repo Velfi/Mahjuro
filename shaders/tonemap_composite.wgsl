@@ -184,5 +184,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let inv_g = 1.0 / max(params.gamma, 0.01);
     color = pow(max(color, vec3<f32>(0.0)), vec3<f32>(inv_g));
 
+    if any(color != color) {
+        color = vec3<f32>(1.0, 0.0, 1.0);
+    }
+
     return vec4<f32>(color, 1.0);
 }
