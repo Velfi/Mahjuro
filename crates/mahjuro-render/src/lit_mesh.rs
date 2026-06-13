@@ -847,7 +847,8 @@ pub fn create_shadow_warp_bind_group(
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShadowGlobals {
-    /// x = enabled (0/1), y = depth bias, z = point texel size, w = unused.
+    /// x = enabled (0/1), y = depth bias, z = point texel size,
+    /// w = dynamic receiver shadow strength for baked-room indirect.
     pub params: [f32; 4],
     /// x = shadow caster count, y/z/w = unused (spot shadows removed).
     pub counts: [f32; 4],

@@ -14,9 +14,7 @@ use super::{
     ConsumableShopItem, ShopFocus, ShopItem, ShopMode, ShopScene, TilePackShopItem, push_free_badge,
 };
 use crate::core::consumable::Consumable;
-use crate::core::relic::{
-    Rarity, RelicId, all_relic_defs, relic_sell_price_live,
-};
+use crate::core::relic::{Rarity, RelicId, all_relic_defs, relic_sell_price_live};
 use crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
 use crate::game::engine::{GameEngine, ShopReadModel, consumable_sell_price_for_mode};
 use crate::game::game_mode::GameMode;
@@ -703,16 +701,20 @@ pub(crate) fn render_shop_frame(
             .into_iter()
             .map(|t| Some(t.gltf_node_name))
             .collect();
-        let mut point_lights: Vec<PointLight> = if use_glb_lights {
+        let mut point_lights: Vec<ScenePunctualLight> = if use_glb_lights {
             Vec::new()
         } else {
-            let mut v = vec![PointLight {
+            let mut v = vec![ScenePunctualLight::Smooth(PointLight {
                 pos: [lp.0, lp.1, lp.2],
                 radius: h * 1.15,
                 color: [0.86, 0.96, 0.98],
                 intensity: 2.15 * lamp_flicker,
-            }];
-            v.extend(default_fill_point_lights(w, h));
+            })];
+            v.extend(
+                default_fill_point_lights(w, h)
+                    .into_iter()
+                    .map(ScenePunctualLight::Smooth),
+            );
             v
         };
 
@@ -750,24 +752,24 @@ pub(crate) fn render_shop_frame(
                     } else {
                         (w * 0.5, h * 0.5, h * 0.2)
                     };
-                    point_lights.push(PointLight {
+                    point_lights.push(ScenePunctualLight::SmoothNoShadow(PointLight {
                         pos: [px, py - 30.0, wy + 60.0],
                         radius: h * 0.65 * hover_r_mul,
                         color: color::rgb(color::PARCHMENT),
                         intensity: 3.20 * hover_i_mul,
-                    });
+                    }));
                 }
                 ShopHit::Ribbon(_) | ShopHit::Talisman(_) => {
                     if let Some((cx, cy)) =
                         screen_xy_for_hit(hit, shop, &shop_rm, ctx.run, w, h, &cam)
                     {
                         let wy = light_lift_at_screen_y(cy, h);
-                        point_lights.push(PointLight {
+                        point_lights.push(ScenePunctualLight::SmoothNoShadow(PointLight {
                             pos: [cx, cy + 35.0, wy + 50.0],
                             radius: h * 0.72 * hover_r_mul,
                             color: color::rgb(color::PARCHMENT),
                             intensity: 3.00 * hover_i_mul,
-                        });
+                        }));
                     }
                 }
                 ShopHit::Dish(_) => {
@@ -776,24 +778,24 @@ pub(crate) fn render_shop_frame(
                         gold_dish_anchor[1],
                         gold_dish_anchor[2],
                     );
-                    point_lights.push(PointLight {
+                    point_lights.push(ScenePunctualLight::SmoothNoShadow(PointLight {
                         pos: [center.0, center.1 - 20.0, center.2.max(80.0)],
                         radius: h * 0.55 * hover_r_mul,
                         color: color::rgb(color::PARCHMENT),
                         intensity: 2.50 * hover_i_mul,
-                    });
+                    }));
                 }
                 ShopHit::TilePack(id) => {
                     if let Some((cx, cy)) =
                         screen_xy_for_hit(hit, shop, &shop_rm, ctx.run, w, h, &cam)
                     {
                         let wy = light_lift_at_screen_y(cy, h);
-                        point_lights.push(PointLight {
+                        point_lights.push(ScenePunctualLight::SmoothNoShadow(PointLight {
                             pos: [cx, cy - 28.0, wy + 55.0],
                             radius: h * 0.62 * hover_r_mul,
                             color: color::rgb(color::PARCHMENT),
                             intensity: 3.20 * hover_i_mul,
-                        });
+                        }));
                     } else if let Some(idx) = super::layout::tile_pack_index_from_pick(id) {
                         let pid = super::PICK_TILE_PACK_BASE + idx as u32;
                         if let Some(si) = sale_slot_for_focus(shop, ShopFocus::Pack(pid)) {
@@ -803,12 +805,12 @@ pub(crate) fn render_shop_frame(
                                 r[1] + r[3] * 0.5,
                                 shop_shelf_slot_wz(h, si),
                             );
-                            point_lights.push(PointLight {
+                            point_lights.push(ScenePunctualLight::SmoothNoShadow(PointLight {
                                 pos: [center.0, center.1 - 30.0, center.2 + 60.0],
                                 radius: h * 0.62 * hover_r_mul,
                                 color: color::rgb(color::PARCHMENT),
                                 intensity: 3.20 * hover_i_mul,
-                            });
+                            }));
                         }
                     }
                 }
@@ -819,7 +821,7 @@ pub(crate) fn render_shop_frame(
         }
 
         let proc_count = point_lights.len();
-        merged_punctual.extend(point_lights.into_iter().map(ScenePunctualLight::Smooth));
+        merged_punctual.extend(point_lights);
         punctual_gltf_nodes.extend(std::iter::repeat_n(None, proc_count));
         frame.scene_lighting.punctual = merged_punctual;
         frame.scene_lighting.punctual_gltf_nodes = punctual_gltf_nodes;

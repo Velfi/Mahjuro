@@ -1599,6 +1599,7 @@ fn fs_main(
     var spec_acc = vec3<f32>(0.0);     // base specular accumulator
     var coat_acc = vec3<f32>(0.0);     // clearcoat accumulator (white, untinted)
     var sheen_acc = vec3<f32>(0.0);    // talisman sheen accumulator
+    var shop_probe_irradiance = vec3<f32>(0.0);
 
     let cam_pos = lit_mesh_frame.view_pos.xyz;
     let view_dir = normalize(cam_pos - in.world_pos);
@@ -1782,6 +1783,14 @@ fn fs_main(
         );
         let shadowed_radiance = radiance * cand_vis;
         lit = lit + shadowed_radiance * lambert;
+        if (shop_catalog_stock) {
+            // Dynamic shop stock sits in a baked-lightmap room but does not
+            // have room-lightmap UVs. Treat nearby punctual energy as a local
+            // diffuse probe so vertical card/ribbon faces receive the same
+            // room light field instead of only a scene-wide ambient color.
+            let upward_fill = 0.62 + 0.38 * smoothstep(-0.30, 0.85, l_dir.z);
+            shop_probe_irradiance = shop_probe_irradiance + shadowed_radiance * upward_fill;
+        }
 
         // Wrap-diffuse SSS: pushes the terminator past 90° so the
         // shaded side of the surface picks up a soft tinted bleed,
@@ -2228,6 +2237,10 @@ fn fs_main(
         let cand_vis_sp = 1.0;
         let sc = spot_sample.radiance * cand_vis_sp;
         lit = lit + sc * lambert_sp;
+        if (shop_catalog_stock) {
+            let upward_fill_sp = 0.62 + 0.38 * smoothstep(-0.30, 0.85, l_dir.z);
+            shop_probe_irradiance = shop_probe_irradiance + sc * upward_fill_sp;
+        }
 
         if (sss_strength > 0.001) {
             let wrapped_sp = max((ndl_raw + wrap) / (1.0 + wrap), 0.0);
@@ -2599,6 +2612,12 @@ fn fs_main(
         scene_indirect_scale,
         scene_indirect_exposure,
     ) * diffuse_scale * indirect_contact;
+    let catalog_probe_indirect =
+        albedo
+        * shop_probe_irradiance
+        * diffuse_scale
+        * indirect_contact
+        * select(0.0, 0.040, shop_catalog_stock);
     let env_reflect_dir = reflect(-view_dir, n);
     let env_f0 = scene_room_pbr_f0(max(albedo, vec3<f32>(0.0)), material_metallic);
     let env_fresnel = scene_fresnel_schlick(ndv_view, env_f0);
@@ -2694,6 +2713,7 @@ fn fs_main(
             + direct_rgb
             + shared_indirect
             + shared_specular_indirect
+            + catalog_probe_indirect
             + emissive;
     }
 

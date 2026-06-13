@@ -8,7 +8,10 @@ use glam::{Mat4, Vec3};
 
 use crate::draw_cmd::{CameraParams, ScenePunctualLight, UiFrame};
 use crate::room_env_gltf::{RoomEnvironmentBounds, room_world_bounds_corners_centered};
-use crate::room_glb::room_env_world_scale;
+use crate::room_glb::{
+    player_consumable_marker_name, player_relic_marker_name, room_env_world_scale,
+    spawn_relic_marker_name, with_shop_glb_cpu,
+};
 use crate::wgpu_renderer::{ActiveRoomEnv, MAX_POINT_LIGHTS};
 use crate::world_space::{pixel_to_world, world_on_camera_ray_plane_z};
 
@@ -120,6 +123,82 @@ fn fit_ortho_depth_rh(view: Mat4, fit_points: &[Vec3]) -> (f32, f32) {
     (near, far)
 }
 
+struct ShadowFitRegion {
+    corners: Vec<Vec3>,
+    look_at: Vec3,
+    fallback_half: f32,
+    fallback_depth: f32,
+}
+
+fn aabb_corners(min: Vec3, max: Vec3) -> Vec<Vec3> {
+    vec![
+        Vec3::new(min.x, min.y, min.z),
+        Vec3::new(max.x, min.y, min.z),
+        Vec3::new(min.x, max.y, min.z),
+        Vec3::new(max.x, max.y, min.z),
+        Vec3::new(min.x, min.y, max.z),
+        Vec3::new(max.x, min.y, max.z),
+        Vec3::new(min.x, max.y, max.z),
+        Vec3::new(max.x, max.y, max.z),
+    ]
+}
+
+fn shop_dynamic_shadow_fit_region(camera_h: f32, env_height_scale: f32) -> Option<ShadowFitRegion> {
+    let points = with_shop_glb_cpu(|cpu_opt| {
+        let cpu = cpu_opt?;
+        let mut points = Vec::new();
+        for slot in 0..9 {
+            if let Some(p) =
+                crate::room_glb::marker_translation(cpu, &spawn_relic_marker_name(slot))
+            {
+                points.push(p);
+            }
+        }
+        for slot in 0..5 {
+            if let Some(p) =
+                crate::room_glb::marker_translation(cpu, &player_relic_marker_name(slot))
+            {
+                points.push(p);
+            }
+        }
+        for slot in 0..2 {
+            if let Some(p) =
+                crate::room_glb::marker_translation(cpu, &player_consumable_marker_name(slot))
+            {
+                points.push(p);
+            }
+        }
+        Some(points)
+    })?;
+    if points.is_empty() {
+        return None;
+    }
+    let scale = room_env_world_scale(camera_h, env_height_scale);
+    let mut min_v = Vec3::splat(f32::INFINITY);
+    let mut max_v = Vec3::splat(f32::NEG_INFINITY);
+    for p in points {
+        let w = p * scale;
+        min_v = min_v.min(w);
+        max_v = max_v.max(w);
+    }
+    let pad_xy = camera_h * 0.22;
+    let pad_front_back = camera_h * 0.34;
+    let pad_down = camera_h * 0.18;
+    let pad_up = camera_h * 0.62;
+    min_v -= Vec3::new(pad_xy, pad_front_back, pad_down);
+    max_v += Vec3::new(pad_xy, pad_front_back, pad_up);
+
+    let ext = max_v - min_v;
+    let fallback_half = (ext.x.max(ext.y).max(ext.z) * 0.55).max(camera_h * 0.20);
+    let fallback_depth = ext.length().max(camera_h * 0.75);
+    Some(ShadowFitRegion {
+        corners: aabb_corners(min_v, max_v),
+        look_at: (min_v + max_v) * 0.5,
+        fallback_half,
+        fallback_depth,
+    })
+}
+
 pub fn point_light_shadow_view_proj(
     light_world: Vec3,
     scene_corners_world: &[Vec3],
@@ -172,7 +251,7 @@ pub fn punctual_light_world(
     use_ray_plane: bool,
 ) -> Vec3 {
     match entry {
-        ScenePunctualLight::Smooth(l) => {
+        ScenePunctualLight::Smooth(l) | ScenePunctualLight::SmoothNoShadow(l) => {
             if use_ray_plane && let Some(cam) = cam {
                 world_on_camera_ray_plane_z(screen_w, screen_h, cam, l.pos[0], l.pos[1], l.pos[2])
             } else {
@@ -189,7 +268,7 @@ pub fn punctual_light_world(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_punctual_shadow_setups(
     frame: &UiFrame,
-    _active_env: Option<ActiveRoomEnv>,
+    active_env: Option<ActiveRoomEnv>,
     screen_w: f32,
     screen_h: f32,
     camera_h: f32,
@@ -197,14 +276,24 @@ pub(crate) fn build_punctual_shadow_setups(
     bounds_doc: Option<RoomEnvironmentBounds>,
     cam: Option<&CameraParams>,
     use_ray_plane: bool,
+    focus_shop_dynamic_region: bool,
 ) -> PunctualShadowBuild {
     let lab_layout = frame.shadow_ao_lab_layout;
-    let fallback_half = if lab_layout.is_some() {
+    let shop_dynamic_fit = if focus_shop_dynamic_region && active_env == Some(ActiveRoomEnv::Shop) {
+        shop_dynamic_shadow_fit_region(camera_h, env_height_scale)
+    } else {
+        None
+    };
+    let fallback_half = if let Some(fit) = &shop_dynamic_fit {
+        fit.fallback_half
+    } else if lab_layout.is_some() {
         crate::shadow_ao_lab::PUNCTUAL_SHADOW_FALLBACK_HALF
     } else {
         room_projected_shadow_half_xy(camera_h, env_height_scale, bounds_doc)
     };
-    let fallback_depth = if lab_layout.is_some() {
+    let fallback_depth = if let Some(fit) = &shop_dynamic_fit {
+        fit.fallback_depth
+    } else if lab_layout.is_some() {
         crate::shadow_ao_lab::PUNCTUAL_SHADOW_FALLBACK_DEPTH
     } else {
         bounds_doc
@@ -214,14 +303,18 @@ pub(crate) fn build_punctual_shadow_setups(
             })
             .unwrap_or_else(|| camera_h * env_height_scale * 1.45)
     };
-    let scene_corners = if let Some(layout) = lab_layout {
+    let scene_corners = if let Some(fit) = &shop_dynamic_fit {
+        fit.corners.clone()
+    } else if let Some(layout) = lab_layout {
         crate::shadow_ao_lab::fit_corners_world(layout)
     } else {
         bounds_doc
             .map(|b| room_world_bounds_corners_centered(b, camera_h, env_height_scale))
             .unwrap_or_default()
     };
-    let look_at = if lab_layout.is_some() {
+    let look_at = if let Some(fit) = &shop_dynamic_fit {
+        fit.look_at
+    } else if lab_layout.is_some() {
         crate::shadow_ao_lab::punctual_shadow_look_at()
     } else {
         Vec3::ZERO
@@ -236,6 +329,10 @@ pub(crate) fn build_punctual_shadow_setups(
         .take(MAX_POINT_LIGHTS)
         .enumerate()
     {
+        if !entry.casts_shadow() {
+            out.light_index_to_layer[i] = -1;
+            continue;
+        }
         let light_world = punctual_light_world(screen_w, screen_h, entry, cam, use_ray_plane);
         let light_view_proj = point_light_shadow_view_proj_with_fit(
             light_world,
@@ -315,6 +412,7 @@ mod tests {
             None,
             None,
             false,
+            false,
         );
         assert_eq!(build.casters.len(), 1);
         let clip = build.casters[0].light_view_proj * world.extend(1.0);
@@ -358,12 +456,77 @@ mod tests {
             None,
             None,
             false,
+            false,
         );
         assert_eq!(build.casters.len(), 2);
         assert_eq!(build.casters[0].source_light_index, 0);
         assert_eq!(build.casters[1].source_light_index, 1);
         assert_eq!(build.light_index_to_layer[0], 0);
         assert_eq!(build.light_index_to_layer[1], 1);
+    }
+
+    #[test]
+    fn no_shadow_punctual_keeps_light_index_without_shadow_layer() {
+        let mut frame = UiFrame::default();
+        frame.scene_lighting.punctual = vec![
+            ScenePunctualLight::Smooth(PointLight {
+                pos: [0.0; 3],
+                radius: 10.0,
+                color: [1.0; 3],
+                intensity: 1.0,
+            }),
+            ScenePunctualLight::SmoothNoShadow(PointLight {
+                pos: [1.0; 3],
+                radius: 10.0,
+                color: [1.0; 3],
+                intensity: 1.0,
+            }),
+            ScenePunctualLight::InverseSquare(PointLight {
+                pos: [2.0; 3],
+                radius: 10.0,
+                color: [1.0; 3],
+                intensity: 1.0,
+            }),
+        ];
+        let build = build_punctual_shadow_setups(
+            &frame,
+            Some(ActiveRoomEnv::Shop),
+            1920.0,
+            1080.0,
+            1080.0,
+            1.0,
+            None,
+            None,
+            false,
+            false,
+        );
+        assert_eq!(build.casters.len(), 2);
+        assert_eq!(build.casters[0].source_light_index, 0);
+        assert_eq!(build.casters[0].layer_index, 0);
+        assert_eq!(build.casters[1].source_light_index, 2);
+        assert_eq!(build.casters[1].layer_index, 1);
+        assert_eq!(build.light_index_to_layer[0], 0);
+        assert_eq!(build.light_index_to_layer[1], -1);
+        assert_eq!(build.light_index_to_layer[2], 1);
+    }
+
+    #[test]
+    fn shop_dynamic_shadow_fit_is_tighter_than_whole_room() {
+        let h = 1080.0;
+        let env_h = 1.0;
+        let bounds =
+            crate::room_glb::with_shop_glb_cpu(|o| o.and_then(|c| c.environment_bounds_doc))
+                .expect("shop bounds");
+        let room_half = room_projected_shadow_half_xy(h, env_h, Some(bounds));
+        let fit = shop_dynamic_shadow_fit_region(h, env_h).expect("shop stock fit");
+
+        assert!(
+            fit.fallback_half < room_half * 0.65,
+            "shop stock shadow fit should be narrower than whole-room fit: stock={} room={}",
+            fit.fallback_half,
+            room_half
+        );
+        assert_eq!(fit.corners.len(), 8);
     }
 
     #[test]
@@ -425,7 +588,8 @@ mod tests {
             })],
             ..Default::default()
         };
-        let build = build_punctual_shadow_setups(&frame, None, w, h, h, 1.0, None, None, false);
+        let build =
+            build_punctual_shadow_setups(&frame, None, w, h, h, 1.0, None, None, false, false);
         assert_eq!(
             build.casters.len(),
             1,

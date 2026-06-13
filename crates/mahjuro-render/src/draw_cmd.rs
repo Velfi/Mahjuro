@@ -74,7 +74,17 @@ pub struct CameraParams {
 #[derive(Clone, Debug)]
 pub enum ScenePunctualLight {
     Smooth(PointLight),
+    /// Smooth UI/focus fill. It contributes to shading like [`Self::Smooth`],
+    /// but the projected-shadow pass does not allocate a shadow map for it.
+    SmoothNoShadow(PointLight),
     InverseSquare(PointLight),
+}
+
+impl ScenePunctualLight {
+    #[inline]
+    pub fn casts_shadow(&self) -> bool {
+        !matches!(self, Self::SmoothNoShadow(_))
+    }
 }
 
 /// Unified per-frame lights for tiles, `lit_mesh`, and GLB room passes.
@@ -110,6 +120,11 @@ impl SceneLighting {
 
     pub fn push_smooth(&mut self, p: PointLight) {
         self.punctual.push(ScenePunctualLight::Smooth(p));
+        self.punctual_gltf_nodes.push(None);
+    }
+
+    pub fn push_smooth_no_shadow(&mut self, p: PointLight) {
+        self.punctual.push(ScenePunctualLight::SmoothNoShadow(p));
         self.punctual_gltf_nodes.push(None);
     }
 

@@ -674,6 +674,12 @@ pub fn primitive_contact_ao_class(
         return class;
     }
 
+    if contains_any(&node, &["manekineko", "maneki neko"]) {
+        class.receiver = class.receiver.min(0.0);
+        class.occluder = class.occluder.min(0.35);
+        return class;
+    }
+
     if contains_any(&node, &["mysterious_sheet", "cloth", "sheet"])
         || contains_any(&material, &["sheet fabric"])
     {
@@ -1204,6 +1210,14 @@ mod tests {
         );
         assert!(sign.receiver < 0.10);
         assert!(sign.occluder < 0.50);
+    }
+
+    #[test]
+    fn shop_maneki_neko_does_not_receive_baked_contact_ao() {
+        let cat =
+            primitive_contact_ao_class(RoomGiRoom::Shop, Some("ManekinekoB"), Some("Material.001"));
+        assert_eq!(cat.receiver, 0.0);
+        assert!(cat.occluder <= 0.35);
     }
 
     fn test_ao_tuning() -> ContactAoTuning {

@@ -1046,6 +1046,14 @@ mod tests {
             "candle wax feature flag missing from room_glb.wgsl"
         );
         assert!(
+            ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER"),
+            "room dynamic-shadow receiver feature flag missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("receives_dynamic_room_shadow"),
+            "focused room shadow sampling must be gated by a receiver material flag"
+        );
+        assert!(
             ROOM_GLB_WGSL.contains("candle_flame_capsule_closest_pos"),
             "candle point lights should use a soft capsule emitter approximation"
         );

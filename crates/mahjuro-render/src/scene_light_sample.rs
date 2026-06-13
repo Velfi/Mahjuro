@@ -277,7 +277,7 @@ fn accumulate_punctual_lo(
 
     for ent in ctx.punctual {
         let (light, inverse_square) = match ent {
-            ScenePunctualLight::Smooth(l) => (l, false),
+            ScenePunctualLight::Smooth(l) | ScenePunctualLight::SmoothNoShadow(l) => (l, false),
             ScenePunctualLight::InverseSquare(l) => (l, true),
         };
         let light_pos = point_light_world(ctx, light, inverse_square);
