@@ -248,18 +248,8 @@ impl WgpuRenderer {
             });
         self.bloom_ping_texture.destroy();
         self.bloom_pong_texture.destroy();
-        self.emissive_gi_texture.destroy();
         let bloom_w = (rs.width.max(1) / 2).max(1);
         let bloom_h = (rs.height.max(1) / 2).max(1);
-        let (egi_t, egi_v) = create_post_texture(
-            &self.device,
-            SCENE_HDR_FORMAT,
-            bloom_w,
-            bloom_h,
-            "emissive-gi",
-        );
-        self.emissive_gi_texture = egi_t;
-        self.emissive_gi_view = egi_v;
         let (bpt, bpv) = create_post_texture(
             &self.device,
             SCENE_HDR_FORMAT,
@@ -370,68 +360,6 @@ impl WgpuRenderer {
                     },
                 ],
             });
-        self.emissive_probe_update_bind_group =
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("emissive-probe-update-bg"),
-                layout: &self.emissive_probe_update_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.probe_gi_frame_uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&self.room_emissive_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&self.depth_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: self.probe_sh_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-        self.emissive_probe_apply_bind_group =
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("emissive-probe-apply-bg"),
-                layout: &self.emissive_probe_apply_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.probe_gi_frame_uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: self.probe_sh_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&self.depth_view),
-                    },
-                ],
-            });
-        self.emissive_gi_composite_bind_group =
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("emissive-gi-composite-bg"),
-                layout: &self.emissive_gi_composite_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&self.emissive_gi_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
-                    },
-                ],
-            });
-
         self.tonemap_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("tonemap-pass-bg"),
             layout: &self.tonemap_bind_group_layout,

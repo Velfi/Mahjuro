@@ -162,6 +162,8 @@ pub(crate) struct ShopEnvironmentGpu {
     /// Same `distortion_buffer` as `room_glb` @binding(8) — shadow VS group 1 (warp disabled when zeroed).
     pub shadow_warp_bind_group: wgpu::BindGroup,
     pub bind_groups: Vec<wgpu::BindGroup>,
+    /// Per-primitive room lightmap atlas UV transform: xy offset, zw scale.
+    pub lightmap_uv_rects: Vec<[f32; 4]>,
     /// Archive browse boards (`sign_description_*`): CPU-updated decal at `@group(0) @binding(3)`.
     pub archive_sign_decal_texture: Option<wgpu::Texture>,
     /// Pixel size of [`Self::archive_sign_decal_texture`] (fixed at first GPU upload).

@@ -1,5 +1,6 @@
 // shop.glb environment — glTF-style punctual lights + metallic–roughness + ACES (fitted).
-// Separate from `tile_3d.wgsl` (candle pools + artistic lambert floor).
+// Shares punctual attenuation and direct diffuse receiver math with `tile_3d.wgsl`
+// and `lit_mesh.wgsl`.
 //
 // Room-env uniform (`RoomEnvUniform` in Rust) keeps tile-layout parity while
 // naming room semantics explicitly:
@@ -18,10 +19,9 @@
 // - `room_height_fog_far_color.xyz` = distance tint color approached as distance grows
 // - `room_height_fog_far_color.w` = distance-tint exponential scale in world units
 //
-// Point / spot `pos.w` = max light distance in **world units** (`KHR_lights_punctual` range),
-// or `0` for infinite range (pure inverse-square with a minimum distance clamp).
+// Point `pos.w` = smooth radius or glTF inverse-square range depending on `params.x`.
+// Spot `pos.w` = smooth radius. Both are in world units after upload.
 
-const PI: f32 = 3.14159265358979323846;
 const GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT: u32 = 1u << 0u;
 const GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL: u32 = 1u << 1u;
 const GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE: u32 = 1u << 2u;
@@ -51,6 +51,7 @@ struct RoomEnvUniform {
     room_height_fog_params: vec4<f32>,
     room_height_fog_color: vec4<f32>,
     room_height_fog_far_color: vec4<f32>,
+    room_lightmap_uv: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> cam: RoomEnvUniform;
@@ -74,6 +75,7 @@ struct GltfPbrUniform {
 @group(0) @binding(5) var<uniform> pbr: GltfPbrUniform;
 @group(0) @binding(6) var metallic_roughness_tex: texture_2d<f32>;
 @group(0) @binding(7) var emissive_tex: texture_2d<f32>;
+@group(0) @binding(9) var room_lightmap_tex: texture_2d<f32>;
 
 @group(0) @binding(8) var<uniform> hd: HallwayDistortion;
 
@@ -147,47 +149,6 @@ struct SpotLights {
 };
 @group(3) @binding(0) var<uniform> spot_lights: SpotLights;
 
-fn fresnel_schlick(cos_theta: f32, F0: vec3<f32>) -> vec3<f32> {
-    return F0 + (vec3<f32>(1.0) - F0) * pow(max(1.0 - cos_theta, 0.0), 5.0);
-}
-
-fn distribution_ggx(NdotH: f32, roughness: f32) -> f32 {
-    let a = roughness * roughness;
-    let a2 = a * a;
-    let denom = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    return a2 / max(PI * denom * denom, 1e-8);
-}
-
-fn geometry_schlick_ggx(NdotX: f32, roughness: f32) -> f32 {
-    let r = roughness + 1.0;
-    let k = (r * r) / 8.0;
-    return NdotX / max(NdotX * (1.0 - k) + k, 1e-8);
-}
-
-fn geometry_smith(NdotV: f32, NdotL: f32, roughness: f32) -> f32 {
-    return geometry_schlick_ggx(NdotV, roughness) * geometry_schlick_ggx(NdotL, roughness);
-}
-
-/// Diffuse weight with a small floor so punctual-only scenes do not black out at grazing
-/// view (Schlick `kD → 0`) — approximates Blender World + EEVEE ambient/indirect on dielectrics.
-fn dielectric_kD(kS: vec3<f32>, metallic: f32) -> vec3<f32> {
-    let dielectric = 1.0 - metallic;
-    let kd = (vec3<f32>(1.0) - kS) * dielectric;
-    return max(kd, vec3<f32>(0.04 * dielectric));
-}
-
-/// Warm sky / darker ground hemispheric fill (Z-up). `ambient_scale` is runtime-tuned
-/// (`RoomEnvLightingTune::ambient_scale`) to stand in for glTF's missing World node.
-fn room_world_hemisphere_ambient(n_world: vec3<f32>, albedo: vec3<f32>, metallic: f32, ambient_scale: f32) -> vec3<f32> {
-    let dielectric = 1.0 - metallic;
-    let world_up = vec3<f32>(0.0, 0.0, 1.0);
-    let hemi_mix = clamp(dot(n_world, world_up) * 0.5 + 0.5, 0.0, 1.0);
-    let sky = vec3<f32>(0.58, 0.55, 0.50);
-    let ground = vec3<f32>(0.26, 0.22, 0.18);
-    let hemi_col = mix(ground, sky, hemi_mix);
-    return ambient_scale * albedo * dielectric * hemi_col * 0.09;
-}
-
 struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,
     @location(0) wn: vec3<f32>,
@@ -199,6 +160,7 @@ struct VsOut {
     @location(6) b_w: vec3<f32>,
     @location(7) uv_emr: vec2<f32>,
     @location(8) v_color: vec4<f32>,
+    @location(9) lightmap_uv: vec2<f32>,
 };
 
 @vertex
@@ -209,6 +171,7 @@ fn vs_main(
     @location(3) tangent: vec4<f32>,
     @location(4) uv_emr_in: vec2<f32>,
     @location(5) v_color_in: vec4<f32>,
+    @location(6) lightmap_uv_in: vec2<f32>,
 ) -> VsOut {
     let world_h = (cam.model * vec4<f32>(pos, 1.0)).xyz;
     let N0 = normalize((cam.model * vec4<f32>(n, 0.0)).xyz);
@@ -241,6 +204,7 @@ fn vs_main(
     o.b_w = Borth2;
     o.uv_emr = uv_emr_in;
     o.v_color = v_color_in;
+    o.lightmap_uv = lightmap_uv_in;
     return o;
 }
 
@@ -379,6 +343,42 @@ fn candle_streak_tangent(n_world: vec3<f32>, tangent_world: vec3<f32>) -> vec3<f
     return normalize(cross(n_world, vec3<f32>(1.0, 0.0, 0.0)));
 }
 
+fn room_lightmap_wrap_coord(v: f32, mode: u32) -> f32 {
+    if (mode == 0u) {
+        return clamp(v, 0.0, 1.0);
+    }
+    if (mode == 2u) {
+        let t = v - floor(v / 2.0) * 2.0;
+        return select(t, 2.0 - t, t > 1.0);
+    }
+    return fract(v);
+}
+
+fn room_lightmap_texel(p: vec2<i32>) -> vec3<f32> {
+    return textureLoad(room_lightmap_tex, p, 0).rgb;
+}
+
+fn room_lightmap_bilerp(uv: vec2<f32>) -> vec3<f32> {
+    let dims_u = max(textureDimensions(room_lightmap_tex), vec2<u32>(1u));
+    let dims = vec2<f32>(f32(dims_u.x), f32(dims_u.y));
+    let max_p = vec2<i32>(i32(dims_u.x - 1u), i32(dims_u.y - 1u));
+    let p = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * dims - vec2<f32>(0.5);
+    let p0 = vec2<i32>(floor(p));
+    let p1 = min(p0 + vec2<i32>(1), max_p);
+    let p00 = clamp(p0, vec2<i32>(0), max_p);
+    let w = clamp(p - vec2<f32>(p00), vec2<f32>(0.0), vec2<f32>(1.0));
+    let c00 = room_lightmap_texel(p00);
+    let c10 = room_lightmap_texel(vec2<i32>(p1.x, p00.y));
+    let c01 = room_lightmap_texel(vec2<i32>(p00.x, p1.y));
+    let c11 = room_lightmap_texel(p1);
+    return mix(mix(c00, c10, w.x), mix(c01, c11, w.x), w.y);
+}
+
+fn sample_room_lightmap_indirect(uv: vec2<f32>) -> vec3<f32> {
+    let rect = cam.room_lightmap_uv;
+    let lm_uv = rect.xy + clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * rect.zw;
+    return max(room_lightmap_bilerp(lm_uv), vec3<f32>(0.0));
+}
 
 fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let base_s = textureSample(base_color, base_sampler, in.uv);
@@ -487,17 +487,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
 
     let V = normalize(cam.cam_pos - in.world_pos);
     let NdotV = max(dot(n_world, V), 1e-4);
-    // Punctual-only shading has no IBL: metallic BRDF uses baseColor as F0. Near-black
-    // baseColor + metallic≈1 makes F0≈0 so large flat facets read black while bevels
-    // still catch specular. Floor F0 for that case and add a small metal ambient fill.
-    let metal_f0_floor = vec3<f32>(0.52, 0.42, 0.24);
-    // Smoothly floor F0 toward gold for dark metallic facets (embossed text fronts).
-    // Hard thresholds flip across GPU backends when albedo sits on the boundary.
-    let metal_ramp = smoothstep(0.45, 0.65, metallic);
-    let dark_ramp = 1.0 - smoothstep(0.04, 0.16, albedo_lum);
-    let f0_boost = metal_ramp * dark_ramp;
-    let f0_base = mix(albedo, max(albedo, metal_f0_floor), f0_boost);
-    let F0 = mix(vec3<f32>(0.04), f0_base, metallic);
+    let pbr_surface = scene_pbr_direct_surface(albedo, n_world, V, metallic, roughness);
 
     // Shop gold lettering (SHOP / tagline): it should read as warm metal reflecting
     // the room's lanterns, not as a self-lit sign. Classify once here so the light
@@ -529,17 +519,18 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let pl = lights.lights[i];
         let light_pos = pl.pos.xyz;
         let range_w = pl.pos.w;
-        let to_light = light_pos - in.world_pos;
-        let dist = length(to_light);
-        let L = to_light / max(dist, 1e-4);
         let kind = pl.params.x;
-        let atten = select(
-            scene_smooth_point_atten(dist, range_w),
-            punctual_attenuation_with_inv_doc_scale(dist, range_w, cam.room_env_params.y),
-            kind > 0.5,
+        let point_sample = scene_pbr_sample_point_light(
+            in.world_pos,
+            light_pos,
+            range_w,
+            vec4<f32>(pl.color.rgb * boss_light_rgb_mul, pl.color.a),
+            kind,
+            cam.room_env_params.y,
         );
-        let radiance = pl.color.rgb * boss_light_rgb_mul * pl.color.a * atten;
-        let NdotL = max(dot(n_world, L), 0.0);
+        let L = point_sample.direction;
+        let dist = point_sample.distance;
+        let radiance = point_sample.radiance;
         if (length(radiance) <= 0.0) {
             continue;
         }
@@ -559,15 +550,16 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
                 light_pos,
                 lights.extras.z,
             );
-            let to_area = area_pos - in.world_pos;
-            let area_dist = length(to_area);
-            let area_L = to_area / max(area_dist, 1e-4);
-            let area_atten = select(
-                scene_smooth_point_atten(area_dist, range_w),
-                punctual_attenuation_with_inv_doc_scale(area_dist, range_w, cam.room_env_params.y),
-                kind > 0.5,
+            let area_sample = scene_pbr_sample_point_light(
+                in.world_pos,
+                area_pos,
+                range_w,
+                vec4<f32>(pl.color.rgb * boss_light_rgb_mul, pl.color.a),
+                kind,
+                cam.room_env_params.y,
             );
-            let area_radiance = pl.color.rgb * boss_light_rgb_mul * pl.color.a * area_atten;
+            let area_L = area_sample.direction;
+            let area_radiance = area_sample.radiance;
             let area_dot = dot(n_world, area_L);
             let R = reflect(-area_L, n_world);
             let reflected_view = max(dot(R, V), 0.0);
@@ -649,107 +641,40 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
             }
         }
 
-        if (NdotL <= 0.0) {
-            continue;
-        }
-        let H = normalize(V + L);
-        let NdotH = max(dot(n_world, H), 0.0);
-        let VdotH = max(dot(V, H), 0.0);
-
-        let F = fresnel_schlick(VdotH, F0);
-        let kS = F;
-        let kD = dielectric_kD(kS, metallic);
-        let diffuse = kD * albedo / PI * radiance * NdotL * punc_vis;
-
-        let D = distribution_ggx(NdotH, roughness);
-        let G = geometry_smith(NdotV, NdotL, roughness);
-        let spec_brdf = D * G * F / max(4.0 * NdotV * NdotL, 1e-6);
-        let specular = spec_brdf * radiance * NdotL * punc_vis;
-
-        Lo = Lo + diffuse + specular;
+        let direct = scene_pbr_direct_sampled_light(pbr_surface, point_sample, punc_vis);
+        Lo = Lo + direct.total;
     }
 
     let spot_count = spot_lights.count.x;
     for (var si: u32 = 0u; si < spot_count; si = si + 1u) {
         let s = spot_lights.lights[si];
-        let to_frag = in.world_pos - s.pos.xyz;
-        let dist = length(to_frag);
-        let range_spot = s.pos.w;
-        let atten_spot = punctual_attenuation_with_inv_doc_scale(dist, range_spot, cam.room_env_params.y);
-        if (atten_spot <= 0.0) {
-            continue;
-        }
-        let L = -to_frag / max(dist, 1e-4);
-        let frag_dir = to_frag / max(dist, 1e-4);
-        let cos_a = dot(frag_dir, s.dir.xyz);
-        let cos_outer = s.dir.w;
-        let cos_inner = s.params.x;
-        let spot_factor = khr_spot_angle_attenuation_scene(cos_a, cos_inner, cos_outer);
-        if (spot_factor <= 0.0) {
-            continue;
-        }
-        let radiance = s.color.rgb * boss_light_rgb_mul * s.color.a * atten_spot * spot_factor;
-        let NdotL = max(dot(n_world, L), 0.0);
-        let projected_shadows_on = shadow_globals.params.x > 0.5;
-        let punc_vis = select(
-            1.0,
-            1.0,
-            projected_shadows_on,
+        let spot_sample = scene_pbr_sample_spot_light(
+            in.world_pos,
+            s.pos.xyz,
+            s.pos.w,
+            s.dir.xyz,
+            s.params.x,
+            s.dir.w,
+            vec4<f32>(s.color.rgb * boss_light_rgb_mul, s.color.a),
+            0.0,
+            cam.room_env_params.y,
         );
+        let L = spot_sample.direction;
+        let radiance = spot_sample.radiance;
+        if (length(radiance) <= 0.0) {
+            continue;
+        }
+        let punc_vis = 1.0;
         let gold_soft_ndl = smoothstep(-0.12, 0.62, dot(n_world, L));
         gold_reflected_fill = gold_reflected_fill
             + gold_sign_ramp * albedo * radiance * gold_soft_ndl * gold_face_view * 0.018 * punc_vis;
 
-        if (NdotL <= 0.0) {
-            continue;
-        }
-        let H = normalize(V + L);
-        let NdotH = max(dot(n_world, H), 0.0);
-        let VdotH = max(dot(V, H), 0.0);
-
-        let F = fresnel_schlick(VdotH, F0);
-        let kS = F;
-        let kD = dielectric_kD(kS, metallic);
-        let diffuse = kD * albedo / PI * radiance * NdotL * punc_vis;
-
-        let D = distribution_ggx(NdotH, roughness);
-        let G = geometry_smith(NdotV, NdotL, roughness);
-        let spec_brdf = D * G * F / max(4.0 * NdotV * NdotL, 1e-6);
-        let specular = spec_brdf * radiance * NdotL * punc_vis;
-
-        Lo = Lo + diffuse + specular;
+        let direct = scene_pbr_direct_sampled_light(pbr_surface, spot_sample, punc_vis);
+        Lo = Lo + direct.total;
     }
 
-    let ambient_scale = cam.room_env_params.x;
-    let amb_dielectric = room_world_hemisphere_ambient(n_world, albedo, metallic, ambient_scale);
-    let metal_amb_tint = mix(
-        vec3<f32>(0.58, 0.50, 0.40),
-        albedo,
-        clamp(albedo_lum * 22.0, 0.0, 1.0),
-    );
-    let amb_metal = ambient_scale * metallic * metal_amb_tint * vec3<f32>(0.14);
-    let ambient = amb_dielectric + amb_metal;
+    Lo = Lo + sample_room_lightmap_indirect(in.lightmap_uv);
 
-    // Authoring may set ambient scale to 0; tune via RoomEnvLightingTune if fill is needed.
-    // Without IBL, dark-metallic facets still need a tiny direction-dependent fill so
-    // flat faces toward the camera read as metal, not void.
-    let dark_metal_ramp = (1.0 - smoothstep(0.04, 0.18, albedo_lum))
-        * smoothstep(0.40, 0.60, metallic);
-    let hemi_tint = mix(
-        vec3<f32>(0.062, 0.054, 0.041),
-        albedo,
-        clamp(albedo_lum * 15.0, 0.0, 1.0),
-    );
-    let metal_hemi_room_visibility = clamp(
-        max(cam.room_env_params.x, cam.room_linear_exposure * 80.0),
-        0.0,
-        1.0,
-    );
-    let metal_hemi = dark_metal_ramp
-        * metallic
-        * hemi_tint
-        * (0.10 + 0.26 * NdotV)
-        * metal_hemi_room_visibility;
     Lo = Lo
         + gold_reflected_fill
         + candle_area_fill
@@ -758,9 +683,9 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         + candle_reflection_streaks;
 
     // `room_linear_exposure` is scene exposure for punctual PBR (often ≪ 1 to tame imported
-    // glTF light energy). Keep the runtime hemisphere fill in scene-linear units
-    // so the Scene Look "Room ambient" slider remains visible.
-    var lit_hdr = Lo * cam.room_linear_exposure + ambient + metal_hemi;
+    // glTF light energy). Indirect/environment terms are supplied by the room lightmap,
+    // which is baked through the shared scene PBR helpers using the same exposure convention.
+    var lit_hdr = Lo * cam.room_linear_exposure;
     if ((pbr.flags & GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO) == 0u) {
         lit_hdr = lit_hdr * sample_contact_ao(in.world_pos);
     }
@@ -782,7 +707,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     return vec4<f32>(apply_exponential_height_fog(s.hdr, in.world_pos), s.out_alpha);
 }
 
-/// Emissive-only pre-pass for screen-space GI (writes `room_emissive_view`).
+/// Emissive-only pre-pass for bloom separation (writes `room_emissive_view`).
 /// `s.emissive` = texture × factor × strength (outgoing radiance), not BRDF.
 @fragment
 fn fs_main_emissive(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {

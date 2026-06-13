@@ -615,6 +615,7 @@ impl WgpuRenderer {
             room_height_fog_params: height_fog_params,
             room_height_fog_color: height_fog_color,
             room_height_fog_far_color: height_fog_far_color,
+            room_lightmap_uv: [0.0; 4],
         };
         for (pi, buf) in gpu.uniform_buffers.iter().enumerate() {
             let prim_model = if let Some(delta) = prim_deltas.get(&pi) {
@@ -624,6 +625,10 @@ impl WgpuRenderer {
             };
             let mut u = uniform;
             u.model = prim_model.to_cols_array();
+            u.room_lightmap_uv = *gpu
+                .lightmap_uv_rects
+                .get(pi)
+                .expect("room lightmap UV rect count matches room primitives");
             self.queue.write_buffer(buf, 0, bytemuck::bytes_of(&u));
         }
         if let Some((lvp, changed)) = shadow_upload {

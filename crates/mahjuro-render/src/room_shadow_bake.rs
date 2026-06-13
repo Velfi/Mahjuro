@@ -166,6 +166,7 @@ impl RoomShadowBake {
             3 => RoomGiRoom::MainMenu,
             4 => RoomGiRoom::Stairway,
             5 => RoomGiRoom::Gameplay,
+            6 => RoomGiRoom::ShadowTestRoom,
             _ => anyhow::bail!("room shadow bake: unknown room id {}", header.room),
         };
         anyhow::ensure!(
@@ -282,7 +283,7 @@ impl ContactAoTuning {
                 max_neighbor_depth_delta: 0.065,
                 ..default
             },
-            RoomGiRoom::Archive | RoomGiRoom::Stairway => default,
+            RoomGiRoom::Archive | RoomGiRoom::Stairway | RoomGiRoom::ShadowTestRoom => default,
         }
     }
 }
@@ -939,6 +940,7 @@ static BAKE_CACHE: [OnceLock<Option<Arc<RoomShadowBake>>>;
     OnceLock::new(),
     OnceLock::new(),
     OnceLock::new(),
+    OnceLock::new(),
 ];
 
 pub fn cached_room_shadow_bake(room: RoomGiRoom) -> Option<Arc<RoomShadowBake>> {
@@ -968,6 +970,7 @@ impl RoomGiRoom {
             Self::MainMenu => "data/room_shadow/main_menu.msh",
             Self::Stairway => "data/room_shadow/stairway.msh",
             Self::Gameplay => "data/room_shadow/gameplay.msh",
+            Self::ShadowTestRoom => "data/room_shadow/shadow_test_room.msh",
         }
     }
 }

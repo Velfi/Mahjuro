@@ -10,8 +10,6 @@ pub(super) struct ShadersAndPipelinesParams<'a> {
     pub size: crate::physical_size::PhysicalSize,
     pub render_size: crate::physical_size::PhysicalSize,
     pub format: wgpu::TextureFormat,
-    /// Scene depth attachment (`Depth32Float`) — GI probes + depth-to-R32 blit source.
-    pub scene_depth_view: &'a wgpu::TextureView,
 }
 
 pub(super) struct ShadersAndPipelinesInit {
@@ -47,17 +45,6 @@ pub(super) struct ShadersAndPipelinesInit {
     pub depth_quad_debug_pipeline_display: wgpu::RenderPipeline,
     pub depth_quad_pipeline: wgpu::RenderPipeline,
     pub depth_quad_pipeline_display: wgpu::RenderPipeline,
-    pub emissive_gi_composite_bind_group: wgpu::BindGroup,
-    pub emissive_gi_composite_bind_group_layout: wgpu::BindGroupLayout,
-    pub emissive_gi_composite_pipeline: wgpu::RenderPipeline,
-    pub emissive_gi_texture: wgpu::Texture,
-    pub emissive_gi_view: wgpu::TextureView,
-    pub emissive_probe_apply_bind_group: wgpu::BindGroup,
-    pub emissive_probe_apply_bind_group_layout: wgpu::BindGroupLayout,
-    pub emissive_probe_apply_pipeline: wgpu::RenderPipeline,
-    pub emissive_probe_update_bind_group: wgpu::BindGroup,
-    pub emissive_probe_update_bind_group_layout: wgpu::BindGroupLayout,
-    pub emissive_probe_update_pipeline: wgpu::ComputePipeline,
     pub flame_glow_pipeline: wgpu::RenderPipeline,
     pub flame_pipeline: wgpu::RenderPipeline,
     pub flame_core_pipeline: wgpu::RenderPipeline,
@@ -86,8 +73,6 @@ pub(super) struct ShadersAndPipelinesInit {
     pub point_shadow_array: ShadowDepthArrayGpu,
     pub post_bloom_texture: wgpu::Texture,
     pub post_bloom_view: wgpu::TextureView,
-    pub probe_gi_frame_uniform_buffer: wgpu::Buffer,
-    pub probe_sh_buffer: wgpu::Buffer,
     pub quad_pipeline: wgpu::RenderPipeline,
     pub quad_pipeline_display: wgpu::RenderPipeline,
     pub room_baked_shadow_gpu:
@@ -138,6 +123,7 @@ pub(super) struct ShadersAndPipelinesInit {
     pub tile_env_distortion_placeholder: wgpu::Buffer,
     pub tile_glow_pipeline: wgpu::RenderPipeline,
     pub tile_material_layout: wgpu::BindGroupLayout,
+    pub room_env_material_layout: wgpu::BindGroupLayout,
     pub tile_occluders_buffer: wgpu::Buffer,
     pub tile_outline_frame_bind_group: wgpu::BindGroup,
     pub tile_outline_frame_uniform_buffer: wgpu::Buffer,
@@ -173,7 +159,6 @@ pub(super) fn init_shaders_and_pipelines(
         size,
         render_size,
         format,
-        scene_depth_view,
     } = params;
 
     let lit_mesh_compilation = wgpu::PipelineCompilationOptions::default();
@@ -211,9 +196,6 @@ pub(super) fn init_shaders_and_pipelines(
         bloom_blur: bloom_blur_shader,
         bloom_composite: bloom_composite_shader,
         tonemap: tonemap_shader_module,
-        emissive_probe_update: emissive_probe_update_shader,
-        emissive_probe_apply: emissive_probe_apply_shader,
-        emissive_gi_composite: emissive_gi_composite_shader,
     } = super::super::init_phases::create_renderer_shader_modules(&device);
     crate::startup_profile::record("wgpu.shader_modules", t_shader_modules.elapsed());
 
@@ -443,6 +425,109 @@ pub(super) fn init_shaders_and_pipelines(
             },
         ],
     });
+
+    let room_env_material_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("room-env-material-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    },
+                    count: None,
+                },
+            ],
+        });
 
     let tile_env_distortion_placeholder =
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -682,6 +767,17 @@ pub(super) fn init_shaders_and_pipelines(
         label: Some("tile-pl"),
         bind_group_layouts: &[
             Some(&tile_material_layout),
+            Some(&point_lights_layout),
+            Some(&shadow_sample_layout),
+            Some(&spot_lights_layout),
+        ],
+        immediate_size: 0,
+    });
+
+    let room_env_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("room-env-pl"),
+        bind_group_layouts: &[
+            Some(&room_env_material_layout),
             Some(&point_lights_layout),
             Some(&shadow_sample_layout),
             Some(&spot_lights_layout),
@@ -1630,6 +1726,48 @@ pub(super) fn init_shaders_and_pipelines(
             },
         ],
     };
+    let room_env_vertex_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<crate::room_lightmap_uv::RoomEnvLightmapVertex>()
+            as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[
+            wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: 12,
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: 24,
+                shader_location: 2,
+                format: wgpu::VertexFormat::Float32x2,
+            },
+            wgpu::VertexAttribute {
+                offset: 32,
+                shader_location: 3,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 48,
+                shader_location: 4,
+                format: wgpu::VertexFormat::Float32x2,
+            },
+            wgpu::VertexAttribute {
+                offset: 56,
+                shader_location: 5,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 72,
+                shader_location: 6,
+                format: wgpu::VertexFormat::Float32x2,
+            },
+        ],
+    };
 
     let tile_3d_instance_vertex_layout = wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<super::super::Tile3dInstance>() as wgpu::BufferAddress,
@@ -1770,12 +1908,12 @@ pub(super) fn init_shaders_and_pipelines(
      -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
-            layout: Some(&tile_layout),
+            layout: Some(&room_env_layout),
             vertex: wgpu::VertexState {
                 module: &shop_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: std::slice::from_ref(&tile_vertex_layout),
+                buffers: std::slice::from_ref(&room_env_vertex_layout),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shop_shader,
@@ -1818,7 +1956,7 @@ pub(super) fn init_shaders_and_pipelines(
         true,
     );
 
-    // Emissive-only pre-pass into `room_emissive_view` for screen-space GI.
+    // Emissive-only pre-pass into `room_emissive_view` for bloom separation.
     // Single attachment now that the linear-HDR pre-pass was retired (scene
     // shaders write linear HDR to `scene_color` directly — see
     // `tonemap_composite.wgsl`).
@@ -1829,12 +1967,12 @@ pub(super) fn init_shaders_and_pipelines(
      -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
-            layout: Some(&tile_layout),
+            layout: Some(&room_env_layout),
             vertex: wgpu::VertexState {
                 module: &shop_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: std::slice::from_ref(&tile_vertex_layout),
+                buffers: std::slice::from_ref(&room_env_vertex_layout),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shop_shader,
@@ -2100,8 +2238,6 @@ pub(super) fn init_shaders_and_pipelines(
     let bloom_ping_view = bloom_bundle.ping_view;
     let bloom_pong_texture = bloom_bundle.pong_texture;
     let bloom_pong_view = bloom_bundle.pong_view;
-    let (emissive_gi_texture, emissive_gi_view) =
-        create_post_texture(&device, scene_hdr_format, bloom_w, bloom_h, "emissive-gi");
     let lit_mesh_spot_frame_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("lit-mesh-spot-frame-bg"),
         layout: &lit_mesh_spot_frame_layout,
@@ -2300,7 +2436,8 @@ pub(super) fn init_shaders_and_pipelines(
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             buffers: &[wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
+                array_stride: std::mem::size_of::<crate::room_lightmap_uv::RoomEnvLightmapVertex>()
+                    as wgpu::BufferAddress,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &[wgpu::VertexAttribute {
                     offset: 0,
@@ -2339,7 +2476,9 @@ pub(super) fn init_shaders_and_pipelines(
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
+                    array_stride:
+                        std::mem::size_of::<crate::room_lightmap_uv::RoomEnvLightmapVertex>()
+                            as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
                         wgpu::VertexAttribute {
@@ -2705,276 +2844,6 @@ pub(super) fn init_shaders_and_pipelines(
         ],
     });
 
-    let probe_gi_frame_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("probe-gi-frame-uniform"),
-        size: std::mem::size_of::<super::super::ProbeGiFrameUniform>() as wgpu::BufferAddress,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let probe_sh_stride = 9 * std::mem::size_of::<glam::Vec4>();
-    let probe_sh_bytes = (crate::room_glb::ROOM_EMISSIVE_PROBE_MAX as usize * probe_sh_stride)
-        as wgpu::BufferAddress;
-    let probe_sh_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("emissive-probe-sh"),
-        size: probe_sh_bytes,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-    let emissive_probe_update_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("emissive-probe-update-bg-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Depth,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-    let emissive_probe_apply_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("emissive-probe-apply-bg-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Depth,
-                    },
-                    count: None,
-                },
-            ],
-        });
-    let emissive_probe_update_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("emissive-probe-update-pl"),
-        bind_group_layouts: &[Some(&emissive_probe_update_bind_group_layout)],
-        immediate_size: 0,
-    });
-    let emissive_probe_apply_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("emissive-probe-apply-pl"),
-        bind_group_layouts: &[Some(&emissive_probe_apply_bind_group_layout)],
-        immediate_size: 0,
-    });
-    let emissive_probe_update_pipeline =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("emissive-probe-update-pipeline"),
-            layout: Some(&emissive_probe_update_pl),
-            module: &emissive_probe_update_shader,
-            entry_point: Some("update_probes"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            cache: None,
-        });
-    let emissive_probe_apply_pipeline =
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("emissive-probe-apply-pipeline"),
-            layout: Some(&emissive_probe_apply_pl),
-            vertex: wgpu::VertexState {
-                module: &emissive_probe_apply_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &emissive_probe_apply_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: scene_hdr_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-    let emissive_probe_update_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("emissive-probe-update-bg"),
-        layout: &emissive_probe_update_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: probe_gi_frame_uniform_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&room_emissive_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::TextureView(scene_depth_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: wgpu::BindingResource::Sampler(&bloom_sampler),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: probe_sh_buffer.as_entire_binding(),
-            },
-        ],
-    });
-    let emissive_probe_apply_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("emissive-probe-apply-bg"),
-        layout: &emissive_probe_apply_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: probe_gi_frame_uniform_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: probe_sh_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::TextureView(scene_depth_view),
-            },
-        ],
-    });
-
-    let emissive_gi_composite_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("emissive-gi-composite-bg-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-    let emissive_gi_composite_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("emissive-gi-composite-pl"),
-        bind_group_layouts: &[Some(&emissive_gi_composite_bind_group_layout)],
-        immediate_size: 0,
-    });
-    let additive_one_one = wgpu::BlendComponent {
-        src_factor: wgpu::BlendFactor::One,
-        dst_factor: wgpu::BlendFactor::One,
-        operation: wgpu::BlendOperation::Add,
-    };
-    let emissive_gi_composite_pipeline =
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("emissive-gi-composite-pipeline"),
-            layout: Some(&emissive_gi_composite_pl),
-            vertex: wgpu::VertexState {
-                module: &emissive_gi_composite_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &emissive_gi_composite_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: scene_hdr_format,
-                    blend: Some(wgpu::BlendState {
-                        color: additive_one_one,
-                        alpha: wgpu::BlendComponent::REPLACE,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-    let emissive_gi_composite_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("emissive-gi-composite-bg"),
-        layout: &emissive_gi_composite_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&emissive_gi_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&bloom_sampler),
-            },
-        ],
-    });
     crate::startup_profile::record("wgpu.shaders_and_pipelines", t_shaders.elapsed());
     ShadersAndPipelinesInit {
         arc_ring_quad_pipeline,
@@ -3009,17 +2878,6 @@ pub(super) fn init_shaders_and_pipelines(
         depth_quad_debug_pipeline_display,
         depth_quad_pipeline,
         depth_quad_pipeline_display,
-        emissive_gi_composite_bind_group,
-        emissive_gi_composite_bind_group_layout,
-        emissive_gi_composite_pipeline,
-        emissive_gi_texture,
-        emissive_gi_view,
-        emissive_probe_apply_bind_group,
-        emissive_probe_apply_bind_group_layout,
-        emissive_probe_apply_pipeline,
-        emissive_probe_update_bind_group,
-        emissive_probe_update_bind_group_layout,
-        emissive_probe_update_pipeline,
         flame_glow_pipeline,
         flame_pipeline,
         flame_core_pipeline,
@@ -3048,8 +2906,6 @@ pub(super) fn init_shaders_and_pipelines(
         point_shadow_array,
         post_bloom_texture,
         post_bloom_view,
-        probe_gi_frame_uniform_buffer,
-        probe_sh_buffer,
         quad_pipeline,
         quad_pipeline_display,
         room_baked_shadow_gpu,
@@ -3099,6 +2955,7 @@ pub(super) fn init_shaders_and_pipelines(
         tile_env_distortion_placeholder,
         tile_glow_pipeline,
         tile_material_layout,
+        room_env_material_layout,
         tile_occluders_buffer,
         tile_outline_frame_bind_group,
         tile_outline_frame_uniform_buffer,

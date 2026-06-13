@@ -5,7 +5,8 @@ use mahjuro::game::run::RunState;
 use mahjuro::render::room_gi_bake::RoomGiRoom;
 use mahjuro::scenes::shop::ShopScene;
 use mahjuro::scenes::{
-    ArchiveScene, GameplayScene, HallwayScene, MainMenuScene, Scene, StairwayScene,
+    ArchiveScene, GameplayScene, HallwayScene, MainMenuScene, Scene, ShadowAoLabScene,
+    StairwayScene,
 };
 
 use super::fixtures::{setup_gameplay_bake_state, setup_shop_state};
@@ -28,6 +29,9 @@ pub fn scene_for_room(room: RoomGiRoom, progress: &PlayerProgress) -> (Scene, Ru
         RoomGiRoom::Gameplay => {
             setup_gameplay_bake_state(&mut run);
             (Scene::Gameplay(Box::new(GameplayScene::new())), run, true)
+        }
+        RoomGiRoom::ShadowTestRoom => {
+            (Scene::ShadowAoLab(ShadowAoLabScene::new(false)), run, false)
         }
     }
 }

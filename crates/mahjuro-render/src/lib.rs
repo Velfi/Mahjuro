@@ -77,6 +77,7 @@ pub mod room_gltf_anim;
 pub mod room_gltf_punctual;
 pub mod room_gpu_profile;
 pub mod room_gpu_resident;
+pub mod room_lightmap_uv;
 pub mod room_preload;
 pub mod room_shadow_bake;
 pub mod scene_glue;

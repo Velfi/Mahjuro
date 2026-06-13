@@ -108,8 +108,9 @@ pub struct WgpuRenderer {
     config: wgpu::SurfaceConfiguration,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
-    /// Current-frame depth copied to R32Float before emissive-probe passes
-    /// (`textureLoad` is unsupported on depth textures in the GLSL backend).
+    /// Current-frame depth copied to R32Float for shader paths that need
+    /// filter-free depth reads (`textureLoad` is unsupported on depth textures
+    /// in the GLSL backend).
     depth_r32_snapshot_texture: wgpu::Texture,
     depth_r32_snapshot_view: wgpu::TextureView,
     depth_copy_staging_buffer: wgpu::Buffer,
@@ -185,6 +186,7 @@ pub struct WgpuRenderer {
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
     tile_material_layout: wgpu::BindGroupLayout,
+    room_env_material_layout: wgpu::BindGroupLayout,
     /// Zeroed [`crate::hallway_glb::HallwayDistortion`] for `tile_3d` / showcase bind groups (binding 8).
     tile_env_distortion_placeholder: wgpu::Buffer,
     /// Group 0 for `tile_outline_pipeline`: frame uniform (instances are VB slot 1).
@@ -487,32 +489,9 @@ pub struct WgpuRenderer {
     /// before bloom, tonemap, and final composite into the swapchain.
     scene_color_texture: wgpu::Texture,
     scene_color_view: wgpu::TextureView,
-    /// Emissive-only linear RGB (`room_glb` emissive pre-pass) for GI gather —
-    /// excludes BRDF / punctual.
+    /// Emissive-only linear RGB (`room_glb` emissive pre-pass) for bloom separation.
     room_emissive_texture: wgpu::Texture,
     room_emissive_view: wgpu::TextureView,
-    /// Half-res emissive indirect estimate (linear HDR).
-    emissive_gi_texture: wgpu::Texture,
-    emissive_gi_view: wgpu::TextureView,
-    emissive_probe_update_pipeline: wgpu::ComputePipeline,
-    emissive_probe_update_bind_group_layout: wgpu::BindGroupLayout,
-    emissive_probe_update_bind_group: wgpu::BindGroup,
-    emissive_probe_apply_pipeline: wgpu::RenderPipeline,
-    emissive_probe_apply_bind_group_layout: wgpu::BindGroupLayout,
-    emissive_probe_apply_bind_group: wgpu::BindGroup,
-    probe_gi_frame_uniform_buffer: wgpu::Buffer,
-    probe_sh_buffer: wgpu::Buffer,
-    /// GI frames since room GI became active (drives amortized probe compute).
-    probe_gi_tick: u32,
-    probe_gi_last_view_proj: [f32; 16],
-    probe_gi_last_size: (u32, u32),
-    probe_gi_had_room: bool,
-    /// Which room's baked SH coefficients are currently in [`Self::probe_sh_buffer`].
-    probe_gi_gpu_room: Option<crate::room_gi_bake::RoomGiRoom>,
-    /// Set by `mahjuro bake-room-gi` to read back probes after one dynamic GI frame.
-    room_gi_capture_pending: Option<crate::room_gi_bake::RoomGiRoom>,
-    room_gi_capture_meta: Option<crate::room_gi_bake::RoomGiBake>,
-    room_gi_captured: Option<crate::room_gi_bake::RoomGiBake>,
     /// Offline baked room shadow maps (one per static room); lazy-uploaded on first draw.
     room_baked_shadow_gpu:
         [Option<impl_room_shadow::RoomBakedShadowGpu>; crate::room_gi_bake::ROOM_GI_ROOM_COUNT],
@@ -527,9 +506,6 @@ pub struct WgpuRenderer {
     room_shadow_captured: Option<crate::room_shadow_bake::RoomShadowBake>,
     shadow_probe_last_log: Instant,
     shadow_probe_last_caster_count: usize,
-    emissive_gi_composite_pipeline: wgpu::RenderPipeline,
-    emissive_gi_composite_bind_group_layout: wgpu::BindGroupLayout,
-    emissive_gi_composite_bind_group: wgpu::BindGroup,
     /// Fullscreen offscreen target for the live GPU render of the
     /// yaku-journal scene. The book mesh's leather shader samples this
     /// in screen space (not UV) so the rendered scene reads as a window
@@ -879,15 +855,12 @@ pub struct WgpuRenderer {
     /// Emissive overlay mesh for main-menu `rain_hit_*` shells (rain debug menu).
     pub(super) main_menu_rain_hit_debug_mesh: Option<LitMeshGpu>,
     pub(super) main_menu_rain_hit_debug_instance: Option<LitMeshInstance>,
-    /// Log once per room when probe GI AABB drifts stale (see `render.rs`).
-    probe_gi_stale_aabb_warned_room: Option<crate::room_gi_bake::RoomGiRoom>,
 }
 
 mod impl_loaders;
 mod impl_pipelines;
 mod impl_public;
 mod impl_relic_residency;
-mod impl_room_gi;
 mod impl_room_shadow;
 mod impl_screenshot;
 
@@ -921,9 +894,9 @@ pub(crate) use screenshot::ScreenshotStaging;
 pub(crate) use targets::RenderTarget;
 pub(crate) use tile_pipeline::{TileGlbPipelineKey, TileMeshGpuSet, TilePrimitiveGpu};
 pub(crate) use uniforms::{
-    BloomParams, FlameViewUniform, Globals, ProbeGiFrameUniform, RoomEnvUniform,
-    RoomShadowMaskUniform, Tile3dInstance, TileFrameUniform, TileOutlineFrameUniform,
-    TileOutlineInstance, TileShadowInstance, TonemapParams,
+    BloomParams, FlameViewUniform, Globals, RoomEnvUniform, RoomShadowMaskUniform, Tile3dInstance,
+    TileFrameUniform, TileOutlineFrameUniform, TileOutlineInstance, TileShadowInstance,
+    TonemapParams,
 };
 
 pub(super) use constants::{

@@ -12,11 +12,13 @@ macro_rules! wgsl_file {
     };
 }
 
-/// Lit room/tile shaders: hallway warp VS + PBR lights + scene body + shadow atlas.
+/// Lit room/tile shaders: hallway warp VS + PBR core + scene body + shadow atlas.
 macro_rules! scene_pbr_with_hallway_warp {
     ($room_shader:literal) => {
         concat!(
             wgsl_file!("hallway_vertex_warp.wgsl"),
+            "\n",
+            wgsl_file!("scene_pbr_core.wgsl"),
             "\n",
             wgsl_file!("scene_pbr_lights.wgsl"),
             "\n",
@@ -73,9 +75,6 @@ pub const BLOOM_EXTRACT: &str = wgsl_file!("bloom_extract.wgsl");
 pub const BLOOM_BLUR: &str = wgsl_file!("bloom_blur.wgsl");
 pub const BLOOM_COMPOSITE: &str = wgsl_file!("bloom_composite.wgsl");
 pub const TONEMAP_COMPOSITE: &str = wgsl_file!("tonemap_composite.wgsl");
-pub const EMISSIVE_PROBE_UPDATE: &str = wgsl_file!("emissive_probe_update.wgsl");
-pub const EMISSIVE_PROBE_APPLY: &str = wgsl_file!("emissive_probe_apply.wgsl");
-pub const EMISSIVE_GI_COMPOSITE: &str = wgsl_file!("emissive_gi_composite.wgsl");
 
 #[cfg(test)]
 mod composition_drift {
@@ -142,10 +141,10 @@ mod composition_drift {
 // `tonemap_composite.wgsl` owns the single ACES pass, so `scene_hdr_tonemap.wgsl`
 // no longer needs to be prepended here.
 
-/// `scene_pbr_lights` + `tile_3d`
+/// `scene_pbr_core` + `scene_pbr_lights` + `tile_3d`
 pub const TILE_3D: &str = scene_pbr_with_hallway_warp!("tile_3d.wgsl");
 
-/// `scene_pbr_lights` + `room_glb`
+/// `scene_pbr_core` + `scene_pbr_lights` + `room_glb`
 pub const SHOP_GLB: &str = scene_pbr_with_hallway_warp!("room_glb.wgsl");
 
 /// `tile_outline`
@@ -154,8 +153,13 @@ pub const TILE_OUTLINE: &str = include_str!(concat!(
     "/../../shaders/tile_outline.wgsl"
 ));
 
-/// `scene_pbr_lights` + `lit_mesh`
+/// `scene_pbr_core` + `scene_pbr_lights` + `lit_mesh`
 pub const LIT_MESH: &str = concat!(
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../shaders/scene_pbr_core.wgsl"
+    )),
+    "\n",
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../shaders/scene_pbr_lights.wgsl"

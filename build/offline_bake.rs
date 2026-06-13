@@ -175,7 +175,7 @@ fn ensure_room_gpu_bakes_current(repo: &Path, ctx: &BakeToolCtx) {
     let shadow_ok = shadow.stamp_ok && shadow.outputs_ok;
 
     if gi_ok && shadow_ok {
-        println!("cargo:info=room GI bake: committed bake matches inputs");
+        println!("cargo:info=room GI lightmap bake: committed bake matches inputs");
         println!("cargo:info=room shadow bake: committed bake matches inputs");
         return;
     }
@@ -249,7 +249,7 @@ fn run_room_gpu_rebake(
 ) -> Result<(), String> {
     let mut kinds = Vec::new();
     if needs_gi {
-        kinds.push("gi");
+        kinds.push("lightmap");
     }
     if needs_shadow {
         kinds.push("shadow");

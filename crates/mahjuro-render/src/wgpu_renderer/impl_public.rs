@@ -265,10 +265,6 @@ impl WgpuRenderer {
         if let Some(i) = self.room_gpu_lru.iter().position(|&b| b == bit) {
             self.room_gpu_lru.remove(i);
         }
-        if self.probe_gi_gpu_room.is_some() {
-            self.probe_gi_gpu_room = None;
-            self.probe_gi_had_room = false;
-        }
         if self.graphics_mode == mahjuro_gfx_types::GraphicsMode::LowMemory {
             super::room_gpu_load::clear_room_cpu_cache_for_gpu_evict(bit);
             super::room_gpu_load::on_low_memory_room_gpu_evict_restart_prefetch(bit);

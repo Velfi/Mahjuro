@@ -59,7 +59,7 @@ Asset-pack details: [tools/bake_assets/README.md](../../tools/bake_assets/README
 
 ## Headless binaries
 
-**`mahjuro-bake`** — offline `.mgi` / `.msh` room bakes. Requires `--features bake`.
+**`mahjuro-bake`** — offline room lightmap (`.lightmap.rlm`) / shadow (`.msh`) bakes. Requires `--features bake`.
 
 **`mahjuro-screenshot`** — one offscreen PNG. Requires `--features screenshot`. Scene list in `crates/mahjuro-headless/src/screenshot_cli.rs`.
 

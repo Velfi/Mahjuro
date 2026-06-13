@@ -59,8 +59,8 @@ struct PointLights {
 
 // ── Spotlights (group 3) ─────────────────────────────────────────────
 // Directional cone lights used for focused visual highlights (e.g. hint
-// indicators pooling green on a specific tile). Only sampled by the tile
-// pipeline — candles/table/smoke do not receive spotlight contribution.
+// indicators pooling green on a specific tile). Sampled by scene receivers
+// through the same shared punctual diffuse helper as point lights.
 struct SpotLight {
     // xyz = world-space position, w = falloff radius.
     pos: vec4<f32>,
@@ -244,10 +244,10 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
     // ── Point-light pass ────────────────────────────────────────────────
     // Accumulate candle / point-light contributions on top of the base
-    // shade. Each light uses a smooth quadratic falloff plus a Lambertian
-    // term against the world-space normal so the side bevel facing a candle
-    // gets the most warmth. Lighting tints existing colour (rgb * contrib)
-    // instead of overwriting it, so the tile's albedo still reads through.
+    // shade. Each light uses shared scene attenuation plus the shared
+    // punctual diffuse receiver term so tiles match the other 3D receivers.
+    // Lighting tints existing colour (rgb * contrib) instead of overwriting
+    // it, so the tile's albedo still reads through.
     // glTF / OpenGL tangent-space normal (+Y up in TS); RGB linear unpacked.
     let nm = textureSample(normal_tex, base_sampler, in.uv_emr).rgb * 2.0 - 1.0;
     var Ngeom = normalize(in.wn);
@@ -277,28 +277,26 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     );
     let light_count = lights.count.x;
     for (var i: u32 = 0u; i < light_count; i = i + 1u) {
-        let lp = lights.lights[i].pos.xyz;
-        let radius = lights.lights[i].pos.w;
-        let kind = lights.lights[i].params.x;
-        let lc = lights.lights[i].color.rgb * punc_rgb_mul;
-        let intensity = lights.lights[i].color.a;
-        let to_light = lp - in.world_pos;
-        let dist = length(to_light);
-        // `tile_post_params.w` carries inverse document scale on tile draws (see
-        // `showcase_tiles.rs`); `tile_decal_atlas_uv.y` is decal-atlas V — not inv_doc.
-        let inv_doc = frame.tile_post_params.w;
-        let atten = select(
-            scene_smooth_point_atten(dist, radius),
-            punctual_attenuation_with_inv_doc_scale(dist, radius, inv_doc),
-            kind > 0.5,
+        let pl = lights.lights[i];
+        let point_sample = scene_pbr_sample_point_light(
+            in.world_pos,
+            pl.pos.xyz,
+            pl.pos.w,
+            vec4<f32>(pl.color.rgb * punc_rgb_mul, pl.color.a),
+            pl.params.x,
+            frame.tile_post_params.w,
         );
-        let l_dir = to_light / max(dist, 0.0001);
-        let nl = max(dot(n_world, l_dir), 0.0);
-        // 0.35 ambient floor so even back-facing fragments warm up a little
-        // (matches how a real candle bounces off the table around a tile).
-        let lambert = 0.35 + 0.65 * nl;
+        if (length(point_sample.radiance) <= 0.0) {
+            continue;
+        }
+        let l_dir = point_sample.direction;
+        let radiance = point_sample.radiance;
+        let nl_raw = dot(n_world, l_dir);
+        let nl = max(nl_raw, 0.0);
+        let lambert = scene_punctual_diffuse_weight(nl_raw);
         let punc_vis = punctual_shadow_vis(i, in.world_pos);
-        point_contrib = point_contrib + lc * intensity * atten * lambert * punc_vis;
+        let shadowed_radiance = radiance * punc_vis;
+        point_contrib = point_contrib + shadowed_radiance * lambert;
 
         // ── Enhancement sheen lobes ────────────────────────────────────
         // Fresnel-masked specular highlights per enhancement type, matching
@@ -321,14 +319,14 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
                     0.90 + 0.10 * cos(phase + 2.8)
                 );
                 let lobe = pow(nh, 18.0) * 0.6 + broad * 0.15;
-                sheen_acc = sheen_acc + lc * intensity * atten * lobe * fresnel * pearl_tint;
+                sheen_acc = sheen_acc + shadowed_radiance * lobe * fresnel * pearl_tint;
             } else if (enh < 2.5) {
                 // Gilded: metallic gold conductor — Schlick Fresnel tinted
                 // by gold base so highlights read warm.
                 let f0 = vec3<f32>(0.95, 0.75, 0.30);
                 let f_gold = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
                 let lobe = pow(nh, 24.0) * 0.9 + broad * 0.08;
-                sheen_acc = sheen_acc + lc * intensity * atten * lobe * f_gold;
+                sheen_acc = sheen_acc + shadowed_radiance * lobe * f_gold;
             } else {
                 // Polychrome: holographic thin-film rainbow driven by
                 // viewing angle + surface position.
@@ -339,7 +337,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
                 let holo_tint = vec3<f32>(holo_r, holo_g, holo_b);
                 let fresnel = 0.10 + 0.50 * pow(1.0 - ndv, 2.5);
                 let lobe = pow(nh, 12.0) * 0.7 + broad * 0.18;
-                sheen_acc = sheen_acc + lc * intensity * atten * lobe * fresnel * holo_tint;
+                sheen_acc = sheen_acc + shadowed_radiance * lobe * fresnel * holo_tint;
             }
         }
     }
@@ -352,28 +350,23 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let spot_count = spot_lights.count.x;
     for (var si: u32 = 0u; si < spot_count; si = si + 1u) {
         let s = spot_lights.lights[si];
-        let to_frag = in.world_pos - s.pos.xyz;
-        let dist = length(to_frag);
-        let radius = max(s.pos.w, 1.0);
-        let t = clamp(1.0 - dist / radius, 0.0, 1.0);
-        let atten = t * t;
-        if (atten <= 0.0) {
+        let spot_sample = scene_pbr_sample_spot_light(
+            in.world_pos,
+            s.pos.xyz,
+            s.pos.w,
+            s.dir.xyz,
+            s.params.x,
+            s.dir.w,
+            vec4<f32>(s.color.rgb * punc_rgb_mul, s.color.a),
+            0.0,
+            frame.tile_post_params.w,
+        );
+        if (length(spot_sample.radiance) <= 0.0) {
             continue;
         }
-        let to_light = -to_frag / max(dist, 0.0001);
-        let frag_dir = to_frag / max(dist, 0.0001);
-        let cos_a = dot(frag_dir, s.dir.xyz);
-        let cos_outer = s.dir.w;
-        let cos_inner = s.params.x;
-        let spot_factor = khr_spot_angle_attenuation_scene(cos_a, cos_inner, cos_outer);
-        if (spot_factor <= 0.0) {
-            continue;
-        }
-        let nl = max(dot(n_world, to_light), 0.0);
-        let lambert = 0.35 + 0.65 * nl;
+        let lambert = scene_punctual_diffuse_weight(dot(n_world, spot_sample.direction));
         let spot_vis = 1.0;
-        point_contrib = point_contrib
-            + s.color.rgb * punc_rgb_mul * s.color.a * atten * spot_factor * lambert * spot_vis;
+        point_contrib = point_contrib + spot_sample.radiance * lambert * spot_vis;
     }
 
     // ── Enhancement fresnel albedo tint ─────────────────────────────────
@@ -416,6 +409,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     if (use_textured_albedo) {
         let mr_s = textureSample(metallic_roughness_tex, base_sampler, in.uv_emr);
         let metallic = clamp(mr_s.b * pbr.metallic_factor, 0.0, 1.0);
+        let roughness = clamp(mr_s.g * pbr.roughness_factor, 0.04, 1.0);
         let emissive_base = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb * pbr.emissive_factor.rgb;
         let emissive_scale = select(1.0, in.tile_decal_atlas_uv.z, use_textured_env);
         let emissive = emissive_base * emissive_scale;

@@ -679,6 +679,7 @@ pub fn create_room_env_camera_uniform_buffers(
         room_height_fog_params: [0.0; 4],
         room_height_fog_color: [0.0; 4],
         room_height_fog_far_color: [0.0; 4],
+        room_lightmap_uv: [0.0; 4],
     };
     (0..count)
         .map(|i| {

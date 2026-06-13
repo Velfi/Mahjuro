@@ -1,6 +1,6 @@
 //! Required offline bakes at renderer init.
 //!
-//! Showcase decal atlases, room `.mgi`/`.msh`, and relic RLC2 payloads are validated
+//! Showcase decal atlases, room lightmap/shadow bakes, and relic RLC2 payloads are validated
 //! eagerly when committed bakes are required. `build.rs` stamp checks still enforce
 //! outputs at compile time; runtime checks catch missing assets in dev skips or bad packs.
 
@@ -40,8 +40,8 @@ pub fn require_all_at_startup() -> anyhow::Result<()> {
     crate::startup_profile::record("wgpu.offline_bakes.showcase", t_showcase.elapsed());
 
     let t_room_gi = Instant::now();
-    require_room_gi_bakes()?;
-    crate::startup_profile::record("wgpu.offline_bakes.room_gi", t_room_gi.elapsed());
+    require_room_gi_lightmaps()?;
+    crate::startup_profile::record("wgpu.offline_bakes.room_lightmap", t_room_gi.elapsed());
 
     let t_room_shadow = Instant::now();
     require_room_shadow_bakes()?;
@@ -66,10 +66,11 @@ fn require_showcase_decal_atlases() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn require_room_gi_bakes() -> anyhow::Result<()> {
+fn require_room_gi_lightmaps() -> anyhow::Result<()> {
     for room in RoomGiRoom::ALL {
-        crate::room_gi_bake::require_room_gi_bake(room)
-            .with_context(|| format!("room GI bake {room:?}"))?;
+        crate::room_gi_bake::load_room_gi_lightmap(room)
+            .with_context(|| format!("room GI lightmap {room:?}"))?
+            .ok_or_else(|| anyhow::anyhow!("missing room GI lightmap {room:?}"))?;
     }
     Ok(())
 }

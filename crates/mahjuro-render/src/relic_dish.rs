@@ -1219,7 +1219,7 @@ const ORDEAL_ICON_ALPHA_SOLID_THRESH: u8 = 24;
 /// 3. Contours are simplified (Douglas–Peucker, ~0.75 px tolerance) to cut
 ///    vertex count on long smooth edges without losing concavities.
 /// 4. Lyon tessellates the resulting polygon-with-holes into triangles for the
-///    front cap; the back cap mirrors those triangles with reversed winding,
+///    front cap; cap triangle winding is oriented to match authored normals,
 ///    and the side walls extrude every contour edge.
 /// 5. A uniform scale adjusts all vertices so the front-cap footprint in XZ
 ///    matches [`cap_extrude::CAP_REFERENCE_AREA`] (equal apparent “pin” size across relics).
@@ -1474,6 +1474,23 @@ fn append_side_wall_strip_from_ring(
     }
 }
 
+fn append_triangle_oriented_to_normal(
+    indices: &mut Vec<u32>,
+    vertices: &[Vertex3dTex],
+    tri: [u32; 3],
+    want_normal: glam::Vec3,
+) {
+    let p0 = glam::Vec3::from(vertices[tri[0] as usize].position);
+    let p1 = glam::Vec3::from(vertices[tri[1] as usize].position);
+    let p2 = glam::Vec3::from(vertices[tri[2] as usize].position);
+    let face = (p1 - p0).cross(p2 - p0);
+    if face.dot(want_normal) < 0.0 {
+        indices.extend_from_slice(&[tri[0], tri[2], tri[1]]);
+    } else {
+        indices.extend_from_slice(&tri);
+    }
+}
+
 fn build_extruded_pin_mesh_from_solid(
     solid: &[bool],
     width: u32,
@@ -1548,14 +1565,19 @@ fn build_extruded_pin_mesh_from_solid(
             });
         }
         for tri in buffers.indices.chunks_exact(3) {
-            indices.extend_from_slice(&[
-                base_front + tri[0],
-                base_front + tri[1],
-                base_front + tri[2],
-            ]);
+            append_triangle_oriented_to_normal(
+                &mut indices,
+                &vertices,
+                [
+                    base_front + tri[0],
+                    base_front + tri[1],
+                    base_front + tri[2],
+                ],
+                glam::Vec3::Y,
+            );
         }
 
-        // Back cap: duplicate vertices with flipped normal and reversed winding
+        // Back cap: duplicate vertices with flipped normal and matching winding
         // so both caps are front-facing from their respective sides.
         let base_back = vertices.len() as u32;
         for &(x, y) in &buffers.vertices {
@@ -1570,11 +1592,12 @@ fn build_extruded_pin_mesh_from_solid(
             });
         }
         for tri in buffers.indices.chunks_exact(3) {
-            indices.extend_from_slice(&[
-                base_back + tri[0],
-                base_back + tri[2],
-                base_back + tri[1],
-            ]);
+            append_triangle_oriented_to_normal(
+                &mut indices,
+                &vertices,
+                [base_back + tri[0], base_back + tri[1], base_back + tri[2]],
+                -glam::Vec3::Y,
+            );
         }
 
         // Side walls: shared-vertex strip around outer + holes.
@@ -1816,9 +1839,7 @@ fn build_extruded_talisman_mesh_from_solid(
 mod extruded_tests {
     use super::*;
 
-    #[test]
-    fn talisman_mesh_from_filled_disk_has_front_cap_and_rim() {
-        let size = 32u32;
+    fn filled_disk_rgba(size: u32) -> Vec<u8> {
         let mut rgba = vec![0u8; (size * size * 4) as usize];
         let cx = size as f32 / 2.0;
         let cy = size as f32 / 2.0;
@@ -1834,6 +1855,13 @@ mod extruded_tests {
                 }
             }
         }
+        rgba
+    }
+
+    #[test]
+    fn talisman_mesh_from_filled_disk_has_front_cap_and_rim() {
+        let size = 32u32;
+        let rgba = filled_disk_rgba(size);
         let mesh = build_talisman_mesh_from_rgba(&rgba, size, size, "test-disk")
             .expect("disk silhouette should extrude");
         assert!(mesh.vertices.len() > 8);
@@ -1841,6 +1869,54 @@ mod extruded_tests {
         let has_front = mesh.vertices.iter().any(|v| v.position[2] > 0.01);
         let has_back = mesh.vertices.iter().any(|v| v.position[2] < -0.01);
         assert!(has_front && has_back);
+    }
+
+    #[test]
+    fn relic_cap_face_winding_matches_authored_normals() {
+        let size = 32u32;
+        let rgba = filled_disk_rgba(size);
+        let mesh = build_relic_mesh_from_rgba(&rgba, size, size, "test-relic-disk")
+            .expect("disk silhouette should extrude");
+        let mut front = 0usize;
+        let mut back = 0usize;
+        let mut bad = 0usize;
+        for tri in mesh.indices.chunks_exact(3) {
+            let v = [
+                &mesh.vertices[tri[0] as usize],
+                &mesh.vertices[tri[1] as usize],
+                &mesh.vertices[tri[2] as usize],
+            ];
+            let all_front = v.iter().all(|v| v.normal[1] > 0.9);
+            let all_back = v.iter().all(|v| v.normal[1] < -0.9);
+            if !all_front && !all_back {
+                continue;
+            }
+            let p = [
+                glam::Vec3::from(v[0].position),
+                glam::Vec3::from(v[1].position),
+                glam::Vec3::from(v[2].position),
+            ];
+            let face = (p[1] - p[0]).cross(p[2] - p[0]);
+            if face.length_squared() < 1.0e-14 {
+                continue;
+            }
+            let want = if all_front {
+                glam::Vec3::Y
+            } else {
+                -glam::Vec3::Y
+            };
+            if face.normalize().dot(want) <= 0.0 {
+                bad += 1;
+            }
+            if all_front {
+                front += 1;
+            } else {
+                back += 1;
+            }
+        }
+        assert!(front > 0, "expected front cap triangles");
+        assert!(back > 0, "expected back cap triangles");
+        assert_eq!(bad, 0, "relic cap winding must match authored normals");
     }
 
     #[test]

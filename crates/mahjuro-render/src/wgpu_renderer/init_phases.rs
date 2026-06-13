@@ -112,9 +112,6 @@ pub(super) struct RendererShaderPack {
     pub bloom_blur: wgpu::ShaderModule,
     pub bloom_composite: wgpu::ShaderModule,
     pub tonemap: wgpu::ShaderModule,
-    pub emissive_probe_update: wgpu::ShaderModule,
-    pub emissive_probe_apply: wgpu::ShaderModule,
-    pub emissive_gi_composite: wgpu::ShaderModule,
 }
 
 #[inline(never)]
@@ -223,18 +220,6 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
         tonemap: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tonemap-shader"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::TONEMAP_COMPOSITE.into()),
-        }),
-        emissive_probe_update: device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("emissive-probe-update-shader"),
-            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::EMISSIVE_PROBE_UPDATE.into()),
-        }),
-        emissive_probe_apply: device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("emissive-probe-apply-shader"),
-            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::EMISSIVE_PROBE_APPLY.into()),
-        }),
-        emissive_gi_composite: device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("emissive-gi-composite-shader"),
-            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::EMISSIVE_GI_COMPOSITE.into()),
         }),
     }
 }
@@ -403,9 +388,10 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     };
     log::debug!("wgpu: surface format / caps resolved");
 
-    // `downlevel_webgl2_defaults` zeros storage-buffer counts for WebGL2-tier parity; the
-    // emissive probe GI compute pass needs at least one `storage` binding. Take the adapter
-    // ceiling so Metal/Vulkan/DX12 keep full capability (see crash: max_storage_buffers… = 0).
+    // `downlevel_webgl2_defaults` zeros storage-buffer counts for WebGL2-tier parity. The
+    // renderer still uses storage buffers in runtime/bake-adjacent bind groups, so take the
+    // adapter ceiling and keep Metal/Vulkan/DX12 at full capability (see crash:
+    // max_storage_buffers… = 0).
     //
     // Win32 + Vulkan: starting from the WebGL2 downlevel preset has been linked to AMD
     // proprietary (LLPC) faults during the first `Surface::configure` / swapchain creation.
@@ -424,8 +410,8 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     limits.max_storage_buffer_binding_size = limits
         .max_storage_buffer_binding_size
         .max(al.max_storage_buffer_binding_size);
-    // Same downlevel preset disables compute (`max_compute_*` = 0); emissive probe update uses
-    // `@workgroup_size(64, 1, 1)` and `dispatch_workgroups` — restore adapter compute limits.
+    // Same downlevel preset disables compute (`max_compute_*` = 0). Keep adapter compute limits
+    // available for backends/features that add compute pipelines after initialization.
     limits.max_compute_invocations_per_workgroup = limits
         .max_compute_invocations_per_workgroup
         .max(al.max_compute_invocations_per_workgroup)
@@ -469,10 +455,9 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         }
     }
     // Opt into linear filtering of R32Float / Rgba32Float textures when the
-    // adapter supports it. Emissive probe update binds R32Float textures with
-    // `Float { filterable: true }` layouts; without this, every resize hits a
-    // wgpu validation error on offline-bake adapters that don't auto-expose
-    // the feature.
+    // adapter supports it. Room shadow/lightmap tooling uses float textures
+    // across runtime and offline-bake adapters, and some backends require the
+    // feature to expose filterable float sample types.
     if adapter
         .features()
         .contains(wgpu::Features::FLOAT32_FILTERABLE)
