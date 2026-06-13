@@ -204,7 +204,11 @@ fn write_room_shadow_bake(
     ensure_parent_dir(&out_path)?;
     let compressed = zstd::encode_all(raw.as_slice(), 3)?;
     let nbytes = compressed.len();
-    std::fs::write(&out_path, compressed)?;
+    std::fs::write(&out_path, &compressed)?;
+    mahjuro::asset_path::refresh_cached(
+        &format!("{}.zst", room.shadow_asset_path()),
+        compressed,
+    );
     log::info!(
         "room shadow bake {:?} → {} ({}×{}, {} bytes zstd)",
         room,
@@ -227,7 +231,11 @@ fn write_room_gi_lightmap_bake(
     ensure_parent_dir(&hdr_path)?;
     let compressed = zstd::encode_all(raw.as_slice(), 3)?;
     let compressed_len = compressed.len();
-    std::fs::write(&hdr_path, compressed)?;
+    std::fs::write(&hdr_path, &compressed)?;
+    mahjuro::asset_path::refresh_cached(
+        &format!("{}.zst", room.lightmap_asset_path()),
+        compressed,
+    );
 
     let preview_name = room.offline_bake_filename("lightmap.png");
     let preview_path = output_dir.join(preview_name);

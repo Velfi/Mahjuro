@@ -626,7 +626,7 @@ pub fn gameplay_pick_discard_river(
     Ok(Object3d {
         pos: pose.anchor,
         extents,
-        rotation: rotate_marker_pose_x_180(pose.rotation_rad),
+        rotation: pose.rotation_rad,
         color: [1.0, 1.0, 1.0, 1.0],
         kind: Object3dKind::Bowl,
         hover_target: 0.0,
@@ -758,7 +758,7 @@ pub fn gameplay_pick_play_mirror(
     Ok(Object3d {
         pos: pose.anchor,
         extents,
-        rotation: rotate_marker_pose_x_180(pose.rotation_rad),
+        rotation: pose.rotation_rad,
         color: [1.0, 1.0, 1.0, 1.0],
         kind: Object3dKind::Mirror {
             valid_play_glow: 0.0,

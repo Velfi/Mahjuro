@@ -607,6 +607,15 @@ pub fn get_cached(path: &str) -> Option<Arc<[u8]>> {
     Some(byte_cache().insert(lk, data))
 }
 
+/// Replace a cached asset after an offline bake writes fresh bytes to disk.
+///
+/// Without this, a long-lived `mahjuro-bake` process keeps serving pre-bake pack
+/// contents from the byte cache even though `assets/data/…` on disk was updated.
+pub fn refresh_cached(path: &str, data: Vec<u8>) -> Arc<[u8]> {
+    init();
+    byte_cache().insert(normalize_lookup_key(path), data)
+}
+
 /// Memory-map a file from the loose asset tree only.
 pub fn get_mmap_loose(path: &str) -> Option<Mmap> {
     init();
