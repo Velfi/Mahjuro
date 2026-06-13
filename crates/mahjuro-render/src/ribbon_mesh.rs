@@ -273,12 +273,12 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         vertices,
         indices,
         default_material: MaterialParams {
-            kind: MaterialKind::Plain,
+            kind: MaterialKind::CatalogPaper,
             // Default base color is overridden per-instance from the
             // ZodiacRibbonPlacement; this fallback is a soft cream.
             base_color: [0.92, 0.86, 0.72, 1.0],
-            specular_strength: 0.25,
-            specular_power: 16.0,
+            specular_strength: 0.06,
+            specular_power: 8.0,
         },
     }
 }

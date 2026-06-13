@@ -134,6 +134,11 @@ pub enum MaterialKind {
     /// Gameplay play mirror — polished bronze conductor with an optional
     /// view-facing jade dielectric Fresnel rim (`instance_params.x`).
     BronzeMirror = 23,
+    /// Catalog washi / paper art — textured dielectric stock displayed in the
+    /// shop case. Uses scene lighting, but participates in the shop catalog
+    /// exposure balance so source art stays readable under the same lights as
+    /// packs and talismans.
+    CatalogPaper = 24,
 }
 
 /// Whether instances using this material should participate in the
@@ -143,15 +148,17 @@ pub fn material_casts_shadow(kind: MaterialKind) -> bool {
     !matches!(kind, MaterialKind::Emissive | MaterialKind::Unshaded)
 }
 
-/// Balance for props on the shop shelf when embedded punctual lights and HDR
-/// tonemap are active (`LitMeshFrameGlobals.shop_punctual.y == DISPLAY_CASE_STOREROOM`).
+/// Shared light calibration for shop catalog stock when embedded punctual
+/// lights and HDR tonemap are active
+/// (`LitMeshFrameGlobals.shop_punctual.y == DISPLAY_CASE_STOREROOM`).
 ///
-/// Spec-forward materials (pack wrap, foil, talismans) pull back direct lit in
-/// `lit_mesh.wgsl`; art-forward materials (enamel relics) use [`AMBIENT_MUL`].
+/// The shader applies these as one scene-level policy to catalog stock
+/// materials; material differences still come from normal material parameters
+/// and lobes, not from item-category exposure hacks.
 pub mod shop_catalog_balance {
     /// `LitMeshFrameGlobals.shop_punctual.y` — storeroom shelf row balance active.
     pub const DISPLAY_CASE_STOREROOM: f32 = 1.0;
-    /// Hemispheric ambient multiplier for art-forward catalog props.
+    /// Hemispheric ambient multiplier for catalog stock.
     pub const AMBIENT_MUL: f32 = 0.22;
 }
 
@@ -1054,7 +1061,7 @@ pub struct LitMeshFrameGlobals {
     /// x = `1/room_env_world_scale` for embedded glTF punctual attenuation in `lit_mesh`
     /// (document-space distance; **0** = world-space / gameplay).
     /// y = shop display-case material tuning (1 = shop + embedded punctual only).
-    /// z = art-forward ambient mul when `y == 1`; w = gameplay marker-spawn punctual mul.
+    /// z = catalog ambient mul when `y == 1`; w = reserved.
     pub shop_punctual: [f32; 4],
 }
 

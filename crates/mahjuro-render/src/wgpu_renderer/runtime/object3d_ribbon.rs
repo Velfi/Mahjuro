@@ -51,10 +51,10 @@ impl WgpuRenderer {
             return;
         }
         let silk_mat = MaterialParams {
-            kind: MaterialKind::Plain,
+            kind: MaterialKind::CatalogPaper,
             base_color: obj.color,
-            specular_strength: 0.25,
-            specular_power: 16.0,
+            specular_strength: 0.06,
+            specular_power: 8.0,
         };
         let zodiac_id: Option<u8> = kind.as_ref().and_then(|z| {
             let tex_idx = mahjuro_core::core::zodiac::ZodiacKind::all()
@@ -65,9 +65,12 @@ impl WgpuRenderer {
         let slot_i = *ribbon_slot;
         *ribbon_slot += 1;
         if self.ribbon_slot_zodiac[slot_i] != zodiac_id {
-            let view: &wgpu::TextureView = match zodiac_id {
-                Some(idx) => &self.ribbon_zodiac_tex.views[idx as usize],
-                None => &self.lit_mesh_white_view,
+            let (view, material_view): (&wgpu::TextureView, &wgpu::TextureView) = match zodiac_id {
+                Some(idx) => (
+                    &self.ribbon_zodiac_tex.views[idx as usize],
+                    &self.ribbon_zodiac_tex.material_views[idx as usize],
+                ),
+                None => (&self.lit_mesh_white_view, &self.lit_mesh_relief_default_view),
             };
             let inst = &mut self.ribbon_instances[slot_i];
             inst.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -88,9 +91,7 @@ impl WgpuRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.lit_mesh_relief_default_view,
-                        ),
+                        resource: wgpu::BindingResource::TextureView(material_view),
                     },
                 ],
             });

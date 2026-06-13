@@ -500,8 +500,9 @@ fn material_kind_to_u32(kind: MaterialKind) -> u32 {
 }
 
 fn material_kind_from_u32(v: u32) -> MaterialKind {
-    if v <= MaterialKind::Unshaded as u32 {
-        // SAFETY: `MaterialKind` is `#[repr(u32)]` with discriminants 0..=22.
+    if v <= MaterialKind::CatalogPaper as u32 {
+        // SAFETY: `MaterialKind` is `#[repr(u32)]` with contiguous
+        // discriminants from `Plain` through `CatalogPaper`.
         unsafe { std::mem::transmute::<u32, MaterialKind>(v) }
     } else {
         MaterialKind::Plain

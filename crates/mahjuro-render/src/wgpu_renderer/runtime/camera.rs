@@ -268,8 +268,8 @@ impl WgpuRenderer {
         // `KHR_lights_punctual`: `.x` = inverse document scale for attenuation
         // (matches `room_glb` `decal_atlas_uv.y`) whenever embedded punctual is
         // on — archive/collection need this too, not only `shop_like` scenes.
-        // `.y` = shop display-case tuning flag; `.z`/`.w` = art-forward ambient +
-        // shadow floor (see [`shop_catalog_balance`]).
+        // `.y` = shop display-case tuning flag; `.z` = catalog ambient mul;
+        // `.w` = reserved (see [`shop_catalog_balance`]).
         let shop_punctual_inv_doc =
             self.room_punctual_inv_doc_scale(cam, frame.scene_lighting.embedded_gltf_punctual);
         let shop_punctual_display_case = if shop_like && frame.scene_lighting.embedded_gltf_punctual
