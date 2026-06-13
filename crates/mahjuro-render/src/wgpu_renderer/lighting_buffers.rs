@@ -307,7 +307,7 @@ impl PointLightsBuf {
         for (i, ent) in p.src.iter().take(n).enumerate() {
             let room_reflection = Self::room_reflection_flag(p.gltf_nodes, i);
             match ent {
-                ScenePunctualLight::Smooth(l) => {
+                ScenePunctualLight::Smooth(l) | ScenePunctualLight::SmoothNoShadow(l) => {
                     let world =
                         pixel_to_world(p.screen_w, p.screen_h, l.pos[0], l.pos[1], l.pos[2]);
                     Self::push_scene_punctual_entry(
@@ -355,7 +355,7 @@ impl PointLightsBuf {
         for (i, ent) in bake.src.iter().take(n).enumerate() {
             let room_reflection = Self::room_reflection_flag(bake.gltf_nodes, i);
             match ent {
-                ScenePunctualLight::Smooth(l) => {
+                ScenePunctualLight::Smooth(l) | ScenePunctualLight::SmoothNoShadow(l) => {
                     let p = crate::world_space::world_on_camera_ray_plane_z(
                         bake.screen_w,
                         bake.screen_h,

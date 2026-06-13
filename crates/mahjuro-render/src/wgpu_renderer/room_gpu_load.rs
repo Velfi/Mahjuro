@@ -18,8 +18,9 @@ use std::time::{Duration, Instant};
 use crate::gltf_helpers::{
     GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME, GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE,
     GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW, GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL,
-    GLTF_PBR_FLAG_ROOM_CANDLE_WAX, GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT,
-    GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO, GltfPbrUniform, build_sampler_descriptor,
+    GLTF_PBR_FLAG_ROOM_CANDLE_WAX, GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER,
+    GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT, GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO, GltfPbrUniform,
+    build_sampler_descriptor,
 };
 use crate::room_env_gltf::{RoomEnvPrimitiveCpu, RoomTextureUsageClass};
 use crate::room_gi_bake::RoomGiRoom;
@@ -32,6 +33,11 @@ pub(super) use crate::room_gpu_resident::{
 };
 
 use crate::score_roller_layout::{self, GAMEPLAY_SCORE_ROLLER_SLOT_COUNT};
+
+#[inline]
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 struct RoomUploadAuditMetrics {
@@ -194,6 +200,43 @@ fn room_env_candle_wax_flags(
 }
 
 #[inline]
+fn shop_dynamic_shadow_receiver_flags(
+    scene_key: &str,
+    node_name: Option<&str>,
+    material_name: Option<&str>,
+) -> u32 {
+    if scene_key != scene_keys::SHOP {
+        return 0;
+    }
+    let node = node_name.unwrap_or("").to_ascii_lowercase();
+    let material = material_name.unwrap_or("").to_ascii_lowercase();
+    let receives = contains_any(&node, &["cubby", "recess", "hole", "pillow", "tabletop"])
+        || contains_any(
+            &node,
+            &[
+                "player_gold_dish",
+                "player_relic_dish",
+                "player_talisman_dish",
+            ],
+        )
+        || contains_any(
+            &material,
+            &[
+                "red velvet",
+                "ratten wicker",
+                "wicker",
+                "stone.107",
+                "concrete surface",
+            ],
+        );
+    if receives {
+        GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER
+    } else {
+        0
+    }
+}
+
+#[inline]
 fn room_env_shader_flags(
     scene_key: &str,
     node_name: Option<&str>,
@@ -205,7 +248,9 @@ fn room_env_shader_flags(
         scene_keys::MAIN_MENU => main_menu_env_shader_flags(node_name),
         _ => 0,
     };
-    scene_flags | room_env_candle_wax_flags(scene_key, node_name, material_name)
+    scene_flags
+        | room_env_candle_wax_flags(scene_key, node_name, material_name)
+        | shop_dynamic_shadow_receiver_flags(scene_key, node_name, material_name)
 }
 
 #[inline]
@@ -4127,6 +4172,34 @@ mod tests {
                 Some("Sauna Room planks"),
             ),
             0
+        );
+    }
+
+    #[test]
+    fn shop_dynamic_shadow_receiver_flags_only_receiver_surfaces() {
+        assert_eq!(
+            shop_dynamic_shadow_receiver_flags(
+                scene_keys::SHOP,
+                Some("cubby_recess_01"),
+                Some("Red velvet"),
+            ),
+            GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER
+        );
+        assert_eq!(
+            shop_dynamic_shadow_receiver_flags(
+                scene_keys::SHOP,
+                Some("ManekinekoB"),
+                Some("Material.001"),
+            ),
+            0
+        );
+        assert_eq!(
+            room_env_baked_contact_ao_flags(
+                scene_keys::SHOP,
+                Some("ManekinekoB"),
+                Some("Material.001"),
+            ),
+            GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO
         );
     }
 

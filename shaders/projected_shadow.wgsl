@@ -135,3 +135,12 @@ fn combined_mesh_shadow_vis(world_pos: vec3<f32>) -> f32 {
     }
     return vis;
 }
+
+fn dynamic_receiver_shadow_vis(world_pos: vec3<f32>) -> f32 {
+    let strength = clamp(shadow_globals.params.w, 0.0, 1.0);
+    if (strength <= 0.001) {
+        return 1.0;
+    }
+    let caster_vis = combined_mesh_shadow_vis(world_pos);
+    return 1.0 - (1.0 - caster_vis) * strength;
+}

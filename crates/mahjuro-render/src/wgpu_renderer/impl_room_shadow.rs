@@ -265,6 +265,7 @@ impl WgpuRenderer {
             crate::room_shadow_bake::contact_ao_world_scale_ratio(
                 crate::room_shadow_bake::ROOM_SHADOW_BAKE_REFERENCE_H,
             ),
+            0.0,
         );
         let globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("room-baked-shadow-globals"),
@@ -299,6 +300,7 @@ impl WgpuRenderer {
         build: &crate::projected_light_shadow::PunctualShadowBuild,
         window_h: f32,
         contact_ao_active: bool,
+        dynamic_receiver_shadow_strength: f32,
     ) {
         let (gpu, contact_ao_world_scale) = if self.active_lab_baked_shadow {
             let Some((_, gpu)) = &self.lab_baked_shadow else {
@@ -323,6 +325,7 @@ impl WgpuRenderer {
             contact_ao_active,
             gpu.baked_light_view_proj,
             contact_ao_world_scale,
+            dynamic_receiver_shadow_strength,
         );
         self.queue
             .write_buffer(&gpu.globals_buffer, 0, bytemuck::bytes_of(&globals));

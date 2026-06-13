@@ -1239,11 +1239,25 @@ impl WgpuRenderer {
             ops.insert(pos + 1, RenderOp::ShowcaseTileTranslucent);
         }
 
+        let dynamic_receiver_shadow_strength = if shadow_quality.active()
+            && active_room_env == Some(super::shadow_setup::ActiveRoomEnv::Shop)
+            && !object3d_shadow_draw_list.is_empty()
+            && active_room_env.is_some_and(|env| {
+                super::shadow_setup::skip_room_env_live_shadow_pass(
+                    env,
+                    self.active_room_baked_shadow,
+                )
+            }) {
+            0.55
+        } else {
+            0.0
+        };
         self.write_active_room_baked_shadow_globals(
             shadow_quality,
             &projected_frame.build,
             camera.h,
             contact_ao_active,
+            dynamic_receiver_shadow_strength,
         );
         self.upload_projected_shadow_globals(
             shadow_quality,
@@ -1251,6 +1265,7 @@ impl WgpuRenderer {
             contact_ao_active,
             contact_ao_view_proj,
             camera.h,
+            dynamic_receiver_shadow_strength,
         );
         let room_shadow_active = shadow_quality.active();
         let offline_room_baked_loaded = self.active_room_baked_shadow.is_some();
@@ -1381,6 +1396,7 @@ impl WgpuRenderer {
                     "room_glb_brdf": frame.uses_room_glb_shader(),
                     "punctual_count": frame.scene_lighting.punctual.len(),
                     "caster_count": projected_frame.casters().len(),
+                    "dynamic_receiver_shadow_strength": dynamic_receiver_shadow_strength,
                     "active_env": active_room_env.map(|e| format!("{e:?}")),
                     "scene_key": self.active_scene_key,
                     "camera_h": camera.h,
@@ -1402,6 +1418,7 @@ impl WgpuRenderer {
                 );
                 let punctual_kind = frame.scene_lighting.punctual.first().map(|e| match e {
                     crate::draw_cmd::ScenePunctualLight::Smooth(_) => "smooth",
+                    crate::draw_cmd::ScenePunctualLight::SmoothNoShadow(_) => "smooth_no_shadow",
                     crate::draw_cmd::ScenePunctualLight::InverseSquare(_) => "inverse_square",
                 });
                 let synth_lvp = crate::shadow_ao_lab::punctual_light_view_proj(layout);

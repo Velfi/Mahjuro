@@ -150,6 +150,7 @@ pub(crate) fn build_shadow_globals(
     contact_ao_active: bool,
     contact_ao_view_proj: [f32; 16],
     contact_ao_world_scale: f32,
+    dynamic_receiver_shadow_strength: f32,
 ) -> ShadowGlobals {
     let point_size = shadow_quality.point_map_size().max(1) as f32;
     let mut globals = ShadowGlobals::empty();
@@ -157,7 +158,7 @@ pub(crate) fn build_shadow_globals(
         if shadow_quality.active() { 1.0 } else { 0.0 },
         0.005,
         1.0 / point_size,
-        0.0,
+        dynamic_receiver_shadow_strength.clamp(0.0, 1.0),
     ];
     for caster in &build.casters {
         let layer = caster.layer_index as usize;
@@ -208,6 +209,10 @@ impl WgpuRenderer {
                 .and_then(ActiveRoomEnv::from_scene_key)
         });
         let bounds_doc = active_room_env.and_then(|e| e.environment_bounds_doc());
+        let focus_shop_dynamic_region = active_room_env.is_some_and(|env| {
+            matches!(env, ActiveRoomEnv::Shop)
+                && skip_room_env_live_shadow_pass(env, self.active_room_baked_shadow)
+        });
         let env_height_scale = active_room_env
             .map(|e| self.room_env_shadow_height_scale(e))
             .unwrap_or_else(|| self.active_frame_env().height_scale);
@@ -227,6 +232,7 @@ impl WgpuRenderer {
             bounds_doc,
             frame.camera_override.as_ref(),
             use_ray_plane,
+            focus_shop_dynamic_region,
         );
         let (hash, changed) =
             punctual_shadow_setups_changed(&build, self.cached_projected_shadow_hash);
@@ -264,6 +270,7 @@ impl WgpuRenderer {
         contact_ao_active: bool,
         contact_ao_view_proj: [f32; 16],
         window_h: f32,
+        dynamic_receiver_shadow_strength: f32,
     ) {
         let ao_scale = if self.active_lab_baked_shadow {
             crate::shadow_ao_lab::CONTACT_AO_WORLD_SCALE
@@ -278,6 +285,7 @@ impl WgpuRenderer {
             contact_ao_active,
             contact_ao_view_proj,
             ao_scale,
+            dynamic_receiver_shadow_strength,
         );
         self.queue
             .write_buffer(&self.shadow_globals_buffer, 0, bytemuck::bytes_of(&globals));

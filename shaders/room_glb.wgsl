@@ -29,6 +29,7 @@ const GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW: u32 = 1u << 3u;
 const GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME: u32 = 1u << 4u;
 const GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO: u32 = 1u << 5u;
 const GLTF_PBR_FLAG_ROOM_CANDLE_WAX: u32 = 1u << 6u;
+const GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER: u32 = 1u << 7u;
 const CANDLE_WARMTH_RGB: vec3<f32> = vec3<f32>(1.0, 0.58, 0.20);
 // UI polychrome (The House) — coarser bands than 3D score pops at label sizes.
 const POLYCHROME_COORD_X: f32 = 2.0;
@@ -422,6 +423,8 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let is_house_polychrome = (pbr.flags & GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME) != 0u
         && cam.room_post_params.w > 0.0;
     let is_candle_wax = (pbr.flags & GLTF_PBR_FLAG_ROOM_CANDLE_WAX) != 0u;
+    let receives_dynamic_room_shadow =
+        (pbr.flags & GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER) != 0u;
 
     // Animation-lab false shading: albedo × simple N·L (skips punctual PBR / shadows).
     if (cam.room_debug_params.y > 0.5) {
@@ -535,7 +538,8 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
             continue;
         }
 
-        let projected_shadows_on = shadow_globals.params.x > 0.5;
+        let projected_shadows_on =
+            shadow_globals.params.x > 0.5 && receives_dynamic_room_shadow;
         let punc_vis = select(
             1.0,
             punctual_shadow_vis(i, in.world_pos),
@@ -673,7 +677,12 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         Lo = Lo + direct.total;
     }
 
-    Lo = Lo + sample_room_lightmap_indirect(in.lightmap_uv);
+    let room_indirect_shadow_vis = select(
+        1.0,
+        dynamic_receiver_shadow_vis(in.world_pos),
+        receives_dynamic_room_shadow,
+    );
+    Lo = Lo + sample_room_lightmap_indirect(in.lightmap_uv) * room_indirect_shadow_vis;
 
     Lo = Lo
         + gold_reflected_fill
