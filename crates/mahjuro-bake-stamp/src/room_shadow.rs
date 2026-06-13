@@ -66,5 +66,7 @@ pub fn rerun_if_changed_paths() -> Vec<&'static str> {
     ];
     paths.extend_from_slice(crate::shader_program::SHADOW);
     paths.extend_from_slice(crate::shader_program::ROOM_SHADOW_MASK);
+    paths.sort();
+    paths.dedup();
     paths
 }
