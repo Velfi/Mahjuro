@@ -25,10 +25,9 @@
 //! paths do not invalidate the bake). Set `MAHJURO_SKIP_ASSET_BAKE=1` to skip entirely.
 //!
 //! **Room GI / shadow / decal / relic bakes:** committed outputs under `assets/` must
-//! match their input stamps. On local host builds, `build.rs` auto-rebakes when stale;
-//! missing bakers are compiled into `target/offline-bake-tools/` (nested `cargo` with a
-//! separate target dir — see rust-lang/cargo#6412). CI (`CI=true`) and cross-compiles
-//! still panic. Set `MAHJURO_SKIP_AUTO_OFFLINE_BAKE=1` to disable.
+//! match their input stamps. On local host builds, `build.rs` panics when stale so the
+//! user can run the appropriate rebake command. CI (`CI=true`) and cross-compiles
+//! also panic. Set `MAHJURO_SKIP_OFFLINE_BAKES=1` to disable freshness checks.
 //! - `mahjuro` is built with `headless-screenshot` or `offline-bake-support`,
 //! `MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1`, `MAHJURO_SKIP_OFFLINE_BAKES=1`, or a per-bake
 //! `MAHJURO_SKIP_*_BAKE=1`.

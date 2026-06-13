@@ -2,7 +2,7 @@
 
 Headless bake tools live in [`crates/mahjuro-headless`](../../crates/mahjuro-headless) (`mahjuro-bake`, `mahjuro-screenshot`) so they do not build the interactive `mahjuro` binary (no `rodio`, Steam, or SDL). GPU work is in `mahjuro-render`; room scenes still link for draw recording.
 
-Stamp hashes and skip env vars are centralized in [`crates/mahjuro-bake-stamp`](../../crates/mahjuro-bake-stamp). `build.rs` compares committed stamps against current inputs; on **local host builds** it auto-rebakes when stale. Missing bake binaries are built via nested `cargo` into `target/offline-bake-tools/` (separate `CARGO_TARGET_DIR` avoids the main target-dir lock — [cargo#6412](https://github.com/rust-lang/cargo/issues/6412)). **CI** (`CI=true`) and **cross-compiles** still panic. Set `MAHJURO_SKIP_AUTO_OFFLINE_BAKE=1` to disable auto-rebake. See [launch options](launch-options.md).
+Stamp hashes and skip env vars are centralized in [`crates/mahjuro-bake-stamp`](../../crates/mahjuro-bake-stamp). `build.rs` compares committed stamps against current inputs; if they are stale, the build panics and prints the command to run to rebake. Set `MAHJURO_SKIP_OFFLINE_BAKES=1` to disable freshness checks. See [launch options](launch-options.md).
 
 ## Room vertex warp + live shadows
 
