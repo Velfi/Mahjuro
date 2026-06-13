@@ -402,8 +402,8 @@ pub struct RunState {
         crate::core::yaku::YakuKind,
         u32,
     )>,
-    /// Data from a dismissed zodiac celebration overlay, consumed by the
-    /// underlying scene (shop) to spawn a score popup + particle burst.
+    /// Data from a dismissed shop zodiac-purchase celebration overlay, consumed by
+    /// [`ShopScene`] on the same visit to spawn a score popup + particle burst.
     #[serde(skip)]
     pub finished_zodiac_celebration: Option<(&'static str, u32)>,
     /// Set when a shop celebration overlay (tile pack or zodiac level-up) pops;

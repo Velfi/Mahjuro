@@ -21,6 +21,10 @@ pub struct ZodiacPresenter {
     kind: ZodiacKind,
     yaku_name: &'static str,
     new_level: u32,
+    /// When true (shop purchase), queue a table popup after the ribbon dismisses.
+    /// Hallway ZodiacBlessing celebrations already show the full ribbon — deferring
+    /// a second popup into the next shop visit reads as a spurious level-up.
+    shop_table_popup_after: bool,
     started_at: Instant,
     intro_gate: celebration_overlay::CelebrationShowcaseIntroGate,
     dismissed: bool,
@@ -29,10 +33,24 @@ pub struct ZodiacPresenter {
 
 impl ZodiacPresenter {
     pub fn new(kind: ZodiacKind, yaku_name: &'static str, new_level: u32) -> Self {
+        Self::new_internal(kind, yaku_name, new_level, false)
+    }
+
+    pub fn new_shop_purchase(kind: ZodiacKind, yaku_name: &'static str, new_level: u32) -> Self {
+        Self::new_internal(kind, yaku_name, new_level, true)
+    }
+
+    fn new_internal(
+        kind: ZodiacKind,
+        yaku_name: &'static str,
+        new_level: u32,
+        shop_table_popup_after: bool,
+    ) -> Self {
         Self {
             kind,
             yaku_name,
             new_level,
+            shop_table_popup_after,
             started_at: Instant::now(),
             intro_gate: celebration_overlay::CelebrationShowcaseIntroGate::new(
                 celebration_overlay::ShootingStarCelebrationIntro::new_zodiac(),
@@ -72,8 +90,14 @@ impl ZodiacPresenter {
         }
         if self.dismissed {
             ctx.bus.push(GameEvent::ZodiacLevelUp);
-            GameEngine::set_finished_zodiac_celebration(ctx.run, self.yaku_name, self.new_level);
-            ctx.run.pending_shop_focus_snap_after_celebration = true;
+            if self.shop_table_popup_after {
+                GameEngine::set_finished_zodiac_celebration(
+                    ctx.run,
+                    self.yaku_name,
+                    self.new_level,
+                );
+                ctx.run.pending_shop_focus_snap_after_celebration = true;
+            }
             *ctx.overlay_request = Some(OverlayRequest::Pop);
         }
         None
@@ -127,19 +151,19 @@ impl ZodiacPresenter {
                 pos: [cx + w * 0.18, cy - h * 0.10, lift + h * 0.35],
                 radius: w.max(h) * 2.4,
                 color: [1.00, 0.88, 0.62],
-                intensity: 2.6,
+                intensity: 16.0,
             },
             PointLight {
                 pos: [cx - w * 0.22, cy + h * 0.05, lift + h * 0.20],
                 radius: w.max(h) * 2.0,
                 color: [0.55, 0.70, 1.00],
-                intensity: 1.4,
+                intensity: 5.0,
             },
             PointLight {
                 pos: [cx, cy - h * 0.15, lift - h * 0.15],
                 radius: w.max(h) * 1.6,
                 color: color::rgb(color::RELIC_GOLD),
-                intensity: 1.1,
+                intensity: 5.0,
             },
         ]);
 

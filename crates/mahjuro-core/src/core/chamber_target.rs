@@ -14,9 +14,6 @@ pub const CHAMBERS_PER_WING: u32 = 3;
 /// Total chambers in a full run.
 pub const TOTAL_CHAMBERS: u32 = FINAL_WING * CHAMBERS_PER_WING;
 
-/// Spring-season chip base for wing 1 Small Chamber (`base_target` before season mult).
-pub const DEFAULT_BASE_TARGET: u32 = 1000;
-
 /// Per-wing multiplier on the run's `base_target`.
 ///
 /// Golden ratio φ = (1+√5)/2; decimal expansion [OEIS A001622](https://oeis.org/A001622).
@@ -60,21 +57,21 @@ impl ChamberKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::season::Season;
 
     #[test]
     fn wing_one_matches_base_and_chamber_mults() {
-        assert_eq!(wing_chip_base(1, DEFAULT_BASE_TARGET), DEFAULT_BASE_TARGET);
-        assert_eq!(
-            score_for(1, ChamberKind::Small, DEFAULT_BASE_TARGET),
-            DEFAULT_BASE_TARGET
-        );
-        assert_eq!(score_for(1, ChamberKind::Big, DEFAULT_BASE_TARGET), 1500);
-        assert_eq!(score_for(1, ChamberKind::Ordeal, DEFAULT_BASE_TARGET), 2000);
+        let base = Season::Spring.base_target();
+        assert_eq!(wing_chip_base(1, base), base);
+        assert_eq!(score_for(1, ChamberKind::Small, base), base);
+        assert_eq!(score_for(1, ChamberKind::Big, base), 750);
+        assert_eq!(score_for(1, ChamberKind::Ordeal, base), 1000);
     }
 
     #[test]
     fn scales_exponentially_per_wing() {
-        assert_eq!(wing_chip_base(3, DEFAULT_BASE_TARGET), 2618);
-        assert_eq!(score_for(3, ChamberKind::Ordeal, DEFAULT_BASE_TARGET), 5236);
+        let base = Season::Spring.base_target();
+        assert_eq!(wing_chip_base(3, base), 1309);
+        assert_eq!(score_for(3, ChamberKind::Ordeal, base), 2618);
     }
 }

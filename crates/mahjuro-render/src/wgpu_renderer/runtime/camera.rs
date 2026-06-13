@@ -222,10 +222,16 @@ impl WgpuRenderer {
                         | DrawCmd::GameplayEnvironment
                 )
             });
+        let tile_select_showcase = k == Some("tile_select")
+            && frame
+                .cmds
+                .iter()
+                .any(|c| matches!(c, DrawCmd::ShowcaseTileBatch(_)));
         let hdr_active = k == Some(scene_keys::SHADOW_AO_LAB)
             || frame.shadow_ao_lab_layout.is_some()
             || tile_pack_celebration
             || shop_showcase_without_env
+            || tile_select_showcase
             || shop_scene
             || table_like
             || k == Some(scene_keys::VICTORY)

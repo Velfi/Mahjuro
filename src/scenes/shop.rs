@@ -403,6 +403,19 @@ mod tests {
     }
 
     #[test]
+    fn shop_entry_clears_stale_finished_zodiac_celebration() {
+        let mut run = crate::game::run::RunState::new(GameMode::standard());
+        run.finished_zodiac_celebration = Some(("Riichi", 2));
+        run.pending_shop_focus_snap_after_celebration = true;
+
+        let _shop =
+            ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
+
+        assert!(run.finished_zodiac_celebration.is_none());
+        assert!(!run.pending_shop_focus_snap_after_celebration);
+    }
+
+    #[test]
     fn stacked_patron_gift_shop_zeros_multiple_relics() {
         let mut run = crate::game::run::RunState::new(GameMode::standard());
         run.tag_patron_gift = 2;
