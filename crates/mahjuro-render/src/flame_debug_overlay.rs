@@ -8,13 +8,10 @@ use crate::theme::{ButtonVariant, color, metrics, typography};
 use crate::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use mahjuro_types::UiAction;
 
-const FLAME_MID_ACTION_COUNT: usize = 2;
-const FLAME_TRIGGER_GUST_ROW: usize = FLAME_DEBUG_SLIDER_COUNT;
-const FLAME_TRIGGER_ROOM_GUST_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + 1;
-const FLAME_SAVE_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + FLAME_MID_ACTION_COUNT;
-const FLAME_RESET_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + FLAME_MID_ACTION_COUNT + 1;
-const FLAME_CLOSE_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + FLAME_MID_ACTION_COUNT + 2;
-const FLAME_ROW_COUNT: usize = FLAME_DEBUG_SLIDER_COUNT + FLAME_MID_ACTION_COUNT + 3;
+const FLAME_SAVE_ROW: usize = FLAME_DEBUG_SLIDER_COUNT;
+const FLAME_RESET_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + 1;
+const FLAME_CLOSE_ROW: usize = FLAME_DEBUG_SLIDER_COUNT + 2;
+const FLAME_ROW_COUNT: usize = FLAME_DEBUG_SLIDER_COUNT + 3;
 const MAX_VISIBLE_ROWS: usize = 14;
 
 struct FlameDebugLayout {
@@ -118,7 +115,6 @@ pub enum FlameDebugResult {
     Close,
     Reset,
     Save,
-    TriggerGust { room: bool },
 }
 
 impl FlameDebugOverlay {
@@ -205,21 +201,9 @@ impl FlameDebugOverlay {
 
     fn action_label(row: usize) -> (&'static str, ButtonVariant) {
         match row {
-            FLAME_TRIGGER_GUST_ROW => ("Trigger gust (per candle)", ButtonVariant::Primary),
-            FLAME_TRIGGER_ROOM_GUST_ROW => {
-                ("Trigger room gust (all candles)", ButtonVariant::Primary)
-            }
             FLAME_SAVE_ROW => ("Save for shop / gameplay", ButtonVariant::Primary),
             FLAME_RESET_ROW => ("Reset to defaults", ButtonVariant::Danger),
             _ => ("Close", ButtonVariant::Subtle),
-        }
-    }
-
-    fn mid_action_result(row: usize) -> Option<FlameDebugResult> {
-        match row {
-            FLAME_TRIGGER_GUST_ROW => Some(FlameDebugResult::TriggerGust { room: false }),
-            FLAME_TRIGGER_ROOM_GUST_ROW => Some(FlameDebugResult::TriggerGust { room: true }),
-            _ => None,
         }
     }
 
@@ -343,16 +327,13 @@ impl FlameDebugOverlay {
                         break;
                     }
                 }
-                for row in FLAME_TRIGGER_GUST_ROW..=FLAME_CLOSE_ROW {
+                for row in FLAME_SAVE_ROW..=FLAME_CLOSE_ROW {
                     let Some(rect) = layout.hit_row_rect(row) else {
                         continue;
                     };
                     if point_in_rect(mx, my, rect) {
                         self.cursor = row;
                         self.clear_edit();
-                        if let Some(result) = Self::mid_action_result(row) {
-                            return result;
-                        }
                         return match row {
                             FLAME_SAVE_ROW => FlameDebugResult::Save,
                             FLAME_RESET_ROW => FlameDebugResult::Reset,
@@ -395,8 +376,6 @@ impl FlameDebugOverlay {
                 UiAction::Confirm | UiAction::CommitDiscard => {
                     if self.editing {
                         self.commit_edit();
-                    } else if let Some(result) = Self::mid_action_result(self.cursor) {
-                        return result;
                     } else if self.cursor == FLAME_SAVE_ROW {
                         return FlameDebugResult::Save;
                     } else if self.cursor == FLAME_RESET_ROW {
@@ -550,7 +529,7 @@ impl FlameDebugOverlay {
             });
         }
 
-        for row in FLAME_TRIGGER_GUST_ROW..=FLAME_CLOSE_ROW {
+        for row in FLAME_SAVE_ROW..=FLAME_CLOSE_ROW {
             if !layout.row_visible(row) {
                 continue;
             }

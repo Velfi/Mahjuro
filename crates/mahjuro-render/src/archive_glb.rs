@@ -552,3 +552,27 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod debug_dump {
+    use super::*;
+    use crate::room_env_gltf::decal_texel_u_runs_along_local_y;
+
+    #[test]
+    #[ignore]
+    fn debug_inspect_plaque_uvs() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/3d/archive.glb");
+        let data = std::fs::read(&path).unwrap();
+        let cpu = load_archive_glb_from_bytes(&data).unwrap();
+        let prim = cpu.environment_primitives.iter()
+            .find(|p| p.gltf_node_name.as_deref() == Some(INSPECT_PLAQUE))
+            .expect("inspect_plaque prim");
+        let positions: Vec<[f32;3]> = prim.mesh.vertices.iter().map(|v| v.position).collect();
+        let uvs: Vec<[f32;2]> = prim.mesh.vertices.iter().map(|v| v.uv).collect();
+        eprintln!("aspect={}", prim.archive_decal_face_aspect);
+        eprintln!("along_y={}", decal_texel_u_runs_along_local_y(&positions, &uvs));
+        for (i, (p, uv)) in positions.iter().zip(uvs.iter()).enumerate().take(8) {
+            eprintln!("{i}: pos={p:?} uv={uv:?}");
+        }
+    }
+}
