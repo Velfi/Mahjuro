@@ -1101,10 +1101,18 @@ impl WgpuRenderer {
         // Wood tablets migrated to Object3dKind::WoodTablet.
 
         self.upload_active_room_baked_shadow_globals(frame);
-        if self.recreate_shadow_depth_arrays_if_needed(shadow_quality) {
+        // Offline `.msh` capture needs a real punctual shadow frustum and a fixed
+        // map size even when live settings have shadows Off (Performance / LowMemory).
+        let shadow_quality_for_pass = if self.room_shadow_capture_pending.is_some() {
+            crate::room_shadow_bake::ROOM_SHADOW_BAKE_CAPTURE_QUALITY
+        } else {
+            shadow_quality
+        };
+        if self.recreate_shadow_depth_arrays_if_needed(shadow_quality_for_pass) {
             self.cached_shadow_light_view_proj = [0.0; 16];
         }
-        let projected_frame = self.prepare_projected_shadow_frame(frame, &camera, shadow_quality);
+        let projected_frame =
+            self.prepare_projected_shadow_frame(frame, &camera, shadow_quality_for_pass);
         let active_room_env = super::shadow_setup::ActiveRoomEnv::from_frame(frame).or_else(|| {
             self.active_scene_key
                 .and_then(super::shadow_setup::ActiveRoomEnv::from_scene_key)
@@ -1570,7 +1578,7 @@ impl WgpuRenderer {
         );
         let room_shadow_capture_staging = self.room_shadow_capture_pending.map(|room| {
             const BIAS: f32 = 0.005;
-            let size = self.point_shadow_array.size;
+            let size = crate::room_shadow_bake::ROOM_SHADOW_BAKE_MAP_SIZE;
             self.encode_room_shadow_capture_copy(
                 &mut encoder,
                 frame,

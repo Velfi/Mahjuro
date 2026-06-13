@@ -559,6 +559,8 @@ impl WgpuRenderer {
             width,
             height,
         );
+        let width = width.max(1);
+        let height = height.max(1);
         RoomShadowCaptureStaging {
             depth_buffer: depth_staging,
             depth_byte_len,

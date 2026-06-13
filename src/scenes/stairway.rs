@@ -156,6 +156,15 @@ fn focused_decimation_tile(tree: &TreeState) -> Option<usize> {
         })
 }
 
+/// Tile glow in the picker grid: cursor mode follows the raycast pick; KB/controller
+/// follows keyboard focus only so a stationary mouse does not retain hover.
+fn decimation_hover_pick(tree: &TreeState, ctx: &UpdateCtx<'_>) -> Option<usize> {
+    match ctx.input_mode {
+        InputMode::Cursor => ctx.picked_hand_tile.or_else(|| focused_decimation_tile(tree)),
+        InputMode::Keyboard | InputMode::Controller => focused_decimation_tile(tree),
+    }
+}
+
 struct DecimationPickingChrome {
     back: [f32; 4],
     seal: [f32; 4],
@@ -799,7 +808,7 @@ impl StairwayScene {
         }
 
         let scale = metrics::scene_scale(w, h);
-        let hover_slot = focused_decimation_tile(&self.tree).or(ctx.picked_hand_tile);
+        let hover_slot = decimation_hover_pick(&self.tree, &ctx);
         let mut layout = self.decimation_layout(
             w,
             h,
@@ -888,7 +897,7 @@ impl StairwayScene {
                 face_aspect,
                 &display_tiles,
                 &selected,
-                focused_decimation_tile(&self.tree).or(ctx.picked_hand_tile),
+                decimation_hover_pick(&self.tree, &ctx),
                 &chrome,
                 picking_chrome.viewport,
             );
@@ -917,20 +926,17 @@ impl StairwayScene {
                 face_aspect,
                 &display_tiles,
                 &selected,
-                focused_decimation_tile(&self.tree).or(ctx.picked_hand_tile),
+                decimation_hover_pick(&self.tree, &ctx),
                 &chrome,
                 picking_chrome.viewport,
             );
             self.tile_scroll_y = layout.scroll.scroll_y;
         }
 
-        self.hovered_tile = ctx
-            .picked_hand_tile
-            .or_else(|| focused_decimation_tile(&self.tree));
+        let hover_slot = decimation_hover_pick(&self.tree, &ctx);
+        self.hovered_tile = hover_slot;
 
-        let marquee_slot = ctx
-            .picked_hand_tile
-            .or_else(|| focused_decimation_tile(&self.tree));
+        let marquee_slot = hover_slot;
         if let (Some(m), Some(idx)) = (self.marquee.as_mut(), marquee_slot)
             && idx != m.current_slot
         {

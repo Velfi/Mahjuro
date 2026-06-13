@@ -441,7 +441,7 @@ fn cluster_by(
     let mut parent: Vec<usize> = (0..n).collect();
     for i in 0..n {
         for j in i + 1..n {
-            if same_group(rect_at(active[i]), rect_at(active[j])) {
+            if same_group(rect_at(i), rect_at(j)) {
                 union_find(&mut parent, i, j);
             }
         }
@@ -463,11 +463,11 @@ fn groups_from_parent(
     }
     let mut groups: Vec<Vec<usize>> = buckets.into_values().collect();
     for group in &mut groups {
-        group.sort_by(|&a, &b| within_sort(rect_at(active[a]), rect_at(active[b])));
+        group.sort_by(|&a, &b| within_sort(rect_at(a), rect_at(b)));
     }
     groups.sort_by(|ga, gb| {
-        let ra = rect_at(active[ga[0]]);
-        let rb = rect_at(active[gb[0]]);
+        let ra = rect_at(ga[0]);
+        let rb = rect_at(gb[0]);
         group_sort(ra, rb)
     });
     groups
@@ -515,8 +515,8 @@ fn infer_groups(
     }
 
     for w in 1..rows.len() {
-        let prev = rows[w - 1].first().copied().map(|i| rect_at(active[i]));
-        let cur = rows[w].first().copied().map(|i| rect_at(active[i]));
+        let prev = rows[w - 1].first().copied().map(|i| rect_at(i));
+        let cur = rows[w].first().copied().map(|i| rect_at(i));
         if let (Some(rp), Some(rc)) = (prev, cur) {
             let gap = rc[1] - (rp[1] + rp[3]);
             if gap <= group_gap_y {
@@ -533,8 +533,8 @@ fn infer_groups(
 
     for row in rows {
         for w in 1..row.len() {
-            let left = rect_at(active[row[w - 1]]);
-            let right = rect_at(active[row[w]]);
+            let left = rect_at(row[w - 1]);
+            let right = rect_at(row[w]);
             let gap = right[0] - (left[0] + left[2]);
             if gap > group_gap_x && group_ids[row[w]] == group_ids[row[w - 1]] {
                 let old = group_ids[row[w - 1]];
@@ -1041,5 +1041,28 @@ mod tests {
         assert_eq!(nav.pick(2, FocusDir::Left, &mut memory), None);
         nav.set_scope_filter(Some(FocusScope::Scene));
         assert_eq!(nav.pick(1, FocusDir::Right, &mut memory), None);
+    }
+
+    #[test]
+    fn layout_survives_filtered_leading_nodes() {
+        // Archive registers chrome + many artifact cells; tiny rects are skipped
+        // during layout. Active indices no longer match 0..active.len()-1.
+        let mut nav = FocusNav::new();
+        nav.begin_frame();
+        for i in 0..3u32 {
+            nav.add(i, [0.0, 0.0, 1.0, 1.0]); // below MIN_FOCUSABLE_SIZE
+        }
+        for row in 0..4 {
+            for col in 0..6 {
+                let id = 100 + row * 6 + col;
+                nav.add(
+                    id,
+                    [80.0 + col as f32 * 90.0, 120.0 + row as f32 * 90.0, 80.0, 80.0],
+                );
+            }
+        }
+        nav.end_frame();
+        let mut memory = FocusMemory::default();
+        assert_eq!(nav.pick(100, FocusDir::Right, &mut memory), Some(101));
     }
 }

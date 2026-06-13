@@ -55,17 +55,19 @@ pub fn push_label_clipped(
     }
 }
 
+/// Vertical viewport band for a chart pane at the label's x/w.
+pub fn chart_clip_viewport(rect: [f32; 4], clip: ChartClip) -> [f32; 4] {
+    [
+        rect[0],
+        clip.top,
+        rect[2],
+        (clip.bottom - clip.top).max(0.0),
+    ]
+}
+
 /// Intersect `rect` with a [`ChartClip`] band (shared by quads and labels).
 pub fn chart_clip_rect(rect: [f32; 4], clip: ChartClip) -> Option<[f32; 4]> {
-    intersect_rect(
-        rect,
-        [
-            rect[0],
-            clip.top,
-            rect[2],
-            (clip.bottom - clip.top).max(0.0),
-        ],
-    )
+    intersect_rect(rect, chart_clip_viewport(rect, clip))
 }
 
 /// Walnut ledger card chrome shared by Chronicle KPI tiles, section cards, and insight columns.
@@ -156,10 +158,14 @@ pub fn push_colored_label_clipped(
     align: TextAlign,
     mono: bool,
 ) {
+    let viewport = chart_clip_viewport(rect, clip);
+    if intersect_rect(rect, viewport).is_none() {
+        return;
+    }
     push_colored_line_clipped(
         out,
         rect,
-        chart_clip_rect(rect, clip),
+        Some(viewport),
         text,
         default,
         font_px,
