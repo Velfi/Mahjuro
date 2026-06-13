@@ -500,11 +500,33 @@ fn material_kind_to_u32(kind: MaterialKind) -> u32 {
 }
 
 fn material_kind_from_u32(v: u32) -> MaterialKind {
-    if v <= MaterialKind::CatalogPaper as u32 {
-        // SAFETY: `MaterialKind` is `#[repr(u32)]` with contiguous
-        // discriminants from `Plain` through `CatalogPaper`.
-        unsafe { std::mem::transmute::<u32, MaterialKind>(v) }
-    } else {
-        MaterialKind::Plain
+    // Map removed legacy discriminants from older RLC1 bakes.
+    let v = match v {
+        8 => MaterialKind::PackWrap as u32, // Foil
+        11 | 12 | 13 | 14 => MaterialKind::Chitin as u32, // Jade / Moonstone / Pearl / GoldNugget
+        19 => MaterialKind::Plain as u32,   // FeltGreen
+        other => other,
+    };
+    match v {
+        k if k == MaterialKind::Plain as u32 => MaterialKind::Plain,
+        k if k == MaterialKind::Wax as u32 => MaterialKind::Wax,
+        k if k == MaterialKind::Wick as u32 => MaterialKind::Wick,
+        k if k == MaterialKind::LacqueredWood as u32 => MaterialKind::LacqueredWood,
+        k if k == MaterialKind::LacqueredWoodFlat as u32 => MaterialKind::LacqueredWoodFlat,
+        k if k == MaterialKind::Metal as u32 => MaterialKind::Metal,
+        k if k == MaterialKind::Water as u32 => MaterialKind::Water,
+        k if k == MaterialKind::PackWrap as u32 => MaterialKind::PackWrap,
+        k if k == MaterialKind::Glass as u32 => MaterialKind::Glass,
+        k if k == MaterialKind::Enamel as u32 => MaterialKind::Enamel,
+        k if k == MaterialKind::Polychrome as u32 => MaterialKind::Polychrome,
+        k if k == MaterialKind::Porcelain as u32 => MaterialKind::Porcelain,
+        k if k == MaterialKind::Brass as u32 => MaterialKind::Brass,
+        k if k == MaterialKind::Leather as u32 => MaterialKind::Leather,
+        k if k == MaterialKind::Emissive as u32 => MaterialKind::Emissive,
+        k if k == MaterialKind::Chitin as u32 => MaterialKind::Chitin,
+        k if k == MaterialKind::Unshaded as u32 => MaterialKind::Unshaded,
+        k if k == MaterialKind::BronzeMirror as u32 => MaterialKind::BronzeMirror,
+        k if k == MaterialKind::CatalogPaper as u32 => MaterialKind::CatalogPaper,
+        _ => MaterialKind::Plain,
     }
 }

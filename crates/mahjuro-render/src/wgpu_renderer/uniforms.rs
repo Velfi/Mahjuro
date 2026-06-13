@@ -3,6 +3,8 @@
 pub(crate) struct Globals {
     pub screen: [f32; 2],
     pub time: f32,
+    /// Display gamma for post-tonemap 2D (`globals_bind_group`). Pass A uses
+    /// `globals_scene_hdr_buffer` with this field forced to 1.0.
     pub gamma: f32,
     pub cursor_pos: [f32; 2],
     pub transition_progress: f32,
@@ -44,10 +46,9 @@ pub(crate) struct TonemapParams {
     pub vhs_vignette: f32,
     /// Monotonic frame counter for in-place VHS grain re-roll (not spatial scroll).
     pub grain_frame: f32,
-    /// User display-gamma slider (`AppSettings::gamma`, default 1.0). Applied as
-    /// `pow(color, 1/gamma)` at the end of the composite so the HDR scene path
-    /// respects it — the per-shader gamma in `lit_mesh`/`tile_3d` is a no-op on
-    /// the HDR path, which previously left only the UI honoring the slider.
+    /// User display-gamma slider; applied as pow(color, 1/gamma) at the end of
+    /// the visible swapchain path (once per frame, after ACES). Pass A UI uses
+    /// `globals_scene_hdr` (gamma = 1.0) so this is the only gamma step for 3D.
     pub gamma: f32,
 }
 
@@ -58,7 +59,7 @@ pub(crate) struct TileFrameUniform {
     pub view_proj: [f32; 16],
     pub cam_pos: [f32; 3],
     pub _pad0: f32,
-    /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient; w = inv doc scale.
+    /// x = 1.0 (HDR always); y = linear exposure; z = hemispheric ambient; w = inv doc scale.
     pub tile_post_params: [f32; 4],
     /// x = embedded glTF inverse-square intensity scale for tiles.
     pub tile_punctual_params: [f32; 4],

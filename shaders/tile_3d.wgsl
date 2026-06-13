@@ -2,8 +2,7 @@ struct TileFrameUniform {
     view_proj: mat4x4<f32>,
     cam_pos: vec3<f32>,
     _pad0: f32,
-    /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient (albedo * 0.08);
-    /// w = inverse document scale for embedded glTF punctual attenuation.
+    /// x = 1.0 (HDR path always on); y = linear exposure; z = hemispheric ambient; w = inv doc scale.
     tile_post_params: vec4<f32>,
     /// x = reserved; source punctual intensity is shared across room/tile/lit_mesh.
     tile_punctual_params: vec4<f32>,
@@ -50,7 +49,7 @@ struct PointLight {
 struct PointLights {
     // count.x = number of active lights; rest is std140 padding.
     count: vec4<u32>,
-    // extras.x = display gamma; extras.w = reserved.
+    // extras.x = reserved (display gamma; tiles write HDR, tonemap is composite).
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
@@ -450,28 +449,21 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         }
     }
 
-    let inv_g = 1.0 / max(lights.extras.x, 0.01);
-    var out_rgb: vec3<f32>;
-    if (frame.tile_post_params.x > 0.5) {
-        // Table / room linear HDR path: write the un-tonemapped HDR into
-        // `scene_color`. `tonemap_composite.wgsl` applies the single ACES
-        // pass + sRGB encode; the per-shader `lights.extras.x` gamma slider
-        // is intentionally a no-op here.
-        //
-        // `tile_post_params.y` crushes punctual-lit albedo (gameplay feel).
-        // glTF emissive is authored as outgoing radiance — if it goes through the same multiplier,
-        // bright point lights on the same mesh (e.g. hallway lamp bulbs) swamp it and changing
-        // emissive scale is invisible. Keep emissive out of that multiply (same idea as
-        // `room_glb.wgsl`: emissive is not scaled by room linear exposure).
-        let hem = frame.tile_post_params.z * rgb * vec3<f32>(0.08);
-        var hdr = (lit_rgb - gltf_emissive_hdr + hem) * frame.tile_post_params.y;
-        hdr = hdr + gltf_emissive_hdr;
-        // Clamp to prevent Rgba16Float overflow (Infinity) which causes NaN during bloom bilinear filtering on Metal
-        out_rgb = min(hdr, vec3<f32>(65000.0));
-    } else {
-        // Legacy non-HDR scenes still apply the user gamma slider in-shader.
-        out_rgb = pow(lit_rgb, vec3<f32>(inv_g));
-    }
+    let linear_exposure = frame.tile_post_params.y;
+    let ambient_scale = frame.tile_post_params.z;
+    // Table / room linear HDR: write un-tonemapped scene color; `tonemap_composite.wgsl`
+    // applies ACES + sRGB encode.
+    //
+    // `linear_exposure` crushes punctual-lit albedo (gameplay feel). glTF emissive is
+    // authored as outgoing radiance — if it goes through the same multiplier, bright
+    // point lights on the same mesh (e.g. hallway lamp bulbs) swamp it and changing
+    // emissive scale is invisible. Keep emissive out of that multiply (same idea as
+    // `room_glb.wgsl`: emissive is not scaled by room linear exposure).
+    let hem = ambient_scale * rgb * vec3<f32>(0.08);
+    var hdr = (lit_rgb - gltf_emissive_hdr + hem) * linear_exposure;
+    hdr = hdr + gltf_emissive_hdr;
+    // Clamp to prevent Rgba16Float overflow (Infinity) which causes NaN during bloom bilinear filtering on Metal
+    let out_rgb = min(hdr, vec3<f32>(65000.0));
 
     // Staging meld previews (per-instance opacity < 1): cool additive ghost keyed
     // off decal albedo — standard alpha left only specular highlights visible.

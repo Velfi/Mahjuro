@@ -53,6 +53,11 @@ pub(super) struct ShadersAndPipelinesInit {
     pub flame_volume_mesh: crate::lit_mesh::LitMeshGpu,
     pub globals_bind_group: wgpu::BindGroup,
     pub globals_buffer: wgpu::Buffer,
+    /// Same layout as [`Self::globals_buffer`], but `gamma` is always 1.0 so
+    /// 2D shaders drawn into `scene_color` do not apply display gamma before
+    /// `tonemap_composite` (which applies the user slider once).
+    pub globals_scene_hdr_bind_group: wgpu::BindGroup,
+    pub globals_scene_hdr_buffer: wgpu::Buffer,
     pub golden_dust_pipeline: wgpu::RenderPipeline,
     pub gradient_quad_pipeline: wgpu::RenderPipeline,
     pub image_pipeline: wgpu::RenderPipeline,
@@ -67,6 +72,7 @@ pub(super) struct ShadersAndPipelinesInit {
     pub lit_mesh_spot_frame_layout: wgpu::BindGroupLayout,
     pub lit_mesh_frame_buffer: wgpu::Buffer,
     pub moonlit_water_bind_group: wgpu::BindGroup,
+    pub moonlit_water_scene_hdr_bind_group: wgpu::BindGroup,
     pub moonlit_water_pipeline: wgpu::RenderPipeline,
     pub point_lights_bind_group: wgpu::BindGroup,
     pub point_lights_buffer: wgpu::Buffer,
@@ -237,6 +243,29 @@ pub(super) fn init_shaders_and_pipelines(
         }],
     });
 
+    let globals_scene_hdr_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("globals-scene-hdr"),
+        contents: bytemuck::bytes_of(&Globals {
+            screen: [size.width as f32, size.height as f32],
+            time: 0.0,
+            gamma: 1.0,
+            cursor_pos: [size.width as f32 * 0.5, size.height as f32 * 0.5],
+            transition_progress: 0.0,
+            quality_level: 2.0,
+            moon_phase: current_moon_phase(),
+            _globals_pad: [0.0; 3],
+        }),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+    let globals_scene_hdr_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("globals-scene-hdr-bg"),
+        layout: &globals_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: globals_scene_hdr_buffer.as_entire_binding(),
+        }],
+    });
+
     // Point-light uniform buffer + bind group (group 1 of the tile pipeline).
     // Initialised empty; populated each frame from `frame.scene_lighting`.
     let point_lights_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -255,11 +284,9 @@ pub(super) fn init_shaders_and_pipelines(
         )),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
-    // Companion uniform: per-frame analytic tile occluders for the
-    // candle-pool ray-AABB shadow test in lit_mesh.wgsl. Lives on the
-    // same bind group so the lit-mesh pipeline only needs one extra
-    // binding to read it. Other shaders sharing this layout simply
-    // ignore the binding.
+    // Companion uniform: per-frame collision-mesh AABBs for `room_glb.wgsl`
+    // punctual shadow tests (group 1 binding 1). Lit mesh shares the bind
+    // group layout but does not read this buffer.
     let tile_occluders_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("tile-occluders"),
         contents: bytemuck::bytes_of(&TileOccludersBuf::empty()),
@@ -614,6 +641,20 @@ pub(super) fn init_shaders_and_pipelines(
             wgpu::BindGroupEntry {
                 binding: 0,
                 resource: globals_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&moon_albedo_view),
+            },
+        ],
+    });
+    let moonlit_water_scene_hdr_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("moonlit-water-scene-hdr-bg"),
+        layout: &moonlit_water_bind_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals_scene_hdr_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -2885,6 +2926,8 @@ pub(super) fn init_shaders_and_pipelines(
         flame_volume_mesh,
         globals_bind_group,
         globals_buffer,
+        globals_scene_hdr_bind_group,
+        globals_scene_hdr_buffer,
         golden_dust_pipeline,
         gradient_quad_pipeline,
         image_pipeline,
@@ -2899,6 +2942,7 @@ pub(super) fn init_shaders_and_pipelines(
         lit_mesh_spot_frame_layout,
         lit_mesh_frame_buffer,
         moonlit_water_bind_group,
+        moonlit_water_scene_hdr_bind_group,
         moonlit_water_pipeline,
         point_lights_bind_group,
         point_lights_buffer,

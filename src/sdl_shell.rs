@@ -28,14 +28,11 @@ pub struct SdlShell {
 }
 
 impl SdlShell {
-    /// `borderless_fullscreen`: after creating a windowed surface, enter borderless fullscreen
-    /// (ignored when `SteamTenfoot` is set — that path always starts fullscreen).
-    pub fn new(
-        title: &str,
-        width: u32,
-        height: u32,
-        borderless_fullscreen: bool,
-    ) -> anyhow::Result<Self> {
+    /// Creates a resizable windowed surface (or true fullscreen when `SteamTenfoot` is set).
+    /// Call [`Self::apply_borderless_from_settings`] after startup prefs are loaded and the
+    /// window is shown — borderless is not applied here so macOS hide/show during GPU init
+    /// does not drop desktop fullscreen before the player sees the window.
+    pub fn new(title: &str, width: u32, height: u32) -> anyhow::Result<Self> {
         let _sdl = sdl3::init().map_err(anyhow::Error::from)?;
         #[cfg(target_os = "macos")]
         sdl3::hint::set("SDL_VIDEO_MACOSX_METAL_LAYER", "1");
@@ -108,11 +105,21 @@ impl SdlShell {
         };
         shell.refresh_gamepads();
 
-        if !tenfoot && borderless_fullscreen {
-            shell.set_desktop_fullscreen(true)?;
-        }
-
         Ok(shell)
+    }
+
+    /// Enter borderless desktop fullscreen when `borderless_fullscreen` is set in prefs.
+    /// Returns true when the window mode changed (caller should resize the swapchain).
+    pub fn apply_borderless_from_settings(
+        &mut self,
+        borderless_fullscreen: bool,
+    ) -> anyhow::Result<bool> {
+        let tenfoot = std::env::var_os("SteamTenfoot").is_some();
+        if tenfoot || !borderless_fullscreen || self.desktop_fullscreen_on() {
+            return Ok(false);
+        }
+        self.set_desktop_fullscreen(true)?;
+        Ok(true)
     }
 
     fn clamp_launch_window_size(video: &VideoSubsystem, w: u32, h: u32) -> (u32, u32) {

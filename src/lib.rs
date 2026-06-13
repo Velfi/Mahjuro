@@ -368,12 +368,9 @@ pub fn run() -> anyhow::Result<()> {
                 })
             };
 
-            let settings = persistence::load_settings();
-            let tenfoot = std::env::var_os("SteamTenfoot").is_some();
-            let launch_borderless = !tenfoot && settings.borderless_fullscreen;
             let mut shell = {
                 let _sdl = crate::startup_profile::scope("sdl.window");
-                sdl_shell::SdlShell::new("Mahjuro", 1920, 1080, launch_borderless)?
+                sdl_shell::SdlShell::new("Mahjuro", 1920, 1080)?
             };
             let app = {
                 let _app = crate::startup_profile::scope("app.new");

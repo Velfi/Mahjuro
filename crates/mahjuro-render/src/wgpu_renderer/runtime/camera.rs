@@ -185,64 +185,10 @@ impl WgpuRenderer {
         1.0 / s.max(1e-6)
     }
 
-    /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline`
-    /// (`TileUniform.tile_post_params`) and `lit_mesh`
-    /// (`LitMeshFrameGlobals.hdr_tonemap`). Same `RoomEnvLightingTune` as the room.
+    /// Linear HDR exposure / ambient for `tile_3d` / `tile_outline`
+    /// (`TileFrameUniform.tile_post_params`) and lit_mesh frame globals.
+    /// Same `RoomEnvLightingTune` as the room. Always HDR — tonemap is composite.
     pub(super) fn tile_hdr_tonemap(&self, frame: &crate::draw_cmd::UiFrame) -> [f32; 4] {
-        use crate::draw_cmd::DrawCmd;
-        let k = self.active_scene_key;
-        let h = frame.showcase_render_hints;
-        let table_like = matches!(
-            k,
-            Some(scene_keys::GAMEPLAY)
-                | Some("tutorial")
-                | Some(scene_keys::HALLWAY)
-                | Some(scene_keys::ARCHIVE)
-                | Some(scene_keys::SHADOW_AO_LAB)
-        ) || frame.shadow_ao_lab_layout.is_some()
-            || frame.gameplay_env_cash_in_only
-            || (k == Some("showcase") && h.collection_tonemap_context);
-        let shop_scene = k == Some(scene_keys::SHOP)
-            || (k == Some("showcase") && h.shop_tonemap_and_lit_mesh_context);
-        let tile_pack_celebration = k == Some("tile_pack_celebration")
-            || (k == Some("showcase") && h.tile_pack_celebration_tonemap);
-        let shop_showcase_without_env = shop_scene
-            && frame
-                .cmds
-                .iter()
-                .any(|c| matches!(c, DrawCmd::ShowcaseTileBatch(_)))
-            && !frame.cmds.iter().any(|c| {
-                matches!(
-                    c,
-                    DrawCmd::ShopEnvironment
-                        | DrawCmd::HallwayEnvironment
-                        | DrawCmd::StaircaseEnvironment
-                        | DrawCmd::ArchiveEnvironment
-                        | DrawCmd::MainMenuEnvironment
-                        | DrawCmd::GameplayEnvironment
-                )
-            });
-        let tile_select_showcase = k == Some("tile_select")
-            && frame
-                .cmds
-                .iter()
-                .any(|c| matches!(c, DrawCmd::ShowcaseTileBatch(_)));
-        let hdr_active = k == Some(scene_keys::SHADOW_AO_LAB)
-            || frame.shadow_ao_lab_layout.is_some()
-            || tile_pack_celebration
-            || shop_showcase_without_env
-            || tile_select_showcase
-            || shop_scene
-            || table_like
-            || k == Some(scene_keys::VICTORY)
-            || k == Some(scene_keys::DEFEAT)
-            || frame
-                .cmds
-                .iter()
-                .any(|c| matches!(c, DrawCmd::MainMenuEnvironment));
-        if !hdr_active {
-            return [0.0; 4];
-        }
         let tune = self.active_frame_env();
         let linear_base = if frame.scene_lighting.embedded_gltf_punctual {
             tune.linear_exposure_base
@@ -262,10 +208,14 @@ impl WgpuRenderer {
         cam: &CameraFrame,
         frame: &crate::draw_cmd::UiFrame,
     ) -> LitMeshFrameGlobals {
-        let tm = self.tile_hdr_tonemap(frame);
-        let hdr_path = tm[0];
-        let linear_exposure = if hdr_path > 0.5 { tm[1] } else { 0.0 };
-        let ambient_scale = if hdr_path > 0.5 { tm[2] } else { 0.0 };
+        let tune = self.active_frame_env();
+        let linear_base = if frame.scene_lighting.embedded_gltf_punctual {
+            tune.linear_exposure_base
+        } else {
+            1.0
+        };
+        let linear_exposure = tune.linear_exposure * linear_base;
+        let ambient_scale = tune.ambient_scale;
         let shop_like = self.active_scene_key == Some(scene_keys::SHOP)
             || (self.active_scene_key == Some("showcase")
                 && frame
@@ -291,7 +241,7 @@ impl WgpuRenderer {
         };
         LitMeshFrameGlobals {
             view_pos: [cam.cam_pos.x, cam.cam_pos.y, cam.cam_pos.z, 1.0],
-            hdr_tonemap: [hdr_path, linear_exposure, ambient_scale, 0.0],
+            hdr_tonemap: [1.0, linear_exposure, ambient_scale, 0.0],
             shop_punctual: [
                 shop_punctual_inv_doc,
                 shop_punctual_display_case,

@@ -129,8 +129,7 @@ pub(crate) struct PointLightsBuf {
     /// `count.x` = number of active lights; rest is std140 padding.
     pub count: [u32; 4],
     /// Frame-wide extras shared with shaders that bind this buffer:
-    /// `extras.x` = display gamma (used to gamma-correct 3D fragments
-    /// that don't have access to the screen-space `Globals` uniform).
+    /// `extras.x` = reserved (display gamma lives in `Globals` / tonemap composite).
     /// `extras.y` = wall-clock time in seconds (used by `MaterialKind::Water`
     /// to scroll the river surface and animate foam crests).
     /// `extras.z` = candle flame height in world units (for shaders that

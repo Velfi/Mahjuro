@@ -1685,7 +1685,7 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.shooting_star_cascade_pipeline);
-            pass.set_bind_group(0, &self.globals_bind_group, &[]);
+            pass.set_bind_group(0, &self.globals_scene_hdr_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 

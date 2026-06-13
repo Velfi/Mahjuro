@@ -505,6 +505,13 @@ impl App {
                 mahjuro_render::tuning::scene_look::room_env_frame_from_scene_look(&look, room),
             ));
         }
+        mahjuro_render::tuning::scene_look::push_doc_tile_env_frame_tunes(
+            &mut env_frame_tunes,
+            &self.scene_look,
+            overlay_key,
+            overlay_look,
+            |room| self.room_gltf_brownout.apply(room),
+        );
         let loading_hub_progress = if matches!(self.scene, Scene::Splash(_)) {
             let _g = crate::render::cpu_profiler::scope("draw_prep.loading_hub_progress");
             renderer.splash_hub_boot_progress(&self.gfx.tileset_name)

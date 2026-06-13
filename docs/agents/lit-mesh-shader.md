@@ -22,7 +22,7 @@ Related notes: [cap-mesh coordinates](cap-mesh-coordinates.md) (talisman/relic U
 | Group | Bindings | Purpose |
 |-------|----------|---------|
 | **0** | 0 `MeshUniform`, 1 `albedo_tex`, 2 sampler, 3 `relief_tex` | Per-instance transform, material params, textures |
-| **1** | 0 `PointLights` (≤16), 1 `TileOccluders` (≤16 AABBs) | Punctual lights + tile AABB buffer (occlusion fn exists but is unused — see [Dead code](#dead-code)) |
+| **1** | 0 `PointLights` (≤16), 1 `RoomOccluders` (≤16 AABBs) | Punctual lights + collision AABBs (read by `room_glb.wgsl`; lit_mesh shares layout only) |
 | **2** | projected-shadow resources | Per-light depth maps, contact AO, combined receiver shadow |
 | **3** | 0 `SpotLights` (≤8), 1 `LitMeshFrameGlobals` | Spotlights + camera/HDR/shop/profile flags |
 
@@ -41,7 +41,7 @@ Related notes: [cap-mesh coordinates](cap-mesh-coordinates.md) (talisman/relic U
 ### `LitMeshFrameGlobals` (group 3)
 
 - `view_pos` — camera for view-dependent effects
-- `hdr_tonemap` — `(ACES path, linear exposure, ambient scale, _)`
+- `hdr_tonemap` — `(1.0, linear exposure, ambient scale, _)`
 - `shop_punctual` — `(1/doc_scale, catalog balance flag, catalog ambient mul, profile flags)`
 
 Profile flags (`lit_mesh_profile.rs`, via `MAHJURO_LIT_MESH_PROFILE`): disable per-light shadow, combined receiver shadow, specular, or cap to one light. See [Profiling](#profiling-relative-cost).
@@ -55,7 +55,7 @@ Profile flags (`lit_mesh_profile.rs`, via `MAHJURO_LIT_MESH_PROFILE`): disable p
 
 ## Material kinds
 
-Discriminants match `MaterialKind` in [`lit_mesh.rs`](../../crates/mahjuro-render/src/lit_mesh.rs):
+Discriminants match `MaterialKind` in [`lit_mesh.rs`](../../crates/mahjuro-render/src/lit_mesh.rs). Gaps at 8, 11–14, and 19 are reserved; old RLC1 bakes map through `material_kind_from_u32` in [`relic_bake.rs`](../../crates/mahjuro-render/src/relic_bake.rs).
 
 | Kind | Name | Summary |
 |------|------|---------|
@@ -67,18 +67,12 @@ Discriminants match `MaterialKind` in [`lit_mesh.rs`](../../crates/mahjuro-rende
 | 5 | Metal | Tinted Fresnel conductor + heightmap normals (coins) |
 | 6 | Water | Early-return branch: stone trough vs animated river |
 | 7 | PackWrap | Clear plastic sleeve + front decal |
-| 8 | Foil | Metallic + anisotropic streaks + holo band |
 | 9 | Glass | Fresnel rim, cool tint |
 | 10 | Enamel | Hard enamel pin; relief on front cap only |
-| 11 | Jade | Waxy green dielectric + sheen |
-| 12 | Moonstone | Schiller / adularescence |
-| 13 | Pearl | Pearlescent nacre |
-| 14 | GoldNugget | Pitted gold conductor |
 | 15 | Polychrome | Rainbow thin-film (or score-glyph bands if `spec_power ≥ 40`) |
 | 16 | Porcelain | Glaze + Voronoi crazing |
 | 17 | Brass | Warm conductor, wider rim |
 | 18 | Leather | Procedural grain; UV.x selects body/pages/ribbon/journal RT |
-| 19 | FeltGreen | Legacy slot (unused) |
 | 20 | Emissive | Additive self-illumination (`spec_strength` scales) |
 | 21 | Chitin | Abalone talisman tablets |
 | 22 | Unshaded | Flat atlas read, no lighting |
@@ -103,7 +97,7 @@ Inputs: position, normal, UV, tangent pad.
 
 ### 1. Kind dispatch & early exits
 
-- Decode ~25 material booleans from `material_params.x`.
+- Decode material booleans from `material_params.x`.
 - **Chitin front cap**: discard where relief mask `< 8/255`.
 - **Enamel / Unshaded front cap**: discard cut-out alpha.
 - **Water (6)**: full custom path — stone vs water, own light loops, early `return`.
@@ -116,7 +110,7 @@ Per-kind overrides on top of default `base_color × albedo_tex`:
 - **Decal path** (`has_decal`): procedural base + gold-leaf channel composite
 - **Wood**: procedural `wood_sample` / `wood_sample_world`
 - **Leather**: UV.x branches (body grain, page edge, silk ribbon, journal screen-space sample from `relief_tex`)
-- **PackWrap / Foil / Glass / Enamel / Chitin / CatalogPaper**: each has dedicated tint/mask logic
+- **PackWrap / Glass / Enamel / Chitin / CatalogPaper**: each has dedicated tint/mask logic
 - **Porcelain**: Voronoi crazing albedo + stain
 - **Score glyphs** (`Polychrome` + `spec_power ≥ 40`): animated diagonal bands
 
@@ -139,11 +133,11 @@ For each **point light** (up to 16):
 1. `scene_pbr_sample_point_light` — smooth or KHR inverse-square attenuation
 2. **`punctual_shadow_vis`** — projected depth map per light (group 2)
 3. Lambert diffuse (`scene_punctual_diffuse_weight`)
-4. Optional **wrap SSS** (wood, wax, jade, moonstone, pearl, chitin, porcelain, leather, …)
-5. Optional **Penner back-transmission** (wax, talisman gems)
-6. **Blinn–Phong specular** — material-specific branches (conductor Schlick, enamel ridges, glass/pack/porcelain/leather/catalog paper, foil, bronze mirror, decal gold)
+4. Optional **wrap SSS** (wood, wax, chitin, porcelain, leather, …)
+5. Optional **Penner back-transmission** (wax)
+6. **Blinn–Phong specular** — material-specific branches (conductor Schlick, enamel ridges, glass/pack/porcelain/leather/catalog paper, bronze mirror, decal gold, polychrome/chitin sheen)
 7. **Clearcoat** (wood only) — white dielectric lacquer lobe
-8. **Talisman sheen** — jade/moonstone/pearl/gold/poly/chitin iridescence stacks
+8. **Chitin / polychrome sheen** — iridescence stacks
 9. Shop **probe irradiance** accumulation for catalog stock
 
 Then a parallel **spotlight loop** (≤8) with the same diffuse/SSS/back/spec/coat terms (no per-light shadow on spots in this path).
@@ -163,20 +157,18 @@ indirect = scene_world_hemisphere_lighting(...) × diffuse_scale × contact_AO �
 
 - **`sample_contact_ao`**: offline `.msh` contact grounding (weaker for shop catalog stock)
 - **`dynamic_receiver_shadow_vis`**: dims ambient/indirect when receiver is in combined shadow
-- Per-material **`diffuse_scale`** suppresses diffuse on conductors, glass, moonstone, score glyphs, etc.
+- Per-material **`diffuse_scale`** suppresses diffuse on conductors, glass, score glyphs, etc.
 - Wood gets Reinhard knees on diffuse, coat, and spec to prevent milky highlights
 
 ### 6. View-dependent albedo finishing
 
-Fresnel rim tints applied before final compose for: talismans, score glyphs, enamel, pack wrap, foil, glass, metal, brass, leather.
+Fresnel rim tints applied before final compose for: chitin, polychrome tablets, score glyphs, enamel, pack wrap, glass, metal, brass, leather.
 
 Bronze mirror adds view-facing Schlick rims + optional jade glow (`instance_params.x`).
 
 ### 7. Output encoding
 
-- **HDR path** (`hdr_tonemap.x > 0.5`): multiply by linear exposure, clamp to 65000 (Metal bloom safety), no in-shader gamma
-- **Legacy path**: `pow(rgb, 1/gamma)` using `lights.extras.x`
-- Alpha from `base_color.a`
+Always **linear HDR**: multiply lit RGB by `hdr_tonemap.y`, clamp to 65000 (Metal bloom safety). Unshaded passes albedo through unchanged. Alpha from `base_color.a`. No in-shader gamma — display encoding is `tonemap_composite.wgsl`.
 
 ---
 
@@ -197,12 +189,6 @@ Shared from **`projected_shadow.wgsl`**: `punctual_shadow_vis`, `sample_contact_
 
 ---
 
-## Dead code
-
-`candle_occlusion` + `TileOccluders` implement analytic tile AABB ray tests but are **not called** from the current light loop — shadowing uses projected depth maps instead. The buffer is still bound (group 1 binding 1).
-
----
-
 ## Profiling relative cost
 
 GPU timestamps measure whole **passes**, not individual WGSL blocks. Use `MAHJURO_LIT_MESH_PROFILE` A/B toggles (see [`lit_mesh_profile.rs`](../../crates/mahjuro-render/src/lit_mesh_profile.rs)) to attribute cost to shader phases.
@@ -218,11 +204,11 @@ Default scene: shop relic inspect @ 1280×720, Visuals, high shadows, 40 GPU-pro
 ### Profile tokens → shader phase
 
 | Token | Shader phase affected |
-|-------|-------------------------|
+|-------|------------------------|
 | `one_light` | Point+spot loops for lights 2…15 (diffuse + shadow + spec + SSS per extra light) |
 | `no_per_light_shadow` | `punctual_shadow_vis()` inside point loop |
 | `no_combined_shadow` | `dynamic_receiver_shadow_vis()` on indirect only |
-| `no_spec` | Blinn–Phong + material spec + sheen + clearcoat + foil + decal gold in loops |
+| `no_spec` | Blinn–Phong + material spec + sheen + clearcoat + decal gold in loops |
 | `no_pcf` | 9→1 tap on **all** `sample_projected_depth` (tiles + room + lit_mesh) |
 | `no_shadow` | Both shadow toggles (`no_per_light_shadow` + `no_combined_shadow`) |
 | `diffuse_only` | All of the above shadow + spec toggles combined |
@@ -335,6 +321,6 @@ Percentages are approximate, from [Profiling relative cost](#profiling-relative-
 
 - **One pipeline, many looks** — all props share bind layouts; only uniforms and bound textures change.
 - **Candle-first lighting** — diffuse starts at zero; warm pools come from point lights (same family as `tile_3d.wgsl`).
-- **No in-shader tonemap on HDR path** — keeps bloom/composite consistent.
+- **HDR-only output** — lit mesh always writes linear scene color; tonemap/composite is downstream.
 - **Shop catalog balance** — storeroom shelf props get boosted ambient + punctual probe so authored art stays readable under HDR (`shop_catalog_balance` in `lit_mesh.rs`).
 - **Headless profiling** — `MAHJURO_LIT_MESH_PROFILE` + `scripts/profile-lit-mesh-inspect.sh` for cost isolation; see [launch options](launch-options.md).

@@ -175,6 +175,16 @@ impl App {
         }
         shell.window.show();
         shell.raise_to_foreground();
+        {
+            let settings = crate::persistence::load_settings();
+            if shell.apply_borderless_from_settings(settings.borderless_fullscreen)? {
+                let (w, h) = shell.drawable_size();
+                self.last_drawable_px = PhysicalSize::new(w.max(1), h.max(1));
+                if let Some(r) = self.renderer.as_mut() {
+                    r.resize(self.last_drawable_px);
+                }
+            }
+        }
         crate::startup_profile::report_sync_boot();
         if self.renderer.as_ref().is_some_and(|r| !r.is_loading()) {
             crate::startup_profile::note_async_boot_complete();

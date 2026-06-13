@@ -70,8 +70,6 @@ pub enum MaterialKind {
     /// The bound texture is the cover decal on the front face; edges read
     /// as a lightly tinted plastic sleeve (no metallic streaks or holo).
     PackWrap = 7,
-    /// Metallic foil — thin-film iridescence (material viewer / legacy).
-    Foil = 8,
     /// Faux glass / glazed crystal. Still rendered in the opaque pass, but
     /// shaded with a strong Fresnel rim and cool internal glow so small props
     /// read as translucent under the scene lighting.
@@ -79,25 +77,6 @@ pub enum MaterialKind {
     /// Hard-enamel lapel pin look: color from `albedo_tex`; height/ridge from
     /// `relief_tex` (binding 3, linear grayscale).
     Enamel = 10,
-    /// Carved jade tablet — waxy vitreous green dielectric with broad
-    /// view-dependent sheen, soft SSS, and back-transmission glow on
-    /// silhouette edges. The bound texture is a grayscale heightfield;
-    /// the shader perturbs the normal on the flat faces so carved motifs
-    /// catch the candle highlights.
-    Jade = 11,
-    /// Moonstone — transparent feldspar with blue adularescence.
-    /// Layered specular (tight white pinpoint + wide soft-blue schiller
-    /// halo) over a clear body with cool SSS and a moon-blue Fresnel
-    /// rim. `base_color` tints the body. Uses the talisman heightmap.
-    Moonstone = 12,
-    /// Pearl / nacre — pearlescent surface with view-dependent hue shift
-    /// (pink/blue iridescence) and broad sheen. `base_color` tints the
-    /// nacre (white pearl, gold honors). Uses the talisman heightmap.
-    Pearl = 13,
-    /// Pitted gold nugget — metallic gold conductor with procedural
-    /// noise-driven normal perturbation that reads as raw cast-metal
-    /// pitting. Tinted Schlick Fresnel highlights.
-    GoldNugget = 14,
     /// Holographic polychrome — thin-film iridescence with a rainbow
     /// hue that shifts with viewing angle. Uses the talisman heightmap.
     Polychrome = 15,
@@ -118,9 +97,6 @@ pub enum MaterialKind {
     /// tan). Composites engraved decals via the same `has_decal` path
     /// as Plain/LacqueredWoodFlat.
     Leather = 18,
-    /// Legacy material slot (procedural green baize removed). Kept so
-    /// `#[repr(u32)]` discriminants stay stable.
-    FeltGreen = 19,
     /// Unlit emission added on top of the usual lit path. `specular_strength`
     /// scales `base_color.rgb` in the shader (`lit_mesh.wgsl` emissive term).
     Emissive = 20,
@@ -1056,8 +1032,7 @@ pub struct LitMeshFrameGlobals {
     /// xyz = camera world position, w = unused
     pub view_pos: [f32; 4],
     /// Matches [`crate::wgpu_renderer::uniforms::TileUniform::tile_post_params`]:
-    /// x = ACES HDR path when **1**; y = linear exposure before ACES;
-    /// z = hemispheric ambient scale; w = reserved.
+    /// x = 1.0; y = linear exposure before ACES; z = hemispheric ambient scale; w = reserved.
     pub hdr_tonemap: [f32; 4],
     /// x = `1/room_env_world_scale` for embedded glTF punctual attenuation in `lit_mesh`
     /// (document-space distance; **0** = world-space / gameplay).
