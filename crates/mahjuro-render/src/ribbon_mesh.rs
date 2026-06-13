@@ -105,10 +105,13 @@ pub fn build_ribbon_mesh() -> MeshCpu {
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    // Helper: push a quad as two triangles given four corner vertices
-    // already appended to `vertices`, returning the next base index.
+    // Helper: push a quad as two triangles given four corner vertices already
+    // appended to `vertices`. The vertices below are listed in texture-space
+    // order; this winding keeps geometric face normals aligned with their
+    // authored vertex normals so the shader's front-facing normal flip does
+    // not invert the visible side.
     let push_quad = |indices: &mut Vec<u32>, base: u32| {
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        indices.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
     };
 
     // ── Front face (+Z normal), subdivided into SEGMENTS quads top→bottom.
@@ -277,5 +280,30 @@ pub fn build_ribbon_mesh() -> MeshCpu {
             specular_strength: 0.25,
             specular_power: 16.0,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ribbon_face_winding_matches_authored_normals() {
+        let mesh = build_ribbon_mesh();
+        let mut bad = 0usize;
+        for tri in mesh.indices.chunks_exact(3) {
+            let v0 = &mesh.vertices[tri[0] as usize];
+            let v1 = &mesh.vertices[tri[1] as usize];
+            let v2 = &mesh.vertices[tri[2] as usize];
+            let p0 = glam::Vec3::from(v0.position);
+            let p1 = glam::Vec3::from(v1.position);
+            let p2 = glam::Vec3::from(v2.position);
+            let face = (p1 - p0).cross(p2 - p0);
+            let want = glam::Vec3::from(v0.normal);
+            if face.length_squared() <= f32::EPSILON || face.normalize().dot(want) <= 0.0 {
+                bad += 1;
+            }
+        }
+        assert_eq!(bad, 0, "ribbon winding must match authored normals");
     }
 }

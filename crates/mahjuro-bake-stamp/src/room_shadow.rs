@@ -9,7 +9,7 @@ use crate::{BakeKind, Fnv64, hash_paths, outputs_present};
 
 pub const MSH_FORMAT_VERSION: u32 = 2;
 
-pub use crate::room_slugs::ALL as ROOMS;
+pub use crate::room_slugs::SHADOW_ALL as ROOMS;
 
 pub struct RoomShadow;
 

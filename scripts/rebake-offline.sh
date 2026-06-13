@@ -7,8 +7,8 @@
 #   scripts/rebake-offline.sh [kinds…]
 #
 # Kinds (default: all):
-#   gi, shadow   room bakes (mahjuro-bake)
-#   room         gi + shadow
+#   lightmap, shadow   room bakes (`gi` is accepted as a lightmap alias)
+#   room         lightmap GI + shadow
 #   decal        showcase atlases
 #   relic        relic RLC2
 #   all          room + decal + relic
@@ -45,12 +45,12 @@ for kind in "${kinds[@]}"; do
             want_gi=1
             want_shadow=1
             ;;
-        gi) want_gi=1 ;;
+        gi|lightmap) want_gi=1 ;;
         shadow) want_shadow=1 ;;
         decal) want_decal=1 ;;
         relic) want_relic=1 ;;
         *)
-            echo "unknown kind: $kind (use gi, shadow, room, decal, relic, or all)" >&2
+            echo "unknown kind: $kind (use lightmap, shadow, room, decal, relic, or all)" >&2
             exit 1
             ;;
     esac
@@ -58,7 +58,7 @@ done
 
 if [[ "$want_gi" -eq 1 || "$want_shadow" -eq 1 ]]; then
     bake_kinds=()
-    [[ "$want_gi" -eq 1 ]] && bake_kinds+=(gi)
+    [[ "$want_gi" -eq 1 ]] && bake_kinds+=(lightmap)
     [[ "$want_shadow" -eq 1 ]] && bake_kinds+=(shadow)
     kinds_csv=$(IFS=,; echo "${bake_kinds[*]}")
 

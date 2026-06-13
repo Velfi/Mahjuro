@@ -1045,8 +1045,6 @@ pub struct UiFrame {
     pub archive_inspect_plaque_decal_text: Option<String>,
     /// Pick-blind hallway vertex warp (`room_glb.wgsl` @group(0) @binding(8)); `None` elsewhere.
     pub hallway_distortion: Option<crate::hallway_glb::HallwayDistortion>,
-    /// When true, skip offline room GI probe bake and run dynamic `emissive-probe-update`.
-    pub room_gi_dynamic: bool,
     /// World-space flame emitters without procedural candle meshes (e.g. shop
     /// `light_candle_*` punctual lights). Merged into the particle system each frame.
     pub procedural_flame_emitters: Vec<crate::flame_volume::FlameEmitter>,
@@ -1116,7 +1114,6 @@ impl UiFrame {
             archive_inspect_plaque_visible: false,
             archive_inspect_plaque_decal_text: None,
             hallway_distortion: None,
-            room_gi_dynamic: false,
             procedural_flame_emitters: Vec::new(),
             gameplay_action_picks: None,
             gameplay_cash_in_button_visible: false,

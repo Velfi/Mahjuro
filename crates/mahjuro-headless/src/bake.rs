@@ -13,7 +13,7 @@ use mahjuro_bake_stamp::room_shadow::RoomShadow;
 use crate::bake_cli::{BakeRoomCli, RoomBakeKind};
 use crate::room_bake::scene_for_room;
 use crate::room_bake_app::RoomBakeApp;
-use crate::slug::resolve_bake_rooms;
+use crate::slug::{resolve_lightmap_bake_rooms, resolve_shadow_bake_rooms};
 
 const EXPECTED_GI_STAMP_HASH_ENV: &str = "MAHJURO_EXPECT_ROOM_GI_STAMP_HASH";
 const EXPECTED_SHADOW_STAMP_HASH_ENV: &str = "MAHJURO_EXPECT_ROOM_SHADOW_STAMP_HASH";
@@ -22,12 +22,25 @@ pub fn run(cli: BakeRoomCli) -> anyhow::Result<()> {
     mahjuro::asset_path::init();
     mahjuro::asset_path::log_all_assets();
 
-    let rooms = resolve_bake_rooms(&cli.rooms)?;
-    let bake_gi = cli.kinds.contains(&RoomBakeKind::Gi);
+    let bake_lightmap = cli.kinds.contains(&RoomBakeKind::Lightmap);
     let bake_shadow = cli.kinds.contains(&RoomBakeKind::Shadow);
     anyhow::ensure!(
-        bake_gi || bake_shadow,
-        "no bake kinds selected (use --kinds gi,shadow)"
+        bake_lightmap || bake_shadow,
+        "no bake kinds selected (use --kinds lightmap,shadow)"
+    );
+    let lightmap_rooms = if bake_lightmap {
+        resolve_lightmap_bake_rooms(&cli.rooms)?
+    } else {
+        Vec::new()
+    };
+    let shadow_rooms = if bake_shadow {
+        resolve_shadow_bake_rooms(&cli.rooms)?
+    } else {
+        Vec::new()
+    };
+    anyhow::ensure!(
+        !bake_shadow || !shadow_rooms.is_empty() || bake_lightmap,
+        "no room shadow bake targets selected"
     );
 
     let settings = mahjuro::persistence::load_settings();
@@ -35,8 +48,34 @@ pub fn run(cli: BakeRoomCli) -> anyhow::Result<()> {
     let progress = mahjuro::persistence::load_profile(profile_index);
     let width = cli.width.max(1);
     let height = cli.height.max(1);
+    let scene_look = bake_lightmap.then(mahjuro::game::scene_look_tuning::SceneLookTuningSet::load);
 
-    for room in &rooms {
+    for room in &lightmap_rooms {
+        let look = scene_look
+            .as_ref()
+            .expect("lightmap bake initializes scene look")
+            .resolve(Some(room.scene_key()));
+        let bake = mahjuro::render::room_gi_bake::bake_room_gi_lightmap_gpu(
+            mahjuro::render::room_gi_bake::RoomGiGpuBakeParams {
+                room: *room,
+                bake_width: width,
+                bake_height: height,
+                lighting: look.room,
+                height_scale: look.room_gltf_height_scale,
+            },
+            cli.lightmap_size,
+        )
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "room GI lightmap GPU bake failed for {:?}; rebake with \
+                 `cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds lightmap`: {e:#}",
+                room
+            )
+        })?;
+        write_room_gi_lightmap_bake(*room, &cli.lightmap_dir, bake)?;
+    }
+
+    for room in &shadow_rooms {
         let (scene, run, game_in_progress) = scene_for_room(*room, &progress);
         let mut app = RoomBakeApp::new(
             scene,
@@ -47,29 +86,21 @@ pub fn run(cli: BakeRoomCli) -> anyhow::Result<()> {
             profile_index,
             progress.clone(),
         )?;
-
-        if bake_shadow {
-            let bake = app.bake_room_shadow(*room, cli.warmup_frames)?;
-            write_room_shadow_bake(*room, &cli.shadow_dir, bake)?;
-        }
-
-        if bake_gi {
-            let bake = app.bake_room_gi(*room, cli.warmup_frames)?;
-            write_room_gi_bake(*room, &cli.gi_dir, bake)?;
-        }
+        let bake = app.bake_room_shadow(*room, cli.warmup_frames)?;
+        write_room_shadow_bake(*room, &cli.shadow_dir, bake)?;
     }
 
-    refresh_stamps_if_canonical(&cli, bake_gi, bake_shadow)?;
+    refresh_stamps_if_canonical(&cli, bake_lightmap, bake_shadow)?;
     Ok(())
 }
 
-/// Stamp refresh runs only when the user took the default `--gi-dir` / `--shadow-dir`
+/// Stamp refresh runs only when the user took the default `--lightmap-dir` / `--shadow-dir`
 /// AND let the bake cover every room. Anything else is treated as an ad-hoc run that
 /// must not poison the committed stamp; we'd rather have `build.rs` panic next time
 /// than silently mark a partial bake as authoritative.
 fn refresh_stamps_if_canonical(
     cli: &BakeRoomCli,
-    bake_gi: bool,
+    bake_lightmap: bool,
     bake_shadow: bool,
 ) -> anyhow::Result<()> {
     let baked_all_rooms = cli.rooms.is_empty();
@@ -80,8 +111,8 @@ fn refresh_stamps_if_canonical(
 
     let repo = repo_root()?;
 
-    if bake_gi {
-        if cli.gi_dir == Path::new(RoomGi::OUT_DIR) {
+    if bake_lightmap {
+        if cli.lightmap_dir == Path::new(RoomGi::OUT_DIR) {
             if let Some(expected_hash) = expected_stamp_hash_from_env(EXPECTED_GI_STAMP_HASH_ENV) {
                 let stamp_path = repo.join(RoomGi::STAMP_PATH);
                 mahjuro_bake_stamp::write_stamp_line(&stamp_path, &expected_hash)?;
@@ -96,8 +127,8 @@ fn refresh_stamps_if_canonical(
             }
         } else {
             log::info!(
-                "--gi-dir is non-canonical ({}); leaving {} alone",
-                cli.gi_dir.display(),
+                "--lightmap-dir is non-canonical ({}); leaving {} alone",
+                cli.lightmap_dir.display(),
                 RoomGi::STAMP_PATH
             );
         }
@@ -185,35 +216,71 @@ fn write_room_shadow_bake(
     Ok(())
 }
 
-fn write_room_gi_bake(
+fn write_room_gi_lightmap_bake(
     room: mahjuro::render::room_gi_bake::RoomGiRoom,
     output_dir: &PathBuf,
-    bake: mahjuro::render::room_gi_bake::RoomGiBake,
+    bake: mahjuro::render::room_gi_bake::RoomGiLightmapBake,
 ) -> anyhow::Result<()> {
-    let raw = bake.encode();
-    let out_name = room.offline_bake_filename("mgi.zst");
-    let out_path = output_dir.join(out_name);
-    ensure_parent_dir(&out_path)?;
+    let raw = bake.encode_rgba32f_texture()?;
+    let hdr_name = room.offline_bake_filename("lightmap.rlm.zst");
+    let hdr_path = output_dir.join(hdr_name);
+    ensure_parent_dir(&hdr_path)?;
     let compressed = zstd::encode_all(raw.as_slice(), 3)?;
-    let nbytes = compressed.len();
-    std::fs::write(&out_path, compressed)?;
+    let compressed_len = compressed.len();
+    std::fs::write(&hdr_path, compressed)?;
+
+    let preview_name = room.offline_bake_filename("lightmap.png");
+    let preview_path = output_dir.join(preview_name);
+    ensure_parent_dir(&preview_path)?;
+    let mut rgba = vec![0u8; (bake.width as usize) * (bake.height as usize) * 4];
+    for (i, px) in bake.pixels_rgba_f32.chunks_exact(4).enumerate() {
+        let a = px[3].clamp(0.0, 1.0);
+        let mapped = if a > 0.0 {
+            [
+                linear_hdr_to_srgb8(px[0]),
+                linear_hdr_to_srgb8(px[1]),
+                linear_hdr_to_srgb8(px[2]),
+                255,
+            ]
+        } else {
+            [0, 0, 0, 0]
+        };
+        rgba[i * 4..i * 4 + 4].copy_from_slice(&mapped);
+    }
+    let img = image::RgbaImage::from_raw(bake.width, bake.height, rgba)
+        .ok_or_else(|| anyhow::anyhow!("room GI lightmap PNG dimensions overflow"))?;
+    img.save(&preview_path)?;
     log::info!(
-        "room GI bake {:?} → {} ({} probes, {}×{}, {} bytes zstd)",
+        "room GI lightmap bake {:?} → {} + {} ({}×{}, {} bytes zstd)",
         room,
-        out_path.display(),
-        bake.probe_count,
-        bake.bake_width,
-        bake.bake_height,
-        nbytes
+        hdr_path.display(),
+        preview_path.display(),
+        bake.width,
+        bake.height,
+        compressed_len
     );
     Ok(())
 }
 
+fn linear_hdr_to_srgb8(v: f32) -> u8 {
+    let mapped = if v.is_finite() && v > 0.0 {
+        v / (1.0 + v)
+    } else {
+        0.0
+    };
+    let srgb = if mapped <= 0.0031308 {
+        mapped * 12.92
+    } else {
+        1.055 * mapped.powf(1.0 / 2.4) - 0.055
+    };
+    (srgb.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+}
+
 fn ensure_parent_dir(path: &PathBuf) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)?;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
     }
     Ok(())
 }

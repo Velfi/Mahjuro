@@ -38,9 +38,8 @@
 //! [Don McCurdy’s glTF Viewer](https://gltf-viewer.donmccurdy.com/)) against this build.
 //!
 //! **Blender parity:** The viewport almost always adds **World** lighting (sky/ground) and often
-//! EEVEE indirect; glTF export does not include World. Runtime approximates that with hemispheric
-//! ambient in `room_glb.wgsl` ([`SHOP_ENV_AMBIENT_SCALE`] / [`RoomEnvLightingTune`]) plus emissive-probe GI from
-//! candles/lanterns. In Blender before export: glTF *Data → Lighting* units match Khronos, disable
+//! EEVEE indirect; glTF export does not include World. The room GI lightmaps bake that shared
+//! hemisphere/environment term together with indirect transport from the authored lights. In Blender before export: glTF *Data → Lighting* units match Khronos, disable
 //! viewport-only overlays, and compare in Don McCurdy’s viewer at exposure **−9** (same as
 //! [`ROOM_GLB_LINEAR_EXPOSURE_BASE`]). Warm candle/lantern tints are intentional game grading.
 //!
@@ -251,91 +250,6 @@ pub const ROOM_GLB_LINEAR_EXPOSURE_BASE: f32 = 1.0 / 512.0; // 2^-9
 /// `KHR_materials_emissive_strength` and `emissiveFactor × emissiveTexture`. Keep near `1` when
 /// assets use emissive strength; raise only if authors omit the extension.
 pub const SHOP_GLTF_EMISSIVE_SCALE: f32 = 1.0;
-
-/// Linear HDR strength for emissive probe indirect on shop / hallway GLB (additive before tonemap).
-pub const SHOP_ROOM_EMISSIVE_GI_STRENGTH: f32 = 0.42;
-
-/// 3D probe grid resolution (world AABB from room corners). Product must be ≤ [`ROOM_EMISSIVE_PROBE_MAX`].
-pub const ROOM_EMISSIVE_PROBE_GRID: [u32; 3] = [7, 4, 6];
-
-pub const ROOM_EMISSIVE_PROBE_MAX: u32 = 256;
-
-pub const ROOM_EMISSIVE_PROBE_DIR_SAMPLES: u32 = 20;
-
-pub const ROOM_EMISSIVE_PROBE_MARCH_STEPS: u32 = 14;
-
-/// Max ray length in world units for probe → emissive screen-space march.
-pub const ROOM_EMISSIVE_PROBE_MARCH_WORLD: f32 = 28.0;
-
-/// Recompute volumetric probe SH every N GI frames unless the view or resolution changed.
-pub const ROOM_EMISSIVE_PROBE_UPDATE_INTERVAL: u32 = 2;
-
-/// Element-wise view_proj delta above which probes refresh immediately (camera nudge / cut).
-pub const ROOM_EMISSIVE_PROBE_VIEW_EPS: f32 = 2e-4;
-
-/// Amortized GI probe refresh state (tick, last view, last size).
-pub struct ProbeGiUpdateState {
-    pub tick: u32,
-    pub last_view_proj: [f32; 16],
-    pub last_size: (u32, u32),
-    pub had_room: bool,
-}
-
-/// Frame inputs for [`probe_gi_should_update_probes`].
-pub struct ProbeGiUpdateParams<'a> {
-    pub view_proj: &'a [f32; 16],
-    pub size: (u32, u32),
-    pub gi_active: bool,
-    pub update_interval: u32,
-}
-
-/// Whether to run `emissive-probe-update` this frame (amortized GI). Resets when GI is inactive.
-pub fn probe_gi_should_update_probes(
-    state: &mut ProbeGiUpdateState,
-    params: &ProbeGiUpdateParams<'_>,
-) -> bool {
-    if !params.gi_active {
-        state.tick = 0;
-        state.had_room = false;
-        return false;
-    }
-
-    let first_room_frame = !state.had_room;
-    state.had_room = true;
-
-    let view_moved = params
-        .view_proj
-        .iter()
-        .zip(state.last_view_proj.iter())
-        .any(|(a, b)| (*a - *b).abs() > ROOM_EMISSIVE_PROBE_VIEW_EPS);
-    let resized = state.last_size != params.size;
-    let interval = params.update_interval.max(1);
-    let on_interval = state.tick.is_multiple_of(interval);
-    let update = first_room_frame || view_moved || resized || on_interval;
-
-    if update {
-        state.last_view_proj = *params.view_proj;
-        state.last_size = params.size;
-    }
-    state.tick = state.tick.wrapping_add(1);
-    update
-}
-
-/// Tighten or expand the room AABB used for probe placement (`pad_frac` of the box size per axis).
-pub fn room_probe_world_aabb(corners: &[Vec3], pad_frac: f32) -> Option<(Vec3, Vec3)> {
-    if corners.is_empty() {
-        return None;
-    }
-    let mut mn = corners[0];
-    let mut mx = corners[0];
-    for c in corners.iter().skip(1) {
-        mn = mn.min(*c);
-        mx = mx.max(*c);
-    }
-    let diag = mx - mn;
-    let pad = diag * pad_frac + Vec3::splat(1e-3);
-    Some((mn - pad, mx + pad))
-}
 
 /// Default **tuning** multiplier for linear HDR (debug overlay). With embedded glTF punctual
 /// lights, multiplied by [`ROOM_GLB_LINEAR_EXPOSURE_BASE`] before tonemap.
@@ -864,7 +778,7 @@ pub fn shop_embedded_point_lights_runtime_tagged(
                 h,
                 env_h,
                 tune,
-                crate::room_gltf_punctual::RoomPunctualProfile::ShopCandles {
+                crate::room_gltf_punctual::RoomPunctualProfile::Candles {
                     flame_time_s,
                     lamp_flicker,
                     flicker_amp: candle_flicker_amp,
@@ -968,16 +882,13 @@ mod tests {
         metal_ramp * dark_ramp
     }
 
-    /// Keep in sync with `metal_hemi_room_visibility` in `shaders/room_glb.wgsl` `shop_shade`.
-    fn metal_hemi_room_visibility(ambient_scale: f32, room_linear_exposure: f32) -> f32 {
-        ambient_scale
-            .max(room_linear_exposure * 80.0)
-            .clamp(0.0, 1.0)
-    }
-
     const ROOM_GLB_WGSL: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../shaders/room_glb.wgsl"
+    ));
+    const SCENE_PBR_CORE_WGSL: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../shaders/scene_pbr_core.wgsl"
     ));
 
     #[test]
@@ -1088,14 +999,6 @@ mod tests {
     }
 
     #[test]
-    fn metal_hemi_visibility_can_black_out_with_room_brownout() {
-        assert_eq!(metal_hemi_room_visibility(0.0, 0.0), 0.0);
-        assert!(metal_hemi_room_visibility(0.1, 0.0005) > 0.0);
-        assert_eq!(metal_hemi_room_visibility(1.0, 0.0), 1.0);
-        assert_eq!(metal_hemi_room_visibility(0.0, 1.0 / 80.0), 1.0);
-    }
-
-    #[test]
     fn room_glb_wgsl_uses_smooth_gold_ramps_not_hard_cliffs() {
         assert!(
             !ROOM_GLB_WGSL.contains("albedo_lum < 0.07"),
@@ -1106,8 +1009,13 @@ mod tests {
             "hard hemi cliff should be replaced by smooth ramps"
         );
         assert!(
-            ROOM_GLB_WGSL.contains("smoothstep(0.45, 0.65, metallic)"),
-            "F0 gold-boost ramp missing from room_glb.wgsl"
+            SCENE_PBR_CORE_WGSL.contains("smoothstep(0.45, 0.65, metallic)"),
+            "shared scene PBR core must own the smooth F0 gold-boost ramp"
+        );
+        assert!(
+            !ROOM_GLB_WGSL.contains("let f0_base")
+                && !ROOM_GLB_WGSL.contains("scene_distribution_ggx"),
+            "room_glb.wgsl should use the shared scene PBR direct-light evaluator"
         );
         assert!(
             ROOM_GLB_WGSL.contains("gold_reflected_fill"),
@@ -1122,8 +1030,8 @@ mod tests {
             "warm gold signage detection missing from room_glb.wgsl"
         );
         assert!(
-            ROOM_GLB_WGSL.contains("metal_hemi_room_visibility"),
-            "metallic readability fill should dim with room brownout"
+            !ROOM_GLB_WGSL.contains("scene_world_hemisphere_lighting(n_world"),
+            "runtime room shader should not add a separate hemisphere path on top of the lightmap"
         );
         assert!(
             ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE"),

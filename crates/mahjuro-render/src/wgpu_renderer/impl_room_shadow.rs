@@ -675,6 +675,10 @@ impl WgpuRenderer {
                 self.gameplay_env_primitives.as_slice(),
                 self.gameplay_environment.as_ref()?,
             )),
+            RoomGiRoom::ShadowTestRoom => Some((
+                self.shadow_test_room_env_primitives.as_slice(),
+                self.shadow_test_room_environment.as_ref()?,
+            )),
         }
     }
 
@@ -730,6 +734,7 @@ impl WgpuRenderer {
             RoomGiRoom::Archive => self.archive_env_skip_shadow_prim(pi, frame),
             RoomGiRoom::MainMenu => self.main_menu_env_skip_prim(pi, frame),
             RoomGiRoom::Gameplay => self.gameplay_env_skip_prim(pi, frame),
+            RoomGiRoom::ShadowTestRoom => false,
         }
     }
 }
@@ -798,5 +803,6 @@ fn active_room_env_for_shadow_bake(room: RoomGiRoom) -> ActiveRoomEnv {
         RoomGiRoom::MainMenu => ActiveRoomEnv::MainMenu,
         RoomGiRoom::Stairway => ActiveRoomEnv::Stairway,
         RoomGiRoom::Gameplay => ActiveRoomEnv::Gameplay,
+        RoomGiRoom::ShadowTestRoom => ActiveRoomEnv::ShadowTest,
     }
 }

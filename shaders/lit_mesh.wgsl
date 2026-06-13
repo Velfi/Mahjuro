@@ -41,11 +41,6 @@ struct MeshUniform {
 /// Relic relief data (linear): `.r` = height, `.g` = specular mask (soft-enamel pins).
 @group(0) @binding(3) var relief_tex: texture_2d<f32>;
 
-fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
-    let ct = clamp(cos_theta, 0.0, 1.0);
-    return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - ct, 5.0);
-}
-
 struct PointLight {
     pos: vec4<f32>,   // xyz = world position, w = radius or inverse-square range
     color: vec4<f32>, // rgb = color, a = intensity
@@ -84,13 +79,6 @@ struct TileOccluders {
 
 // ACES tonemapping is applied once in `tonemap_composite.wgsl`. This shader
 // writes linear HDR to `scene_color` (`Rgba16Float`).
-
-// Jorge Jimenez's interleaved gradient noise. Cheap, low-discrepancy,
-// stable in screen space — perfect for jittering shadow taps without
-// the swimming you'd get from white noise. Returns a value in [0, 1).
-fn ign(p: vec2<f32>) -> f32 {
-    return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
-}
 
 // Animated diagonal band tint for extruded score-pop glyphs. Polychrome
 // extruded glyphs pass spec_power >= 40 (see object3d_placement.rs); talisman
@@ -184,7 +172,7 @@ fn candle_occlusion(light_pos: vec3<f32>, frag_pos: vec3<f32>, frag_xy: vec2<f32
     // harder shadow edges. The IGN jitter offsets the ray slightly in
     // the table plane so adjacent pixels don't alias identically.
     let jitter_r = 1.5;
-    let rot = ign(frag_xy) * 6.2831853;
+    let rot = scene_ign(frag_xy) * 6.2831853;
     let off = vec2<f32>(cos(rot), sin(rot)) * jitter_r;
     let lp = light_pos + vec3<f32>(off.x, off.y, 0.0);
     let dir = frag_pos - lp;
@@ -767,11 +755,10 @@ fn fs_main(
     // ── Shop shelf catalog balance ─────────────────────────────────────
     // Storeroom row (`shop_punctual.y == 1`, see `shop_catalog_balance` in lit_mesh.rs):
     //   spec_forward — pack wrap, foil, talisman: gloss/holo-led pull-back.
-    //   art_forward  — enamel relic: ambient fill.
+    //   shop_cat_amb — catalog-prop hemisphere fill scale for the shared scene PBR helpers.
     let shop_cat_amb = lit_mesh_frame.shop_punctual.z;
     let shop_spec_forward = shop_display_case_tuning
         && (is_pack_wrap || is_foil || is_talisman);
-    let shop_art_forward = shop_display_case_tuning && is_enamel;
     let has_decal = mesh.material_params.w > 0.5
         && !is_talisman
         && !is_foil
@@ -908,15 +895,7 @@ fn fs_main(
         if (relic_front_tex > 0.48 && tex_sample.a < (16.0 / 255.0)) {
             discard;
         }
-        // Shop GLB display case: caps used `tex_rgb` alone — under punctual + key shadow,
-        // dark tex reads as a black slab while foil/talisman spec stays hot. Tint caps
-        // by `base_color` like the sides so material + rarity survive.
-        if (shop_display_case_tuning) {
-            let tinted = mesh.base_color.rgb * (tex_rgb * 1.10 + vec3<f32>(0.035));
-            albedo = mix(mesh.base_color.rgb, tinted, relic_front_tex);
-        } else {
-            albedo = mix(mesh.base_color.rgb, tex_rgb, relic_front_tex);
-        }
+        albedo = mix(mesh.base_color.rgb, tex_rgb, relic_front_tex);
     }
     if (is_unshaded) {
         // Boss ordeal icons: same extruded-pin topology as relics, but the
@@ -1310,53 +1289,50 @@ fn fs_main(
         let pt_n_w = lights.count.x;
         for (var i: u32 = 0u; i < pt_n_w; i = i + 1u) {
             let pl = lights.lights[i];
-            let lp = pl.pos.xyz;
-            let range_w = pl.pos.w;
-            let lc = pl.color.rgb;
-            let is_inv = pl.params.x > 0.5;
-            let intensity = pl.color.a;
-            let to_light = lp - in.world_pos;
-            let dist = length(to_light);
-            let atten = select(
-                scene_smooth_point_atten(dist, range_w),
-                punctual_attenuation_with_inv_doc_scale(dist, range_w, lit_mesh_frame.shop_punctual.x),
-                is_inv,
+            let point_sample = scene_pbr_sample_point_light(
+                in.world_pos,
+                pl.pos.xyz,
+                pl.pos.w,
+                pl.color,
+                pl.params.x,
+                lit_mesh_frame.shop_punctual.x,
             );
-            let l_dir = to_light / max(dist, 0.0001);
-            let nl = max(dot(water_n, l_dir), 0.0);
-            // Slight diffuse floor on water so the stream silhouette reads
-            // between candle pools without blowing out vs other lit_mesh props.
-            let lambert = select(0.30, 0.38, is_water) + 0.55 * nl;
-            lit_water = lit_water + lc * intensity * atten * lambert;
+            if (length(point_sample.radiance) <= 0.0) {
+                continue;
+            }
+            let l_dir = point_sample.direction;
+            let radiance = point_sample.radiance;
+            let nl_raw = dot(water_n, l_dir);
+            let lambert = scene_punctual_diffuse_weight(nl_raw);
+            lit_water = lit_water + radiance * lambert;
 
             if (water_spec_strength > 0.001) {
                 let h = normalize(l_dir + view_dir_w);
                 let nh = max(dot(water_n, h), 0.0);
                 let s = pow(nh, water_spec_power) * water_spec_strength;
-                spec_water = spec_water + lc * intensity * atten * s;
+                spec_water = spec_water + radiance * s;
             }
         }
         let spot_count_w = spot_lights.count.x;
         for (var si: u32 = 0u; si < spot_count_w; si = si + 1u) {
             let s = spot_lights.lights[si];
-            let to_frag = in.world_pos - s.pos.xyz;
-            let dist = length(to_frag);
-            let radius = max(s.pos.w, 1.0);
-            let t_sp = clamp(1.0 - dist / radius, 0.0, 1.0);
-            let atten_sp = t_sp * t_sp;
-            if (atten_sp <= 0.0) {
+            let spot_sample = scene_pbr_sample_spot_light(
+                in.world_pos,
+                s.pos.xyz,
+                s.pos.w,
+                s.dir.xyz,
+                s.params.x,
+                s.dir.w,
+                s.color,
+                0.0,
+                lit_mesh_frame.shop_punctual.x,
+            );
+            if (length(spot_sample.radiance) <= 0.0) {
                 continue;
             }
-            let frag_dir = to_frag / max(dist, 0.0001);
-            let cos_a = dot(frag_dir, s.dir.xyz);
-            let spot_factor = khr_spot_angle_attenuation_scene(cos_a, s.params.x, s.dir.w);
-            if (spot_factor <= 0.0) {
-                continue;
-            }
-            let to_light = -frag_dir;
-            let nl = max(dot(water_n, to_light), 0.0);
-            let lambert_sp = select(0.30, 0.38, is_water) + 0.55 * nl;
-            let sc = s.color.rgb * s.color.a * atten_sp * spot_factor;
+            let to_light = spot_sample.direction;
+            let lambert_sp = scene_punctual_diffuse_weight(dot(water_n, to_light));
+            let sc = spot_sample.radiance;
             lit_water = lit_water + sc * lambert_sp;
 
             if (water_spec_strength > 0.001) {
@@ -1479,7 +1455,6 @@ fn fs_main(
         }
     }
     if (is_enamel) {
-        let face_flat = abs(n.y);
         // Relief (object height + spec mask) only on the front cap; back
         // stays smooth metal with no mirrored height field.
         let relic_front_relief = smoothstep(0.55, 0.82, in.local_n.y);
@@ -1491,6 +1466,7 @@ fn fs_main(
             let h_c = clamp((hr - 0.62) / 0.33, 0.0, 1.0);
             enamel_height = h_c * relic_front_relief;
             enamel_ridge = smoothstep(0.70, 0.92, h_c) * relic_front_relief;
+            let face_flat = abs(in.local_n.y);
             if (face_flat > 0.6) {
                 let dim = vec2<f32>(textureDimensions(relief_tex, 0));
                 let texel = vec2<f32>(1.0 / max(dim.x, 1.0), 1.0 / max(dim.y, 1.0));
@@ -1501,12 +1477,10 @@ fn fs_main(
                 let bump = 3.6;
                 let dhdu = (h_r - h_l) * bump;
                 let dhdv = (h_u - h_d) * bump;
-                let sgn = sign(n.y);
-                let perturbed = normalize(vec3<f32>(-dhdu, sgn, -dhdv));
-                var n_face = vec3<f32>(perturbed.x, perturbed.y * sgn, perturbed.z);
-                n_face = normalize(n_face);
+                let n_local = normalize(vec3<f32>(-dhdu, 1.0, -dhdv));
+                let n_world_perturbed = normalize((mesh.normal_model * vec4(n_local, 0.0)).xyz);
                 let blend = smoothstep(0.6, 0.95, face_flat) * relic_front_relief;
-                n = normalize(mix(n, n_face, blend));
+                n = normalize(mix(n, n_world_perturbed, blend));
             }
         }
     }
@@ -1584,9 +1558,9 @@ fn fs_main(
     var rgb = vec3<f32>(0.0);
 
     // ── Point-light pass ─────────────────────────────────────────────────
-    // Distance attenuation + Lambertian, with optional Blinn-Phong specular,
-    // optional fake subsurface wrap (wood/wax), and an optional dielectric
-    // clearcoat lobe (lacquered wood).
+    // Shared scene attenuation + direct diffuse receiver term, with optional
+    // Blinn-Phong specular, optional fake subsurface wrap (wood/wax), and an
+    // optional dielectric clearcoat lobe (lacquered wood).
     var lit = vec3<f32>(0.0);          // diffuse-band light (multiplied by albedo)
     var sss_acc = vec3<f32>(0.0);      // wrap-diffuse subsurface (front-lit)
     var back_acc = vec3<f32>(0.0); // wax back-transmission (Penner-style)
@@ -1748,28 +1722,25 @@ fn fs_main(
     let pt_n_main = lights.count.x;
     for (var i: u32 = 0u; i < pt_n_main; i = i + 1u) {
         let pl = lights.lights[i];
-        let lp = pl.pos.xyz;
-        let range_w = pl.pos.w;
-        let lc = pl.color.rgb;
-        let is_inv = pl.params.x > 0.5;
-        let intensity = pl.color.a;
-        let to_light = lp - in.world_pos;
-        let dist = length(to_light);
-        let atten = select(
-            scene_smooth_point_atten(dist, range_w),
-            punctual_attenuation_with_inv_doc_scale(dist, range_w, lit_mesh_frame.shop_punctual.x),
-            is_inv,
+        let point_sample = scene_pbr_sample_point_light(
+            in.world_pos,
+            pl.pos.xyz,
+            pl.pos.w,
+            pl.color,
+            pl.params.x,
+            lit_mesh_frame.shop_punctual.x,
         );
         // Skip lights whose attenuation has fallen to zero — no point
         // computing occlusion, diffuse, specular, or SSS for a light
         // that contributes nothing.
-        if (atten < 0.001) {
+        if (length(point_sample.radiance) < 0.001) {
             continue;
         }
-        let l_dir = to_light / max(dist, 0.0001);
+        let l_dir = point_sample.direction;
+        let radiance = point_sample.radiance;
         let ndl_raw = dot(n, l_dir);
         let nl = max(ndl_raw, 0.0);
-        let lambert = 0.35 + 0.65 * nl;
+        let lambert = scene_punctual_diffuse_weight(ndl_raw);
         // Live punctual depth maps only (same path as the shadow & AO lab).
         let projected_shadows_on = shadow_globals.params.x > 0.5;
         let cand_vis = select(
@@ -1777,7 +1748,8 @@ fn fs_main(
             punctual_shadow_vis(i, in.world_pos),
             projected_shadows_on,
         );
-        lit = lit + lc * intensity * atten * lambert * cand_vis;
+        let shadowed_radiance = radiance * cand_vis;
+        lit = lit + shadowed_radiance * lambert;
 
         // Wrap-diffuse SSS: pushes the terminator past 90° so the
         // shaded side of the surface picks up a soft tinted bleed,
@@ -1790,7 +1762,7 @@ fn fs_main(
             // we don't double-count light on the lit hemisphere.
             let sss_band = max(wrapped - nl, 0.0);
             let sss_mask = select(1.0, 1.0 - wood_pore * 0.7, is_wood);
-            sss_acc = sss_acc + lc * intensity * atten * sss_band * sss_strength * sss_mask * cand_vis;
+            sss_acc = sss_acc + radiance * sss_band * sss_strength * sss_mask * cand_vis;
         }
 
         // Wax back-transmission (Penner SSS). Bend the light direction
@@ -1803,7 +1775,7 @@ fn fs_main(
             let lt = normalize(l_dir + n * back_distortion);
             let back = pow(max(dot(view_dir, -lt), 0.0), back_power);
             back_acc = back_acc
-                + lc * intensity * atten * back * back_thinness * back_scale * cand_vis;
+                + radiance * back * back_thinness * back_scale * cand_vis;
         }
 
         if (spec_strength > 0.001) {
@@ -1845,7 +1817,7 @@ fn fs_main(
                 if (is_bronze_mirror) {
                     conductor_scale = 2.15 * mirror_relief_spec;
                 }
-                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * f_metal * conductor_scale;
+                spec_acc = spec_acc + radiance * s * cand_vis * f_metal * conductor_scale;
             } else if (is_enamel) {
                 let vdh = max(dot(view_dir, h), 0.0);
                 let ridge_f0 = mesh.base_color.rgb;
@@ -1853,13 +1825,13 @@ fn fs_main(
                 let ridge_lobe = pow(nh, max(spec_power * 1.8, 1.0)) * smoothstep(0.68, 0.92, enamel_height);
                 let fill_spec = mix(0.18, 0.55, enamel_spec_mask);
                 let ridge_spec = mix(0.35, 1.15, enamel_spec_mask);
-                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fill_spec;
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * ridge_lobe * ridge_spec * f_pin;
+                spec_acc = spec_acc + radiance * s * cand_vis * fill_spec;
+                spec_acc = spec_acc + shadowed_radiance * ridge_lobe * ridge_spec * f_pin;
             } else if (is_glass) {
                 let vdh = max(dot(view_dir, h), 0.0);
                 let fresnel = 0.10 + 0.90 * pow(1.0 - vdh, 5.0);
                 let glass_tint = mix(vec3<f32>(0.92, 0.97, 1.0), mesh.base_color.rgb, 0.35);
-                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fresnel * glass_tint * 1.35;
+                spec_acc = spec_acc + radiance * s * cand_vis * fresnel * glass_tint * 1.35;
             } else if (is_pack_wrap) {
                 // Clear plastic gloss: dielectric Fresnel, tight highlight +
                 // broad wet wrap — no streaks or rainbow bands.
@@ -1871,9 +1843,9 @@ fn fs_main(
                 let pinpoint = pow(nh, max(spec_power * 0.85, 32.0)) * 1.10;
                 let wide = pow(nh, max(spec_power * 0.22, 6.0)) * 0.24;
                 let rim = 0.20 * pow(1.0 - ndv, 2.4);
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * fresnel * wrap_tint * pinpoint * pack_spec_gain;
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * wide * wrap_tint * pack_spec_gain;
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * rim * wrap_tint * 0.55 * pack_spec_gain;
+                spec_acc = spec_acc + shadowed_radiance * fresnel * wrap_tint * pinpoint * pack_spec_gain;
+                spec_acc = spec_acc + shadowed_radiance * wide * wrap_tint * pack_spec_gain;
+                spec_acc = spec_acc + shadowed_radiance * rim * wrap_tint * 0.55 * pack_spec_gain;
             } else if (is_porcelain) {
                 // Porcelain glaze (chiclet/pillow look): a tight pinpoint
                 // highlight sits inside a broader wet-glaze lobe, then a
@@ -1898,9 +1870,9 @@ fn fs_main(
                 // default porcelain preset (~0.7) so dish-sized pieces match
                 // their historical brightness when strength stays at 0.7.
                 let glaze_k = mesh.material_params.y / 0.7;
-                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fresnel * glaze_tint * 1.55;
-                spec_acc = spec_acc + lc * intensity * atten * wide_lobe * cand_vis * glaze_tint * 0.80 * glaze_break * glaze_k;
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * rim * glaze_tint * glaze_break * glaze_k;
+                spec_acc = spec_acc + radiance * s * cand_vis * fresnel * glaze_tint * 1.55;
+                spec_acc = spec_acc + radiance * wide_lobe * cand_vis * glaze_tint * 0.80 * glaze_break * glaze_k;
+                spec_acc = spec_acc + shadowed_radiance * rim * glaze_tint * glaze_break * glaze_k;
             } else if (is_leather) {
                 let vdh = max(dot(view_dir, h), 0.0);
                 let ndv = max(dot(n, view_dir), 0.0);
@@ -1909,7 +1881,7 @@ fn fs_main(
                     // just a hint of glance to keep them from looking
                     // dead flat under the candles.
                     let paper_lobe = pow(nh, 4.0) * 0.06;
-                    spec_acc = spec_acc + lc * intensity * atten * cand_vis * paper_lobe * vec3<f32>(0.95, 0.92, 0.84);
+                    spec_acc = spec_acc + shadowed_radiance * paper_lobe * vec3<f32>(0.95, 0.92, 0.84);
                 } else {
                     // Leather body: dielectric with a broad waxy sheen,
                     // no tight pinpoint. Two layered lobes — a soft
@@ -1924,18 +1896,18 @@ fn fs_main(
                     let polish_tint = mix(vec3<f32>(1.0, 0.95, 0.85), mesh.base_color.rgb + vec3<f32>(0.4), 0.35);
                     // Soft polish lobe — wide, half-energy.
                     let soft_polish = pow(nh, max(spec_power, 1.0)) * 0.55;
-                    spec_acc = spec_acc + lc * intensity * atten * cand_vis * soft_polish * fresnel * polish_tint;
+                    spec_acc = spec_acc + shadowed_radiance * soft_polish * fresnel * polish_tint;
                     // Sheen rim: glancing-angle bloom that reads as
                     // the waxed edge catching the candle. Independent
                     // of lobe sharpness so it shows up on flat panels
                     // too.
                     let sheen = pow(1.0 - ndv, 2.5) * pow(nh, 4.0) * 0.45;
-                    spec_acc = spec_acc + lc * intensity * atten * cand_vis * sheen * polish_tint;
+                    spec_acc = spec_acc + shadowed_radiance * sheen * polish_tint;
                 }
             } else if (is_chitin) {
                 // Nacre sheen is in the talisman block below.
             } else if (!is_score_glyph) {
-                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis;
+                spec_acc = spec_acc + radiance * s * cand_vis;
             }
         }
 
@@ -1950,7 +1922,7 @@ fn fs_main(
             let f_schlick = coat_f0 + (1.0 - coat_f0) * pow(1.0 - vdh, 5.0);
             let d = pow(nh, coat_power) * (coat_power + 2.0) / 8.0;
             let coat = d * f_schlick * coat_strength * (1.0 - wood_pore * 0.6);
-            coat_acc = coat_acc + lc * intensity * atten * coat * cand_vis;
+            coat_acc = coat_acc + radiance * coat * cand_vis;
         }
 
         // ── Per-talisman-kind sheen lobes ─────────────────────────────
@@ -1988,7 +1960,7 @@ fn fs_main(
                     let f_foil = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, select(3.2, 4.5, chitin_rim_face));
                     let mirror_pow = select(64.0, 24.0, chitin_rim_face);
                     let mirror_lobe = pow(nh, mirror_pow) * select(2.0, 0.85, chitin_rim_face) * streak;
-                    spec_acc = spec_acc + lc * intensity * atten * cand_vis * mirror_lobe * f_foil;
+                    spec_acc = spec_acc + shadowed_radiance * mirror_lobe * f_foil;
                 }
 
                 let sheen_pow = select(3.5, select(10.0, 6.0, chitin_rim_face), talisman_lustrous);
@@ -2000,12 +1972,12 @@ fn fs_main(
                 );
                 let lobe = pow(nh, sheen_pow) * sheen_gain
                     + broad * select(0.20, select(0.38, 0.16, chitin_rim_face), talisman_lustrous);
-                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
+                sheen_acc = sheen_acc + shadowed_radiance
                     * lobe * fresnel * themed_abalone(nacre_phase + 0.9, accent, talisman_relief_h, kind_idx, talisman_lustrous) * streak;
 
                 let film_lobe = pow(nh, select(2.8, 5.5, talisman_lustrous))
                     * select(0.38, 0.72, talisman_lustrous);
-                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
+                sheen_acc = sheen_acc + shadowed_radiance
                     * film_lobe * themed_abalone(nacre_phase + 1.8, accent, talisman_relief_h, kind_idx, talisman_lustrous);
 
                 // Oily wet clearcoat — tight highlight + strong grazing bloom.
@@ -2017,11 +1989,11 @@ fn fs_main(
                     vec3<f32>(0.92, 0.96, 1.0),
                     select(0.22, 0.38, talisman_lustrous),
                 );
-                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
+                sheen_acc = sheen_acc + shadowed_radiance
                     * wet_lobe * wet_fresnel * wet_tint;
 
                 if (chitin_front_face && talisman_lustrous) {
-                    sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
+                    sheen_acc = sheen_acc + shadowed_radiance
                         * broad * 0.28 * themed_abalone(nacre_phase - 0.7, accent, talisman_relief_h, kind_idx, true);
                 }
             } else if (is_jade) {
@@ -2030,7 +2002,7 @@ fn fs_main(
                 let fresnel = 0.08 + 0.30 * pow(1.0 - ndv, 2.5);
                 let lobe = pow(nh, 12.0) * 0.6 + broad * 0.15;
                 let tint = vec3<f32>(0.55, 0.95, 0.65);
-                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * tint;
+                sheen_acc = sheen_acc + shadowed_radiance * lobe * fresnel * tint;
             } else if (is_moonstone) {
                 // Moonstone: three stacked lobes for a theatrical
                 // schiller. Tight white pinpoint (surface glaze), a
@@ -2046,7 +2018,7 @@ fn fs_main(
                 let bloom    = pow(nh, 1.5) * 0.55;
                 let halo      = mesh.base_color.rgb + vec3<f32>(0.25);
                 let deep_halo = mesh.base_color.rgb + vec3<f32>(0.15);
-                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * (
+                sheen_acc = sheen_acc + shadowed_radiance * (
                     pinpoint * fresnel * vec3<f32>(1.0) +
                     schiller * halo +
                     bloom    * deep_halo
@@ -2065,7 +2037,7 @@ fn fs_main(
                 );
                 let pearl_tint = mix(pearl_white, mesh.base_color.rgb + vec3<f32>(0.20), 0.45);
                 let lobe = pow(nh, 16.0) * 0.7 + broad * 0.20;
-                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * pearl_tint;
+                sheen_acc = sheen_acc + shadowed_radiance * lobe * fresnel * pearl_tint;
             } else if (is_goldnug) {
                 // Polished gold: metallic conductor Schlick Fresnel with
                 // a tight highlight lobe that reads as mirror-polished
@@ -2073,7 +2045,7 @@ fn fs_main(
                 let f0 = vec3<f32>(1.0, 0.82, 0.36);
                 let f_gold = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
                 let lobe = pow(nh, 64.0) * 1.8 + pow(nh, 12.0) * 0.35 + broad * 0.12;
-                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * f_gold;
+                sheen_acc = sheen_acc + shadowed_radiance * lobe * f_gold;
             } else if (is_poly) {
                 if (is_score_glyph) {
                     // Score pops: band-swept sheen keyed to the popup tint.
@@ -2086,7 +2058,7 @@ fn fs_main(
                     let sheen_tint = mesh.base_color.rgb * (1.2 + band * 0.8);
                     let fresnel = 0.15 + 0.55 * pow(1.0 - ndv, 2.2);
                     let lobe = pow(nh, 12.0) * (0.5 + band * 0.6) + broad * 0.2;
-                    sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * sheen_tint * 0.32;
+                    sheen_acc = sheen_acc + shadowed_radiance * lobe * fresnel * sheen_tint * 0.32;
                 } else {
                     // Polychrome: holographic thin-film iridescence — rainbow
                     // hue driven by the normal-to-half angle so the spectrum
@@ -2099,7 +2071,7 @@ fn fs_main(
                     let holo_tint = vec3<f32>(holo_r, holo_g, holo_b);
                     let fresnel = 0.12 + 0.60 * pow(1.0 - ndv, 2.5);
                     let lobe = pow(nh, 10.0) * 0.8 + broad * 0.25;
-                    sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * holo_tint;
+                    sheen_acc = sheen_acc + shadowed_radiance * lobe * fresnel * holo_tint;
                 }
             }
         }
@@ -2143,13 +2115,13 @@ fn fs_main(
             // Main mirror highlight — tighter and brighter than before so
             // the specular actually punches through the scene lighting.
             let mirror_lobe = pow(nh, 96.0) * 2.6 * streak;
-            spec_acc = spec_acc + lc * intensity * atten * cand_vis * mirror_lobe * f_foil;
+            spec_acc = spec_acc + shadowed_radiance * mirror_lobe * f_foil;
 
             // Broad diffuse-wrapped sheen — keeps the lit side of the
             // pack obviously brighter than the shadow side even when the
             // camera misses the mirror lobe.
             let broad_lobe = pow(nh, 16.0) * 0.8 * streak;
-            spec_acc = spec_acc + lc * intensity * atten * cand_vis * broad_lobe * f_foil * 0.7;
+            spec_acc = spec_acc + shadowed_radiance * broad_lobe * f_foil * 0.7;
 
             // View-swept holographic band. `ndv` goes 1→0 as we look
             // toward the grazing edge; combined with a per-light term it
@@ -2167,7 +2139,7 @@ fn fs_main(
                 // viewing angle.
                 let band_gain = (0.15 + 0.5 * pow(1.0 - ndv, 2.0)) * streak;
                 let band_lobe = pow(nh, 18.0) * 0.55;
-                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * band_lobe * band_gain * band_tint;
+                sheen_acc = sheen_acc + shadowed_radiance * band_lobe * band_gain * band_tint;
             }
         }
 
@@ -2184,7 +2156,7 @@ fn fs_main(
             let vdh = max(dot(view_dir, h), 0.0);
             let f_gold = decal_f0 + (vec3<f32>(1.0) - decal_f0) * pow(1.0 - vdh, 5.0);
             let gold_spec = pow(nh, 180.0) * 1.2 * decal_metallic;
-            spec_acc = spec_acc + lc * intensity * atten * gold_spec * cand_vis * f_gold;
+            spec_acc = spec_acc + radiance * gold_spec * cand_vis * f_gold;
         }
     }
 
@@ -2192,27 +2164,26 @@ fn fs_main(
     let spot_count_fs = spot_lights.count.x;
     for (var si: u32 = 0u; si < spot_count_fs; si = si + 1u) {
         let s = spot_lights.lights[si];
-        let lp = s.pos.xyz;
-        let to_frag = in.world_pos - lp;
-        let dist = length(to_frag);
-        let radius = max(s.pos.w, 1.0);
-        let t_sp = clamp(1.0 - dist / radius, 0.0, 1.0);
-        let atten_sp = t_sp * t_sp;
-        if (atten_sp <= 0.0) {
+        let spot_sample = scene_pbr_sample_spot_light(
+            in.world_pos,
+            s.pos.xyz,
+            s.pos.w,
+            s.dir.xyz,
+            s.params.x,
+            s.dir.w,
+            s.color,
+            0.0,
+            lit_mesh_frame.shop_punctual.x,
+        );
+        if (length(spot_sample.radiance) <= 0.0) {
             continue;
         }
-        let frag_dir = to_frag / max(dist, 0.0001);
-        let cos_a = dot(frag_dir, s.dir.xyz);
-        let spot_factor = khr_spot_angle_attenuation_scene(cos_a, s.params.x, s.dir.w);
-        if (spot_factor <= 0.0) {
-            continue;
-        }
-        let l_dir = -frag_dir;
+        let l_dir = spot_sample.direction;
         let ndl_raw = dot(n, l_dir);
         let nl = max(ndl_raw, 0.0);
-        let lambert_sp = 0.35 + 0.65 * nl;
+        let lambert_sp = scene_punctual_diffuse_weight(ndl_raw);
         let cand_vis_sp = 1.0;
-        let sc = s.color.rgb * s.color.a * atten_sp * spot_factor * cand_vis_sp;
+        let sc = spot_sample.radiance * cand_vis_sp;
         lit = lit + sc * lambert_sp;
 
         if (sss_strength > 0.001) {
@@ -2564,8 +2535,69 @@ fn fs_main(
     );
     // Offline `.msh` contact AO grounds catalog props on room surfaces (shop
     // counter, gameplay table edge) the same way `room_glb.wgsl` does for shells.
-    let baked_contact = sample_contact_ao(in.world_pos);
+    let baked_contact_raw = sample_contact_ao(in.world_pos);
+    let baked_contact = mix(
+        1.0,
+        baked_contact_raw,
+        select(1.0, 0.32, shop_display_case_tuning),
+    );
     let lit_shadowed = lit_display_case * shadow_vis * baked_contact;
+
+    var material_metallic = 0.0;
+    if (is_conductor || is_goldnug) {
+        material_metallic = 1.0;
+    } else if (is_foil) {
+        material_metallic = 0.55;
+    }
+    material_metallic = max(material_metallic, decal_metallic);
+
+    var material_roughness = clamp(sqrt(2.0 / (spec_power + 2.0)), 0.06, 0.92);
+    if (is_wood) {
+        material_roughness = 0.28;
+    } else if (is_enamel) {
+        material_roughness = 0.34;
+    } else if (is_chitin || is_pearl || is_moonstone) {
+        material_roughness = 0.42;
+    } else if (is_goldnug) {
+        material_roughness = 0.20;
+    } else if (is_foil) {
+        material_roughness = 0.18;
+    }
+
+    // Shared scene indirect. Room lightmaps pre-divide environment by exposure
+    // before runtime exposure is applied; lit_mesh uses the same convention so
+    // catalog props remain visible under the embedded-room HDR path.
+    let scene_indirect_scale = max(
+        lit_mesh_frame.hdr_tonemap.z,
+        select(0.0, shop_cat_amb, shop_display_case_tuning),
+    );
+    let scene_indirect_exposure = select(
+        1.0,
+        max(lit_mesh_frame.hdr_tonemap.y, 1e-5),
+        phys_hdr > 0.5,
+    );
+    let indirect_contact = mix(
+        1.0,
+        baked_contact,
+        select(0.60, 0.30, shop_display_case_tuning),
+    );
+    let shared_indirect = scene_world_hemisphere_lighting(
+        n,
+        albedo,
+        material_metallic,
+        scene_indirect_scale,
+        scene_indirect_exposure,
+    ) * diffuse_scale * indirect_contact;
+    let env_reflect_dir = reflect(-view_dir, n);
+    let env_f0 = scene_room_pbr_f0(max(albedo, vec3<f32>(0.0)), material_metallic);
+    let env_fresnel = scene_fresnel_schlick(ndv_view, env_f0);
+    let env_spec_strength = clamp(spec_strength * 0.20 + material_metallic * 0.18, 0.0, 0.45);
+    let shared_specular_indirect = scene_environment_radiance(
+        env_reflect_dir,
+        material_roughness,
+        scene_indirect_scale,
+        scene_indirect_exposure,
+    ) * env_fresnel * env_spec_strength * indirect_contact;
     // Reinhard-knee the coat accumulator on wood: with many candles
     // contributing additive white highlights, the lacquer lobe was
     // piling up past 1.0 and milkifying the deep walnut. The knee
@@ -2604,7 +2636,7 @@ fn fs_main(
         // View-facing Schlick rims — independent of punctual light direction
         // so the disc reads polished from every camera angle.
         let bronze_f0 = mesh.base_color.rgb * 0.52;
-        let f_bronze = fresnel_schlick(ndv_view, bronze_f0);
+        let f_bronze = scene_fresnel_schlick(ndv_view, bronze_f0);
         let warm_edge = mix(vec3<f32>(1.0, 0.93, 0.72), vec3<f32>(1.0), 0.25);
         sheen_acc = sheen_acc + f_bronze * warm_edge * 0.58;
         let relief_catch = mirror_carve * (0.55 + mirror_grad * 0.12);
@@ -2622,13 +2654,13 @@ fn fs_main(
                 let center_w = (1.0 - smoothstep(0.0, 0.68, radial)) * 0.55;
                 let ridge_w = mirror_carve * 0.72;
                 let jade_strength = (rim_w * 7.5 + center_w + ridge_w) * play_glow;
-                let f_view = fresnel_schlick(ndv_view, jade_f0);
+                let f_view = scene_fresnel_schlick(ndv_view, jade_f0);
                 sheen_acc = sheen_acc + jade_color * jade_strength * 11.0;
                 sheen_acc = sheen_acc + f_view * jade_color * play_glow * 5.5;
                 emissive = emissive + jade_color * jade_strength * 4.2;
                 emissive = emissive + jade_color * play_glow * center_w * 2.4;
             } else {
-                let f_jade = fresnel_schlick(ndv_view, jade_f0);
+                let f_jade = scene_fresnel_schlick(ndv_view, jade_f0);
                 let grazing = pow(1.0 - ndv_view, 1.6) * play_glow;
                 sheen_acc = sheen_acc + jade_color * f_jade * play_glow * 7.5;
                 sheen_acc = sheen_acc + jade_color * grazing * 4.5;
@@ -2642,6 +2674,8 @@ fn fs_main(
     } else {
         rgb = rgb
             + albedo * lit_shadowed * diffuse_scale
+            + shared_indirect
+            + shared_specular_indirect
             + sss_acc * sss_tint
             + back_acc * back_tint
             + spec_final
@@ -2657,10 +2691,6 @@ fn fs_main(
         // applies ACES + sRGB encode for the swapchain. The per-shader
         // `lights.extras.x` gamma slider is intentionally a no-op here — display
         // encoding belongs at the composite stage now.
-        var amb = lit_mesh_frame.hdr_tonemap.z * 0.08;
-        if (shop_art_forward && shop_cat_amb > 0.001) {
-            amb = lit_mesh_frame.hdr_tonemap.z * shop_cat_amb;
-        }
         if (is_unshaded) {
             // Flat atlas decals skip punctual lighting but still need to land in
             // the same HDR range as the rest of the frame. Embedded-room scenes
@@ -2669,7 +2699,6 @@ fn fs_main(
             out_rgb = albedo;
         } else {
             var hdr = rgb;
-            hdr = hdr + albedo * vec3<f32>(amb) * diffuse_scale * baked_contact;
             hdr = hdr * lit_mesh_frame.hdr_tonemap.y;
             if (is_bronze_mirror && mesh.instance_params.x > 0.01) {
                 let pg = mesh.instance_params.x;

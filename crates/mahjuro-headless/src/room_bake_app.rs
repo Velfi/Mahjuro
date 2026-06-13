@@ -265,26 +265,6 @@ impl RoomBakeApp {
         }
     }
 
-    pub(crate) fn bake_room_gi(
-        &mut self,
-        room: mahjuro::render::room_gi_bake::RoomGiRoom,
-        warmup_frames: u32,
-    ) -> anyhow::Result<mahjuro::render::room_gi_bake::RoomGiBake> {
-        self.effect_layers.procedural_surface_quality = true;
-        self.gfx.effects_quality = mahjuro::persistence::EffectsQuality::High;
-        // Avoid dynamic shadow depth readbacks during warmup on integrated GPUs.
-        self.gfx.graphics_mode = mahjuro::persistence::GraphicsMode::Performance;
-        self.renderer.request_room_gi_capture(room);
-        self.run_warmup(warmup_frames);
-        self.tick();
-        self.renderer.take_room_gi_capture().ok_or_else(|| {
-            anyhow::anyhow!(
-                "room GI bake: GPU readback missing (was probe compute dispatched?) — rebake with \
-                 `cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds gi`"
-            )
-        })
-    }
-
     pub(crate) fn bake_room_shadow(
         &mut self,
         room: mahjuro::render::room_gi_bake::RoomGiRoom,

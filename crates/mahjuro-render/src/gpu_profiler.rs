@@ -16,7 +16,6 @@
 //!   shadow, main, main-table, main-scene — Pass A (table split only while profiling)
 //!   cascade — shooting-star offscreen pre-pass
 //!   room-bloom — second GLB draw for linear HDR bloom / emissive (shop, hallway, archive)
-//!   gi-compute, gi-apply, gi-composite — emissive probe indirect
 //!   bloom-extract, bloom-blur-h, bloom-blur-v, scene-composite
 //!   tonemap, overlay — final display + 2D HUD text
 //!
@@ -27,7 +26,7 @@
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
-const NUM_PASSES: usize = 15;
+const NUM_PASSES: usize = 12;
 /// Pairwise begin/end indices (Vulkan / DX12).
 const PAIRWISE_TIMESTAMPS: u32 = (NUM_PASSES * 2) as u32;
 const QUERY_COUNT: u32 = PAIRWISE_TIMESTAMPS; // 32 slots; Metal chained mode uses ≤17
@@ -41,9 +40,6 @@ const PASS_LABELS: [&str; NUM_PASSES] = [
     "main-scene",
     "cascade",
     "room-bloom",
-    "gi-compute",
-    "gi-apply",
-    "gi-composite",
     "bloom-extract",
     "bloom-blur-h",
     "bloom-blur-v",
@@ -67,18 +63,12 @@ pub enum PassSlot {
     Cascade = 4,
     /// `shop-linear-bloom-pass` / hallway / archive linear HDR room redraw.
     RoomBloom = 5,
-    /// `emissive-probe-update-pass` compute dispatch.
-    GiCompute = 6,
-    /// `emissive-probe-apply-pass` fullscreen apply.
-    GiApply = 7,
-    /// `emissive-gi-composite-pass` additive composite.
-    GiComposite = 8,
-    BloomExtract = 9,
-    BloomBlurH = 10,
-    BloomBlurV = 11,
-    SceneComposite = 12,
-    Tonemap = 13,
-    Overlay = 14,
+    BloomExtract = 6,
+    BloomBlurH = 7,
+    BloomBlurV = 8,
+    SceneComposite = 9,
+    Tonemap = 10,
+    Overlay = 11,
 }
 
 pub struct GpuProfiler {

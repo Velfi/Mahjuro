@@ -51,23 +51,6 @@ pub(crate) struct TonemapParams {
     pub gamma: f32,
 }
 
-/// Shared by `emissive_probe_update.wgsl` and `emissive_probe_apply.wgsl` (must match WGSL layout).
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct ProbeGiFrameUniform {
-    pub inv_view_proj: [f32; 16],
-    pub view_proj: [f32; 16],
-    pub world_min: [f32; 4],
-    pub world_max: [f32; 4],
-    /// x = nx, y = ny, z = nz, w = probe_count (nx×ny×nz).
-    pub grid_dims: [u32; 4],
-    /// xy = full-res width/height; z = max march distance (world); w = indirect strength scale.
-    pub screen_march: [f32; 4],
-    pub cam_pos: [f32; 4],
-    /// x = sphere direction samples, y = march steps, zw unused.
-    pub sample_params: [u32; 4],
-}
-
 /// Per-frame camera + tonemap data for `tile_3d.wgsl` group 0 binding 0.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -125,6 +108,8 @@ pub(crate) struct RoomEnvUniform {
     pub room_height_fog_color: [f32; 4],
     /// xyz = distance tint color; w = tint gradient exponential scale in world units.
     pub room_height_fog_far_color: [f32; 4],
+    /// xy = room lightmap atlas UV offset; zw = atlas UV scale.
+    pub room_lightmap_uv: [f32; 4],
 }
 
 /// Per-primitive metadata rendered into the bake-only room shadow mask.

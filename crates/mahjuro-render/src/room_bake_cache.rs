@@ -1,4 +1,4 @@
-//! Shared once-per-room cache for offline `.mgi` / `.msh` bakes.
+//! Shared once-per-room cache for offline room bakes.
 
 use std::sync::{Arc, OnceLock};
 

@@ -978,7 +978,7 @@ pub(super) fn create_post_texture(
     (tex, view)
 }
 
-/// R32 depth snapshot for `textureLoad` in emissive-probe shaders.
+/// R32 depth snapshot for shader `textureLoad` paths that need filter-free depth values.
 /// GLES/llvmpipe cannot compile WGSL `textureLoad` on `texture_depth_2d`.
 pub(crate) fn create_depth_r32_snapshot(
     device: &wgpu::Device,

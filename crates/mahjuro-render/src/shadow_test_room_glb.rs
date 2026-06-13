@@ -1,6 +1,6 @@
 //! [`shadow_test_room.glb`](../../../assets/3d/shadow_test_room.glb) - debug-only room
-//! used by the Shadow & AO lab. It uses the shared room GLB GPU path but is not
-//! part of the normal startup prefetch or offline bake room set.
+//! used by the Shadow & AO lab. It uses the shared room GLB GPU path and has a
+//! required room lightmap, but is not part of the normal startup prefetch set.
 
 use parking_lot::RwLock;
 

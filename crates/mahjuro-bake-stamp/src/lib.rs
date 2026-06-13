@@ -501,7 +501,7 @@ mod tests {
         let mut paths = RoomGi::stamp_input_paths(&repo);
         paths.retain(|p| p != &shop);
         let mut h = Fnv64::new();
-        h.write(format!("mgi-v{}\n", crate::room_gi::MGI_FORMAT_VERSION).as_bytes());
+        h.write(format!("rlm-v{}\n", crate::room_gi::ROOM_LIGHTMAP_FORMAT_VERSION).as_bytes());
         h.write(
             format!(
                 "bake-{}x{}\n",
@@ -510,6 +510,7 @@ mod tests {
             )
             .as_bytes(),
         );
+        h.write(format!("lightmap-{}\n", crate::room_gi::ROOM_LIGHTMAP_SIZE).as_bytes());
         hash_paths(&mut h, &repo, &paths);
         let without_shop = h.finish_hex();
         assert_ne!(

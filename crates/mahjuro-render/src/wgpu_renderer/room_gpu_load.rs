@@ -257,7 +257,40 @@ fn room_env_pbr_uniform(
         node_name,
         material_name,
     ));
+    pbr_uniform._pad1 = [
+        room_lightmap_wrap_mode_u32(prim.sampler.wrap_s),
+        room_lightmap_wrap_mode_u32(prim.sampler.wrap_t),
+    ];
     pbr_uniform
+}
+
+fn room_lightmap_wrap_mode_u32(mode: gltf::texture::WrappingMode) -> u32 {
+    match mode {
+        gltf::texture::WrappingMode::ClampToEdge => 0,
+        gltf::texture::WrappingMode::Repeat => 1,
+        gltf::texture::WrappingMode::MirroredRepeat => 2,
+    }
+}
+
+fn create_room_env_mesh_buffers(
+    device: &wgpu::Device,
+    label_prefix: &str,
+    i: usize,
+    prim: &crate::tile_glb::LoadedPrimitive,
+) -> (wgpu::Buffer, wgpu::Buffer, u32) {
+    let mesh = crate::room_lightmap_uv::build_room_env_lightmap_gpu_mesh(prim);
+    let index_count = mesh.indices.len() as u32;
+    let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&format!("{label_prefix}-env-verts-{i}")),
+        contents: bytemuck::cast_slice(&mesh.vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&format!("{label_prefix}-env-idx-{i}")),
+        contents: bytemuck::cast_slice(&mesh.indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    (vb, ib, index_count)
 }
 
 fn room_shadow_mask_classes(
@@ -352,6 +385,157 @@ fn upload_room_texture_slot(
         fallback,
         Some(&hint),
     )
+}
+
+struct RoomLightmapGpu {
+    view: wgpu::TextureView,
+    uv_rects: Vec<[f32; 4]>,
+}
+
+fn upload_room_lightmap_gpu(
+    ctx: &RoomGpuUploadCtx<'_>,
+    room: RoomGiRoom,
+    prim_count: usize,
+    label: &str,
+) -> RoomLightmapGpu {
+    let bake = crate::room_gi_bake::load_room_gi_lightmap(room)
+        .unwrap_or_else(|e| panic!("{room:?} room lightmap bake is invalid: {e:#}"))
+        .unwrap_or_else(|| {
+            panic!("{room:?} room lightmap bake is missing; run `cargo build` to rebake room GI")
+        });
+    assert_eq!(
+        bake.primitive_uv_rects.len(),
+        prim_count,
+        "{:?} room lightmap primitive count does not match room GPU upload",
+        bake.room
+    );
+    let expected_values = bake.width as usize * bake.height as usize * 4;
+    assert_eq!(
+        bake.pixels_rgba_f32.len(),
+        expected_values,
+        "{:?} room lightmap pixel count does not match dimensions",
+        bake.room
+    );
+    let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: bake.width.max(1),
+            height: bake.height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    write_room_lightmap_texture(
+        ctx.queue,
+        &texture,
+        bake.width.max(1),
+        bake.height.max(1),
+        bytemuck::cast_slice(&bake.pixels_rgba_f32),
+    );
+    RoomLightmapGpu {
+        view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
+        uv_rects: bake.primitive_uv_rects,
+    }
+}
+
+fn write_room_lightmap_texture(
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+    tight_rgba32f: &[u8],
+) {
+    let unpadded = width * 16;
+    let bytes_per_row = unpadded.div_ceil(256) * 256;
+    let extent = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let mut padded = vec![0u8; (bytes_per_row * height) as usize];
+    for y in 0..height {
+        let src = (y * unpadded) as usize;
+        let dst = (y * bytes_per_row) as usize;
+        padded[dst..dst + unpadded as usize]
+            .copy_from_slice(&tight_rgba32f[src..src + unpadded as usize]);
+    }
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &padded,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(bytes_per_row),
+            rows_per_image: Some(height),
+        },
+        extent,
+    );
+}
+
+fn create_room_env_material_bind_group(
+    ctx: &RoomGpuUploadCtx<'_>,
+    label: &'static str,
+    uniform_buffer: &wgpu::Buffer,
+    prim: &TilePrimitiveGpu,
+    decal_view: &wgpu::TextureView,
+    distortion_buffer: &wgpu::Buffer,
+    lightmap_view: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout: ctx.room_env_material_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&prim.albedo_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&prim.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(decal_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(&prim.normal_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: prim.pbr_uniform_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(&prim.metallic_roughness_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(&prim.emissive_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: distortion_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: wgpu::BindingResource::TextureView(lightmap_view),
+            },
+        ],
+    })
 }
 
 pub(super) struct GameplayRoomGpuUpload {
@@ -517,7 +701,7 @@ pub(crate) fn on_low_memory_room_gpu_evict_restart_prefetch(bit: u8) {
 pub(super) struct RoomGpuUploadCtx<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
-    pub tile_material_layout: &'a wgpu::BindGroupLayout,
+    pub room_env_material_layout: &'a wgpu::BindGroupLayout,
     pub shadow_caster_layout: &'a wgpu::BindGroupLayout,
     pub room_shadow_mask_layout: &'a wgpu::BindGroupLayout,
     pub shadow_warp_layout: &'a wgpu::BindGroupLayout,
@@ -555,20 +739,8 @@ fn load_shop_room_gpu(
                     shop_eyeball_prim_indices.push(i);
                 }
                 let prim = &env_prim.mesh;
-                let vb = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("shop-env-verts-{i}")),
-                        contents: bytemuck::cast_slice(&prim.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                let ib = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("shop-env-idx-{i}")),
-                        contents: bytemuck::cast_slice(&prim.indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
+                let (vb, ib, index_count) =
+                    create_room_env_mesh_buffers(ctx.device, "shop", i, prim);
                 let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                 let albedo_view = upload_room_texture_slot(
                     &mut room_tex_cache,
@@ -639,7 +811,7 @@ fn load_shop_room_gpu(
                 prims.push(TilePrimitiveGpu {
                     vertex_buffer: vb,
                     index_buffer: ib,
-                    index_count: prim.indices.len() as u32,
+                    index_count,
                     albedo_view,
                     normal_view,
                     metallic_roughness_view,
@@ -662,54 +834,25 @@ fn load_shop_room_gpu(
                         ),
                         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     });
+            let lightmap = upload_room_lightmap_gpu(
+                &ctx,
+                crate::room_gi_bake::RoomGiRoom::Shop,
+                prims.len(),
+                "shop-env-lightmap",
+            );
             let bind_groups: Vec<wgpu::BindGroup> = prims
                 .iter()
                 .enumerate()
                 .map(|(pi, p)| {
-                    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("shop-env-bg"),
-                        layout: ctx.tile_material_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: uniform_buffers[pi].as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&p.albedo_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Sampler(&p.sampler),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: wgpu::BindingResource::TextureView(&shop_decal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: wgpu::BindingResource::TextureView(&p.normal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: p.pbr_uniform_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 6,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &p.metallic_roughness_view,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 7,
-                                resource: wgpu::BindingResource::TextureView(&p.emissive_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 8,
-                                resource: distortion_buffer.as_entire_binding(),
-                            },
-                        ],
-                    })
+                    create_room_env_material_bind_group(
+                        &ctx,
+                        "shop-env-bg",
+                        &uniform_buffers[pi],
+                        p,
+                        &shop_decal_view,
+                        &distortion_buffer,
+                        &lightmap.view,
+                    )
                 })
                 .collect();
             let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
@@ -743,6 +886,7 @@ fn load_shop_room_gpu(
                 shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
+                lightmap_uv_rects: lightmap.uv_rects,
                 archive_sign_decal_texture: None,
                 archive_sign_decal_size: None,
                 archive_inspect_plaque_decal_texture: None,
@@ -782,20 +926,8 @@ fn load_hallway_room_gpu(
             let (_white_tex, white_albedo_view) = white_albedo(ctx.device, ctx.queue);
             for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                 let prim = &env_prim.mesh;
-                let vb = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("hallway-env-verts-{i}")),
-                        contents: bytemuck::cast_slice(&prim.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                let ib = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("hallway-env-idx-{i}")),
-                        contents: bytemuck::cast_slice(&prim.indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
+                let (vb, ib, index_count) =
+                    create_room_env_mesh_buffers(ctx.device, "hallway", i, prim);
                 let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                 let albedo_view = upload_room_texture_slot(
                     &mut room_tex_cache,
@@ -866,7 +998,7 @@ fn load_hallway_room_gpu(
                 prims.push(TilePrimitiveGpu {
                     vertex_buffer: vb,
                     index_buffer: ib,
-                    index_count: prim.indices.len() as u32,
+                    index_count,
                     albedo_view,
                     normal_view,
                     metallic_roughness_view,
@@ -892,54 +1024,25 @@ fn load_hallway_room_gpu(
                         ),
                         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     });
+            let lightmap = upload_room_lightmap_gpu(
+                &ctx,
+                crate::room_gi_bake::RoomGiRoom::Hallway,
+                prims.len(),
+                "hallway-env-lightmap",
+            );
             let bind_groups: Vec<wgpu::BindGroup> = prims
                 .iter()
                 .enumerate()
                 .map(|(pi, p)| {
-                    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("hallway-env-bg"),
-                        layout: ctx.tile_material_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: uniform_buffers[pi].as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&p.albedo_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Sampler(&p.sampler),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: wgpu::BindingResource::TextureView(&hallway_decal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: wgpu::BindingResource::TextureView(&p.normal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: p.pbr_uniform_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 6,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &p.metallic_roughness_view,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 7,
-                                resource: wgpu::BindingResource::TextureView(&p.emissive_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 8,
-                                resource: distortion_buffer.as_entire_binding(),
-                            },
-                        ],
-                    })
+                    create_room_env_material_bind_group(
+                        &ctx,
+                        "hallway-env-bg",
+                        &uniform_buffers[pi],
+                        p,
+                        &hallway_decal_view,
+                        &distortion_buffer,
+                        &lightmap.view,
+                    )
                 })
                 .collect();
             let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
@@ -973,6 +1076,7 @@ fn load_hallway_room_gpu(
                 shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
+                lightmap_uv_rects: lightmap.uv_rects,
                 archive_sign_decal_texture: None,
                 archive_sign_decal_size: None,
                 archive_inspect_plaque_decal_texture: None,
@@ -998,20 +1102,8 @@ fn load_main_menu_room_gpu(
             let (_white_tex, white_albedo_view) = white_albedo(ctx.device, ctx.queue);
             for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                 let prim = &env_prim.mesh;
-                let vb = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("main_menu-env-verts-{i}")),
-                        contents: bytemuck::cast_slice(&prim.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                let ib = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("main_menu-env-idx-{i}")),
-                        contents: bytemuck::cast_slice(&prim.indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
+                let (vb, ib, index_count) =
+                    create_room_env_mesh_buffers(ctx.device, "main_menu", i, prim);
                 let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                 let albedo_view = upload_room_texture_slot(
                     &mut room_tex_cache,
@@ -1082,7 +1174,7 @@ fn load_main_menu_room_gpu(
                 prims.push(TilePrimitiveGpu {
                     vertex_buffer: vb,
                     index_buffer: ib,
-                    index_count: prim.indices.len() as u32,
+                    index_count,
                     albedo_view,
                     normal_view,
                     metallic_roughness_view,
@@ -1108,54 +1200,25 @@ fn load_main_menu_room_gpu(
                         ),
                         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     });
+            let lightmap = upload_room_lightmap_gpu(
+                &ctx,
+                crate::room_gi_bake::RoomGiRoom::MainMenu,
+                prims.len(),
+                "main-menu-env-lightmap",
+            );
             let bind_groups: Vec<wgpu::BindGroup> = prims
                 .iter()
                 .enumerate()
                 .map(|(pi, p)| {
-                    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("main_menu-env-bg"),
-                        layout: ctx.tile_material_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: uniform_buffers[pi].as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&p.albedo_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Sampler(&p.sampler),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: wgpu::BindingResource::TextureView(&main_menu_decal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: wgpu::BindingResource::TextureView(&p.normal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: p.pbr_uniform_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 6,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &p.metallic_roughness_view,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 7,
-                                resource: wgpu::BindingResource::TextureView(&p.emissive_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 8,
-                                resource: distortion_buffer.as_entire_binding(),
-                            },
-                        ],
-                    })
+                    create_room_env_material_bind_group(
+                        &ctx,
+                        "main_menu-env-bg",
+                        &uniform_buffers[pi],
+                        p,
+                        &main_menu_decal_view,
+                        &distortion_buffer,
+                        &lightmap.view,
+                    )
                 })
                 .collect();
             let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
@@ -1189,6 +1252,7 @@ fn load_main_menu_room_gpu(
                 shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
+                lightmap_uv_rects: lightmap.uv_rects,
                 archive_sign_decal_texture: None,
                 archive_sign_decal_size: None,
                 archive_inspect_plaque_decal_texture: None,
@@ -1214,20 +1278,8 @@ fn load_staircase_room_gpu(
             let (_white_tex, white_albedo_view) = white_albedo(ctx.device, ctx.queue);
             for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                 let prim = &env_prim.mesh;
-                let vb = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("staircase-env-verts-{i}")),
-                        contents: bytemuck::cast_slice(&prim.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                let ib = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("staircase-env-idx-{i}")),
-                        contents: bytemuck::cast_slice(&prim.indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
+                let (vb, ib, index_count) =
+                    create_room_env_mesh_buffers(ctx.device, "staircase", i, prim);
                 let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                 let albedo_view = upload_room_texture_slot(
                     &mut room_tex_cache,
@@ -1298,7 +1350,7 @@ fn load_staircase_room_gpu(
                 prims.push(TilePrimitiveGpu {
                     vertex_buffer: vb,
                     index_buffer: ib,
-                    index_count: prim.indices.len() as u32,
+                    index_count,
                     albedo_view,
                     normal_view,
                     metallic_roughness_view,
@@ -1324,54 +1376,25 @@ fn load_staircase_room_gpu(
                         ),
                         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     });
+            let lightmap = upload_room_lightmap_gpu(
+                &ctx,
+                crate::room_gi_bake::RoomGiRoom::Stairway,
+                prims.len(),
+                "staircase-env-lightmap",
+            );
             let bind_groups: Vec<wgpu::BindGroup> = prims
                 .iter()
                 .enumerate()
                 .map(|(pi, p)| {
-                    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("staircase-env-bg"),
-                        layout: ctx.tile_material_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: uniform_buffers[pi].as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&p.albedo_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Sampler(&p.sampler),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: wgpu::BindingResource::TextureView(&staircase_decal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: wgpu::BindingResource::TextureView(&p.normal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: p.pbr_uniform_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 6,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &p.metallic_roughness_view,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 7,
-                                resource: wgpu::BindingResource::TextureView(&p.emissive_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 8,
-                                resource: distortion_buffer.as_entire_binding(),
-                            },
-                        ],
-                    })
+                    create_room_env_material_bind_group(
+                        &ctx,
+                        "staircase-env-bg",
+                        &uniform_buffers[pi],
+                        p,
+                        &staircase_decal_view,
+                        &distortion_buffer,
+                        &lightmap.view,
+                    )
                 })
                 .collect();
             let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
@@ -1405,6 +1428,7 @@ fn load_staircase_room_gpu(
                 shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
+                lightmap_uv_rects: lightmap.uv_rects,
                 archive_sign_decal_texture: None,
                 archive_sign_decal_size: None,
                 archive_inspect_plaque_decal_texture: None,
@@ -1430,20 +1454,8 @@ fn load_shadow_test_room_gpu(
             let (_white_tex, white_albedo_view) = white_albedo(ctx.device, ctx.queue);
             for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                 let prim = &env_prim.mesh;
-                let vb = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("shadow-test-room-env-verts-{i}")),
-                        contents: bytemuck::cast_slice(&prim.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                let ib = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("shadow-test-room-env-idx-{i}")),
-                        contents: bytemuck::cast_slice(&prim.indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
+                let (vb, ib, index_count) =
+                    create_room_env_mesh_buffers(ctx.device, "shadow-test-room", i, prim);
                 let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                 let albedo_view = upload_room_texture_slot(
                     &mut room_tex_cache,
@@ -1514,7 +1526,7 @@ fn load_shadow_test_room_gpu(
                 prims.push(TilePrimitiveGpu {
                     vertex_buffer: vb,
                     index_buffer: ib,
-                    index_count: prim.indices.len() as u32,
+                    index_count,
                     albedo_view,
                     normal_view,
                     metallic_roughness_view,
@@ -1540,56 +1552,25 @@ fn load_shadow_test_room_gpu(
                         ),
                         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     });
+            let lightmap = upload_room_lightmap_gpu(
+                &ctx,
+                crate::room_gi_bake::RoomGiRoom::ShadowTestRoom,
+                prims.len(),
+                "shadow-test-room-env-lightmap",
+            );
             let bind_groups: Vec<wgpu::BindGroup> = prims
                 .iter()
                 .enumerate()
                 .map(|(pi, p)| {
-                    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("shadow-test-room-env-bg"),
-                        layout: ctx.tile_material_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: uniform_buffers[pi].as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&p.albedo_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Sampler(&p.sampler),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &shadow_test_room_decal_view,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: wgpu::BindingResource::TextureView(&p.normal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: p.pbr_uniform_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 6,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &p.metallic_roughness_view,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 7,
-                                resource: wgpu::BindingResource::TextureView(&p.emissive_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 8,
-                                resource: distortion_buffer.as_entire_binding(),
-                            },
-                        ],
-                    })
+                    create_room_env_material_bind_group(
+                        &ctx,
+                        "shadow-test-room-env-bg",
+                        &uniform_buffers[pi],
+                        p,
+                        &shadow_test_room_decal_view,
+                        &distortion_buffer,
+                        &lightmap.view,
+                    )
                 })
                 .collect();
             let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
@@ -1603,7 +1584,7 @@ fn load_shadow_test_room_gpu(
                     ctx.device,
                     ctx.room_shadow_mask_layout,
                     &room_shadow_mask_classes(
-                        crate::room_gi_bake::RoomGiRoom::Hallway,
+                        crate::room_gi_bake::RoomGiRoom::ShadowTestRoom,
                         &cpu.environment_primitives,
                     ),
                     "shadow-test-room-env-shadow-mask",
@@ -1623,6 +1604,7 @@ fn load_shadow_test_room_gpu(
                 shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
+                lightmap_uv_rects: lightmap.uv_rects,
                 archive_sign_decal_texture: None,
                 archive_sign_decal_size: None,
                 archive_inspect_plaque_decal_texture: None,
@@ -1735,20 +1717,8 @@ fn load_archive_room_gpu(
                     }
                 }
                 let prim = &env_prim.mesh;
-                let vb = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("archive-env-verts-{i}")),
-                        contents: bytemuck::cast_slice(&prim.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                let ib = ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("archive-env-idx-{i}")),
-                        contents: bytemuck::cast_slice(&prim.indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
+                let (vb, ib, index_count) =
+                    create_room_env_mesh_buffers(ctx.device, "archive", i, prim);
                 let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                 let albedo_view = upload_room_texture_slot(
                     &mut room_tex_cache,
@@ -1819,7 +1789,7 @@ fn load_archive_room_gpu(
                 prims.push(TilePrimitiveGpu {
                     vertex_buffer: vb,
                     index_buffer: ib,
-                    index_count: prim.indices.len() as u32,
+                    index_count,
                     albedo_view,
                     normal_view,
                     metallic_roughness_view,
@@ -1873,6 +1843,12 @@ fn load_archive_room_gpu(
                         ),
                         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     });
+            let lightmap = upload_room_lightmap_gpu(
+                &ctx,
+                crate::room_gi_bake::RoomGiRoom::Archive,
+                prims.len(),
+                "archive-env-lightmap",
+            );
             let bind_groups: Vec<wgpu::BindGroup> = prims
                 .iter()
                 .enumerate()
@@ -1884,50 +1860,15 @@ fn load_archive_room_gpu(
                     } else {
                         &white_albedo_view
                     };
-                    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("archive-env-bg"),
-                        layout: ctx.tile_material_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: uniform_buffers[pi].as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&p.albedo_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Sampler(&p.sampler),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: wgpu::BindingResource::TextureView(decal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: wgpu::BindingResource::TextureView(&p.normal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: p.pbr_uniform_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 6,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &p.metallic_roughness_view,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 7,
-                                resource: wgpu::BindingResource::TextureView(&p.emissive_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 8,
-                                resource: distortion_buffer.as_entire_binding(),
-                            },
-                        ],
-                    })
+                    create_room_env_material_bind_group(
+                        &ctx,
+                        "archive-env-bg",
+                        &uniform_buffers[pi],
+                        p,
+                        decal_view,
+                        &distortion_buffer,
+                        &lightmap.view,
+                    )
                 })
                 .collect();
             let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
@@ -1961,6 +1902,7 @@ fn load_archive_room_gpu(
                 shadow_mask_bind_groups,
                 shadow_warp_bind_group,
                 bind_groups,
+                lightmap_uv_rects: lightmap.uv_rects,
                 archive_sign_decal_texture: Some(archive_sign_decal_tex),
                 archive_sign_decal_size: Some((sign_decal_w, sign_decal_h)),
                 archive_inspect_plaque_decal_texture: Some(archive_inspect_decal_tex),
@@ -2038,20 +1980,7 @@ fn upload_incremental_room_env_prim_gpu(
 ) -> TilePrimitiveGpu {
     let prim = &env_prim.mesh;
     let label_prefix = kind.label_prefix();
-    let vb = ctx
-        .device
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{label_prefix}-env-verts-{i}")),
-            contents: bytemuck::cast_slice(&prim.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-    let ib = ctx
-        .device
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{label_prefix}-env-idx-{i}")),
-            contents: bytemuck::cast_slice(&prim.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+    let (vb, ib, index_count) = create_room_env_mesh_buffers(ctx.device, label_prefix, i, prim);
     let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
     let albedo_view = upload_room_texture_slot(
         room_tex_cache,
@@ -2122,7 +2051,7 @@ fn upload_incremental_room_env_prim_gpu(
     TilePrimitiveGpu {
         vertex_buffer: vb,
         index_buffer: ib,
-        index_count: prim.indices.len() as u32,
+        index_count,
         albedo_view,
         normal_view,
         metallic_roughness_view,
@@ -2157,52 +2086,25 @@ fn finalize_incremental_room_env_gpu_upload(
         });
     let uniform_buffers =
         create_room_env_camera_uniform_buffers(ctx.device, prim_count, kind.uniform_label());
+    let lightmap = upload_room_lightmap_gpu(
+        &ctx,
+        kind.room(),
+        prim_count,
+        &format!("{}-env-lightmap", label_prefix),
+    );
     let bind_groups: Vec<wgpu::BindGroup> = prims
         .iter()
         .enumerate()
         .map(|(pi, p)| {
-            ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(kind.bind_group_label()),
-                layout: ctx.tile_material_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: uniform_buffers[pi].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&p.albedo_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&p.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&decal_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(&p.normal_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: p.pbr_uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::TextureView(&p.metallic_roughness_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::TextureView(&p.emissive_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: distortion_buffer.as_entire_binding(),
-                    },
-                ],
-            })
+            create_room_env_material_bind_group(
+                &ctx,
+                kind.bind_group_label(),
+                &uniform_buffers[pi],
+                p,
+                &decal_view,
+                &distortion_buffer,
+                &lightmap.view,
+            )
         })
         .collect();
     let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
@@ -2234,6 +2136,7 @@ fn finalize_incremental_room_env_gpu_upload(
             shadow_mask_bind_groups,
             shadow_warp_bind_group,
             bind_groups,
+            lightmap_uv_rects: lightmap.uv_rects,
             archive_sign_decal_texture: None,
             archive_sign_decal_size: None,
             archive_inspect_plaque_decal_texture: None,
@@ -2281,20 +2184,7 @@ fn upload_gameplay_env_prim_gpu(
     room_tex_cache: &mut RoomEnvTextureCache,
 ) -> TilePrimitiveGpu {
     let prim = &env_prim.mesh;
-    let vb = ctx
-        .device
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("gameplay-env-verts-{i}")),
-            contents: bytemuck::cast_slice(&prim.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-    let ib = ctx
-        .device
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("gameplay-env-idx-{i}")),
-            contents: bytemuck::cast_slice(&prim.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+    let (vb, ib, index_count) = create_room_env_mesh_buffers(ctx.device, "gameplay", i, prim);
     let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
     let albedo_view = upload_room_texture_slot(
         room_tex_cache,
@@ -2368,7 +2258,7 @@ fn upload_gameplay_env_prim_gpu(
     TilePrimitiveGpu {
         vertex_buffer: vb,
         index_buffer: ib,
-        index_count: prim.indices.len() as u32,
+        index_count,
         albedo_view,
         normal_view,
         metallic_roughness_view,
@@ -2449,52 +2339,25 @@ fn finalize_gameplay_room_gpu_upload(
         });
     let uniform_buffers =
         create_room_env_camera_uniform_buffers(ctx.device, prim_count, "gameplay-env-uniform");
+    let lightmap = upload_room_lightmap_gpu(
+        &ctx,
+        crate::room_gi_bake::RoomGiRoom::Gameplay,
+        prim_count,
+        "gameplay-env-lightmap",
+    );
     let bind_groups: Vec<wgpu::BindGroup> = prims
         .iter()
         .enumerate()
         .map(|(pi, p)| {
-            ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("gameplay-env-bg"),
-                layout: ctx.tile_material_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: uniform_buffers[pi].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&p.albedo_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&p.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&gameplay_decal_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(&p.normal_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: p.pbr_uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::TextureView(&p.metallic_roughness_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::TextureView(&p.emissive_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: distortion_buffer.as_entire_binding(),
-                    },
-                ],
-            })
+            create_room_env_material_bind_group(
+                &ctx,
+                "gameplay-env-bg",
+                &uniform_buffers[pi],
+                p,
+                &gameplay_decal_view,
+                &distortion_buffer,
+                &lightmap.view,
+            )
         })
         .collect();
     let (shadow_uniform_buffers, shadow_bind_groups) = create_room_env_shadow_gpu_batch(
@@ -2524,6 +2387,7 @@ fn finalize_gameplay_room_gpu_upload(
         shadow_mask_bind_groups,
         shadow_warp_bind_group,
         bind_groups,
+        lightmap_uv_rects: lightmap.uv_rects,
         archive_sign_decal_texture: None,
         archive_sign_decal_size: None,
         archive_inspect_plaque_decal_texture: None,
@@ -3363,7 +3227,7 @@ impl WgpuRenderer {
         RoomGpuUploadCtx {
             device: &self.device,
             queue: &self.queue,
-            tile_material_layout: &self.tile_material_layout,
+            room_env_material_layout: &self.room_env_material_layout,
             shadow_caster_layout: &self.shadow_caster_layout,
             room_shadow_mask_layout: &self.room_shadow_mask_layout,
             shadow_warp_layout: &self.shadow_warp_layout,

@@ -1,7 +1,7 @@
 //! Runtime [`KHR_lights_punctual`] → [`PointLight`] for room GLBs.
 //!
 //! Shared by shop, hallway, archive, and main menu. Room-specific behavior is selected via
-//! [`RoomPunctualProfile`] (shop candle flicker, main-menu black-body node tints).
+//! [`RoomPunctualProfile`] (candle flicker, main-menu black-body node tints).
 
 use crate::blackbody;
 use crate::room_env_gltf::RoomGltfEmbeddedPointLight;
@@ -11,12 +11,12 @@ use crate::room_glb::{
 use crate::wgpu_renderer::{MAX_POINT_LIGHTS, PointLight};
 use crate::world_space::surface_anchor_from_world_xyz;
 
-/// Per-room punctual build behavior (color / intensity only — positions come from glTF).
+/// Per-room punctual build behavior (color / intensity / range — positions come from glTF).
 #[derive(Clone, Copy, Debug)]
 pub enum RoomPunctualProfile {
     Standard,
     /// `light_candle*`: glTF white × [`RoomEnvLightingTune::candle_light_color_mul`] + flicker.
-    ShopCandles {
+    Candles {
         flame_time_s: f32,
         lamp_flicker: f32,
         flicker_amp: f32,
@@ -63,6 +63,10 @@ const MAIN_MENU_DOORWAY_NODE_PREFIX: &str = "light_doorway";
 const MAIN_MENU_LIGHT_MOONLIGHT_COLOR_LINEAR: [f32; 3] = [0.2298, 0.4770, 1.0];
 /// Porch bulb — warm incandescent.
 const MAIN_MENU_LIGHT_DOORWAY_TEMP_K: f32 = 2700.0;
+/// Shared candle punctual range cap/fallback in document meters.
+const CANDLE_RANGE_DOC: f32 = 3.65;
+/// Keep direct candle energy local now that tile/lit-mesh receivers use PBR-like diffuse.
+const CANDLE_INTENSITY_MUL: f32 = 0.82;
 
 #[inline]
 fn is_main_menu_moonlight_node(name: &str) -> bool {
@@ -138,23 +142,38 @@ fn point_intensity(
     candle_index: &mut u32,
 ) -> f32 {
     let mut intensity = (l.intensity * tune.gltf_light_intensity_scale).max(0.0);
-    if let RoomPunctualProfile::ShopCandles {
-        flame_time_s,
-        lamp_flicker,
-        flicker_amp,
-    } = profile
-        && l.is_candle
-    {
-        let seed = candle_index
-            .wrapping_mul(0x9E37_79B9)
-            .wrapping_add(0xA5A5_A5A5);
-        *candle_index += 1;
-        let phase = (seed as f32 * 2.328_306e-10).fract();
-        intensity *= lamp_flicker;
-        intensity *=
-            crate::flame_volume::flame_flicker_multiplier_amp(phase, flame_time_s, flicker_amp);
+    match profile {
+        RoomPunctualProfile::Candles {
+            flame_time_s,
+            lamp_flicker,
+            flicker_amp,
+        } if l.is_candle => {
+            let seed = candle_index
+                .wrapping_mul(0x9E37_79B9)
+                .wrapping_add(0xA5A5_A5A5);
+            *candle_index += 1;
+            let phase = (seed as f32 * 2.328_306e-10).fract();
+            intensity *= lamp_flicker;
+            intensity *=
+                crate::flame_volume::flame_flicker_multiplier_amp(phase, flame_time_s, flicker_amp);
+            intensity *= CANDLE_INTENSITY_MUL;
+        }
+        _ => {}
     }
     intensity
+}
+
+fn calibrated_range_doc(
+    profile: RoomPunctualProfile,
+    l: &RoomGltfEmbeddedPointLight,
+) -> Option<f32> {
+    if !matches!(profile, RoomPunctualProfile::Candles { .. }) || !l.is_candle {
+        return l.range_doc;
+    }
+    match l.range_doc {
+        Some(r) if r.is_finite() && r > 0.0 => Some(r.min(CANDLE_RANGE_DOC)),
+        _ => Some(CANDLE_RANGE_DOC),
+    }
 }
 
 /// Runtime point light plus its glTF node name (for shadow caster policy).
@@ -211,7 +230,7 @@ pub fn embedded_point_lights_runtime_tagged(
         .take(budget)
         .map(|l| {
             let world = (l.pos_doc - center_doc) * s;
-            let radius = glb_punctual_range_world_upload(h, s, l.range_doc);
+            let radius = glb_punctual_range_world_upload(h, s, calibrated_range_doc(profile, l));
             EmbeddedPointLightRuntime {
                 light: PointLight {
                     pos: surface_anchor_from_world_xyz(w, h, world),
@@ -259,6 +278,30 @@ mod tests {
             intensity: 1.0,
             range_doc: None,
         }
+    }
+
+    #[test]
+    fn candle_profile_applies_shared_range_and_source_balance() {
+        let tune = RoomEnvLightingTune::SOURCE_DEFAULTS;
+        let profile = RoomPunctualProfile::Candles {
+            flame_time_s: 0.0,
+            lamp_flicker: 1.0,
+            flicker_amp: 0.0,
+        };
+        let mut candle = point("light_candle.001", [1.0, 1.0, 1.0]);
+        candle.is_candle = true;
+        candle.intensity = 10.0;
+        candle.range_doc = None;
+
+        assert_eq!(
+            calibrated_range_doc(profile, &candle),
+            Some(CANDLE_RANGE_DOC)
+        );
+
+        let mut candle_index = 0;
+        let intensity = point_intensity(profile, &candle, &tune, &mut candle_index);
+        assert!((intensity - 10.0 * CANDLE_INTENSITY_MUL).abs() < 1e-4);
+        assert_eq!(candle_index, 1);
     }
 
     #[test]

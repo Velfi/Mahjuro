@@ -1156,7 +1156,7 @@ pub fn gameplay_embedded_point_lights_runtime_tagged(
                 h,
                 env_h,
                 tune,
-                crate::room_gltf_punctual::RoomPunctualProfile::ShopCandles {
+                crate::room_gltf_punctual::RoomPunctualProfile::Candles {
                     flame_time_s,
                     lamp_flicker,
                     flicker_amp: candle_flicker_amp,

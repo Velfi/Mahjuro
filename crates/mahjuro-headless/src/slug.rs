@@ -72,18 +72,48 @@ pub(crate) fn parse_bake_room_slug(
         }
         "staircase" | "stairway" => Ok(mahjuro::render::room_gi_bake::RoomGiRoom::Stairway),
         "gameplay" => Ok(mahjuro::render::room_gi_bake::RoomGiRoom::Gameplay),
+        "shadow_test_room" | "shadow-test-room" | "shadowtestroom" => {
+            Ok(mahjuro::render::room_gi_bake::RoomGiRoom::ShadowTestRoom)
+        }
         other => anyhow::bail!(
-            "unknown room '{other}' (try shop, hallway, stairway, archive, main_menu, gameplay)"
+            "unknown room '{other}' (try shop, hallway, stairway, archive, main_menu, gameplay, shadow_test_room)"
         ),
     }
 }
 
-pub(crate) fn resolve_bake_rooms(
+const SHADOW_BAKE_ROOMS: &[mahjuro::render::room_gi_bake::RoomGiRoom] = &[
+    mahjuro::render::room_gi_bake::RoomGiRoom::Shop,
+    mahjuro::render::room_gi_bake::RoomGiRoom::Hallway,
+    mahjuro::render::room_gi_bake::RoomGiRoom::Archive,
+    mahjuro::render::room_gi_bake::RoomGiRoom::MainMenu,
+    mahjuro::render::room_gi_bake::RoomGiRoom::Stairway,
+    mahjuro::render::room_gi_bake::RoomGiRoom::Gameplay,
+];
+
+pub(crate) fn resolve_lightmap_bake_rooms(
     slugs: &[String],
 ) -> anyhow::Result<Vec<mahjuro::render::room_gi_bake::RoomGiRoom>> {
     if slugs.is_empty() {
         return Ok(mahjuro::render::room_gi_bake::RoomGiRoom::ALL.to_vec());
     }
+    resolve_explicit_bake_rooms(slugs)
+}
+
+pub(crate) fn resolve_shadow_bake_rooms(
+    slugs: &[String],
+) -> anyhow::Result<Vec<mahjuro::render::room_gi_bake::RoomGiRoom>> {
+    if slugs.is_empty() {
+        return Ok(SHADOW_BAKE_ROOMS.to_vec());
+    }
+    Ok(resolve_explicit_bake_rooms(slugs)?
+        .into_iter()
+        .filter(|room| SHADOW_BAKE_ROOMS.contains(room))
+        .collect())
+}
+
+fn resolve_explicit_bake_rooms(
+    slugs: &[String],
+) -> anyhow::Result<Vec<mahjuro::render::room_gi_bake::RoomGiRoom>> {
     let mut rooms = Vec::with_capacity(slugs.len());
     for slug in slugs {
         let room = parse_bake_room_slug(slug)?;

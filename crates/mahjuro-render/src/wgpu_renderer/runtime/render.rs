@@ -1906,16 +1906,10 @@ impl WgpuRenderer {
             }
         }
 
-        // Baked / dynamic room GI needs the emissive-only pre-pass even when bloom
-        // is off (e.g. main menu disables bloom but keeps probes on Medium+).
-        let room_gi_bake_capture = self.room_gi_capture_pending.is_some();
-        let room_gi_effects_ok =
-            effects_quality >= mahjuro_gfx_types::EffectsQuality::Medium || room_gi_bake_capture;
-
-        // Emissive-only pre-pass for screen-space GI (writes `room_emissive_view`).
-        // Previously this also wrote a linear-HDR bloom source, but every scene
-        // shader now writes linear HDR to `scene_color` directly — bloom_extract
-        // reads from there, and the dedicated linear-HDR target is gone.
+        // Emissive-only pre-pass for room bloom. GI no longer reads this
+        // screen-space target; room lightmaps are sampled by material shaders.
+        // Every scene shader writes linear HDR to `scene_color` directly —
+        // bloom_extract reads from there, and the dedicated linear-HDR target is gone.
         let room_glb_emissive_env = frame.uses_room_glb_shader()
             && (ops_flags.shop_env
                 || ops_flags.hallway_env
@@ -1923,8 +1917,7 @@ impl WgpuRenderer {
                 || ops_flags.archive_env
                 || ops_flags.main_menu_env
                 || ops_flags.gameplay_env);
-        let glb_room_emissive_prefetch =
-            room_glb_emissive_env && (bloom_active || room_gi_effects_ok);
+        let glb_room_emissive_prefetch = room_glb_emissive_env && bloom_active;
         if glb_room_emissive_prefetch {
             if ops_flags.shop_env
                 && self.shop_environment.is_some()
@@ -2162,290 +2155,6 @@ impl WgpuRenderer {
             }
         }
 
-        // GI compute / apply / composite are only meaningful when we have
-        // a real room AABB to march through. Resolve once here so the
-        // composite block below shares the same gate, dropping the
-        // clear-only pass + redundant composite when there's no room
-        // (loading frames, scenes that pull in `glb_room_emissive_prefetch`
-        // before the GLB has parsed, etc.).
-        let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> =
-            if glb_room_emissive_prefetch && !is_prepass && room_gi_effects_ok {
-                if ops_flags.shop_env {
-                    crate::room_glb::with_shop_glb_cpu(|cpu| {
-                        cpu.and_then(|c| {
-                            let corners = crate::room_glb::room_world_bounds_corners_centered(
-                                camera.h,
-                                self.active_frame_env().height_scale,
-                                c,
-                            );
-                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
-                        })
-                    })
-                } else if ops_flags.hallway_env {
-                    crate::hallway_glb::with_hallway_glb_cpu(|cpu| {
-                        cpu.and_then(|c| {
-                            let corners = crate::room_glb::room_world_bounds_corners_centered(
-                                camera.h,
-                                self.active_frame_env().height_scale,
-                                c,
-                            );
-                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
-                        })
-                    })
-                } else if ops_flags.staircase_env {
-                    crate::staircase_glb::with_staircase_glb_cpu(|cpu| {
-                        cpu.and_then(|c| {
-                            let corners = crate::room_glb::room_world_bounds_corners_centered(
-                                camera.h,
-                                self.active_frame_env().height_scale,
-                                c,
-                            );
-                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
-                        })
-                    })
-                } else if ops_flags.archive_env {
-                    crate::archive_glb::with_archive_glb_cpu(|cpu| {
-                        cpu.and_then(|c| {
-                            let corners = crate::room_glb::room_world_bounds_corners_centered(
-                                camera.h,
-                                self.active_frame_env().height_scale,
-                                c,
-                            );
-                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
-                        })
-                    })
-                } else if ops_flags.main_menu_env {
-                    let env_h = crate::main_menu_glb::main_menu_env_height_scale(
-                        self.active_frame_env().height_scale,
-                    );
-                    crate::main_menu_glb::with_main_menu_glb_cpu(|cpu| {
-                        cpu.and_then(|c| {
-                            let corners = crate::room_glb::room_world_bounds_corners_centered(
-                                camera.h, env_h, c,
-                            );
-                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
-                        })
-                    })
-                } else if ops_flags.gameplay_env {
-                    crate::gameplay_glb::with_gameplay_glb_cpu(|cpu| {
-                        cpu.and_then(|c| {
-                            let corners = crate::room_glb::room_world_bounds_corners_centered(
-                                camera.h,
-                                self.active_frame_env().height_scale,
-                                c,
-                            );
-                            crate::room_glb::room_probe_world_aabb(&corners, 0.035)
-                        })
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-        let gi_runs_this_frame = room_gi_aabb.is_some();
-
-        let gi_room = if gi_runs_this_frame {
-            crate::room_gi_bake::RoomGiRoom::from_ops(
-                ops_flags.shop_env,
-                ops_flags.hallway_env,
-                ops_flags.staircase_env,
-                ops_flags.archive_env,
-                ops_flags.main_menu_env,
-                ops_flags.gameplay_env,
-            )
-        } else {
-            None
-        };
-        let mut gi_clear_gpu_probes = !gi_runs_this_frame && self.probe_gi_had_room;
-        let mut gi_baked_upload: Option<(crate::room_gi_bake::RoomGiRoom, std::sync::Arc<[u8]>)> =
-            None;
-
-        // Quality-dependent GI tuning: Medium cuts dir samples and march steps to ~1/3 of
-        // High and doubles the amortization interval, for roughly 6× cheaper compute.
-        let gi_is_high =
-            effects_quality >= mahjuro_gfx_types::EffectsQuality::High || room_gi_bake_capture;
-        let gi_dir_samples = if gi_is_high {
-            crate::room_glb::ROOM_EMISSIVE_PROBE_DIR_SAMPLES
-        } else {
-            8
-        };
-        let gi_march_steps = if gi_is_high {
-            crate::room_glb::ROOM_EMISSIVE_PROBE_MARCH_STEPS
-        } else {
-            6
-        };
-        let gi_update_interval = if gi_is_high {
-            crate::room_glb::ROOM_EMISSIVE_PROBE_UPDATE_INTERVAL
-        } else {
-            4
-        };
-
-        let gw = self.render_size.width.max(1) as f32;
-        let gh = self.render_size.height.max(1) as f32;
-        let use_baked_probes = if room_gi_bake_capture {
-            false
-        } else if gi_runs_this_frame && !frame.room_gi_dynamic {
-            if let (Some(room), Some((mn, mx))) = (gi_room, room_gi_aabb) {
-                let bake = crate::room_gi_bake::require_room_gi_bake(room)
-                    .unwrap_or_else(|e| panic!("{e}"));
-                if !bake.aabb_matches(mn, mx) {
-                    // Committed bake is stale (room AABB drifted since the
-                    // last `mahjuro-bake --kinds gi`). Don't poison the live
-                    // probe upload with mismatched bounds; render dynamic for
-                    // this frame instead. The build script's stamp check is
-                    // the authoritative source of truth — a stale bake will
-                    // panic there next compile, while the runtime keeps
-                    // working in the meantime (also lets `mahjuro-bake`
-                    // re-render the stale room instead of panicking on its
-                    // own warmup frames).
-                    if self.probe_gi_stale_aabb_warned_room != Some(room) {
-                        log::warn!(
-                            "room GI bake {room:?} AABB stale vs live room bounds; \
-                             falling back to dynamic GI until a fresh bake is loaded"
-                        );
-                        self.probe_gi_stale_aabb_warned_room = Some(room);
-                    }
-                    false
-                } else {
-                    if self.probe_gi_stale_aabb_warned_room == Some(room) {
-                        self.probe_gi_stale_aabb_warned_room = None;
-                    }
-                    if self.probe_gi_gpu_room != Some(room) {
-                        gi_baked_upload = Some((room, std::sync::Arc::clone(&bake.probe_sh_bytes)));
-                    }
-                    true
-                }
-            } else {
-                false
-            }
-        } else {
-            if gi_runs_this_frame && frame.room_gi_dynamic && self.probe_gi_gpu_room.is_some() {
-                gi_clear_gpu_probes = true;
-            }
-            false
-        };
-        if gi_clear_gpu_probes {
-            self.probe_gi_gpu_room = None;
-        }
-        if let Some((room, bytes)) = gi_baked_upload {
-            self.queue.write_buffer(&self.probe_sh_buffer, 0, &bytes);
-            self.probe_gi_gpu_room = Some(room);
-        }
-        let mut gi_update_probes = if use_baked_probes {
-            self.probe_gi_had_room = true;
-            false
-        } else {
-            {
-                let mut gi_state = crate::room_glb::ProbeGiUpdateState {
-                    tick: self.probe_gi_tick,
-                    last_view_proj: self.probe_gi_last_view_proj,
-                    last_size: self.probe_gi_last_size,
-                    had_room: self.probe_gi_had_room,
-                };
-                let update = crate::room_glb::probe_gi_should_update_probes(
-                    &mut gi_state,
-                    &crate::room_glb::ProbeGiUpdateParams {
-                        view_proj: &camera.view_proj_arr,
-                        size: (gw as u32, gh as u32),
-                        gi_active: gi_runs_this_frame,
-                        update_interval: gi_update_interval,
-                    },
-                );
-                self.probe_gi_tick = gi_state.tick;
-                self.probe_gi_last_view_proj = gi_state.last_view_proj;
-                self.probe_gi_last_size = gi_state.last_size;
-                self.probe_gi_had_room = gi_state.had_room;
-                update
-            }
-        };
-        if self.room_gi_capture_pending.is_some() && gi_runs_this_frame {
-            gi_update_probes = true;
-        }
-
-        if gi_runs_this_frame {
-            let [nx, ny, nz] = crate::room_glb::ROOM_EMISSIVE_PROBE_GRID;
-            let probe_count = nx * ny * nz;
-            debug_assert!(probe_count <= crate::room_glb::ROOM_EMISSIVE_PROBE_MAX);
-
-            let inv_vp = glam::Mat4::from_cols_array(&camera.view_proj_arr).inverse();
-
-            let (mn, mx) = room_gi_aabb.expect("gi_runs_this_frame implies Some");
-            let gi = crate::wgpu_renderer::ProbeGiFrameUniform {
-                inv_view_proj: inv_vp.to_cols_array(),
-                view_proj: camera.view_proj_arr,
-                world_min: [mn.x, mn.y, mn.z, 0.0],
-                world_max: [mx.x, mx.y, mx.z, 0.0],
-                grid_dims: [nx, ny, nz, probe_count],
-                screen_march: [
-                    gw,
-                    gh,
-                    crate::room_glb::ROOM_EMISSIVE_PROBE_MARCH_WORLD,
-                    crate::room_glb::SHOP_ROOM_EMISSIVE_GI_STRENGTH,
-                ],
-                cam_pos: [camera.cam_pos.x, camera.cam_pos.y, camera.cam_pos.z, 1.0],
-                sample_params: [gi_dir_samples, gi_march_steps, 0, 0],
-            };
-            self.queue.write_buffer(
-                &self.probe_gi_frame_uniform_buffer,
-                0,
-                bytemuck::bytes_of(&gi),
-            );
-
-            if probe_count > 0 {
-                if gi_update_probes {
-                    let gi_compute_ts = self
-                        .gpu_profiler
-                        .compute_pass_writes(crate::gpu_profiler::PassSlot::GiCompute);
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("emissive-probe-update-pass"),
-                        timestamp_writes: gi_compute_ts,
-                    });
-                    cpass.set_pipeline(&self.emissive_probe_update_pipeline);
-                    cpass.set_bind_group(0, &self.emissive_probe_update_bind_group, &[]);
-                    let wg = probe_count.div_ceil(64);
-                    cpass.dispatch_workgroups(wg, 1, 1);
-                    if let Some(room) = self.room_gi_capture_pending
-                        && gi_room == Some(room)
-                    {
-                        let (mn, mx) = room_gi_aabb.expect("gi frame");
-                        self.room_gi_capture_meta = Some(crate::room_gi_bake::probe_sh_meta(
-                            room,
-                            mn,
-                            mx,
-                            camera.view_proj_arr,
-                            gw as u32,
-                            gh as u32,
-                        ));
-                    }
-                }
-                {
-                    let gi_apply_ts = self
-                        .gpu_profiler
-                        .pass_writes(crate::gpu_profiler::PassSlot::GiApply);
-                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("emissive-probe-apply-pass"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &self.emissive_gi_view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                store: wgpu::StoreOp::Store,
-                            },
-                            depth_slice: None,
-                        })],
-                        depth_stencil_attachment: None,
-                        occlusion_query_set: None,
-                        timestamp_writes: gi_apply_ts,
-                        multiview_mask: None,
-                    });
-                    pass.set_pipeline(&self.emissive_probe_apply_pipeline);
-                    pass.set_bind_group(0, &self.emissive_probe_apply_bind_group, &[]);
-                    pass.draw(0..3, 0..1);
-                }
-            }
-        }
-
         let bloom_w = (self.render_size.width.max(1) / 2).max(1);
         let bloom_h = (self.render_size.height.max(1) / 2).max(1);
         // `scene_color` is linear HDR — see `tonemap_composite.wgsl`.
@@ -2597,16 +2306,12 @@ impl WgpuRenderer {
         }
 
         // The scene-composite pass applies bloom + fisheye + vignette and
-        // produces `post_bloom_view` for tonemap (and as an additive
-        // target for GI). When all three are inactive, the pass collapses
+        // produces `post_bloom_view` for tonemap. When both are inactive, the pass collapses
         // to a fullscreen copy `scene_color → post_bloom`. On the Steam
         // Deck baseline that's a ~16 MB read+write per frame at 1080p
         // for nothing — skip it and have tonemap sample `scene_color`
-        // directly via `tonemap_bind_group_scene`. GI's additive
-        // composite still wants `post_bloom_view` as a stable target
-        // (it `LoadOp::Load`s and adds), so when GI runs we keep the
-        // copy.
-        let skip_scene_composite = !bloom_active && fisheye_strength == 0.0 && !gi_runs_this_frame;
+        // directly via `tonemap_bind_group_scene`.
+        let skip_scene_composite = !bloom_active && fisheye_strength == 0.0;
         if !skip_scene_composite {
             let scene_composite_ts = self
                 .gpu_profiler
@@ -2629,31 +2334,6 @@ impl WgpuRenderer {
             });
             pass.set_pipeline(&self.bloom_composite_pipeline);
             pass.set_bind_group(0, &self.bloom_composite_bind_group, &[]);
-            pass.draw(0..3, 0..1);
-        }
-
-        if gi_runs_this_frame {
-            let gi_composite_ts = self
-                .gpu_profiler
-                .pass_writes(crate::gpu_profiler::PassSlot::GiComposite);
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("emissive-gi-composite-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.post_bloom_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: gi_composite_ts,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.emissive_gi_composite_pipeline);
-            pass.set_bind_group(0, &self.emissive_gi_composite_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 
@@ -2889,26 +2569,12 @@ impl WgpuRenderer {
             }
             _ => None,
         };
-        let room_gi_capture_staging = self
-            .room_gi_capture_meta
-            .take()
-            .map(|meta| self.encode_room_gi_capture_copy(&mut encoder, meta));
-
         self.queue.submit(std::iter::once(encoder.finish()));
 
         if let (Some(path), Some(staging)) = (screenshot_path, screenshot_staging) {
             match self.finalize_screenshot(staging, &path) {
                 Ok(()) => log::info!("screenshot saved → {}", path.display()),
                 Err(e) => log::error!("screenshot finalize failed: {e:?}"),
-            }
-        }
-        if let Some(staging) = room_gi_capture_staging {
-            match self.finalize_room_gi_capture(staging) {
-                Ok(bake) => {
-                    self.room_gi_captured = Some(bake);
-                    self.room_gi_capture_pending = None;
-                }
-                Err(e) => log::error!("room GI capture readback failed: {e:?}"),
             }
         }
         if let Some(staging) = room_shadow_capture_staging {

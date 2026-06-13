@@ -34,15 +34,17 @@ room bake set has no placeholder/all-white shadow asset.
 
 The live map is still used on archive for **inspect orbit only**: only [`SHOP_INSPECT_SUBJECT_ANIM_ID`](../../crates/mahjuro-render/src/draw_cmd.rs) casts dynamic shadows (grid featured close-up and cubbies do not, so the pedestal and description signs stay clean). Inspect sets `UiFrame::shop_inspect_shadow_target` for a tight frustum + subject-only cast.
 
-## Offline room GI (`.mgi`)
+## Offline room GI lightmaps (`.lightmap.rlm`)
 
-Static rooms also ship `assets/data/room_gi/<room>.mgi` (MGI1: emissive probe SH). Rebake via the same `mahjuro-bake` run as shadows (or `--kinds gi` / `--kinds shadow` separately).
+Static rooms ship `assets/data/room_lightmap/<room>.lightmap.rlm.zst` (RLM1 container: linear RGBA32F indirect lightmap). `mahjuro-bake --kinds lightmap` runs a dedicated offline GPU compute bake against room GLB geometry/material textures and existing embedded punctual lights, then room environment shaders sample that lightmap directly. Missing or invalid lightmaps panic for real rooms; fallback lighting must not mask broken room bakes.
 
 - Stamp logic: [`mahjuro_bake_stamp::room_gi`](../../crates/mahjuro-bake-stamp/src/room_gi.rs)
 - Skip env var: `MAHJURO_SKIP_ROOM_GI_BAKE=1`
 - Implementation: [`room_gi_bake.rs`](../../crates/mahjuro-render/src/room_gi_bake.rs)
 
-Rebake after changing room GLB layout, probe grid, or [`ROOM_EMISSIVE_PROBE_DIR_SAMPLES`](../../crates/mahjuro-render/src/room_glb.rs) / [`ROOM_EMISSIVE_PROBE_MARCH_STEPS`](../../crates/mahjuro-render/src/room_glb.rs).
+Rebake after changing room GLB layout, GPU bake sampling constants in [`room_gi_bake.rs`](../../crates/mahjuro-render/src/room_gi_bake.rs), or [`room_gi_bake.wgsl`](../../shaders/room_gi_bake.wgsl).
+
+`<room>.lightmap.png` is only a tonemapped preview for inspection.
 
 ## Relic RLC2 bakes
 

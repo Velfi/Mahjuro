@@ -27,6 +27,7 @@ pub const ROOM_SHADOW_MASK: &[&str] = &[
 /// argument, in macro order.
 pub const SCENE_PBR_WITH_HALLWAY_WARP_PREFIX: &[&str] = &[
     "shaders/hallway_vertex_warp.wgsl",
+    "shaders/scene_pbr_core.wgsl",
     "shaders/scene_pbr_lights.wgsl",
     "shaders/rainbow_swirl.wgsl",
     "shaders/moon_phase.wgsl",
