@@ -187,6 +187,31 @@ mod collision_mesh_tests {
     }
 
     #[test]
+    fn dense_grid_with_u_along_local_x_does_not_swap_axes() {
+        // `brass_plaque` ships u along width like the sign boards; a dense tessellated
+        // grid must not false-positive the inspect-plaque u↔Y heuristic.
+        let positions: Vec<[f32; 3]> = (0..20)
+            .flat_map(|iy| {
+                (0..20).map(move |ix| {
+                    [
+                        ix as f32 / 19.0 - 0.5,
+                        iy as f32 / 19.0 - 0.5,
+                        0.0,
+                    ]
+                })
+            })
+            .collect();
+        let uvs: Vec<[f32; 2]> = positions
+            .iter()
+            .map(|p| [p[0] + 0.5, p[1] + 0.5])
+            .collect();
+        assert!(
+            !decal_texel_u_runs_along_local_y(&positions, &uvs),
+            "u along local X should not select inspect-plaque axis swap"
+        );
+    }
+
+    #[test]
     fn inspect_plaque_decal_uv_maps_decal_u_along_local_y() {
         let positions = [
             [-0.103_f32, -0.285, 0.0],
@@ -568,9 +593,14 @@ pub fn room_camera_fit_clip_planes(mut cam: CameraParams, corners_world: &[Vec3]
 
 /// True when authored UV **u** correlates more with local **Y** than **X** on a decal board.
 ///
-/// Archive `inspect_plaque` ships with u along the plaque height; sign boards use u along width.
-/// When true, [`decode_env_primitive`] applies [`archive_inspect_plaque_decal_uv`] so rasterized copy
-/// reads left-to-right on the copper face.
+/// Archive inspect plaque (`brass_plaque`; legacy `inspect_plaque`) ships with u along plaque height;
+/// sign boards use u along width. When true, [`decode_env_primitive`] applies
+/// [`archive_inspect_plaque_decal_uv`] so rasterized copy reads left-to-right on the copper face.
+#[inline]
+pub fn is_archive_inspect_plaque_node(name: &str) -> bool {
+    matches!(name, "inspect_plaque" | "brass_plaque")
+}
+
 pub fn decal_texel_u_runs_along_local_y(positions: &[[f32; 3]], uvs: &[[f32; 2]]) -> bool {
     if positions.len() < 3 || positions.len() != uvs.len() {
         return false;
@@ -610,7 +640,10 @@ pub fn decal_texel_u_runs_along_local_y(positions: &[[f32; 3]], uvs: &[[f32; 2]]
     } else {
         0.0
     };
-    corr_y > corr_x
+    // Dense authored grids (e.g. `brass_plaque`) can tie on ~0 correlations; require a
+    // clear u↔Y footprint before swapping axes for the legacy inspect-plaque remap path.
+    const MIN_UV_U_Y_AXIS_STRENGTH: f32 = 0.15;
+    corr_y > corr_x && corr_y >= MIN_UV_U_Y_AXIS_STRENGTH
 }
 
 /// Normalized archive inspect plaque UV → decal atlas UV.
@@ -997,9 +1030,9 @@ pub fn decode_env_primitive(
     // the asset ships with (Repeat sampler + UVs > 1 would otherwise tile the text).
     let is_archive_sign = matches!(
         gltf_node_name,
-        "sign_description_left" | "sign_description_right" | "inspect_plaque"
-    );
-    let swap_archive_decal_uv_axes = gltf_node_name == "inspect_plaque"
+        "sign_description_left" | "sign_description_right"
+    ) || is_archive_inspect_plaque_node(gltf_node_name);
+    let swap_archive_decal_uv_axes = is_archive_inspect_plaque_node(gltf_node_name)
         && decal_texel_u_runs_along_local_y(&positions_local, &uvs);
     let (uv_remap, archive_decal_face_aspect) = if is_archive_sign {
         let mut min = Vec2::splat(f32::INFINITY);
