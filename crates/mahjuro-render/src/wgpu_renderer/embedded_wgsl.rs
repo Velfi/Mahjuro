@@ -175,3 +175,68 @@ pub const LIT_MESH: &str = concat!(
         "/../../shaders/projected_shadow.wgsl"
     )),
 );
+
+#[cfg(test)]
+mod shader_validation {
+    //! Parse + validate every embedded WGSL program with the same `naga` version
+    //! `wgpu` uses. This catches shader breakage in CI on any host (no GPU needed)
+    //! — including platforms we don't run in CI like the Steam Deck (RADV/Vulkan),
+    //! since they share this front-end. Each program here is a complete module
+    //! (post-composition) exactly as handed to `wgpu`.
+
+    fn validate(label: &str, src: &str) {
+        let module = naga::front::wgsl::parse_str(src)
+            .unwrap_or_else(|e| panic!("{label}: WGSL parse error:\n{}", e.emit_to_string(src)));
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        );
+        validator
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{label}: WGSL validation error:\n{}", e.emit_to_string(src)));
+    }
+
+    macro_rules! validate_program {
+        ($name:ident) => {{
+            validate(stringify!($name), super::$name);
+        }};
+    }
+
+    #[test]
+    fn flame_validates() {
+        validate_program!(FLAME);
+    }
+
+    #[test]
+    fn all_embedded_programs_validate() {
+        validate_program!(QUAD);
+        validate_program!(DEPTH_QUAD);
+        validate_program!(DEPTH_QUAD_DEBUG);
+        validate_program!(TEXT_QUAD);
+        validate_program!(GRADIENT_QUAD);
+        validate_program!(ARC_RING_QUAD);
+        validate_program!(SQUIRCLE_QUAD);
+        validate_program!(FLAME);
+        validate_program!(STARFIELD);
+        validate_program!(GOLDEN_DUST);
+        validate_program!(MOONLIT_WATER);
+        validate_program!(SUNLIT_WATER);
+        validate_program!(SHOOTING_STAR_CASCADE);
+        validate_program!(SHOOTING_STAR_CASCADE_COMPOSITE);
+        validate_program!(DEPTH_TO_R32);
+        validate_program!(TILE_GLOW);
+        validate_program!(SHADOW);
+        validate_program!(ROOM_SHADOW_MASK);
+        validate_program!(IMAGE_QUAD);
+        validate_program!(BLOOM_EXTRACT);
+        validate_program!(BLOOM_BLUR);
+        validate_program!(BLOOM_COMPOSITE);
+        validate_program!(TONEMAP_COMPOSITE);
+        validate_program!(TILE_3D);
+        validate_program!(SHOP_GLB);
+        validate_program!(TILE_OUTLINE);
+        validate_program!(LIT_MESH);
+        #[cfg(feature = "windowed")]
+        validate_program!(BOOT_SPLASH);
+    }
+}

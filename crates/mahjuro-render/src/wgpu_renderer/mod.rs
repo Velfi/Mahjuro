@@ -846,8 +846,6 @@ pub struct WgpuRenderer {
     shadow_quality: mahjuro_gfx_types::ShadowQuality,
     /// Live candle flame tuning (shader + placement); synced from scene / debug overlay.
     pub flame_tuning: crate::flame_tuning::FlameTuning,
-    /// Decaying manual gust from the candle flame debug menu.
-    pub flame_gust_runtime: crate::flame_volume::FlameGustRuntime,
     /// Main-menu moon tab: pride rainbow on moon / stars (defaults on in June).
     pub main_menu_pride_rainbow_debug: bool,
     /// Main-menu moon tab: live calendar vs forced synodic phase for hub shading.

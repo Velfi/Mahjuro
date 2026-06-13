@@ -2,13 +2,18 @@
 //!
 //! Vertex **position** stores `[cos_theta, y01, sin_theta]` for the plume vertex
 //! shader; **uv** stores rest radial fraction for the cap ring.
+//!
+//! Envelope helpers mirror `shaders/flame.wgsl` (mesh build only — runtime sim is GPU).
 
 use crate::lit_mesh::MeshCpu;
-use crate::plume_sim::{FLAME_BASE, flame_envelope_width, flame_height_at, y01_from_height};
 use crate::tile_glb::Vertex3dTex;
 
 const CAP_STEPS: usize = 6;
 const FLAME_HEIGHT: f32 = 1.0;
+/// Matches `FLAME_BASE` in `shaders/flame.wgsl`.
+const FLAME_BASE: f32 = 0.004;
+/// Matches `FLAME_HEIGHT_EXP` in `shaders/flame.wgsl`.
+const FLAME_HEIGHT_EXP: f32 = 0.82;
 
 struct LatheDetail {
     radial: usize,
@@ -19,6 +24,29 @@ const DETAIL: LatheDetail = LatheDetail {
     radial: 36,
     height: 20,
 };
+
+#[inline]
+fn flame_height_at(y01: f32, flame_height: f32) -> f32 {
+    FLAME_BASE + y01.powf(FLAME_HEIGHT_EXP) * flame_height
+}
+
+#[inline]
+fn y01_from_height(y: f32, flame_height: f32) -> f32 {
+    ((y - FLAME_BASE) / flame_height)
+        .max(0.0)
+        .powf(1.0 / FLAME_HEIGHT_EXP)
+        .clamp(0.0, 1.0)
+}
+
+#[inline]
+fn flame_envelope_width(y01: f32) -> f32 {
+    let t = y01.clamp(0.0, 1.0);
+    let foot_open = ((t / 0.11).min(1.0) * std::f32::consts::FRAC_PI_2).sin();
+    let wick = (t / 0.06).min(1.0).powf(0.45);
+    let tip = (1.0 - t).powf(0.82);
+    let belly = (-((t - 0.3) / 0.28).powi(2)).exp();
+    (0.002 + 0.034 * wick * tip * (0.34 + 0.66 * belly)) * foot_open
+}
 
 fn append_flame_cap_profile(profile: &mut Vec<[f32; 2]>) -> f32 {
     let merge_y01 = 0.09;

@@ -14,16 +14,15 @@ struct FlameShaderTuning {
     turbulence: f32,
     emission_gain: f32,
     flame_width_mul: f32,
-    _pad1: f32,
-    _pad2: f32,
-    _pad3: f32,
+    candle_flicker_amp: f32,
+    wind_bias_x: f32,
+    wind_bias_y: f32,
 };
 
 struct FlameView {
     view_proj: mat4x4<f32>,
     view_pos: vec4<f32>,
     tuning: FlameShaderTuning,
-    _pad: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> view: FlameView;
 
@@ -50,6 +49,27 @@ const PLUME_TURB_FINE_HEIGHT: f32 = 12.0;
 const PLUME_EDDY_Y: f32 = 2.6;
 const PLUME_EDDY_Y01: f32 = 1.5;
 const PLUME_WIND_EDDY_Y: f32 = 4.5;
+const FLAME_FLICKER_RATE_HZ: f32 = 24.0;
+
+fn flame_rw_hash(seed: f32, cell: f32) -> f32 {
+    let v = sin(seed * 127.1 + cell * 311.7) * 43758.547;
+    return fract(v) * 2.0 - 1.0;
+}
+
+fn flame_rw_1d(seed: f32, time_s: f32, rate_hz: f32) -> f32 {
+    let x = time_s * rate_hz;
+    let cell = floor(x);
+    let f = x - cell;
+    let blend = f * f * (3.0 - 2.0 * f);
+    let a = flame_rw_hash(seed, cell);
+    let b = flame_rw_hash(seed, cell + 1.0);
+    return a + (b - a) * blend;
+}
+
+fn flame_brightness_flicker(phase: f32, time_s: f32, amp: f32) -> f32 {
+    let seed = phase * 97.13 + 0.17;
+    return 1.0 + flame_rw_1d(seed, time_s, FLAME_FLICKER_RATE_HZ) * amp;
+}
 
 fn hash3(x: f32, y: f32, z: f32) -> f32 {
     var p = vec3<f32>(x, y, z);
@@ -252,10 +272,17 @@ fn vs_plume(
     layer: u32,
 ) -> VsOut {
     let anchor = inst_anchor_wind.xyz;
-    let wind = vec2<f32>(inst_anchor_wind.w, inst_params.w);
+    let wind_bias = vec2<f32>(inst_anchor_wind.w, inst_params.w);
     let scale = inst_params.x;
-    let brightness = inst_params.z;
-    let time = globals.time + inst_params.y * 6.2831853;
+    let phase = inst_params.y;
+    let base_brightness = inst_params.z;
+    let wind = wind_bias + vec2<f32>(view.tuning.wind_bias_x, view.tuning.wind_bias_y);
+    let brightness = clamp(
+        base_brightness * flame_brightness_flicker(phase, globals.time, view.tuning.candle_flicker_amp),
+        0.0,
+        1.38,
+    );
+    let time = globals.time + phase * 6.2831853;
 
     let cos_theta = mesh_meta.x;
     let y01 = mesh_meta.y;
@@ -263,7 +290,7 @@ fn vs_plume(
 
     let flame_height = FLAME_HEIGHT_UNIT * view.tuning.flame_height_mul;
     let plume_scale = plume_unit_scale(flame_height);
-    let phase_seed = inst_params.y * 6.2831853 + cos_theta * 1.73 + sin_theta * 2.41;
+    let phase_seed = phase * 6.2831853 + cos_theta * 1.73 + sin_theta * 2.41;
     let width = flame_envelope_width_scaled(y01, flame_height, view.tuning.flame_width_mul);
     let ry = flame_height_at(y01, flame_height);
     let rx = cos_theta * width;

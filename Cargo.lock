@@ -2384,6 +2384,7 @@ dependencies = [
  "mahjuro-gfx-types",
  "mahjuro-types",
  "memmap2",
+ "naga",
  "parking_lot",
  "pollster",
  "rand 0.10.1",

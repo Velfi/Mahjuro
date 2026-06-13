@@ -20,12 +20,6 @@ pub struct FlameTuning {
     pub emitter_scale_mul: f32,
     /// Shop / gameplay `light_candle*` punctual + procedural flame flicker swing.
     pub candle_flicker_amp: f32,
-    /// Procedural gust vector scale (see [`super::flame_volume::flame_gust_wind`]).
-    pub gust_amp: f32,
-    /// Auto-gust envelope rate in Hz (0 = off; manual triggers still apply).
-    pub gust_rate: f32,
-    /// Blend toward shared room draft vs per-candle gust (0 = per-candle only).
-    pub gust_room_mix: f32,
     /// Steady wind lean bias in world X (added to each flame instance).
     pub wind_bias_x: f32,
     /// Steady wind lean bias in world Y (added to each flame instance).
@@ -53,23 +47,10 @@ impl FlameTuning {
             flame_width_mul: 1.64,
             emitter_scale_mul: 0.22,
             candle_flicker_amp: 0.03,
-            gust_amp: crate::flame_volume::FLAME_GUST_AMP,
-            gust_rate: crate::flame_volume::FLAME_GUST_RATE_DEFAULT,
-            gust_room_mix: crate::flame_volume::FLAME_GUST_ROOM_MIX_DEFAULT,
             wind_bias_x: 0.0,
             wind_bias_y: 0.0,
             lightbake_height_frac: 0.48,
             wick_below_light_frac: 0.42,
-        }
-    }
-
-    #[inline]
-    pub fn gust_config(&self) -> crate::flame_volume::FlameGustConfig {
-        crate::flame_volume::FlameGustConfig {
-            amp: self.gust_amp,
-            envelope_hz: self.gust_rate,
-            room_mix: self.gust_room_mix,
-            wind_bias: glam::Vec2::new(self.wind_bias_x, self.wind_bias_y),
         }
     }
 
@@ -99,9 +80,9 @@ impl FlameTuning {
             self.turbulence,
             self.emission_gain,
             self.flame_width_mul,
-            0.0,
-            0.0,
-            0.0,
+            self.candle_flicker_amp,
+            self.wind_bias_x,
+            self.wind_bias_y,
         ]
     }
 
@@ -134,13 +115,10 @@ impl FlameTuning {
             4 => self.flame_width_mul,
             5 => self.emitter_scale_mul,
             6 => self.candle_flicker_amp,
-            7 => self.gust_amp,
-            8 => self.gust_rate,
-            9 => self.gust_room_mix,
-            10 => self.wind_bias_x,
-            11 => self.wind_bias_y,
-            12 => self.lightbake_height_frac,
-            13 => self.wick_below_light_frac,
+            7 => self.wind_bias_x,
+            8 => self.wind_bias_y,
+            9 => self.lightbake_height_frac,
+            10 => self.wick_below_light_frac,
             _ => 0.0,
         }
     }
@@ -156,13 +134,10 @@ impl FlameTuning {
             4 => self.flame_width_mul = v,
             5 => self.emitter_scale_mul = v,
             6 => self.candle_flicker_amp = v,
-            7 => self.gust_amp = v,
-            8 => self.gust_rate = v,
-            9 => self.gust_room_mix = v,
-            10 => self.wind_bias_x = v,
-            11 => self.wind_bias_y = v,
-            12 => self.lightbake_height_frac = v,
-            13 => self.wick_below_light_frac = v,
+            7 => self.wind_bias_x = v,
+            8 => self.wind_bias_y = v,
+            9 => self.lightbake_height_frac = v,
+            10 => self.wick_below_light_frac = v,
             _ => {}
         }
     }
@@ -181,9 +156,6 @@ impl FlameTuning {
                 "    flame_width_mul: {:.4},\n",
                 "    emitter_scale_mul: {:.4},\n",
                 "    candle_flicker_amp: {:.4},\n",
-                "    gust_amp: {:.4},\n",
-                "    gust_rate: {:.4},\n",
-                "    gust_room_mix: {:.4},\n",
                 "    wind_bias_x: {:.4},\n",
                 "    wind_bias_y: {:.4},\n",
                 "    lightbake_height_frac: {:.4},\n",
@@ -197,9 +169,6 @@ impl FlameTuning {
             self.flame_width_mul,
             self.emitter_scale_mul,
             self.candle_flicker_amp,
-            self.gust_amp,
-            self.gust_rate,
-            self.gust_room_mix,
             self.wind_bias_x,
             self.wind_bias_y,
             self.lightbake_height_frac,
@@ -216,9 +185,6 @@ pub const FLAME_DEBUG_ROW_META: &[(&str, f32, f32, f32)] = &[
     ("Plume · width mul", 0.2, 4.0, 0.02),
     ("Placement · emitter scale", 0.05, 0.8, 0.005),
     ("Light · flicker amp", 0.0, 0.08, 0.001),
-    ("Wind · gust amp", 0.0, 1.5, 0.02),
-    ("Wind · gust rate", 0.0, 0.5, 0.005),
-    ("Wind · room mix", 0.0, 1.0, 0.02),
     ("Wind · bias X", -1.0, 1.0, 0.05),
     ("Wind · bias Y", -1.0, 1.0, 0.05),
     ("Light · lightbake height", 0.1, 1.2, 0.01),
@@ -233,7 +199,7 @@ mod tests {
 
     #[test]
     fn debug_rows_cover_all_fields() {
-        assert_eq!(FLAME_DEBUG_SLIDER_COUNT, 14);
+        assert_eq!(FLAME_DEBUG_SLIDER_COUNT, 11);
         let base = FlameTuning::shipping_default();
         for row in 0..FLAME_DEBUG_SLIDER_COUNT {
             let v = base.debug_row_value(row);

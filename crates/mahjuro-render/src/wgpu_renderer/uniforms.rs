@@ -145,5 +145,4 @@ pub(crate) struct FlameViewUniform {
     pub view_proj: [f32; 16],
     pub view_pos: [f32; 4],
     pub tuning: [f32; 8],
-    pub _pad: [f32; 4],
 }

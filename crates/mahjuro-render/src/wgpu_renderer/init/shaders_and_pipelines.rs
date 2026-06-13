@@ -1457,7 +1457,6 @@ pub(super) fn init_shaders_and_pipelines(
             view_proj: Mat4::IDENTITY.to_cols_array(),
             view_pos: [0.0; 4],
             tuning: crate::flame_tuning::FlameTuning::load().shader_fields(),
-            _pad: [0.0; 4],
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });

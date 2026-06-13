@@ -54,7 +54,6 @@ pub mod particles;
 pub mod physical_size;
 pub mod picking;
 pub mod plaque_mesh;
-pub mod plume_sim;
 pub mod primitive;
 pub mod progress_meter_mesh;
 pub mod projected_light_shadow;
