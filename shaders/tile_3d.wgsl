@@ -254,9 +254,9 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     if (!front_facing) {
         Ngeom = -Ngeom;
     }
-    let T = normalize(in.t_w.xyz);
-    let B = normalize(cross(Ngeom, T)) * in.t_w.w;
-    let n_world = normalize(nm.x * T + nm.y * B + nm.z * Ngeom);
+    let T = scene_safe_normalize(in.t_w.xyz, vec3<f32>(1.0, 0.0, 0.0));
+    let B = scene_safe_normalize(cross(Ngeom, T), vec3<f32>(0.0, 1.0, 0.0)) * in.t_w.w;
+    let n_world = scene_safe_normalize(nm.x * T + nm.y * B + nm.z * Ngeom, Ngeom);
 
     // Enhancement kind from tile_visual_params.z:
     //   0 = none, 1 = pearl, 2 = gilded, 3 = polychrome.
@@ -466,7 +466,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let hem = frame.tile_post_params.z * rgb * vec3<f32>(0.08);
         var hdr = (lit_rgb - gltf_emissive_hdr + hem) * frame.tile_post_params.y;
         hdr = hdr + gltf_emissive_hdr;
-        out_rgb = hdr;
+        // Clamp to prevent Rgba16Float overflow (Infinity) which causes NaN during bloom bilinear filtering on Metal
+        out_rgb = min(hdr, vec3<f32>(65000.0));
     } else {
         // Legacy non-HDR scenes still apply the user gamma slider in-shader.
         out_rgb = pow(lit_rgb, vec3<f32>(inv_g));

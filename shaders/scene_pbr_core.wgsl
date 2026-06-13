@@ -42,7 +42,8 @@ fn scene_smooth_point_atten(dist: f32, radius: f32) -> f32 {
 
 fn scene_safe_normalize(v: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
     let len2 = dot(v, v);
-    return select(fallback, v * inverseSqrt(len2), len2 > 1e-8);
+    let safe_len2 = max(len2, 1e-8);
+    return select(fallback, v * inverseSqrt(safe_len2), len2 > 1e-8);
 }
 
 fn scene_luminance(c: vec3<f32>) -> f32 {

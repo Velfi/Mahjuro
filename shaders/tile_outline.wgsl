@@ -217,7 +217,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         // gamma slider is intentionally a no-op here).
         var hdr = lit + outline_frame.hdr_tonemap.z * base_color * vec3<f32>(0.08);
         hdr = hdr * outline_frame.hdr_tonemap.y;
-        out_rgb = hdr;
+        // Clamp to prevent Rgba16Float overflow (Infinity) which causes NaN during bloom bilinear filtering on Metal
+        out_rgb = min(hdr, vec3<f32>(65000.0));
     } else {
         out_rgb = pow(lit, vec3<f32>(inv_g));
     }

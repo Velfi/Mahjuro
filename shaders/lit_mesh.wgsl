@@ -2741,7 +2741,8 @@ fn fs_main(
                 let center_pg = (1.0 - smoothstep(0.0, 0.55, radial_pg)) * 0.28;
                 hdr = hdr + jade_hdr * pg * (rim_pg * 1.65 + center_pg + mirror_carve * 0.62);
             }
-            out_rgb = hdr;
+            // Clamp to prevent Rgba16Float overflow (Infinity) which causes NaN during bloom bilinear filtering on Metal
+            out_rgb = min(hdr, vec3<f32>(65000.0));
         }
     } else if (is_unshaded) {
         out_rgb = albedo;
