@@ -148,6 +148,8 @@ pub enum DebugAction {
     TriggerTrailerMode,
     /// Meta: unlock every tile material and every season on every material.
     UnlockAllTilesetsAndSeasons,
+    /// Replace relic and consumable slots with random shop-eligible relics and talismans.
+    FillRandomInventory,
 }
 
 #[cfg(debug_menu_enabled)]
@@ -367,6 +369,13 @@ impl DebugMenuBar {
         let demo_cascade_item = MenuItem::new("Demo Score Cascade", true, None);
         mappings.push((demo_cascade_item.id().clone(), DebugAction::DemoCascade));
         let _ = this_run_sub.append(&demo_cascade_item);
+
+        let fill_inventory_item = MenuItem::new("Fill Random Inventory", true, None);
+        mappings.push((
+            fill_inventory_item.id().clone(),
+            DebugAction::FillRandomInventory,
+        ));
+        let _ = this_run_sub.append(&fill_inventory_item);
 
         let _ = this_run_sub.append(&PredefinedMenuItem::separator());
 

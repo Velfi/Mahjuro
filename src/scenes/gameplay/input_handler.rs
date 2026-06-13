@@ -1432,43 +1432,26 @@ pub(super) struct StructureStripLayout {
     pub inter_gap: f32,
 }
 
-fn structure_strip_counts(
-    committed_sets: &[crate::core::hand::DetectedMeld],
-    preview_groups: &[Vec<usize>],
-) -> (usize, usize, usize) {
-    let total_tiles = committed_sets
-        .iter()
-        .map(|s| s.tile_ids.len())
-        .sum::<usize>()
-        + preview_groups.iter().map(|g| g.len()).sum::<usize>();
-    let intra_count = committed_sets
+fn structure_strip_counts(sets: &[crate::core::hand::DetectedMeld]) -> (usize, usize, usize) {
+    let total_tiles: usize = sets.iter().map(|s| s.tile_ids.len()).sum();
+    let intra_count: usize = sets
         .iter()
         .map(|s| s.tile_ids.len().saturating_sub(1))
-        .sum::<usize>()
-        + preview_groups
-            .iter()
-            .map(|g| g.len().saturating_sub(1))
-            .sum::<usize>();
-    let mut inter_count = committed_sets.len().saturating_sub(1);
-    if !committed_sets.is_empty() && !preview_groups.is_empty() {
-        inter_count += 1;
-    }
-    inter_count += preview_groups.len().saturating_sub(1);
+        .sum();
+    let inter_count = sets.len().saturating_sub(1);
     (total_tiles, intra_count, inter_count)
 }
 
-/// Tile size + gaps for the full structure strip (committed melds + staging preview).
+/// Tile size + gaps for the full structure strip (every committed + pending meld).
 fn compute_structure_strip_layout(
     span: f32,
     layout_scale: f32,
-    committed_sets: &[crate::core::hand::DetectedMeld],
-    preview_groups: &[Vec<usize>],
+    sets: &[crate::core::hand::DetectedMeld],
 ) -> StructureStripLayout {
     let layout_span = span.max(8.0);
     let max_tile = (44.0 * layout_scale).max(28.0);
     let (base_intra, base_inter) = structure_strip_gaps(layout_scale);
-    let (total_tiles, intra_count, inter_count) =
-        structure_strip_counts(committed_sets, preview_groups);
+    let (total_tiles, intra_count, inter_count) = structure_strip_counts(sets);
 
     if total_tiles == 0 {
         return StructureStripLayout {
@@ -1527,6 +1510,7 @@ pub(super) fn staging_preview_anchors_for_groups(
     layout: &crate::ui::layout::LayoutResult,
     layout_scale: f32,
     env_h: f32,
+    layout_sets: &[crate::core::hand::DetectedMeld],
     committed_sets: &[crate::core::hand::DetectedMeld],
     preview_groups: &[Vec<usize>],
 ) -> rustc_hash::FxHashMap<usize, StagingPreviewAnchor> {
@@ -1545,7 +1529,7 @@ pub(super) fn staging_preview_anchors_for_groups(
     let rot_r = structure_marker_poses[1].rotation_rad;
     let structure_scale = structure_marker_poses[0].uniform_author_scale(layout.window_h, env_h);
     let span = marker_pair_span_px(a_l, a_r);
-    let strip = compute_structure_strip_layout(span, layout_scale, committed_sets, preview_groups);
+    let strip = compute_structure_strip_layout(span, layout_scale, layout_sets);
     let size_px = strip.tile_size * structure_scale;
 
     let mut cursor = structure_strip_cursor_after_committed(&strip, committed_sets);
@@ -1596,7 +1580,7 @@ pub(super) fn structure_showcase_tile_popup_center(
     let a_r = structure_marker_poses[1].anchor;
     let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
     let _ = (has_structure, cascade_showcase_active);
-    let strip = compute_structure_strip_layout(span, layout_scale, &showcase.sets, &[]);
+    let strip = compute_structure_strip_layout(span, layout_scale, &showcase.sets);
     let mut cursor = 0.0f32;
     let mut centers: Vec<[f32; 3]> = Vec::new();
     for (mi, set) in showcase.sets.iter().enumerate() {
@@ -1645,7 +1629,7 @@ pub(super) fn structure_strip_callout_anchor(
 
     let gameplay = GameEngine::read(run);
     let sets = gameplay.structure_sets.clone();
-    let strip = compute_structure_strip_layout(span, layout_scale, &sets, &[]);
+    let strip = compute_structure_strip_layout(span, layout_scale, &sets);
     let tile_h = strip.tile_size * structure_scale;
 
     let base = if gameplay.has_structure {
@@ -1740,14 +1724,28 @@ pub(super) fn build_yaku_panel_and_tablets(
         .as_ref()
         .and_then(|frame| frame.active_yaku.as_deref());
 
-    // Structure strip / scored-hand showcase: while idle it shows the
-    // committed structure, and while a cascade is active it keeps the
-    // just-scored tiles visible long enough to pulse them in sequence.
+    // Structure strip / scored-hand showcase: while idle it shows committed
+    // structure (plus a valid pending selection when meld preview is on), and
+    // while a cascade is active it keeps the just-scored tiles visible.
+    let meld_preview = crate::persistence::load_settings().structure_meld_preview;
+    let selection_on_structure_strip =
+        meld_preview && scene.staging_layout.is_valid_meld && !yaku_preview_sets.is_empty();
+    let committed_tile_ids: rustc_hash::FxHashSet<u32> =
+        gameplay.structure_tiles.iter().map(|t| t.id).collect();
     let showcase_data = cascade_showcase_ref.cloned().or_else(|| {
-        has_structure.then(|| CascadeShowcase {
-            tiles: GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run),
-            sets: gameplay.structure_sets.clone(),
-        })
+        if selection_on_structure_strip {
+            Some(CascadeShowcase {
+                tiles: yaku_preview_effective_tiles.clone(),
+                sets: yaku_preview_sets.clone(),
+            })
+        } else if has_structure {
+            Some(CascadeShowcase {
+                tiles: GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run),
+                sets: gameplay.structure_sets.clone(),
+            })
+        } else {
+            None
+        }
     });
     if let Some(showcase) = showcase_data {
         let a_l = structure_marker_poses[0].anchor;
@@ -1757,14 +1755,7 @@ pub(super) fn build_yaku_panel_and_tablets(
         let structure_scale = structure_marker_poses[0]
             .uniform_author_scale(layout.window_h, ctx.room_gltf_height_scale);
         let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
-        let preview_groups: &[Vec<usize>] =
-            if crate::persistence::load_settings().structure_meld_preview {
-                &scene.staging_layout.meld_index_groups
-            } else {
-                &[]
-            };
-        let strip =
-            compute_structure_strip_layout(span, layout_scale, &showcase.sets, preview_groups);
+        let strip = compute_structure_strip_layout(span, layout_scale, &showcase.sets);
         let mut cursor = 0.0f32;
         let active_tile_ids = cascade_frame
             .as_ref()
@@ -1793,7 +1784,13 @@ pub(super) fn build_yaku_panel_and_tablets(
                     })
                     .unwrap_or(0.0);
                 let scale = 1.0 + 0.14 * pulse;
-                let brightness = 1.0 + 0.45 * pulse;
+                let is_pending =
+                    selection_on_structure_strip && !committed_tile_ids.contains(&tid);
+                let brightness = if is_pending {
+                    0.85
+                } else {
+                    1.0 + 0.45 * pulse
+                };
                 lift_mm += SCORE_WAVE_STRUCTURE_TILE_MM * wave_t * pulse;
                 anchor[2] += layout.mm(lift_mm);
                 structure_showcase.push(ShowcaseTilePlacement {
@@ -1944,4 +1941,48 @@ fn focus_non_hand_target_at_cursor(
         }
     }
     best.map(|(t, _)| t)
+}
+
+#[cfg(test)]
+mod structure_strip_tests {
+    use super::*;
+    use crate::core::hand::{DetectedMeld, MeldKind};
+
+    fn triplet(ids: &[u32]) -> DetectedMeld {
+        DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: ids.to_vec(),
+        }
+    }
+
+    #[test]
+    fn strip_counts_span_two_melds_not_one() {
+        let sets = vec![triplet(&[0, 1, 2]), triplet(&[3, 4, 5])];
+        let (total, intra, inter) = structure_strip_counts(&sets);
+        assert_eq!(total, 6, "two triplets = six tiles across the strip");
+        assert_eq!(intra, 4);
+        assert_eq!(inter, 1);
+    }
+
+    #[test]
+    fn strip_layout_shrinks_tile_size_as_melds_accumulate() {
+        let span = 300.0;
+        let layout_scale = 1.0;
+        let one_meld = compute_structure_strip_layout(span, layout_scale, &[triplet(&[0, 1, 2])]);
+        let three_melds = compute_structure_strip_layout(
+            span,
+            layout_scale,
+            &[
+                triplet(&[0, 1, 2]),
+                triplet(&[3, 4, 5]),
+                triplet(&[6, 7, 8]),
+            ],
+        );
+        assert!(
+            three_melds.tile_size < one_meld.tile_size,
+            "nine tiles must be smaller than three: {} vs {}",
+            three_melds.tile_size,
+            one_meld.tile_size
+        );
+    }
 }

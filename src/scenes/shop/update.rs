@@ -556,6 +556,7 @@ impl ShopScene {
             if let Some(dir) = dir {
                 // Moving focus abandons any in-progress hold-to-buy/sell.
                 self.cancel_all_hold_prompts(ctx.bus);
+                let nav_bounds = super::focus::ShopNavStockBounds::from_scene(self);
                 if self.focus.is_none() {
                     let seed = focus_rects
                         .iter()
@@ -572,6 +573,7 @@ impl ShopScene {
                         &focus_rects,
                         cur,
                         dir,
+                        &nav_bounds,
                     )
                 {
                     self.focus = Some(next);

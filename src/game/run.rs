@@ -588,6 +588,47 @@ impl RunState {
         self.chrysalis_extinct = true;
     }
 
+    /// Debug / cheat: replace relic and consumable slots with random shop-eligible
+    /// relics and talismans (respects current capacity; zodiacs/memorials cleared).
+    pub fn cheat_fill_random_relics_and_talismans(&mut self) {
+        use rand::seq::SliceRandom;
+
+        use crate::core::consumable::Consumable;
+        use crate::core::relic::all_relic_defs;
+        use crate::core::talisman::TalismanKind;
+
+        let mut rng = rand::rng();
+        let pool_extinction = self.relic_shop_pool_extinction();
+
+        self.relics.active.clear();
+        self.consumables.items.clear();
+        self.recompute_capacities();
+
+        let mut relic_pool: Vec<RelicId> = all_relic_defs()
+            .iter()
+            .filter(|d| {
+                relic_eligible_for_shop_stock(
+                    d.id,
+                    &self.relics,
+                    &self.available_relics,
+                    pool_extinction,
+                )
+            })
+            .map(|d| d.id)
+            .collect();
+        relic_pool.shuffle(&mut rng);
+        for id in relic_pool.into_iter().take(self.relics.max_slots) {
+            self.relics.active.push(id);
+        }
+        self.recompute_capacities();
+
+        let mut talisman_pool: Vec<TalismanKind> = TalismanKind::all().to_vec();
+        talisman_pool.shuffle(&mut rng);
+        for kind in talisman_pool.into_iter().take(self.consumables.capacity) {
+            self.consumables.items.push(Consumable::Talisman(kind));
+        }
+    }
+
     /// Canonical *relic destroyed* trigger.
     ///
     /// The "destroyed" keyword is the player-facing name for permanent removal

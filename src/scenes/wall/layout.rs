@@ -2,6 +2,7 @@
 
 use crate::core::tile::Suit;
 use crate::render::theme::{metrics, typography};
+use crate::ui::controller_hints::{HintStyle, screen_footer_top};
 use crate::ui::widget::PLAIN_TEXT_LINE_STEP_MUL;
 
 use crate::scenes::header_chrome::{HeaderChromeMetrics, HeaderTitleLayout};
@@ -34,10 +35,12 @@ pub fn read_boost(window_w: f32, window_h: f32) -> f32 {
     (window_w.min(window_h) / 720.0).clamp(1.0, 1.38)
 }
 
-/// Reserve space for the wall screen's text-only help strip (no icon hints).
-pub fn wall_footer_reserve(_w: f32, h: f32) -> f32 {
-    let font_px = typography::size(typography::H42, h);
-    text_line_h(font_px) + h * 0.012
+/// Reserve space through the footer hint row plus a gap so the bottom grid row
+/// (and projected tile silhouettes) stay clear of [`push_screen_footer_hint`].
+pub fn wall_footer_reserve(w: f32, h: f32) -> f32 {
+    let style = HintStyle::standard(w, h);
+    let gap = (h * 0.036).max(36.0);
+    h - screen_footer_top(h, style) + gap
 }
 
 pub struct WallLayout {
@@ -345,8 +348,9 @@ mod tests {
         let footer = wall_footer_reserve(1920.0, 1080.0);
         let used = header_tabs + main + footer;
         assert!(used <= 1080.0 + 1.0);
-        assert!(main / 1080.0 > 0.56);
-        assert!(footer / 1080.0 < 0.07);
+        assert!(main / 1080.0 > 0.48);
+        assert!(footer / 1080.0 > 0.08);
+        assert!(footer / 1080.0 < 0.17);
         assert!(layout.summary_h / 1080.0 > 0.50);
     }
 }
