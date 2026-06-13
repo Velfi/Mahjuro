@@ -7,6 +7,29 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.7.0 — 2026-06-13
+
+### Added
+- New **King Kong** relic: kongs can contain five identical tiles instead of four.
+- Three new uncommon relics reward matching suit and dragon pairs in your structure: **Blue Tiles White Dragon** (pinzu + white dragon), **Green Tiles Green Dragon** (souzu + green dragon), and **Red Tiles Red Dragon** (manzu + red dragon). Each grants +6 mult when you cash in a structure that includes both melds.
+
+### Changed
+- With Auto cash-in enabled, structure now cashes in automatically once it can accept no further melds, not only when it forms a complete winning hand. Under Bureaucratic Form (The Bureaucrat), that includes after two five-tile plays fill the structure to ten tiles.
+- Ryanpeikou and Iipeikou are now tiered exclusive (Ryanpeikou beats Iipeikou), matching riichi. Guide updated.
+- Buff simples-focused play: Tanyao fires from one simple meld (≥3 tiles) at 2.5 mult / 90 chips; Iipeikou works on partial structure at 5.0 mult / 105 chips; Pinfu 5.0 mult / 105 chips.
+- Moving down from the target score odometer with keyboard or controller now lands on the nearest on-screen element instead of jumping into the relic or talisman column.
+- Junchan, Honroutou, and Chanta are tiered exclusive on each cash-in (Junchan beats Honroutou beats Chanta). Detection now matches riichi more closely: Junchan excludes honors and requires a sequence; Chanta requires every group (including the pair) to touch a terminal or honor, plus at least one honor, one simple, and one sequence.
+- Wall Ledger navigation now follows the same directional controls as other screens, so moving between the tile grid, summary panel, and view toggle feels more predictable.
+- Retune yaku payouts from bot frequency data: Toitoi 2.0 mult / 70 chips (was 2.5 / 75); Pinfu and Iipeikou 4.5 mult / 95 chips (was 4.0 / 85).
+- When Yakuhai scores more than once on a cash-in, the in-play yaku row now shows one tablet with a stack count (e.g. Yakuhai 3x) instead of duplicate tablets. The Guide entry for Yakuhai now notes that each qualifying dragon or round-wind triplet stacks.
+
+### Fixed
+- Fixed the main menu loading dots getting stuck on screen forever after switching away from the Low memory graphics preset.
+- Fixed an issue where shop signs and metallic objects could render as black squares on Mac.
+- Selecting many copies of the same tile no longer makes the Play button flicker on and off.
+- The Play button no longer glows when your selection forms valid melds but would overflow structure capacity.
+- Score and target odometer selection highlights now fit the roller banks instead of stretching down the screen.
+
 ## 0.6.1 — 2026-06-09
 
 ### Changed
