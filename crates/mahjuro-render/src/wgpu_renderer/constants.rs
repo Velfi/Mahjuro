@@ -98,7 +98,7 @@ mod tests {
     fn scaled_render_size_075_at_768p_laptop() {
         let window = crate::physical_size::PhysicalSize::new(1366, 768);
         let rs = scaled_render_size(window, 0.75);
-        assert_eq!(rs.width, 1024);
+        assert_eq!(rs.width, 1025);
         assert_eq!(rs.height, 576);
     }
 

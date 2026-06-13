@@ -5,9 +5,9 @@
 //! - `sign_description_left` / `sign_description_right` — grid-mode description boards; runtime
 //!   draws one mesh (see `archive_env_skip_description_prim`) based on cursor so the active board
 //!   is away from the pointer; browse copy is CPU-rasterized into a shared decal atlas.
-//! - `inspect_plaque` — inspect-mode description board beside the turntable; same decal atlas
+//! - `brass_plaque` — inspect-mode description board beside the turntable; same decal atlas
 //!   path (explicit room-env PBR feature flags from `room_gpu_load.rs`); hidden outside item inspect.
-//! - `plaque_backing` — ornate frame behind [`INSPECT_PLAQUE`]; hidden outside item inspect.
+//! - `plaque_backing` — ornate frame behind [`INSPECT_PLAQUE`] when authored; hidden outside item inspect.
 //! - `archive_spawn_item.001` … `archive_spawn_item.021` — 21 item anchors (3×7 window into the tab catalogue).
 //! - `btn_relics_tab`, `btn_zodiacs_tab`, `btn_bosses_tab`, `btn_talismans_tab`, `btn_chronicle_tab` —
 //!   section tabs (meshes draw; hit rects project mesh AABBs like shop `exit_btn`).
@@ -38,7 +38,8 @@ use crate::wgpu_renderer::PointLight;
 
 pub const SIGN_DESCRIPTION_LEFT: &str = "sign_description_left";
 pub const SIGN_DESCRIPTION_RIGHT: &str = "sign_description_right";
-pub const INSPECT_PLAQUE: &str = "inspect_plaque";
+/// glTF node for the item-inspect description board (`brass_plaque` in current `archive.glb`).
+pub const INSPECT_PLAQUE: &str = "brass_plaque";
 pub const PLAQUE_BACKING: &str = "plaque_backing";
 pub const ARCHIVE_SPAWN_FOCUSED_ITEM: &str = "archive_spawn_focused_item";
 
