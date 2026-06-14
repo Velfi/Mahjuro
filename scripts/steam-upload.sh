@@ -15,7 +15,8 @@
 #                  Steamworks partner UI to promote).
 #   --beta         Promote the main AppID to the "beta" branch (or
 #                  STEAM_BETA_BRANCH) and also upload + promote the Steam
-#                  Playtest child app (see packaging/steam/targets.env).
+#                  Playtest child app (default playtest branch: "default";
+#                  override with STEAM_PLAYTEST_BRANCH).
 #   --skip-login   Don't pass +login to steamcmd; assume an existing cached
 #                  session. Useful when re-running after a successful login.
 #
@@ -33,7 +34,7 @@
 #   packaging/steam/targets.env — default AppID / depot IDs (main + playtest).
 #   STEAM_BETA_BRANCH    Used with --beta when you want a default other than
 #                        the branch literally named "beta" (e.g. "publicbeta").
-#   STEAM_PLAYTEST_BRANCH  Playtest branch when using --beta (default: beta).
+#   STEAM_PLAYTEST_BRANCH  Playtest branch when using --beta (default: default).
 
 set -euo pipefail
 
@@ -94,8 +95,8 @@ fi
 STEAM_APP_ID="${STEAM_APP_ID:-4636490}"
 STEAM_DEPOT_WINDOWS="${STEAM_DEPOT_WINDOWS:-4636491}"
 STEAM_DEPOT_MACOS="${STEAM_DEPOT_MACOS:-4636492}"
-if [[ -z "${STEAM_PLAYTEST_BRANCH:-}" ]]; then
-    STEAM_PLAYTEST_BRANCH="${BRANCH:-${STEAM_BETA_BRANCH:-beta}}"
+if [[ -z "${STEAM_PLAYTEST_BRANCH+x}" ]]; then
+    STEAM_PLAYTEST_BRANCH="default"
 fi
 
 validate_app_id () {
@@ -347,7 +348,7 @@ else
                 echo "  main:     AppID $STEAM_APP_ID → branch ${BRANCH:-<none — promote in partner UI>}"
                 ;;
             playtest)
-                echo "  playtest: AppID $STEAM_PLAYTEST_APP_ID → branch $STEAM_PLAYTEST_BRANCH"
+                echo "  playtest: AppID $STEAM_PLAYTEST_APP_ID → branch ${STEAM_PLAYTEST_BRANCH:-<none — promote in partner UI>}"
                 ;;
         esac
     done

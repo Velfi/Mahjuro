@@ -871,15 +871,23 @@ fn push_tile_strip(
 
 fn push_relic_row(
     emit: &mut ChronicleEmit<'_>,
-    _clip: ChartClip,
+    clip: ChartClip,
     x: f32,
     y: f32,
+    w: f32,
     relics: &[crate::core::relic::RelicId],
 ) {
     let icon = 28.0_f32;
     let gap = 6.0;
+    let scissor = [x, clip.top, w.max(1.0), (clip.bottom - clip.top).max(0.0)];
+    if scissor[3] <= 0.0 || y >= clip.bottom || y + icon <= clip.top {
+        return;
+    }
     for (i, rid) in relics.iter().take(10).enumerate() {
         let ix = x + i as f32 * (icon + gap);
+        if intersect_rect([ix, y, icon, icon], scissor).is_none() {
+            continue;
+        }
         emit.images.push(ImageQuad {
             inst: GpuInstance {
                 rect: [ix, y, icon, icon],
@@ -887,7 +895,7 @@ fn push_relic_row(
                 user: 0,
             },
             source: ImageQuadSource::Relic(*rid),
-            clip_rect: None,
+            clip_rect: Some(scissor),
         });
     }
 }
@@ -2010,7 +2018,7 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
             section_px,
         );
         doc_y += metrics.title_h + metrics.gap * 0.35;
-        push_relic_row(&mut emit, clip, rx, ry(doc_y), &rec.relics_owned);
+        push_relic_row(&mut emit, clip, rx, ry(doc_y), rw, &rec.relics_owned);
         doc_y += 36.0 + metrics.gap * 0.5;
     }
 
