@@ -699,7 +699,12 @@ impl App {
         let wall_ledger_active = self.overlay_stack.last().is_some_and(|top| {
             matches!(top, Scene::WallLedger(_))
         }) || matches!(self.scene, Scene::WallLedger(_));
-        if wall_ledger_active && !orbit_overlay_active {
+        if (wall_ledger_active
+            || (!orbit_overlay_active
+                && matches!(&self.scene, Scene::Archive(a) if a.is_chronicle_tab())
+                && self.overlay_stack.is_empty()))
+            && !orbit_overlay_active
+        {
             match scancode {
                 Some(Scancode::Up) => {
                     self.mouse_actions.push(UiAction::ScrollUp);

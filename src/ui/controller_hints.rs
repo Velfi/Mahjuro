@@ -789,6 +789,47 @@ pub fn guide_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
         .into_segments()
 }
 
+/// Chronicle ledger: back, pick a run (left), scroll stats (right).
+pub fn chronicle_ledger_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
+    let select_run = match input_mode {
+        InputMode::Controller => HintBind::grouped(
+            "select run",
+            vec![
+                vec![HintKey::Dpad],
+                vec![HintKey::Stick(StickSide::Left)],
+            ],
+            HintKeyJoin::Slash,
+        )
+        .into(),
+        InputMode::Keyboard | InputMode::Cursor => {
+            HintBind::alternatives("select run", vec![HintKey::Keyboard("keyboard_wasd")]).into()
+        }
+    };
+    let scroll = match input_mode {
+        InputMode::Controller => {
+            HintBind::alternatives("scroll stats", vec![HintKey::Stick(StickSide::Right)]).into()
+        }
+        InputMode::Keyboard | InputMode::Cursor => HintBind::grouped(
+            "scroll stats",
+            vec![
+                vec![HintKey::Keyboard("mouse_scroll")],
+                vec![HintKey::Keyboard("keyboard_arrows_vertical")],
+            ],
+            HintKeyJoin::Slash,
+        )
+        .into(),
+    };
+    HintRow::new()
+        .push(back_bind(input_mode).into())
+        .sep()
+        .push(confirm_bind(input_mode, "select").into())
+        .sep()
+        .push(select_run)
+        .sep()
+        .push(scroll)
+        .into_segments()
+}
+
 /// Wall ledger: back, select tile (WASD / d-pad / left stick), scroll summary (↑↓ / wheel / right stick).
 pub fn wall_ledger_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
     let select_tile = match input_mode {

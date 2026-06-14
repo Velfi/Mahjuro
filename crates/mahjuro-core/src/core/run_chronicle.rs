@@ -347,9 +347,16 @@ pub fn signature_from_breakdown(breakdown: &ScoreBreakdown, tiles: &[Tile]) -> S
             dora_count = dora_count.saturating_add(count_dora_in_source(&step.source));
         }
     }
+    let mut yaku = breakdown.detected_yaku.clone();
+    YakuKind::sort_for_tablets(&mut yaku);
+    let yaku = YakuKind::consolidate_for_tablets(&yaku)
+        .into_iter()
+        .map(|e| e.kind)
+        .collect();
+
     SignatureHandRecord {
         tiles: tiles.iter().map(|t| t.display_copy()).collect(),
-        yaku: breakdown.detected_yaku.clone(),
+        yaku,
         yaku_han_total: breakdown
             .detected_yaku
             .iter()

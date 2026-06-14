@@ -281,6 +281,20 @@ impl YakuKind {
         kinds.sort_by_key(|k| k.tablet_display_index());
     }
 
+    /// Chronicle / run-record label for a scored hand (`"Toitoi + Yakuhai 4x"`).
+    pub fn record_label_from_detected(kinds: &[Self]) -> String {
+        if kinds.is_empty() {
+            return "No Yaku".to_string();
+        }
+        let mut sorted = kinds.to_vec();
+        Self::sort_for_tablets(&mut sorted);
+        Self::consolidate_for_tablets(&sorted)
+            .into_iter()
+            .map(|e| e.kind.gameplay_tablet_label_with_count(e.count, true).into_owned())
+            .collect::<Vec<_>>()
+            .join(" + ")
+    }
+
     /// Collapse duplicate kinds (e.g. three Yakuhai) into one tablet entry.
     /// Call [`Self::sort_for_tablets`] on `kinds` first.
     pub fn consolidate_for_tablets(kinds: &[Self]) -> Vec<YakuTabletEntry> {
@@ -1821,6 +1835,21 @@ mod tests {
         assert_eq!(
             kinds,
             vec![YakuKind::Tanyao, YakuKind::Honroutou, YakuKind::Yakuhai]
+        );
+    }
+
+    #[test]
+    fn record_label_from_detected_merges_duplicate_yakuhai() {
+        let kinds = vec![
+            YakuKind::Toitoi,
+            YakuKind::Yakuhai,
+            YakuKind::Yakuhai,
+            YakuKind::Yakuhai,
+            YakuKind::Yakuhai,
+        ];
+        assert_eq!(
+            YakuKind::record_label_from_detected(&kinds),
+            "Toitoi + Yakuhai 4x"
         );
     }
 
