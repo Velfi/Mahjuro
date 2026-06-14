@@ -43,25 +43,26 @@ pub fn draw_wall_detail_panel(
         push_plaque_clipped(frame, rect, 0.88, scroll_clip);
     }
 
-    let pad = 10.0;
+    let pad = layout.detail_pad();
     let inner_w = rect[2] - pad * 2.0;
     let caption_lh = text_line_h(layout.caption_px);
     let header_lh = caption_lh;
+    let top_pad = (8.0 * layout.jr).max(6.0);
 
-    let mut y = rect[1] + 8.0;
+    let mut y = rect[1] + top_pad;
     push_text_maybe_clip(
         texts,
         [rect[0] + pad, y, inner_w, header_lh],
         "SELECTED TILE",
         layout.caption_px,
-        color::alpha(color::BRASS, 0.78),
+        color::alpha(color::CHAMPAGNE, 0.92),
         true,
         TextAlign::Left,
         clip,
     );
-    y += header_lh + 8.0;
+    y += header_lh + layout.section_inner_gap() + 4.0;
 
-    let preview_size = (inner_w * 0.78).clamp(80.0, 168.0);
+    let preview_size = layout.detail_preview_size(inner_w, scroll_clip[3]);
     let preview_rect = [
         rect[0] + (rect[2] - preview_size) * 0.5,
         y,
@@ -81,7 +82,7 @@ pub fn draw_wall_detail_panel(
             scroll_clip,
         );
     }
-    y = preview_rect[1] + preview_rect[3] + 10.0;
+    y = preview_rect[1] + preview_rect[3] + layout.detail_pad();
 
     let exhausted = details.remaining == 0;
 
@@ -103,12 +104,12 @@ pub fn draw_wall_detail_panel(
         [rect[0] + pad, y, inner_w, caption_lh],
         "COPIES",
         layout.caption_px,
-        color::alpha(color::CHAMPAGNE, 0.82),
+        color::alpha(color::CHAMPAGNE, 0.92),
         true,
         TextAlign::Left,
         clip,
     );
-    y += caption_lh + 6.0;
+    y += caption_lh + layout.section_inner_gap() + 2.0;
 
     draw_copies_panel(
         frame,
@@ -153,12 +154,12 @@ pub fn draw_wall_detail_panel(
         [rect[0] + pad, y, inner_w, caption_lh],
         "ABOUT",
         layout.caption_px,
-        color::alpha(color::CHAMPAGNE, 0.78),
+        color::alpha(color::CHAMPAGNE, 0.92),
         true,
         TextAlign::Left,
         clip,
     );
-    let body_top = y + caption_lh + 4.0;
+    let body_top = y + caption_lh + layout.section_inner_gap();
     let body_font = layout.caption_px;
     let about_color = color::alpha(color::UMBER, if exhausted { 0.72 } else { 0.86 });
     let wrapped_h = styled_line_block_height_at_font_px(
@@ -182,6 +183,7 @@ pub fn draw_wall_detail_panel(
                 align: TextAlign::Left,
                 glossary: GlossaryMode::Prose,
                 vertical_align: Some(TextBlockVerticalAlign::Top),
+                clip_rect: clip,
             },
         );
     }
@@ -189,13 +191,17 @@ pub fn draw_wall_detail_panel(
 
 const COPIES_COL_GAP: f32 = 12.0;
 const COPIES_COL_INSET: f32 = 8.0;
+const COPIES_HEADER_DATA_GAP: f32 = 4.0;
+
+fn copies_block_pad_v(layout: &WallLayout) -> f32 {
+    (7.0 * layout.jr).max(6.0)
+}
+
 /// Width for numeric values (`100.0%`, modifier counts). Sized for [`WallLayout::count_px`].
 fn copies_value_col_w(col_w: f32, count_px: f32) -> f32 {
     let need = count_px * 4.6 * 0.58;
     need.clamp(52.0, col_w * 0.44)
 }
-const COPIES_BLOCK_PAD_V: f32 = 7.0;
-const COPIES_HEADER_DATA_GAP: f32 = 4.0;
 
 fn copies_row_count(mode: WallLedgerMode) -> usize {
     let copy_rows = if mode.shows_round_locations() { 4 } else { 1 };
@@ -213,7 +219,8 @@ fn copies_micro_header_h(layout: &WallLayout) -> f32 {
 }
 
 pub(crate) fn copies_panel_height(layout: &WallLayout, mode: WallLedgerMode) -> f32 {
-    COPIES_BLOCK_PAD_V * 2.0
+    let pad_v = copies_block_pad_v(layout);
+    pad_v * 2.0
         + copies_micro_header_h(layout)
         + COPIES_HEADER_DATA_GAP
         + copies_row_h(layout) * copies_row_count(mode) as f32
@@ -241,6 +248,7 @@ fn draw_copies_panel(
     let micro_h = copies_micro_header_h(layout);
     let block_h = copies_panel_height(layout, mode);
     let block_rect = [block_x, y, inner_w, block_h];
+    let block_pad_v = copies_block_pad_v(layout);
 
     push_clipped_quad(
         frame,
@@ -255,8 +263,8 @@ fn draw_copies_panel(
         color::alpha(color::BRASS, 0.14),
         scroll_clip,
     );
-    let data_top = y + COPIES_BLOCK_PAD_V + micro_h + COPIES_HEADER_DATA_GAP;
-    let data_h = block_h - COPIES_BLOCK_PAD_V * 2.0 - micro_h - COPIES_HEADER_DATA_GAP;
+    let data_top = y + block_pad_v + micro_h + COPIES_HEADER_DATA_GAP;
+    let data_h = block_h - block_pad_v * 2.0 - micro_h - COPIES_HEADER_DATA_GAP;
     push_clipped_quad(
         frame,
         [divider_x - 0.5, data_top, 1.0, data_h],
@@ -264,7 +272,7 @@ fn draw_copies_panel(
         scroll_clip,
     );
 
-    let micro_y = y + COPIES_BLOCK_PAD_V;
+    let micro_y = y + block_pad_v;
     let micro_color = color::alpha(color::BRASS, 0.62);
     draw_stat_row(
         texts,
@@ -311,7 +319,6 @@ fn draw_copies_panel(
         ("Poly", details.modifiers.polychrome, color::keyword::FLOWER),
     ];
     let row_count = copies_row_count(mode);
-    let data_top = y + COPIES_BLOCK_PAD_V + micro_h + COPIES_HEADER_DATA_GAP;
 
     for row_idx in 0..row_count {
         let row_y = data_top + row_idx as f32 * row_h;
@@ -339,7 +346,7 @@ fn draw_copies_panel(
             let (value_color, emphasis) = if draw > 0.0005 {
                 (color::CHAMPAGNE, true)
             } else {
-                (color::alpha(color::UMBER, 0.62), false)
+                (color::alpha(color::STONE, 0.72), false)
             };
             draw_stat_row(
                 texts,

@@ -79,6 +79,7 @@ pub struct WallLayout {
     pub small_px: f32,
     pub count_px: f32,
     pub caption_px: f32,
+    pub jr: f32,
 }
 
 impl WallLayout {
@@ -91,7 +92,36 @@ impl WallLayout {
     }
 
     pub fn summary_pad(&self) -> f32 {
-        12.0
+        (12.0 * self.jr).max(10.0)
+    }
+
+    pub fn detail_pad(&self) -> f32 {
+        (10.0 * self.jr).max(8.0)
+    }
+
+    pub fn section_inner_gap(&self) -> f32 {
+        (4.0 * self.jr).max(3.0)
+    }
+
+    pub fn section_divider_gap(&self) -> f32 {
+        (7.0 * self.jr).max(5.0)
+    }
+
+    pub fn scroll_bottom_pad(&self) -> f32 {
+        (14.0 * self.jr).max(10.0)
+    }
+
+    /// Tile preview in the selected-tile panel — scales with sidebar width and scroll viewport.
+    pub fn detail_preview_size(&self, inner_w: f32, viewport_h: f32) -> f32 {
+        let by_w = inner_w * 0.72;
+        let by_v = viewport_h * 0.26;
+        let max_cap = 180.0 * self.jr;
+        let min_cap = 72.0 * self.jr;
+        by_w.min(by_v).clamp(min_cap, max_cap)
+    }
+
+    pub fn summary_value_col_w(&self) -> f32 {
+        (self.count_px * 2.8).clamp(40.0, 56.0)
     }
 
     pub fn summary_value_x(&self) -> f32 {
@@ -134,8 +164,8 @@ pub fn row_label_col_width(w: f32, jr: f32, h: f32) -> f32 {
 
 /// Font size for a row label constrained by column width and row height.
 pub fn row_label_font_px(text_w: f32, cell_h: f32, h: f32) -> f32 {
-    let cap_h = typography::tier_at_most(cell_h * 0.36, h);
-    let floor = typography::size(typography::H45, h);
+    let floor = typography::size(typography::H42, h);
+    let cap_h = typography::tier_at_most(cell_h * 0.36, h).max(floor);
     let mut px = cap_h;
     while px > floor && row_label_text_width("FLOWERS", px) > text_w {
         px -= 0.5;
@@ -171,9 +201,10 @@ pub fn wall_layout(w: f32, h: f32, jr: f32) -> WallLayout {
     let panel_h = h - footer_reserve - panel_top - 6.0 * jr;
 
     let summary_w = content_w * 0.28;
-    let summary_x = content_x;
-    let grid_x = summary_x + summary_w + content_w * 0.008;
-    let grid_w = content_x + content_w - grid_x;
+    let panel_gap = content_w * 0.008;
+    let grid_x = content_x;
+    let grid_w = content_w - summary_w - panel_gap;
+    let summary_x = grid_x + grid_w + panel_gap;
     let grid_pad = (5.0 * jr).max(4.0);
     let label_col_w = row_label_col_width(w, jr, h);
     let label_gap = (3.0 * jr).max(2.0);
@@ -236,6 +267,7 @@ pub fn wall_layout(w: f32, h: f32, jr: f32) -> WallLayout {
         small_px,
         count_px,
         caption_px,
+        jr,
     }
 }
 
@@ -294,6 +326,13 @@ mod tests {
         let center = (first_honor[0] + last_honor[0] + last_honor[2]) * 0.5;
         assert!((center - slot_center).abs() < 1.0);
         assert!(first_honor[0] >= row[0] - 0.5);
+    }
+
+    #[test]
+    fn grid_panel_is_left_of_summary() {
+        let layout = wall_layout(1920.0, 1080.0, 1.0);
+        assert!(layout.grid_x < layout.summary_x);
+        assert!(layout.grid_x + layout.grid_w <= layout.summary_x);
     }
 
     #[test]

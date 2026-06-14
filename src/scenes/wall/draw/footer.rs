@@ -48,8 +48,14 @@ pub fn draw_wall_footer_controls(
 
 fn footer_hint_text(input_mode: InputMode) -> &'static str {
     match input_mode {
-        InputMode::Keyboard => "ESC back   Enter select   Arrows navigate   Z / X view",
-        InputMode::Controller => "B back   A select   D-pad navigate   LB / RB view",
-        InputMode::Cursor => "Right-click back   Click select   Arrows navigate   Z / X view",
+        InputMode::Keyboard => {
+            "ESC back   Enter select   WASD select tile   ↑↓ scroll   Z / X view"
+        }
+        InputMode::Controller => {
+            "B back   A select   D-pad / left stick select   right stick scroll   LB / RB view"
+        }
+        InputMode::Cursor => {
+            "Right-click back   Click select   WASD select tile   ↑↓ scroll   Z / X view"
+        }
     }
 }

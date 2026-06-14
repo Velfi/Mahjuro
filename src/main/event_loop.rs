@@ -696,6 +696,40 @@ impl App {
             .overlay_stack
             .last()
             .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
+        let wall_ledger_active = self.overlay_stack.last().is_some_and(|top| {
+            matches!(top, Scene::WallLedger(_))
+        }) || matches!(self.scene, Scene::WallLedger(_));
+        if wall_ledger_active && !orbit_overlay_active {
+            match scancode {
+                Some(Scancode::Up) => {
+                    self.mouse_actions.push(UiAction::ScrollUp);
+                }
+                Some(Scancode::Down) => {
+                    self.mouse_actions.push(UiAction::ScrollDown);
+                }
+                // Horizontal arrows are unused for the vertical summary pane.
+                Some(Scancode::Left | Scancode::Right) => {}
+                _ => {
+                    let mode_changed = if let Some(input) = self.input.as_mut() {
+                        input.on_key(scancode, shift, &mut v)
+                    } else {
+                        false
+                    };
+                    self.mouse_actions.extend(v);
+                    if mode_changed {
+                        shell.show_cursor(false);
+                    }
+                    return Ok(());
+                }
+            }
+            if let Some(input) = self.input.as_mut() {
+                if input.mode != crate::ui::input::InputMode::Keyboard {
+                    input.mode = crate::ui::input::InputMode::Keyboard;
+                    shell.show_cursor(false);
+                }
+            }
+            return Ok(());
+        }
         // While orbit inspect is active, arrow keys are reserved for orbit
         // rotation (sampled in `gamepad_frame_tick`) rather than focus actions.
         let scancode_for_actions = if orbit_overlay_active

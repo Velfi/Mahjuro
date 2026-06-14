@@ -657,7 +657,9 @@ pub fn apply_ui_actions(
             | UiAction::TabNext
             | UiAction::TabPrev
             | UiAction::PageNext
-            | UiAction::PagePrev => {}
+            | UiAction::PagePrev
+            | UiAction::ScrollUp
+            | UiAction::ScrollDown => {}
             UiAction::NorthFacePress | UiAction::WestFacePress | UiAction::WestFaceRelease => {}
             UiAction::CancelRelease => {}
         }
