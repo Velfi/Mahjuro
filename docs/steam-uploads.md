@@ -105,14 +105,14 @@ For a public beta, use `--beta`. That uploads **twice** in one `steamcmd` run:
 1. **Main game** (`4636490`) — Windows + macOS depots, promoted to the `beta`
    branch (or `STEAM_BETA_BRANCH`, e.g. `publicbeta`).
 2. **Steam Playtest** (`4819450`) — Windows + macOS depots (same VDF layout as
-   the main game), promoted to the playtest `beta` branch (or
+   the main game), promoted to the playtest `default` branch (or
    `STEAM_PLAYTEST_BRANCH` in [`packaging/steam/targets.env`](../../packaging/steam/targets.env)).
 
 IDs live in `packaging/steam/targets.env`. Verify the playtest App ID on the
 partner site if uploads fail with “application not found”.
 
-Create each branch under **App Admin → SteamPipe → Branches** on the matching
-AppID if it does not exist yet.
+Create each non-default branch under **App Admin → SteamPipe → Branches** on
+the matching AppID if it does not exist yet.
 
 `--branch NAME` (without `--beta`) uploads only the main game — useful for the
 `internal` smoke branch.

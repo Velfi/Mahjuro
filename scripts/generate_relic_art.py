@@ -526,9 +526,7 @@ RELICS = [
         "blue_tiles_white_dragon",
         "Blue Tiles White Dragon",
         "A soft-enamel pin of a dragon in a "
-        "dynamic roar — enormous head and compact muscular body, short thick "
-        "limbs with three-toed claws, swept-back head crest, small angular "
-        "wings, segmented tail curling behind. Pearlescent ice-blue and "
+        "dynamic roar. Pearlescent ice-blue and "
         "silver-white enamel scales with bright white edge highlights and "
         "deep sapphire enamel eyes; mouth open with small sharp white teeth.",
         "Pearlescent ice-blue and silver-white scale enamel, sapphire blue eyes, bright white tooth and highlight enamel, cool moonlit chrome rim highlights.",
@@ -536,10 +534,8 @@ RELICS = [
     (
         "green_tiles_green_dragon",
         "Green Tiles Green Dragon",
-        "A soft-enamel pin of a dragon in a "
-        "dynamic roar — enormous head and compact muscular body, short thick "
-        "limbs with three-toed claws, swept-back head crest, small angular "
-        "wings, segmented tail curling behind. Pearlescent jade-green and "
+        "A soft-enamel pin of an eastern dragon in a "
+        "dynamic roar. Pearlescent jade-green and "
         "silver-white enamel scales with bright white edge highlights and "
         "emerald enamel eyes; mouth open with small sharp white teeth.",
         "Pearlescent jade-green and silver-white scale enamel, emerald green eyes, bright white tooth enamel, cool moonlit chrome rim highlights.",
@@ -547,10 +543,8 @@ RELICS = [
     (
         "red_tiles_red_dragon",
         "Red Tiles Red Dragon",
-        "A soft-enamel pin of a dragon in a "
-        "dynamic roar — enormous head and compact muscular body, short thick "
-        "limbs with three-toed claws, swept-back head crest, small angular "
-        "wings, segmented tail curling behind. Pearlescent crimson-ruby and "
+        "A soft-enamel pin of an great wurtzite dragon in a "
+        "dynamic roar. Pearlescent crimson-ruby and "
         "gold enamel scales with bright white edge highlights and ruby-red "
         "enamel eyes; mouth open with small sharp white teeth.",
         "Pearlescent crimson-ruby and gold scale enamel, ruby red eyes, bright white tooth enamel, warm gold chrome rim highlights.",

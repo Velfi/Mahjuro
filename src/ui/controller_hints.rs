@@ -905,6 +905,7 @@ pub fn archive_browse_footer_row(
     input_mode: InputMode,
     multi_page: bool,
     show_preview: bool,
+    show_inspect: bool,
 ) -> Vec<HintSegment> {
     let mut row = HintRow::new().push(navigate_bind(input_mode).into());
     match input_mode {
@@ -919,9 +920,10 @@ pub fn archive_browse_footer_row(
     if show_preview {
         row = row.sep().push(confirm_bind(input_mode, "preview").into());
     }
-    row.sep()
-        .push(inspect_bind(input_mode).into())
-        .into_segments()
+    if show_inspect {
+        row = row.sep().push(inspect_bind(input_mode).into());
+    }
+    row.into_segments()
 }
 
 /// Run-end and celebration overlays: optional flavor copy + confirm to continue.

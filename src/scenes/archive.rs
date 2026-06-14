@@ -34,8 +34,7 @@ use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_
 use crate::sfx_id::SfxId;
 use crate::ui::controller_hints::{
     HintSegment, HintStyle, archive_browse_footer_row, chronicle_ledger_footer_row,
-    inspect_camera_hint_row, push_inline_hint_rows, push_screen_footer_hint, screen_footer_reserve,
-    screen_footer_top,
+    inspect_camera_hint_row, push_screen_footer_hint, screen_footer_top,
 };
 use crate::ui::focus_nav::{FocusDir, FocusNavState, push_focus_ring};
 use crate::ui::input::{InputMode, UiAction};
@@ -55,13 +54,11 @@ use crate::scenes::object3d_inspect::{
 #[derive(Clone, Copy)]
 struct ArchiveOverlayLayout {
     scale: f32,
-    margin_x: f32,
 }
 
 fn archive_overlay_layout(w: f32, h: f32) -> ArchiveOverlayLayout {
     ArchiveOverlayLayout {
         scale: metrics::scene_scale(w, h),
-        margin_x: w * 0.04,
     }
 }
 
@@ -1109,7 +1106,6 @@ impl ArchiveScene {
             ));
         let overlay = archive_overlay_layout(w, h);
         let scale = overlay.scale;
-        let margin_x = overlay.margin_x;
 
         let frame = UiFrame::new();
 
@@ -1169,24 +1165,17 @@ impl ArchiveScene {
             }
         }
 
-        let footer_anchor_y = h - screen_footer_reserve(w, h) - (h * 0.014).max(8.0);
         let chronicle_ledger = chronicle_open;
 
-        // Control hints — pinned above the footer chrome. The page / scroll
-        // affordance line is omitted when the tab fits in one page so the
-        // hint stays compact on small catalogs.
+        // Control hints. Keep rows compact when paging controls are unnecessary.
         let chronicle_last_seen = ctx.archive_chronicle_last_seen_run_len;
         let all_count_hint =
             tab_artifacts(self.active_tab, ctx.progress, chronicle_last_seen).len();
         let archive_page_count_now = archive_page_count(all_count_hint);
         let archive_multi_page = archive_page_count_now > 1;
         let hint_style = HintStyle::standard(w, h);
-        let hint_line_h = hint_style.line_h;
-        let hint_band_x = margin_x * 0.5;
-        let hint_band_w = w - margin_x;
         let inspect_open = inspect.is_some();
 
-        let mut legend_row_rects: Vec<[f32; 4]> = Vec::new();
         let mut legend_rows: Vec<Vec<HintSegment>> = Vec::new();
 
         if inspect_open {
@@ -1199,38 +1188,31 @@ impl ArchiveScene {
         } else if chronicle_ledger && all_count_hint > 0 {
             legend_rows.push(chronicle_ledger_footer_row(ctx.input_mode));
         } else if !chronicle_ledger {
-            let show_preview = matches!(self.active_tab, Tab::Relics | Tab::Yaku);
+            let item_focus_for_hints = if all_count_hint == 0 {
+                false
+            } else {
+                match ctx.input_mode {
+                    InputMode::Cursor => self.focused_row.is_some_and(|idx| {
+                        self.tree.focused() == Some(CollectionAction::SelectArtifact(idx).id())
+                    }),
+                    InputMode::Keyboard | InputMode::Controller => {
+                        self.focused_chrome.is_none() && self.focused_row.is_some()
+                    }
+                }
+            };
+            let show_preview =
+                matches!(self.active_tab, Tab::Relics | Tab::Yaku) && item_focus_for_hints;
             legend_rows.push(archive_browse_footer_row(
                 ctx.input_mode,
                 archive_multi_page,
                 show_preview,
+                item_focus_for_hints,
             ));
         }
 
         let hint_line_count = legend_rows.len();
-        let hint_h = if hint_line_count == 0 {
-            0.0
-        } else {
-            hint_line_h * hint_line_count as f32 + 10.0
-        };
-        let hint_y = if inspect_open {
-            screen_footer_top(h, hint_style)
-        } else if chronicle_ledger {
-            h - hint_h - (h * 0.018).max(10.0)
-        } else {
-            footer_anchor_y - hint_h - (h * 0.014).max(10.0)
-        };
-
-        if !inspect_open {
-            for i in 0..hint_line_count {
-                legend_row_rects.push([
-                    hint_band_x,
-                    hint_y + hint_line_h * i as f32,
-                    hint_band_w,
-                    hint_line_h,
-                ]);
-            }
-        }
+        // Keep archive hints in the shared footer band used by other scenes.
+        let hint_y = screen_footer_top(h, hint_style);
 
         // Page indicator — `Page X / Y · ● ○ ○ …` centred in the gap between
         // the authored cabinet page buttons when the catalog spans multiple pages.
@@ -1289,18 +1271,8 @@ impl ArchiveScene {
             &mut ctx,
             inspect,
         );
-        if inspect_open {
-            if let Some(row) = legend_rows.first() {
-                push_screen_footer_hint(&mut frame, &ctx, row.clone(), hint_style);
-            }
-        } else if !legend_rows.is_empty() {
-            push_inline_hint_rows(
-                &mut frame,
-                &ctx,
-                &legend_row_rects,
-                &legend_rows,
-                hint_style,
-            );
+        if let Some(row) = legend_rows.first() {
+            push_screen_footer_hint(&mut frame, &ctx, row.clone(), hint_style);
         }
 
         if inspect_open
