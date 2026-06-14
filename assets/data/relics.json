@@ -712,7 +712,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Glass Cannon wherever it rests.",
+        "text": "Sometimes power is more fragile than anyone imagines.",
         "bold": false,
         "italic": true
       }
@@ -813,14 +813,9 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "\"The peerless paragons of Puerto Rican pride!\"- ",
+        "text": "What do geese know of chevrons?",
         "bold": false,
         "italic": false
-      },
-      {
-        "text": "Good Bunny",
-        "bold": false,
-        "italic": true
       }
     ]
   },
@@ -906,7 +901,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Desert survey probes answer a thumper's call — one last rhythm buys you another turn.",
+        "text": "\"Always arrange for backup. It's better to have it and not need it than need it and not have it.\"\n",
         "bold": false,
         "italic": true
       }
@@ -932,7 +927,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "I’m Nobody! Who are you?\n\nAre you – Nobody – too? \n\nThen there’s a pair of us! \n\nDon’t tell! they’d advertise – you know!\nHow dreary – to be – Somebody!\n\nHow public – like a Frog – \n\nTo tell one’s name – the livelong June – \n\nTo an admiring Bog!",
+        "text": "Have patience for all those just starting out; The first steps are always the hardest.",
         "bold": false,
         "italic": false
       }
@@ -1152,9 +1147,9 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "The Soul selects her own Society —\nThen — shuts the Door —\nTo her divine Majority —\nPresent no more —\nUnmoved — she notes the Chariots — pausing —\nAt her low Gate —\nUnmoved — an Emperor be kneeling\nUpon her Mat —\nI've known her — from an ample nation —\nChoose One —\nThen — close the Valves of her attention —\nLike Stone —",
+        "text": "\"Everything in moderation; Even moderation\"",
         "bold": false,
-        "italic": false
+        "italic": true
       }
     ]
   },
@@ -1219,7 +1214,7 @@
       {
         "text": "\"Those of us that travel The Way see the value in sacred numerology. The tiles illustrate their truth to us every play.\" - Strange Foreigner.",
         "bold": false,
-        "italic": true  
+        "italic": true
       }
     ]
   },
@@ -1535,7 +1530,7 @@
         "italic": true
       },
       {
-        "text": "2.71828",
+        "text": "2.71828, ",
         "bold": true,
         "italic": true
       },
@@ -1586,7 +1581,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "\"They look like big, good, strong hands, don't they? I alway thought that's what they were.\"                                                     - ",
+        "text": "\"They look like big, good, strong hands, don't they? I alway thought that's what they were.\"\n- ",
         "bold": false,
         "italic": false
       },
@@ -1653,9 +1648,9 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "\n",
+        "text": "\"Does it ever feel to you like the past keeps repeating itself?\"",
         "bold": false,
-        "italic": false
+        "italic": true
       }
     ]
   },
@@ -1666,7 +1661,7 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "Every pattern in the weave adds another jewel to the crown.",
+        "text": "Every pattern in the weave is another jewel in the crown.",
         "bold": false,
         "italic": true
       }
