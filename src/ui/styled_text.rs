@@ -863,6 +863,7 @@ fn push_styled_visual_lines(
                     color: chunk.color,
                     font_px: Some(font_px),
                     align: TextAlign::Left,
+                    clip_rect: style.clip_rect,
                     underline: chunk.underline,
                     text_effect: chunk.effect,
                     bold: chunk.bold,
@@ -906,6 +907,8 @@ pub struct StyledBlockStyle {
     pub glossary: GlossaryMode,
     /// When set, pins the block to the top or bottom of `rect`; `None` keeps legacy centering.
     pub vertical_align: Option<crate::render::wgpu_renderer::TextBlockVerticalAlign>,
+    /// Optional text clipping rectangle in screen-space.
+    pub clip_rect: Option<[f32; 4]>,
 }
 
 impl Default for StyledBlockStyle {
@@ -917,6 +920,7 @@ impl Default for StyledBlockStyle {
             align: TextAlign::Center,
             glossary: GlossaryMode::Off,
             vertical_align: None,
+            clip_rect: None,
         }
     }
 }
@@ -930,6 +934,7 @@ impl From<TextStyle> for StyledBlockStyle {
             align: s.align,
             glossary: s.glossary,
             vertical_align: None,
+            clip_rect: None,
         }
     }
 }

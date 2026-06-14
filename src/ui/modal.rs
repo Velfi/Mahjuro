@@ -735,6 +735,7 @@ impl ModalQueue {
                     align: TextAlign::Left,
                     glossary: GlossaryMode::Prose,
                     vertical_align: None,
+                    clip_rect: None,
                 },
             );
         }
@@ -1102,6 +1103,7 @@ fn draw_modal_paginated_unlock(
             align: TextAlign::Center,
             glossary: GlossaryMode::Prose,
             vertical_align: None,
+            clip_rect: None,
         },
     );
 
