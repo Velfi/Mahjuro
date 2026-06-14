@@ -75,22 +75,6 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, mut ctx: DrawCtx<'_>) ->
         scene.mode,
     );
     let scroll_y = scene.sidebar_scroll.tick();
-    draw_wall_summary_panel(
-        &mut frame,
-        &mut texts,
-        &mut placements,
-        &layout,
-        &frame_ctx.stats,
-        selected_details.as_ref(),
-        ctx.run,
-        rep_tile.as_ref(),
-        w,
-        h,
-        scroll_y,
-        scroll_layout.clip,
-        scene.mode,
-    );
-
     draw_grid_panel_chrome(&mut frame, &layout);
 
     draw_main_panel(
@@ -105,6 +89,23 @@ pub fn draw_strategic_frame(scene: &StrategicWallScene, mut ctx: DrawCtx<'_>) ->
         focus,
         w,
         h,
+    );
+
+    draw_wall_summary_panel(
+        &mut frame,
+        &mut texts,
+        &mut placements,
+        &layout,
+        &frame_ctx.stats,
+        selected_details.as_ref(),
+        ctx.run,
+        rep_tile.as_ref(),
+        w,
+        h,
+        &scroll_layout,
+        scroll_y,
+        scene.dragging_scrollbar,
+        scene.mode,
     );
 
     scene

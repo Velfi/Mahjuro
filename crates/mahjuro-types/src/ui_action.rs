@@ -27,6 +27,10 @@ pub enum UiAction {
     TabPrev,
     PageNext,
     PagePrev,
+    /// Arrow Up — panel scroll (not grid focus). Scenes opt in (e.g. wall ledger).
+    ScrollUp,
+    /// Arrow Down — panel scroll (not grid focus). Scenes opt in (e.g. wall ledger).
+    ScrollDown,
     Pause,
     Help,
     Delete,

@@ -8,6 +8,8 @@ use crate::render::draw_cmd::ImageQuadSource;
 
 const KEYBOARD_SHEET: &str =
     "textures/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.png";
+const KEYBOARD_WASD: &str =
+    "textures/kenney_input-prompts/Keyboard & Mouse/keyboard_wasd.png";
 
 const fn key(name: &'static str) -> ImageQuadSource {
     ImageQuadSource::AtlasSprite {
@@ -18,7 +20,11 @@ const fn key(name: &'static str) -> ImageQuadSource {
 
 /// Single keyboard / mouse atlas sprite (see `keyboard-&-mouse_sheet_double.xml`).
 pub fn keyboard_key(name: &'static str) -> ImageQuadSource {
-    key(name)
+    if name == "keyboard_wasd" {
+        ImageQuadSource::Asset { path: KEYBOARD_WASD }
+    } else {
+        key(name)
+    }
 }
 
 /// Keyboard icons for shop action hints (Sell, Inspect).
@@ -63,5 +69,16 @@ mod tests {
         for icon in gameplay_keyboard_prompt_icons() {
             expect_resolves(&icon);
         }
+    }
+
+    #[test]
+    fn wasd_icon_uses_standalone_asset() {
+        let icon = keyboard_key("keyboard_wasd");
+        assert_eq!(
+            icon,
+            ImageQuadSource::Asset {
+                path: KEYBOARD_WASD,
+            }
+        );
     }
 }

@@ -14,6 +14,7 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::StrategicWallScene;
 use super::layout::{GRID_ROWS, WallLayout, grid_cell_rect};
+use super::sidebar_scroll::SidebarScrollLayout;
 
 const NAV_BASE: u32 = 0xE200;
 
@@ -167,6 +168,7 @@ impl StrategicWallScene {
         ctx: UpdateCtx<'_>,
         layout: &WallLayout,
         stats: &WallStats,
+        scroll_layout: &SidebarScrollLayout,
     ) -> Option<SceneTransition> {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
@@ -178,12 +180,29 @@ impl StrategicWallScene {
             }
         }
 
+        let scrollable = scroll_layout.max_scroll_px > 0.0 && !self.dragging_scrollbar;
+        let mut nav_actions: Vec<UiAction> = Vec::with_capacity(ctx.actions.len());
+        for &a in ctx.actions {
+            match a {
+                UiAction::ScrollDown if scrollable => {
+                    self.sidebar_scroll
+                        .scroll_by(scroll_layout.wheel_step_px);
+                }
+                UiAction::ScrollUp if scrollable => {
+                    self.sidebar_scroll
+                        .scroll_by(-scroll_layout.wheel_step_px);
+                }
+                UiAction::ScrollUp | UiAction::ScrollDown => {}
+                _ => nav_actions.push(a),
+            }
+        }
+
         let items = self.flat_items(w, layout, stats);
         let edges = wall_ledger_nav_edges();
         let action = self.focus.tree.update_flat_with_edges(
             &items,
             TreeInput {
-                actions: ctx.actions,
+                actions: &nav_actions,
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (w, h),
@@ -276,6 +295,9 @@ mod tests {
             },
             focus: WallFocusModel::new(),
             sidebar_scroll: crate::ui::smooth_scroll::SmoothScroll::new(),
+            dragging_scrollbar: false,
+            scroll_drag_grab_y: 0.0,
+            prev_mouse_down: false,
         }
         .flat_items(w, &layout, stats)
     }

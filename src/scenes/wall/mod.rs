@@ -11,7 +11,6 @@ use crate::core::tile::Suit;
 use crate::game::wall_ledger::WallLedgerMode;
 use crate::game::wall_stats::{FaceKey, selected_tile_details};
 use crate::render::draw_cmd::UiFrame;
-use crate::ui::input::InputMode;
 use crate::ui::smooth_scroll::SmoothScroll;
 
 use super::{DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
@@ -19,7 +18,10 @@ use data::{build_frame_context, groups_by_face};
 use draw::draw_strategic_frame;
 use focus::WallFocusModel;
 use layout::{read_boost, wall_layout};
-use sidebar_scroll::sidebar_scroll_layout;
+use sidebar_scroll::{
+    point_in_rect, sidebar_scroll_layout, sidebar_scrollbar, sidebar_scroll_y_from_cursor,
+    SidebarScrollLayout,
+};
 use state::WallScreenState;
 
 pub struct StrategicWallScene {
@@ -27,6 +29,9 @@ pub struct StrategicWallScene {
     pub screen: WallScreenState,
     pub focus: WallFocusModel,
     pub sidebar_scroll: SmoothScroll,
+    dragging_scrollbar: bool,
+    scroll_drag_grab_y: f32,
+    prev_mouse_down: bool,
 }
 
 impl StrategicWallScene {
@@ -41,6 +46,9 @@ impl StrategicWallScene {
             },
             focus: WallFocusModel::new(),
             sidebar_scroll: SmoothScroll::new(),
+            dragging_scrollbar: false,
+            scroll_drag_grab_y: 0.0,
+            prev_mouse_down: false,
         }
     }
 }
@@ -87,19 +95,18 @@ impl SceneBehavior for WallLedgerScene {
                 scene
                     .sidebar_scroll
                     .set_max(scroll_layout.max_scroll_px.ceil() as u32);
-                if ctx.scroll_lines.abs() > 0.001 && scroll_layout.max_scroll_px > 0.0 {
-                    let (cx, cy) = ctx.cursor_pos;
-                    let over_sidebar = cx >= layout.summary_x
-                        && cx <= layout.summary_x + layout.summary_w
-                        && cy >= layout.summary_y
-                        && cy <= layout.summary_y + layout.summary_h;
-                    if over_sidebar || ctx.input_mode != InputMode::Cursor {
-                        scene
-                            .sidebar_scroll
-                            .scroll_by(ctx.scroll_lines * scroll_layout.wheel_step_px);
-                    }
+                update_sidebar_scrollbar(scene, &ctx, &scroll_layout, &layout);
+                if ctx.scroll_lines.abs() > 0.001
+                    && scroll_layout.max_scroll_px > 0.0
+                    && !scene.dragging_scrollbar
+                {
+                    scene
+                        .sidebar_scroll
+                        .scroll_by(ctx.scroll_lines * scroll_layout.wheel_step_px);
                 }
-                if let Some(transition) = scene.handle_input(ctx, &layout, &frame_ctx.stats) {
+                if let Some(transition) =
+                    scene.handle_input(ctx, &layout, &frame_ctx.stats, &scroll_layout)
+                {
                     return transition;
                 }
                 None
@@ -112,6 +119,55 @@ impl SceneBehavior for WallLedgerScene {
             Self::Strategic(scene) => draw_strategic_frame(scene, ctx),
         }
     }
+}
+
+fn update_sidebar_scrollbar(
+    scene: &mut StrategicWallScene,
+    ctx: &UpdateCtx<'_>,
+    scroll_layout: &SidebarScrollLayout,
+    layout: &layout::WallLayout,
+) {
+    let max_scroll = scroll_layout.max_scroll_px;
+    let scroll_y = scene.sidebar_scroll.target();
+    let sb = sidebar_scrollbar(
+        layout,
+        scroll_layout.clip,
+        scroll_layout.content_h,
+        scroll_y,
+        max_scroll,
+    );
+    let mouse_down = ctx.mouse_left_down;
+    let mouse_click = mouse_down && !scene.prev_mouse_down;
+    if let Some(sb) = sb {
+        if scene.dragging_scrollbar && mouse_down {
+            let y = sidebar_scroll_y_from_cursor(
+                ctx.cursor_pos.1,
+                scene.scroll_drag_grab_y,
+                &sb,
+                max_scroll,
+            );
+            scene.sidebar_scroll.jump(y);
+        } else if mouse_click {
+            let (mx, my) = ctx.cursor_pos;
+            if point_in_rect(mx, my, sb.thumb) {
+                scene.dragging_scrollbar = true;
+                scene.scroll_drag_grab_y = my - sb.thumb[1];
+                let y = sidebar_scroll_y_from_cursor(my, scene.scroll_drag_grab_y, &sb, max_scroll);
+                scene.sidebar_scroll.jump(y);
+            } else if point_in_rect(mx, my, sb.hit_track) {
+                scene.dragging_scrollbar = true;
+                scene.scroll_drag_grab_y = sb.thumb[3] * 0.5;
+                let y = sidebar_scroll_y_from_cursor(my, scene.scroll_drag_grab_y, &sb, max_scroll);
+                scene.sidebar_scroll.jump(y);
+            }
+        }
+    } else {
+        scene.dragging_scrollbar = false;
+    }
+    if !mouse_down {
+        scene.dragging_scrollbar = false;
+    }
+    scene.prev_mouse_down = mouse_down;
 }
 
 #[cfg(test)]
