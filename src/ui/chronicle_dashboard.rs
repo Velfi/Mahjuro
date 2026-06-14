@@ -8,7 +8,7 @@ use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign,
 use crate::scenes::archive_career;
 use crate::ui::chart_primitives::{
     self, ChartClip, LedgerPanelStyle, push_colored_label_clipped, push_ledger_panel_clipped,
-    push_quad_clipped as chart_quad, push_rect_border, push_sparkline, push_yaku_hbar_row,
+    push_quad_clipped as chart_quad, push_sparkline, push_yaku_hbar_row,
     push_yaku_pill,
 };
 use crate::ui::chronicle_charts;
@@ -119,12 +119,11 @@ pub fn chronicle_panel_rect(w: f32, h: f32) -> [f32; 4] {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ChronicleView {
     pub focused_run: Option<usize>,
-    pub focused_pane: ChronicleScrollPane,
     pub run_log_scroll: f32,
     pub career_scroll: f32,
 }
 
-/// Which Chronicle ledger column should receive wheel / page scroll.
+/// Chronicle ledger column target for scroll deltas.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ChronicleScrollPane {
     #[default]
@@ -2124,17 +2123,6 @@ pub fn push_chronicle_dashboard(
         panes.inner_w,
         panes.inner_h,
     );
-    let (run_log_rect, career_rect) = chronicle_pane_rects(w, h, panel);
-    push_pane_focus_ring(
-        out_quads,
-        run_log_rect,
-        view.focused_pane == ChronicleScrollPane::RunLog,
-    );
-    push_pane_focus_ring(
-        out_quads,
-        career_rect,
-        view.focused_pane == ChronicleScrollPane::Career,
-    );
     chart_primitives::push_quad(
         out_quads,
         [
@@ -2199,18 +2187,6 @@ pub fn push_chronicle_dashboard(
             list_i,
         );
     }
-}
-
-fn push_pane_focus_ring(out: &mut Vec<GpuInstance>, rect: [f32; 4], active: bool) {
-    if !active {
-        return;
-    }
-    push_rect_border(
-        out,
-        rect,
-        PANE_RING_BORDER,
-        color::alpha(color::CHAMPAGNE, 0.72),
-    );
 }
 
 fn push_ledger_sheet(
