@@ -920,6 +920,7 @@ impl TutorialCampaignScene {
                 align: TextAlign::Left,
                 glossary: GlossaryMode::Panel,
                 vertical_align: None,
+                clip_rect: None,
             },
         );
         block_h
