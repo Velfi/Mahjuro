@@ -18,12 +18,12 @@ impl RunState {
         mode.starting_discards = LESSONS_DISCARDS;
         mode.hand_size = LESSONS_HAND_SIZE;
         mode.base_target = LESSONS_TARGET;
-        mode.starting_yaku = Vec::new();
+        mode.starting_yaku = tutorial_yaku();
         mode.consumable_capacity = 2;
 
         let mut state = Self::new(mode.clone());
         state.mode = mode;
-        state.available_yaku = Vec::new();
+        state.available_yaku = tutorial_yaku();
         state.base_target = LESSONS_TARGET;
         state.target_score = LESSONS_TARGET;
         state.yen = state.mode.starting_yen as i32;
@@ -77,7 +77,7 @@ impl RunState {
         self.mode.starting_plays = LESSONS_PLAYS;
         self.mode.starting_discards = LESSONS_DISCARDS;
         self.mode.base_target = LESSONS_TARGET;
-        self.available_yaku = Vec::new();
+        self.available_yaku = tutorial_yaku();
         self.base_target = LESSONS_TARGET;
         self.target_score = LESSONS_TARGET;
         self.chamber = ChamberKind::Small;

@@ -114,11 +114,7 @@ pub const LESSONS_PLAYS: u32 = 3;
 pub const LESSONS_DISCARDS: u32 = 2;
 
 pub fn tutorial_yaku() -> Vec<YakuKind> {
-    vec![
-        YakuKind::ChickenHand,
-        YakuKind::FullHand,
-        YakuKind::Chiitoitsu,
-    ]
+    YakuKind::all().to_vec()
 }
 
 /// Hint text after failing the Lessons blind.
