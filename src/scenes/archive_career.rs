@@ -501,11 +501,11 @@ pub struct ScoreBucket {
 
 pub fn score_distribution_buckets(progress: &PlayerProgress) -> Vec<ScoreBucket> {
     const BUCKETS: &[(&str, u64, u64)] = &[
-        ("< 10k cp", 0, 10_000),
-        ("10k–50k cp", 10_000, 50_000),
-        ("50k–100k cp", 50_000, 100_000),
-        ("100k–250k cp", 100_000, 250_000),
-        ("250k+ cp", 250_000, u64::MAX),
+        ("< 10k", 0, 10_000),
+        ("10k–50k", 10_000, 50_000),
+        ("50k–100k", 50_000, 100_000),
+        ("100k–250k", 100_000, 250_000),
+        ("250k+", 250_000, u64::MAX),
     ];
     let mut counts = vec![0u32; BUCKETS.len()];
     for r in serious_records(progress) {
@@ -700,7 +700,7 @@ pub fn run_detail_model(
             format_score(rec.round_score),
             format_score(rec.target_score as u64),
         ));
-        score_lines.push(format_score_with_unit(rec.total_score_earned));
+        score_lines.push(format_score(rec.total_score_earned));
     }
     score_lines.push(format!(
         "{} · {}",
@@ -857,11 +857,6 @@ pub fn tile_image_source(tile: &Tile) -> Option<ImageQuadSource> {
 
 pub use crate::ui::score_format::format_score;
 
-/// Score with unit for Chronicle copy (career ledger, run detail).
-pub fn format_score_with_unit(n: u64) -> String {
-    format!("{} score", format_score(n))
-}
-
 /// Compact score magnitude for narrow Chronicle columns and chart callouts.
 ///
 /// Values over 999 use the three most significant digits with a `k` / `M` / `B` suffix
@@ -889,7 +884,7 @@ fn format_score_magnitude(n: u64) -> String {
     }
 }
 
-/// Compact score for the narrow run-log column (magnitude + `cp` Fu abbrev).
+/// Compact score for the narrow run-log column.
 pub fn format_run_log_score(n: u64) -> String {
     format!("{}", format_score_magnitude(n))
 }
@@ -985,14 +980,14 @@ mod tests {
     }
 
     #[test]
-    fn chronicle_score_formatters_include_units() {
-        assert_eq!(super::format_score_with_unit(40_368), "40,368 score");
-        assert_eq!(super::format_run_log_score(999), "999 cp");
-        assert_eq!(super::format_run_log_score(1_000), "1.00 k cp");
-        assert_eq!(super::format_run_log_score(72_000), "72.0 k cp");
-        assert_eq!(super::format_run_log_score(347_000), "347 k cp");
-        assert_eq!(super::format_score_compact(1_500_000), "1.50 M cp");
-        assert_eq!(super::format_run_log_score(1_000_000), "1.00 M cp");
+    fn chronicle_score_formatters() {
+        assert_eq!(super::format_score(40_368), "40,368");
+        assert_eq!(super::format_run_log_score(999), "999");
+        assert_eq!(super::format_run_log_score(1_000), "1.00 k");
+        assert_eq!(super::format_run_log_score(72_000), "72.0 k");
+        assert_eq!(super::format_run_log_score(347_000), "347 k");
+        assert_eq!(super::format_score_compact(1_500_000), "1.50 M");
+        assert_eq!(super::format_run_log_score(1_000_000), "1.00 M");
         assert_eq!(super::format_wing(4), "W4");
         assert_eq!(super::format_han(206), "206 Han");
     }
