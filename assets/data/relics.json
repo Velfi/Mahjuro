@@ -80,7 +80,7 @@
   {
     "id": "kindling",
     "name": "Kindling",
-    "description": "Cashing in a structure: +{{kindling_mult}} Han from {{kindling_cashins}} cash-ins (max +{{kindling_cap}} Han)",
+    "description": "Cashing in a structure: +{{kindling_han}} Han from {{kindling_cashins}} cash-ins (max +{{kindling_cap}} Han)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -197,7 +197,7 @@
   {
     "id": "multiplier_master",
     "name": "Multiplier Master",
-    "description": "+{{multiplier_master_mult}} Han (+1.5 Han per relic held)",
+    "description": "+{{multiplier_master_han}} Han (+1.5 Han per relic held)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -644,7 +644,7 @@
   {
     "id": "golden_engine",
     "name": "Golden Engine",
-    "description": "+{{golden_mult}} Han from ¥{{gold_held}} held (+1 Han per 3 yen, max +12 Han)",
+    "description": "+{{golden_han}} Han from ¥{{gold_held}} held (+1 Han per 3 yen, max +12 Han)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -677,7 +677,7 @@
   {
     "id": "snowball",
     "name": "Snowball",
-    "description": "+{{snowball_chips}} Fu from {{snowball_stacks}}/{{snowball_cap}} cleared chambers (+25 Fu per clear)",
+    "description": "+{{snowball_fu}} Fu from {{snowball_stacks}}/{{snowball_cap}} cleared chambers (+25 Fu per clear)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -910,7 +910,7 @@
   {
     "id": "ghost_hand",
     "name": "Ghost Hand",
-    "description": "Cashing in a structure: +{{ghost_hand_chips}} Fu from the value of your current hand",
+    "description": "Cashing in a structure: +{{ghost_hand_fu}} Fu from the value of your current hand",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -923,7 +923,7 @@
   {
     "id": "humility",
     "name": "Humility",
-    "description": "+{{humility_mult}} Han from {{humility_streak}} consecutive honorless cash-ins (+0.5 Han per streak)",
+    "description": "+{{humility_han}} Han from {{humility_streak}} consecutive honorless cash-ins (+0.5 Han per streak)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -936,7 +936,7 @@
   {
     "id": "obsession",
     "name": "Obsession",
-    "description": "Cashing in without your most played yaku: +0.5 Han. Currently +{{obsession_mult}} Han ({{obsession_rounds}} rounds). Resets if you cash in with your most played yaku.",
+    "description": "Cashing in without your most played yaku: +0.5 Han. Currently +{{obsession_han}} Han ({{obsession_rounds}} rounds). Resets if you cash in with your most played yaku.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -949,7 +949,7 @@
   {
     "id": "bonfire",
     "name": "Bonfire",
-    "description": "+{{bonfire_mult}} Han from {{bonfire_sold}} relics sold this run (+0.6 Han per sold)",
+    "description": "+{{bonfire_han}} Han from {{bonfire_sold}} relics sold this run (+0.6 Han per sold)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -972,7 +972,7 @@
   {
     "id": "river_runner",
     "name": "River Runner",
-    "description": "+{{river_runner_chips}} Fu from sequences this run (+30 Fu per sequence in a cash-in)",
+    "description": "+{{river_runner_fu}} Fu from sequences this run (+30 Fu per sequence in a cash-in)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -985,7 +985,7 @@
   {
     "id": "melting_ice",
     "name": "Melting Ice",
-    "description": "+{{chips_left}} Fu. Loses 12 Fu per play. At 0 it is destroyed",
+    "description": "+{{fu_left}} Fu. Loses 12 Fu per play. At 0 it is destroyed",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -998,7 +998,7 @@
   {
     "id": "taotie",
     "name": "Taotie",
-    "description": "+120 Fu. Cashing in a structure: each honor tile in the structure is destroyed. For each honor destroyed: +30 Fu ({{devoured}} devoured, +{{taotie_chips}} Fu stored).",
+    "description": "+120 Fu. Cashing in a structure: each honor tile in the structure is destroyed. For each honor destroyed: +30 Fu ({{devoured}} devoured, +{{taotie_fu}} Fu stored).",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1011,7 +1011,7 @@
   {
     "id": "silk_thread",
     "name": "Silk Thread",
-    "description": "+{{silk_mult_left}} Han left. Loses 0.3 Han per discard. At 0 it is destroyed",
+    "description": "+{{silk_han_left}} Han left. Loses 0.3 Han per discard. At 0 it is destroyed",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1050,7 +1050,7 @@
   {
     "id": "solitary_sage",
     "name": "Solitary Sage",
-    "description": "+{{sage_mult}} Han from {{sage_empty_slots}} empty relic slots (+2.5 Han per empty slot)",
+    "description": "+{{sage_han}} Han from {{sage_empty_slots}} empty relic slots (+2.5 Han per empty slot)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1143,7 +1143,7 @@
   {
     "id": "temperance",
     "name": "Temperance",
-    "description": "+{{temperance_mult}} permanent Han from unused plays on clear (max +10 Han; +0.5 per unused play)",
+    "description": "+{{temperance_han}} permanent Han from unused plays on clear (max +10 Han; +0.5 per unused play)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1273,7 +1273,7 @@
   {
     "id": "hungry_ghost",
     "name": "Hungry Ghost",
-    "description": "Round start: destroy the next relic in inventory. +{{hungry_ghost_mult}} Han stored from devoured relic sell value (max +20 Han)",
+    "description": "Round start: destroy the next relic in inventory. +{{hungry_ghost_han}} Han stored from devoured relic sell value (max +20 Han)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1304,7 +1304,7 @@
   {
     "id": "curio_cabinet",
     "name": "Curio Cabinet",
-    "description": "+{{curio_mult}} Han from other relic sell values (max +15 Han)",
+    "description": "+{{curio_han}} Han from other relic sell values (max +15 Han)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1317,7 +1317,7 @@
   {
     "id": "lotus_bloom",
     "name": "Lotus Bloom",
-    "description": "+{{lotus_mult}} Han from {{lotus_blooms}} flowers scored (max +12 Han; +0.75 per flower)",
+    "description": "+{{lotus_han}} Han from {{lotus_blooms}} flowers scored (max +12 Han; +0.75 per flower)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1330,7 +1330,7 @@
   {
     "id": "wall_weaver",
     "name": "Wall Weaver",
-    "description": "+{{wall_weaver_mult}} Han from wall size beyond 140 tiles (+0.35 per tile, max +8 Han)",
+    "description": "+{{wall_weaver_han}} Han from wall size beyond 140 tiles (+0.35 per tile, max +8 Han)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1431,7 +1431,7 @@
   {
     "id": "heirloom",
     "name": "Heirloom",
-    "description": "+{{heirloom_mult}} Han from {{heirloom_blinds}} blinds cleared (max +12 Han; +1 per clear).",
+    "description": "+{{heirloom_han}} Han from {{heirloom_blinds}} blinds cleared (max +12 Han; +1 per clear).",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1472,7 +1472,7 @@
   {
     "id": "kintsugi",
     "name": "Kintsugi",
-    "description": "+{{kintsugi_mult}} Han from relics destroyed this run (+1 Han per destroyed relic)",
+    "description": "+{{kintsugi_han}} Han from relics destroyed this run (+1 Han per destroyed relic)",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -1621,7 +1621,7 @@
   {
     "id": "monarch_butterfly",
     "name": "Monarch Butterfly",
-    "description": "Cashing in a structure: +{{monarch_chips}} Fu (tier {{monarch_tier}}, {{monarch_excess}} excess, {{monarch_next}}). Excess score is absorbed each round.",
+    "description": "Cashing in a structure: +{{monarch_fu}} Fu (tier {{monarch_tier}}, {{monarch_excess}} excess, {{monarch_next}}). Excess score is absorbed each round.",
     "rarity": "rare",
     "flavor_spans": [
       {
