@@ -25,18 +25,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-kinds=()
-for arg in "$@"; do
-    case "$arg" in
-        --help|-h)
-            sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
-            exit 0
-            ;;
-        *)
-            kinds+=("$arg")
-            ;;
-    esac
-done
+# Room bakes read GLBs and textures from the live assets tree, not the zip packs
+# next to the bake binary (those packs can be stale during iteration).
+export MAHJURO_ASSETS="${MAHJURO_ASSETS:-$REPO_ROOT/assets}"
+
+kinds=("$@")
 if [[ ${#kinds[@]} -eq 0 ]]; then
     kinds=(all)
 fi
