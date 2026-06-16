@@ -3,8 +3,8 @@ use crate::core::rules::ChamberKind;
 use crate::game::engine_state::GameplayCoreState;
 use crate::game::game_mode::GameMode;
 use crate::game::onboarding::{
-    LESSONS_DISCARDS, LESSONS_HAND_SIZE, LESSONS_PLAYS, LESSONS_TARGET, OnboardingPhase,
-    OnboardingState, TUTORIAL_ORDEAL, tutorial_yaku,
+    LESSONS_DISCARDS, LESSONS_PLAYS, LESSONS_TARGET, OnboardingPhase, OnboardingState,
+    TUTORIAL_ORDEAL, tutorial_yaku,
 };
 use crate::game::run::RunState;
 
@@ -16,7 +16,6 @@ impl RunState {
         mode.starting_yen = 16;
         mode.starting_plays = LESSONS_PLAYS;
         mode.starting_discards = LESSONS_DISCARDS;
-        mode.hand_size = LESSONS_HAND_SIZE;
         mode.base_target = LESSONS_TARGET;
         mode.starting_yaku = tutorial_yaku();
         mode.consumable_capacity = 2;
@@ -85,7 +84,6 @@ impl RunState {
             onboarding.scored_once = false;
             onboarding.clear_invalid_meld_hint();
         }
-        self.mode.hand_size = LESSONS_HAND_SIZE;
         self.mode.starting_plays = LESSONS_PLAYS;
         self.mode.starting_discards = LESSONS_DISCARDS;
         self.mode.base_target = LESSONS_TARGET;

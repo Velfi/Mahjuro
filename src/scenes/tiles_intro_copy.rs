@@ -4,7 +4,7 @@ pub const PAGE_TITLE: &str = "The Tiles";
 
 pub const PAGE_SUBTITLE: &str = "Mahjuro is a game played with tiles.";
 
-pub const INTRO: &str = "Your hand of tiles is drawn from the \"wall\". All tiles have a suit. Some tiles have ranks.\nTiles ranked 1 and 9 are called \"terminals\". Tiles ranked 2–8 are called \"simples\".";
+pub const INTRO: &str = "Your hand of tiles is drawn from the \"wall\". All tiles have a suit. Some tiles have ranks.\n\nTiles ranked 1 and 9 are called \"terminals\".\nRanks 2 through 8 are called \"simples\".\n\nIn Mahjong and Mahjuro, suits don't mix.";
 
 pub const SECTION_NUMBER_SUITS: &str = "RANKED SUITS (scored by face value)";
 pub const SECTION_HONOR_SUITS: &str = "HONOR SUITS (high-scoring, but rarer)";

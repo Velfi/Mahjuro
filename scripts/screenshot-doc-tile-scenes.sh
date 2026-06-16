@@ -11,8 +11,8 @@ echo "Building mahjuro-screenshot…"
 cargo build -p mahjuro-headless --bin mahjuro-screenshot --features screenshot -q
 BIN="${ROOT}/target/debug/mahjuro-screenshot"
 
-W=2560
-H=1600
+W=1920
+H=1080
 WARMUP=24
 
 capture() {
@@ -33,7 +33,7 @@ for scene in yaku_journal tile_select material_viewer tile_anchor_lab tile_stres
   capture "$scene" "$OUT/${scene}.png"
 done
 
-for page in 1 2; do
+for page in 1 2 3 4 5; do
   capture tutorial "$OUT/tutorial-$(printf '%02d' "$page").png" --page "$page"
 done
 
