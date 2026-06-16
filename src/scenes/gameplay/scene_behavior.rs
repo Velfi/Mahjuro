@@ -1190,7 +1190,7 @@ impl SceneBehavior for GameplayScene {
             let placements = self.score_popups.placements(now, popup_scale);
             frame.object3d_batch(placements);
         }
-        // Cascade HUD: chips × mult counter under the score panel. During the
+        // Cascade HUD: Fu × Han counter under the score panel. During the
         // hand-off tween the trio merges into `= TOTAL` and flies up toward
         // the readout anchor (`score_counter.reel`).
         if !vis.hide_cascade_hud

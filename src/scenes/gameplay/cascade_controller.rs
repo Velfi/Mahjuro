@@ -80,14 +80,14 @@ pub(super) fn tick_active_cascade(
             if let Some(step) = step {
                 let step_count = cascade.breakdown.base_steps.len() + cascade.breakdown.steps.len();
                 log::debug!(
-                    "[score] cascade reveal {}/{}: kind={:?} source={} running_total={} chips={} mult={:.2}",
+                    "[score] cascade reveal {}/{}: kind={:?} source={} running_total={} fu={} han={:.2}",
                     ordinal + 1,
                     step_count,
                     step.kind,
                     step.source,
                     step.running_total,
-                    step.running_chips,
-                    step.running_mult,
+                    step.running_fu,
+                    step.running_han,
                 );
                 if step.source.starts_with("Dora") && !step.tile_ids.is_empty() {
                     const DORA_CHIME_SPACING_MS: u64 = 180;
@@ -100,35 +100,35 @@ pub(super) fn tick_active_cascade(
                 if let Some(rid) = crate::core::relic::relic_by_name(&step.source) {
                     scene.relic_glow_starts.insert(rid, now);
                 }
-                let (chip_delta, mult_delta) = if ordinal < cascade.breakdown.base_steps.len() {
+                let (fu_delta, han_delta) = if ordinal < cascade.breakdown.base_steps.len() {
                     if ordinal > 0 {
                         let prev = &cascade.breakdown.base_steps[ordinal - 1];
                         (
-                            step.running_chips - prev.running_chips,
-                            step.running_mult - prev.running_mult,
+                            step.running_fu - prev.running_fu,
+                            step.running_han - prev.running_han,
                         )
                     } else {
-                        (step.running_chips, step.running_mult - 1.0)
+                        (step.running_fu, step.running_han - 1.0)
                     }
                 } else {
                     let idx = ordinal - cascade.breakdown.base_steps.len();
                     if idx > 0 {
                         let prev = &cascade.breakdown.steps[idx - 1];
                         (
-                            step.running_chips - prev.running_chips,
-                            step.running_mult - prev.running_mult,
+                            step.running_fu - prev.running_fu,
+                            step.running_han - prev.running_han,
                         )
                     } else {
                         (
-                            step.running_chips - cascade.breakdown.base_chips,
-                            step.running_mult - 1.0,
+                            step.running_fu - cascade.breakdown.base_fu,
+                            step.running_han - 1.0,
                         )
                     }
                 };
                 let popup_label = match step.kind {
-                    StepKind::Chips if chip_delta != 0 => Some(format!("{chip_delta:+}")),
-                    StepKind::Mult if mult_delta.abs() > 0.001 => {
-                        Some(format!("{mult_delta:+.1}x"))
+                    StepKind::Fu if fu_delta != 0 => Some(format!("{fu_delta:+}")),
+                    StepKind::Han if han_delta.abs() > 0.001 => {
+                        Some(format!("{han_delta:+.1}x"))
                     }
                     StepKind::Yen => Some(format!("+{}", step.source.clone())),
                     StepKind::Final => Some(format!("={}", step.running_total)),
@@ -157,7 +157,7 @@ pub(super) fn tick_active_cascade(
                     };
                     let reel_xy = (fly_dest.px, fly_dest.py);
                     let reel_lift = Some(fly_dest.lift_z);
-                    let magnitude = chip_delta.abs().max(1) as f32 + mult_delta.abs() as f32;
+                    let magnitude = fu_delta.abs().max(1) as f32 + han_delta.abs() as f32;
                     scene.score_popups.spawn(
                         label,
                         source,

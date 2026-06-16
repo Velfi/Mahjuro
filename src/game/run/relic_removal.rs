@@ -89,7 +89,7 @@ impl RunState {
     }
 
     /// At round start, each enabled Hungry Ghost destroys the relic immediately to its
-    /// right and banks permanent mult equal to that relic's sell value.
+    /// right and banks permanent Han equal to that relic's sell value.
     pub(crate) fn feed_hungry_ghosts_at_round_start(&mut self) {
         loop {
             let Some(hg_idx) = self

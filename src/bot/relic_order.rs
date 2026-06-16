@@ -2,7 +2,7 @@
 //!
 //! Mirror Tile copies the relic to its right; Shadow Hand copies the leftmost relic
 //! (when that slot is not Shadow Hand). Hungry Ghost destroys the relic to its right
-//! at round start and banks permanent mult from the victim's sell value.
+//! at round start and banks permanent Han from the victim's sell value.
 
 use std::collections::BTreeMap;
 

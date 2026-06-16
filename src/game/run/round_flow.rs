@@ -202,7 +202,7 @@ impl RunState {
                 .push((self.wing, self.total_score_earned));
             self.wing += 1;
         }
-        // Heirloom: +1 mult per blind *played* (skips don't count — this
+        // Heirloom: +1 Han per blind *played* (skips don't count — this
         // path only runs when a blind was cleared).
         if self.relics.has(RelicId::Heirloom) {
             *self.relic_counters.entry(RelicId::Heirloom).or_insert(0) += 1;

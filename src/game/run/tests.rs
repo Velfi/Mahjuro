@@ -1200,7 +1200,7 @@ mod cases {
         let dragon_earned = dragon.trigger_structure_manual(&mut dragon_bus);
         assert_eq!(
             dragon_earned, 0,
-            "Dragon debuffs non-honor tile chips; with no meld flat bonuses the cash-in scores zero"
+            "Dragon debuffs non-honor tile Fu; with no meld flat bonuses the cash-in scores zero"
         );
         assert_eq!(dragon.round_score, 0);
         assert!(
@@ -1209,7 +1209,7 @@ mod cases {
         );
         assert!(
             baseline_score > 0,
-            "non-Dragon blind should still score tile chips from the same structure"
+            "non-Dragon blind should still score tile Fu from the same structure"
         );
     }
 
@@ -1651,7 +1651,8 @@ mod cases {
             YakuKind::Toitoi,
             YakuKind::Honroutou,
             YakuKind::Chanta,
-            YakuKind::FullHand,
+            YakuKind::Shousangen,
+            YakuKind::Daisangen,
             YakuKind::Chinitsu,
             YakuKind::Junchan,
         ];

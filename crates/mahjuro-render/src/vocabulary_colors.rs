@@ -42,11 +42,11 @@ pub const COLORED_KEYWORD_TABLE: &[(&str, [f32; 4])] = &[
     ("seasons", color::keyword::SEASON),
     ("trigger", color::keyword::TRIGGER),
     ("honors", color::keyword::HONORS),
-    ("chips", color::keyword::CHIPS),
-    ("cp", color::keyword::CHIPS),
+    ("fu", color::keyword::FU),
+    ("fu", color::keyword::FU),
     ("winds", color::keyword::WIND),
-    ("mult", color::keyword::MULT),
-    ("han", color::keyword::TRIGGER),
+    ("han", color::keyword::HAN),
+    ("han", color::keyword::HAN),
     ("yen", color::keyword::GOLD),
     ("play", color::keyword::PLAY),
 ];
@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn chips_still_keywords_when_title_cased() {
         let d = [0.5, 0.5, 0.5, 1.0];
-        let c = color_for_token("Chips", d, GlossaryMode::Prose);
+        let c = color_for_token("Fu", d, GlossaryMode::Prose);
         assert_ne!(c, d);
     }
 

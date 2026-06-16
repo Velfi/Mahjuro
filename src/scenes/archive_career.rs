@@ -98,10 +98,10 @@ pub fn chronicle_score_rank_color(rank: u8) -> [f32; 4] {
     }
 }
 
-/// Default chips magnitude tint for non-podium scores.
+/// Default Fu magnitude tint for non-podium scores.
 pub fn chronicle_chips_color() -> [f32; 4] {
     use crate::render::theme::color;
-    color::alpha(color::score_cascade::CHIPS, 0.94)
+    color::alpha(color::score_cascade::FU, 0.94)
 }
 
 /// Wing column tint in the run log.
@@ -476,7 +476,7 @@ pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
     vec![
         CareerKpi {
             label: "Best run",
-            value: format!("{} · #{best_run_num}", format_chips_compact(best_run)),
+            value: format!("{} · #{best_run_num}", format_score_compact(best_run)),
         },
         CareerKpi {
             label: "Win rate",
@@ -488,7 +488,7 @@ pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
         },
         CareerKpi {
             label: "Total score",
-            value: format_chips_compact(total_score),
+            value: format_score_compact(total_score),
         },
     ]
 }
@@ -672,35 +672,35 @@ pub fn run_detail_model(
     let mut score_lines = Vec::new();
     if let Some(snap) = rec.chronicle.terminal_score.as_ref() {
         score_lines.push(format!(
-            "Base {} chips",
-            format_score(snap.base_chips as u64)
+            "Base {} Fu",
+            format_score(snap.base_fu as u64)
         ));
         score_lines.push(format!(
-            "Yaku +{} chips",
-            format_score(snap.yaku_chips as u64)
+            "Yaku +{} Fu",
+            format_score(snap.yaku_fu as u64)
         ));
         score_lines.push(format!(
-            "Dora +{} chips",
-            format_score(snap.dora_chips as u64)
+            "Dora +{} Fu",
+            format_score(snap.dora_fu as u64)
         ));
-        if snap.relic_chips > 0 {
+        if snap.relic_fu > 0 {
             score_lines.push(format!(
-                "Relics +{} chips",
-                format_score(snap.relic_chips as u64)
+                "Relics +{} Fu",
+                format_score(snap.relic_fu as u64)
             ));
         }
         score_lines.push(format!(
-            "Boss mult ×{:.2} · Season base {}",
-            snap.boss_mult_factor, snap.season_base_target
+            "Boss Han ×{:.2} · Season base {}",
+            snap.boss_han_factor, snap.season_base_target
         ));
-        score_lines.push(format!("Total {} chips", format_score(snap.total)));
+        score_lines.push(format!("Total {} score", format_score(snap.total)));
     } else {
         score_lines.push(format!(
-            "Round {} / {} chips target",
+            "Round {} / {} score target",
             format_score(rec.round_score),
             format_score(rec.target_score as u64),
         ));
-        score_lines.push(format_chips(rec.total_score_earned));
+        score_lines.push(format_score_with_unit(rec.total_score_earned));
     }
     score_lines.push(format!(
         "{} · {}",
@@ -858,8 +858,8 @@ pub fn tile_image_source(tile: &Tile) -> Option<ImageQuadSource> {
 pub use crate::ui::score_format::format_score;
 
 /// Score with unit for Chronicle copy (career ledger, run detail).
-pub fn format_chips(n: u64) -> String {
-    format!("{} chips", format_score(n))
+pub fn format_score_with_unit(n: u64) -> String {
+    format!("{} score", format_score(n))
 }
 
 /// Compact score magnitude for narrow Chronicle columns and chart callouts.
@@ -889,14 +889,14 @@ fn format_score_magnitude(n: u64) -> String {
     }
 }
 
-/// Compact score for the narrow run-log column (magnitude + `cp` chips abbrev).
+/// Compact score for the narrow run-log column (magnitude + `cp` Fu abbrev).
 pub fn format_run_log_score(n: u64) -> String {
-    format!("{} cp", format_score_magnitude(n))
+    format!("{}", format_score_magnitude(n))
 }
 
 /// Compact score callout for chart stat panels and ordeal rows.
-pub fn format_chips_compact(n: u64) -> String {
-    format!("{} cp", format_score_magnitude(n))
+pub fn format_score_compact(n: u64) -> String {
+    format!("{}", format_score_magnitude(n))
 }
 
 /// Wing index with a clear prefix (`W4`).
@@ -904,7 +904,7 @@ pub fn format_wing(wing: u32) -> String {
     format!("W{wing}")
 }
 
-/// Han count with unit (`206 han`).
+/// Han count with unit (`206 Han`).
 pub fn format_han(han: u32) -> String {
     format!("{han} han")
 }
@@ -986,15 +986,15 @@ mod tests {
 
     #[test]
     fn chronicle_score_formatters_include_units() {
-        assert_eq!(super::format_chips(40_368), "40,368 chips");
+        assert_eq!(super::format_score_with_unit(40_368), "40,368 score");
         assert_eq!(super::format_run_log_score(999), "999 cp");
         assert_eq!(super::format_run_log_score(1_000), "1.00 k cp");
         assert_eq!(super::format_run_log_score(72_000), "72.0 k cp");
         assert_eq!(super::format_run_log_score(347_000), "347 k cp");
-        assert_eq!(super::format_chips_compact(1_500_000), "1.50 M cp");
+        assert_eq!(super::format_score_compact(1_500_000), "1.50 M cp");
         assert_eq!(super::format_run_log_score(1_000_000), "1.00 M cp");
         assert_eq!(super::format_wing(4), "W4");
-        assert_eq!(super::format_han(206), "206 han");
+        assert_eq!(super::format_han(206), "206 Han");
     }
 
     #[test]

@@ -109,10 +109,10 @@ pub fn record_score_breakdown(stats: &mut RunStats, breakdown: &ScoreBreakdown) 
         *stats.relic_score_triggers.entry(relic).or_insert(0) += 1;
         *stats.relic_score_points.entry(relic).or_insert(0) += delta;
         match step.kind {
-            StepKind::Chips => {
+            StepKind::Fu => {
                 *stats.relic_score_chips.entry(relic).or_insert(0) += delta;
             }
-            StepKind::Mult => {
+            StepKind::Han => {
                 *stats.relic_score_mult_pts.entry(relic).or_insert(0) += delta;
             }
             // Yen steps do not move `running_total`; economy relics use `yen_clear_*` counters.

@@ -704,7 +704,7 @@ pub(super) fn process_focus_and_actions(
         match a {
             UiAction::ScoreHand => {
                 let gameplay = GameEngine::read(ctx.run);
-                let played_chips_before = GameEngine::structure_played_meld_chips(ctx.run);
+                let played_chips_before = GameEngine::structure_played_meld_fu(ctx.run);
                 let round_before = gameplay.round_score;
                 let score_before = gameplay.round_score;
                 let cascade_showcase = if gameplay.selected_count == 0 {
@@ -801,7 +801,7 @@ pub(super) fn process_focus_and_actions(
                         scene.begin_scoring_cascade(ctx, score_before, gained, cascade_showcase);
                     } else if step > 0 {
                         ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
-                        let played_chips_after = GameEngine::structure_played_meld_chips(ctx.run);
+                        let played_chips_after = GameEngine::structure_played_meld_fu(ctx.run);
                         let d = played_chips_after.saturating_sub(played_chips_before);
                         if d > 0 {
                             let gameplay_after = GameEngine::read(ctx.run);
@@ -1829,7 +1829,7 @@ pub(super) fn build_yaku_panel_and_tablets(
                     outline: false,
                     glow: pulse > 0.05,
                     glow_color: if pulse > 0.05 {
-                        Some(crate::render::theme::color::score_cascade::CHIPS)
+                        Some(crate::render::theme::color::score_cascade::FU)
                     } else {
                         None
                     },

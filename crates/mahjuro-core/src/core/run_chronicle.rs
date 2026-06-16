@@ -45,7 +45,7 @@ pub struct SignatureHandRecord {
     pub tiles: Vec<Tile>,
     #[serde(default)]
     pub yaku: Vec<YakuKind>,
-    /// Display "han" total — sum of yaku mult bonuses × 2 (UI convention).
+    /// Display "han" total — sum of yaku Han bonuses × 2 (UI convention).
     #[serde(default)]
     pub yaku_han_total: u32,
     #[serde(default)]
@@ -59,14 +59,14 @@ pub struct SignatureHandRecord {
 /// Score breakdown lines for the Chronicle detail panel.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ChronicleScoreSnapshot {
-    pub base_chips: i32,
-    pub yaku_chips: i32,
-    pub dora_chips: i32,
-    pub relic_chips: i32,
-    pub boss_mult_factor: f64,
+    pub base_fu: i32,
+    pub yaku_fu: i32,
+    pub dora_fu: i32,
+    pub relic_fu: i32,
+    pub boss_han_factor: f64,
     #[serde(default)]
     pub season_base_target: u32,
-    pub streak_mult_factor: f64,
+    pub streak_han_factor: f64,
     pub total: u64,
 }
 
@@ -329,7 +329,7 @@ pub fn format_run_seed(seed: u64) -> String {
 }
 
 fn yaku_display_han(y: YakuKind, level: u32) -> u32 {
-    (y.mult_bonus_at(level) * 2.0).round().max(1.0) as u32
+    (y.han_bonus_at(level) * 2.0).round().max(1.0) as u32
 }
 
 fn count_dora_in_source(source: &str) -> u32 {
@@ -372,49 +372,49 @@ fn score_snapshot_from_breakdown(
     breakdown: &ScoreBreakdown,
     season: Season,
 ) -> ChronicleScoreSnapshot {
-    let mut yaku_chips = 0i32;
-    let mut dora_chips = 0i32;
-    let mut relic_chips = 0i32;
-    let mut prev_chips = breakdown.base_chips;
+    let mut yaku_fu = 0i32;
+    let mut dora_fu = 0i32;
+    let mut relic_fu = 0i32;
+    let mut prev_fu = breakdown.base_fu;
     let mut boss_mult = 1.0f64;
     let mut streak_mult = 1.0f64;
 
     for step in &breakdown.steps {
-        let delta_chips = step.running_chips - prev_chips;
+        let delta_chips = step.running_fu - prev_fu;
         if step.source.starts_with("Dora") {
-            dora_chips += delta_chips;
+            dora_fu += delta_chips;
         } else if breakdown
             .detected_yaku
             .iter()
             .any(|y| step.source.starts_with(y.name()))
         {
-            yaku_chips += delta_chips;
-        } else if step.kind == StepKind::Chips && delta_chips != 0 {
-            relic_chips += delta_chips;
+            yaku_fu += delta_chips;
+        } else if step.kind == StepKind::Fu && delta_chips != 0 {
+            relic_fu += delta_chips;
         }
         if (step.source.contains("Boss") || step.source.contains("boss"))
-            && step.kind == StepKind::Mult
+            && step.kind == StepKind::Han
             && delta_chips == 0
         {
-            let mult_delta = step.running_mult / prev_chips.max(1) as f64;
-            if mult_delta > 1.0 {
-                boss_mult = mult_delta;
+            let han_delta = step.running_han / prev_fu.max(1) as f64;
+            if han_delta > 1.0 {
+                boss_mult = han_delta;
             }
         }
         if step.source.contains("Chain") || step.source.contains("Streak") {
-            streak_mult = step.running_mult;
+            streak_mult = step.running_han;
         }
-        prev_chips = step.running_chips;
+        prev_fu = step.running_fu;
     }
 
     ChronicleScoreSnapshot {
-        base_chips: breakdown.base_chips,
-        yaku_chips,
-        dora_chips,
-        relic_chips,
-        boss_mult_factor: boss_mult,
+        base_fu: breakdown.base_fu,
+        yaku_fu,
+        dora_fu,
+        relic_fu,
+        boss_han_factor: boss_mult,
         season_base_target: season.base_target(),
-        streak_mult_factor: streak_mult.max(1.0),
+        streak_han_factor: streak_mult.max(1.0),
         total: breakdown.total,
     }
 }

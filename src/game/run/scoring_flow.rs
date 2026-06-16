@@ -17,7 +17,7 @@ use crate::{
         scoring::{EffectiveRelics, ScoreBreakdown, score_sets_with_original, tile_is_debuffed},
         structure::{
             StructureTriggerKind, StructureTriggerMeta, can_trigger_structure,
-            is_winning_structure_shape, played_meld_chips, star_tile_yaku_pool,
+            is_winning_structure_shape, played_meld_fu, star_tile_yaku_pool,
             structure_cannot_grow_further,
         },
         tile::{Suit, Tile},
@@ -237,7 +237,7 @@ impl RunState {
             &original_for_wildcard,
         );
         let mut breakdown_total = breakdown.total;
-        if self.memorial_round.next_cashin_bonus_chips > 0 {
+        if self.memorial_round.next_cashin_bonus_fu > 0 {
             let yaku_ok = self
                 .memorial_round
                 .next_cashin_yaku
@@ -245,9 +245,9 @@ impl RunState {
                 .unwrap_or(true);
             if yaku_ok {
                 breakdown_total =
-                    breakdown_total.saturating_add(self.memorial_round.next_cashin_bonus_chips);
+                    breakdown_total.saturating_add(self.memorial_round.next_cashin_bonus_fu);
             }
-            self.memorial_round.next_cashin_bonus_chips = 0;
+            self.memorial_round.next_cashin_bonus_fu = 0;
             self.memorial_round.next_cashin_yaku = None;
         }
         let pre_round = self.round_score;
@@ -339,7 +339,7 @@ impl RunState {
             // Anti-synergy with Honor Fury / Windreader / Yakuhai is
             // deliberate — feeding the mask drains the supply those relics
             // depend on, which gives the build a real shape.
-            use crate::core::relic::TAOTIE_CHIPS_PER_DEVOURED;
+            use crate::core::relic::TAOTIE_FU_PER_DEVOURED;
             let mut devoured = 0i32;
             for tile in &scoring_tiles {
                 if matches!(tile.suit, Suit::Wind | Suit::Dragon) {
@@ -351,7 +351,7 @@ impl RunState {
             }
             if devoured > 0 {
                 *self.relic_counters.entry(RelicId::Taotie).or_insert(0) +=
-                    TAOTIE_CHIPS_PER_DEVOURED * devoured;
+                    TAOTIE_FU_PER_DEVOURED * devoured;
                 self.push_relic_activation(RelicId::Taotie);
                 bus.push(GameEvent::TilesDestroyed);
             }
@@ -405,10 +405,9 @@ impl RunState {
         if breakdown.flower_yen > 0 {
             self.apply_yen_reward(breakdown.flower_yen, Some(bus));
         }
-        let scored_full_hand = breakdown
-            .detected_yaku
-            .contains(&crate::core::yaku::YakuKind::FullHand);
-        if scored_full_hand {
+        let cashed_standard_hand =
+            crate::core::yaku::is_full_hand(&scoring_tiles, &sets);
+        if cashed_standard_hand {
             self.full_hand_played_this_round = true;
         }
         if self.relics.has(RelicId::KanDrum) {
@@ -439,7 +438,7 @@ impl RunState {
         self.last_breakdown = Some(breakdown);
         self.scored_last_turn = breakdown_total > 0;
 
-        if scored_full_hand {
+        if cashed_standard_hand {
             let treasures = EffectiveRelics::from_roster(&self.relics)
                 .count(&self.relics, RelicId::EightTreasures);
             for _ in 0..treasures {
@@ -777,9 +776,9 @@ impl RunState {
         true
     }
 
-    /// Played meld chips in structure (for HUD tiers).
-    pub fn structure_played_meld_chips(&self) -> i32 {
-        played_meld_chips(&self.structure_tiles, &self.structure_sets)
+    /// Played meld Fu in structure (for HUD tiers).
+    pub fn structure_played_meld_fu(&self) -> i32 {
+        played_meld_fu(&self.structure_tiles, &self.structure_sets)
     }
 
     /// Whether [`Self::trigger_structure_manual`] can score (structure non-empty and rules allow).
@@ -1134,6 +1133,6 @@ impl RunState {
 
 fn preview_yaku_bundle_weight(yaku: &[YakuKind]) -> i64 {
     yaku.iter()
-        .map(|y| y.chip_bonus() as i64 + (y.mult_bonus() * 100.0).round() as i64)
+        .map(|y| y.fu_bonus() as i64 + (y.han_bonus() * 100.0).round() as i64)
         .sum()
 }

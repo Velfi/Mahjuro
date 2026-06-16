@@ -827,26 +827,26 @@ fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, Vec<Ti
                 ),
                 tile_group_with_subtitle(
                     "5 Pinzu",
-                    "+5 chips",
+                    "+5 Fu",
                     vec![t(Suit::Pinzu, 5, 9)],
                     Suit::Pinzu.keyword_color(),
                 ),
                 tile_group_with_subtitle(
                     "Red Dragon",
-                    "+12 chips",
+                    "+12 Fu",
                     vec![t(Suit::Dragon, 1, 10)],
                     Suit::Dragon.keyword_color(),
                 ),
                 tile_group_with_subtitle(
                     "Flower",
-                    "+0 chips",
+                    "+0 Fu",
                     vec![t(Suit::Flower, 1, 11)],
                     Suit::Flower.keyword_color(),
                 ),
                 {
                     let mut tile = t(Suit::Pinzu, 1, 12);
                     tile.debuffed_visual = true;
-                    tile_group_with_subtitle("Debuffed tile", "+0 chips", vec![tile], color::STONE)
+                    tile_group_with_subtitle("Debuffed tile", "+0 Fu", vec![tile], color::STONE)
                 },
             ],
         ),
@@ -1204,14 +1204,15 @@ pub(crate) fn yaku_guide_detail(yk: YakuKind, kokushi_discovered: bool) -> YakuG
             requires: "Terminals and honors only",
             breaks_if: "Any number tile 2–8 appears.",
         },
-        YakuKind::FullHand => YakuGuideDetail {
-            rule: "Standard 14-tile shape: four melds plus one pair.",
-            requires: "4 melds · 1 pair",
-            breaks_if: if kokushi_discovered {
-                "Seven pairs, thirteen orphans, or wrong group sizes."
-            } else {
-                "Seven pairs or wrong group sizes."
-            },
+        YakuKind::Shousangen => YakuGuideDetail {
+            rule: "Two dragon triplets/kongs plus a pair of the third dragon on a full hand. Replaces dragon Yakuhai.",
+            requires: "2 dragon melds · 1 dragon pair · full hand",
+            breaks_if: "All three dragons are triplets (Daisangen instead).",
+        },
+        YakuKind::Daisangen => YakuGuideDetail {
+            rule: "All three dragon triplets/kongs on a full hand. Replaces dragon Yakuhai.",
+            requires: "Red · green · white dragon melds · full hand",
+            breaks_if: "Only two dragon triplets (Shousangen instead).",
         },
         YakuKind::Chinitsu => YakuGuideDetail {
             rule: "Pure suit — every tile from one number suit.",
@@ -1347,7 +1348,7 @@ fn draw_yaku_entry(
         ..Default::default()
     });
 
-    let stats = format!("+{} mult · +{} chips", yk.mult_bonus(), yk.chip_bonus());
+    let stats = format!("+{} Han · +{} Fu", yk.han_bonus(), yk.fu_bonus());
     let stats_y = band_top + name_h + h * 0.002;
     let stats_h = push_dense_text_lines(
         frame,
@@ -1647,18 +1648,25 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             ),
             ("Pair", MeldKind::Pair, Suit::Wind, &[1, 1], pair_color),
         ]),
-        YakuKind::FullHand => meld_groups(&[
+        YakuKind::Shousangen => meld_groups(&[
             (
-                "Sequence",
-                MeldKind::Sequence,
-                Suit::Manzu,
-                &[1, 2, 3],
-                seq_color,
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Dragon,
+                &[1, 1, 1],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Dragon,
+                &[2, 2, 2],
+                trip_color,
             ),
             (
                 "Sequence",
                 MeldKind::Sequence,
-                Suit::Souzu,
+                Suit::Manzu,
                 &[4, 5, 6],
                 seq_color,
             ),
@@ -1669,14 +1677,38 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 &[7, 7, 7],
                 trip_color,
             ),
+            ("Pair", MeldKind::Pair, Suit::Dragon, &[3, 3], pair_color),
+        ]),
+        YakuKind::Daisangen => meld_groups(&[
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Dragon,
+                &[1, 1, 1],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Dragon,
+                &[2, 2, 2],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Dragon,
+                &[3, 3, 3],
+                trip_color,
+            ),
             (
                 "Sequence",
                 MeldKind::Sequence,
                 Suit::Manzu,
-                &[7, 8, 9],
+                &[4, 5, 6],
                 seq_color,
             ),
-            ("Pair", MeldKind::Pair, Suit::Dragon, &[1, 1], pair_color),
+            ("Pair", MeldKind::Pair, Suit::Pinzu, &[8, 8], pair_color),
         ]),
         YakuKind::Chinitsu => meld_groups(&[
             (
@@ -2248,6 +2280,7 @@ fn zodiac_icon_asset(kind: ZodiacKind) -> &'static str {
         ZodiacKind::Qilin => "textures/zodiacs/zodiac_qilin.png",
         ZodiacKind::Phoenix => "textures/zodiacs/zodiac_phoenix.png",
         ZodiacKind::Crane => "textures/zodiacs/zodiac_crane.png",
+        ZodiacKind::Koi => "textures/zodiacs/zodiac_koi.png",
     }
 }
 
@@ -4146,10 +4179,10 @@ fn push_scoring_tile_values_panel(
             bold: true,
             ..Default::default()
         });
-        if let Some(chips) = group.subtitle {
+        if let Some(subtitle) = group.subtitle {
             frame.text(TextLabel {
                 rect: [col_x, name_y + name_h, col_w, value_h],
-                text: chips.into(),
+                text: subtitle.into(),
                 color: color::alpha(color::BRASS, 0.95),
                 align: TextAlign::Center,
                 font_px: Some(value_font),
@@ -4214,8 +4247,8 @@ fn push_scoring_yaku_relics_panel(
     });
     frame.text(TextLabel {
         rect: [x + col_example_w, header_y, col_num_w, header_h],
-        text: scoring_intro_copy::YAKU_TABLE_HEADER_CHIPS.into(),
-        color: color::keyword::CHIPS,
+        text: scoring_intro_copy::YAKU_TABLE_HEADER_FU.into(),
+        color: color::keyword::FU,
         align: TextAlign::Right,
         font_px: Some(caption_font),
         bold: true,
@@ -4223,8 +4256,8 @@ fn push_scoring_yaku_relics_panel(
     });
     frame.text(TextLabel {
         rect: [x + col_example_w + col_num_w, header_y, col_num_w, header_h],
-        text: scoring_intro_copy::YAKU_TABLE_HEADER_MULT.into(),
-        color: color::keyword::MULT,
+        text: scoring_intro_copy::YAKU_TABLE_HEADER_HAN.into(),
+        color: color::keyword::HAN,
         align: TextAlign::Right,
         font_px: Some(caption_font),
         bold: true,
@@ -4239,23 +4272,23 @@ fn push_scoring_yaku_relics_panel(
     let rows: [(&str, String, String); 3] = [
         (
             YakuKind::Tanyao.name(),
-            format!("+{} chips", YakuKind::Tanyao.chip_bonus()),
-            format!("+{:.1} mult", YakuKind::Tanyao.mult_bonus()),
+            format!("+{} Fu", YakuKind::Tanyao.fu_bonus()),
+            format!("+{:.1} Han", YakuKind::Tanyao.han_bonus()),
         ),
         (
             YakuKind::Yakuhai.name(),
-            format!("+{} chips", YakuKind::Yakuhai.chip_bonus()),
-            format!("+{:.1} mult", YakuKind::Yakuhai.mult_bonus()),
+            format!("+{} Fu", YakuKind::Yakuhai.fu_bonus()),
+            format!("+{:.1} Han", YakuKind::Yakuhai.han_bonus()),
         ),
         (
             scoring_intro_copy::YAKU_TABLE_RELIC_ROW,
-            format!("+{} chips", scoring_intro_copy::RELIC_EXAMPLE_CHIPS),
-            format!("+{:.1} mult", scoring_intro_copy::RELIC_EXAMPLE_MULT),
+            format!("+{} Fu", scoring_intro_copy::RELIC_EXAMPLE_FU),
+            format!("+{:.1} Han", scoring_intro_copy::RELIC_EXAMPLE_HAN),
         ),
     ];
 
     let mut row_y = header_y + header_h;
-    for (name, chips, mult) in rows {
+    for (name, fu, han) in rows {
         frame.text(TextLabel {
             rect: [x, row_y, col_example_w, row_h],
             text: name.into(),
@@ -4266,16 +4299,16 @@ fn push_scoring_yaku_relics_panel(
         });
         frame.text(TextLabel {
             rect: [x + col_example_w, row_y, col_num_w, row_h],
-            text: chips,
-            color: color::keyword::CHIPS,
+            text: fu,
+            color: color::keyword::FU,
             align: TextAlign::Right,
             font_px: Some(micro_font),
             ..Default::default()
         });
         frame.text(TextLabel {
             rect: [x + col_example_w + col_num_w, row_y, col_num_w, row_h],
-            text: mult,
-            color: color::keyword::MULT,
+            text: han,
+            color: color::keyword::HAN,
             align: TextAlign::Right,
             font_px: Some(micro_font),
             ..Default::default()
@@ -4318,8 +4351,8 @@ fn push_scoring_final_score_panel(
     let detail_y = y + eq_h;
     let detail_line_h = detail_h * 0.5;
     for (i, line) in [
-        scoring_intro_copy::FINAL_CHIPS_LINE,
-        scoring_intro_copy::FINAL_MULT_LINE,
+        scoring_intro_copy::FINAL_FU_LINE,
+        scoring_intro_copy::FINAL_HAN_LINE,
     ]
     .iter()
     .enumerate()
@@ -5861,7 +5894,10 @@ pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
         YakuKind::ChickenHand => "Valid hand with no other yaku",
         YakuKind::Tanyao => "All tiles ranked 2\u{2013}8",
         YakuKind::Toitoi => "At least two triplets/kongs, no sequences",
-        YakuKind::FullHand => "Four melds and one pair (not seven pairs)",
+        YakuKind::Shousangen => {
+            "Two dragon triplets/kongs plus a pair of the third dragon (full hand)"
+        }
+        YakuKind::Daisangen => "All three dragon triplets/kongs (full hand)",
         YakuKind::Yakuhai => "Each dragon or matching wind triplet/kong; stacks",
         YakuKind::Iipeikou => "Two identical sequences in the same suit",
         YakuKind::Ryanpeikou => "Two doubled sequences in one suit (full hand)",
@@ -5896,21 +5932,21 @@ mod tests {
     /// so the bone tablets under each structure are non-empty.
     #[test]
     fn yaku_intro_examples_score_yaku_for_tablets() {
-        let full_hand = vec![
-            tile(Suit::Manzu, 2, 20),
-            tile(Suit::Manzu, 3, 21),
-            tile(Suit::Manzu, 4, 22),
-            tile(Suit::Souzu, 5, 23),
-            tile(Suit::Souzu, 6, 24),
-            tile(Suit::Souzu, 7, 25),
-            tile(Suit::Pinzu, 8, 26),
-            tile(Suit::Pinzu, 8, 27),
-            tile(Suit::Pinzu, 8, 28),
-            tile(Suit::Pinzu, 3, 29),
-            tile(Suit::Pinzu, 3, 30),
-            tile(Suit::Pinzu, 3, 31),
-            tile(Suit::Wind, 2, 32),
-            tile(Suit::Wind, 2, 33),
+        let shousangen = vec![
+            tile(Suit::Dragon, 1, 0),
+            tile(Suit::Dragon, 1, 1),
+            tile(Suit::Dragon, 1, 2),
+            tile(Suit::Dragon, 2, 3),
+            tile(Suit::Dragon, 2, 4),
+            tile(Suit::Dragon, 2, 5),
+            tile(Suit::Dragon, 3, 6),
+            tile(Suit::Dragon, 3, 7),
+            tile(Suit::Manzu, 2, 8),
+            tile(Suit::Manzu, 3, 9),
+            tile(Suit::Manzu, 4, 10),
+            tile(Suit::Souzu, 5, 11),
+            tile(Suit::Souzu, 5, 12),
+            tile(Suit::Souzu, 5, 13),
         ];
         let with_kong = vec![
             tile(Suit::Manzu, 1, 40),
@@ -5944,7 +5980,7 @@ mod tests {
             tile(Suit::Souzu, 5, 71),
         ];
         for (name, hand) in [
-            ("full hand", &full_hand),
+            ("shousangen", &shousangen),
             ("with kong", &with_kong),
             ("chinitsu", &chinitsu),
         ] {
@@ -5958,11 +5994,11 @@ mod tests {
                 "{name}: expected at least one yaku tablet, got none"
             );
         }
-        assert!(example_structure_yaku(&full_hand).contains(&YakuKind::FullHand));
+        assert!(example_structure_yaku(&shousangen).contains(&YakuKind::Shousangen));
         assert!(example_structure_yaku(&with_kong).contains(&YakuKind::Yakuhai));
         assert!(example_structure_yaku(&chinitsu).contains(&YakuKind::Chinitsu));
         assert!(example_structure_yaku(&chinitsu).contains(&YakuKind::Tanyao));
-        assert!(!example_structure_yaku(&chinitsu).contains(&YakuKind::FullHand));
+        assert!(!example_structure_yaku(&chinitsu).contains(&YakuKind::Shousangen));
     }
 
     /// Every `yaku_page()` canonical hand must actually score as its named

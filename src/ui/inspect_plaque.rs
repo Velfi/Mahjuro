@@ -438,10 +438,10 @@ pub fn gameplay_consumable_description_full(
 ) -> String {
     match c {
         Consumable::Zodiac(z) => format!(
-            "Levelled by the {} zodiac ribbon (+{:.2} mult, +{} chips per level).",
+            "Levelled by the {} zodiac ribbon (+{:.2} Han, +{} Fu per level).",
             z.name(),
-            z.level_up_mult_per_level(),
-            z.level_up_chips_per_level(),
+            z.level_up_han_per_level(),
+            z.level_up_fu_per_level(),
         ),
         Consumable::Talisman(t) => t.description().to_string(),
         Consumable::Memorial(m) => m.description(memorial_snapshot),
@@ -452,10 +452,10 @@ pub fn gameplay_consumable_description_full(
 pub fn dora_focus_tooltip_strings(
     dora_faces: &[(crate::core::tile::Suit, u8)],
 ) -> (String, String, String) {
-    use crate::core::scoring::DORA_CHIPS_PER_TILE;
+    use crate::core::scoring::DORA_FU_PER_TILE;
     use crate::core::tile::Tile;
 
-    let desc = format!("Dora tiles score +{DORA_CHIPS_PER_TILE} extra.");
+    let desc = format!("Dora tiles score +{DORA_FU_PER_TILE} extra.");
     if dora_faces.is_empty() {
         return ("Dora".to_string(), String::new(), desc);
     }
@@ -542,14 +542,14 @@ pub fn hand_tile_keyword_lines(
     match tile.suit {
         Suit::Flower => {
             lines.push(("Flower · wildcard in one meld".into(), color::STONE));
-            lines.push(("Face · no base chips".into(), color::UMBER));
+            lines.push(("Face · no base Fu".into(), color::UMBER));
         }
         Suit::Season => {
             lines.push(("Season · bonus tile".into(), color::STONE));
         }
         _ => {
             lines.push((
-                format!("Base · {} chips", tile.point_value()),
+                format!("Base · {} score", tile.point_value()),
                 color::CHAMPAGNE,
             ));
         }
@@ -557,8 +557,8 @@ pub fn hand_tile_keyword_lines(
 
     let face = (tile.suit, tile.rank);
     if dora_faces.contains(&face) {
-        use crate::core::scoring::DORA_CHIPS_PER_TILE;
-        lines.push((format!("Dora · +{DORA_CHIPS_PER_TILE} chips"), color::GOLD));
+        use crate::core::scoring::DORA_FU_PER_TILE;
+        lines.push((format!("Dora · +{DORA_FU_PER_TILE} Fu"), color::GOLD));
     }
 
     if let Some(e) = tile.enhancement {

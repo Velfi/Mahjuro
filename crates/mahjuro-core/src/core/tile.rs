@@ -44,11 +44,11 @@ impl Suit {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TileEnhancement {
-    /// Flat chips per scored meld that includes this stamp (see scoring pipeline; Polychrome’s chip twin).
+    /// Flat Fu per scored meld that includes this stamp (see scoring pipeline; Polychrome’s chip twin).
     Pearl,
     /// +¥1 yen once per scored meld that includes this stamp (pairs included).
     Gilded,
-    /// ×1.25 mult applied once per meld that contains this tile.
+    /// ×1.25 Han applied once per meld that contains this tile.
     Polychrome,
 }
 

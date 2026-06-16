@@ -1360,8 +1360,8 @@ fn push_career_insights_band(
         let meta_y = summary_y + val_h + stack * 0.35;
         let meta = format!(
             "{} · avg {} · {}×",
-            archive_career::format_chips_compact(rec.best_structure_score),
-            archive_career::format_chips_compact(stats.avg_score),
+            archive_career::format_score_compact(rec.best_structure_score),
+            archive_career::format_score_compact(stats.avg_score),
             stats.times_used
         );
         push_colored_label_clipped(
@@ -1562,13 +1562,13 @@ fn push_career_pane(h: f32, _w: f32, draw: ChroniclePaneDraw<'_>) {
     let callout = if avg_score > 0 {
         format!(
             "Avg {} · Peak {}",
-            archive_career::format_chips_compact(avg_score),
-            archive_career::format_chips_compact(personal_best)
+            archive_career::format_score_compact(avg_score),
+            archive_career::format_score_compact(personal_best)
         )
     } else {
         format!(
             "Peak {}",
-            archive_career::format_chips_compact(personal_best)
+            archive_career::format_score_compact(personal_best)
         )
     };
     push_label_clipped(
@@ -1852,7 +1852,7 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
         &format!(
             "{} · {}",
             model.signature_name,
-            archive_career::format_chips(model.signature_score)
+            archive_career::format_score_with_unit(model.signature_score)
         ),
         color::PARCHMENT,
         body,

@@ -120,7 +120,7 @@ pub mod try_it {
 
     pub const PLAY: &str = "You **Play**ed a meld to your structure.";
     pub const DISCARD: &str = "Discarded tiles are removed to the river.";
-    pub const CASH_IN: &str = "Demo: 4 **chips** × 3 **mult** = 12";
+    pub const CASH_IN: &str = "Demo: 4 **Fu** × 3 **Han** = 12";
 
     /// Every flash line; used to reserve callout height for the tallest variant.
     pub const FLASH_LINES: &[&str] = &[CASH_IN, PLAY, DISCARD];
@@ -146,7 +146,7 @@ pub mod lessons {
 
     pub const FINALE_INTRO: &str = "You must now prepare to undergo an ordeal — The Iconoclast\n\n\
          The Iconoclast changes the rules of the game, debuffing Wind and Dragon tiles. \
-         Debuffed tiles still form melds and yaku, but contribute +0 chips when you Cash In. \
+         Debuffed tiles still form melds and yaku, but contribute +0 Fu when you Cash In. \
          The blue **Guide** book on the table contains a refresher of mechanics.";
 }
 
@@ -162,12 +162,12 @@ pub mod summary {
     pub const SUBTITLE_LOST: &str = "You reached the finale but faltered against The Iconoclast. Perhaps you'll fare better next time.";
 
     pub const BULLET_SCORING: &str =
-        "Select melds, **Play** to Structure, then **Cash In** to score (**chips** × **mult**).";
+        "Select melds, **Play** to Structure, then **Cash In** to score (**Fu** × **Han**).";
     pub const BULLET_DISCARD: &str =
         "**Discard** tiles you don't need to draw replacements and build a stronger structure.";
     pub const BULLET_GUIDE: &str =
         "Open the **Guide** book on the table for tiles, melds, yaku, and scoring.";
-    pub const BULLET_YAKU: &str = "Full Hand and Chiitoitsu are good yaku to learn first.";
+    pub const BULLET_YAKU: &str = "Shousangen and Chiitoitsu are good yaku to learn first.";
     pub const BULLET_PROGRESS: &str =
         "The more you play, the more the house will reveal to you. How far will you go?";
 

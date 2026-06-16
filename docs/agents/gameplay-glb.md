@@ -24,8 +24,8 @@ Blender object names must match glTF node names exactly:
 | `player_guidebook` | Procedural guide book (`Object3dKind::Book`; spine label "Guide"; opens guide on click) |
 | `score_cascade_reel` | Score odometer fly-to anchor during cascade hand-off |
 | `score_pops_lerp_target` | Cascade score-popup stream destination (`+50`, `×3`, …) |
-| `score_cascade_pad` | Center of the chips × mult HUD trio |
-| `score_cascade_chips` / `score_cascade_mult` | Chip / mult accumulator token destinations |
+| `score_cascade_pad` | Center of the Fu × Han HUD trio |
+| `score_cascade_chips` / `score_cascade_mult` | Chip / Han accumulator token destinations |
 | `score_cascade_src_chips` / `score_cascade_src_mult` / `score_cascade_src_misc` | Popup launch points for steps not tied to structure tiles, relics, or yaku tablets |
 
 Static geometry (table surface, dishes, candles, score `frame`, …) is part of the environment mesh. Do not duplicate those with procedural `Object3d`.

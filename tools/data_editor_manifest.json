@@ -18,8 +18,8 @@
     "fields": [
       { "key": "id", "type": "string", "readonly": true },
       { "key": "name", "type": "string" },
-      { "key": "mult_bonus", "type": "number", "step": "any" },
-      { "key": "chip_bonus", "type": "number", "step": 1 }
+      { "key": "han_bonus", "type": "number", "step": "any" },
+      { "key": "fu_bonus", "type": "number", "step": 1 }
     ]
   },
   "seasons": {

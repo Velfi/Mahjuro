@@ -39,9 +39,9 @@ Mahjuro is a mahjong-inspired roguelite that makes mahjong approachable for west
 
 **Enhancements** (persistent on tiles while they stay in hand / until played) come from shop **talismans**—buff talismans stamp **every tile in hand** at use time (Brocade Pouch extends that stamp to all future draws):
 
-* **Pearl** — +100 chips per scored meld containing the tile
-* **Gilded** — +¥1 per scored meld containing the tile (separate from the chips × mult total)
-* **Polychrome** — +0.25 mult (additive) per scored meld containing the tile (→ ×1.25 when that is the only mult source on the hand)
+* **Pearl** — +100 Fu per scored meld containing the tile
+* **Gilded** — +¥1 per scored meld containing the tile (separate from the Fu × Han total)
+* **Polychrome** — +0.25 Han (additive) per scored meld containing the tile (→ ×1.25 when that is the only Han source on the hand)
 
 Additional talismans **transform** every tile in hand at use time (suit shifts, honors, flowers, conformity, etc.); each affected wall copy is tombstoned and replaced with the transformed tile for the rest of the run.
 
@@ -55,22 +55,22 @@ Meld **shape** drives yaku detection and relic triggers, but **base chips** are 
 | Wind / Dragon | 15 each |
 | Flower / Season | 0 (structural wildcard only) |
 
-| Meld     | Tiles              | Example base chips |
+| Meld     | Tiles              | Example base Fu |
 | -------- | ------------------ | ------------------ |
 | Pair     | 2 identical        | pair of 5s → 10    |
 | Sequence | 3 consecutive      | 1-2-3 → 6          |
 | Triplet  | 3 identical        | triplet of 3s → 9  |
 | Kong     | 4 identical        | kong of 9s → 36    |
 
-Debuffed tiles contribute **0**. Boss / round rules can modify meld base chips (e.g. **Pairs Score Zero** zeroes pair tile value; **Sequences Halved** floor-divides sequence tile value by 2).
+Debuffed tiles contribute **0**. Boss / round rules can modify meld base Fu (e.g. **Pairs Score Zero** zeroes pair tile value; **Sequences Halved** floor-divides sequence tile value by 2).
 
-**Dora** — each round shows dora face(s) on the plinth (derived from wall picks; the displayed face is what pays). Every matching tile in the scored hand adds **+100 chips**. **Dora Crown** reveals an extra indicator and adds **+50 chips** per matching tile per Crown copy. Meta tier **L6** still flags dora in level-up messaging.
+**Dora** — each round shows dora face(s) on the plinth (derived from wall picks; the displayed face is what pays). Every matching tile in the scored hand adds **+100 Fu**. **Dora Crown** reveals an extra indicator and adds **+50 chips** per matching tile per Crown copy. Meta tier **L6** still flags dora in level-up messaging.
 
 ### **D. Yaku (Hand Patterns)**
 
-Many **yaku** are implemented (exact list and bonuses live in `assets/data/yaku.json`). They add chips and/or mult on top of meld scoring. Patterns include:
+Many **yaku** are implemented (exact list and bonuses live in `assets/data/yaku.json`). They add Fu and/or Han on top of meld scoring. Patterns include:
 
-* **Structure / value:** FullHand (4 melds + pair), Yakuhai (dragon or round-wind triplet), Chicken Hand (valid structure with no other yaku), Pinfu (all-chow full hand; pair is 2–8 in a number suit)
+* **Structure / value:** Shousangen (two dragon triplets + dragon pair), Daisangen (three dragon triplets), Yakuhai (dragon or round-wind triplet), Chicken Hand (valid structure with no other yaku), Pinfu (all-chow full hand; pair is 2–8 in a number suit)
 * **Suit / composition:** Tanyao (2–8 only), Toitoi (all triplets/kongs), Iipeikou (doubled sequence on a full hand), Ryanpeikou (two doubled sequences), Sanshoku Doujun (same sequence in three suits), Sanshoku Doukou (same triplet in three suits), Ittsu (1–9 straight one suit), Honitsu (one number suit + honors), Chinitsu (one number suit), Chanta (every meld has a terminal or honor), Junchan (all tiles are 1/9 or honor, every meld has a terminal or honor), Honroutou (terminals and honors only), Chiitoitsu (seven pairs), Kokushi Musō (thirteen orphans)
 
 In normal runs the **full yaku list** is scoring-eligible (`assets/data/yaku.json`). **Kokushi Musō** stays secret in journal/previews until the first time it is cashed in, but the scorer still awards it when the hand qualifies.
@@ -79,19 +79,19 @@ Yaku level up via **zodiacs**: each use on a card boosts its bound yaku by **`+5
 
 ### **E. Scoring System**
 
-`final_score = floor(chips × mult)`
+`final_score = floor(Fu × Han)`
 
 Scoring runs in layers (`src/core/scoring/`):
 
 1. **Base melds** — sum each scored tile's `point_value()`; one cascade line per meld.
-2. **Pre-yaku layer** — meld-type relic chips (Triplet Boost, Sequence Surge, Pair Power, …), talisman enhancements, flower relics, retrigger chips, etc.
-3. **Dora & yaku** — dora chip lines, then each detected yaku's leveled chip and mult bonuses.
-4. **Post-yaku relic mults** — conditional mult relics, **Honor Triple Score** / **No-Sequence Bonus** rules, Way of Purity paths, etc.
+2. **Pre-yaku layer** — meld-type relic Fu (Triplet Boost, Sequence Surge, Pair Power, …), talisman enhancements, flower relics, retrigger Fu, etc.
+3. **Dora & yaku** — dora chip lines, then each detected yaku's leveled chip and Han bonuses.
+4. **Post-yaku relic mults** — conditional Han relics, **Honor Triple Score** / **No-Sequence Bonus** rules, Way of Purity paths, etc.
 
 * **Chips** start at the meld tile-value sum and accumulate additively from yaku, dora, relics, and enhancements.
 * **Mult** starts at **1.0** and grows **additively** (`+N mult` steps stack into the displayed multiplier—e.g. three +2 lines → ×7).
-* **Gold** from Gilded talisman, Hanami, etc. is tracked on a separate axis in the cascade (not part of chips × mult).
-* The popup animation walks every step; chip lines are grouped before mult lines for readability.
+* **Gold** from Gilded talisman, Hanami, etc. is tracked on a separate axis in the cascade (not part of Fu × Han).
+* The popup animation walks every step; chip lines are grouped before Han lines for readability.
 
 ### **F. Relics**
 
@@ -107,7 +107,7 @@ A large **relic** pool is implemented (see `assets/data/relics.json`), spanning 
 * **Retrigger, polish, lanterns, mirror** — LastBreath, TilePolisher, PaperLantern, StoneLantern, MirrorTile, Geese, VoiceOfThePeople, VoiceOfTheElite, TeaCeremony, GhostHand
 * **Ramp, fragile evolutions, inventory tricks** — Humility, Obsession, Bonfire, RiverRunner, MeltingIce, Taotie, SilkThread, SilkMoth, ShadowHand, SolitarySage, Disgust
 * **Hand-shape mult** — WayOfPairs, WayOfTriplets, WayOfSequences, WayOfPurity
-* **Chance mult & sell effects** — FortunesFavor, CrackedTile, StarTile, HungryGhost
+* **Chance Han & sell effects** — FortunesFavor, CrackedTile, StarTile, HungryGhost
 * **Run-wide payouts & rule bends** — CurioCabinet, LotusBloom, WallWeaver, KongCollector, NoHonorButWealth, Sweepstakes, BeggarsCup, Cosmopolitan, Heirloom, Tourist, Kintsugi, AntTrail, BrocadePouch
 
 Relics use **Common / Uncommon / Rare / Legendary** tiers (see `relics.json`) for shop presentation and pricing.
@@ -209,7 +209,7 @@ The original MVP scope is fully implemented and significantly exceeded:
 | --------------------------------- | ----------- | ----------------------------------------- |
 | Tile draw/discard                 | Done        | Wall refill, discard bowl, river mesh     |
 | Pair / Triplet / Sequence         | Done        | + Kong, flower wildcards, structure   |
-| Scoring system                    | Done        | Balatro-style chips × mult with cascades  |
+| Scoring system                    | Done        | Balatro-style Fu × Han with cascades  |
 | 10–15 relics                      | Exceeded    | Large pool — `assets/data/relics.json`    |
 | 1–2 rule modifiers                | Exceeded    | Broad `RuleModifier` set + rich boss hooks |
 | Score targets                     | Done        | Full ante ladder (**Small / Big / Boss** per ante); **Spring–Winter seasons** |

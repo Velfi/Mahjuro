@@ -125,7 +125,7 @@ Replace all “selection melds” paths to use `chosen_selection_sets()`:
 
 ### 6. Docs
 
-Short subsection in [`docs/agents/scoring.md`](docs/agents/scoring.md): ambiguous plays show grouping; comma/period (and chips) cycle before Play.
+Short subsection in [`docs/agents/scoring.md`](docs/agents/scoring.md): ambiguous plays show grouping; comma/period (and Fu) cycle before Play.
 
 ## Out of scope (follow-ups)
 

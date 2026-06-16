@@ -82,7 +82,7 @@ The only sustained musical sequence in the moment-to-moment loop. Treat it as a 
 | `ScoreStep` | Per reveal beat, layered with `ScoreTick`. | Soft percussive accent that supports the climb without competing with it. Tonally neutral. |
 | `ScoreTick` (base sample) | Fires per reveal beat, pitched up the chromatic ladder via `SCORE_TICK_PITCHES` (8 semitones). | The base sample must be a **single short tuned-percussion strike** at the cascade root (clave or finger cymbal). The engine handles pitching it up the ladder. |
 | `DoraScored` | Per dora tile, 180 ms staggered (rolling ding-ding-ding). | Single struck-bell tine at a fixed pitch — suggestion: a **perfect fifth above the cascade root**. Recurring decoration; pitch must be in-key with the music or the climb falls apart. |
-| `CascadeMerge` | Chips × mult trio snaps together at the start of the hand-off tween. | One continuous gesture *in two parts* with `CascadeLaunch` — pitched-up swirl that signals "the accounting is done." Same instrument as `CascadeLaunch`. |
+| `CascadeMerge` | Chips × Han trio snaps together at the start of the hand-off tween. | One continuous gesture *in two parts* with `CascadeLaunch` — pitched-up swirl that signals "the accounting is done." Same instrument as `CascadeLaunch`. |
 | `CascadeLaunch` | Merged total leaves the pad and flies toward the score reel. | Second half of the gesture — release whoosh that resolves out of `CascadeMerge`. Same instrument. |
 | `CascadeLand` | Merged total lands in the score reel. | Today: `Snap.ogg`. **Keep** — the totals are a tile-sized object landing. |
 | `ScoreCrescendo` | Layered on top of `ScoreFinal` for closing weight. | Single two-beat resolution in the cascade's key, paired with `ScoreFinal`. Brassy hit with weight. |

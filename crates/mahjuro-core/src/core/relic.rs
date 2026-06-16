@@ -152,7 +152,7 @@ pub fn monarch_butterfly_tier(excess: i32) -> i32 {
 }
 
 #[inline]
-pub fn monarch_butterfly_bonus_chips(excess: i32) -> i32 {
+pub fn monarch_butterfly_bonus_fu(excess: i32) -> i32 {
     monarch_butterfly_tier(excess).saturating_mul(MONARCH_CHIPS_PER_TIER)
 }
 
@@ -454,7 +454,7 @@ impl RelicId {
         counters: &std::collections::BTreeMap<RelicId, i32>,
         gold: i32,
         inventory_focus: Option<(&RelicState, usize)>,
-        ghost_hand_chips_preview: Option<i32>,
+        ghost_hand_fu_preview: Option<i32>,
         wing: Option<u32>,
     ) -> String {
         use crate::core::relic_desc_template::{
@@ -472,7 +472,7 @@ impl RelicId {
             gold,
             relics,
             slot,
-            ghost_hand_chips_preview,
+            ghost_hand_fu_preview,
             wing,
             live: inventory_focus.is_some(),
         };
@@ -941,7 +941,7 @@ pub struct ScoreEconomyBundle {
 pub const KINDLING_STACK_CAP: i32 = 30;
 /// Mult added per prior cash-in (run-total) on Kindling.
 pub const KINDLING_MULT_PER_CASHIN: f64 = 0.4;
-/// Maximum mult Kindling can add on a cash-in.
+/// Maximum Han Kindling can add on a cash-in.
 pub const KINDLING_MULT_CAP: f64 = 10.0;
 
 /// Cleared blinds counted toward Snowball (cap).
@@ -949,9 +949,9 @@ pub const SNOWBALL_STACK_CAP: i32 = 15;
 /// Chips added per scored hand for each blind clear counted on Snowball (before mult).
 pub const SNOWBALL_CHIPS_PER_CLEAR: i32 = 25;
 
-/// Flat chips from Turtle Shell while the run still holds yen (`yen > 0` at score time).
+/// Flat Fu from Turtle Shell while the run still holds yen (`yen > 0` at score time).
 /// The relic is removed when run yen hits zero or below (handled in the run yen-change hook).
-pub const TURTLE_SHELL_CHIPS: i32 = 300;
+pub const TURTLE_SHELL_FU: i32 = 300;
 
 /// Starting chip bonus for Melting Ice (also used when the counter is first set).
 pub const MELTING_ICE_START_CHIPS: i32 = 120;
@@ -963,7 +963,7 @@ pub const MELTING_ICE_DECAY_PER_PLAY: i32 = 12;
 pub const TAOTIE_BASE_CHIPS: i32 = 120;
 
 /// Permanent chip growth per honor devoured by Taotie.
-pub const TAOTIE_CHIPS_PER_DEVOURED: i32 = 30;
+pub const TAOTIE_FU_PER_DEVOURED: i32 = 30;
 
 /// Permanent chip growth per sequence scored while River Runner is owned.
 pub const RIVER_RUNNER_CHIPS_PER_SEQUENCE: i32 = 30;
@@ -973,13 +973,13 @@ pub const TILE_POLISHER_CHIPS_PER_TILE: i32 = 5;
 
 /// Mult bonus from Golden Engine (+1 per 3 gold held at score time).
 #[inline]
-pub fn golden_engine_mult_bonus(gold: i32) -> i32 {
+pub fn golden_engine_han_bonus(gold: i32) -> i32 {
     ((gold.max(0) as f64 / 3.0).floor() as i32).min(12)
 }
 
 /// Mult from Kindling for one scored hand (`total_cash_ins` = run-total cash-ins while owned).
 #[inline]
-pub fn kindling_mult_bonus(total_cash_ins: i32) -> f64 {
+pub fn kindling_han_bonus(total_cash_ins: i32) -> f64 {
     if total_cash_ins <= 0 {
         return 0.0;
     }
@@ -989,7 +989,7 @@ pub fn kindling_mult_bonus(total_cash_ins: i32) -> f64 {
 
 /// Chips from Snowball for one scored hand (`stacks` = blind clears while owned, capped).
 #[inline]
-pub fn snowball_score_chips(stacks: i32) -> i32 {
+pub fn snowball_score_fu(stacks: i32) -> i32 {
     if stacks <= 0 {
         return 0;
     }
@@ -1016,36 +1016,36 @@ mod tests {
     use super::{
         KINDLING_MULT_CAP, KINDLING_STACK_CAP, RelicFlavorSpan, RelicId, RelicState,
         SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP, all_relic_defs, apply_merchants_eye_discount,
-        golden_engine_mult_bonus, kindling_mult_bonus, relic_buy_price, relic_shop_price,
-        snowball_score_chips,
+        golden_engine_han_bonus, kindling_han_bonus, relic_buy_price, relic_shop_price,
+        snowball_score_fu,
     };
 
     #[test]
     fn golden_engine_mult_scales_per_three_gold() {
-        assert_eq!(golden_engine_mult_bonus(0), 0);
-        assert_eq!(golden_engine_mult_bonus(2), 0);
-        assert_eq!(golden_engine_mult_bonus(3), 1);
-        assert_eq!(golden_engine_mult_bonus(5), 1);
-        assert_eq!(golden_engine_mult_bonus(24), 8);
-        assert_eq!(golden_engine_mult_bonus(-3), 0);
+        assert_eq!(golden_engine_han_bonus(0), 0);
+        assert_eq!(golden_engine_han_bonus(2), 0);
+        assert_eq!(golden_engine_han_bonus(3), 1);
+        assert_eq!(golden_engine_han_bonus(5), 1);
+        assert_eq!(golden_engine_han_bonus(24), 8);
+        assert_eq!(golden_engine_han_bonus(-3), 0);
     }
 
     #[test]
-    fn snowball_chips_flat_per_clear_and_caps_stacks() {
-        assert_eq!(snowball_score_chips(3), 3 * SNOWBALL_CHIPS_PER_CLEAR);
+    fn snowball_fu_flat_per_clear_and_caps_stacks() {
+        assert_eq!(snowball_score_fu(3), 3 * SNOWBALL_CHIPS_PER_CLEAR);
         assert_eq!(
-            snowball_score_chips(SNOWBALL_STACK_CAP + 50),
+            snowball_score_fu(SNOWBALL_STACK_CAP + 50),
             SNOWBALL_STACK_CAP * SNOWBALL_CHIPS_PER_CLEAR
         );
     }
 
     #[test]
-    fn kindling_mult_scales_per_cashin_and_caps() {
-        assert_eq!(kindling_mult_bonus(0), 0.0);
-        assert_eq!(kindling_mult_bonus(2), 0.8);
-        assert_eq!(kindling_mult_bonus(KINDLING_STACK_CAP), KINDLING_MULT_CAP);
+    fn kindling_han_scales_per_cashin_and_caps() {
+        assert_eq!(kindling_han_bonus(0), 0.0);
+        assert_eq!(kindling_han_bonus(2), 0.8);
+        assert_eq!(kindling_han_bonus(KINDLING_STACK_CAP), KINDLING_MULT_CAP);
         assert_eq!(
-            kindling_mult_bonus(KINDLING_STACK_CAP + 10),
+            kindling_han_bonus(KINDLING_STACK_CAP + 10),
             KINDLING_MULT_CAP
         );
     }

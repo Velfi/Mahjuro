@@ -134,11 +134,11 @@ impl RunState {
                 self.sync_round_resource_caps();
             }
             MemorialTalismanKind::MeldMason => {
-                self.memorial_round.next_cashin_bonus_chips = 80;
+                self.memorial_round.next_cashin_bonus_fu = 80;
                 self.memorial_round.next_cashin_yaku = snapshot.and_then(|s| s.dominant_yaku);
             }
             MemorialTalismanKind::DeepWalker => {
-                self.memorial_round.next_cashin_bonus_chips = 60;
+                self.memorial_round.next_cashin_bonus_fu = 60;
                 self.memorial_round.next_cashin_yaku = None;
             }
             MemorialTalismanKind::DeadOnArrival => {

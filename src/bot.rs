@@ -28,7 +28,7 @@ use crate::core::hand::detect_all_sets;
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
     ScoreRoundBundle, ScoreTileBundle, all_relic_defs, apply_merchants_eye_discount,
-    golden_engine_mult_bonus, relic_sell_price_live, relic_shop_price,
+    golden_engine_han_bonus, relic_sell_price_live, relic_shop_price,
 };
 use crate::core::rules::{ChamberKind, RuleModifier};
 use crate::core::scoring::{
@@ -616,8 +616,8 @@ pub(crate) fn build_bot_scoring_action(
         relic_points: None,
         other_points: None,
         yen_held: Some(yen_before),
-        golden_engine_mult_bonus: golden_engine_active
-            .then_some(golden_engine_mult_bonus(yen_before)),
+        golden_engine_han_bonus: golden_engine_active
+            .then_some(golden_engine_han_bonus(yen_before)),
         yaku: Vec::new(),
         yaku_steps: Vec::new(),
         relic_steps: Vec::new(),
@@ -1889,7 +1889,7 @@ pub(crate) fn best_play_score_for_hand(
     .unwrap_or(0)
 }
 
-/// Best-play value for shop/talisman estimates: blind chips plus yen converted at
+/// Best-play value for shop/talisman estimates: blind Fu plus yen converted at
 /// target÷clear_reward so Gilded and other yen sources compete with score upgrades.
 fn best_play_shop_value_for_hand(
     run: &RunState,
@@ -3012,8 +3012,8 @@ fn play_run_with_options(
                     .map(|&id| relic_display_name(id).to_string())
                     .collect(),
                 yen_held: Some(run.yen),
-                golden_engine_mult_bonus: golden_engine_active
-                    .then_some(golden_engine_mult_bonus(run.yen)),
+                golden_engine_han_bonus: golden_engine_active
+                    .then_some(golden_engine_han_bonus(run.yen)),
                 relic_state: peak_chamber_relic_state(&run),
                 scoring_actions: chamber_scoring,
             });

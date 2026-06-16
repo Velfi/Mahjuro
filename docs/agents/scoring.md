@@ -8,13 +8,13 @@
 
 ---
 
-## Tiles → chips
+## Tiles → Fu
 
-Each tile adds chips when scored:
+Each tile adds Fu when scored:
 
-- **Number tiles** (1–9 suits) → chips = **rank** (a 5 is +5, a 9 is +9)
+- **Number tiles** (1–9 suits) → Fu = **rank** (a 5 is +5, a 9 is +9)
 - **Winds & dragons** → **+12** each
-- **Flowers** → **+0** (they help form melds, but don't add chips)
+- **Flowers** → **+0** (they help form melds, but don't add Fu)
 - **Debuffed tiles** → **+0**
 
 ---
@@ -30,7 +30,7 @@ A meld is a valid group of tiles:
 | **Triplet** | 3 of a kind |
 | **Kong** | 4 of a kind |
 
-Melds contribute **only through their tile values** — there is no separate per-meld chip bonus.
+Melds contribute **only through their tile values** — there is no separate per-meld Fu bonus.
 
 You can play **one meld or many** in a single play, as long as every selected tile fits into melds.
 
@@ -47,9 +47,9 @@ Playing into structure **does not** add to your round score. Only **Cash In** do
 
 ---
 
-## Yaku → big chip + mult bonuses
+## Yaku → big Fu + Han bonuses
 
-**Yaku** are named patterns checked against your **whole structure**. Each one adds **+chips** and **+mult**.
+**Yaku** are named patterns checked against your **whole structure**. Each one adds **+Fu** and **+Han**.
 
 There is **no** universal rule like "yaku = 2+ melds." Each yaku has its own requirement:
 
@@ -66,12 +66,12 @@ There is **no** universal rule like "yaku = 2+ melds." Each yaku has its own req
 - **Pinfu** — four sequences + 2–8 number pair on a full hand
 - etc.
 
-If you Cash In with **no yaku** on a complete hand, you get **Chicken Hand** (+0 chips, +0 mult).
+If you Cash In with **no yaku** on a complete hand, you get **Chicken Hand** (+0 Fu, +0 Han).
 
 Sample base yaku payouts (level 1):
 
-| Yaku | +Mult | +Chips |
-|------|-------|--------|
+| Yaku | +Han | +Fu |
+|------|-------|-------|
 | Tanyao | 2.5 | 90 |
 | Toitoi | 2.0 | 70 |
 | Yakuhai | 2.0 | 75 |
@@ -85,27 +85,27 @@ Sample base yaku payouts (level 1):
 
 ---
 
-## Mult
+## Han
 
-Mult **starts at 1.0**. Everything stacks **additively**:
+Han **starts at 1.0**. Everything stacks **additively**:
 
 ```
-mult = 1.0 + yaku bonuses + relic bonuses + boss rules + ...
+Han = 1.0 + yaku bonuses + relic bonuses + boss rules + ...
 ```
 
-So two yaku giving +3 and +5 → mult = **9.0**, not 1×3×5.
+So two yaku giving +3 and +5 → Han = **9.0**, not 1×3×5.
 
 ---
 
 ## Final score
 
 ```
-chips = tile values + yaku chips + dora + relics + …
-mult  = 1.0 + yaku mult + relic mult + boss rules + …
-score = floor(chips × mult)
+Fu = tile values + yaku Fu + dora + relics + …
+Han  = 1.0 + yaku Han + relic Han + boss rules + …
+score = floor(Fu × Han)
 ```
 
-**Dora** tiles on the table add **+100 chips** each if they match tiles in your scored melds.
+**Dora** tiles on the table add **+100 Fu** each if they match tiles in your scored melds.
 
 **Gold** (from flowers/relics) is separate — it goes to your run wallet, not the round score.
 
@@ -114,10 +114,10 @@ score = floor(chips × mult)
 ## One-line mental model
 
 ```
-tile   = +rank chips (honors +12, flowers +0)
-meld   = 2–4 tiles grouped (chips come from tiles only)
+tile   = +rank Fu (honors +12, flowers +0)
+meld   = 2–4 tiles grouped (Fu comes from tiles only)
 structure = melds played across plays; cash in to score them all
-yaku   = pattern bonus on the whole structure (+chips AND +mult each)
+yaku   = pattern bonus on the whole structure (+Fu AND +Han each)
 score  = floor( (tiles + yaku + dora + relics) × (1.0 + yaku + relics + boss rules) )
 ```
 

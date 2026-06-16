@@ -1,8 +1,8 @@
 //! Chinese Zodiac consumable cards — Mahjuro's planet-card analogue.
 //!
 //! Each Zodiac card levels one or more yaku in [`crate::core::yaku`] for the
-//! rest of the run, scaling both chip and mult contributions per
-//! `YakuKind::mult_bonus_at` / `chip_bonus_at`. Zodiacs are consumed when used
+//! rest of the run, scaling both chip and Han contributions per
+//! `YakuKind::han_bonus_at` / `fu_bonus_at`. Zodiacs are consumed when used
 //! on a tile.
 //!
 //! Display names, asset slugs, primary yaku pairing, and ribbon shop price live
@@ -76,7 +76,8 @@ fn zodiac_row(kind: ZodiacKind) -> &'static ZodiacRow {
 }
 
 /// Zodiac ribbon kinds: the thirteen calendar animals (Mouse precedes Rat) plus
-/// **Qilin**, **Phoenix**, and **Crane**. Variant order matters for serialization.
+/// **Qilin**, **Phoenix**, **Crane**, and **Koi**. Variant order matters for
+/// serialization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ZodiacKind {
@@ -96,6 +97,7 @@ pub enum ZodiacKind {
     Qilin,
     Phoenix,
     Crane,
+    Koi,
 }
 
 impl ZodiacKind {
@@ -119,6 +121,7 @@ impl ZodiacKind {
             ZodiacKind::Qilin,
             ZodiacKind::Phoenix,
             ZodiacKind::Crane,
+            ZodiacKind::Koi,
         ]
     }
 
@@ -140,7 +143,7 @@ impl ZodiacKind {
             ZodiacKind::Ox => &[YakuKind::Toitoi],
             ZodiacKind::Tiger => &[YakuKind::Honroutou],
             ZodiacKind::Rabbit => &[YakuKind::Iipeikou, YakuKind::Ryanpeikou],
-            ZodiacKind::Dragon => &[YakuKind::FullHand],
+            ZodiacKind::Dragon => &[YakuKind::Daisangen],
             ZodiacKind::Snake => &[YakuKind::Ittsu],
             ZodiacKind::Horse => &[YakuKind::SanshokuDoujun, YakuKind::SanshokuDoukou],
             ZodiacKind::Goat => &[YakuKind::Junchan],
@@ -151,6 +154,7 @@ impl ZodiacKind {
             ZodiacKind::Qilin => &[YakuKind::KokushiMusou],
             ZodiacKind::Phoenix => &[YakuKind::Chanta],
             ZodiacKind::Crane => &[YakuKind::Pinfu],
+            ZodiacKind::Koi => &[YakuKind::Shousangen],
         }
     }
 
@@ -180,10 +184,10 @@ impl ZodiacKind {
         self.yaku_levels().iter().any(|&yk| yaku_scored(yk))
     }
 
-    /// Additive mult granted to each bound yaku level when this zodiac is
-    /// consumed. Default is +0.5 mult per level; Rooster (Chicken Hand) is a
-    /// chips-only stabilizer and grants +0.0 mult.
-    pub fn level_up_mult_per_level(self) -> f64 {
+    /// Additive Han granted to each bound yaku level when this zodiac is
+    /// consumed. Default is +0.5 Han per level; Rooster (Chicken Hand) is a
+    /// chips-only stabilizer and grants +0.0 Han.
+    pub fn level_up_han_per_level(self) -> f64 {
         match self {
             ZodiacKind::Rooster => 0.0,
             ZodiacKind::Mouse => 0.5,
@@ -201,12 +205,13 @@ impl ZodiacKind {
             ZodiacKind::Qilin => 0.5,
             ZodiacKind::Phoenix => 0.5,
             ZodiacKind::Crane => 0.5,
+            ZodiacKind::Koi => 0.5,
         }
     }
 
-    /// Additive chips granted to each bound yaku level when this zodiac is
-    /// consumed. Default is +30 chips; Rooster (Chicken Hand) gets +50 chips.
-    pub fn level_up_chips_per_level(self) -> i32 {
+    /// Additive Fu granted to each bound yaku level when this zodiac is
+    /// consumed. Default is +30 Fu; Rooster (Chicken Hand) gets +50 Fu.
+    pub fn level_up_fu_per_level(self) -> i32 {
         match self {
             ZodiacKind::Rooster => 50,
             _ => 30,
@@ -404,24 +409,24 @@ mod tests {
     }
 
     #[test]
-    fn zodiac_level_up_mult_bonuses_are_half_increments() {
+    fn zodiac_level_up_han_bonuses_are_half_increments() {
         for &z in ZodiacKind::all() {
-            let mult = z.level_up_mult_per_level();
+            let han = z.level_up_han_per_level();
             assert_eq!(
-                mult,
-                (mult * 2.0).round() / 2.0,
-                "{z:?} mult per level {mult} is not a half increment"
+                han,
+                (han * 2.0).round() / 2.0,
+                "{z:?} Han per level {han} is not a half increment"
             );
         }
     }
 
     #[test]
-    fn zodiac_level_up_chip_bonuses_match_default_and_rooster_exception() {
+    fn zodiac_level_up_fu_bonuses_match_default_and_rooster_exception() {
         for &z in ZodiacKind::all() {
             if z == ZodiacKind::Rooster {
-                assert_eq!(z.level_up_chips_per_level(), 50);
+                assert_eq!(z.level_up_fu_per_level(), 50);
             } else {
-                assert_eq!(z.level_up_chips_per_level(), 30);
+                assert_eq!(z.level_up_fu_per_level(), 30);
             }
         }
     }

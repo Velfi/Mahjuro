@@ -27,7 +27,7 @@ pub const BIG_MULT: f32 = 1.5;
 pub const BOSS_MULT: f32 = 2.0;
 
 /// Chip base for a wing (Small-chamber equivalent), before chamber-type multiplier.
-pub fn wing_chip_base(wing: u32, base_target: u32) -> u32 {
+pub fn wing_fu_base(wing: u32, base_target: u32) -> u32 {
     let wing = wing.max(1);
     let exponent = (wing - 1) as i32;
     let factor = TARGET_SCALING.powi(exponent);
@@ -37,9 +37,9 @@ pub fn wing_chip_base(wing: u32, base_target: u32) -> u32 {
 
 /// Score required to clear a chamber at the given wing.
 pub fn score_for(wing: u32, chamber: ChamberKind, base_target: u32) -> u32 {
-    let base = wing_chip_base(wing, base_target);
-    let mult = chamber.target_multiplier();
-    let raw = (base as f64) * (mult as f64);
+    let base = wing_fu_base(wing, base_target);
+    let han = chamber.target_multiplier();
+    let raw = (base as f64) * (han as f64);
     raw.round().max(1.0) as u32
 }
 
@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn wing_one_matches_base_and_chamber_mults() {
         let base = Season::Spring.base_target();
-        assert_eq!(wing_chip_base(1, base), base);
+        assert_eq!(wing_fu_base(1, base), base);
         assert_eq!(score_for(1, ChamberKind::Small, base), base);
         assert_eq!(score_for(1, ChamberKind::Big, base), 750);
         assert_eq!(score_for(1, ChamberKind::Ordeal, base), 1000);
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn scales_exponentially_per_wing() {
         let base = Season::Spring.base_target();
-        assert_eq!(wing_chip_base(3, base), 1309);
+        assert_eq!(wing_fu_base(3, base), 1309);
         assert_eq!(score_for(3, ChamberKind::Ordeal, base), 2618);
     }
 }

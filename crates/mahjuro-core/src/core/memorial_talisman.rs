@@ -429,8 +429,8 @@ pub fn discarded_extra_discards(snapshot: Option<&MemorialJournalSnapshot>) -> u
 pub struct MemorialRoundState {
     /// Extra yen added on blind clear (Skipper).
     pub clear_yen_bonus: u32,
-    /// Bonus chips on next structure cash-in.
-    pub next_cashin_bonus_chips: u64,
+    /// Bonus Fu on next structure cash-in.
+    pub next_cashin_bonus_fu: u64,
     /// Only apply cash-in bonus if this yaku is in the hand (Meld Mason).
     pub next_cashin_yaku: Option<YakuKind>,
 }
