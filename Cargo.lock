@@ -2367,6 +2367,7 @@ dependencies = [
  "bumpalo",
  "bytemuck",
  "chrono",
+ "clap",
  "crossbeam-channel",
  "env_logger",
  "fontdue",
