@@ -15,7 +15,7 @@ bake = [
 screenshot = ["mahjuro/headless-screenshot"]
 
 [dependencies]
-mahjuro.workspace = true
+mahjuro = { workspace = true, default-features = false }
 mahjuro-render.workspace = true
 mahjuro-assets.workspace = true
 mahjuro-bake-stamp.workspace = true

@@ -101,7 +101,6 @@ dist-msstore = [
 headless-screenshot = [
     "dep:rodio",
     "dep:arboard",
-    "mahjuro-distribution/steam",
     "mahjuro-render/clipboard",
 ]
 # Skips committed offline bake freshness in `build.rs` while compiling `mahjuro` as a

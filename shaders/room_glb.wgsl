@@ -19,7 +19,7 @@
 // - `room_height_fog_far_color.xyz` = distance tint color approached as distance grows
 // - `room_height_fog_far_color.w` = distance-tint exponential scale in world units
 // - `GLTF_PBR_FLAG_ROOM_READABLE_SURFACE` = GLB text/decal/UI surface: skip combined
-//   receiver shadow and baked contact AO so copy stays legible; still receives room lightmap fill.
+//   receiver shadow, baked contact AO, and coarse room lightmap fill so copy stays legible.
 // - `GLTF_PBR_FLAG_ROOM_SKIP_LIGHTMAP` = explicit opt-out for surfaces whose lighting is
 //   fully supplied by material/emissive paths.
 //
@@ -687,7 +687,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         Lo = Lo + direct.total;
     }
 
-    if (!skips_room_lightmap) {
+    if (!is_readable_room_surface && !skips_room_lightmap) {
         let room_indirect_shadow_vis = select(
             1.0,
             dynamic_receiver_shadow_vis(in.world_pos),
