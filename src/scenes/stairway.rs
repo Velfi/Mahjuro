@@ -281,10 +281,10 @@ impl StairwayScene {
         }
     }
 
-    /// Headless screenshot: decimation picker mid-selection (3/5 marked).
+    /// Headless screenshot: decimation picker mid-selection (4/6 marked).
     pub fn for_decimation_screenshot(run: &crate::game::run::RunState) -> Self {
         let display_tiles = Self::eligible_display_tiles(run);
-        let selected: Vec<u32> = display_tiles.iter().take(3).map(|t| t.id).collect();
+        let selected: Vec<u32> = display_tiles.iter().take(4).map(|t| t.id).collect();
         Self {
             flavor: crate::core::staircase_flavor::random_entry_flavor(),
             phase: StairwayPhase::Picking {
@@ -568,7 +568,10 @@ impl StairwayScene {
         if !can_seal_decimation(run, selected) {
             return false;
         }
-        let player: [u32; PLAYER_PICKS] = selected.as_slice().try_into().expect("5 player picks");
+        let player: [u32; PLAYER_PICKS] = selected
+            .as_slice()
+            .try_into()
+            .expect("player picks");
         let pool = decimation_house_pool(run, selected);
         let house_vec = pick_house_tiles(&pool, &mut rand::rng());
         if house_vec.len() != HOUSE_PICKS {

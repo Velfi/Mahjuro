@@ -1,4 +1,4 @@
-//! Stairway decimation — permanently remove 10 wall tiles (5 player, 5 House).
+//! Stairway decimation — permanently remove 10 wall tiles (6 player, 4 House).
 
 use rand::seq::IndexedRandom;
 
@@ -9,8 +9,8 @@ use crate::core::tile_pack::PACK_TILE_ID_BASE;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::run::RunState;
 
-pub const PLAYER_PICKS: usize = 5;
-pub const HOUSE_PICKS: usize = 5;
+pub const PLAYER_PICKS: usize = 6;
+pub const HOUSE_PICKS: usize = 4;
 
 /// Next-round wall tiles (shop preview composition).
 pub fn decimation_preview_tiles(run: &RunState) -> Vec<Tile> {
@@ -116,14 +116,18 @@ mod tests {
         let mut run = fresh_run();
         let eligible = decimation_eligible_tiles(&run);
         assert!(eligible.len() >= 10);
-        let player: Vec<u32> = eligible.iter().take(5).map(|t| t.id).collect();
+        let player: Vec<u32> = eligible
+            .iter()
+            .take(PLAYER_PICKS)
+            .map(|t| t.id)
+            .collect();
         run.removed_tile_ids.insert(eligible[9].id);
         let pool = decimation_house_pool(&run, &player);
         for id in &player {
             assert!(!pool.contains(id));
         }
         assert!(!pool.contains(&eligible[9].id));
-        assert!(pool.len() >= 5);
+        assert!(pool.len() >= HOUSE_PICKS);
     }
 
     #[test]
@@ -132,17 +136,17 @@ mod tests {
         let mut bus = EventBus::default();
         let before = decimation_preview_tiles(&run).len();
         let eligible = decimation_eligible_tiles(&run);
-        let player: [u32; 5] = eligible
+        let player: [u32; PLAYER_PICKS] = eligible
             .iter()
-            .take(5)
+            .take(PLAYER_PICKS)
             .map(|t| t.id)
             .collect::<Vec<_>>()
             .try_into()
             .unwrap();
         let pool = decimation_house_pool(&run, &player);
-        let house: [u32; 5] = pool
+        let house: [u32; HOUSE_PICKS] = pool
             .iter()
-            .take(5)
+            .take(HOUSE_PICKS)
             .copied()
             .collect::<Vec<_>>()
             .try_into()
@@ -173,13 +177,13 @@ mod tests {
         for id in &same_face {
             assert!(!pool.contains(id));
         }
-        assert!(pool.len() >= 5);
+        assert!(pool.len() >= HOUSE_PICKS);
     }
 
     #[test]
-    fn pick_house_tiles_takes_five_when_available() {
+    fn pick_house_tiles_takes_house_picks_when_available() {
         let pool: Vec<u32> = (100..200).collect();
         let picked = pick_house_tiles(&pool, &mut rand::rng());
-        assert_eq!(picked.len(), 5);
+        assert_eq!(picked.len(), HOUSE_PICKS);
     }
 }

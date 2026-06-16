@@ -37,6 +37,9 @@ pub fn is_winning_structure_shape(tiles: &[Tile], sets: &[DetectedMeld]) -> bool
     is_complete_winning_hand(tiles, sets)
 }
 
+/// Standard winning structure shape: four melds plus a pair.
+pub const STRUCTURE_MELD_CAPACITY: usize = 5;
+
 /// Smallest legal play into structure is a pair (2 tiles).
 const MIN_MELD_COMMIT_TILES: usize = 2;
 
@@ -60,6 +63,26 @@ pub fn structure_remaining_tile_slots(
     capacity.saturating_sub(tiles.len())
 }
 
+/// Meld slots still open before a complete standard structure (4 melds + pair).
+pub fn structure_remaining_meld_slots(sets: &[DetectedMeld]) -> usize {
+    STRUCTURE_MELD_CAPACITY.saturating_sub(sets.len())
+}
+
+/// Remaining meld slots for player callouts — drops to zero when tile capacity
+/// or commit rules block another play even if the meld budget is not exhausted.
+pub fn structure_callout_remaining_slots(
+    tiles: &[Tile],
+    sets: &[DetectedMeld],
+    hand_size: usize,
+    rules: &[RuleModifier],
+) -> usize {
+    if structure_cannot_grow_further(tiles, sets, hand_size, rules) {
+        0
+    } else {
+        structure_remaining_meld_slots(sets)
+    }
+}
+
 /// True when structure has no room left for another meld under the standard tile
 /// budget (`hand_size` tiles, plus kong overflow) and the active commit rules
 /// (e.g. Bureaucratic Form requires exactly five tiles per play).
@@ -76,13 +99,13 @@ pub fn structure_cannot_grow_further(
     remaining < structure_min_commit_tiles(rules)
 }
 
-/// Player-facing callout after playing into structure (tile slots left).
-pub fn structure_remaining_slots_callout(remaining: usize) -> String {
-    match remaining {
+/// Player-facing callout after playing into structure (meld slots left).
+pub fn structure_remaining_slots_callout(remaining_melds: usize) -> String {
+    match remaining_melds {
         0 => "Cash In Time!".to_string(),
-        1 => "One slot remains empty".to_string(),
-        2 => "Two slots remain empty".to_string(),
-        n => format!("{n} slots remain empty"),
+        1 => "One meld slot remains empty".to_string(),
+        2 => "Two meld slots remain empty".to_string(),
+        n => format!("{n} meld slots remain empty"),
     }
 }
 
@@ -284,19 +307,63 @@ mod tests {
     }
 
     #[test]
+    fn structure_remaining_meld_slots_counts() {
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![3, 4],
+            },
+        ];
+        assert_eq!(structure_remaining_meld_slots(&sets), 3);
+        assert_eq!(structure_remaining_meld_slots(&[]), STRUCTURE_MELD_CAPACITY);
+    }
+
+    #[test]
+    fn structure_callout_remaining_slots_at_tile_capacity() {
+        let tiles: Vec<Tile> = (0..14).map(|i| tile(Suit::Manzu, 1, i)).collect();
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![6, 7, 8],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![9, 10],
+            },
+        ];
+        assert_eq!(structure_remaining_meld_slots(&sets), 1);
+        assert_eq!(
+            structure_callout_remaining_slots(&tiles, &sets, 14, &[]),
+            0
+        );
+    }
+
+    #[test]
     fn structure_remaining_slots_callout_labels() {
         assert_eq!(structure_remaining_slots_callout(0), "Cash In Time!");
         assert_eq!(
             structure_remaining_slots_callout(1),
-            "One slot remains empty"
+            "One meld slot remains empty"
         );
         assert_eq!(
             structure_remaining_slots_callout(2),
-            "Two slots remain empty"
+            "Two meld slots remain empty"
         );
         assert_eq!(
             structure_remaining_slots_callout(5),
-            "5 slots remain empty"
+            "5 meld slots remain empty"
         );
     }
 
