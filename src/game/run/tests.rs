@@ -1960,7 +1960,7 @@ mod cases {
 
     #[test]
     fn melds_for_yaku_preview_matches_pick_best_decomposition() {
-        use crate::core::hand::validate_selection;
+        use crate::core::hand::{MeldKind, validate_selection};
         use crate::core::yaku::{YakuKind, yaku_after_pool_filter};
 
         let selected: Vec<Tile> = (0..6).map(|i| Tile::new(Suit::Souzu, 6, i)).collect();
@@ -1976,6 +1976,10 @@ mod cases {
             .try_validate_with_wildcards(&selected)
             .expect("valid six 6s");
         let best_sets = run.pick_best_decomposition(validator_sets, &scoring_tiles, &selected);
+        assert_eq!(best_sets.len(), 2);
+        assert!(best_sets.iter().any(|s| s.kind == MeldKind::Kong));
+        assert!(best_sets.iter().any(|s| s.kind == MeldKind::Pair));
+
         let mut expected_sets = run.structure_sets.clone();
         expected_sets.extend(best_sets.clone());
         assert_eq!(preview_sets, expected_sets);
@@ -2000,24 +2004,56 @@ mod cases {
         );
         assert_eq!(preview_yaku, commit_yaku);
 
-        // When multiple splits exist, the validator's first split can miss Toitoi.
         let naive_sets = validate_selection(&selected).expect("valid six 6s");
-        if naive_sets != best_sets && preview_yaku.contains(&YakuKind::Toitoi) {
-            let mut naive_merged = run.structure_sets.clone();
-            naive_merged.extend(naive_sets);
-            let naive_yaku = yaku_after_pool_filter(
-                &preview_effective,
-                &naive_merged,
-                Some(1),
-                None,
-                Some(preview_original.as_slice()),
-                &run.available_yaku,
-            );
-            assert!(
-                !naive_yaku.contains(&YakuKind::Toitoi),
-                "regression guard: preview must not use validator-first split"
+        if naive_sets != best_sets {
+            assert_ne!(
+                naive_sets.iter().filter(|s| s.kind == MeldKind::Triplet).count(),
+                2,
+                "≤6 tile plays should prefer largest chunks over two triplets"
             );
         }
+    }
+
+    #[test]
+    fn pick_best_decomposition_chunks_small_plays() {
+        use crate::core::hand::MeldKind;
+
+        let selected: Vec<Tile> = (0..6).map(|i| Tile::new(Suit::Manzu, 2, i)).collect();
+        let mut run = test_run();
+        run.hand = selected.clone();
+        let (sets, scoring) = run.try_validate_with_wildcards(&selected).expect("valid");
+        let best = run.pick_best_decomposition(sets, &scoring, &selected);
+        assert_eq!(best.len(), 2);
+        assert!(best.iter().any(|s| s.kind == MeldKind::Kong));
+        assert!(best.iter().any(|s| s.kind == MeldKind::Pair));
+    }
+
+    #[test]
+    fn pick_best_decomposition_scores_large_plays_for_toitoi() {
+        use crate::core::hand::MeldKind;
+        use crate::core::yaku::{YakuKind, yaku_after_pool_filter};
+
+        let selected: Vec<Tile> = (0..8).map(|i| Tile::new(Suit::Souzu, 6, i)).collect();
+        let mut run = test_run();
+        run.available_yaku = vec![YakuKind::Toitoi];
+        run.hand = selected.clone();
+        let (sets, scoring) = run.try_validate_with_wildcards(&selected).expect("valid");
+        let best = run.pick_best_decomposition(sets, &scoring, &selected);
+        assert_eq!(
+            best.iter().filter(|s| s.kind == MeldKind::Triplet).count(),
+            2,
+            "7+ tile plays should still optimize yaku/score (two triplets for Toitoi)"
+        );
+
+        let yaku = yaku_after_pool_filter(
+            &scoring,
+            &best,
+            Some(1),
+            None,
+            Some(selected.as_slice()),
+            &run.available_yaku,
+        );
+        assert!(yaku.contains(&YakuKind::Toitoi));
     }
 
     #[test]

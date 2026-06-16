@@ -7,7 +7,9 @@ use crate::{
             DetectedMeld, MeldKind, decomposition_canonical_key, enumerate_decompositions,
             kong_structure_bonus,
         },
-        hand_intent::{decomposition_affinity, infer_decomposition_bias},
+        hand_intent::{
+            compare_decompositions_by_chunks, decomposition_affinity, infer_decomposition_bias,
+        },
         ordeal::{self, OrdealKind},
         relic::{
             RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
@@ -886,21 +888,22 @@ impl RunState {
     }
 
     /// Enumerate every valid meld decomposition of the selection and pick the
-    /// one that would score best at cash-in. Full winning submissions score the
-    /// selection alone; partial commits score the merged structure (existing
-    /// melds plus the candidate split). Ties fall back to hand-shape affinity,
-    /// then preview yaku weight, then a canonical decomposition key.
+    /// best split. Plays of ≤6 tiles use largest-chunk grouping; 7+ tiles score
+    /// the merged structure at cash-in (full hand scores the selection alone).
+    /// Ties on large plays fall back to hand-shape affinity, yaku weight, then
+    /// a canonical decomposition key.
     pub(crate) fn pick_best_decomposition(
         &self,
         default_sets: Vec<DetectedMeld>,
         scoring_tiles: &[Tile],
         original_tiles: &[Tile],
     ) -> Vec<DetectedMeld> {
+        const CHUNK_PICK_TILE_LIMIT: usize = 6;
+
         // A full hand has 14 tiles plus each kong's excess over a triplet (4→+1, 5→+2).
         let kong_bonus = kong_structure_bonus(default_sets.iter());
         let is_full_hand =
             scoring_tiles.len() >= HAND_SIZE && scoring_tiles.len() == HAND_SIZE + kong_bonus;
-        let bias = infer_decomposition_bias(&self.hand);
         let rules = self.validation_rules_for_structure_commits();
         let mut alternatives = enumerate_decompositions(scoring_tiles, &rules);
         alternatives.retain(|sets| self.selection_commit_capacity_ok(sets, scoring_tiles.len()));
@@ -911,6 +914,22 @@ impl RunState {
             return alternatives[0].clone();
         }
 
+        if scoring_tiles.len() <= CHUNK_PICK_TILE_LIMIT {
+            let mut best = alternatives[0].clone();
+            let mut best_key = decomposition_canonical_key(scoring_tiles, &best);
+            for candidate in alternatives.into_iter().skip(1) {
+                let key = decomposition_canonical_key(scoring_tiles, &candidate);
+                let chunk_cmp = compare_decompositions_by_chunks(scoring_tiles, &candidate, &best);
+                let take = chunk_cmp.is_gt() || (chunk_cmp.is_eq() && key < best_key);
+                if take {
+                    best_key = key;
+                    best = candidate;
+                }
+            }
+            return best;
+        }
+
+        let bias = infer_decomposition_bias(&self.hand);
         let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
         let bonus_rw = self.bonus_round_wind_for_yaku();
         let base_set_len = self.structure_sets.len();
