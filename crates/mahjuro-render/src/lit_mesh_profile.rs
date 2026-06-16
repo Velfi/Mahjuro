@@ -33,9 +33,7 @@ fn parse_flags() -> u32 {
             "no_pcf" | "pcf1" => NO_PCF,
             "diffuse_only" => NO_PER_LIGHT_SHADOW | NO_COMBINED_SHADOW | NO_SPEC,
             _ => {
-                log::warn!(
-                    "lit_mesh_profile: unknown token '{t}' in MAHJURO_LIT_MESH_PROFILE"
-                );
+                log::warn!("lit_mesh_profile: unknown token '{t}' in MAHJURO_LIT_MESH_PROFILE");
                 0
             }
         };

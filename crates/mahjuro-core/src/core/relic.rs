@@ -457,7 +457,9 @@ impl RelicId {
         ghost_hand_chips_preview: Option<i32>,
         wing: Option<u32>,
     ) -> String {
-        use crate::core::relic_desc_template::{RelicDescContext, expand_relic_description_templates};
+        use crate::core::relic_desc_template::{
+            RelicDescContext, expand_relic_description_templates,
+        };
 
         let base = self.description_template();
         let (relics, slot) = match inventory_focus {

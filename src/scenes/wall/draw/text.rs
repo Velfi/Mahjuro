@@ -6,12 +6,7 @@ use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::clip::intersect_rect;
 
-pub fn push_clipped_quad(
-    frame: &mut UiFrame,
-    rect: [f32; 4],
-    color: [f32; 4],
-    clip: [f32; 4],
-) {
+pub fn push_clipped_quad(frame: &mut UiFrame, rect: [f32; 4], color: [f32; 4], clip: [f32; 4]) {
     if let Some(clipped) = intersect_rect(rect, clip) {
         frame.quad(GpuInstance {
             rect: clipped,

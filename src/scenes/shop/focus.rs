@@ -150,8 +150,10 @@ pub(in crate::scenes::shop) fn shop_nav_edges(
         edges.push((pair[0], FocusDir::Down, pair[1]));
         edges.push((pair[1], FocusDir::Up, pair[0]));
     }
-    if let (Some(last_rail), true) = (rail.last().copied(), target_rect(focus_rects, wall).is_some())
-    {
+    if let (Some(last_rail), true) = (
+        rail.last().copied(),
+        target_rect(focus_rects, wall).is_some(),
+    ) {
         edges.push((last_rail, FocusDir::Down, wall));
         edges.push((wall, FocusDir::Up, last_rail));
     }

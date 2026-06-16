@@ -109,7 +109,8 @@ fn rgba_mip_chain_bc7(rgba: &[u8], width: u32, height: u32) -> Vec<(Vec<u8>, u32
         let img = image::RgbaImage::from_raw(w, h, level).expect("relic mip rgba");
         w = (w / 2).max(4);
         h = (h / 2).max(4);
-        level = image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle).into_raw();
+        level =
+            image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle).into_raw();
     }
     chain
 }
@@ -180,7 +181,10 @@ fn validate_baked_relic_bytes(expected_id: RelicId, bytes: &[u8]) -> anyhow::Res
     anyhow::ensure!(bytes.len() >= header_size, "relic bake: file too small");
     let header: &RelicBakeHeader = bytemuck::try_from_bytes(&bytes[..header_size])
         .map_err(|e| anyhow::anyhow!("relic bake header: {e}"))?;
-    anyhow::ensure!(header.magic == *MAGIC, "relic bake: bad magic (expected RLC2)");
+    anyhow::ensure!(
+        header.magic == *MAGIC,
+        "relic bake: bad magic (expected RLC2)"
+    );
     anyhow::ensure!(
         header.version == VERSION,
         "relic bake: unsupported version {}",
@@ -254,15 +258,24 @@ pub fn encode_baked_relic(msg: &DecodedRelicImage) -> anyhow::Result<Vec<u8>> {
     let mut slug_buf = [0u8; SLUG_BYTES];
     slug_buf[..slug.len()].copy_from_slice(slug.as_bytes());
 
-    let (albedo_bc7, albedo_base_w, albedo_base_h, albedo_mips, albedo_fb, albedo_fb_w, albedo_fb_h) =
-        encode_bc7_mip_chain(&msg.rgba, msg.width, msg.height, true)?;
-    let (relief_bc7, relief_base_w, relief_base_h, relief_mips, relief_fb, relief_fb_w, relief_fb_h) =
-        encode_bc7_mip_chain(
-            &msg.relief_rgba,
-            msg.relief_width,
-            msg.relief_height,
-            false,
-        )?;
+    let (
+        albedo_bc7,
+        albedo_base_w,
+        albedo_base_h,
+        albedo_mips,
+        albedo_fb,
+        albedo_fb_w,
+        albedo_fb_h,
+    ) = encode_bc7_mip_chain(&msg.rgba, msg.width, msg.height, true)?;
+    let (
+        relief_bc7,
+        relief_base_w,
+        relief_base_h,
+        relief_mips,
+        relief_fb,
+        relief_fb_w,
+        relief_fb_h,
+    ) = encode_bc7_mip_chain(&msg.relief_rgba, msg.relief_width, msg.relief_height, false)?;
 
     let mesh = msg.mesh_cpu.as_ref();
     let flags = if mesh.is_some() { FLAG_HAS_MESH } else { 0 };
@@ -342,7 +355,10 @@ pub fn decode_baked_relic(bytes: &[u8]) -> anyhow::Result<DecodedRelicImage> {
     anyhow::ensure!(bytes.len() >= header_size, "relic bake: file too small");
     let header: &RelicBakeHeader = bytemuck::try_from_bytes(&bytes[..header_size])
         .map_err(|e| anyhow::anyhow!("relic bake header: {e}"))?;
-    anyhow::ensure!(header.magic == *MAGIC, "relic bake: bad magic (expected RLC2)");
+    anyhow::ensure!(
+        header.magic == *MAGIC,
+        "relic bake: bad magic (expected RLC2)"
+    );
     anyhow::ensure!(
         header.version == VERSION,
         "relic bake: unsupported version {}",
@@ -362,7 +378,10 @@ pub fn decode_baked_relic(bytes: &[u8]) -> anyhow::Result<DecodedRelicImage> {
     let albedo_fb_end = albedo_bc7_end + header.albedo_fallback_len as usize;
     let relief_bc7_end = albedo_fb_end + header.relief_bc7_len as usize;
     let relief_fb_end = relief_bc7_end + header.relief_fallback_len as usize;
-    anyhow::ensure!(bytes.len() >= relief_fb_end, "relic bake: truncated textures");
+    anyhow::ensure!(
+        bytes.len() >= relief_fb_end,
+        "relic bake: truncated textures"
+    );
 
     let albedo_bc7 = RelicBc7MipChain {
         base_width: header.albedo_base_w,
@@ -502,9 +521,9 @@ fn material_kind_to_u32(kind: MaterialKind) -> u32 {
 fn material_kind_from_u32(v: u32) -> MaterialKind {
     // Map removed legacy discriminants from older RLC1 bakes.
     let v = match v {
-        8 => MaterialKind::PackWrap as u32, // Foil
+        8 => MaterialKind::PackWrap as u32,               // Foil
         11 | 12 | 13 | 14 => MaterialKind::Chitin as u32, // Jade / Moonstone / Pearl / GoldNugget
-        19 => MaterialKind::Plain as u32,   // FeltGreen
+        19 => MaterialKind::Plain as u32,                 // FeltGreen
         other => other,
     };
     match v {

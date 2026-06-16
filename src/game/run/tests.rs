@@ -645,10 +645,11 @@ mod cases {
             !run.relics.has(RelicId::RescuedByProbes),
             "Rescued By Probes should be destroyed"
         );
-        assert!(bus.queue.iter().any(|ev| matches!(
-            ev,
-            GameEvent::RelicActivated(RelicId::RescuedByProbes)
-        )));
+        assert!(
+            bus.queue
+                .iter()
+                .any(|ev| matches!(ev, GameEvent::RelicActivated(RelicId::RescuedByProbes)))
+        );
     }
 
     #[test]

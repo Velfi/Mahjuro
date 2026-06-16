@@ -160,7 +160,9 @@ fn focused_decimation_tile(tree: &TreeState) -> Option<usize> {
 /// follows keyboard focus only so a stationary mouse does not retain hover.
 fn decimation_hover_pick(tree: &TreeState, ctx: &UpdateCtx<'_>) -> Option<usize> {
     match ctx.input_mode {
-        InputMode::Cursor => ctx.picked_hand_tile.or_else(|| focused_decimation_tile(tree)),
+        InputMode::Cursor => ctx
+            .picked_hand_tile
+            .or_else(|| focused_decimation_tile(tree)),
         InputMode::Keyboard | InputMode::Controller => focused_decimation_tile(tree),
     }
 }
@@ -1056,13 +1058,7 @@ impl StairwayScene {
         let items: Vec<FlatItem<DecimationAction>> = layout
             .flat_items
             .iter()
-            .map(|it| {
-                FlatItem::new(
-                    it.action.id(),
-                    it.rect,
-                    it.action,
-                )
-            })
+            .map(|it| FlatItem::new(it.action.id(), it.rect, it.action))
             .collect();
 
         let input = TreeInput {
@@ -1469,8 +1465,7 @@ impl StairwayScene {
         );
         frame.texts(subtitle_labels);
 
-        self.tree
-            .register_flat_buttons(&items, &mut frame.buttons);
+        self.tree.register_flat_buttons(&items, &mut frame.buttons);
 
         push_screen_footer_hint(
             &mut frame,
@@ -1650,8 +1645,7 @@ impl StairwayScene {
                 .iter()
                 .map(|it| FlatItem::new(it.action.id(), it.rect, it.action))
                 .collect();
-            self.tree
-                .register_flat_buttons(&items, &mut frame.buttons);
+            self.tree.register_flat_buttons(&items, &mut frame.buttons);
             ctx.stash_focus_nav_tree_flat(&self.tree, &items, DecimationAction::label);
         }
 

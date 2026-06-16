@@ -25,6 +25,7 @@ pub const GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME: u32 = 1 << 4;
 pub const GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO: u32 = 1 << 5;
 pub const GLTF_PBR_FLAG_ROOM_CANDLE_WAX: u32 = 1 << 6;
 pub const GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER: u32 = 1 << 7;
+pub const GLTF_PBR_FLAG_ROOM_READABLE_SURFACE: u32 = 1 << 8;
 
 impl GltfPbrUniform {
     pub fn from_loaded(

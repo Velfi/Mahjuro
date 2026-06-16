@@ -56,7 +56,7 @@ Offline bakes (`data/relic_baked/*.rlc`, format **RLC2**) store BC7 mip chains a
 - **Low memory:** on-demand decode + GPU LRU cap of **24** (one archive relic page is 3×7 = **21** slots) ([`impl_relic_residency.rs`](../../crates/mahjuro-render/src/wgpu_renderer/impl_relic_residency.rs)); no startup batch.
 - **Performance / Visuals:** eager batch after hub CPU prefetch completes and pressure is Normal; batch reads bypass the asset byte LRU.
 
-Rebake: `cargo run -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake --release`
+Rebake: `scripts/rebake-offline.sh relic` (or `cargo run -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake --release` for a release-profile direct run).
 
 Thresholds can be overridden with `MAHJURO_GPU_MEM_CONSTRAINED_MIB` and
 `MAHJURO_GPU_MEM_CRITICAL_MIB` (see [launch options](launch-options.md)).

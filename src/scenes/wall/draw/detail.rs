@@ -209,9 +209,7 @@ fn copies_row_count(mode: WallLedgerMode) -> usize {
 }
 
 fn copies_row_h(layout: &WallLayout) -> f32 {
-    text_line_h(layout.caption_px)
-        .max(text_line_h(layout.count_px))
-        + 3.0
+    text_line_h(layout.caption_px).max(text_line_h(layout.count_px)) + 3.0
 }
 
 fn copies_micro_header_h(layout: &WallLayout) -> f32 {
@@ -569,19 +567,9 @@ fn push_focus_corner(frame: &mut UiFrame, x: f32, y: f32, clip: [f32; 4]) {
 
 fn push_border(frame: &mut UiFrame, rect: [f32; 4], t: f32, c: [f32; 4], clip: [f32; 4]) {
     push_clipped_quad(frame, [rect[0], rect[1], rect[2], t], c, clip);
-    push_clipped_quad(
-        frame,
-        [rect[0], rect[1] + rect[3] - t, rect[2], t],
-        c,
-        clip,
-    );
+    push_clipped_quad(frame, [rect[0], rect[1] + rect[3] - t, rect[2], t], c, clip);
     push_clipped_quad(frame, [rect[0], rect[1], t, rect[3]], c, clip);
-    push_clipped_quad(
-        frame,
-        [rect[0] + rect[2] - t, rect[1], t, rect[3]],
-        c,
-        clip,
-    );
+    push_clipped_quad(frame, [rect[0] + rect[2] - t, rect[1], t, rect[3]], c, clip);
 }
 
 fn modifier_summary(m: &ModifierBreakdown) -> Option<String> {

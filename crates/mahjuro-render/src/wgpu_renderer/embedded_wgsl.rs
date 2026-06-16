@@ -191,9 +191,9 @@ mod shader_validation {
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
         );
-        validator
-            .validate(&module)
-            .unwrap_or_else(|e| panic!("{label}: WGSL validation error:\n{}", e.emit_to_string(src)));
+        validator.validate(&module).unwrap_or_else(|e| {
+            panic!("{label}: WGSL validation error:\n{}", e.emit_to_string(src))
+        });
     }
 
     macro_rules! validate_program {

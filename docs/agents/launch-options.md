@@ -46,15 +46,16 @@ Headless tools (`mahjuro-bake`, `mahjuro-screenshot`) and bot/sweep always skip 
 | Variable | When set |
 | --- | --- |
 | `MAHJURO_SKIP_ASSET_BAKE` | Skip `tools/bake_assets` in `build.rs` (supply packs or `MAHJURO_ASSETS`). |
-| `MAHJURO_SKIP_AUTO_OFFLINE_BAKE` | Disable `build.rs` auto-rebake when stamps are stale (panic instead). CI always skips auto-rebake via `CI=true`. |
 | `MAHJURO_SKIP_OFFLINE_BAKES` | Skip all committed offline bake freshness checks (GI, shadow, decal, relic). |
 | `MAHJURO_SKIP_COMMITTED_BAKE_CHECKS` | Skip every `.inputs_stamp` check. `mahjuro-headless --features bake` skips via `mahjuro/offline-bake-support`; `headless-screenshot` skips via feature. |
 | `MAHJURO_SKIP_ROOM_GI_BAKE` | Skip only room GI stamp check (use while rebaking GI alone). |
 | `MAHJURO_SKIP_ROOM_SHADOW_BAKE` | Skip only room shadow stamp check. |
 | `MAHJURO_SKIP_SHOWCASE_DECAL_BAKE` | Skip only showcase decal atlas stamp check. |
-| `MAHJURO_SKIP_RELIC_BAKE` | Skip only relic RLC1 stamp check. |
+| `MAHJURO_SKIP_RELIC_BAKE` | Skip only relic RLC2 stamp check. |
 | `MAHJURO_DEBUG_MENU` | Compile release with debug menubar (`build.rs`). |
 | `MAHJURO_DXC_REDIST` | Directory containing `dxcompiler.dll` + `dxil.dll` for `build.rs` to copy on Windows (see [windows-build.md](windows-build.md)). |
+
+Stale committed bakes are not auto-rebaked by `build.rs`; it panics with the exact `scripts/rebake-offline.sh <kind>` command to run.
 
 Asset-pack details: [tools/bake_assets/README.md](../../tools/bake_assets/README.md).
 
@@ -69,4 +70,4 @@ Asset-pack details: [tools/bake_assets/README.md](../../tools/bake_assets/README
 | `MAHJURO_HEADLESS_GPU_PROFILE_FRAMES` | Average GPU pass timings over N frames after warmup (logs `main`, `shadow`, etc. via `mahjuro_render::gpu_profiler`). Used by `scripts/profile-lit-mesh-inspect.sh`. |
 | `MAHJURO_HEADLESS_SHADOW_QUALITY` | Headless shadow preset: `low`, `medium`, `high` (PCF tap count in `projected_shadow.wgsl`). |
 
-**`mahjuro-bake-relics`**, **`mahjuro-bake-decal-atlases`** — relic RLC1 and showcase decal atlases (`mahjuro-render` bins).
+**`mahjuro-bake-relics`**, **`mahjuro-bake-decal-atlases`** — relic RLC2 and showcase decal atlases (`mahjuro-render` bins).

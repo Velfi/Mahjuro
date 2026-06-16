@@ -8,8 +8,7 @@ use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign,
 use crate::scenes::archive_career;
 use crate::ui::chart_primitives::{
     self, ChartClip, LedgerPanelStyle, push_colored_label_clipped, push_ledger_panel_clipped,
-    push_quad_clipped as chart_quad, push_sparkline, push_yaku_hbar_row,
-    push_yaku_pill,
+    push_quad_clipped as chart_quad, push_sparkline, push_yaku_hbar_row, push_yaku_pill,
 };
 use crate::ui::chronicle_charts;
 use crate::ui::clip::intersect_rect;

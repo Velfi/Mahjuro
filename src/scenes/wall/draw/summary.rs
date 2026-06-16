@@ -337,13 +337,7 @@ fn draw_wall_tab_summary(
     *logical_y += layout.section_divider_gap();
 
     if let Some(details) = details {
-        let detail_h = measure_detail_panel_height(
-            layout,
-            scroll.w,
-            scroll.clip[3],
-            details,
-            mode,
-        );
+        let detail_h = measure_detail_panel_height(layout, scroll.w, scroll.clip[3], details, mode);
         let detail_top = scroll.screen_y(*logical_y);
         let detail_rect = [scroll.x, detail_top, scroll.w, detail_h];
         draw_wall_detail_panel(

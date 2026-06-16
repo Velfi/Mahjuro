@@ -70,7 +70,10 @@ impl WgpuRenderer {
                     &self.ribbon_zodiac_tex.views[idx as usize],
                     &self.ribbon_zodiac_tex.material_views[idx as usize],
                 ),
-                None => (&self.lit_mesh_white_view, &self.lit_mesh_relief_default_view),
+                None => (
+                    &self.lit_mesh_white_view,
+                    &self.lit_mesh_relief_default_view,
+                ),
             };
             let inst = &mut self.ribbon_instances[slot_i];
             inst.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {

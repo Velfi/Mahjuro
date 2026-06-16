@@ -19,8 +19,8 @@ use draw::draw_strategic_frame;
 use focus::WallFocusModel;
 use layout::{read_boost, wall_layout};
 use sidebar_scroll::{
-    point_in_rect, sidebar_scroll_layout, sidebar_scrollbar, sidebar_scroll_y_from_cursor,
-    SidebarScrollLayout,
+    SidebarScrollLayout, point_in_rect, sidebar_scroll_layout, sidebar_scroll_y_from_cursor,
+    sidebar_scrollbar,
 };
 use state::WallScreenState;
 

@@ -236,7 +236,11 @@ impl WgpuRenderer {
             }
             RenderOp::MoonlitWater => {
                 pass.set_pipeline(&self.moonlit_water_pipeline);
-                pass.set_bind_group(0, self.moonlit_water_bind_group_for(scene_hdr_attachment), &[]);
+                pass.set_bind_group(
+                    0,
+                    self.moonlit_water_bind_group_for(scene_hdr_attachment),
+                    &[],
+                );
                 pass.draw(0..3, 0..1);
             }
             RenderOp::SunlitWater => {
@@ -340,7 +344,11 @@ impl WgpuRenderer {
                                     && glyph_popup_glows[slot_i].color[3] > 0.001
                                 {
                                     pass.set_pipeline(&self.tile_glow_pipeline);
-                                    pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
+                                    pass.set_bind_group(
+                                        0,
+                                        self.globals_bind_group_for(scene_hdr_attachment),
+                                        &[],
+                                    );
                                     pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                                     pass.set_vertex_buffer(1, gpb.slice(..));
                                     pass.set_index_buffer(
@@ -563,7 +571,11 @@ impl WgpuRenderer {
                     let has_glow = batch.iter().any(|p| p.glow);
                     if has_glow && let Some(tgb) = tile_glow_buffer {
                         pass.set_pipeline(&self.tile_glow_pipeline);
-                        pass.set_bind_group(0, self.globals_bind_group_for(scene_hdr_attachment), &[]);
+                        pass.set_bind_group(
+                            0,
+                            self.globals_bind_group_for(scene_hdr_attachment),
+                            &[],
+                        );
                         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                         pass.set_vertex_buffer(1, tgb.slice(..));
                         pass.set_index_buffer(

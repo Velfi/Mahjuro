@@ -53,7 +53,8 @@ Rebake after changing room GLB layout, GPU bake sampling constants in [`room_gi_
 **Rebake** (refreshes `.inputs_stamp` automatically):
 
 ```bash
-cargo run -p mahjuro-render --bin mahjuro-bake-relics
+scripts/rebake-offline.sh relic
+# or: cargo run -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake
 ```
 
 - Stamp logic: [`mahjuro_bake_stamp::relic`](../../crates/mahjuro-bake-stamp/src/relic.rs)

@@ -98,8 +98,13 @@ pub(crate) fn estimate_relic_texture_gpu_bytes(meta: &RelicGpuMeta) -> usize {
     meta.albedo_bytes + meta.relief_bytes + meta.mesh_bytes
 }
 
-pub(crate) fn total_relic_gpu_bytes(meta_map: &rustc_hash::FxHashMap<RelicId, RelicGpuMeta>) -> usize {
-    meta_map.values().map(estimate_relic_texture_gpu_bytes).sum()
+pub(crate) fn total_relic_gpu_bytes(
+    meta_map: &rustc_hash::FxHashMap<RelicId, RelicGpuMeta>,
+) -> usize {
+    meta_map
+        .values()
+        .map(estimate_relic_texture_gpu_bytes)
+        .sum()
 }
 
 pub(crate) fn touch_relic_lru(lru: &mut VecDeque<RelicId>, id: RelicId) {

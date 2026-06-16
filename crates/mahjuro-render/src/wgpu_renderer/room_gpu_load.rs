@@ -19,8 +19,8 @@ use crate::gltf_helpers::{
     GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME, GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE,
     GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW, GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL,
     GLTF_PBR_FLAG_ROOM_CANDLE_WAX, GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER,
-    GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT, GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO, GltfPbrUniform,
-    build_sampler_descriptor,
+    GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT, GLTF_PBR_FLAG_ROOM_READABLE_SURFACE,
+    GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO, GltfPbrUniform, build_sampler_descriptor,
 };
 use crate::room_env_gltf::{RoomEnvPrimitiveCpu, RoomTextureUsageClass};
 use crate::room_gi_bake::RoomGiRoom;
@@ -162,6 +162,51 @@ fn archive_env_shader_flags(node_name: Option<&str>) -> u32 {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RoomEnvSurfaceRole {
+    StaticRoom,
+    ReadableSurface,
+}
+
+#[inline]
+fn room_env_surface_role(
+    scene_key: &str,
+    node_name: Option<&str>,
+    _material_name: Option<&str>,
+) -> RoomEnvSurfaceRole {
+    if scene_key != scene_keys::ARCHIVE {
+        return RoomEnvSurfaceRole::StaticRoom;
+    }
+    let Some(name) = node_name else {
+        return RoomEnvSurfaceRole::StaticRoom;
+    };
+    let node = name.to_ascii_lowercase();
+    let readable = node.starts_with("text_")
+        || node.starts_with("btn_")
+        || node.starts_with("sign_")
+        || node.starts_with("plaque_")
+        || matches!(node.as_str(), "inspect_plaque" | "brass_plaque");
+    if readable {
+        RoomEnvSurfaceRole::ReadableSurface
+    } else {
+        RoomEnvSurfaceRole::StaticRoom
+    }
+}
+
+#[inline]
+fn room_env_surface_role_flags(
+    scene_key: &str,
+    node_name: Option<&str>,
+    material_name: Option<&str>,
+) -> u32 {
+    match room_env_surface_role(scene_key, node_name, material_name) {
+        RoomEnvSurfaceRole::StaticRoom => 0,
+        RoomEnvSurfaceRole::ReadableSurface => {
+            GLTF_PBR_FLAG_ROOM_READABLE_SURFACE | GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO
+        }
+    }
+}
+
 #[inline]
 fn main_menu_env_shader_flags(node_name: Option<&str>) -> u32 {
     let Some(name) = node_name else {
@@ -249,6 +294,7 @@ fn room_env_shader_flags(
         _ => 0,
     };
     scene_flags
+        | room_env_surface_role_flags(scene_key, node_name, material_name)
         | room_env_candle_wax_flags(scene_key, node_name, material_name)
         | shop_dynamic_shadow_receiver_flags(scene_key, node_name, material_name)
 }
@@ -258,6 +304,7 @@ fn scene_key_room_shadow_room(scene_key: &str) -> Option<RoomGiRoom> {
     match scene_key {
         scene_keys::SHOP => Some(RoomGiRoom::Shop),
         scene_keys::HALLWAY => Some(RoomGiRoom::Hallway),
+        scene_keys::ARCHIVE => Some(RoomGiRoom::Archive),
         scene_keys::MAIN_MENU => Some(RoomGiRoom::MainMenu),
         scene_keys::STAIRWAY => Some(RoomGiRoom::Stairway),
         scene_keys::GAMEPLAY => Some(RoomGiRoom::Gameplay),
@@ -4205,13 +4252,16 @@ mod tests {
 
     #[test]
     fn room_env_shader_flags_archive_decal_hosts() {
+        let readable_decal_flags = GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL
+            | GLTF_PBR_FLAG_ROOM_READABLE_SURFACE
+            | GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO;
         assert_eq!(
             room_env_shader_flags(
                 scene_keys::ARCHIVE,
                 Some(crate::archive_glb::SIGN_DESCRIPTION_LEFT),
                 Some("sign"),
             ),
-            GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL
+            readable_decal_flags
         );
         assert_eq!(
             room_env_shader_flags(
@@ -4219,7 +4269,7 @@ mod tests {
                 Some(crate::archive_glb::SIGN_DESCRIPTION_RIGHT),
                 Some("sign"),
             ),
-            GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL
+            readable_decal_flags
         );
         assert_eq!(
             room_env_shader_flags(
@@ -4227,7 +4277,7 @@ mod tests {
                 Some(crate::archive_glb::INSPECT_PLAQUE),
                 Some("plaque"),
             ),
-            GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL
+            readable_decal_flags
         );
         assert_eq!(
             room_env_shader_flags(
@@ -4235,7 +4285,35 @@ mod tests {
                 Some(crate::archive_glb::PLAQUE_BACKING),
                 Some("plaque"),
             ),
-            0
+            GLTF_PBR_FLAG_ROOM_READABLE_SURFACE | GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO
+        );
+    }
+
+    #[test]
+    fn room_env_surface_role_marks_readable_ui_surfaces() {
+        assert_eq!(
+            room_env_surface_role(scene_keys::ARCHIVE, Some("text_scene_title"), Some("Brass")),
+            RoomEnvSurfaceRole::ReadableSurface
+        );
+        assert_eq!(
+            room_env_surface_role(scene_keys::ARCHIVE, Some("btn_page_left"), Some("Wood.001")),
+            RoomEnvSurfaceRole::ReadableSurface
+        );
+        assert_eq!(
+            room_env_surface_role(
+                scene_keys::GAMEPLAY,
+                Some("btn_cash_in"),
+                Some("Casted Iron")
+            ),
+            RoomEnvSurfaceRole::StaticRoom
+        );
+        assert_eq!(
+            room_env_surface_role(scene_keys::ARCHIVE, Some("Cubby.001"), Some("Wood.001")),
+            RoomEnvSurfaceRole::StaticRoom
+        );
+        assert_eq!(
+            room_env_surface_role(scene_keys::SHOP, Some("floor"), Some("Dark wood")),
+            RoomEnvSurfaceRole::StaticRoom
         );
     }
 

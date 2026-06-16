@@ -168,10 +168,7 @@ fn atlas_cache_state() -> &'static Mutex<AtlasCacheState> {
 }
 
 fn refresh_decal_atlas_cpu_profile(cache: &lru::LruCache<String, std::sync::Arc<Atlas>>) {
-    let bytes: usize = cache
-        .iter()
-        .map(|(_, atlas)| atlas.rgba.len())
-        .sum();
+    let bytes: usize = cache.iter().map(|(_, atlas)| atlas.rgba.len()).sum();
     crate::gpu_memory_profile::set_decal_atlas_cpu_bytes(bytes);
 }
 

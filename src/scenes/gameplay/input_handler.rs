@@ -1802,13 +1802,8 @@ pub(super) fn build_yaku_panel_and_tablets(
                     })
                     .unwrap_or(0.0);
                 let scale = 1.0 + 0.14 * pulse;
-                let is_pending =
-                    selection_on_structure_strip && !committed_tile_ids.contains(&tid);
-                let brightness = if is_pending {
-                    0.85
-                } else {
-                    1.0 + 0.45 * pulse
-                };
+                let is_pending = selection_on_structure_strip && !committed_tile_ids.contains(&tid);
+                let brightness = if is_pending { 0.85 } else { 1.0 + 0.45 * pulse };
                 lift_mm += SCORE_WAVE_STRUCTURE_TILE_MM * wave_t * pulse;
                 anchor[2] += layout.mm(lift_mm);
                 structure_showcase.push(ShowcaseTilePlacement {

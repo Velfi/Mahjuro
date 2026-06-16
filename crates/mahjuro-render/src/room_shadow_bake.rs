@@ -677,6 +677,41 @@ pub fn primitive_contact_ao_class(
         return class;
     }
 
+    if room == RoomGiRoom::Archive {
+        if contains_any(
+            &node,
+            &[
+                "text_",
+                "btn_",
+                "sign_description",
+                "plaque_scene_title",
+                "brass_plaque",
+                "text_flavor_quad",
+            ],
+        ) || contains_any(&material, &["brass", "paper", "casted iron"])
+        {
+            class.receiver = class.receiver.min(0.0);
+            class.occluder = class.occluder.min(0.35);
+        }
+
+        if contains_any(&node, &["wall", "ceiling"]) || contains_any(&material, &["plaster"]) {
+            class.receiver = class.receiver.min(0.0);
+            class.occluder = class.occluder.min(0.20);
+        }
+
+        if contains_any(&node, &["cubby"]) || contains_any(&material, &["wood"]) {
+            class.receiver = class.receiver.min(0.35);
+            class.occluder = class.occluder.min(0.75);
+        }
+
+        if contains_any(&node, &["floor", "main_fixture"]) {
+            class.receiver = class.receiver.max(1.0);
+            class.occluder = class.occluder.max(0.85);
+        }
+
+        return class;
+    }
+
     if room != RoomGiRoom::Shop {
         return class;
     }
@@ -915,11 +950,12 @@ pub fn require_effective_room_shadow_bake(room: RoomGiRoom) -> anyhow::Result<Ar
     Ok(bake)
 }
 
-/// Rooms that must have a committed `.msh` at game runtime (archive uses punctual-only today).
-pub fn runtime_required_room_shadow_bakes() -> [RoomGiRoom; 5] {
+/// Rooms that must have a committed `.msh` at game runtime.
+pub fn runtime_required_room_shadow_bakes() -> [RoomGiRoom; 6] {
     [
         RoomGiRoom::Shop,
         RoomGiRoom::Hallway,
+        RoomGiRoom::Archive,
         RoomGiRoom::MainMenu,
         RoomGiRoom::Stairway,
         RoomGiRoom::Gameplay,
@@ -1117,18 +1153,19 @@ mod tests {
 
     #[test]
     fn committed_room_shadow_bakes_are_effective() {
-        for room in [
-            RoomGiRoom::Shop,
-            RoomGiRoom::Hallway,
-            RoomGiRoom::Archive,
-            RoomGiRoom::MainMenu,
-            RoomGiRoom::Stairway,
-            RoomGiRoom::Gameplay,
-        ] {
+        for room in runtime_required_room_shadow_bakes() {
             let bake = require_room_shadow_bake(room).expect("room shadow bake should load");
             validate_room_shadow_bake_effective(&bake, room)
                 .expect("room shadow bake should have usable depth and AO");
         }
+    }
+
+    #[test]
+    fn runtime_required_room_shadow_bakes_include_archive() {
+        assert!(
+            runtime_required_room_shadow_bakes().contains(&RoomGiRoom::Archive),
+            "archive runtime path samples archive.msh and must validate it at startup"
+        );
     }
 
     #[test]
@@ -1217,6 +1254,29 @@ mod tests {
         );
         assert!(sign.receiver < 0.10);
         assert!(sign.occluder < 0.50);
+    }
+
+    #[test]
+    fn archive_ui_chrome_does_not_receive_baked_contact_ao() {
+        let title = primitive_contact_ao_class(
+            RoomGiRoom::Archive,
+            Some("text_scene_title"),
+            Some("Brass"),
+        );
+        assert_eq!(title.receiver, 0.0);
+        assert!(title.occluder < 0.50);
+
+        let sign = primitive_contact_ao_class(
+            RoomGiRoom::Archive,
+            Some("sign_description_left"),
+            Some("Paper 22"),
+        );
+        assert_eq!(sign.receiver, 0.0);
+
+        let cubby =
+            primitive_contact_ao_class(RoomGiRoom::Archive, Some("Cubby.001"), Some("Wood.001"));
+        assert!(cubby.receiver > 0.0);
+        assert!(cubby.receiver < 0.50);
     }
 
     #[test]

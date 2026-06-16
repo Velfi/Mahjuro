@@ -16,7 +16,7 @@ Short pointers to deeper context. Read the linked file before working in the are
 - [Tileset mods](docs/agents/tileset-mods.md) — player-installed `atlas.png` + `atlas.toml` under config dir; `mod:<name>` namespace.
 - [GPU memory / 4 GB preset](docs/agents/gpu-memory.md) — Low memory graphics mode, profiling soak, residency caps.
 - [Memory / loading budgets](docs/agents/memory-loading-budgets.md) — Phase 0 baseline capture (`scripts/memory-loading-baseline.sh`), soak metrics, targets.
-- [Room shadows & baking](docs/agents/room-shadows-and-baking.md) — offline `.msh` / `.mgi`, live prop shadows, rebake commands, headless tools, relic RLC1.
+- [Room shadows & baking](docs/agents/room-shadows-and-baking.md) — offline `.msh` / `.mgi`, live prop shadows, rebake commands, headless tools, relic RLC2.
 - [Lit mesh shader](docs/agents/lit-mesh-shader.md) — `lit_mesh.wgsl` materials, bind groups, fs_main phases, A/B profiling (`MAHJURO_LIT_MESH_PROFILE`).
 - [macOS dylibs / app bundle](docs/agents/macos-dylibs.md) — `libsteam_api.dylib`, static SDL3, `@loader_path` / `@rpath`, CI vs `package-macos.sh`.
 - [Windows build / DXC redist](docs/agents/windows-build.md) — `dxcompiler.dll` + `dxil.dll`, DX12 vs FXC, release packaging.

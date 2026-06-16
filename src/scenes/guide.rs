@@ -36,9 +36,7 @@ use crate::render::table_transform::{
     compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad,
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
-use crate::render::vocabulary_colors::{
-    GlossaryMode, text_effect_for_glossary_tint,
-};
+use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
 use crate::render::wgpu_renderer::{
     GpuInstance, PointLight, TextAlign, TextBlockVerticalAlign, TextLabel,
 };

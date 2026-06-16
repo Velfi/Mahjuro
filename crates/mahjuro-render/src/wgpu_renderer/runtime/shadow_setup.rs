@@ -42,9 +42,6 @@ pub fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
 
 impl ActiveRoomEnv {
     /// Runtime `.msh` contact-AO bake for this room, if one should be sampled.
-    ///
-    /// Archive intentionally stays punctual-only for now; see
-    /// `docs/agents/room-shadows-and-baking.md`.
     pub fn baked_shadow_room(self) -> Option<RoomGiRoom> {
         match self {
             Self::Shop => Some(RoomGiRoom::Shop),
@@ -52,7 +49,8 @@ impl ActiveRoomEnv {
             Self::Stairway => Some(RoomGiRoom::Stairway),
             Self::MainMenu => Some(RoomGiRoom::MainMenu),
             Self::Gameplay => Some(RoomGiRoom::Gameplay),
-            Self::Archive | Self::ShadowTest => None,
+            Self::Archive => Some(RoomGiRoom::Archive),
+            Self::ShadowTest => None,
         }
     }
 
@@ -120,12 +118,6 @@ pub fn skip_room_env_live_shadow_pass(
     active_room_env: ActiveRoomEnv,
     active_baked_room: Option<RoomGiRoom>,
 ) -> bool {
-    // Archive is punctual-lit only for now. It does not sample `archive.msh`,
-    // but drawing the whole static archive shell into the live punctual shadow
-    // map produces large room-shaped slabs on the collection UI.
-    if matches!(active_room_env, ActiveRoomEnv::Archive) {
-        return true;
-    }
     active_room_env
         .baked_shadow_room()
         .is_some_and(|room| Some(room) == active_baked_room)
@@ -436,9 +428,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn archive_skips_static_live_room_shadow_without_sampling_baked_ao() {
-        assert_eq!(ActiveRoomEnv::Archive.baked_shadow_room(), None);
-        assert!(skip_room_env_live_shadow_pass(ActiveRoomEnv::Archive, None));
+    fn archive_uses_baked_shadow_like_other_static_rooms() {
+        assert_eq!(
+            ActiveRoomEnv::Archive.baked_shadow_room(),
+            Some(RoomGiRoom::Archive)
+        );
+        assert!(!skip_room_env_live_shadow_pass(
+            ActiveRoomEnv::Archive,
+            None
+        ));
+        assert!(skip_room_env_live_shadow_pass(
+            ActiveRoomEnv::Archive,
+            Some(RoomGiRoom::Archive)
+        ));
     }
 
     #[test]

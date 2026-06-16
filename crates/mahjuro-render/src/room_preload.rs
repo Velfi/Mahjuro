@@ -62,8 +62,7 @@ fn mark_prefetch_done(slot_id: u8) {
 ///
 /// [`RoomGpuResidentDesc::prefetch_slot`]: crate::room_gpu_resident::RoomGpuResidentDesc::prefetch_slot
 pub fn room_prefetch_in_flight(slot_id: u8) -> bool {
-    slot_by_id(slot_id)
-        .is_some_and(|slot| slot.state.load(Ordering::Acquire) == PREFETCH_IN_FLIGHT)
+    slot_by_id(slot_id).is_some_and(|slot| slot.state.load(Ordering::Acquire) == PREFETCH_IN_FLIGHT)
 }
 
 struct PrefetchSlot {
