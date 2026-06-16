@@ -160,6 +160,8 @@ impl RunState {
         self.transformed_tiles.insert(id, replacement);
         if self.wall.remove_undrawn_by_id(id) {
             self.wall.inject_into_remaining(replacement);
+        } else {
+            self.wall.patch_tile_by_id(id, replacement);
         }
     }
 
@@ -230,9 +232,11 @@ impl RunState {
             }
         }
 
+        self.sync_live_wall_with_persisted_transforms();
         self.clear_hand_selection_flags();
         self.hand.sort();
         self.restamp_hand_enhancements();
+        GameplayCoreState::with_run_mut(self, |core| core.finalize_hand_after_draw());
     }
 
     fn clear_hand_selection_flags(&mut self) {

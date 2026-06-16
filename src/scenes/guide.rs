@@ -1162,7 +1162,7 @@ pub(crate) struct YakuGuideDetail {
     pub breaks_if: &'static str,
 }
 
-pub(crate) fn yaku_guide_detail(yk: YakuKind, kokushi_discovered: bool) -> YakuGuideDetail {
+pub(crate) fn yaku_guide_detail(yk: YakuKind) -> YakuGuideDetail {
     match yk {
         YakuKind::ChickenHand => YakuGuideDetail {
             rule: "Fallback score when the hand wins but no other pattern applies.",
@@ -1273,7 +1273,6 @@ fn draw_yaku_guide_page(
     content_floor: f32,
     cam: &CameraParams,
 ) {
-    let kokushi_discovered = progress.kokushi_musou_discovered();
     if yaku.is_empty() {
         return;
     }
@@ -1284,7 +1283,7 @@ fn draw_yaku_guide_page(
     for (i, &yk) in yaku.iter().enumerate() {
         let band_top = body_top + i as f32 * (band_h + band_gap);
         let band_bottom = band_top + band_h;
-        let detail = yaku_guide_detail(yk, kokushi_discovered);
+        let detail = yaku_guide_detail(yk);
         let (_, groups) = yaku_page(yk);
         draw_yaku_entry(
             frame,

@@ -1884,6 +1884,124 @@ mod cases {
     }
 
     #[test]
+    fn conformity_talisman_transform_persists_across_round() {
+        use crate::core::consumable::Consumable;
+        use crate::core::deck::Wall;
+        use crate::core::talisman::TalismanKind;
+
+        let mut run = test_run();
+        let mut bus = bus();
+
+        let hand_ids: Vec<u32> = run.hand.iter().map(|t| t.id).collect();
+
+        run.consumables
+            .try_push(Consumable::Talisman(TalismanKind::Conformity));
+        run.use_consumable(0, &mut bus);
+
+        let template_face = run.hand[0].face();
+        assert!(
+            run.hand.iter().all(|t| t.face() == template_face),
+            "conformity should rewrite every hand tile to the same face"
+        );
+        assert_eq!(
+            run.transformed_tiles.len(),
+            hand_ids.len(),
+            "every hand tile id should be tombstoned"
+        );
+        for id in &hand_ids {
+            assert!(run.removed_tile_ids.contains(id));
+            assert_eq!(
+                run.transformed_tiles.get(id).map(|t| t.face()),
+                Some(template_face)
+            );
+        }
+
+        run.advance_round(&mut bus);
+        run.apply_chamber(ChamberKind::Big, None);
+
+        let preview = Wall::preview_composition(
+            &run.removed_tile_ids,
+            &run.tile_packs,
+            &run.tile_enhancements,
+            &run.transformed_tiles,
+            false,
+            &run.joker_extra_faces,
+        );
+        for id in &hand_ids {
+            let baked = preview
+                .all_tiles()
+                .iter()
+                .find(|t| t.id == *id)
+                .copied()
+                .unwrap_or_else(|| panic!("transformed tile {id} should remain in next-round wall"));
+            assert_eq!(
+                baked.face(),
+                template_face,
+                "tile {id} should keep its conformity face in the next round"
+            );
+        }
+    }
+
+    #[test]
+    fn draw_wall_tile_applies_persisted_conformity_transform() {
+        use crate::core::consumable::Consumable;
+        use crate::core::talisman::TalismanKind;
+
+        let mut run = test_run();
+        let mut bus = bus();
+
+        let tracked_id = run.hand[0].id;
+        run.consumables
+            .try_push(Consumable::Talisman(TalismanKind::Conformity));
+        run.use_consumable(0, &mut bus);
+
+        let template_face = run.hand[0].face();
+
+        // Simulate a stale undrawn copy (mid-round save or pre-sync wall).
+        run.hand.clear();
+        run.selected.clear();
+        while run.draw_wall_tile().is_some() {}
+        run.wall
+            .inject_into_remaining(Tile::new(Suit::Manzu, 1, tracked_id));
+
+        let drawn = run.draw_wall_tile().expect("draw");
+        assert_eq!(drawn.id, tracked_id);
+        assert_eq!(drawn.face(), template_face);
+    }
+
+    #[test]
+    fn conformity_talisman_transform_persists_on_same_id_after_discard_refill() {
+        use crate::core::consumable::Consumable;
+        use crate::core::talisman::TalismanKind;
+
+        let mut run = test_run();
+        let mut bus = bus();
+
+        let tracked_id = run.hand[0].id;
+        run.consumables
+            .try_push(Consumable::Talisman(TalismanKind::Conformity));
+        run.use_consumable(0, &mut bus);
+
+        let template_face = run.hand[0].face();
+        assert_eq!(run.transformed_tiles.get(&tracked_id).map(|t| t.face()), Some(template_face));
+
+        // Discard the whole hand and redraw — copies of other ids can still be
+        // pre-transform faces, but the tombstoned id must never revert.
+        for i in 0..run.hand.len() {
+            run.toggle_select(i);
+        }
+        run.discard_selected(&mut bus);
+
+        if let Some(drawn) = run.hand.iter().find(|t| t.id == tracked_id) {
+            assert_eq!(
+                drawn.face(),
+                template_face,
+                "a redrawn copy of a conformity-tombstoned id must keep its new face"
+            );
+        }
+    }
+
+    #[test]
     fn brocade_pouch_stamps_tiles_drawn_after_talisman_use() {
         use crate::core::consumable::Consumable;
         use crate::core::talisman::TalismanKind;

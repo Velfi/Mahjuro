@@ -144,7 +144,7 @@ impl RunState {
         };
         let mut drawn: Vec<Tile> = Vec::new();
         while self.hand.len() + drawn.len() < draw_target {
-            let Some(t) = self.wall.draw() else { break };
+            let Some(t) = self.draw_wall_tile() else { break };
             bus.push(GameEvent::TileDrawn);
             drawn.push(t);
         }

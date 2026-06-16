@@ -328,37 +328,6 @@ fn score_glyph_band_albedo_uv(base: vec3<f32>, band_coord: vec2<f32>, uv: vec2<f
     return saturate_rgb(albedo, 1.12);
 }
 
-/// World-space alternating vertical stripes on pick-blind hallway walls (bands along corridor depth).
-fn hallway_wall_tint_by_index(idx: u32) -> vec3<f32> {
-    // Keep in sync with `HALLWAY_WALL_TINTS` in hallway_glb.rs.
-    let tints = array<vec3<f32>, 8>(
-        vec3<f32>(0.35, 0.55, 0.95),
-        vec3<f32>(0.95, 0.82, 0.28),
-        vec3<f32>(0.38, 0.78, 0.42),
-        vec3<f32>(0.92, 0.35, 0.32),
-        vec3<f32>(0.68, 0.42, 0.88),
-        vec3<f32>(0.95, 0.52, 0.22),
-        vec3<f32>(0.95, 0.55, 0.75),
-        vec3<f32>(0.72, 0.48, 0.32),
-    );
-    return tints[idx % 8u];
-}
-
-fn hallway_wall_stripe_albedo(textured: vec3<f32>, world_pos: vec3<f32>, h: HallwayDistortion) -> vec3<f32> {
-    let axis = hallway_depth_axis_sel(h.mask.x) * vec3<f32>(h.mask.y);
-    let depth = dot(world_pos, axis);
-    let stripe_coord = (depth - h.stretch.z) * h.wallpaper.y + h.wallpaper.w;
-    let wave = sin(stripe_coord * HALLWAY_TAU);
-    let band = smoothstep(-0.18, 0.18, wave);
-    let stripe_a = textured * h.bow.rgb;
-    var stripe_b = stripe_a * h.wallpaper.z;
-    if (h.wallpaper.z >= 1.0) {
-        let alt_idx = u32(clamp(floor(h.wallpaper.z + 0.5) - 1.0, 0.0, 7.0));
-        stripe_b = textured * hallway_wall_tint_by_index(alt_idx);
-    }
-    return mix(stripe_b, stripe_a, band);
-}
-
 fn candle_flame_capsule_closest_pos(frag_pos: vec3<f32>, light_pos: vec3<f32>, flame_height_world: f32) -> vec3<f32> {
     let h = max(flame_height_world, 0.001);
     let base = light_pos - vec3<f32>(0.0, 0.0, h * 0.55);
@@ -445,11 +414,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     }
     var albedo = tex_rgb * in.v_color.rgb;
     if (is_hallway_wall_tint && hd.flags.x > 0.5) {
-        if (hd.wallpaper.x > 0.5) {
-            albedo = hallway_wall_stripe_albedo(albedo, in.world_pos, hd);
-        } else {
-            albedo = albedo * hd.bow.rgb;
-        }
+        albedo = albedo * hd.bow.rgb;
     }
     let is_archive_decal = (pbr.flags & GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL) != 0u;
     if (is_archive_decal) {

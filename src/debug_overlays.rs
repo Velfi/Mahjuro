@@ -2164,7 +2164,7 @@ impl SceneLookDebugOverlay {
 
 // ── Pick-blind hallway distortion debug (vertex warp tuning) ─────────────
 
-const HALL_DIST_DEBUG_ROW_COUNT: usize = 16;
+const HALL_DIST_DEBUG_ROW_COUNT: usize = 15;
 
 const HALL_DIST_DEBUG_ROW_META: &[(&str, f32, f32, f32)] = &[
     ("Blind (0 Auto 1S 2B 3Boss)", 0.0, 3.0, 0.25),
@@ -2177,7 +2177,6 @@ const HALL_DIST_DEBUG_ROW_META: &[(&str, f32, f32, f32)] = &[
     ("Ripple travel ×", 0.0, 3.0, 0.05),
     ("Wall barrel bow ×", 0.0, 10.0, 0.05),
     ("Wall tint (0 Auto 1–8)", 0.0, 8.0, 1.0),
-    ("Wall pattern (0 Auto 1P 2S 3T 4BC 5TBC)", 0.0, 5.0, 1.0),
     ("Ceiling squeeze ×", 0.0, 10.0, 0.05),
     ("Depth stretch × (×u)", 0.0, 10.0, 0.05),
     ("Twist × (walls)", 0.0, 10.0, 0.05),
@@ -2272,7 +2271,6 @@ pub struct HallwayDistortionDebugOverlay {
     ripple_mul: f32,
     balloon_mul: f32,
     wall_tint: f32,
-    wall_pattern: f32,
     ripple_waves_mul: f32,
     ripple_travel_mul: f32,
     editing: bool,
@@ -2301,7 +2299,6 @@ impl HallwayDistortionDebugOverlay {
             ripple_mul: 1.0,
             balloon_mul: 1.0,
             wall_tint: 0.0,
-            wall_pattern: 0.0,
             ripple_waves_mul: 1.0,
             ripple_travel_mul: 1.0,
             editing: false,
@@ -2328,8 +2325,7 @@ impl HallwayDistortionDebugOverlay {
             drift_mul: self.drift_mul,
             ripple_mul: self.ripple_mul,
             balloon_mul: self.balloon_mul,
-            wall_tint: self.wall_tint.round().clamp(0.0, 6.0) as u8,
-            wall_pattern: self.wall_pattern.round().clamp(0.0, 5.0) as u8,
+            wall_tint: self.wall_tint.round().clamp(0.0, 8.0) as u8,
             ripple_waves_mul: self.ripple_waves_mul,
             ripple_travel_mul: self.ripple_travel_mul,
         }
@@ -2351,12 +2347,11 @@ impl HallwayDistortionDebugOverlay {
             7 => self.ripple_travel_mul,
             8 => self.balloon_mul,
             9 => self.wall_tint,
-            10 => self.wall_pattern,
-            11 => self.ceiling_mul,
-            12 => self.stretch_mul,
-            13 => self.twist_mul,
-            14 => self.pulse_mul,
-            15 => self.drift_mul,
+            10 => self.ceiling_mul,
+            11 => self.stretch_mul,
+            12 => self.twist_mul,
+            13 => self.pulse_mul,
+            14 => self.drift_mul,
             _ => 0.0,
         }
     }
@@ -2375,12 +2370,11 @@ impl HallwayDistortionDebugOverlay {
             7 => self.ripple_travel_mul = v,
             8 => self.balloon_mul = v,
             9 => self.wall_tint = v.round(),
-            10 => self.wall_pattern = v.round(),
-            11 => self.ceiling_mul = v,
-            12 => self.stretch_mul = v,
-            13 => self.twist_mul = v,
-            14 => self.pulse_mul = v,
-            15 => self.drift_mul = v,
+            10 => self.ceiling_mul = v,
+            11 => self.stretch_mul = v,
+            12 => self.twist_mul = v,
+            13 => self.pulse_mul = v,
+            14 => self.drift_mul = v,
             _ => {}
         }
     }
@@ -2413,8 +2407,6 @@ impl HallwayDistortionDebugOverlay {
             format!("{}", self.chamber_row)
         } else if self.cursor == 9 {
             format!("{}", self.wall_tint.round() as u8)
-        } else if self.cursor == 10 {
-            format!("{}", self.wall_pattern.round() as u8)
         } else {
             format!("{:.6}", v)
         };
@@ -2455,7 +2447,7 @@ impl HallwayDistortionDebugOverlay {
         if ctrl && matches!(code, Scancode::C) && !self.editing {
             let s = self.to_snapshot();
             let text = format!(
-                "HallwayDistortionDebugSnapshot {{ chamber_mode: {}, run_seed: {:#018x}, run_number: {}, wing: {}, global_mul: {:.4}, breathe_mul: {:.4}, ripple_mul: {:.4}, ceiling_mul: {:.4}, stretch_mul: {:.4}, twist_mul: {:.4}, pulse_mul: {:.4}, drift_mul: {:.4}, balloon_mul: {:.4}, wall_tint: {}, wall_pattern: {}, ripple_waves_mul: {:.4}, ripple_travel_mul: {:.4} }}",
+                "HallwayDistortionDebugSnapshot {{ chamber_mode: {}, run_seed: {:#018x}, run_number: {}, wing: {}, global_mul: {:.4}, breathe_mul: {:.4}, ripple_mul: {:.4}, ceiling_mul: {:.4}, stretch_mul: {:.4}, twist_mul: {:.4}, pulse_mul: {:.4}, drift_mul: {:.4}, balloon_mul: {:.4}, wall_tint: {}, ripple_waves_mul: {:.4}, ripple_travel_mul: {:.4} }}",
                 s.chamber_mode,
                 s.run_seed,
                 s.run_number,
@@ -2470,7 +2462,6 @@ impl HallwayDistortionDebugOverlay {
                 s.drift_mul,
                 s.balloon_mul,
                 s.wall_tint,
-                s.wall_pattern,
                 s.ripple_waves_mul,
                 s.ripple_travel_mul,
             );
@@ -2721,40 +2712,6 @@ impl HallwayDistortionDebugOverlay {
                 Self::trim_f32(rgb[2]),
             );
         }
-        if row == 10 {
-            let idx = self.wall_pattern.round() as u8;
-            let label = match idx {
-                0 => "Auto",
-                1 => "Plain",
-                2 => "Stripes",
-                3 => "Tall",
-                4 => "Bicolor",
-                5 => "TallBC",
-                _ => "?",
-            };
-            let pattern = if idx == 0 {
-                preview.wallpaper[0]
-            } else if idx == 1 {
-                0.0
-            } else if idx == 2 {
-                1.0
-            } else if idx == 3 {
-                2.0
-            } else if idx == 4 {
-                1.0
-            } else {
-                2.0
-            };
-            let pat_label = if pattern < 0.5 {
-                "Plain"
-            } else if pattern < 1.5 {
-                "Stripes"
-            } else {
-                "Tall"
-            };
-            let color_label = if preview.wallpaper[2] >= 1.0 { "BC" } else { "Mono" };
-            return format!("{idx} {label} ({pat_label}/{color_label})");
-        }
         let v = self.row_value(row);
         let mul = Self::trim_f32(v);
         let eff = match row {
@@ -2764,11 +2721,11 @@ impl HallwayDistortionDebugOverlay {
             6 => Self::trim_f32(preview.ripple[1]),
             7 => Self::trim_f32(preview.ripple[3]),
             8 => Self::trim_f32(preview.bow[3]),
-            11 => Self::trim_f32(preview.ceiling[0]),
-            12 => Self::trim_f32(preview.stretch[0]),
-            13 => Self::trim_f32(preview.twist[0]),
-            14 => Self::trim_f32(preview.time_pulse[3]),
-            15 => Self::trim_f32(preview.time_pulse[1]),
+            10 => Self::trim_f32(preview.ceiling[0]),
+            11 => Self::trim_f32(preview.stretch[0]),
+            12 => Self::trim_f32(preview.twist[0]),
+            13 => Self::trim_f32(preview.time_pulse[3]),
+            14 => Self::trim_f32(preview.time_pulse[1]),
             _ => return mul,
         };
         format!("{mul} ({eff})")
