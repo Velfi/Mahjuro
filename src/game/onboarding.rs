@@ -30,6 +30,9 @@ pub struct OnboardingState {
     /// Selected tile ids tied to [`Self::invalid_meld_hint`]; cleared when selection changes.
     #[serde(default)]
     invalid_meld_hint_tile_ids: Vec<u32>,
+    /// Number of successful hold-to-confirm actions demonstrated by the player.
+    #[serde(default)]
+    hold_action_successes: u8,
 }
 
 impl Default for OnboardingState {
@@ -48,6 +51,7 @@ impl OnboardingState {
             finale_intro_shown: false,
             invalid_meld_hint: None,
             invalid_meld_hint_tile_ids: Vec::new(),
+            hold_action_successes: 0,
         }
     }
 
@@ -76,6 +80,16 @@ impl OnboardingState {
 
     pub fn lessons_active(&self) -> bool {
         self.phase == OnboardingPhase::Lessons
+    }
+
+    pub fn hold_tooltip_enabled(&self) -> bool {
+        self.hold_action_successes < HOLD_TOOLTIP_SUCCESS_TARGET
+    }
+
+    pub fn notify_hold_success(&mut self) {
+        if self.hold_action_successes < HOLD_TOOLTIP_SUCCESS_TARGET {
+            self.hold_action_successes += 1;
+        }
     }
 
     pub fn discard_allowed_in_lessons(&self) -> bool {
@@ -112,6 +126,8 @@ pub const LESSONS_TARGET: u32 = 100;
 pub const LESSONS_HAND_SIZE: usize = 10;
 pub const LESSONS_PLAYS: u32 = 3;
 pub const LESSONS_DISCARDS: u32 = 2;
+pub const HOLD_TOOLTIP_SUCCESS_TARGET: u8 = 3;
+pub const HOLD_TOOLTIP_COPY: &str = "Try holding the button";
 
 pub fn tutorial_yaku() -> Vec<YakuKind> {
     YakuKind::all().to_vec()

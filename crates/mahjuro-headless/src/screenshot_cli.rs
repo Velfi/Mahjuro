@@ -21,6 +21,9 @@ pub struct ScreenshotCli {
     /// Extra idle ticks before the capture frame (layout/asset settling).
     #[arg(long, default_value_t = 12)]
     pub warmup_frames: u32,
+    /// Hide 2D UI chrome and text, matching the in-game Debug → Overlays → Hide 2D UI toggle.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub hide_ui: bool,
     /// Ordeal slug for runs where gameplay ordeals matter (`gameplay`, `hallway`, …).
     #[arg(long, alias = "boss")]
     pub ordeal: Option<String>,

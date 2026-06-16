@@ -41,7 +41,7 @@ pub(super) use self::pick_ids::{
 
 use rand::seq::SliceRandom;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::core::consumable::Consumable;
 use crate::core::relic::{
@@ -105,6 +105,8 @@ pub struct ShopScene {
     west_sell_hold_started: Option<std::time::Instant>,
     /// Confirm hold-to-buy (gamepad South / Enter / Space). Cursor mode uses click-to-buy instead.
     confirm_buy_hold_started: Option<std::time::Instant>,
+    /// One-shot onboarding hint after releasing a hold too early.
+    hold_tooltip: Option<HoldTooltipState>,
     /// LMB-drag turntable on the storeroom camera (radians, applied around [`CameraParams::target`]).
     storeroom_orbit_yaw: f32,
     storeroom_orbit_pitch: f32,
@@ -114,6 +116,12 @@ pub struct ShopScene {
     departing_stock: Vec<restock_exit::ShopDepartingBatch>,
     /// When the current for-sale row should play the enter scale pop.
     restock_enter_at: Option<Instant>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HoldTooltipState {
+    focus: ShopFocus,
+    until: Instant,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -126,6 +134,7 @@ pub const SHOP_3D_HIT_ID: u32 = 0x9200;
 pub const SHOP_INSPECT_PREVIEW_ID: u32 = 0x9201;
 /// How long a relic glow + wiggle lasts after activation.
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
+const HOLD_TOOLTIP_DURATION: Duration = Duration::from_millis(1600);
 /// Pitch relic cuboids toward the camera ([`crate::render::table_transform::rot_fixed_axes_deg`]).
 /// The relic front cap is at local +Y; pitching past 90° tilts it to face -Y
 /// (toward the camera). Camera is at (0, -0.72h, 0.34h); counter relics sit at
@@ -220,6 +229,43 @@ impl ShopScene {
             shop,
         )
         .is_some()
+    }
+
+    pub(crate) fn trigger_hold_tooltip(
+        &mut self,
+        run: &crate::game::run::RunState,
+        now: Instant,
+        focus: Option<ShopFocus>,
+    ) {
+        let Some(focus) = focus else {
+            return;
+        };
+        if !run.onboarding_hold_tooltip_enabled() {
+            return;
+        }
+        self.hold_tooltip = Some(HoldTooltipState {
+            focus,
+            until: now + HOLD_TOOLTIP_DURATION,
+        });
+    }
+
+    pub(crate) fn hold_tooltip_focus(
+        &self,
+        run: &crate::game::run::RunState,
+        now: Instant,
+    ) -> Option<ShopFocus> {
+        if !run.onboarding_hold_tooltip_enabled() {
+            return None;
+        }
+        self.hold_tooltip
+            .filter(|tip| now <= tip.until)
+            .map(|tip| tip.focus)
+    }
+
+    pub(crate) fn prune_hold_tooltip(&mut self, now: Instant) {
+        if self.hold_tooltip.is_some_and(|tip| now > tip.until) {
+            self.hold_tooltip = None;
+        }
     }
 
     /// Freeze hold timers while the targeted action cannot succeed.

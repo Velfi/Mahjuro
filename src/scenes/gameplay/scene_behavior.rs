@@ -1575,6 +1575,7 @@ impl SceneBehavior for GameplayScene {
         }
 
         // Focus inspect: [`crate::ui::tooltip`] frame + wrapped text (shop uses the same helper).
+        let show_cash_in_hold_tip = self.cash_in_hold_tooltip_active(run, now);
         if !self.pause_menu.paused
             && !ctx.modal_active
             && self.cascade_queue.is_empty()
@@ -1895,7 +1896,14 @@ impl SceneBehavior for GameplayScene {
                         );
                     }
                     FocusTarget::Button(GameplayButton::Trigger) => {
-                        let (title, desc, accent) = if cash_in_blocked {
+                        let (title, desc, cta, accent) = if show_cash_in_hold_tip {
+                            (
+                                "Cash In".to_string(),
+                                crate::game::onboarding::HOLD_TOOLTIP_COPY.to_string(),
+                                String::new(),
+                                color::CHAMPAGNE,
+                            )
+                        } else if cash_in_blocked {
                             let boss = if boss_title_text.is_empty() {
                                 "The boss".to_string()
                             } else {
@@ -1910,12 +1918,13 @@ impl SceneBehavior for GameplayScene {
                             } else {
                                 format!("{boss_rule_text} ({discards} {discard_word} left).")
                             };
-                            ("Cash In".to_string(), desc, color::RUBY)
+                            ("Cash In".to_string(), desc, "Ordeal Rule".to_string(), color::RUBY)
                         } else {
                             (
                                 "Cash In".to_string(),
                                 "Confirm to score the melds in your structure and end the round."
                                     .to_string(),
+                                String::new(),
                                 color::CHAMPAGNE,
                             )
                         };
@@ -1928,7 +1937,7 @@ impl SceneBehavior for GameplayScene {
                                 anchor_rect: Some(rect),
                                 title: title.as_str(),
                                 desc: desc.as_str(),
-                                cta: if cash_in_blocked { "Ordeal Rule" } else { "" },
+                                cta: cta.as_str(),
                                 accent_color: accent,
                                 hover_is_owned: false,
                                 skip_title_block: false,
@@ -2010,6 +2019,28 @@ impl SceneBehavior for GameplayScene {
                     }
                     _ => {}
                 }
+            }
+            if show_cash_in_hold_tip
+                && self.focus != Some(FocusTarget::Button(GameplayButton::Trigger))
+                && trigger_btn_rect.2 > 1.0
+                && trigger_btn_rect.3 > 1.0
+            {
+                push_focus_tooltip_panel_2d(
+                    &mut inspect_tooltip_quads,
+                    &mut inspect_tooltip_texts,
+                    FocusTooltipPanelParams {
+                        window_w: layout.window_w,
+                        window_h: layout.window_h,
+                        anchor_rect: Some(trigger_btn_rect.into()),
+                        title: "Cash In",
+                        desc: crate::game::onboarding::HOLD_TOOLTIP_COPY,
+                        cta: "",
+                        accent_color: color::CHAMPAGNE,
+                        hover_is_owned: false,
+                        skip_title_block: false,
+                        avoid_rect: None,
+                    },
+                );
             }
             if !inspect_tooltip_quads.is_empty() || !inspect_tooltip_texts.is_empty() {
                 frame.overlay_quads(inspect_tooltip_quads);

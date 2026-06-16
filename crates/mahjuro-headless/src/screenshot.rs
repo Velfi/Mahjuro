@@ -42,6 +42,7 @@ pub fn run(cli: ScreenshotCli) -> anyhow::Result<()> {
         profile_index,
         screenshot_progress,
     )?;
+    app.hide_ui = cli.hide_ui;
 
     if (cli.shop_focus.is_some() && matches!(cli.scene.as_str(), "shop"))
         || (cli.item_inspect && collection_screenshot_tab_for_overlay(&cli.scene))

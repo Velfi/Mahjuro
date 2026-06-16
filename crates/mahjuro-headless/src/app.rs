@@ -67,6 +67,7 @@ pub(crate) struct HeadlessApp {
     modal_overlay: Option<mahjuro::ui::modal::ModalQueue>,
     pub(crate) shop_env_lighting: mahjuro::render::room_glb::RoomEnvLightingTune,
     pub(crate) input_mode_override: Option<InputMode>,
+    pub(crate) hide_ui: bool,
 }
 
 impl HeadlessApp {
@@ -115,6 +116,7 @@ impl HeadlessApp {
             modal_overlay: None,
             input_mode_override: None,
             shop_env_lighting: mahjuro::render::room_glb::RoomEnvLightingTune::SOURCE_DEFAULTS,
+            hide_ui: false,
         })
     }
 
@@ -492,6 +494,10 @@ impl HeadlessApp {
                 );
             }
         }
+        if self.hide_ui {
+            frame.buttons.clear();
+            hide_ui_draw_cmds(&mut frame);
+        }
 
         let top = self.overlay_stack.last().unwrap_or(&self.scene);
         let parent = mahjuro::scenes::overlay_renderer_parent(&self.scene, &self.overlay_stack);
@@ -576,4 +582,21 @@ impl HeadlessApp {
         }
         Ok(())
     }
+}
+
+fn hide_ui_draw_cmds(frame: &mut UiFrame) {
+    frame.cmds.retain(|cmd| {
+        !matches!(
+            cmd,
+            mahjuro::render::draw_cmd::DrawCmd::Quad(_)
+                | mahjuro::render::draw_cmd::DrawCmd::OverlayQuad(_)
+                | mahjuro::render::draw_cmd::DrawCmd::OverlaySquircleQuad(_)
+                | mahjuro::render::draw_cmd::DrawCmd::GradientQuad(_)
+                | mahjuro::render::draw_cmd::DrawCmd::ArcRingQuad(_)
+                | mahjuro::render::draw_cmd::DrawCmd::SquircleQuad(_)
+                | mahjuro::render::draw_cmd::DrawCmd::Text(_)
+                | mahjuro::render::draw_cmd::DrawCmd::ImageQuad(_)
+                | mahjuro::render::draw_cmd::DrawCmd::TileFaceQuad(_)
+        )
+    });
 }

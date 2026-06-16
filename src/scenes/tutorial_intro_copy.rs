@@ -5,15 +5,8 @@
 pub mod tiles {
     pub const INTRO: &str = "Your hand of tiles is drawn from the \"wall\". All tiles have a suit. Some tiles have ranks.\nTiles ranked 1 and 9 are called \"terminals\". Tiles ranked 2–8 are called \"simples\".";
 
-    pub const NUMBER_SUITS_HEADING: &str = "RANKED SUITS (scored by face value)";
     pub const HONOR_SUITS_HEADING: &str = "HONOR SUITS (high-scoring, but rarer)";
     pub const FLOWERS_HEADING: &str = "SPECIAL TILES";
-
-    pub const NUMBER_SUIT_LINES: &[&str] = &[
-        "Manzu — ranks 1–9.",
-        "Souzu — ranks 1–9.",
-        "Pinzu — ranks 1–9.",
-    ];
 
     pub const HONOR_LINES: &[&str] = &[
         "Winds — East, South, West, North.",
@@ -45,13 +38,16 @@ pub mod scoring {
 // ── Campaign pages ────────────────────────────────────────────────────────────
 
 pub mod campaign {
-    use super::{melds, scoring};
+    use super::scoring;
 
-    pub const PART1_TITLE: &str = "Part 1 — The Tiles";
-    pub const PART1_CALLOUT: &str = "Next: melds and how to score.";
+    pub const PAGE_TILES_INTRO_TITLE: &str = "The Tiles";
+    pub const PAGE_TILES_HONORS_TITLE: &str = "Honors & Flowers";
+    pub const PAGE_MELDS_TITLE: &str = "Melds";
+    pub const PAGE_SCORING_TITLE: &str = "Scoring";
+    pub const PAGE_TRY_IT_TITLE: &str = "Try It";
 
-    pub const PART2_TITLE: &str = "Part 2 — Melds & Scoring";
-    pub const PART2_CALLOUT: &str = "Your actions are limited — make them count.";
+    pub const PAGE_NAV_CALLOUT: &str = "Press **Next** below when you're ready to continue.";
+    pub const PAGE_START_CALLOUT: &str = "Press **Start** below to begin your first lesson.";
 
     pub const GLOSSARY_DISCARD: &str =
         "Discard — remove unwanted tiles from your hand. Discards are a limited resource.";
@@ -61,16 +57,13 @@ pub mod campaign {
     pub const GLOSSARY_CASH_IN: &str =
         "Cash In — scores tiles in your structure and then resets it.";
 
-    pub const PART2_GLOSSARY: &[&str] = &[
-        melds::PAGE_SUBTITLE,
+    pub const SCORING_GLOSSARY: &[&str] = &[
         GLOSSARY_DISCARD,
         GLOSSARY_PLAY,
         GLOSSARY_STRUCTURE,
         GLOSSARY_CASH_IN,
         scoring::FLOW_REMINDER,
     ];
-
-    pub const PART2_SUBTITLE: &str = scoring::SUBTITLE;
 }
 
 // ── Try-it demo (Part 2 interactive flash lines) ────────────────────────────

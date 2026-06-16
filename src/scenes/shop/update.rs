@@ -16,6 +16,12 @@ fn shop_owned_inventory_focus(scene: &ShopScene, f: ShopFocus) -> bool {
     }
 }
 
+#[inline]
+fn released_before_hold_complete(start: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(start).as_secs_f32()
+        < crate::ui::prompt_hold_ring::hold_act_seconds()
+}
+
 impl ShopScene {
     pub(super) fn pause_options_overlay_impl(&self) -> Option<&options::OptionsScene> {
         self.pause_menu.options_overlay()
@@ -261,6 +267,7 @@ impl ShopScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.age_secs += dt;
+        self.prune_hold_tooltip(now);
         self.tick_departing_stock(now, ctx.layout.window_h);
         let sellable_focus = focused_sell_action(
             self.focus,
@@ -508,11 +515,26 @@ impl ShopScene {
                 continue;
             }
             if matches!(a, UiAction::WestFaceRelease) {
+                let released_early_sell = self
+                    .west_sell_hold_started
+                    .is_some_and(|started| released_before_hold_complete(started, now));
                 self.cancel_west_sell_hold(ctx.bus);
+                if released_early_sell {
+                    self.trigger_hold_tooltip(ctx.run, now, self.focus);
+                }
                 continue;
             }
             if matches!(a, UiAction::ConfirmRelease) {
+                let released_early_sell = self
+                    .west_sell_hold_started
+                    .is_some_and(|started| released_before_hold_complete(started, now));
+                let released_early_buy = self
+                    .confirm_buy_hold_started
+                    .is_some_and(|started| released_before_hold_complete(started, now));
                 self.cancel_all_hold_prompts(ctx.bus);
+                if released_early_sell || released_early_buy {
+                    self.trigger_hold_tooltip(ctx.run, now, self.focus);
+                }
                 continue;
             }
 
