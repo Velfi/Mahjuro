@@ -740,13 +740,15 @@ pub(super) fn process_focus_and_actions(
                     )
                 };
                 use crate::core::structure::{
-                    structure_remaining_slots_callout, structure_remaining_tile_slots,
+                    structure_callout_remaining_slots, structure_remaining_slots_callout,
                 };
                 use crate::game::game_mode::HAND_SIZE;
-                let remaining_before = structure_remaining_tile_slots(
+                let commit_rules = ctx.run.validation_rules_for_structure_commits();
+                let remaining_before = structure_callout_remaining_slots(
                     &gameplay.structure_tiles,
                     &gameplay.structure_sets,
                     HAND_SIZE,
+                    &commit_rules,
                 );
                 let outcome = {
                     let mut engine = GameEngine::new(ctx.run, ctx.bus);
@@ -805,10 +807,12 @@ pub(super) fn process_focus_and_actions(
                         let d = played_chips_after.saturating_sub(played_chips_before);
                         if d > 0 {
                             let gameplay_after = GameEngine::read(ctx.run);
-                            let remaining = structure_remaining_tile_slots(
+                            let commit_rules_after = ctx.run.validation_rules_for_structure_commits();
+                            let remaining = structure_callout_remaining_slots(
                                 &gameplay_after.structure_tiles,
                                 &gameplay_after.structure_sets,
                                 HAND_SIZE,
+                                &commit_rules_after,
                             );
                             if remaining == 0 && remaining_before > 0 {
                                 scene.final_tiles_fov_pop_at = Some(Instant::now());

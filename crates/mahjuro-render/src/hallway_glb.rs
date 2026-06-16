@@ -28,6 +28,15 @@ pub const BTN_SKIP_ROUND: &str = "btn_skip_round";
 /// glTF mesh node for pick-blind hallway wall panels (tinted per run via [`HallwayDistortion::bow`]).
 pub const HALLWAY_WALLS_NODE: &str = "walls";
 
+/// Stripe frequency along corridor depth (world units⁻¹); ~3.6–6.2 m stripe width.
+pub const HALLWAY_WALL_STRIPE_FREQ_MIN: f32 = 0.16;
+pub const HALLWAY_WALL_STRIPE_FREQ_MAX: f32 = 0.28;
+/// Tall vertical stripes (~8–16 m stripe width).
+pub const HALLWAY_WALL_STRIPE_TALL_FREQ_MIN: f32 = 0.06;
+pub const HALLWAY_WALL_STRIPE_TALL_FREQ_MAX: f32 = 0.12;
+/// Odd-stripe albedo multiplier when stripes are monochrome (even stripes use full tint).
+pub const HALLWAY_WALL_STRIPE_DARK_MUL: f32 = 0.72;
+
 /// Linear RGB tints (blue, yellow, green, red, purple, orange, pink, brown).
 const HALLWAY_WALL_TINTS: [[f32; 3]; 8] = [
     [0.35, 0.55, 0.95],
@@ -183,6 +192,47 @@ pub struct HallwayDistortion {
     /// x = lateral ripple amplitude, y = wave count along depth `u`, z = travel speed (rad/s),
     /// w = travel mix (`0` = standing corrugation, `1` = waves march down the hall).
     pub ripple: [f32; 4],
+    /// x = wall pattern id (`0` = plain, `1` = vertical stripes, `2` = tall vertical stripes),
+    /// y = stripe frequency (world units⁻¹ along depth), z = mono dark-stripe multiplier
+    /// (`0..1`) or bicolor alt palette index + 1 (`1..=`[`HALLWAY_WALL_TINT_COUNT`]),
+    /// w = phase offset (stripe units).
+    pub wallpaper: [f32; 4],
+}
+
+/// Hallway wall surface pattern (fragment-only; see [`HallwayDistortion::wallpaper`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum HallwayWallPattern {
+    Plain = 0,
+    VerticalStripes = 1,
+    VerticalStripesTall = 2,
+}
+
+impl HallwayWallPattern {
+    #[inline]
+    pub fn from_id(id: f32) -> Self {
+        if id < 0.5 {
+            Self::Plain
+        } else if id < 1.5 {
+            Self::VerticalStripes
+        } else {
+            Self::VerticalStripesTall
+        }
+    }
+
+    #[inline]
+    pub fn is_striped(self) -> bool {
+        !matches!(self, Self::Plain)
+    }
+
+    #[inline]
+    pub fn as_f32(self) -> f32 {
+        match self {
+            Self::Plain => 0.0,
+            Self::VerticalStripes => 1.0,
+            Self::VerticalStripesTall => 2.0,
+        }
+    }
 }
 
 #[inline]
@@ -245,6 +295,63 @@ pub fn hallway_wall_tint_by_index(idx: usize) -> [f32; 3] {
     HALLWAY_WALL_TINTS[idx % HALLWAY_WALL_TINT_COUNT]
 }
 
+/// Wing-stable palette index for [`hallway_wall_tint_rgb`].
+#[inline]
+pub fn hallway_wall_tint_index(run_seed: u64, wing: u32) -> usize {
+    (wall_tint_seed_hash(run_seed, wing) as usize) % HALLWAY_WALL_TINT_COUNT
+}
+
+/// Pick-blind wall pattern from per-visit loop seed (plain vs vertical stripes).
+#[inline]
+pub fn hallway_wall_pattern_from_hash(h: u32) -> HallwayWallPattern {
+    if h.rotate_left(31) & 1 == 0 {
+        HallwayWallPattern::Plain
+    } else if h.rotate_left(37) & 1 == 0 {
+        HallwayWallPattern::VerticalStripes
+    } else {
+        HallwayWallPattern::VerticalStripesTall
+    }
+}
+
+#[inline]
+fn hallway_wallpaper_stripe_freq(pattern: HallwayWallPattern, h: u32) -> f32 {
+    let t = u01(h.rotate_left(29));
+    match pattern {
+        HallwayWallPattern::Plain => HALLWAY_WALL_STRIPE_FREQ_MIN,
+        HallwayWallPattern::VerticalStripes => {
+            HALLWAY_WALL_STRIPE_FREQ_MIN + t * (HALLWAY_WALL_STRIPE_FREQ_MAX - HALLWAY_WALL_STRIPE_FREQ_MIN)
+        }
+        HallwayWallPattern::VerticalStripesTall => {
+            HALLWAY_WALL_STRIPE_TALL_FREQ_MIN
+                + t * (HALLWAY_WALL_STRIPE_TALL_FREQ_MAX - HALLWAY_WALL_STRIPE_TALL_FREQ_MIN)
+        }
+    }
+}
+
+#[inline]
+fn hallway_wallpaper_stripe_z(h: u32, run_seed: u64, wing: u32) -> f32 {
+    if h.rotate_left(39) & 1 == 0 {
+        return HALLWAY_WALL_STRIPE_DARK_MUL;
+    }
+    let primary = hallway_wall_tint_index(run_seed, wing);
+    let alt = (primary + 1 + (h.rotate_left(41) as usize) % (HALLWAY_WALL_TINT_COUNT - 1))
+        % HALLWAY_WALL_TINT_COUNT;
+    (alt + 1) as f32
+}
+
+#[inline]
+fn hallway_wallpaper_from_hash(h: u32, run_seed: u64, wing: u32) -> [f32; 4] {
+    let pattern = hallway_wall_pattern_from_hash(h);
+    let freq = hallway_wallpaper_stripe_freq(pattern, h);
+    let phase = u01(h.rotate_left(33));
+    let z = if pattern.is_striped() {
+        hallway_wallpaper_stripe_z(h, run_seed, wing)
+    } else {
+        HALLWAY_WALL_STRIPE_DARK_MUL
+    };
+    [pattern.as_f32(), freq, z, phase]
+}
+
 /// Linear ramp on current wing (1-indexed). Wings above [`HALLWAY_WING_FINAL`] clamp to the final value.
 #[inline]
 pub fn hallway_wing_intensity_scale(wing: u32) -> f32 {
@@ -295,6 +402,7 @@ impl HallwayDistortion {
         let ripple_amp = (HALLWAY_RIPPLE_AMOUNT * ripple_mul * global_intensity)
             .max(HALLWAY_RIPPLE_AMOUNT * 0.4);
         let balloon_amp = HALLWAY_BALLOON_AMOUNT * balloon_mul * global_intensity;
+        let wallpaper = hallway_wallpaper_from_hash(h, run_seed, wing);
 
         Self {
             bow: [wall_tint[0], wall_tint[1], wall_tint[2], balloon_amp],
@@ -346,6 +454,7 @@ impl HallwayDistortion {
                 HALLWAY_RIPPLE_SPEED,
                 ripple_travel_mix,
             ],
+            wallpaper,
         }
     }
 
@@ -372,6 +481,31 @@ impl HallwayDistortion {
         self.time_pulse[3] *= s.pulse_mul.max(0.0);
         self.time_pulse[1] *= s.drift_mul.max(0.0);
         self.ceiling[2] *= s.pulse_mul.clamp(0.0, 3.0);
+        if s.wall_pattern == 1 {
+            self.wallpaper[0] = HallwayWallPattern::Plain.as_f32();
+        } else if s.wall_pattern == 2 {
+            self.wallpaper[0] = HallwayWallPattern::VerticalStripes.as_f32();
+            self.wallpaper[1] = (HALLWAY_WALL_STRIPE_FREQ_MIN + HALLWAY_WALL_STRIPE_FREQ_MAX) * 0.5;
+            self.wallpaper[2] = HALLWAY_WALL_STRIPE_DARK_MUL;
+        } else if s.wall_pattern == 3 {
+            self.wallpaper[0] = HallwayWallPattern::VerticalStripesTall.as_f32();
+            self.wallpaper[1] =
+                (HALLWAY_WALL_STRIPE_TALL_FREQ_MIN + HALLWAY_WALL_STRIPE_TALL_FREQ_MAX) * 0.5;
+            self.wallpaper[2] = HALLWAY_WALL_STRIPE_DARK_MUL;
+        } else if s.wall_pattern == 4 {
+            self.wallpaper[0] = HallwayWallPattern::VerticalStripes.as_f32();
+            self.wallpaper[1] = (HALLWAY_WALL_STRIPE_FREQ_MIN + HALLWAY_WALL_STRIPE_FREQ_MAX) * 0.5;
+            if self.wallpaper[2] < 1.0 {
+                self.wallpaper[2] = 2.0;
+            }
+        } else if s.wall_pattern == 5 {
+            self.wallpaper[0] = HallwayWallPattern::VerticalStripesTall.as_f32();
+            self.wallpaper[1] =
+                (HALLWAY_WALL_STRIPE_TALL_FREQ_MIN + HALLWAY_WALL_STRIPE_TALL_FREQ_MAX) * 0.5;
+            if self.wallpaper[2] < 1.0 {
+                self.wallpaper[2] = 2.0;
+            }
+        }
     }
 }
 
@@ -397,6 +531,9 @@ pub struct HallwayDistortionDebugSnapshot {
     pub balloon_mul: f32,
     /// `0` = seed tint; `1..=`[`HALLWAY_WALL_TINT_COUNT`] = forced palette index + 1.
     pub wall_tint: u8,
+    /// `0` = seed pattern; `1` = plain; `2` = stripes; `3` = tall stripes;
+    /// `4` = bicolor stripes; `5` = tall bicolor stripes.
+    pub wall_pattern: u8,
     pub ripple_waves_mul: f32,
     /// Scales `ripple.w` travel mix (`0` = standing, `1` = marching).
     pub ripple_travel_mul: f32,
@@ -792,7 +929,9 @@ mod tests {
 
     use super::load_hallway_glb_from_bytes;
     use crate::hallway_glb::{
-        HALLWAY_RIPPLE_AMOUNT, HALLWAY_RIPPLE_SPEED, HALLWAY_RIPPLE_WAVES, HallwayDistortion,
+        HALLWAY_RIPPLE_AMOUNT, HALLWAY_RIPPLE_SPEED, HALLWAY_RIPPLE_WAVES,
+        HALLWAY_WALL_STRIPE_FREQ_MIN, HALLWAY_WALL_STRIPE_TALL_FREQ_MAX, HALLWAY_WALL_TINT_COUNT,
+        HallwayDistortion,
     };
     use crate::room_glb;
     use mahjuro_core::core::rules::ChamberKind;
@@ -924,6 +1063,71 @@ mod tests {
             .abs()
                 < 1e-5
         );
+    }
+
+    #[test]
+    fn hallway_wallpaper_deterministic_per_visit() {
+        let a = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 42, 3, 2);
+        let b = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 42, 3, 2);
+        assert_eq!(a.wallpaper, b.wallpaper);
+    }
+
+    #[test]
+    fn hallway_wallpaper_varies_with_run_number() {
+        let plain = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 0xDEAD_BEEF, 1, 1);
+        let striped = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 0xDEAD_BEEF, 7, 1);
+        let mut saw_plain = plain.wallpaper[0] < 0.5;
+        let mut saw_striped = striped.wallpaper[0] > 0.5;
+        for run_number in 1..=32 {
+            let d = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 0xCAFE_BABE, run_number, 1);
+            if d.wallpaper[0] < 0.5 {
+                saw_plain = true;
+            } else {
+                saw_striped = true;
+            }
+        }
+        assert!(saw_plain, "expected at least one plain wallpaper roll");
+        assert!(saw_striped, "expected at least one striped wallpaper roll");
+    }
+
+    #[test]
+    fn hallway_wallpaper_tall_stripes_use_lower_frequency() {
+        let mut tall_freq = None;
+        for run_number in 1..=64 {
+            let d = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 0xFEED_FACE, run_number, 2);
+            if d.wallpaper[0] > 1.5 {
+                tall_freq = Some(d.wallpaper[1]);
+                break;
+            }
+        }
+        let freq = tall_freq.expect("expected a tall stripe roll in 64 visits");
+        assert!(
+            freq <= HALLWAY_WALL_STRIPE_TALL_FREQ_MAX + 1e-5,
+            "tall stripes should use the low-frequency band, got {freq}"
+        );
+        assert!(freq < HALLWAY_WALL_STRIPE_FREQ_MIN);
+    }
+
+    #[test]
+    fn hallway_wallpaper_bicolor_uses_palette_index_encoding() {
+        let mut saw_bicolor = false;
+        for run_number in 1..=64 {
+            let d = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 0xB1C0_100D, run_number, 3);
+            if d.wallpaper[0] > 0.5 && d.wallpaper[2] >= 1.0 {
+                saw_bicolor = true;
+                assert!(d.wallpaper[2] <= HALLWAY_WALL_TINT_COUNT as f32);
+            }
+        }
+        assert!(saw_bicolor, "expected at least one bicolor stripe roll");
+    }
+
+    #[test]
+    fn hallway_wallpaper_plain_has_zero_pattern_id() {
+        let d = HallwayDistortion::from_pick_chamber(ChamberKind::Small, 1, 1, 1);
+        if d.wallpaper[0] < 0.5 {
+            assert_eq!(d.wallpaper[0], 0.0);
+            assert!(d.wallpaper[1] > 0.0);
+        }
     }
 
     #[test]

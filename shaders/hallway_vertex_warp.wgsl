@@ -27,6 +27,8 @@ struct HallwayDistortion {
     flags: vec4<f32>,
     /// x = lateral amplitude, y = wave count along `u`, z = travel speed, w = travel mix 0..1.
     ripple: vec4<f32>,
+    /// x = pattern id, y = stripe freq, z = dark-stripe mul, w = phase (rad).
+    wallpaper: vec4<f32>,
 }
 
 fn hallway_depth_axis_sel(idx: f32) -> vec3<f32> {
