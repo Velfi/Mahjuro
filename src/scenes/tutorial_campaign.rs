@@ -630,6 +630,16 @@ impl TutorialCampaignScene {
         self.try_it_flash = None;
     }
 
+    fn on_last_page(&self) -> bool {
+        self.page + 1 >= PAGES.len()
+    }
+
+    fn finish_tutorial(&self, bus: &mut EventBus) -> SceneTransition {
+        bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+        bus.push(GameEvent::UiSound(SfxId::RelicPickup));
+        Some(SceneIntent::GameplayLessonsFirstChamber)
+    }
+
     fn go_back(
         &self,
         run: &mut RunState,
@@ -1737,7 +1747,13 @@ impl SceneBehavior for TutorialCampaignScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         self.tick_try_it_flash();
         for a in ctx.actions {
-            if matches!(a, UiAction::Cancel | UiAction::Pause) {
+            if matches!(a, UiAction::Cancel) {
+                return self.go_back(ctx.run, ctx.progress, ctx.bus);
+            }
+            if matches!(a, UiAction::Pause) {
+                if self.on_last_page() {
+                    return self.finish_tutorial(ctx.bus);
+                }
                 return self.go_back(ctx.run, ctx.progress, ctx.bus);
             }
         }
@@ -1759,12 +1775,11 @@ impl SceneBehavior for TutorialCampaignScene {
                         self.page += 1;
                         self.reset_try_it_demo();
                         if self.page().try_it_demo {
-                            self.tree.set_focus(TutorialNav::TryDiscard.id());
+                            self.tree.set_focus(TutorialNav::Next.id());
                         }
                         ctx.bus.push(GameEvent::UiSound(SfxId::PackBuy));
                     } else {
-                        ctx.bus.push(GameEvent::UiSound(SfxId::RelicPickup));
-                        return Some(SceneIntent::GameplayLessonsFirstChamber);
+                        return self.finish_tutorial(ctx.bus);
                     }
                 }
                 _ => {}
@@ -1803,11 +1818,13 @@ impl SceneBehavior for TutorialCampaignScene {
                 if self.page + 1 < PAGES.len() {
                     self.page += 1;
                     self.reset_try_it_demo();
+                    if self.page().try_it_demo {
+                        self.tree.set_focus(TutorialNav::Next.id());
+                    }
                     ctx.bus.push(GameEvent::UiSound(SfxId::PackBuy));
                     None
                 } else {
-                    ctx.bus.push(GameEvent::UiSound(SfxId::RelicPickup));
-                    Some(SceneIntent::GameplayLessonsFirstChamber)
+                    self.finish_tutorial(ctx.bus)
                 }
             }
             Some(TutorialNav::TryPlay) => {
@@ -2659,6 +2676,14 @@ mod tests {
                 block.line_count(),
             );
         }
+    }
+
+    #[test]
+    fn try_it_page_is_last_and_uses_start_callout() {
+        let page = PAGES.last().expect("try-it page");
+        assert_eq!(page.kind, TutorialPageKind::TryIt);
+        assert_eq!(page.callout, Some(TutorialCallout::PageStart));
+        assert!(TutorialCampaignScene::with_page(PAGES.len() - 1).on_last_page());
     }
 
     #[test]

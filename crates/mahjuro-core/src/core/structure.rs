@@ -49,6 +49,17 @@ pub fn structure_min_commit_tiles(rules: &[RuleModifier]) -> usize {
     }
 }
 
+/// Tile slots still open in structure before hitting the standard budget
+/// (`hand_size` tiles, plus kong overflow).
+pub fn structure_remaining_tile_slots(
+    tiles: &[Tile],
+    sets: &[DetectedMeld],
+    hand_size: usize,
+) -> usize {
+    let capacity = hand_size + kong_structure_bonus(sets.iter());
+    capacity.saturating_sub(tiles.len())
+}
+
 /// True when structure has no room left for another meld under the standard tile
 /// budget (`hand_size` tiles, plus kong overflow) and the active commit rules
 /// (e.g. Bureaucratic Form requires exactly five tiles per play).
@@ -61,9 +72,18 @@ pub fn structure_cannot_grow_further(
     if sets.is_empty() {
         return false;
     }
-    let capacity = hand_size + kong_structure_bonus(sets.iter());
-    let remaining = capacity.saturating_sub(tiles.len());
+    let remaining = structure_remaining_tile_slots(tiles, sets, hand_size);
     remaining < structure_min_commit_tiles(rules)
+}
+
+/// Player-facing callout after playing into structure (tile slots left).
+pub fn structure_remaining_slots_callout(remaining: usize) -> String {
+    match remaining {
+        0 => "Cash In Time!".to_string(),
+        1 => "One slot remains empty".to_string(),
+        2 => "Two slots remain empty".to_string(),
+        n => format!("{n} slots remain empty"),
+    }
 }
 
 fn structure_contains_honor(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
@@ -245,6 +265,39 @@ mod tests {
         };
         let pool = star_tile_yaku_pool(&[], Some(meta), &tiles, &sets);
         assert_eq!(pool, vec![YakuKind::ChickenHand]);
+    }
+
+    #[test]
+    fn structure_remaining_tile_slots_counts_kong_bonus() {
+        let tiles: Vec<Tile> = (0..14).map(|i| tile(Suit::Manzu, 1, i)).collect();
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Kong,
+                tile_ids: vec![0, 1, 2, 3],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: (4..14).collect(),
+            },
+        ];
+        assert_eq!(structure_remaining_tile_slots(&tiles, &sets, 14), 1);
+    }
+
+    #[test]
+    fn structure_remaining_slots_callout_labels() {
+        assert_eq!(structure_remaining_slots_callout(0), "Cash In Time!");
+        assert_eq!(
+            structure_remaining_slots_callout(1),
+            "One slot remains empty"
+        );
+        assert_eq!(
+            structure_remaining_slots_callout(2),
+            "Two slots remain empty"
+        );
+        assert_eq!(
+            structure_remaining_slots_callout(5),
+            "5 slots remain empty"
+        );
     }
 
     #[test]

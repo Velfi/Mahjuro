@@ -739,7 +739,15 @@ pub(super) fn process_focus_and_actions(
                         },
                     )
                 };
-                let structure_was_complete = gameplay.structure_complete;
+                use crate::core::structure::{
+                    structure_remaining_slots_callout, structure_remaining_tile_slots,
+                };
+                use crate::game::game_mode::HAND_SIZE;
+                let remaining_before = structure_remaining_tile_slots(
+                    &gameplay.structure_tiles,
+                    &gameplay.structure_sets,
+                    HAND_SIZE,
+                );
                 let outcome = {
                     let mut engine = GameEngine::new(ctx.run, ctx.bus);
                     engine.dispatch(GameCommand::CommitSelection)
@@ -796,22 +804,22 @@ pub(super) fn process_focus_and_actions(
                         let played_chips_after = GameEngine::structure_played_meld_chips(ctx.run);
                         let d = played_chips_after.saturating_sub(played_chips_before);
                         if d > 0 {
-                            let structure_is_complete =
-                                GameEngine::read(ctx.run).structure_complete;
-                            let is_final_tiles = !structure_was_complete && structure_is_complete;
-                            if is_final_tiles {
+                            let gameplay_after = GameEngine::read(ctx.run);
+                            let remaining = structure_remaining_tile_slots(
+                                &gameplay_after.structure_tiles,
+                                &gameplay_after.structure_sets,
+                                HAND_SIZE,
+                            );
+                            if remaining == 0 && remaining_before > 0 {
                                 scene.final_tiles_fov_pop_at = Some(Instant::now());
                             }
+                            let callout = structure_remaining_slots_callout(remaining);
                             spawn_structure_status_callout(
                                 scene,
                                 ctx.layout,
                                 ctx.run,
-                                if is_final_tiles {
-                                    "The final tiles!"
-                                } else {
-                                    "Structure grows"
-                                },
-                                !is_final_tiles,
+                                &callout,
+                                remaining > 0,
                             );
                         }
                     }
