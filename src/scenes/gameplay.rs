@@ -23,7 +23,7 @@ mod scene_behavior;
 mod score_counter;
 
 use std::collections::VecDeque;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::journal_transition::JournalTransition;
 use super::pause_menu::PauseMenu;
@@ -231,6 +231,8 @@ pub struct GameplayScene {
     /// Mirrors the shop's hold-to-sell — completes at
     /// [`cash_in_hold_seconds()`], cancelled on the matching release.
     cash_in_hold_started: Option<Instant>,
+    /// One-shot onboarding hint after releasing cash-in too early.
+    cash_in_hold_tooltip_until: Option<Instant>,
     /// Hand-strip marquee multi-select. `Some` while Confirm is held over a
     /// hand tile (LMB / Space / Enter / gamepad A). Each focus or pointer
     /// movement updates `current_slot` and re-applies the marquee against
@@ -314,6 +316,8 @@ const STRUCTURE_CASH_IN_WIGGLE_OMEGA: f32 = 11.0;
 const CASH_IN_HOLD_VIBRATE_PX: f32 = 2.0;
 /// Hold vibration angular speed (rad/s) — faster than the idle structure wiggle.
 const CASH_IN_HOLD_VIBRATE_OMEGA: f32 = 28.0;
+/// How long to show the onboarding hold hint tooltip after an early release.
+const HOLD_TOOLTIP_DURATION: Duration = Duration::from_millis(1600);
 /// Fullscreen gold tint on the cascade's final beat (see `gold_flash_at`).
 const GOLD_FLASH_SECS: f32 = 0.4;
 
@@ -708,6 +712,7 @@ impl GameplayScene {
             candle_flare: 0.0,
             held_relic_drag: None,
             cash_in_hold_started: None,
+            cash_in_hold_tooltip_until: None,
             marquee: None,
             final_tiles_fov_pop_at: None,
             hand_tile_uids: Vec::new(),
@@ -1061,6 +1066,27 @@ impl GameplayScene {
         if self.cash_in_hold_started.take().is_some() {
             crate::ui::prompt_hold_ring::end_hold(bus);
         }
+    }
+
+    pub(crate) fn trigger_cash_in_hold_tooltip(
+        &mut self,
+        run: &crate::game::run::RunState,
+        now: Instant,
+    ) {
+        if run.onboarding_hold_tooltip_enabled() {
+            self.cash_in_hold_tooltip_until = Some(now + HOLD_TOOLTIP_DURATION);
+        }
+    }
+
+    pub(crate) fn cash_in_hold_tooltip_active(
+        &self,
+        run: &crate::game::run::RunState,
+        now: Instant,
+    ) -> bool {
+        run.onboarding_hold_tooltip_enabled()
+            && self
+                .cash_in_hold_tooltip_until
+                .is_some_and(|until| now <= until)
     }
 
     pub(crate) fn enter_lab_mode(&mut self) {

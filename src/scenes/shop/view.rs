@@ -936,8 +936,10 @@ pub(crate) fn render_shop_frame(
         }
     }
 
+    let hold_tip_focus = shop.hold_tooltip_focus(ctx.run, Instant::now());
     if !shop.pause_menu.paused
         && inspect.is_none()
+        && hold_tip_focus.is_none()
         && let Some(hit) = hover
         && let Some((ref title, ref desc, ref cta, col)) =
             hover_tooltip_content(shop, &shop_rm, &ctx.run.mode, hit)
@@ -980,6 +982,36 @@ pub(crate) fn render_shop_frame(
             },
         );
         // Relic: hover = name + mechanical; E inspect = name + flavor (no mechanical).
+        frame.overlay_quads(tip_quads);
+        frame.texts(tip_texts);
+    }
+    if !shop.pause_menu.paused
+        && inspect.is_none()
+        && let Some(focus) = hold_tip_focus
+        && let Some(anchor_rect) = shop
+            .focus_session
+            .rects()
+            .iter()
+            .find_map(|(f, r)| (*f == focus).then_some(*r))
+    {
+        let mut tip_quads = Vec::new();
+        let mut tip_texts = Vec::new();
+        push_focus_tooltip_panel_2d(
+            &mut tip_quads,
+            &mut tip_texts,
+            FocusTooltipPanelParams {
+                window_w: w,
+                window_h: h,
+                anchor_rect: Some(anchor_rect),
+                title: "Tip",
+                desc: crate::game::onboarding::HOLD_TOOLTIP_COPY,
+                cta: "",
+                accent_color: color::CHAMPAGNE,
+                hover_is_owned: false,
+                skip_title_block: false,
+                avoid_rect: Some(gold_label_rect),
+            },
+        );
         frame.overlay_quads(tip_quads);
         frame.texts(tip_texts);
     }

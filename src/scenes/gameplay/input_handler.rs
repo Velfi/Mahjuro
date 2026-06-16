@@ -31,6 +31,11 @@ const SCORE_WAVE_STRUCTURE_TILE_MM: f32 = 5.0;
 const RELIC_SCORE_VERTICAL_MM: f32 = 3.5;
 const STRUCTURE_CALLOUT_DOWN_MM: f32 = 28.0;
 
+#[inline]
+fn released_before_hold_complete(start: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(start).as_secs_f32() < super::cash_in_hold_seconds()
+}
+
 fn spawn_structure_status_callout(
     scene: &mut GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
@@ -514,7 +519,13 @@ pub(super) fn process_focus_and_actions(
                 continue;
             }
             UiAction::ConfirmRelease => {
+                let released_early_cash_in = scene
+                    .cash_in_hold_started
+                    .is_some_and(|start| released_before_hold_complete(start, now));
                 scene.clear_cash_in_hold(ctx.bus);
+                if released_early_cash_in {
+                    scene.trigger_cash_in_hold_tooltip(ctx.run, now);
+                }
                 if let Some(from_idx) = scene.held_relic_drag.take()
                     && let Some(FocusTarget::Relic(to_idx)) = scene.focus
                 {
@@ -598,7 +609,13 @@ pub(super) fn process_focus_and_actions(
                 continue;
             }
             UiAction::TriggerStructureRelease => {
+                let released_early_cash_in = scene
+                    .cash_in_hold_started
+                    .is_some_and(|start| released_before_hold_complete(start, now));
                 scene.clear_cash_in_hold(ctx.bus);
+                if released_early_cash_in {
+                    scene.trigger_cash_in_hold_tooltip(ctx.run, now);
+                }
                 continue;
             }
             _ => {}
@@ -895,6 +912,7 @@ pub(super) fn process_focus_and_actions(
         if trigger_enabled
             && now.saturating_duration_since(start).as_secs_f32() >= super::cash_in_hold_seconds()
         {
+            ctx.run.onboarding_notify_hold_success();
             scene.clear_cash_in_hold(ctx.bus);
             execute_cash_in(scene, ctx);
         }

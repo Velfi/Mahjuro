@@ -253,6 +253,7 @@ impl ShopScene {
             last_inspect_cam: std::cell::Cell::new(None),
             west_sell_hold_started: None,
             confirm_buy_hold_started: None,
+            hold_tooltip: None,
             storeroom_orbit_yaw: 0.0,
             storeroom_orbit_pitch: 0.0,
             gltf_anims: crate::render::room_gltf_anim::GltfAnimPlaybackSet::default(),
@@ -413,6 +414,7 @@ impl ShopScene {
             self.cancel_west_sell_hold(bus);
             return;
         };
+        run.onboarding_notify_hold_success();
         self.apply_sell_action(action, run, bus, cursor_pos, overlay_request, window_wh);
     }
 
@@ -464,6 +466,7 @@ impl ShopScene {
             self.cancel_confirm_buy_hold(bus);
             return;
         };
+        run.onboarding_notify_hold_success();
         self.apply_buy_action(action, run, bus, cursor_pos, overlay_request, window_wh);
     }
 

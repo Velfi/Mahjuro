@@ -64,6 +64,18 @@ impl RunState {
         }
     }
 
+    pub fn onboarding_hold_tooltip_enabled(&self) -> bool {
+        self.onboarding
+            .as_ref()
+            .is_some_and(|o| o.hold_tooltip_enabled())
+    }
+
+    pub fn onboarding_notify_hold_success(&mut self) {
+        if let Some(ref mut onboarding) = self.onboarding {
+            onboarding.notify_hold_success();
+        }
+    }
+
     /// Configure the run for the guided Lessons blind after the campaign slides.
     pub fn begin_onboarding_lessons(&mut self) {
         if let Some(ref mut onboarding) = self.onboarding {
