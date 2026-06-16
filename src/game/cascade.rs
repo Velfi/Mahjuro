@@ -204,7 +204,7 @@ pub struct ScoringCascade {
     yaku_voiced: FxHashSet<YakuKind>,
 }
 
-/// First scoring step for a yaku (chips line, or mult-only when chips are zero).
+/// First scoring step for a yaku (chips line, or mult-only when Fu are zero).
 pub fn first_yaku_step(breakdown: &ScoreBreakdown, step_index: usize) -> Option<YakuKind> {
     let step = breakdown.steps.get(step_index)?;
     let yk = yaku_kind_by_display_name(&step.source)?;
@@ -217,7 +217,7 @@ pub fn first_yaku_step(breakdown: &ScoreBreakdown, step_index: usize) -> Option<
     Some(yk)
 }
 
-/// Final scoring step for a yaku (always the mult line when chips precede it).
+/// Final scoring step for a yaku (always the Han line when Fu precede it).
 pub fn last_yaku_step(breakdown: &ScoreBreakdown, step_index: usize) -> Option<YakuKind> {
     let step = breakdown.steps.get(step_index)?;
     let yk = yaku_kind_by_display_name(&step.source)?;
@@ -237,10 +237,10 @@ pub struct CascadeFrame {
     /// Monotonic reveal slot across base steps first, then regular steps.
     /// Used by gameplay to fire one-shot effects for every visible beat.
     pub reveal_ordinal: Option<usize>,
-    /// Current chip pile, smoothly interpolated for the active phase.
-    pub displayed_chips: i32,
-    /// Current mult, smoothly interpolated for the active phase.
-    pub displayed_mult: f64,
+    /// Current Fu pile, smoothly interpolated for the active phase.
+    pub displayed_fu: i32,
+    /// Current Han, smoothly interpolated for the active phase.
+    pub displayed_han: f64,
     /// The most recently fired step (source label + which axis it hit).
     /// `None` while still on the base/total beats.
     pub latest_step: Option<(String, StepKind)>,
@@ -257,7 +257,7 @@ pub struct CascadeFrame {
     pub active_yaku: Option<String>,
     /// Relic contributing to the active step (for glow + wave).
     pub active_relic: Option<crate::core::relic::RelicId>,
-    /// Running chip pile × mult at the end of this hand.
+    /// Running chip pile × Han at the end of this hand.
     pub hand_total: u64,
 }
 
@@ -427,72 +427,72 @@ impl ScoringCascade {
 
         // ── Two-axis chips/mult readout ────────────────────────────────────
         //
-        // Compute the *currently displayed* chip pile and mult value, smoothly
+        // Compute the *currently displayed* chip pile and Han value, smoothly
         // interpolating across the active phase. This lets the renderer draw
         // them as two big counters that tick up rather than as a text scroll.
-        let (displayed_chips, displayed_mult, latest_step, pulse_axis, highlight_tile_ids) =
+        let (displayed_fu, displayed_han, latest_step, pulse_axis, highlight_tile_ids) =
             match &self.phase {
                 Phase::ShowBaseIntro => (0, 1.0, None, None, Vec::new()),
                 Phase::ShowBaseStep(i) => {
                     let i = *i;
                     let step = &self.breakdown.base_steps[i];
-                    let prev_chips = if i > 0 {
-                        self.breakdown.base_steps[i - 1].running_chips as f64
+                    let prev_fu = if i > 0 {
+                        self.breakdown.base_steps[i - 1].running_fu as f64
                     } else {
                         0.0
                     };
-                    let to_chips = step.running_chips as f64;
+                    let to_fu = step.running_fu as f64;
                     let t = tick_t as f64;
-                    let chips = (prev_chips + (to_chips - prev_chips) * t).round() as i32;
+                    let fu = (prev_fu + (to_fu - prev_fu) * t).round() as i32;
                     (
-                        chips,
+                        fu,
                         1.0,
                         Some((step.source.clone(), step.kind)),
-                        Some(StepKind::Chips),
+                        Some(StepKind::Fu),
                         step.tile_ids.clone(),
                     )
                 }
                 Phase::ShowStep(i) => {
                     let i = *i;
                     let step = &self.breakdown.steps[i];
-                    let (prev_chips, prev_mult) = if i > 0 {
+                    let (prev_fu, prev_han) = if i > 0 {
                         let p = &self.breakdown.steps[i - 1];
-                        (p.running_chips as f64, p.running_mult)
+                        (p.running_fu as f64, p.running_han)
                     } else {
-                        (self.breakdown.base_chips as f64, 1.0)
+                        (self.breakdown.base_fu as f64, 1.0)
                     };
-                    let to_chips = step.running_chips as f64;
-                    let to_mult = step.running_mult;
+                    let to_fu = step.running_fu as f64;
+                    let to_han = step.running_han;
                     let t = tick_t as f64;
-                    let chips = (prev_chips + (to_chips - prev_chips) * t).round() as i32;
-                    let mult = prev_mult + (to_mult - prev_mult) * t;
+                    let fu = (prev_fu + (to_fu - prev_fu) * t).round() as i32;
+                    let han = prev_han + (to_han - prev_han) * t;
                     let pulse = if step.kind == StepKind::Final {
                         None // final beat handled by total color
                     } else {
                         Some(step.kind)
                     };
                     (
-                        chips,
-                        mult,
+                        fu,
+                        han,
                         Some((step.source.clone(), step.kind)),
                         pulse,
                         step.tile_ids.clone(),
                     )
                 }
                 Phase::PostStepHold | Phase::Done => {
-                    let chips = self
+                    let fu = self
                         .breakdown
                         .steps
                         .last()
-                        .map(|s| s.running_chips)
-                        .unwrap_or(self.breakdown.base_chips);
-                    let mult = self
+                        .map(|s| s.running_fu)
+                        .unwrap_or(self.breakdown.base_fu);
+                    let han = self
                         .breakdown
                         .steps
                         .last()
-                        .map(|s| s.running_mult)
+                        .map(|s| s.running_han)
                         .unwrap_or(1.0);
-                    (chips, mult, None, None, Vec::new())
+                    (fu, han, None, None, Vec::new())
                 }
             };
 
@@ -511,8 +511,8 @@ impl ScoringCascade {
             displayed_score: score_target,
             active: self.is_active(),
             reveal_ordinal,
-            displayed_chips,
-            displayed_mult,
+            displayed_fu,
+            displayed_han,
             latest_step,
             phase_t,
             pulse_axis,

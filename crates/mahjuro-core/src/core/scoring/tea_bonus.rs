@@ -1,11 +1,11 @@
-//! Shared tea-ceremony / rakuware tile-set helpers (chip and mult bonuses).
+//! Shared tea-ceremony / rakuware tile-set helpers (chip and Han bonuses).
 
 use rustc_hash::FxHashSet;
 
 use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::tile::{Suit, Tile};
 
-pub(crate) fn tea_harmony_chips(tiles: &[Tile]) -> Option<i32> {
+pub(crate) fn tea_harmony_fu(tiles: &[Tile]) -> Option<i32> {
     let suits: FxHashSet<Suit> = tiles
         .iter()
         .filter(|t| matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu))
@@ -14,7 +14,7 @@ pub(crate) fn tea_harmony_chips(tiles: &[Tile]) -> Option<i32> {
     (suits.len() >= 2).then_some(60)
 }
 
-pub(crate) fn tea_respect_chips(tiles: &[Tile]) -> Option<i32> {
+pub(crate) fn tea_respect_fu(tiles: &[Tile]) -> Option<i32> {
     let honors = tiles
         .iter()
         .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
@@ -22,7 +22,7 @@ pub(crate) fn tea_respect_chips(tiles: &[Tile]) -> Option<i32> {
     (honors > 0).then_some(15 * honors)
 }
 
-pub(crate) fn tea_purity_mult(tiles: &[Tile]) -> Option<f64> {
+pub(crate) fn tea_purity_han(tiles: &[Tile]) -> Option<f64> {
     let numbered_suits: Vec<Suit> = tiles
         .iter()
         .filter(|t| matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu))
@@ -35,6 +35,6 @@ pub(crate) fn tea_purity_mult(tiles: &[Tile]) -> Option<f64> {
     }
 }
 
-pub(crate) fn tea_tranquility_chips(sets: &[DetectedMeld]) -> Option<i32> {
+pub(crate) fn tea_tranquility_fu(sets: &[DetectedMeld]) -> Option<i32> {
     sets.iter().any(|s| s.kind == MeldKind::Pair).then_some(55)
 }

@@ -77,7 +77,7 @@ pub(crate) fn setup_defeat_game_over_screenshot_state(run: &mut RunState) {
     run.times_restocked = 44;
     run.best_structure_score = 6577;
     run.best_structure_name = ".tsu".into();
-    run.yaku_times_played.insert(YakuKind::FullHand, 6);
+    run.yaku_times_played.insert(YakuKind::Shousangen, 6);
 }
 
 #[cfg(feature = "screenshot")]

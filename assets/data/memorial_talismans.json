@@ -62,13 +62,13 @@
   {
     "id": "meld_mason",
     "name": "The Meld Mason",
-    "description": "Use: next structure cash-in with {{yaku}} gains +80 chips.",
+    "description": "Use: next structure cash-in with {{yaku}} gains +80 Fu.",
     "accent": [0.82, 0.55, 0.38, 1.0]
   },
   {
     "id": "deep_walker",
     "name": "The Deep Walker",
-    "description": "Use: next structure cash-in gains +60 chips.",
+    "description": "Use: next structure cash-in gains +60 Fu.",
     "accent": [0.38, 0.42, 0.52, 1.0]
   },
   {

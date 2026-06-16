@@ -22,7 +22,7 @@ use crate::render::decal::{load_mono_font, load_ui_font, measure_label_advances}
 use crate::render::draw_cmd::{CameraParams, ShowcaseTilePlacement, UiFrame};
 use crate::render::theme::{
     ButtonState, ButtonVariant, color,
-    color::score_cascade::{CHIPS as CHIPS_COLOR, MULT as MULT_COLOR},
+    color::score_cascade::{FU as FU_COLOR, HAN as HAN_COLOR},
     typography,
 };
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
@@ -571,8 +571,8 @@ impl SceneBehavior for YakuJournalScene {
             let is_selected = idx == self.selected;
             let state = progression_state(run, progress, yk);
             let lvl = yaku_progress.level_of(yk);
-            let chips = yk.chip_bonus_at(lvl);
-            let mult = yk.mult_bonus_at(lvl);
+            let fu = yk.fu_bonus_at(lvl);
+            let han = yk.han_bonus_at(lvl);
             let scored_this_run = yaku_progress.played_this_run(yk);
             let (rule_text, _) = super::guide::yaku_page(yk);
 
@@ -678,14 +678,14 @@ impl SceneBehavior for YakuJournalScene {
                     });
                 }
                 _ => {
-                    push_chips_mult_stat_line(
+                    push_fu_mult_stat_line(
                         &mut frame,
                         payout_rect[0],
                         payout_rect[1],
                         payout_rect[3],
                         tiny_font,
-                        chips,
-                        mult,
+                        fu,
+                        han,
                         Some(body_clip_rect),
                     );
                 }
@@ -972,16 +972,16 @@ fn progression_state(
     }
 }
 
-fn format_yaku_mult_bonus(mult: f64) -> String {
-    if (mult - mult.round()).abs() < 1e-6 {
-        format!("{}", mult.round() as i64)
+fn format_yaku_han_bonus(han: f64) -> String {
+    if (han - han.round()).abs() < 1e-6 {
+        format!("{}", han.round() as i64)
     } else {
-        format!("{mult:.1}")
+        format!("{han:.1}")
     }
 }
 
-fn format_yaku_mult_plus(mult: f64) -> String {
-    format!("+{}", format_yaku_mult_bonus(mult))
+fn format_yaku_han_plus(han: f64) -> String {
+    format!("+{}", format_yaku_han_bonus(han))
 }
 
 /// Fixed glyph width for payout numerals so the table column lines up row to row.
@@ -1016,21 +1016,21 @@ fn format_payout_value_col(raw: &str) -> String {
     }
 }
 
-fn chips_mult_stat_segments(chips: i32, mult: f64) -> Vec<(String, [f32; 4])> {
+fn fu_han_stat_segments(fu: i32, han: f64) -> Vec<(String, [f32; 4])> {
     let sep_color = color::alpha(color::CHAMPAGNE, 0.50);
     vec![
-        (format_payout_value_col(&format!("+{chips}")), CHIPS_COLOR),
-        (" cp ".into(), CHIPS_COLOR),
+        (format_payout_value_col(&format!("+{fu}")), FU_COLOR),
+        (" Fu ".into(), FU_COLOR),
         ("/".into(), sep_color),
         (
-            format_payout_value_col(&format_yaku_mult_plus(mult)),
-            MULT_COLOR,
+            format_payout_value_col(&format_yaku_han_plus(han)),
+            HAN_COLOR,
         ),
-        (" mu".into(), MULT_COLOR),
+        (" Ha".into(), HAN_COLOR),
     ]
 }
 
-fn push_chips_mult_stat_segments(
+fn push_fu_mult_stat_segments(
     frame: &mut UiFrame,
     x: f32,
     y: f32,
@@ -1056,35 +1056,35 @@ fn push_chips_mult_stat_segments(
     }
 }
 
-fn push_chips_mult_stat_line(
+fn push_fu_mult_stat_line(
     frame: &mut UiFrame,
     x: f32,
     y: f32,
     band_h: f32,
     font_px: f32,
-    chips: i32,
-    mult: f64,
+    fu: i32,
+    han: f64,
     clip_rect: Option<[f32; 4]>,
 ) {
-    let segments = chips_mult_stat_segments(chips, mult);
-    push_chips_mult_stat_segments(frame, x, y, band_h, font_px, &segments, clip_rect);
+    let segments = fu_han_stat_segments(fu, han);
+    push_fu_mult_stat_segments(frame, x, y, band_h, font_px, &segments, clip_rect);
 }
 
-fn push_chips_mult_stat_line_right(
+fn push_fu_mult_stat_line_right(
     frame: &mut UiFrame,
     right_x: f32,
     y: f32,
     band_h: f32,
     font_px: f32,
-    chips: i32,
-    mult: f64,
+    fu: i32,
+    han: f64,
 ) {
-    let segments = chips_mult_stat_segments(chips, mult);
+    let segments = fu_han_stat_segments(fu, han);
     let total_w: f32 = segments
         .iter()
         .map(|(t, _)| measure_payout_text_width(t, font_px))
         .sum();
-    push_chips_mult_stat_segments(
+    push_fu_mult_stat_segments(
         frame,
         (right_x - total_w).max(0.0),
         y,
@@ -1188,8 +1188,8 @@ fn draw_plaque(
 
     let yaku_progress = GameEngine::read_yaku_progress(ctx.run);
     let lvl = yaku_progress.level_of(yk);
-    let chips = yk.chip_bonus_at(lvl);
-    let mult = yk.mult_bonus_at(lvl);
+    let fu = yk.fu_bonus_at(lvl);
+    let han = yk.han_bonus_at(lvl);
 
     // ── Header — one line: [Lv N] Name: description ··· payout ──
     let header_pad = ((18.0 * shadow_scale).max(12.0)) * pad_scale;
@@ -1206,7 +1206,7 @@ fn draw_plaque(
     let stat_font_px = typography::size(typography::H32, h);
     let payout_reserve = match state {
         ProgressionState::Unseen => measure_ui_text_width("— — —", stat_font_px),
-        _ => chips_mult_stat_segments(chips, mult)
+        _ => fu_han_stat_segments(fu, han)
             .iter()
             .map(|(t, _)| measure_payout_text_width(t, stat_font_px))
             .sum(),
@@ -1328,14 +1328,14 @@ fn draw_plaque(
             });
         }
         _ => {
-            push_chips_mult_stat_line_right(
+            push_fu_mult_stat_line_right(
                 frame,
                 header_x + header_w,
                 stat_y,
                 stat_band_h,
                 stat_font_px,
-                chips,
-                mult,
+                fu,
+                han,
             );
         }
     }

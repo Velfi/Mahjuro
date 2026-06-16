@@ -178,7 +178,7 @@ pub struct GameplayScene {
     /// event. Reset when a new cascade starts.
     cascade_final_emitted: bool,
     /// Snapshot of the cascade's current frame, captured during update and
-    /// consumed by the draw path to render the chips/×/mult trio under the
+    /// consumed by the draw path to render the Fu/×/Han trio under the
     /// plaque and (during HandOff) tween it up into the score reel. `None`
     /// when no cascade is active.
     cascade_hud: Option<CascadeHudState>,
@@ -406,11 +406,11 @@ impl GameplayScene {
         };
 
         let steps: [(StepKind, &str, f32); 5] = [
-            (StepKind::Chips, "+50", 50.0),
-            (StepKind::Mult, "+3.0x", 3.0),
-            (StepKind::Chips, "+120", 120.0),
+            (StepKind::Fu, "+50", 50.0),
+            (StepKind::Han, "+3.0x", 3.0),
+            (StepKind::Fu, "+120", 120.0),
             (StepKind::Yen, "Lucky Cat", 10.0),
-            (StepKind::Mult, "+1.5x", 1.5),
+            (StepKind::Han, "+1.5x", 1.5),
         ];
         for (i, (kind, label, mag)) in steps.iter().enumerate() {
             let src = sources[i % sources.len()];
@@ -893,8 +893,8 @@ impl GameplayScene {
         }
 
         let (px, py) = match step.kind {
-            StepKind::Chips => layout.fallback_modifier_point(0.30, 0.60),
-            StepKind::Mult => layout.fallback_modifier_point(0.70, 0.60),
+            StepKind::Fu => layout.fallback_modifier_point(0.30, 0.60),
+            StepKind::Han => layout.fallback_modifier_point(0.70, 0.60),
             StepKind::Yen | StepKind::Final => layout.fallback_modifier_point(0.50, 0.45),
         };
         crate::render::world_space::LayoutAnchorPx {

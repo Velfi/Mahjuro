@@ -10,9 +10,9 @@ use std::collections::BTreeMap;
 
 use crate::core::relic::{
     CHRYSALIS_HATCH_EXCESS_THRESHOLD, KINDLING_MULT_CAP, MELTING_ICE_START_CHIPS, RelicId,
-    RelicState, SNOWBALL_STACK_CAP, TAOTIE_CHIPS_PER_DEVOURED, golden_engine_mult_bonus,
-    kindling_mult_bonus, monarch_butterfly_bonus_chips, monarch_butterfly_tier,
-    monarch_next_tier_excess_floor, relic_sell_price_live, snowball_score_chips,
+    RelicState, SNOWBALL_STACK_CAP, TAOTIE_FU_PER_DEVOURED, golden_engine_han_bonus,
+    kindling_han_bonus, monarch_butterfly_bonus_fu, monarch_butterfly_tier,
+    monarch_next_tier_excess_floor, relic_sell_price_live, snowball_score_fu,
 };
 
 // --- Fortune's Favor tuning (keep in sync with `round_flow` / `scoring_flow`) ---
@@ -42,7 +42,7 @@ pub struct RelicDescContext<'a> {
     pub gold: i32,
     pub relics: Option<&'a RelicState>,
     pub slot: Option<usize>,
-    pub ghost_hand_chips_preview: Option<i32>,
+    pub ghost_hand_fu_preview: Option<i32>,
     pub wing: Option<u32>,
     /// When false, live tokens use design defaults (archive / static catalog).
     pub live: bool,
@@ -115,18 +115,18 @@ fn replace_ff_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> {
 
 fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> {
     match (ctx.id, key) {
-        (RelicId::MeltingIce, "chips_left") => Some(
+        (RelicId::MeltingIce, "fu_left") => Some(
             ctx.counter(RelicId::MeltingIce, MELTING_ICE_START_CHIPS)
                 .to_string(),
         ),
         (RelicId::Taotie, "devoured") => {
-            let chips = ctx.counter(RelicId::Taotie, 0).max(0);
-            Some((chips / TAOTIE_CHIPS_PER_DEVOURED).to_string())
+            let fu = ctx.counter(RelicId::Taotie, 0).max(0);
+            Some((fu / TAOTIE_FU_PER_DEVOURED).to_string())
         }
-        (RelicId::Taotie, "taotie_chips") => {
+        (RelicId::Taotie, "taotie_fu") => {
             Some(ctx.counter(RelicId::Taotie, 0).max(0).to_string())
         }
-        (RelicId::SilkThread, "silk_mult_left") => {
+        (RelicId::SilkThread, "silk_han_left") => {
             let thread = ctx.counter(RelicId::SilkThread, 40);
             Some(format!("{:.1}", thread as f64 / 10.0))
         }
@@ -159,9 +159,9 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
             let excess = ctx.counter(RelicId::MonarchButterfly, 0).max(0);
             Some(monarch_butterfly_tier(excess).to_string())
         }
-        (RelicId::MonarchButterfly, "monarch_chips") => {
+        (RelicId::MonarchButterfly, "monarch_fu") => {
             let excess = ctx.counter(RelicId::MonarchButterfly, 0).max(0);
-            Some(monarch_butterfly_bonus_chips(excess).to_string())
+            Some(monarch_butterfly_bonus_fu(excess).to_string())
         }
         (RelicId::MonarchButterfly, "monarch_excess") => {
             Some(ctx.counter(RelicId::MonarchButterfly, 0).max(0).to_string())
@@ -177,29 +177,29 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
         (RelicId::Humility, "humility_streak") => {
             Some(ctx.counter(RelicId::Humility, 0).max(0).to_string())
         }
-        (RelicId::Humility, "humility_mult") => {
+        (RelicId::Humility, "humility_han") => {
             let streak = ctx.counter(RelicId::Humility, 0).max(0);
             Some(format!("{:.1}", 0.5 * streak as f64))
         }
-        (RelicId::Temperance, "temperance_mult") => {
+        (RelicId::Temperance, "temperance_han") => {
             let stacks = ctx.counter(RelicId::Temperance, 0).max(0);
             Some(format!("{:.1}", (stacks as f64 / 8.0).min(10.0)))
         }
         (RelicId::Obsession, "obsession_rounds") => {
             Some(ctx.counter(RelicId::Obsession, 0).max(0).to_string())
         }
-        (RelicId::Obsession, "obsession_mult") => {
+        (RelicId::Obsession, "obsession_han") => {
             let rounds = ctx.counter(RelicId::Obsession, 0).max(0);
             Some(format!("{:.1}", 0.3 * rounds as f64))
         }
         (RelicId::Bonfire, "bonfire_sold") => {
             Some(ctx.counter(RelicId::Bonfire, 0).max(0).to_string())
         }
-        (RelicId::Bonfire, "bonfire_mult") => {
+        (RelicId::Bonfire, "bonfire_han") => {
             let sold = ctx.counter(RelicId::Bonfire, 0).max(0);
             Some(format!("{:.1}", 0.4 * sold as f64))
         }
-        (RelicId::HungryGhost, "hungry_ghost_mult") => {
+        (RelicId::HungryGhost, "hungry_ghost_han") => {
             let perm = ctx.counter(RelicId::HungryGhost, 0).max(0);
             Some(format!("{:.1}", (perm as f64 / 10.0).min(20.0)))
         }
@@ -214,9 +214,9 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
         (RelicId::Kindling, "kindling_cashins") => {
             Some(ctx.counter(RelicId::Kindling, 0).max(0).to_string())
         }
-        (RelicId::Kindling, "kindling_mult") => {
+        (RelicId::Kindling, "kindling_han") => {
             let total = ctx.counter(RelicId::Kindling, 0).max(0);
-            Some(format!("{:.1}", kindling_mult_bonus(total)))
+            Some(format!("{:.1}", kindling_han_bonus(total)))
         }
         (RelicId::Kindling, "kindling_cap") => Some(format!("{KINDLING_MULT_CAP:.1}")),
         (RelicId::Snowball, "snowball_stacks") => {
@@ -224,27 +224,27 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
             Some(raw.clamp(0, SNOWBALL_STACK_CAP).to_string())
         }
         (RelicId::Snowball, "snowball_cap") => Some(SNOWBALL_STACK_CAP.to_string()),
-        (RelicId::Snowball, "snowball_chips") => {
-            Some(snowball_score_chips(ctx.counter(RelicId::Snowball, 0)).to_string())
+        (RelicId::Snowball, "snowball_fu") => {
+            Some(snowball_score_fu(ctx.counter(RelicId::Snowball, 0)).to_string())
         }
-        (RelicId::Kintsugi, "kintsugi_mult") => {
+        (RelicId::Kintsugi, "kintsugi_han") => {
             Some(ctx.counter(RelicId::Kintsugi, 0).max(0).to_string())
         }
         (RelicId::Heirloom, "heirloom_blinds") => {
             Some(ctx.counter(RelicId::Heirloom, 0).max(0).to_string())
         }
-        (RelicId::Heirloom, "heirloom_mult") => {
+        (RelicId::Heirloom, "heirloom_han") => {
             let blinds = ctx.counter(RelicId::Heirloom, 0).max(0);
             Some(format!("{:.1}", (blinds as f64).min(12.0)))
         }
         (RelicId::GoldenEngine, "gold_held") => Some(ctx.gold.max(0).to_string()),
-        (RelicId::GoldenEngine, "golden_mult") => {
-            Some(golden_engine_mult_bonus(ctx.gold).to_string())
+        (RelicId::GoldenEngine, "golden_han") => {
+            Some(golden_engine_han_bonus(ctx.gold).to_string())
         }
         (RelicId::BeggarsCup, "beggar_ante") | (RelicId::BeggarsCup, "beggar_yen") => {
             Some(ctx.wing.unwrap_or(1).max(1).to_string())
         }
-        (RelicId::WallWeaver, "wall_weaver_mult") => {
+        (RelicId::WallWeaver, "wall_weaver_han") => {
             let added = ctx.counter(RelicId::WallWeaver, 0).max(0);
             let overflow = if ctx.live
                 && ctx
@@ -258,7 +258,7 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
             let excess = overflow + added;
             Some(format!("{:.1}", (0.35 * excess as f64).min(8.0)))
         }
-        (RelicId::CurioCabinet, "curio_mult") => {
+        (RelicId::CurioCabinet, "curio_han") => {
             let bonus = if let Some(relics) = ctx.relics {
                 relics
                     .active
@@ -279,22 +279,22 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
                 .unwrap_or(0);
             Some(empty.to_string())
         }
-        (RelicId::SolitarySage, "sage_mult") => {
+        (RelicId::SolitarySage, "sage_han") => {
             let empty = ctx
                 .relics
                 .map(|r| r.max_slots.saturating_sub(r.active.len()))
                 .unwrap_or(0);
             Some(format!("{:.1}", 2.5 * empty as f64))
         }
-        (RelicId::MultiplierMaster, "multiplier_master_mult") => {
+        (RelicId::MultiplierMaster, "multiplier_master_han") => {
             let n = ctx.relics.map(|r| r.len()).unwrap_or(0);
             Some(format!("{:.1}", n as f64 * 1.5))
         }
-        (RelicId::RiverRunner, "river_runner_chips") => {
+        (RelicId::RiverRunner, "river_runner_fu") => {
             Some(ctx.counter(RelicId::RiverRunner, 0).max(0).to_string())
         }
-        (RelicId::GhostHand, "ghost_hand_chips") => ctx
-            .ghost_hand_chips_preview
+        (RelicId::GhostHand, "ghost_hand_fu") => ctx
+            .ghost_hand_fu_preview
             .map(|n| n.to_string())
             .or_else(|| {
                 if ctx.live {
@@ -306,7 +306,7 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
         (RelicId::LotusBloom, "lotus_blooms") => {
             Some(ctx.counter(RelicId::LotusBloom, 0).max(0).to_string())
         }
-        (RelicId::LotusBloom, "lotus_mult") => {
+        (RelicId::LotusBloom, "lotus_han") => {
             let blooms = ctx.counter(RelicId::LotusBloom, 0).max(0);
             Some(format!("{:.1}", (0.75 * blooms as f64).min(12.0)))
         }
@@ -352,7 +352,7 @@ pub fn expand_relic_description_templates_static(s: &str) -> String {
         gold: 0,
         relics: None,
         slot: None,
-        ghost_hand_chips_preview: None,
+        ghost_hand_fu_preview: None,
         wing: None,
         live: false,
     };
@@ -376,7 +376,7 @@ mod tests {
 
     #[test]
     fn melting_ice_chips_live_vs_catalog() {
-        let template = "+{{chips_left}} chips. Loses 12 chips per play.";
+        let template = "+{{fu_left}} Fu. Loses 12 Fu per play.";
         let mut counters = BTreeMap::new();
         counters.insert(RelicId::MeltingIce, 87);
         let live = RelicDescContext {
@@ -385,13 +385,13 @@ mod tests {
             gold: 0,
             relics: None,
             slot: None,
-            ghost_hand_chips_preview: None,
+            ghost_hand_fu_preview: None,
             wing: None,
             live: true,
         };
         assert_eq!(
             expand_relic_description_templates(template, &live),
-            "+87 chips. Loses 12 chips per play."
+            "+87 Fu. Loses 12 Fu per play."
         );
         let catalog = RelicDescContext {
             live: false,
@@ -399,7 +399,7 @@ mod tests {
         };
         assert_eq!(
             expand_relic_description_templates(template, &catalog),
-            "+120 chips. Loses 12 chips per play."
+            "+120 Fu. Loses 12 Fu per play."
         );
     }
 
@@ -412,7 +412,7 @@ mod tests {
             gold: 0,
             relics: None,
             slot: None,
-            ghost_hand_chips_preview: None,
+            ghost_hand_fu_preview: None,
             wing: None,
             live: false,
         };

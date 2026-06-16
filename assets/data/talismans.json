@@ -2,7 +2,7 @@
   {
     "id": "pearl",
     "name": "Pearl Talisman",
-    "description": "Each scored meld with at least one Pearl-marked tile: +100 chips once.",
+    "description": "Each scored meld with at least one Pearl-marked tile: +100 Fu once.",
     "shop_price": 12,
     "accent": [0.920, 0.930, 0.950, 1.0]
   },
@@ -16,7 +16,7 @@
   {
     "id": "polychrome",
     "name": "Polychrome Talisman",
-    "description": "Each Polychrome-marked tile scored: +0.25 mult.",
+    "description": "Each Polychrome-marked tile scored: +0.25 Han.",
     "shop_price": 12,
     "accent": [0.680, 0.580, 0.720, 1.0]
   },

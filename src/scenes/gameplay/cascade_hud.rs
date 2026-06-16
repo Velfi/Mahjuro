@@ -8,16 +8,16 @@ pub(crate) struct CascadeShowcase {
     pub(crate) sets: Vec<crate::core::hand::DetectedMeld>,
 }
 
-/// Per-frame cascade HUD state snapshot: the chips/×/mult trio under the
+/// Per-frame cascade HUD state snapshot: the Fu/×/Han trio under the
 /// plaque and, during the hand-off tween, the merged total flying up into
 /// the score reel.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct CascadeHudState {
-    /// Current chip pile reading.
-    pub(super) chips: i32,
-    /// Current mult reading.
-    pub(super) mult: f64,
-    /// Product of chips × mult at the end of the cascade. Held fixed from
+    /// Current Fu reading.
+    pub(super) fu: i32,
+    /// Current Han reading.
+    pub(super) han: f64,
+    /// Product of Fu × Han at the end of the cascade. Held fixed from
     /// cascade start so the merge/fly label animates from a stable target.
     pub(super) total: u64,
     /// `Some(eased t)` during the in-place merge sub-phase, else `None`.
@@ -27,7 +27,7 @@ pub(super) struct CascadeHudState {
 }
 
 /// Build the extruded-glyph placements for the cascade HUD — the
-/// chips/×/mult trio that lives under the plaque and, during hand-off,
+/// Fu/×/Han trio that lives under the plaque and, during hand-off,
 /// merges into `= TOTAL` and physically flies up into the score reel.
 ///
 /// Coordinate inputs:
@@ -57,10 +57,10 @@ pub(super) fn build_cascade_hud_placements(
     // siblings: sky blue for Chips (Polychrome), red for Mult (Polychrome),
     // cream for the Metal total / ×.
     use crate::render::theme::color::score_cascade::{
-        CHIPS as CHIPS_COLOR, FINAL as FINAL_COLOR, MULT as MULT_COLOR,
+        FU as FU_COLOR, FINAL as FINAL_COLOR, HAN as HAN_COLOR,
     };
 
-    // Lateral spacing for the three labels (chips × mult). Sized off the
+    // Lateral spacing for the three labels (Fu × Han). Sized off the
     // plaque so the trio lives comfortably beneath it without spilling.
     let spread = plaque_w * 0.28;
     let chips_x = pad_px - spread;
@@ -72,8 +72,8 @@ pub(super) fn build_cascade_hud_placements(
     // identical labels across frames hit the cache. Building Arc<str> here
     // means `make_extruded_glyph` doesn't need to re-allocate, and the
     // single Arc lives in the Object3d for one frame.
-    let chips_label: Arc<str> = Arc::from(format!("{}", hud.chips));
-    let mult_label: Arc<str> = Arc::from(format!("{:.1}x", hud.mult));
+    let fu_label: Arc<str> = Arc::from(format!("{}", hud.fu));
+    let han_label: Arc<str> = Arc::from(format!("{:.1}x", hud.han));
     let total_label: Arc<str> = Arc::from(format!("= {}", hud.total));
 
     // Merge-sub-phase collapse: the three labels slide toward the pad
@@ -130,10 +130,10 @@ pub(super) fn build_cascade_hud_placements(
         let scale_mul = 1.0 - merge_t * 0.42;
 
         out.push(make_extruded_glyph(
-            chips_label,
+            fu_label,
             [cx, pad_py, pad_lift],
             glyph_scale * scale_mul,
-            with_alpha(CHIPS_COLOR, trio_alpha),
+            with_alpha(FU_COLOR, trio_alpha),
             GlyphMaterial::Polychrome,
             0.9 + merge_t * 0.12,
         ));
@@ -146,10 +146,10 @@ pub(super) fn build_cascade_hud_placements(
             0.82 + merge_t * 0.1,
         ));
         out.push(make_extruded_glyph(
-            mult_label,
+            han_label,
             [mx, pad_py, pad_lift],
             glyph_scale * scale_mul,
-            with_alpha(MULT_COLOR, trio_alpha),
+            with_alpha(HAN_COLOR, trio_alpha),
             GlyphMaterial::Polychrome,
             0.9 + merge_t * 0.12,
         ));

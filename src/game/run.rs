@@ -237,8 +237,8 @@ pub struct RunState {
     pub available_relics: Vec<RelicId>,
     /// Whether the player scored on their last play (for ChainReaction relic).
     pub scored_last_turn: bool,
-    /// Whether the player has scored a FullHand yaku this round (e.g. Eight
-    /// Treasures triggers on the first FullHand of the round).
+    /// Whether the player has cashed in a standard full hand (4 melds + pair)
+    /// this round (e.g. Eight Treasures triggers on the first such cash-in).
     pub full_hand_played_this_round: bool,
     /// Per-yaku level (default 1). Incremented by Zodiac card use.
     pub yaku_levels: crate::core::zodiac::YakuLevels,
@@ -414,17 +414,17 @@ pub struct RunState {
     /// Per-relic mutable counters. Key is RelicId, value meaning depends
     /// on the relic:
     ///   Humility     → consecutive plays without honor tiles
-    ///   Temperance   → permanent mult stack ×10 (+0.5 mult per unused play on blind clear)
+    ///   Temperance   → permanent Han stack ×10 (+0.5 Han per unused play on blind clear)
     ///   Obsession    → rounds without most-used yaku
     ///   Bonfire      → relics sold this run
     ///   MeltingIce   → remaining chip bonus (starts 80, -8 per play)
-    ///   SilkThread   → remaining mult ×10 (starts 40, -3 per discard)
+    ///   SilkThread   → remaining Han ×10 (starts 40, -3 per discard)
     ///   NestEgg      → rounds held (sell value grows)
     ///   XXXL Egg → plays remaining before burning (Geese shop unlock)
     ///   TeaCeremony  → principle index 0–3 (four scored hands, then transforms)
     ///   Rakuware     → (no counter; all four Tea beats when conditions hold)
     ///   MonarchButterfly → cumulative absorbed excess (post-target); tiers for chip bonus
-    ///   HungryGhost  → permanent mult bonus ×10
+    ///   HungryGhost  → permanent Han bonus ×10
     ///   TilePolisher → accumulated +chip bonus (each scored tile +3)
     ///   RiverRunner  → accumulated +chip bonus (each scored sequence +20)
     ///   IGotAGuy     → shop restock waivers remaining (starts 3 on buy)
@@ -633,7 +633,7 @@ impl RunState {
     ///
     /// The "destroyed" keyword is the player-facing name for permanent removal
     /// of a relic from a run; Kintsugi converts each invocation into a permanent
-    /// +1 mult via its counter — skipping this after a qualifying removal breaks
+    /// +1 Han via its counter — skipping this after a qualifying removal breaks
     /// that synergy.
     ///
     /// Inventory teardown is handled by [`Self::destroy_relic_removed_from_run`],

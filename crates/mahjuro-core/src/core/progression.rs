@@ -686,7 +686,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::KanDrum,
             ],
         },
-        // ── L2: Suit & rank chips (all three Serpents together) ──────────
+        // ── L2: Suit & rank Fu (all three Serpents together) ──────────
         2 => LevelUnlocks {
             relics: vec![
                 RelicId::JadeSerpent,
@@ -931,7 +931,7 @@ impl PlayerProgress {
                 710,
                 "Tanyao",
             ),
-            (RunOutcome::Victory, 11200, 1450, "FullHand"),
+            (RunOutcome::Victory, 11200, 1450, "Shousangen"),
             (
                 RunOutcome::Defeat {
                     reason: GameOverReason::NoActionsRemaining,

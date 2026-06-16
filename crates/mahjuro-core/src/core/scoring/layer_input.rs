@@ -17,8 +17,8 @@ pub(crate) struct ScoringLayerInput<'a> {
 
 /// Running chip/mult totals and step log mutated by each layer.
 pub(crate) struct ScoringLayerOut<'a> {
-    pub chips: &'a mut i32,
-    pub mult: &'a mut f64,
+    pub fu: &'a mut i32,
+    pub han: &'a mut f64,
     pub steps: &'a mut Vec<ScoreStep>,
 }
 

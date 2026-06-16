@@ -130,7 +130,7 @@ impl HeadlessApp {
             YakuKind::Yakuhai,
             YakuKind::Toitoi,
             YakuKind::Honitsu,
-            YakuKind::FullHand,
+            YakuKind::Shousangen,
         ] {
             self.run.yaku_levels.levels.insert(yk, 3);
         }

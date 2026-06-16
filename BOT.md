@@ -175,7 +175,7 @@ Per blind, in `play_run`:
    - **Shop funnel** — stock offers vs buys and take rate (undervalued relics show low take% with many offers).
    - **Valuations** — marginal at buy / hold at sell histograms from the bot estimator.
    - **Depth split** — avg antes on runs that bought vs never bought each relic.
-   - **Score attribution** — chips vs mult points from relic-named scoring steps on committed plays.
+   - **Score attribution** — Fu vs Han points from relic-named scoring steps on committed plays.
 7. **Chamber planner (`--chamber-planner-depth N`, default `1`).** Expectimax over play, discard,
    structure cash-in, and consumables (zodiac/talisman). Depth `0` = legacy greedy;
    `1` = unified one-ply (default); `2` = two-ply; `3` = three-ply with branch pruning.

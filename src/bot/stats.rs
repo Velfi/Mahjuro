@@ -86,7 +86,7 @@ pub struct BotScoringAction {
     pub points: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tiles: Option<String>,
-    /// Base meld chips from tiles before yaku/relic multipliers.
+    /// Base meld Fu from tiles before yaku/relic multipliers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tiles_points: Option<u64>,
     /// Round-score delta attributed to yaku / dora score steps.
@@ -101,9 +101,9 @@ pub struct BotScoringAction {
     /// Gold in wallet at score time (used by economy relics like Golden Engine).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yen_held: Option<i32>,
-    /// Golden Engine mult bonus (`floor(gold_held / 3)`) when active.
+    /// Golden Engine Han bonus (`floor(gold_held / 3)`) when active.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub golden_engine_mult_bonus: Option<i32>,
+    pub golden_engine_han_bonus: Option<i32>,
     /// Yaku detected for this action (with levels used at score time).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub yaku: Vec<String>,
@@ -130,7 +130,7 @@ pub struct PeakChamberSnapshot {
     pub yen_held: Option<i32>,
     /// `floor(yen_held / 3)` at blind end when Golden Engine is active.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub golden_engine_mult_bonus: Option<i32>,
+    pub golden_engine_han_bonus: Option<i32>,
     /// Active relic slot state at blind end (counter/debuff visibility).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relic_state: Vec<PeakChamberRelicState>,
@@ -1082,8 +1082,8 @@ impl AggregateStats {
                     "relic",
                     "triggers",
                     "score",
-                    "chips",
-                    "mult"
+                    "fu",
+                    "han"
                 );
                 for row in d.relics_score_attribution.iter().take(15) {
                     out!(

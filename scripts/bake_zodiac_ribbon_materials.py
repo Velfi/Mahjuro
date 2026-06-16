@@ -50,6 +50,7 @@ SLUGS = (
     "qilin",
     "phoenix",
     "crane",
+    "koi",
 )
 
 # Shader defaults when no map is bound: vec4(0.5, 0.92, 0.0, 1.0).

@@ -4,9 +4,9 @@ use crate::core::rules::RuleModifier;
 use crate::core::tile::Tile;
 
 use super::effective_relic::EffectiveRelics;
-use super::presentation::reorder_steps_chips_then_mult_then_yen;
+use super::presentation::reorder_steps_fu_then_han_then_yen;
 use super::{
-    ScoreBreakdown, ScoreStep, StepKind, combine, describe_set, fmt_mult, tile_by_id,
+    ScoreBreakdown, ScoreStep, StepKind, combine, describe_set, fmt_han, tile_by_id,
     tile_is_debuffed,
 };
 
@@ -39,8 +39,8 @@ fn score_sets_inner(
 ) -> ScoreBreakdown {
     let mut steps: Vec<ScoreStep> = Vec::new();
     let mut base_steps: Vec<ScoreStep> = Vec::new();
-    let mut chips: i32;
-    let mut mult: f64 = 1.0;
+    let mut fu: i32;
+    let mut han: f64 = 1.0;
     let mut flower_yen: i32 = 0;
 
     let honor_triple = rules.contains(&RuleModifier::HonorTripleScore);
@@ -51,7 +51,7 @@ fn score_sets_inner(
 
     let eff = EffectiveRelics::from_context(ctx);
 
-    let mut base_chips: i32 = 0;
+    let mut base_fu: i32 = 0;
     for s in sets {
         let mut meld_contrib = 0;
         for &tid in &s.tile_ids {
@@ -69,17 +69,17 @@ fn score_sets_inner(
         if sequences_halved && s.kind == MeldKind::Sequence {
             meld_contrib /= 2;
         }
-        base_chips += meld_contrib;
+        base_fu += meld_contrib;
         base_steps.push(ScoreStep {
             source: describe_set(tiles, s),
-            kind: StepKind::Chips,
+            kind: StepKind::Fu,
             tile_ids: s.tile_ids.clone(),
-            running_chips: base_chips,
-            running_mult: 1.0,
-            running_total: combine(base_chips, 1.0),
+            running_fu: base_fu,
+            running_han: 1.0,
+            running_total: combine(base_fu, 1.0),
         });
     }
-    chips = base_chips;
+    fu = base_fu;
 
     let has_triplet_boost = eff.has(ctx.relic.roster, RelicId::TripletBoost);
     let layer_input = super::layer_input::ScoringLayerInput {
@@ -91,8 +91,8 @@ fn score_sets_inner(
     super::pre_yaku_layer::apply_pre_yaku_scoring(
         &layer_input,
         super::layer_input::ScoringLayerOut {
-            chips: &mut chips,
-            mult: &mut mult,
+            fu: &mut fu,
+            han: &mut han,
             steps: &mut steps,
         },
         super::layer_input::PreYakuLayerOpts {
@@ -104,8 +104,8 @@ fn score_sets_inner(
     let detected_yaku = super::dora_yaku_layer::apply_dora_yaku_and_structure(
         &layer_input,
         super::layer_input::ScoringLayerOut {
-            chips: &mut chips,
-            mult: &mut mult,
+            fu: &mut fu,
+            han: &mut han,
             steps: &mut steps,
         },
         super::layer_input::DoraYakuLayerOpts {
@@ -117,8 +117,8 @@ fn score_sets_inner(
     super::relic_mult_layer::apply_post_yaku_relic_modifiers(
         &layer_input,
         super::layer_input::ScoringLayerOut {
-            chips: &mut chips,
-            mult: &mut mult,
+            fu: &mut fu,
+            han: &mut han,
             steps: &mut steps,
         },
         super::layer_input::PostYakuRelicLayerOpts {
@@ -129,28 +129,28 @@ fn score_sets_inner(
         },
     );
 
-    reorder_steps_chips_then_mult_then_yen(&mut steps, base_chips);
+    reorder_steps_fu_then_han_then_yen(&mut steps, base_fu);
 
-    let final_chips = chips;
-    let final_mult = mult;
-    let total = combine(final_chips, final_mult);
+    let final_fu = fu;
+    let final_han = han;
+    let total = combine(final_fu, final_han);
     steps.push(ScoreStep {
-        source: format!("{} × {}", final_chips, fmt_mult(final_mult)),
+        source: format!("{} × {}", final_fu, fmt_han(final_han)),
         kind: StepKind::Final,
         tile_ids: Vec::new(),
-        running_chips: final_chips,
-        running_mult: final_mult,
+        running_fu: final_fu,
+        running_han: final_han,
         running_total: total,
     });
 
     ScoreBreakdown {
-        base_chips,
-        base_points: base_chips,
+        base_fu,
+        base_points: base_fu,
         base_steps,
         steps,
         detected_yaku,
-        final_chips,
-        final_mult,
+        final_fu,
+        final_han,
         total,
         flower_yen,
         scored_meld_kinds: sets.iter().map(|s| s.kind).collect(),

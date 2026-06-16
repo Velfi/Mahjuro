@@ -1,6 +1,6 @@
 //! Yaku (hand pattern) detection and bonus scoring.
 //!
-//! Per-yaku metadata (display name, base mult bonus, base chip bonus) lives
+//! Per-yaku metadata (display name, base Han bonus, base chip bonus) lives
 //! in `assets/data/yaku.json`. Behaviour — detection predicates, leveling
 //! formulas, scoring integration — stays in Rust.
 
@@ -19,14 +19,14 @@ use crate::core::zodiac::ZodiacKind;
 struct YakuDefRaw {
     id: YakuKind,
     name: String,
-    mult_bonus: f64,
-    chip_bonus: i32,
+    han_bonus: f64,
+    fu_bonus: i32,
 }
 
 struct YakuDef {
     name: &'static str,
-    mult_bonus: f64,
-    chip_bonus: i32,
+    han_bonus: f64,
+    fu_bonus: i32,
 }
 
 fn yaku_def(id: YakuKind) -> &'static YakuDef {
@@ -40,8 +40,8 @@ fn yaku_def(id: YakuKind) -> &'static YakuDef {
                     r.id,
                     YakuDef {
                         name: Box::leak(r.name.into_boxed_str()),
-                        mult_bonus: r.mult_bonus,
-                        chip_bonus: r.chip_bonus,
+                        han_bonus: r.han_bonus,
+                        fu_bonus: r.fu_bonus,
                     },
                 )
             })
@@ -78,9 +78,12 @@ pub enum YakuKind {
     Tanyao,
     /// All melds are triplets (or kongs) — no sequences. Tied to the Ox zodiac.
     Toitoi,
-    /// Full 14-tile hand: 4 melds + 1 pair. Kongs count as a meld. Tied to the
-    /// Dragon zodiac.
-    FullHand,
+    /// Two dragon triplets/kongs plus a pair of the third dragon on a full hand.
+    /// Tied to the Koi zodiac. Supersedes dragon Yakuhai.
+    Shousangen,
+    /// All three dragon triplets/kongs on a full hand. Tied to the Dragon
+    /// zodiac. Supersedes dragon Yakuhai.
+    Daisangen,
     /// Triplet (or kong) of any dragon, or of the current ante's round wind.
     /// Tied to the Dog zodiac.
     Yakuhai,
@@ -113,7 +116,7 @@ pub enum YakuKind {
     /// the first cash-in that scores it; detection still applies when valid.
     KokushiMusou,
     /// A structurally valid hand that triggers no other yaku. Scores base
-    /// chips × 1 mult — legal, but worth very little. Tied to the Rooster
+    /// Fu × 1 Han — legal, but worth very little. Tied to the Rooster
     /// zodiac.
     ChickenHand,
     /// Every meld and the pair contain a terminal or honor; at least one honor,
@@ -133,31 +136,31 @@ pub enum YakuKind {
 impl YakuKind {
     /// Mult bonus added (additively, on the chips×mult scoring axis) when
     /// this yaku fires. These are tuned so that stacking 2-3 yaku on a real
-    /// hand pushes mult into the ×8-15 range — that's where the chip pile
+    /// hand pushes Han into the ×8-15 range — that's where the chip pile
     /// turns into "explosive" final scores.
-    /// Base mult bonus at yaku level 1. Use `mult_bonus_at(level)` when zodiac
+    /// Base Han bonus at yaku level 1. Use `han_bonus_at(level)` when zodiac
     /// leveling applies for this run.
-    pub fn mult_bonus(self) -> f64 {
-        self.base_mult_bonus()
+    pub fn han_bonus(self) -> f64 {
+        self.base_han_bonus()
     }
 
-    fn base_mult_bonus(self) -> f64 {
+    fn base_han_bonus(self) -> f64 {
         match self {
             YakuKind::Tanyao => 2.5,
             YakuKind::Yakuhai => 2.0,
             YakuKind::Toitoi => 2.0,
             YakuKind::Chanta => 3.5,
-            _ => yaku_def(self).mult_bonus,
+            _ => yaku_def(self).han_bonus,
         }
     }
 
     /// Base chip bonus added when this yaku fires (separate from the mult
-    /// axis). Some patterns grant chips only, mult only, or both (see `yaku.json`).
-    pub fn chip_bonus(self) -> i32 {
-        self.base_chip_bonus()
+    /// axis). Some patterns grant Fu only, Han only, or both (see `yaku.json`).
+    pub fn fu_bonus(self) -> i32 {
+        self.base_fu_bonus()
     }
 
-    fn base_chip_bonus(self) -> i32 {
+    fn base_fu_bonus(self) -> i32 {
         match self {
             YakuKind::Tanyao => 90,
             YakuKind::Yakuhai => 75,
@@ -165,46 +168,46 @@ impl YakuKind {
             YakuKind::Pinfu => 105,
             YakuKind::Iipeikou => 105,
             YakuKind::Chanta => 90,
-            _ => yaku_def(self).chip_bonus,
+            _ => yaku_def(self).fu_bonus,
         }
     }
 
-    /// Leveled mult bonus: `base + per-zodiac-mult × (level - 1)`, snapped to the
+    /// Leveled Han bonus: `base + per-zodiac-mult × (level - 1)`, snapped to the
     /// nearest half (1.0, 1.5, 2.0, …). Level starts at 1 and rises when the
     /// player uses the zodiac card bound to this yaku. `score_sets` passes the
-    /// effective level; use `mult_bonus()` when level is always 1.
-    pub fn mult_bonus_at(self, level: u32) -> f64 {
-        let base = self.base_mult_bonus();
+    /// effective level; use `han_bonus()` when level is always 1.
+    pub fn han_bonus_at(self, level: u32) -> f64 {
+        let base = self.base_han_bonus();
         let raw = if level <= 1 {
             base
         } else {
-            base + self.level_up_mult_per_level() * (level - 1) as f64
+            base + self.level_up_han_per_level() * (level - 1) as f64
         };
-        snap_half_mult(raw)
+        snap_half_han(raw)
     }
 
     /// Leveled chip bonus: `base + per-zodiac-chips × (level - 1)`.
-    pub fn chip_bonus_at(self, level: u32) -> i32 {
-        let base = self.base_chip_bonus();
+    pub fn fu_bonus_at(self, level: u32) -> i32 {
+        let base = self.base_fu_bonus();
         if level <= 1 {
             base
         } else {
-            base + self.level_up_chips_per_level() * (level as i32 - 1)
+            base + self.level_up_fu_per_level() * (level as i32 - 1)
         }
     }
 
-    /// Per-level mult increase for this yaku's linked zodiac ribbon.
-    pub fn level_up_mult_per_level(self) -> f64 {
+    /// Per-level Han increase for this yaku's linked zodiac ribbon.
+    pub fn level_up_han_per_level(self) -> f64 {
         let zodiac = ZodiacKind::for_yaku(self)
             .unwrap_or_else(|| panic!("missing zodiac mapping for yaku {self:?}"));
-        zodiac.level_up_mult_per_level()
+        zodiac.level_up_han_per_level()
     }
 
     /// Per-level chip increase for this yaku's linked zodiac ribbon.
-    pub fn level_up_chips_per_level(self) -> i32 {
+    pub fn level_up_fu_per_level(self) -> i32 {
         let zodiac = ZodiacKind::for_yaku(self)
             .unwrap_or_else(|| panic!("missing zodiac mapping for yaku {self:?}"));
-        zodiac.level_up_chips_per_level()
+        zodiac.level_up_fu_per_level()
     }
 
     pub fn name(self) -> &'static str {
@@ -238,10 +241,10 @@ impl YakuKind {
 
     /// Sort key for reference UIs (journal, guide): lowest base payout first.
     pub fn cmp_by_base_score(a: &Self, b: &Self) -> std::cmp::Ordering {
-        a.mult_bonus()
-            .partial_cmp(&b.mult_bonus())
+        a.han_bonus()
+            .partial_cmp(&b.han_bonus())
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.chip_bonus().cmp(&b.chip_bonus()))
+            .then_with(|| a.fu_bonus().cmp(&b.fu_bonus()))
     }
 
     /// All yaku, in display order.
@@ -253,7 +256,8 @@ impl YakuKind {
             YakuKind::Chanta,
             YakuKind::Iipeikou,
             YakuKind::Pinfu,
-            YakuKind::FullHand,
+            YakuKind::Shousangen,
+            YakuKind::Daisangen,
             YakuKind::Chinitsu,
             YakuKind::SanshokuDoujun,
             YakuKind::SanshokuDoukou,
@@ -432,10 +436,26 @@ pub fn detect_yaku_with_wind(
     if is_tanyao(composition) {
         found.push(YakuKind::Tanyao);
     }
-    if is_full_hand(tiles, sets) {
-        found.push(YakuKind::FullHand);
-    }
-    for _ in 0..count_yakuhai(tiles, sets, round_wind, bonus_round_wind) {
+    let suppress_dragon_yakuhai = if is_full_hand(tiles, sets) {
+        if is_daisangen(tiles, sets) {
+            found.push(YakuKind::Daisangen);
+            true
+        } else if is_shousangen(tiles, sets) {
+            found.push(YakuKind::Shousangen);
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    for _ in 0..count_yakuhai(
+        tiles,
+        sets,
+        round_wind,
+        bonus_round_wind,
+        suppress_dragon_yakuhai,
+    ) {
         found.push(YakuKind::Yakuhai);
     }
     if is_chiitoitsu(sets) {
@@ -515,7 +535,7 @@ pub fn detect_yaku_best_decomposition(
 
 fn yaku_bundle_weight(yaku: &[YakuKind]) -> i64 {
     yaku.iter()
-        .map(|y| y.chip_bonus() as i64 + (y.mult_bonus() * 100.0).round() as i64)
+        .map(|y| y.fu_bonus() as i64 + (y.han_bonus() * 100.0).round() as i64)
         .sum()
 }
 
@@ -657,16 +677,20 @@ fn is_toitoi(sets: &[DetectedMeld]) -> bool {
 }
 
 /// Yakuhai: each triplet/kong of a dragon or matching round/bonus round wind
-/// counts once (riichi awards one han per qualifying pon).
+/// counts once (riichi awards one han per qualifying pon). Dragon triplets
+/// are omitted when a sangen yaku (Shousangen / Daisangen) already scored them.
 fn count_yakuhai(
     tiles: &[Tile],
     sets: &[DetectedMeld],
     round_wind: Option<u8>,
     bonus_round_wind: Option<u8>,
+    suppress_dragon_yakuhai: bool,
 ) -> u32 {
     sets.iter()
         .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
-        .filter(|s| is_yakuhai_meld(s, tiles, round_wind, bonus_round_wind))
+        .filter(|s| {
+            is_yakuhai_meld(s, tiles, round_wind, bonus_round_wind, suppress_dragon_yakuhai)
+        })
         .count() as u32
 }
 
@@ -677,6 +701,7 @@ fn is_yakuhai_meld(
     tiles: &[Tile],
     round_wind: Option<u8>,
     bonus_round_wind: Option<u8>,
+    suppress_dragon_yakuhai: bool,
 ) -> bool {
     let honor_faces: Vec<(Suit, u8)> = meld
         .tile_ids
@@ -693,7 +718,7 @@ fn is_yakuhai_meld(
         return false;
     }
     match suit {
-        Suit::Dragon => true,
+        Suit::Dragon => !suppress_dragon_yakuhai,
         Suit::Wind => {
             round_wind.is_some_and(|w| rank == w) || bonus_round_wind.is_some_and(|w| rank == w)
         }
@@ -1039,7 +1064,7 @@ fn is_honroutou(tiles: &[Tile]) -> bool {
 /// usual 14. Two kongs → 16 tiles, etc. Flower tiles in melds count toward
 /// the total (they substitute for regular tiles), plus unused flowers are
 /// allowed as extras.
-fn is_full_hand(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
+pub fn is_full_hand(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
     let kong_bonus: usize = sets
         .iter()
         .filter(|s| s.kind == MeldKind::Kong)
@@ -1075,8 +1100,64 @@ fn is_full_hand(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
     melds == 4 && pairs == 1
 }
 
-/// Round a yaku mult bonus to the nearest half (…, 1.0, 1.5, 2.0, …).
-fn snap_half_mult(v: f64) -> f64 {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DragonLayout {
+    triplet_ranks: u8,
+    pair_rank: Option<u8>,
+}
+
+fn dragon_layout(tiles: &[Tile], sets: &[DetectedMeld]) -> DragonLayout {
+    let mut triplet_ranks: u8 = 0;
+    let mut pair_rank = None;
+    for s in sets {
+        let tile_refs: Vec<&Tile> = s
+            .tile_ids
+            .iter()
+            .filter_map(|id| tiles.iter().find(|t| t.id == *id))
+            .filter(|t| !t.is_flower())
+            .collect();
+        if tile_refs.is_empty() || !tile_refs.iter().all(|t| t.suit == Suit::Dragon) {
+            continue;
+        }
+        let rank = tile_refs[0].rank;
+        if !tile_refs.iter().all(|t| t.rank == rank) {
+            continue;
+        }
+        match s.kind {
+            MeldKind::Triplet | MeldKind::Kong => triplet_ranks |= 1 << (rank - 1),
+            MeldKind::Pair => pair_rank = Some(rank),
+            _ => {}
+        }
+    }
+    DragonLayout {
+        triplet_ranks,
+        pair_rank,
+    }
+}
+
+/// Daisangen (大三元): all three dragon triplets/kongs on a full hand.
+fn is_daisangen(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
+    if !is_full_hand(tiles, sets) {
+        return false;
+    }
+    dragon_layout(tiles, sets).triplet_ranks == 0b111
+}
+
+/// Shousangen (小三元): two dragon triplets/kongs and a pair of the third
+/// dragon on a full hand.
+fn is_shousangen(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
+    if !is_full_hand(tiles, sets) || is_daisangen(tiles, sets) {
+        return false;
+    }
+    let layout = dragon_layout(tiles, sets);
+    layout.triplet_ranks.count_ones() == 2
+        && layout
+            .pair_rank
+            .is_some_and(|rank| layout.triplet_ranks & (1 << (rank - 1)) == 0)
+}
+
+/// Round a yaku Han bonus to the nearest half (…, 1.0, 1.5, 2.0, …).
+fn snap_half_han(v: f64) -> f64 {
     (v * 2.0).round() / 2.0
 }
 
@@ -1167,7 +1248,7 @@ mod tests {
     }
 
     #[test]
-    fn detect_full_hand() {
+    fn detect_standard_full_hand_no_longer_scores_yaku() {
         let tiles = vec![
             t(Suit::Souzu, 1, 0),
             t(Suit::Souzu, 1, 1),
@@ -1207,7 +1288,8 @@ mod tests {
             },
         ];
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
-        assert!(yaku.contains(&YakuKind::FullHand));
+        assert!(!yaku.contains(&YakuKind::Shousangen));
+        assert!(!yaku.contains(&YakuKind::Daisangen));
     }
 
     #[test]
@@ -1221,7 +1303,8 @@ mod tests {
         // A bare pair must not award any yaku — they all gate on a real hand.
         assert!(!yaku.contains(&YakuKind::Toitoi));
         assert!(!yaku.contains(&YakuKind::Tanyao));
-        assert!(!yaku.contains(&YakuKind::FullHand));
+        assert!(!yaku.contains(&YakuKind::Shousangen));
+        assert!(!yaku.contains(&YakuKind::Daisangen));
         assert!(!yaku.contains(&YakuKind::Chinitsu));
     }
 
@@ -1375,7 +1458,7 @@ mod tests {
         ];
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Iipeikou));
-        assert!(yaku.contains(&YakuKind::FullHand));
+        assert!(!yaku.contains(&YakuKind::Shousangen));
     }
 
     #[test]
@@ -1552,7 +1635,7 @@ mod tests {
 
     /// Full hand built from compact labels **EEF1** and **NNF1**: each is two winds
     /// plus a flower wildcard completing a triplet (`E`+`E`+`F1`, `N`+`N`+`F1`).
-    /// Filler melds are one souzu suit so the hand also scores Honitsu + Full Hand.
+    /// Filler melds are one souzu suit so the hand also scores Honitsu.
     fn eef1_nnf1_flower_wind_hand() -> (Vec<Tile>, Vec<DetectedMeld>) {
         use crate::core::hand::validate_selection;
 
@@ -1597,7 +1680,6 @@ mod tests {
 
         let no_wind = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(no_wind.contains(&YakuKind::Honitsu));
-        assert!(no_wind.contains(&YakuKind::FullHand));
         assert!(!no_wind.contains(&YakuKind::Yakuhai));
         assert!(!no_wind.contains(&YakuKind::Toitoi));
 
@@ -1683,7 +1765,6 @@ mod tests {
         assert!(yaku.contains(&YakuKind::Honroutou));
         assert!(!yaku.contains(&YakuKind::Junchan));
         assert!(!yaku.contains(&YakuKind::Chanta));
-        assert!(yaku.contains(&YakuKind::FullHand));
     }
 
     #[test]
@@ -1862,7 +1943,7 @@ mod tests {
         let mut kinds = vec![
             YakuKind::Toitoi,
             YakuKind::Yakuhai,
-            YakuKind::FullHand,
+            YakuKind::Shousangen,
             YakuKind::Yakuhai,
             YakuKind::Honroutou,
             YakuKind::Yakuhai,
@@ -1881,7 +1962,7 @@ mod tests {
                     count: 1,
                 },
                 YakuTabletEntry {
-                    kind: YakuKind::FullHand,
+                    kind: YakuKind::Shousangen,
                     count: 1,
                 },
                 YakuTabletEntry {
@@ -2002,11 +2083,12 @@ mod tests {
     }
 
     #[test]
-    fn mult_bonus_values() {
-        assert_eq!(YakuKind::Toitoi.mult_bonus(), 2.0);
-        assert_eq!(YakuKind::Tanyao.mult_bonus(), 2.5);
-        assert_eq!(YakuKind::FullHand.mult_bonus(), 5.0);
-        assert_eq!(YakuKind::Chinitsu.mult_bonus(), 5.5);
+    fn han_bonus_values() {
+        assert_eq!(YakuKind::Toitoi.han_bonus(), 2.0);
+        assert_eq!(YakuKind::Tanyao.han_bonus(), 2.5);
+        assert_eq!(YakuKind::Shousangen.han_bonus(), 4.0);
+        assert_eq!(YakuKind::Daisangen.han_bonus(), 10.0);
+        assert_eq!(YakuKind::Chinitsu.han_bonus(), 5.5);
     }
 
     #[test]
@@ -2084,7 +2166,6 @@ mod tests {
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Ryanpeikou));
         assert!(!yaku.contains(&YakuKind::Iipeikou));
-        assert!(yaku.contains(&YakuKind::FullHand));
     }
 
     #[test]
@@ -2160,7 +2241,6 @@ mod tests {
         ];
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Pinfu));
-        assert!(yaku.contains(&YakuKind::FullHand));
         assert!(yaku.contains(&YakuKind::Tanyao));
     }
 
@@ -2237,26 +2317,26 @@ mod tests {
     }
 
     #[test]
-    fn mult_bonus_at_levels_up() {
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(1), 2.0);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(2), 2.5);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 4.0);
-        assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 70);
-        assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 190);
+    fn han_bonus_at_levels_up() {
+        assert_eq!(YakuKind::Toitoi.han_bonus_at(1), 2.0);
+        assert_eq!(YakuKind::Toitoi.han_bonus_at(2), 2.5);
+        assert_eq!(YakuKind::Toitoi.han_bonus_at(5), 4.0);
+        assert_eq!(YakuKind::Toitoi.fu_bonus_at(1), 70);
+        assert_eq!(YakuKind::Toitoi.fu_bonus_at(5), 190);
     }
 
     #[test]
-    fn mult_bonus_at_is_half_increment_at_every_level() {
+    fn han_bonus_at_is_half_increment_at_every_level() {
         for &yk in YakuKind::all() {
             if yk == YakuKind::ChickenHand {
                 continue;
             }
             for level in 1..=12 {
-                let mult = yk.mult_bonus_at(level);
+                let han = yk.han_bonus_at(level);
                 assert_eq!(
-                    mult,
-                    snap_half_mult(mult),
-                    "{yk:?} level {level} mult {mult} is not a half increment"
+                    han,
+                    snap_half_han(han),
+                    "{yk:?} level {level} Han {han} is not a half increment"
                 );
             }
         }
@@ -2273,8 +2353,8 @@ mod tests {
         for &kind in YakuKind::all() {
             // Calling these forces the table lookup; missing entries panic.
             let _ = kind.name();
-            let _ = kind.mult_bonus();
-            let _ = kind.chip_bonus();
+            let _ = kind.han_bonus();
+            let _ = kind.fu_bonus();
         }
         assert_eq!(
             YakuKind::all().len(),
@@ -2311,7 +2391,7 @@ mod tests {
     }
 
     #[test]
-    fn would_show_chicken_tablet_false_for_full_hand_only() {
+    fn would_show_chicken_tablet_for_generic_complete_hand() {
         let tiles = vec![
             t(Suit::Manzu, 1, 0),
             t(Suit::Manzu, 2, 1),
@@ -2330,12 +2410,104 @@ mod tests {
         ];
         let sets = validate_selection(&tiles).expect("complete hand");
         let available: Vec<YakuKind> = YakuKind::all().to_vec();
-        assert!(!would_show_chicken_tablet(
+        assert!(would_show_chicken_tablet(
             &tiles, &sets, None, None, None, &available,
         ));
-        assert!(!would_inject_chicken_hand(
+        assert!(would_inject_chicken_hand(
             &tiles, &sets, None, None, &available
         ));
+    }
+
+    #[test]
+    fn detect_shousangen_two_dragon_triplets_and_pair() {
+        let tiles = vec![
+            t(Suit::Dragon, 1, 0),
+            t(Suit::Dragon, 1, 1),
+            t(Suit::Dragon, 1, 2),
+            t(Suit::Dragon, 2, 3),
+            t(Suit::Dragon, 2, 4),
+            t(Suit::Dragon, 2, 5),
+            t(Suit::Dragon, 3, 6),
+            t(Suit::Dragon, 3, 7),
+            t(Suit::Manzu, 2, 8),
+            t(Suit::Manzu, 3, 9),
+            t(Suit::Manzu, 4, 10),
+            t(Suit::Souzu, 5, 11),
+            t(Suit::Souzu, 5, 12),
+            t(Suit::Souzu, 5, 13),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![8, 9, 10],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![11, 12, 13],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![6, 7],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Shousangen));
+        assert!(!yaku.contains(&YakuKind::Daisangen));
+        assert_eq!(yaku.iter().filter(|y| **y == YakuKind::Yakuhai).count(), 0);
+    }
+
+    #[test]
+    fn detect_daisangen_three_dragon_triplets() {
+        let tiles = vec![
+            t(Suit::Dragon, 1, 0),
+            t(Suit::Dragon, 1, 1),
+            t(Suit::Dragon, 1, 2),
+            t(Suit::Dragon, 2, 3),
+            t(Suit::Dragon, 2, 4),
+            t(Suit::Dragon, 2, 5),
+            t(Suit::Dragon, 3, 6),
+            t(Suit::Dragon, 3, 7),
+            t(Suit::Dragon, 3, 8),
+            t(Suit::Manzu, 2, 9),
+            t(Suit::Manzu, 3, 10),
+            t(Suit::Manzu, 4, 11),
+            t(Suit::Pinzu, 5, 12),
+            t(Suit::Pinzu, 5, 13),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![6, 7, 8],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![9, 10, 11],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![12, 13],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Daisangen));
+        assert!(!yaku.contains(&YakuKind::Shousangen));
+        assert_eq!(yaku.iter().filter(|y| **y == YakuKind::Yakuhai).count(), 0);
     }
 
     #[test]

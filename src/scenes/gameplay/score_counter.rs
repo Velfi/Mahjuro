@@ -18,7 +18,7 @@ use crate::ui::scene_layout::GameplayPositions;
 pub mod readout_2d {
     /// Fraction down the projected frame rect for the fly-to anchor.
     pub const ANCHOR_Y_FRAC: f32 = 0.5;
-    /// Fraction below the frame bottom for the chips/×/mult pad.
+    /// Fraction below the frame bottom for the Fu/×/Han pad.
     pub const PAD_Y_FRAC: f32 = 0.05;
 }
 

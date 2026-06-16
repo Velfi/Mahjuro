@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate single-image washi-paper ribbon textures for the 16 zodiac
+Generate single-image washi-paper ribbon textures for the 17 zodiac
 consumable cards in Mahjuro using Google's Nano Banana 2
 (`gemini-3.1-flash-image-preview`) API (the 12 standard animals
-+ Mouse, Qilin, Phoenix, Crane).
++ Mouse, Qilin, Phoenix, Crane, Koi).
 
 The 3D ribbon mesh maps the texture full-bleed across its length, so the
 visible finial and animal proportions are baked into the image itself.
@@ -82,7 +82,7 @@ STYLE_REF_SUFFIX = (
 
 # Each tuple: (slug, display_name, animal_visual, ribbon_color, hair_threads).
 # Order MUST match ZodiacKind::all() in src/core/zodiac.rs (calendar order:
-# Mouse … Pig, then Qilin, Phoenix, Crane — 16 total). Every zodiac gets a
+# Mouse … Pig, then Qilin, Phoenix, Crane, Koi — 17 total). Every zodiac gets a
 # unique washi ribbon color and a distinct hair-thread palette.
 ZODIACS = [
     (
@@ -243,6 +243,20 @@ ZODIACS = [
         "Pale sky-blue washi paper (#a8c8e0).",
         "Crane embroidered in white body, black wing tips, and vermilion "
         "crown human hair.",
+    ),
+    (
+        "koi",
+        "Koi",
+        "A single butterfly koi (longfin koi) in a graceful upward swimming "
+        "curve, body in strict profile, Kohaku-style white belly and head "
+        "with bold orange-red patches along the back and dorsal ridge, "
+        "barbels at the mouth — three times longer than "
+        "natural koi barbels, trailing downward in hair-stitched threads — "
+        "and extra-long billowy pectoral, dorsal, and tail fins trailing "
+        "like silk ribbons, fine hair-stitched scale lattice.",
+        "Deep teal washi paper (#1e6f78).",
+        "Butterfly koi embroidered in bright white, vermilion-orange, and "
+        "warm black outline human hair.",
     ),
 ]
 

@@ -76,7 +76,7 @@ pub mod color {
     pub const AMBER: [f32; 4] = mahjuro_types::theme_tokens::AMBER;
 
     // ── Lapis: the cool number-signal counterpart to RUBY.
-    /// `#AEC0D2` — sky-blue tint for "Chips" score tokens, info chips,
+    /// `#AEC0D2` — sky-blue tint for "Chips" score tokens, info fu,
     /// and any other UI signal that wants to read as the *cool* half of
     /// a warm/cool score pair. Paired with `RUBY` (Mult) at every score
     /// readout, and with `RELIC_GOLD` (Gold) / `PARCHMENT` (Final) when all
@@ -88,8 +88,8 @@ pub mod color {
     /// Score cascade HUD / popup tints (Chips / Mult / Final).
     pub mod score_cascade {
         use super::*;
-        pub const CHIPS: [f32; 4] = LAPIS;
-        pub const MULT: [f32; 4] = RUBY;
+        pub const FU: [f32; 4] = LAPIS;
+        pub const HAN: [f32; 4] = RUBY;
         pub const FINAL: [f32; 4] = PARCHMENT;
     }
 
@@ -131,8 +131,8 @@ pub mod color {
         pub const FLOWER: [f32; 4] = [0.90, 0.45, 0.55, 1.0];
         pub const SEASON: [f32; 4] = [0.30, 0.70, 0.65, 1.0];
         pub const HONORS: [f32; 4] = [0.961, 0.776, 0.455, 1.0];
-        pub const CHIPS: [f32; 4] = [0.55, 0.78, 1.00, 1.0];
-        pub const MULT: [f32; 4] = [0.910, 0.353, 0.420, 1.0];
+        pub const FU: [f32; 4] = [0.55, 0.78, 1.00, 1.0];
+        pub const HAN: [f32; 4] = [0.910, 0.353, 0.420, 1.0];
         pub const GOLD: [f32; 4] = [0.94, 0.78, 0.28, 1.0];
         pub const PLAY: [f32; 4] = [0.373, 0.831, 0.659, 1.0];
         pub const TRIGGER: [f32; 4] = [0.784, 0.565, 0.118, 1.0];

@@ -2194,10 +2194,10 @@ fn description_for(
         ArtifactKind::Talisman(kind) => kind.description().to_string(),
         ArtifactKind::MemorialTalisman(kind) => kind.description(run.memorial_snapshot.as_ref()),
         ArtifactKind::Zodiac(kind) => format!(
-            "Levelled by the {} zodiac ribbon (+{:.2} mult, +{} chips per level).",
+            "Levelled by the {} zodiac ribbon (+{:.2} Han, +{} Fu per level).",
             kind.name(),
-            kind.level_up_mult_per_level(),
-            kind.level_up_chips_per_level(),
+            kind.level_up_han_per_level(),
+            kind.level_up_fu_per_level(),
         ),
         ArtifactKind::Ordeal(kind) => kind.def().description.to_string(),
         ArtifactKind::ChronicleSummary => {

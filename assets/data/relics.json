@@ -2,7 +2,7 @@
   {
     "id": "triplet_boost",
     "name": "Triplet Boost",
-    "description": "Triplets/Kongs: +50 chips and +0.5 mult",
+    "description": "Triplets/Kongs: +50 Fu and +0.5 Han",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -15,7 +15,7 @@
   {
     "id": "sequence_surge",
     "name": "Sequence Surge",
-    "description": "Sequences score an additional +50 chips and +1.25 mult",
+    "description": "Sequences score an additional +50 Fu and +1.25 Han",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -28,7 +28,7 @@
   {
     "id": "pair_power",
     "name": "Pair Power",
-    "description": "Pairs score an additional +45 chips and +1.25 mult",
+    "description": "Pairs score an additional +45 Fu and +1.25 Han",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -41,7 +41,7 @@
   {
     "id": "honor_fury",
     "name": "Honor Fury",
-    "description": "Honor tiles in melds score an additional +42 chips",
+    "description": "Honor tiles in melds score an additional +42 Fu",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -54,7 +54,7 @@
   {
     "id": "dragon_rage",
     "name": "Dragon Rage",
-    "description": "Cashing in a dragon triplet/kong: +8 mult",
+    "description": "Cashing in a dragon triplet/kong: +8 Han",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -80,7 +80,7 @@
   {
     "id": "kindling",
     "name": "Kindling",
-    "description": "Cashing in a structure: +{{kindling_mult}} mult from {{kindling_cashins}} cash-ins (max +{{kindling_cap}} mult)",
+    "description": "Cashing in a structure: +{{kindling_mult}} Han from {{kindling_cashins}} cash-ins (max +{{kindling_cap}} Han)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -93,7 +93,7 @@
   {
     "id": "white_dragons_hush",
     "name": "White Dragon's Hush",
-    "description": "White dragon pairs score an additional +6 mult and grant a random Zodiac",
+    "description": "White dragon pairs score an additional +6 Han and grant a random Zodiac",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -106,7 +106,7 @@
   {
     "id": "blue_tiles_white_dragon",
     "name": "Blue Tiles White Dragon",
-    "description": "Cashing in a structure with a pinzu meld and a white dragon meld: +6 mult",
+    "description": "Cashing in a structure with a pinzu meld and a white dragon meld: +6 Han",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -119,7 +119,7 @@
   {
     "id": "green_tiles_green_dragon",
     "name": "Green Tiles Green Dragon",
-    "description": "Cashing in a structure with a souzu meld and a green dragon meld: +6 mult",
+    "description": "Cashing in a structure with a souzu meld and a green dragon meld: +6 Han",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -132,7 +132,7 @@
   {
     "id": "red_tiles_red_dragon",
     "name": "Red Tiles Red Dragon",
-    "description": "Cashing in a structure with a manzu meld and a red dragon meld: +6 mult",
+    "description": "Cashing in a structure with a manzu meld and a red dragon meld: +6 Han",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -184,7 +184,7 @@
   {
     "id": "chain_reaction",
     "name": "Chain Reaction",
-    "description": "+6 mult if you already cashed in this round",
+    "description": "+6 Han if you already cashed in this round",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -197,7 +197,7 @@
   {
     "id": "multiplier_master",
     "name": "Multiplier Master",
-    "description": "+{{multiplier_master_mult}} mult (+1.5 mult per relic held)",
+    "description": "+{{multiplier_master_mult}} Han (+1.5 Han per relic held)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -259,7 +259,7 @@
   {
     "id": "kan_drum",
     "name": "Kan Drum",
-    "description": "Cashing in a structure with at least one kong: +1 play and +8 mult",
+    "description": "Cashing in a structure with at least one kong: +1 play and +8 Han",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -272,7 +272,7 @@
   {
     "id": "dora_crown",
     "name": "Dora Crown",
-    "description": "There are now two dora tiles; Dora tiles score an additional +50 chips",
+    "description": "There are now two dora tiles; Dora tiles score an additional +50 Fu",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -295,7 +295,7 @@
   {
     "id": "wind_reader",
     "name": "Windreader",
-    "description": "There are now two round winds; round wind triplets/kongs: +9 mult",
+    "description": "There are now two round winds; round wind triplets/kongs: +9 Han",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -308,7 +308,7 @@
   {
     "id": "eight_treasures",
     "name": "Eight Treasures",
-    "description": "Cashing in a Full Hand grants a random Zodiac",
+    "description": "Cashing in a complete hand (4 melds + pair) grants a random Zodiac",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -321,7 +321,7 @@
   {
     "id": "kongs_blessing",
     "name": "Kong's Blessing",
-    "description": "Kongs score an additional +180 chips and +3 mult",
+    "description": "Kongs score an additional +180 Fu and +3 Han",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -344,7 +344,7 @@
   {
     "id": "garden_keeper",
     "name": "Garden Keeper",
-    "description": "Flower tiles score an additional +40 chips",
+    "description": "Flower tiles score an additional +40 Fu",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -362,7 +362,7 @@
   {
     "id": "ikebana",
     "name": "Ikebana",
-    "description": "Cashing in a structure with 2+ flowers: +9 mult",
+    "description": "Cashing in a structure with 2+ flowers: +9 Han",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -398,7 +398,7 @@
   {
     "id": "jade_serpent",
     "name": "Jade Serpent",
-    "description": "Souzu tiles score an additional +12 chips",
+    "description": "Souzu tiles score an additional +12 Fu",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -416,7 +416,7 @@
   {
     "id": "ruby_serpent",
     "name": "Ruby Serpent",
-    "description": "Manzu tiles score an additional +12 chips",
+    "description": "Manzu tiles score an additional +12 Fu",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -429,7 +429,7 @@
   {
     "id": "lapis_serpent",
     "name": "Lapis Serpent",
-    "description": "Pinzu tiles score an additional +12 chips",
+    "description": "Pinzu tiles score an additional +12 Fu",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -447,7 +447,7 @@
   {
     "id": "low_tide",
     "name": "Low Tide",
-    "description": "Tiles ranked 1-3 score an additional +10 chips",
+    "description": "Tiles ranked 1-3 score an additional +10 Fu",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -460,7 +460,7 @@
   {
     "id": "high_tide",
     "name": "High Tide",
-    "description": "Tiles ranked 7-9 score an additional +10 chips",
+    "description": "Tiles ranked 7-9 score an additional +10 Fu",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -478,7 +478,7 @@
   {
     "id": "even_keel",
     "name": "Even Keel",
-    "description": "Tiles ranked 4-6 score an additional +12 chips",
+    "description": "Tiles ranked 4-6 score an additional +12 Fu",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -491,7 +491,7 @@
   {
     "id": "plain_dealing",
     "name": "Plain Dealing",
-    "description": "Simple tiles (rank 2-8) in melds score an additional +18 chips",
+    "description": "Simple tiles (rank 2-8) in melds score an additional +18 Fu",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -530,7 +530,7 @@
   {
     "id": "edge_runner",
     "name": "Edge Runner",
-    "description": "Terminals score an additional +18 chips",
+    "description": "Terminals score an additional +18 Fu",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -548,7 +548,7 @@
   {
     "id": "lucky_seven",
     "name": "Lucky Seven",
-    "description": "Rank-7 tiles in scored sets: +1.5 mult each (max +9 mult)",
+    "description": "Rank-7 tiles in scored sets: +1.5 Han each (max +9 Han)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -561,7 +561,7 @@
   {
     "id": "momentum",
     "name": "Momentum",
-    "description": "+2 mult per play already used this round",
+    "description": "+2 Han per play already used this round",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -574,7 +574,7 @@
   {
     "id": "minimalist",
     "name": "Minimalist",
-    "description": "Cashing in a one-meld structure: +120 chips and +2 mult",
+    "description": "Cashing in a one-meld structure: +120 Fu and +2 Han",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -587,7 +587,7 @@
   {
     "id": "turtle_shell",
     "name": "Turtle Shell",
-    "description": "Cashing in a structure: +300 chips; destroyed if yen hits 0",
+    "description": "Cashing in a structure: +300 Fu; destroyed if yen hits 0",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -600,7 +600,7 @@
   {
     "id": "closed_gate",
     "name": "Closed Gate",
-    "description": "Structure is exclusively terminals and honors: +6 mult",
+    "description": "Structure is exclusively terminals and honors: +6 Han",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -618,7 +618,7 @@
   {
     "id": "open_gate",
     "name": "Open Gate",
-    "description": "Structure is exclusively simple tiles (rank 2-8): +6 mult",
+    "description": "Structure is exclusively simple tiles (rank 2-8): +6 Han",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -631,7 +631,7 @@
   {
     "id": "chow_line",
     "name": "Chow Line",
-    "description": "Cashing in a structure with 3+ sequences: +4 mult",
+    "description": "Cashing in a structure with 3+ sequences: +4 Han",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -644,7 +644,7 @@
   {
     "id": "golden_engine",
     "name": "Golden Engine",
-    "description": "+{{golden_mult}} mult from ¥{{gold_held}} held (+1 mult per 3 yen, max +12 mult)",
+    "description": "+{{golden_mult}} Han from ¥{{gold_held}} held (+1 Han per 3 yen, max +12 Han)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -677,7 +677,7 @@
   {
     "id": "snowball",
     "name": "Snowball",
-    "description": "+{{snowball_chips}} chips from {{snowball_stacks}}/{{snowball_cap}} cleared chambers (+25 chips per clear)",
+    "description": "+{{snowball_chips}} Fu from {{snowball_stacks}}/{{snowball_cap}} cleared chambers (+25 Fu per clear)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -708,7 +708,7 @@
   {
     "id": "glass_cannon",
     "name": "Glass Cannon",
-    "description": "Cashing in a structure: +12 mult; destroyed after activation",
+    "description": "Cashing in a structure: +12 Han; destroyed after activation",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -747,7 +747,7 @@
   {
     "id": "paper_lantern",
     "name": "Paper Lantern",
-    "description": "+4 mult; 1-in-{{ff_paper_destroy}} chance to be destroyed at round end",
+    "description": "+4 Han; 1-in-{{ff_paper_destroy}} chance to be destroyed at round end",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -760,7 +760,7 @@
   {
     "id": "stone_lantern",
     "name": "Stone Lantern",
-    "description": "×3.0 final mult; 1-in-{{ff_stone_destroy}} chance to be destroyed at round end",
+    "description": "×3.0 final Han; 1-in-{{ff_stone_destroy}} chance to be destroyed at round end",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -796,7 +796,7 @@
   {
     "id": "way_of_purity",
     "name": "Way of Purity",
-    "description": "Structure is all one suit: +6 mult",
+    "description": "Structure is all one suit: +6 Han",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -884,7 +884,7 @@
   {
     "id": "rakuware",
     "name": "Rakuware",
-    "description": "Cashing in a structure with 2+ numbered suits: +60 chips; Honor tiles score an additional +15 chips; Cashing in a structure with all numbered tiles in one suit: +2.5 mult; Cashing in a structure with a pair meld: +55 chips",
+    "description": "Cashing in a structure with 2+ numbered suits: +60 Fu; Honor tiles score an additional +15 Fu; Cashing in a structure with all numbered tiles in one suit: +2.5 Han; Cashing in a structure with a pair meld: +55 Fu",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -910,7 +910,7 @@
   {
     "id": "ghost_hand",
     "name": "Ghost Hand",
-    "description": "Cashing in a structure: +{{ghost_hand_chips}} chips from the value of your current hand",
+    "description": "Cashing in a structure: +{{ghost_hand_chips}} Fu from the value of your current hand",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -923,7 +923,7 @@
   {
     "id": "humility",
     "name": "Humility",
-    "description": "+{{humility_mult}} mult from {{humility_streak}} consecutive honorless cash-ins (+0.5 mult per streak)",
+    "description": "+{{humility_mult}} Han from {{humility_streak}} consecutive honorless cash-ins (+0.5 Han per streak)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -936,7 +936,7 @@
   {
     "id": "obsession",
     "name": "Obsession",
-    "description": "Cashing in without your most played yaku: +0.5 mult. Currently +{{obsession_mult}} mult ({{obsession_rounds}} rounds). Resets if you cash in with your most played yaku.",
+    "description": "Cashing in without your most played yaku: +0.5 Han. Currently +{{obsession_mult}} Han ({{obsession_rounds}} rounds). Resets if you cash in with your most played yaku.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -949,7 +949,7 @@
   {
     "id": "bonfire",
     "name": "Bonfire",
-    "description": "+{{bonfire_mult}} mult from {{bonfire_sold}} relics sold this run (+0.6 mult per sold)",
+    "description": "+{{bonfire_mult}} Han from {{bonfire_sold}} relics sold this run (+0.6 Han per sold)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -972,7 +972,7 @@
   {
     "id": "river_runner",
     "name": "River Runner",
-    "description": "+{{river_runner_chips}} chips from sequences this run (+30 chips per sequence in a cash-in)",
+    "description": "+{{river_runner_chips}} Fu from sequences this run (+30 Fu per sequence in a cash-in)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -985,7 +985,7 @@
   {
     "id": "melting_ice",
     "name": "Melting Ice",
-    "description": "+{{chips_left}} chips. Loses 12 chips per play. At 0 it is destroyed",
+    "description": "+{{chips_left}} Fu. Loses 12 Fu per play. At 0 it is destroyed",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -998,7 +998,7 @@
   {
     "id": "taotie",
     "name": "Taotie",
-    "description": "+120 chips. Cashing in a structure: each honor tile in the structure is destroyed. For each honor destroyed: +30 chips ({{devoured}} devoured, +{{taotie_chips}} chips stored).",
+    "description": "+120 Fu. Cashing in a structure: each honor tile in the structure is destroyed. For each honor destroyed: +30 Fu ({{devoured}} devoured, +{{taotie_chips}} Fu stored).",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1011,7 +1011,7 @@
   {
     "id": "silk_thread",
     "name": "Silk Thread",
-    "description": "+{{silk_mult_left}} mult left. Loses 0.3 mult per discard. At 0 it is destroyed",
+    "description": "+{{silk_mult_left}} Han left. Loses 0.3 Han per discard. At 0 it is destroyed",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1024,7 +1024,7 @@
   {
     "id": "silk_moth",
     "name": "Silk Moth",
-    "description": "+3 mult; +¥{{silk_moth_yen}} produced from discards (+¥1 per discard)",
+    "description": "+3 Han; +¥{{silk_moth_yen}} produced from discards (+¥1 per discard)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1050,7 +1050,7 @@
   {
     "id": "solitary_sage",
     "name": "Solitary Sage",
-    "description": "+{{sage_mult}} mult from {{sage_empty_slots}} empty relic slots (+2.5 mult per empty slot)",
+    "description": "+{{sage_mult}} Han from {{sage_empty_slots}} empty relic slots (+2.5 Han per empty slot)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1143,7 +1143,7 @@
   {
     "id": "temperance",
     "name": "Temperance",
-    "description": "+{{temperance_mult}} permanent mult from unused plays on clear (max +10 mult; +0.5 per unused play)",
+    "description": "+{{temperance_mult}} permanent Han from unused plays on clear (max +10 Han; +0.5 per unused play)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1156,7 +1156,7 @@
   {
     "id": "chastity",
     "name": "Chastity",
-    "description": "Cashing in a structure: +80 chips and +1 mult if no scored tile has an enhancement",
+    "description": "Cashing in a structure: +80 Fu and +1 Han if no scored tile has an enhancement",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1195,7 +1195,7 @@
   {
     "id": "way_of_pairs",
     "name": "Way of Pairs",
-    "description": "Cashing in a structure with 3+ pair melds: +6 mult",
+    "description": "Cashing in a structure with 3+ pair melds: +6 Han",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1208,7 +1208,7 @@
   {
     "id": "way_of_triplets",
     "name": "Way of Triplets",
-    "description": "Cashing in a structure with 2+ triplets/kongs: +7 mult",
+    "description": "Cashing in a structure with 2+ triplets/kongs: +7 Han",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1221,7 +1221,7 @@
   {
     "id": "way_of_sequences",
     "name": "Way of Sequences",
-    "description": "Cashing in a structure with 2+ sequences: +5 mult",
+    "description": "Cashing in a structure with 2+ sequences: +5 Han",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1247,7 +1247,7 @@
   {
     "id": "cracked_tile",
     "name": "Cracked Tile",
-    "description": "Cashing in a structure: random +2 to +8 mult",
+    "description": "Cashing in a structure: random +2 to +8 Han",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1273,7 +1273,7 @@
   {
     "id": "hungry_ghost",
     "name": "Hungry Ghost",
-    "description": "Round start: destroy the next relic in inventory. +{{hungry_ghost_mult}} mult stored from devoured relic sell value (max +20 mult)",
+    "description": "Round start: destroy the next relic in inventory. +{{hungry_ghost_mult}} Han stored from devoured relic sell value (max +20 Han)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1304,7 +1304,7 @@
   {
     "id": "curio_cabinet",
     "name": "Curio Cabinet",
-    "description": "+{{curio_mult}} mult from other relic sell values (max +15 mult)",
+    "description": "+{{curio_mult}} Han from other relic sell values (max +15 Han)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1317,7 +1317,7 @@
   {
     "id": "lotus_bloom",
     "name": "Lotus Bloom",
-    "description": "+{{lotus_mult}} mult from {{lotus_blooms}} flowers scored (max +12 mult; +0.75 per flower)",
+    "description": "+{{lotus_mult}} Han from {{lotus_blooms}} flowers scored (max +12 Han; +0.75 per flower)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1330,7 +1330,7 @@
   {
     "id": "wall_weaver",
     "name": "Wall Weaver",
-    "description": "+{{wall_weaver_mult}} mult from wall size beyond 140 tiles (+0.35 per tile, max +8 mult)",
+    "description": "+{{wall_weaver_mult}} Han from wall size beyond 140 tiles (+0.35 per tile, max +8 Han)",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1431,7 +1431,7 @@
   {
     "id": "heirloom",
     "name": "Heirloom",
-    "description": "+{{heirloom_mult}} mult from {{heirloom_blinds}} blinds cleared (max +12 mult; +1 per clear).",
+    "description": "+{{heirloom_mult}} Han from {{heirloom_blinds}} blinds cleared (max +12 Han; +1 per clear).",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1454,7 +1454,7 @@
   {
     "id": "tourist",
     "name": "Tourist",
-    "description": "Cashing in a structure: +2 mult per distinct suit among tiles in the structure",
+    "description": "Cashing in a structure: +2 Han per distinct suit among tiles in the structure",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1472,7 +1472,7 @@
   {
     "id": "kintsugi",
     "name": "Kintsugi",
-    "description": "+{{kintsugi_mult}} mult from relics destroyed this run (+1 mult per destroyed relic)",
+    "description": "+{{kintsugi_mult}} Han from relics destroyed this run (+1 Han per destroyed relic)",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -1521,7 +1521,7 @@
   {
     "id": "eulers_number",
     "name": "Euler's Number",
-    "description": "Cashing in a structure: ×e mult (Euler's constant ≈ 2.71828…)",
+    "description": "Cashing in a structure: ×e Han (Euler's constant ≈ 2.71828…)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1564,7 +1564,7 @@
   {
     "id": "pi_constant",
     "name": "Pi",
-    "description": "Cashing in a structure: ×π mult (≈ 3.14159…)",
+    "description": "Cashing in a structure: ×π Han (≈ 3.14159…)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1621,7 +1621,7 @@
   {
     "id": "monarch_butterfly",
     "name": "Monarch Butterfly",
-    "description": "Cashing in a structure: +{{monarch_chips}} chips (tier {{monarch_tier}}, {{monarch_excess}} excess, {{monarch_next}}). Excess score is absorbed each round.",
+    "description": "Cashing in a structure: +{{monarch_chips}} Fu (tier {{monarch_tier}}, {{monarch_excess}} excess, {{monarch_next}}). Excess score is absorbed each round.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1647,7 +1647,7 @@
   {
     "id": "crown_of_patterns",
     "name": "Crown of Patterns",
-    "description": "Cashing in a structure: +4 mult per yaku in the structure",
+    "description": "Cashing in a structure: +4 Han per yaku in the structure",
     "rarity": "legendary",
     "flavor_spans": [
       {

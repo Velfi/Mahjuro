@@ -60,7 +60,7 @@ pub const TABLE_POPUP_LIFT_Z: f32 = LIFT_BASE;
 /// matches glossary / cash-in ordeal glyphs (`score_glyph_band_albedo` in lit_mesh).
 const STRUCTURE_CALLOUT_COLOR: [f32; 4] = crate::theme::color::keyword::HOUSE;
 /// Vivid scarlet for Mult score pops (#ff0034).
-const MULT_COLOR: [f32; 4] = [1.0, 0.0, 52.0 / 255.0, 1.0];
+const HAN_COLOR: [f32; 4] = [1.0, 0.0, 52.0 / 255.0, 1.0];
 /// Warm gold base tint for Yen popups.
 const GOLD_COLOR: [f32; 4] = crate::theme::color::RELIC_GOLD;
 /// Cream tint for the Final landing number.
@@ -145,8 +145,8 @@ impl ScorePopupSystem {
         timing: PopupMotionTiming,
     ) {
         let (color, material) = match kind {
-            StepKind::Chips => ([0.0, 160.0 / 255.0, 1.0, 1.0], GlyphMaterial::Polychrome),
-            StepKind::Mult => (MULT_COLOR, GlyphMaterial::Polychrome),
+            StepKind::Fu => ([0.0, 160.0 / 255.0, 1.0, 1.0], GlyphMaterial::Polychrome),
+            StepKind::Han => (HAN_COLOR, GlyphMaterial::Polychrome),
             StepKind::Yen => (GOLD_COLOR, GlyphMaterial::Polychrome),
             StepKind::Final => (FINAL_COLOR, GlyphMaterial::Polychrome),
         };

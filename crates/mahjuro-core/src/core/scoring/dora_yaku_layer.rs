@@ -1,4 +1,4 @@
-//! Dora chips and yaku chip/mult lines — the “standard” scoring
+//! Dora Fu and yaku chip/mult lines — the “standard” scoring
 //! block between early relics ([`super::pre_yaku_layer`]) and post-yaku relics
 //! ([`super::relic_mult_layer`]).
 
@@ -6,14 +6,14 @@ use crate::core::relic::RelicId;
 use crate::core::yaku::{YakuKind, detect_yaku_with_wind};
 
 use super::layer_input::{DoraYakuLayerOpts, ScoringLayerInput, ScoringLayerOut};
-use super::push_steps::{push_chips, push_mult};
+use super::push_steps::{push_fu, push_han};
 use super::{ScoreStep, StepKind, combine, tile_is_debuffed};
 
 /// Chips added per matching tile when a face is on the dora plinth.
-pub const DORA_CHIPS_PER_TILE: i32 = 100;
+pub const DORA_FU_PER_TILE: i32 = 100;
 
-/// Extra chips per dora tile from each Dora Crown copy.
-pub const DORA_CROWN_CHIPS_PER_TILE: i32 = 50;
+/// Extra Fu per dora tile from each Dora Crown copy.
+pub const DORA_CROWN_FU_PER_TILE: i32 = 50;
 
 /// Apply Dora and scored yaku. Returns the yaku list used for the breakdown.
 pub(crate) fn apply_dora_yaku_and_structure(
@@ -27,7 +27,7 @@ pub(crate) fn apply_dora_yaku_and_structure(
         sets,
         eff,
     } = *input;
-    let ScoringLayerOut { chips, mult, steps } = out;
+    let ScoringLayerOut { fu, han, steps } = out;
     let DoraYakuLayerOpts {
         censor_repeats,
         original_tiles,
@@ -39,28 +39,28 @@ pub(crate) fn apply_dora_yaku_and_structure(
             .filter(|t| ctx.pattern.dora_faces.contains(&(t.suit, t.rank)))
             .count() as i32;
         if dora_count > 0 {
-            let delta = DORA_CHIPS_PER_TILE * dora_count;
-            *chips += delta;
+            let delta = DORA_FU_PER_TILE * dora_count;
+            *fu += delta;
             steps.push(ScoreStep {
                 source: format!("Dora ×{dora_count}"),
-                kind: StepKind::Chips,
+                kind: StepKind::Fu,
                 tile_ids: tiles
                     .iter()
                     .filter(|t| !tile_is_debuffed(t, ctx.tiles.debuffs))
                     .filter(|t| ctx.pattern.dora_faces.contains(&(t.suit, t.rank)))
                     .map(|t| t.id)
                     .collect(),
-                running_chips: *chips,
-                running_mult: *mult,
-                running_total: combine(*chips, *mult),
+                running_fu: *fu,
+                running_han: *han,
+                running_total: combine(*fu, *han),
             });
             for _ in 0..eff.count(ctx.relic.roster, RelicId::DoraCrown) {
-                push_chips(
+                push_fu(
                     steps,
-                    chips,
-                    *mult,
+                    fu,
+                    *han,
                     format!("Dora Crown ×{dora_count}"),
-                    DORA_CROWN_CHIPS_PER_TILE * dora_count,
+                    DORA_CROWN_FU_PER_TILE * dora_count,
                 );
             }
         }
@@ -105,16 +105,16 @@ pub(crate) fn apply_dora_yaku_and_structure(
     };
     for yaku in &detected_yaku {
         let level = level_of(*yaku);
-        let mut mult_bonus = yaku.mult_bonus_at(level);
-        let mut chip_bonus = yaku.chip_bonus_at(level);
+        let mut han_bonus = yaku.han_bonus_at(level);
+        let mut fu_bonus = yaku.fu_bonus_at(level);
         if censor_repeats && ctx.round.played_yaku_this_round.contains(yaku) {
-            chip_bonus = (chip_bonus as f64 * 0.5).floor() as i32;
-            mult_bonus *= 0.5;
+            fu_bonus = (fu_bonus as f64 * 0.5).floor() as i32;
+            han_bonus *= 0.5;
         }
-        if chip_bonus != 0 {
-            push_chips(steps, chips, *mult, yaku.name(), chip_bonus);
+        if fu_bonus != 0 {
+            push_fu(steps, fu, *han, yaku.name(), fu_bonus);
         }
-        push_mult(steps, *chips, mult, yaku.name(), mult_bonus);
+        push_han(steps, *fu, han, yaku.name(), han_bonus);
     }
 
     detected_yaku

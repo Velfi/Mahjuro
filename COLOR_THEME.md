@@ -62,7 +62,7 @@ Desaturated on purpose so they sit on warm wood instead of vibrating against it.
 | `JADE` | `[0.613, 0.755, 0.702, 1.0]` | `#9CC0B3` | Success, target met, valid, uncommon rarity. |
 | `RUBY` | `[0.611, 0.438, 0.459, 1.0]` | `#9B6F74` | Danger, exit, abandon, destroy. |
 | `AMBER` | `[0.776, 0.680, 0.553, 1.0]` | `#C5AD8C` | Warning, attention, "this will cost you." |
-| `LAPIS` | `[0.686, 0.757, 0.825, 1.0]` | `#AEC0D2` | Cool score signal (Chips), info chips, soft boss tier. |
+| `LAPIS` | `[0.686, 0.757, 0.825, 1.0]` | `#AEC0D2` | Cool score signal (Chips), info Fu, soft boss tier. |
 
 ## Chart encodings (`color::chart::*`)
 

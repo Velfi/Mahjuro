@@ -264,8 +264,8 @@ pub fn push_score_history_ledger(
         }
     }
     let peak_score = points[peak_i].score;
-    let peak_text = archive_career::format_chips_compact(peak_score);
-    let avg_text = (avg_score > 0).then(|| archive_career::format_chips_compact(avg_score));
+    let peak_text = archive_career::format_score_compact(peak_score);
+    let avg_text = (avg_score > 0).then(|| archive_career::format_score_compact(avg_score));
     let stat_row_h = if show_stat_panels {
         score_history_stat_row_height(cap_h.max(val_h), inset)
     } else {
@@ -565,7 +565,7 @@ pub fn push_ordeal_record_rows(
                 ..Default::default()
             },
         );
-        let score_text = archive_career::format_chips_compact(row.best_score);
+        let score_text = archive_career::format_score_compact(row.best_score);
         push_label_clipped(
             labels,
             [score_x, ry, score_w, row_h],

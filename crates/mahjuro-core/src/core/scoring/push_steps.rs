@@ -2,47 +2,47 @@
 
 use super::{ScoreStep, StepKind, combine};
 
-pub(crate) fn push_chips(
+pub(crate) fn push_fu(
     steps: &mut Vec<ScoreStep>,
-    chips: &mut i32,
-    mult: f64,
+    fu: &mut i32,
+    han: f64,
     source: impl Into<String>,
     delta: i32,
 ) {
-    *chips += delta;
+    *fu += delta;
     steps.push(ScoreStep {
         source: source.into(),
-        kind: StepKind::Chips,
+        kind: StepKind::Fu,
         tile_ids: Vec::new(),
-        running_chips: *chips,
-        running_mult: mult,
-        running_total: combine(*chips, mult),
+        running_fu: *fu,
+        running_han: han,
+        running_total: combine(*fu, han),
     });
 }
 
-pub(crate) fn push_mult(
+pub(crate) fn push_han(
     steps: &mut Vec<ScoreStep>,
-    chips: i32,
-    mult: &mut f64,
+    fu: i32,
+    han: &mut f64,
     source: impl Into<String>,
     delta: f64,
 ) {
-    *mult += delta;
+    *han += delta;
     steps.push(ScoreStep {
         source: source.into(),
-        kind: StepKind::Mult,
+        kind: StepKind::Han,
         tile_ids: Vec::new(),
-        running_chips: chips,
-        running_mult: *mult,
-        running_total: combine(chips, *mult),
+        running_fu: fu,
+        running_han: *han,
+        running_total: combine(fu, *han),
     });
 }
 
 pub(crate) fn push_yen(
     steps: &mut Vec<ScoreStep>,
     flower_yen: &mut i32,
-    chips: i32,
-    mult: f64,
+    fu: i32,
+    han: f64,
     source: impl Into<String>,
     delta: i32,
 ) {
@@ -51,8 +51,8 @@ pub(crate) fn push_yen(
         source: source.into(),
         kind: StepKind::Yen,
         tile_ids: Vec::new(),
-        running_chips: chips,
-        running_mult: mult,
-        running_total: combine(chips, mult),
+        running_fu: fu,
+        running_han: han,
+        running_total: combine(fu, han),
     });
 }

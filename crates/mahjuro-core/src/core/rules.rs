@@ -15,9 +15,9 @@ pub enum RuleModifier {
     /// If no sequences in the scored hand, +80 bonus.
     NoSequenceBonus,
     // ── Boss-only scoring/validation effects ────────────────────────────
-    /// Pairs contribute zero base chips. (The Hermit boss.)
+    /// Pairs contribute zero base Fu. (The Hermit boss.)
     PairsScoreZero,
-    /// Sequences contribute half their normal base chips. (The Forest boss.)
+    /// Sequences contribute half their normal base Fu. (The Forest boss.)
     SequencesHalved,
     /// Selection must contain exactly 5 tiles. (The Bureaucrat boss.)
     MustPlayFive,
@@ -63,8 +63,8 @@ impl RuleModifier {
             RuleModifier::ReducedPlays => "Only 3 plays this round",
             RuleModifier::HonorTripleScore => "Honor triplets score ×3",
             RuleModifier::NoSequenceBonus => "No sequences in hand → +80 bonus",
-            RuleModifier::PairsScoreZero => "Pairs score 0 base chips",
-            RuleModifier::SequencesHalved => "Sequences score half base chips",
+            RuleModifier::PairsScoreZero => "Pairs score 0 base Fu",
+            RuleModifier::SequencesHalved => "Sequences score half base Fu",
             RuleModifier::MustPlayFive => "Must play exactly 5 tiles",
             RuleModifier::RequireHonor => "Structure must contain an honor tile",
             RuleModifier::CensorRepeats => "Repeated yaku score at half",

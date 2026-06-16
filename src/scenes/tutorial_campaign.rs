@@ -94,7 +94,7 @@ struct TryItLayout {
     play_rect: [f32; 4],
     trigger_rect: [f32; 4],
     heading_y: f32,
-    /// Y position for the one-line demo result (chips × mult = total).
+    /// Y position for the one-line demo result (Fu × Han = total).
     demo_line_y: f32,
     /// Minimum Y where the bottom row (glossary / callout) may start.
     content_floor_y: f32,

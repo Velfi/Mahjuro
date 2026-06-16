@@ -6,7 +6,7 @@
   { "id": "coin",          "name": "The Copper Wheel",  "description": "Pinzu are debuffed",                                  "tier": "soft",   "min_wing": 2 },
   { "id": "rot",           "name": "The Rot",           "description": "Flowers cannot act as wildcards",                       "tier": "soft",   "min_wing": 2 },
   { "id": "hermit",        "name": "The Hermit",        "description": "Pairs score 0",                                         "tier": "medium", "min_wing": 3 },
-  { "id": "forest",        "name": "The Forest",        "description": "Sequences score half base chips",                       "tier": "medium", "min_wing": 3 },
+  { "id": "forest",        "name": "The Forest",        "description": "Sequences score half base Fu",                       "tier": "medium", "min_wing": 3 },
   { "id": "bureaucrat",    "name": "The Bureaucrat",    "description": "Must play exactly 5 tiles",                             "tier": "medium", "min_wing": 3 },
   { "id": "drunkard",      "name": "The Drunkard",      "description": "Rank-5 tiles are debuffed",                             "tier": "medium", "min_wing": 3 },
   { "id": "ash",           "name": "The Ash",           "description": "Simple tiles are debuffed",                             "tier": "medium", "min_wing": 3 },

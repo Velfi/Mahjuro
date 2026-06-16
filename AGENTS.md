@@ -23,7 +23,7 @@ Short pointers to deeper context. Read the linked file before working in the are
 - [Multi-store distribution](docs/agents/distribution.md) — `dist-steam` / `dist-mas` / `dist-msstore`, achievements, sandbox I/O, packaging.
 - [Mac App Store release](docs/agents/macos-app-store.md) — Connect alignment, signing, Transporter upload, review notes.
 - [Microsoft Store release](docs/agents/windows-app-store.md) — Partner Center, MSIX signing, upload.
-- [Scoring](docs/agents/scoring.md) — play / cash-in loop, melds, chips, multipliers.
+- [Scoring](docs/agents/scoring.md) — play / cash-in loop, melds, Fu, multipliers.
 - [Blind targets](docs/agents/blind-targets.md) — formula, multipliers, season scaling, current values.
 - [Gameplay table (`gameplay.glb`)](docs/agents/gameplay-glb.md) — authored room draw + spawn empties; required at runtime.
 - [Tile pack opening](docs/agents/tpos2-art-direction.md) — `Arrival` → `Anticipation` → `Unseal` → `Deal` celebration phases.

@@ -621,8 +621,8 @@ impl<'a> GameEngine<'a> {
         }
     }
 
-    pub fn structure_played_meld_chips(run: &RunState) -> i32 {
-        run.structure_played_meld_chips()
+    pub fn structure_played_meld_fu(run: &RunState) -> i32 {
+        run.structure_played_meld_fu()
     }
 
     pub fn preview_manual_trigger_breakdown(run: &RunState) -> Option<ScoreBreakdown> {
