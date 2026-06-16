@@ -1077,6 +1077,22 @@ mod tests {
             "readable room-surface feature flag missing from room_glb.wgsl"
         );
         assert!(
+            ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_ROOM_SKIP_LIGHTMAP"),
+            "explicit room lightmap opt-out feature flag missing from room_glb.wgsl"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("sample_room_lightmap_indirect(in.lightmap_uv)"),
+            "room env surfaces, including readable archive chrome, should sample baked GI fill"
+        );
+        assert!(
+            ROOM_GLB_WGSL.contains("if (!skips_room_lightmap)"),
+            "room lightmap sampling should be gated only by the explicit opt-out flag"
+        );
+        assert!(
+            !ROOM_GLB_WGSL.contains("if (!is_readable_room_surface)"),
+            "readable archive chrome should not skip the room lightmap"
+        );
+        assert!(
             ROOM_GLB_WGSL.contains("receives_dynamic_room_shadow"),
             "focused room shadow sampling must be gated by a receiver material flag"
         );

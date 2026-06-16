@@ -6,6 +6,8 @@
 # Usage:
 #   scripts/rebake-offline.sh [kinds…]
 #
+# Always uses the release profile.
+#
 # Kinds (default: all):
 #   lightmap, shadow   room bakes (`gi` is accepted as a lightmap alias)
 #   room         lightmap GI + shadow
@@ -23,7 +25,18 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-kinds=("$@")
+kinds=()
+for arg in "$@"; do
+    case "$arg" in
+        --help|-h)
+            sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            kinds+=("$arg")
+            ;;
+    esac
+done
 if [[ ${#kinds[@]} -eq 0 ]]; then
     kinds=(all)
 fi
@@ -63,21 +76,21 @@ if [[ "$want_gi" -eq 1 || "$want_shadow" -eq 1 ]]; then
     kinds_csv=$(IFS=,; echo "${bake_kinds[*]}")
 
     echo "==> room bakes ($kinds_csv)"
-    MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo build -p mahjuro-headless --bin mahjuro-bake --features bake
-    MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds "$kinds_csv"
+    MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo build --release -p mahjuro-headless --bin mahjuro-bake --features bake
+    MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo run --release -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds "$kinds_csv"
 fi
 
 if [[ "$want_decal" -eq 1 ]]; then
     echo "==> showcase decal atlases"
-    cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases
+    cargo run --release -p mahjuro-render --bin mahjuro-bake-decal-atlases
 fi
 
 if [[ "$want_relic" -eq 1 ]]; then
     echo "==> relic RLC2 bakes"
-    cargo run -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake
+    cargo run --release -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake
 fi
 
-echo "==> verifying stamps (cargo build --locked)"
-cargo build --locked
+echo "==> verifying stamps (cargo build --release --locked)"
+cargo build --release --locked
 
 echo "done — commit baked outputs + stamp files"

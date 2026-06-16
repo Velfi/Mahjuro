@@ -18,8 +18,10 @@
 // - `room_height_fog_color.w` = distance-tint gradient start in world units
 // - `room_height_fog_far_color.xyz` = distance tint color approached as distance grows
 // - `room_height_fog_far_color.w` = distance-tint exponential scale in world units
-// - `GLTF_PBR_FLAG_ROOM_READABLE_SURFACE` = GLB text/decal/UI surface: lit by material +
-//   punctual lights, but not by the coarse room lightmap / baked contact AO.
+// - `GLTF_PBR_FLAG_ROOM_READABLE_SURFACE` = GLB text/decal/UI surface: skip combined
+//   receiver shadow and baked contact AO so copy stays legible; still receives room lightmap fill.
+// - `GLTF_PBR_FLAG_ROOM_SKIP_LIGHTMAP` = explicit opt-out for surfaces whose lighting is
+//   fully supplied by material/emissive paths.
 //
 // Point `pos.w` = smooth radius or glTF inverse-square range depending on `params.x`.
 // Spot `pos.w` = smooth radius. Both are in world units after upload.
@@ -33,6 +35,7 @@ const GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO: u32 = 1u << 5u;
 const GLTF_PBR_FLAG_ROOM_CANDLE_WAX: u32 = 1u << 6u;
 const GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER: u32 = 1u << 7u;
 const GLTF_PBR_FLAG_ROOM_READABLE_SURFACE: u32 = 1u << 8u;
+const GLTF_PBR_FLAG_ROOM_SKIP_LIGHTMAP: u32 = 1u << 9u;
 const CANDLE_WARMTH_RGB: vec3<f32> = vec3<f32>(1.0, 0.58, 0.20);
 // UI polychrome (The House) — coarser bands than 3D score pops at label sizes.
 const POLYCHROME_COORD_X: f32 = 2.0;
@@ -430,6 +433,8 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         (pbr.flags & GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER) != 0u;
     let is_readable_room_surface =
         (pbr.flags & GLTF_PBR_FLAG_ROOM_READABLE_SURFACE) != 0u;
+    let skips_room_lightmap =
+        (pbr.flags & GLTF_PBR_FLAG_ROOM_SKIP_LIGHTMAP) != 0u;
 
     // Animation-lab false shading: albedo × simple N·L (skips punctual PBR / shadows).
     if (cam.room_debug_params.y > 0.5) {
@@ -682,11 +687,11 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         Lo = Lo + direct.total;
     }
 
-    if (!is_readable_room_surface) {
+    if (!skips_room_lightmap) {
         let room_indirect_shadow_vis = select(
             1.0,
             dynamic_receiver_shadow_vis(in.world_pos),
-            receives_dynamic_room_shadow,
+            receives_dynamic_room_shadow && !is_readable_room_surface,
         );
         Lo = Lo + sample_room_lightmap_indirect(in.lightmap_uv) * room_indirect_shadow_vis;
     }
