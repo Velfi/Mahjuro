@@ -834,8 +834,8 @@ mod text_fit_tests {
 
     #[test]
     fn truncate_text_to_width_keeps_short_copy() {
-        let out = truncate_text_to_width("Peak 77.6 k cp", 240.0, 14.0, true);
-        assert_eq!(out, "Peak 77.6 k cp");
+        let out = truncate_text_to_width("Peak 77.6 k", 240.0, 14.0, true);
+        assert_eq!(out, "Peak 77.6 k");
     }
 
     #[test]

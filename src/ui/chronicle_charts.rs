@@ -522,7 +522,7 @@ pub fn push_ordeal_record_rows(
     let score_font_px = body_px;
     // Widths track font size so high-res layouts do not auto-shrink stats into the floor.
     let score_w = (score_font_px * 9.0)
-        .max(chart_primitives::measure_text_width("999.9 M cp", score_font_px, true) + gutter)
+        .max(chart_primitives::measure_text_width("999.9 M", score_font_px, true) + gutter)
         .min(w * 0.42);
     let wl_w = (stat_font_px * 7.0)
         .max(chart_primitives::measure_text_width("99W · 99L", stat_font_px, true) + gutter * 0.75)

@@ -1264,7 +1264,7 @@ pub(crate) fn yaku_guide_detail(yk: YakuKind) -> YakuGuideDetail {
 
 fn draw_yaku_guide_page(
     frame: &mut UiFrame,
-    progress: &PlayerProgress,
+    _progress: &PlayerProgress,
     w: f32,
     h: f32,
     scale: f32,

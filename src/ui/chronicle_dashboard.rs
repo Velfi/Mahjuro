@@ -1852,7 +1852,7 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
         &format!(
             "{} · {}",
             model.signature_name,
-            archive_career::format_score_with_unit(model.signature_score)
+            archive_career::format_score(model.signature_score)
         ),
         color::PARCHMENT,
         body,
