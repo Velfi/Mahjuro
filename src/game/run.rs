@@ -1070,6 +1070,34 @@ impl RunState {
         self.wing > FINAL_WING
     }
 
+    /// Apply a run-persisted transform talisman face override when handing a
+    /// wall tile to the player. The live wall can still carry stale faces for
+    /// ids already drawn into hand (or reloaded mid-round saves).
+    pub(crate) fn bake_persisted_tile(&self, tile: Tile) -> Tile {
+        self.transformed_tiles
+            .get(&tile.id)
+            .copied()
+            .unwrap_or(tile)
+    }
+
+    pub(crate) fn draw_wall_tile(&mut self) -> Option<Tile> {
+        self.wall
+            .draw()
+            .map(|tile| self.bake_persisted_tile(tile))
+    }
+
+    pub(crate) fn draw_wall_tile_matching(&mut self, suit: Suit, rank: u8) -> Option<Tile> {
+        self.wall
+            .draw_matching(suit, rank)
+            .map(|tile| self.bake_persisted_tile(tile))
+    }
+
+    pub(crate) fn sync_live_wall_with_persisted_transforms(&mut self) {
+        for (&id, &replacement) in &self.transformed_tiles {
+            let _ = self.wall.patch_tile_by_id(id, replacement);
+        }
+    }
+
     /// Set Magnet: after any draw phase, for each face with exactly 3 copies
     /// in hand, pull the 4th matching tile from the wall.
     fn set_magnet_draw_fourths(&mut self, bus: &mut EventBus) {
@@ -1084,7 +1112,7 @@ impl RunState {
         }
         for ((suit, rank), count) in counts {
             if count == 3
-                && let Some(matching) = self.wall.draw_matching(suit, rank)
+                && let Some(matching) = self.draw_wall_tile_matching(suit, rank)
             {
                 self.hand.push(matching);
                 self.selected.push(false);

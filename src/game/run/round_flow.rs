@@ -104,7 +104,7 @@ impl RunState {
         let draw_count = ordeal::effective_hand_size(self);
         let lotus = self.relics.has(crate::core::relic::RelicId::LotusBloom);
         for _ in 0..draw_count {
-            if let Some(t) = self.wall.draw() {
+            if let Some(t) = self.draw_wall_tile() {
                 if lotus && t.suit == Suit::Flower {
                     *self
                         .relic_counters

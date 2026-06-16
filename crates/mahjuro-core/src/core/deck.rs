@@ -315,6 +315,19 @@ impl Wall {
         tiles.insert(self.cursor + offset, tile);
     }
 
+    /// Rewrite the wall copy with `id`, drawn or undrawn. Used when transform
+    /// talismans tombstone a tile id so the live wall matches `RunState`.
+    pub fn patch_tile_by_id(&mut self, id: u32, tile: Tile) -> bool {
+        debug_assert_eq!(id, tile.id, "patch tile id must match replacement id");
+        let tiles = Arc::make_mut(&mut self.tiles);
+        if let Some(slot) = tiles.iter_mut().find(|t| t.id == id) {
+            *slot = tile;
+            true
+        } else {
+            false
+        }
+    }
+
     /// The tile faces that count as dora (same faces shown on the plinth).
     pub fn dora_faces(&self) -> Vec<(Suit, u8)> {
         self.dora_indicators

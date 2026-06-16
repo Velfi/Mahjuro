@@ -207,7 +207,6 @@ fn hallway_trailer_snapshot(
         ripple_mul: 1.0,
         balloon_mul: 1.0,
         wall_tint: 0,
-        wall_pattern: 0,
         ripple_waves_mul: 1.0,
         ripple_travel_mul: hallway_ramp_lerp(elapsed_secs, 1.0, DISTORTION_RIPPLE_TRAVEL_END),
     }

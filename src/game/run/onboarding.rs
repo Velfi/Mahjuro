@@ -147,7 +147,7 @@ impl RunState {
         self.hand.clear();
         let draw_count = crate::core::ordeal::effective_hand_size(self);
         for _ in 0..draw_count {
-            if let Some(t) = self.wall.draw() {
+            if let Some(t) = self.draw_wall_tile() {
                 self.hand.push(t);
             }
         }
