@@ -189,8 +189,21 @@ impl WgpuRenderer {
     /// (`TileFrameUniform.tile_post_params`) and lit_mesh frame globals.
     /// Same `RoomEnvLightingTune` as the room. Always HDR — tonemap is composite.
     pub(super) fn tile_hdr_tonemap(&self, frame: &crate::draw_cmd::UiFrame) -> [f32; 4] {
-        let tune = self.active_frame_env();
-        let linear_base = if frame.scene_lighting.embedded_gltf_punctual {
+        let post_showcase = frame.depth_clear_before_showcase();
+        let scene_lighting = if post_showcase {
+            frame.foreground_scene_lighting()
+        } else {
+            &frame.scene_lighting
+        };
+        let tune = if post_showcase {
+            crate::room_glb::RoomEnvFrameTune::from_room_and_height(
+                crate::room_glb::RoomEnvLightingTune::DOC_TILE,
+                self.active_frame_env().height_scale,
+            )
+        } else {
+            self.active_frame_env()
+        };
+        let linear_base = if scene_lighting.embedded_gltf_punctual {
             tune.linear_exposure_base
         } else {
             1.0
