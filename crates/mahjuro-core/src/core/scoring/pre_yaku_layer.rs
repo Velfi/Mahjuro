@@ -9,9 +9,7 @@ use crate::core::yaku::structure_would_score_chicken_hand;
 
 use super::layer_input::{PreYakuLayerOpts, ScoringLayerInput, ScoringLayerOut};
 use super::push_steps::{push_fu, push_han};
-use super::tea_bonus::{
-    tea_harmony_fu, tea_purity_han, tea_respect_fu, tea_tranquility_fu,
-};
+use super::tea_bonus::{tea_harmony_fu, tea_purity_han, tea_respect_fu, tea_tranquility_fu};
 use super::{tile_by_id, tile_is_debuffed};
 
 pub const TRIPLET_BOOST_FU: i32 = 50;
@@ -431,14 +429,7 @@ pub(crate) fn apply_pre_yaku_scoring(
             push_fu(steps, fu, *han, "Pearl Talisman", PEARL_CHIPS_PER_MELD);
         }
         if gilded_yen > 0 {
-            push_yen(
-                steps,
-                flower_yen,
-                *fu,
-                *han,
-                "Gilded Talisman",
-                gilded_yen,
-            );
+            push_yen(steps, flower_yen, *fu, *han, "Gilded Talisman", gilded_yen);
         }
         for _ in 0..polychrome_tiles {
             push_han(

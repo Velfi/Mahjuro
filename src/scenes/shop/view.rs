@@ -9,7 +9,7 @@ use super::layout::{
     consumable_color, is_tile_pack_pick, live_shop_hit, rarity_color, relic_half_extents,
     tile_pack_index_from_pick,
 };
-use super::shared::{focused_sell_action, shop_focus_inspectable};
+use super::shared::{focused_sell_action, focused_shop_buy_action, shop_focus_inspectable};
 use super::{
     ConsumableShopItem, ShopFocus, ShopItem, ShopMode, ShopScene, TilePackShopItem, push_free_badge,
 };
@@ -1083,7 +1083,7 @@ pub(crate) fn render_shop_frame(
         let _g = crate::render::cpu_profiler::scope("draw_frame.shop_floating_hints");
         let inspect_active = inspect.is_some();
 
-        let sell_hint_hit = ctx
+        let hint_focus = ctx
             .picked_shop_object
             .and_then(|hit| {
                 live_shop_hit(
@@ -1096,22 +1096,43 @@ pub(crate) fn render_shop_frame(
                     &shop_rm,
                 )
             })
+            .map(ShopFocus::from_hit)
             .or_else(|| {
-                shop.focus.and_then(|f| f.to_hit()).and_then(|hit| {
-                    live_shop_hit(
-                        hit,
-                        shop,
-                        &shop.items,
-                        &shop.zodiac_items,
-                        &shop.talisman_items,
-                        &shop.pack_items,
-                        &shop_rm,
-                    )
+                shop.focus.and_then(|f| {
+                    f.to_hit()
+                        .and_then(|hit| {
+                            live_shop_hit(
+                                hit,
+                                shop,
+                                &shop.items,
+                                &shop.zodiac_items,
+                                &shop.talisman_items,
+                                &shop.pack_items,
+                                &shop_rm,
+                            )
+                        })
+                        .map(ShopFocus::from_hit)
                 })
             });
-        let hover_sellable = sell_hint_hit.is_some_and(|hit| {
+        let hover_sellable = focused_sell_action(
+            hint_focus,
+            shop.items.len(),
+            &shop.zodiac_items,
+            &shop.talisman_items,
+            &shop_rm,
+        )
+        .is_some();
+        let hover_buyable = focused_shop_buy_action(
+            hint_focus,
+            &shop.items,
+            &shop.zodiac_items,
+            &shop.talisman_items,
+            &shop_rm,
+        )
+        .is_some();
+        let focused_sellable = shop.focus.is_some_and(|focus| {
             focused_sell_action(
-                Some(ShopFocus::from_hit(hit)),
+                Some(focus),
                 shop.items.len(),
                 &shop.zodiac_items,
                 &shop.talisman_items,
@@ -1119,19 +1140,17 @@ pub(crate) fn render_shop_frame(
             )
             .is_some()
         });
-        let hover_buyable = sell_hint_hit.is_some_and(|hit| {
-            super::shared::shop_action_for_hit(
-                hit,
-                &shop.items,
-                &shop.zodiac_items,
-                &shop.talisman_items,
-                &shop_rm,
-            )
-            .is_some()
-        });
-        let show_hold_sell_hint =
-            inspect.is_none() && (shop.west_sell_hold_started.is_some() || hover_sellable);
-        let show_buy_hint = inspect.is_none() && hover_buyable;
+        let focused_buyable = focused_shop_buy_action(
+            shop.focus,
+            &shop.items,
+            &shop.zodiac_items,
+            &shop.talisman_items,
+            &shop_rm,
+        )
+        .is_some();
+        let show_buy_hint = inspect.is_none() && (hover_buyable || focused_buyable);
+        let show_hold_sell_hint = inspect.is_none()
+            && (shop.west_sell_hold_started.is_some() || hover_sellable || focused_sellable);
         let show_inspect_hint = inspect.is_none() && shop.focus.is_some_and(shop_focus_inspectable);
 
         let hint_style = HintStyle::standard(w, h);

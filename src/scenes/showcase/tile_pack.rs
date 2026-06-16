@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 use glam::{Mat4, Vec3};
 
-use crate::core::tile_pack::{PACK_TILE_ID_BASE, TilePackInstance, TilePackKind, PACK_TEXTURE_TINT};
+use crate::core::tile_pack::{
+    PACK_TEXTURE_TINT, PACK_TILE_ID_BASE, TilePackInstance, TilePackKind,
+};
 use crate::persistence::TilePreset;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseRenderHints, ShowcaseTilePlacement,

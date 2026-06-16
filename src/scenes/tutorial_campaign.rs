@@ -9,10 +9,10 @@ use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::run::RunState;
 use crate::persistence::{self, TilePreset};
 use crate::render::doc_tile_camera::{DOC_TILE_ROTATION, doc_tile_camera};
-use crate::render::scene_keys;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
 };
+use crate::render::scene_keys;
 use crate::render::showcase_tile_layout::{
     ShowcaseTileLabelGaps, showcase_tile_group_label_anchor, showcase_tile_merge_projected_group,
 };
@@ -187,7 +187,6 @@ impl SequenceCardSpacing {
             + self.bottom_pad
     }
 }
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TilesCopySections {
@@ -996,8 +995,7 @@ impl TutorialCampaignScene {
         let section_gap = h * 0.006;
         let copy_bottom_pad = h * 0.008;
         let available = (copy_floor - content_top - copy_bottom_pad).max(1.0);
-        let gap_stack =
-            section_gap * Self::tutorial_tiles_copy_section_gaps(sections) as f32;
+        let gap_stack = section_gap * Self::tutorial_tiles_copy_section_gaps(sections) as f32;
         let text_budget = (available - gap_stack).max(1.0);
 
         let font_cap_px = Self::tutorial_tiles_copy_font_cap_for_budget(
@@ -1162,8 +1160,7 @@ impl TutorialCampaignScene {
     }
 
     fn try_it_page_layout(page: &TutorialPage, w: f32, h: f32) -> TryItLayout {
-        let (layout, _, content_top) =
-            tutorial_content_band(w, h, tutorial_page_subtitle(page));
+        let (layout, _, content_top) = tutorial_content_band(w, h, tutorial_page_subtitle(page));
         let scale = metrics::scene_scale(w, h);
         let col_x = layout.content_x + layout.content_w * 0.12;
         let col_w = layout.content_w * 0.76;
@@ -1885,13 +1882,7 @@ impl SceneBehavior for TutorialCampaignScene {
         let content_top = push_guide_chrome(&mut frame, &layout, nav_header.content_top);
         let on_last = self.page + 1 >= PAGES.len();
         let header_nav = tutorial_header_nav(&layout, on_last);
-        push_tutorial_header(
-            &mut frame,
-            w,
-            page.title,
-            &nav_header,
-            subtitle,
-        );
+        push_tutorial_header(&mut frame, w, page.title, &nav_header, subtitle);
         push_tutorial_header_nav(
             &mut frame,
             &self.tree,
@@ -2096,8 +2087,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 let seq_top = top_band_bottom + section_gap;
                 let examples_w = col_w * 0.76;
                 let examples_x = col_x + (col_w - examples_w) * 0.5;
-                let flower_heading_reserve =
-                    flower_heading_h + flower_heading_gap + section_gap;
+                let flower_heading_reserve = flower_heading_h + flower_heading_gap + section_gap;
                 let usable = (content_floor - seq_top - flower_heading_reserve).max(1.0);
                 let comparison_row_h = (usable * 0.5).max(1.0);
                 let seq_max_tile = (comparison_row_h * 0.36).clamp(h * 0.040, h * 0.058);
@@ -2133,8 +2123,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     ..Default::default()
                 });
                 let flower_top = flower_section_y + flower_heading_h + flower_heading_gap;
-                let flower_max_tile = (comparison_row_h * 0.36)
-                    .clamp(h * 0.040, h * 0.058);
+                let flower_max_tile = (comparison_row_h * 0.36).clamp(h * 0.040, h * 0.058);
                 let (flower_placements, flower_bottom) = Self::layout_meld_comparison_cards(
                     SCORING_FLOWER_GROUPS,
                     &FLOWER_COMPARISON_THEME,
@@ -2152,11 +2141,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 showcase_tiles.extend(flower_placements);
                 let pair_tile_light_y = pair_row_top + shapes_max_tile * 0.35;
                 Self::draw_tiles_page_group_labels(&mut texts, &mut fg_quads, &labels, scale, h);
-                (
-                    showcase_tiles,
-                    pair_tile_light_y,
-                    flower_bottom,
-                )
+                (showcase_tiles, pair_tile_light_y, flower_bottom)
             }
             TutorialPageKind::ScoringTerms => {
                 let flow_h = (content_floor - content_top) * 0.50;
@@ -2167,11 +2152,13 @@ impl SceneBehavior for TutorialCampaignScene {
                     flow_h.max(1.0),
                 ];
                 draw_tutorial_scoring_diagram(&mut frame, &ctx, flow_rect, w, h);
-                (Vec::new(), content_top + flow_h * 0.35, content_top + flow_h)
+                (
+                    Vec::new(),
+                    content_top + flow_h * 0.35,
+                    content_top + flow_h,
+                )
             }
-            TutorialPageKind::TryIt => {
-                (Vec::new(), content_top, content_top)
-            }
+            TutorialPageKind::TryIt => (Vec::new(), content_top, content_top),
         };
 
         let tiles_page_footer = tile_content_floor;
@@ -2292,11 +2279,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     try_it::LABEL_DISCARD,
                     color::tally_stick::DISCARD,
                 ),
-                (
-                    layout.play_rect,
-                    try_it::LABEL_PLAY,
-                    color::keyword::PLAY,
-                ),
+                (layout.play_rect, try_it::LABEL_PLAY, color::keyword::PLAY),
                 (
                     layout.trigger_rect,
                     try_it::LABEL_CASH_IN,
@@ -2355,7 +2338,11 @@ impl SceneBehavior for TutorialCampaignScene {
                     &mut texts,
                     [glossary_x + 2.0 * scale, gy, term_w, term_h],
                     term,
-                    Self::tutorial_glossary_text_style(typography::H42, color::STONE, TextAlign::Left),
+                    Self::tutorial_glossary_text_style(
+                        typography::H42,
+                        color::STONE,
+                        TextAlign::Left,
+                    ),
                     h,
                 );
                 gy += term_h + 6.0 * scale;
@@ -2364,33 +2351,34 @@ impl SceneBehavior for TutorialCampaignScene {
 
         if let Some(callout_kind) = page.callout {
             let callout = callout_kind.text(ctx.input_mode);
-            let (callout_x, callout_y, callout_w, callout_h) = if page.kind == TutorialPageKind::TryIt {
-                let callout_w = layout.content_w * 0.76;
-                let callout_x = layout.content_x + layout.content_w * 0.12;
-                let callout_h = Self::callout_kind_box_height(
-                    callout_kind,
-                    callout_w,
-                    scale,
-                    h,
-                    None,
-                    typography::H36,
-                );
-                let callout_y = content_floor - callout_h - (24.0 * scale).max(16.0);
-                (callout_x, callout_y, callout_w, callout_h)
-            } else {
-                let callout_x = tile_col_x;
-                let callout_y = glossary_y;
-                let callout_w = tile_col_w;
-                let callout_h = Self::callout_kind_box_height(
-                    callout_kind,
-                    callout_w,
-                    scale,
-                    h,
-                    None,
-                    typography::H36,
-                );
-                (callout_x, callout_y, callout_w, callout_h)
-            };
+            let (callout_x, callout_y, callout_w, callout_h) =
+                if page.kind == TutorialPageKind::TryIt {
+                    let callout_w = layout.content_w * 0.76;
+                    let callout_x = layout.content_x + layout.content_w * 0.12;
+                    let callout_h = Self::callout_kind_box_height(
+                        callout_kind,
+                        callout_w,
+                        scale,
+                        h,
+                        None,
+                        typography::H36,
+                    );
+                    let callout_y = content_floor - callout_h - (24.0 * scale).max(16.0);
+                    (callout_x, callout_y, callout_w, callout_h)
+                } else {
+                    let callout_x = tile_col_x;
+                    let callout_y = glossary_y;
+                    let callout_w = tile_col_w;
+                    let callout_h = Self::callout_kind_box_height(
+                        callout_kind,
+                        callout_w,
+                        scale,
+                        h,
+                        None,
+                        typography::H36,
+                    );
+                    (callout_x, callout_y, callout_w, callout_h)
+                };
             Self::push_cta_callout(
                 &mut fg_quads,
                 &mut texts,
@@ -2508,7 +2496,11 @@ impl SceneBehavior for TutorialCampaignScene {
 mod tests {
     use super::*;
 
-    fn tiles_page_copy_metrics(w: f32, h: f32, sections: TilesCopySections) -> (f32, f32, f32, f32) {
+    fn tiles_page_copy_metrics(
+        w: f32,
+        h: f32,
+        sections: TilesCopySections,
+    ) -> (f32, f32, f32, f32) {
         let scale = metrics::scene_scale(w, h);
         let (layout, nav_header, content_top) = tutorial_content_band(w, h, None);
         let _ = nav_header;
@@ -2530,8 +2522,14 @@ mod tests {
         let layout = GuideLayout::new(1920.0, 1080.0);
         let nav = tutorial_header_nav(&layout, false);
         let chrome = layout.header_chrome();
-        assert!(nav.prev[2] >= 96.0, "prev button should be wide enough for label");
-        assert!(nav.next[3] >= 52.0, "next button should match header height");
+        assert!(
+            nav.prev[2] >= 96.0,
+            "prev button should be wide enough for label"
+        );
+        assert!(
+            nav.next[3] >= 52.0,
+            "next button should match header height"
+        );
         assert!(
             (nav.prev[1] - chrome.back[1]).abs() < 0.5,
             "prev should sit in the left header chrome slot"
@@ -2559,8 +2557,7 @@ mod tests {
         );
         let copy_bottom_pad = h * 0.008;
         let available = copy_floor - content_top - copy_bottom_pad;
-        let total =
-            natural_h + layout.section_gap * TUTORIAL_TILES_INTRO_COPY_SECTION_GAPS as f32;
+        let total = natural_h + layout.section_gap * TUTORIAL_TILES_INTRO_COPY_SECTION_GAPS as f32;
         assert!(
             total <= available + 1.0,
             "copy should fit: total={total} available={available} font_cap_px={}",
@@ -2628,8 +2625,7 @@ mod tests {
             None,
             typography::H36,
         );
-        let callout_y =
-            guide_layout.content_bottom - callout_h - (24.0 * scale).max(16.0);
+        let callout_y = guide_layout.content_bottom - callout_h - (24.0 * scale).max(16.0);
         assert!(
             callout_y + callout_h <= guide_layout.content_bottom + 0.5,
             "callout should sit above footer hints"
@@ -2696,9 +2692,7 @@ mod tests {
 
     #[test]
     fn try_it_demo_line_only_on_flash() {
-        assert!(
-            TutorialCampaignScene::try_it_demo_line(TutorialPageKind::TryIt, None).is_none()
-        );
+        assert!(TutorialCampaignScene::try_it_demo_line(TutorialPageKind::TryIt, None).is_none());
         let discard = TutorialCampaignScene::try_it_demo_line(
             TutorialPageKind::TryIt,
             Some(TryItFlash::Discard),

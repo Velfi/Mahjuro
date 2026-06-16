@@ -513,13 +513,7 @@ fn runs_to_cells_with_glossary(
         let mut word = String::new();
         for ch in run.text.chars() {
             if ch == '\n' {
-                flush_word(
-                    &mut cells,
-                    &mut word,
-                    run,
-                    &mut word_idx,
-                    &mut token_offset,
-                );
+                flush_word(&mut cells, &mut word, run, &mut word_idx, &mut token_offset);
                 cells.push(Cell {
                     ch: '\n',
                     bold: run.bold,
@@ -531,13 +525,7 @@ fn runs_to_cells_with_glossary(
                 continue;
             }
             if ch.is_whitespace() {
-                flush_word(
-                    &mut cells,
-                    &mut word,
-                    run,
-                    &mut word_idx,
-                    &mut token_offset,
-                );
+                flush_word(&mut cells, &mut word, run, &mut word_idx, &mut token_offset);
                 cells.push(Cell {
                     ch,
                     bold: run.bold,
@@ -550,13 +538,7 @@ fn runs_to_cells_with_glossary(
                 word.push(ch);
             }
         }
-        flush_word(
-            &mut cells,
-            &mut word,
-            run,
-            &mut word_idx,
-            &mut token_offset,
-        );
+        flush_word(&mut cells, &mut word, run, &mut word_idx, &mut token_offset);
     }
     cells
 }

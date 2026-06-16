@@ -741,8 +741,7 @@ fn kindling_adds_mult_from_prior_cashins_this_chamber() {
     };
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
     let prior_cashins = 2;
-    let han =
-        SCORING_BASE_HAN + YakuKind::Tanyao.han_bonus() + kindling_han_bonus(prior_cashins);
+    let han = SCORING_BASE_HAN + YakuKind::Tanyao.han_bonus() + kindling_han_bonus(prior_cashins);
     assert_eq!(breakdown.final_han, han);
     assert!(breakdown.steps.iter().any(|s| s.source == "Kindling"));
 }
@@ -1461,12 +1460,7 @@ fn easter_egg_retriggers_on_chicken_hand() {
         meld_count: sets.len() as u32,
         inject_chicken_if_no_yaku: true,
     });
-    let base = score_sets(
-        &tiles,
-        &sets,
-        &ctx_with(&RelicState::default(), false),
-        &[],
-    );
+    let base = score_sets(&tiles, &sets, &ctx_with(&RelicState::default(), false), &[]);
     let with_egg = score_sets(&tiles, &sets, &ctx, &[]);
     assert_eq!(with_egg.final_fu, base.final_fu + base.base_fu);
     assert!(with_egg.steps.iter().any(|s| s.source == "Easter Egg"));

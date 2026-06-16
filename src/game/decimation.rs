@@ -116,11 +116,7 @@ mod tests {
         let mut run = fresh_run();
         let eligible = decimation_eligible_tiles(&run);
         assert!(eligible.len() >= 10);
-        let player: Vec<u32> = eligible
-            .iter()
-            .take(PLAYER_PICKS)
-            .map(|t| t.id)
-            .collect();
+        let player: Vec<u32> = eligible.iter().take(PLAYER_PICKS).map(|t| t.id).collect();
         run.removed_tile_ids.insert(eligible[9].id);
         let pool = decimation_house_pool(&run, &player);
         for id in &player {

@@ -344,10 +344,7 @@ mod tests {
             },
         ];
         assert_eq!(structure_remaining_meld_slots(&sets), 1);
-        assert_eq!(
-            structure_callout_remaining_slots(&tiles, &sets, 14, &[]),
-            0
-        );
+        assert_eq!(structure_callout_remaining_slots(&tiles, &sets, 14, &[]), 0);
     }
 
     #[test]

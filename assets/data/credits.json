@@ -5,7 +5,8 @@
     {
       "title": "Development",
       "entries": [
-        { "name": "Zelda Hessler", "role": "Lead Designer & Programmer" }
+        { "name": "Zelda Hessler", "role": "Lead Designer & Programmer" },
+        { "name": "Thomas Hatzopoulos", "role": "Rendering, Lighting, and Fog Programmer" }
       ]
     },
     {
@@ -22,7 +23,7 @@
     {
       "title": "Audio",
       "entries": [
-        { "name": "Bo Tiger", "role": "Music" }
+        { "name": "Bo Tiger", "role": "Music and Sound Effects" }
       ]
     },
     {

@@ -1933,7 +1933,9 @@ mod cases {
                 .iter()
                 .find(|t| t.id == *id)
                 .copied()
-                .unwrap_or_else(|| panic!("transformed tile {id} should remain in next-round wall"));
+                .unwrap_or_else(|| {
+                    panic!("transformed tile {id} should remain in next-round wall")
+                });
             assert_eq!(
                 baked.face(),
                 template_face,
@@ -1983,7 +1985,10 @@ mod cases {
         run.use_consumable(0, &mut bus);
 
         let template_face = run.hand[0].face();
-        assert_eq!(run.transformed_tiles.get(&tracked_id).map(|t| t.face()), Some(template_face));
+        assert_eq!(
+            run.transformed_tiles.get(&tracked_id).map(|t| t.face()),
+            Some(template_face)
+        );
 
         // Discard the whole hand and redraw — copies of other ids can still be
         // pre-transform faces, but the tombstoned id must never revert.
@@ -2125,7 +2130,10 @@ mod cases {
         let naive_sets = validate_selection(&selected).expect("valid six 6s");
         if naive_sets != best_sets {
             assert_ne!(
-                naive_sets.iter().filter(|s| s.kind == MeldKind::Triplet).count(),
+                naive_sets
+                    .iter()
+                    .filter(|s| s.kind == MeldKind::Triplet)
+                    .count(),
                 2,
                 "≤6 tile plays should prefer largest chunks over two triplets"
             );

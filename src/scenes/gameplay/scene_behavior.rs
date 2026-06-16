@@ -1918,7 +1918,12 @@ impl SceneBehavior for GameplayScene {
                             } else {
                                 format!("{boss_rule_text} ({discards} {discard_word} left).")
                             };
-                            ("Cash In".to_string(), desc, "Ordeal Rule".to_string(), color::RUBY)
+                            (
+                                "Cash In".to_string(),
+                                desc,
+                                "Ordeal Rule".to_string(),
+                                color::RUBY,
+                            )
                         } else {
                             (
                                 "Cash In".to_string(),

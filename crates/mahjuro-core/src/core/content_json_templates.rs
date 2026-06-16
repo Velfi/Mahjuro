@@ -128,7 +128,10 @@ mod tests {
         let dir = assets_data_dir();
         let mut failures = Vec::new();
         for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| {
-            panic!("failed to read assets/data directory {}: {e}", dir.display())
+            panic!(
+                "failed to read assets/data directory {}: {e}",
+                dir.display()
+            )
         }) {
             let entry = entry.unwrap();
             let name = entry.file_name().to_string_lossy().into_owned();

@@ -144,7 +144,9 @@ impl RunState {
         };
         let mut drawn: Vec<Tile> = Vec::new();
         while self.hand.len() + drawn.len() < draw_target {
-            let Some(t) = self.draw_wall_tile() else { break };
+            let Some(t) = self.draw_wall_tile() else {
+                break;
+            };
             bus.push(GameEvent::TileDrawn);
             drawn.push(t);
         }
@@ -407,8 +409,7 @@ impl RunState {
         if breakdown.flower_yen > 0 {
             self.apply_yen_reward(breakdown.flower_yen, Some(bus));
         }
-        let cashed_standard_hand =
-            crate::core::yaku::is_full_hand(&scoring_tiles, &sets);
+        let cashed_standard_hand = crate::core::yaku::is_full_hand(&scoring_tiles, &sets);
         if cashed_standard_hand {
             self.full_hand_played_this_round = true;
         }

@@ -568,10 +568,7 @@ impl StairwayScene {
         if !can_seal_decimation(run, selected) {
             return false;
         }
-        let player: [u32; PLAYER_PICKS] = selected
-            .as_slice()
-            .try_into()
-            .expect("player picks");
+        let player: [u32; PLAYER_PICKS] = selected.as_slice().try_into().expect("player picks");
         let pool = decimation_house_pool(run, selected);
         let house_vec = pick_house_tiles(&pool, &mut rand::rng());
         if house_vec.len() != HOUSE_PICKS {
