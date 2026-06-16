@@ -223,6 +223,7 @@ if [[ "$want_relic" -eq 1 ]]; then
     echo "==> relic RLC2"
     resolve_merge_theirs assets/data/relic_baked
     restore_tracked_under "$REF_RESOLVED" assets/data/relic_baked '\.rlc$'
+    restore_tracked_under "$REF_RESOLVED" assets/data/relic_baked '\.rlc\.stamp$'
     git checkout "$REF_RESOLVED" -- assets/data/relic_baked/.inputs_stamp 2>/dev/null || true
     stage_paths assets/data/relic_baked
 fi

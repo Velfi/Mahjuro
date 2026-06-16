@@ -57,6 +57,8 @@ scripts/rebake-offline.sh relic
 # or: cargo run -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake
 ```
 
+Unchanged relics are skipped via per-relic sidecars (`<slug>.rlc.stamp`). When the global stamp is already current, the baker exits immediately after bootstrapping any missing sidecars. Use `--force` or `MAHJURO_FORCE_RELIC_BAKE=1` to rebake every relic.
+
 - Stamp logic: [`mahjuro_bake_stamp::relic`](../../crates/mahjuro-bake-stamp/src/relic.rs)
 - Skip env var: `MAHJURO_SKIP_RELIC_BAKE=1`
 
