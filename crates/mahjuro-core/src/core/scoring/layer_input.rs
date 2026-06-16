@@ -26,6 +26,7 @@ pub(crate) struct ScoringLayerOut<'a> {
 pub(crate) struct PreYakuLayerOpts<'a> {
     pub has_triplet_boost: bool,
     pub flower_yen: &'a mut i32,
+    pub original_tiles: Option<&'a [Tile]>,
 }
 
 /// Options for [`super::dora_yaku_layer::apply_dora_yaku_and_structure`].

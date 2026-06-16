@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::hand::{DetectedMeld, MeldKind, enumerate_decompositions, validate_selection};
 use crate::core::json_asset::load_json_asset;
 use crate::core::rules::RuleModifier;
+use crate::core::structure::StructureTriggerMeta;
 use crate::core::tile::{Suit, Tile};
 use crate::core::zodiac::ZodiacKind;
 
@@ -608,6 +609,31 @@ pub fn would_inject_chicken_hand_with_original(
         available,
     )
     .is_empty()
+}
+
+/// True when a structure cash-in would score Chicken Hand (structure meta +
+/// no yaku after pool filter). Same gate as
+/// [`crate::core::scoring::dora_yaku_layer`] injection.
+pub fn structure_would_score_chicken_hand(
+    structure: Option<StructureTriggerMeta>,
+    tiles: &[Tile],
+    sets: &[DetectedMeld],
+    round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
+    original_tiles: Option<&[Tile]>,
+    available: &[YakuKind],
+) -> bool {
+    structure.is_some_and(|st| {
+        st.inject_chicken_if_no_yaku
+            && would_inject_chicken_hand_with_original(
+                tiles,
+                sets,
+                round_wind,
+                bonus_round_wind,
+                original_tiles,
+                available,
+            )
+    })
 }
 
 /// Whether the in-play bone tablet row should show the chicken-hand selector.

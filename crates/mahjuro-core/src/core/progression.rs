@@ -800,6 +800,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::LastBreath,
                 RelicId::VoiceOfThePeople,
                 RelicId::VoiceOfTheElite,
+                RelicId::EasterEgg,
                 RelicId::Chrysalis,
             ],
         },

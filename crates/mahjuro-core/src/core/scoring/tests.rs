@@ -1432,6 +1432,77 @@ fn xxxl_egg_retriggers_all_melds() {
 }
 
 #[test]
+fn easter_egg_retriggers_on_chicken_hand() {
+    use crate::core::structure::StructureTriggerMeta;
+    let tiles = vec![
+        Tile::new(Suit::Pinzu, 5, 0),
+        Tile::new(Suit::Pinzu, 5, 1),
+        Tile::new(Suit::Dragon, 1, 2),
+        Tile::new(Suit::Dragon, 1, 3),
+    ];
+    let sets = vec![
+        DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: vec![0, 1],
+        },
+        DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: vec![2, 3],
+        },
+    ];
+    let r = relics(vec![RelicId::EasterEgg]);
+    let mut ctx = ctx_with(&r, false);
+    ctx.pattern.available_yaku = YakuKind::all()
+        .iter()
+        .copied()
+        .filter(|&y| y != YakuKind::KokushiMusou)
+        .collect();
+    ctx.structure = Some(StructureTriggerMeta {
+        meld_count: sets.len() as u32,
+        inject_chicken_if_no_yaku: true,
+    });
+    let base = score_sets(
+        &tiles,
+        &sets,
+        &ctx_with(&RelicState::default(), false),
+        &[],
+    );
+    let with_egg = score_sets(&tiles, &sets, &ctx, &[]);
+    assert_eq!(with_egg.final_fu, base.final_fu + base.base_fu);
+    assert!(with_egg.steps.iter().any(|s| s.source == "Easter Egg"));
+}
+
+#[test]
+fn easter_egg_does_not_retrigger_with_yaku() {
+    use crate::core::structure::StructureTriggerMeta;
+    let hand = vec![
+        Tile::new(Suit::Souzu, 3, 0),
+        Tile::new(Suit::Souzu, 3, 1),
+        Tile::new(Suit::Souzu, 3, 2),
+        Tile::new(Suit::Dragon, 1, 3),
+        Tile::new(Suit::Dragon, 1, 4),
+        Tile::new(Suit::Dragon, 1, 5),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let r = relics(vec![RelicId::EasterEgg]);
+    let mut ctx = ctx_with(&r, false);
+    ctx.structure = Some(StructureTriggerMeta {
+        meld_count: sets.len() as u32,
+        inject_chicken_if_no_yaku: true,
+    });
+    let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+    assert!(
+        !breakdown.detected_yaku.contains(&YakuKind::ChickenHand),
+        "expected a real yaku, not Chicken Hand, got {:?}",
+        breakdown.detected_yaku
+    );
+    assert!(
+        !breakdown.steps.iter().any(|s| s.source == "Easter Egg"),
+        "Easter Egg should not retrigger when Chicken Hand is not scored"
+    );
+}
+
+#[test]
 fn voice_of_the_people_retriggers_whole_low_meld() {
     let hand = vec![
         Tile::new(Suit::Manzu, 2, 0),

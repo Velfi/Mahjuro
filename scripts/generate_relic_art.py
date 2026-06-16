@@ -627,6 +627,12 @@ RELICS = [
         "Ivory tile faces, one large center dot, nine dots in 3×3 grid, deep blue pips, warm gold light arc, amber sparks.",
     ),
     (
+        "easter_egg",
+        "Easter Egg",
+        "Classic Ukrainian Easter egg design.",
+        "warm spring light.",
+    ),
+    (
         "lucky_seven",
         "Lucky Seven",
         "A vintage slot machine — the three-reel mechanical type — showing "

@@ -5,6 +5,7 @@ use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::relic::{RelicId, ScoreContext};
 use crate::core::scoring::push_steps::push_yen;
 use crate::core::tile::{Suit, Tile};
+use crate::core::yaku::structure_would_score_chicken_hand;
 
 use super::layer_input::{PreYakuLayerOpts, ScoringLayerInput, ScoringLayerOut};
 use super::push_steps::{push_fu, push_han};
@@ -68,6 +69,7 @@ pub(crate) fn apply_pre_yaku_scoring(
     let PreYakuLayerOpts {
         has_triplet_boost,
         flower_yen,
+        original_tiles,
     } = opts;
     let has_sequence_surge = eff.has(ctx.relic.roster, RelicId::SequenceSurge);
     let has_pair_power = eff.has(ctx.relic.roster, RelicId::PairPower);
@@ -274,6 +276,23 @@ pub(crate) fn apply_pre_yaku_scoring(
             if retrigger > 0 {
                 push_fu(steps, fu, *han, "XXXL Egg", retrigger);
             }
+        }
+    }
+
+    if eff.has(ctx.relic.roster, RelicId::EasterEgg)
+        && structure_would_score_chicken_hand(
+            ctx.structure,
+            tiles,
+            sets,
+            ctx.round.round_wind,
+            ctx.round.bonus_round_wind,
+            original_tiles,
+            &ctx.pattern.available_yaku,
+        )
+    {
+        let retrigger: i32 = sets.iter().map(|s| meld_base_fu(s, tiles, ctx)).sum();
+        if retrigger > 0 {
+            push_fu(steps, fu, *han, "Easter Egg", retrigger);
         }
     }
 

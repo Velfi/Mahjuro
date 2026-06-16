@@ -40,6 +40,7 @@ pub enum RelicId {
     DragonEcho,
     DragonRage,
     EdgeRunner,
+    EasterEgg,
     EightTreasures,
     EulersNumber,
     EvenKeel,
@@ -207,6 +208,7 @@ impl RelicId {
             RelicId::MerchantsEye => "merchants_eye.png",
             RelicId::IGotAGuy => "i_got_a_guy.png",
             RelicId::EdgeRunner => "edge_runner.png",
+            RelicId::EasterEgg => "easter_egg.png",
             RelicId::LuckySeven => "lucky_seven.png",
             RelicId::Momentum => "momentum.png",
             RelicId::Minimalist => "minimalist.png",
@@ -1166,6 +1168,7 @@ mod tests {
                     | RelicId::MerchantsEye
                     | RelicId::IGotAGuy
                     | RelicId::EdgeRunner
+                    | RelicId::EasterEgg
                     | RelicId::LuckySeven
                     | RelicId::Momentum
                     | RelicId::Minimalist
@@ -1280,6 +1283,7 @@ mod tests {
                 RelicId::MerchantsEye,
                 RelicId::IGotAGuy,
                 RelicId::EdgeRunner,
+                RelicId::EasterEgg,
                 RelicId::LuckySeven,
                 RelicId::Momentum,
                 RelicId::Minimalist,
