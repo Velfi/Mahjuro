@@ -109,9 +109,18 @@ pub(crate) fn setup_gameplay_screenshot_state(run: &mut RunState) {
 /// Gameplay with a valid meld selected (green dragon triplet) for mirror-glow captures.
 #[cfg(feature = "screenshot")]
 pub(crate) fn setup_gameplay_valid_play_screenshot_state(run: &mut RunState) {
-    use mahjuro::core::tile::Suit;
+    use mahjuro::core::tile::{Suit, Tile};
 
     setup_gameplay_screenshot_state(run);
+    run.structure_tiles_mut().clear();
+    run.structure_sets_mut().clear();
+    let hand = run.hand_mut();
+    if hand.len() >= 3 {
+        hand[0] = Tile::new(Suit::Souzu, 5, 400);
+        hand[1] = Tile::new(Suit::Souzu, 6, 401);
+        hand[2] = Tile::new(Suit::Souzu, 7, 402);
+        hand.sort();
+    }
     let hand_len = run.hand().len();
     let mut pick = vec![false; hand_len];
     let mut souzu_seq = [5u8, 6, 7];

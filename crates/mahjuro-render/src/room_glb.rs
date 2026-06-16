@@ -1082,15 +1082,15 @@ mod tests {
         );
         assert!(
             ROOM_GLB_WGSL.contains("sample_room_lightmap_indirect(in.lightmap_uv)"),
-            "room env surfaces, including readable archive chrome, should sample baked GI fill"
+            "static room env surfaces should sample baked GI fill"
         );
         assert!(
-            ROOM_GLB_WGSL.contains("if (!skips_room_lightmap)"),
-            "room lightmap sampling should be gated only by the explicit opt-out flag"
+            ROOM_GLB_WGSL.contains("if (!is_readable_room_surface && !skips_room_lightmap)"),
+            "readable archive chrome should skip coarse room lightmap sampling"
         );
         assert!(
-            !ROOM_GLB_WGSL.contains("if (!is_readable_room_surface)"),
-            "readable archive chrome should not skip the room lightmap"
+            !ROOM_GLB_WGSL.contains("if (!skips_room_lightmap)"),
+            "room lightmap sampling must not be gated only by the explicit opt-out flag"
         );
         assert!(
             ROOM_GLB_WGSL.contains("receives_dynamic_room_shadow"),
