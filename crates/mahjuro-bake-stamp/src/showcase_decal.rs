@@ -1,9 +1,8 @@
 //! Showcase decal atlas bake stamp (per-tileset `showcase_decal_atlas.png`).
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{BakeKind, Fnv64, hash_file_at_rel, hashable_git_files, repo_relative};
+use crate::{BakeKind, Fnv64, git_tracked_files_under, hash_file_at_rel, repo_relative};
 
 pub struct ShowcaseDecal;
 
@@ -33,12 +32,12 @@ impl BakeKind for ShowcaseDecal {
             if path.is_file() {
                 hash_file_at_rel(&mut h, rel, &path);
             } else if path.is_dir() {
-                for file in hashable_git_files(&path) {
-                    let rel = repo_relative(repo, &file);
-                    if skip_decal_input(&rel) {
+                for file in git_tracked_files_under(repo, rel) {
+                    let file_rel = repo_relative(repo, &file);
+                    if skip_decal_input(&file_rel) {
                         continue;
                     }
-                    hash_file_at_rel(&mut h, &rel, &file);
+                    hash_file_at_rel(&mut h, &file_rel, &file);
                 }
             }
         }
@@ -83,16 +82,17 @@ fn skip_decal_input(rel: &str) -> bool {
 /// Same rule as `mahjuro_assets::list_tilesets`: a shipped tileset has `atlas.png`.
 /// Source-only folders (e.g. work-in-progress art under `source/`) are ignored.
 fn list_tileset_names(repo: &Path) -> Vec<String> {
-    let root = repo.join(ShowcaseDecal::OUT_DIR);
-    let Ok(read) = fs::read_dir(&root) else {
-        return Vec::new();
-    };
-    let mut names: Vec<String> = read
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_dir())
-        .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|name| root.join(name).join("atlas.png").is_file())
+    let mut names: Vec<String> = git_tracked_files_under(repo, ShowcaseDecal::OUT_DIR)
+        .into_iter()
+        .filter(|path| path.file_name().is_some_and(|name| name == "atlas.png"))
+        .filter_map(|path| {
+            path.parent()
+                .and_then(|parent| parent.file_name())
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
         .collect();
     names.sort();
+    names.dedup();
     names
 }

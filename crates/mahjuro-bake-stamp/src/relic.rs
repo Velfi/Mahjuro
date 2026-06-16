@@ -7,9 +7,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ignore::WalkBuilder;
-
-use crate::{BakeKind, Fnv64, hash_paths};
+use crate::{BakeKind, Fnv64, git_tracked_files_under, hash_paths};
 
 pub struct Relic;
 
@@ -46,7 +44,7 @@ impl BakeKind for Relic {
             if path.is_file() {
                 hash_paths(&mut h, repo, std::slice::from_ref(&path));
             } else if path.is_dir() {
-                let files = hashable_relic_input_files(&path);
+                let files = git_tracked_files_under(repo, "assets/textures/relics");
                 hash_paths(&mut h, repo, &files);
             }
         }
@@ -68,25 +66,6 @@ impl BakeKind for Relic {
             .count();
         baked == expected
     }
-}
-
-fn hashable_relic_input_files(root: &Path) -> Vec<PathBuf> {
-    let mut walk = WalkBuilder::new(root);
-    walk.hidden(false);
-    walk.git_ignore(true);
-    walk.git_global(true);
-    walk.git_exclude(true);
-    walk.parents(true);
-    walk.require_git(false);
-
-    let mut files: Vec<PathBuf> = walk
-        .build()
-        .filter_map(Result::ok)
-        .map(|entry| entry.into_path())
-        .filter(|path| path.is_file())
-        .collect();
-    files.sort();
-    files
 }
 
 /// Count `"id":` lines in `relics.json` as a cheap stand-in for "how many bakes

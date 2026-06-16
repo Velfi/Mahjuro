@@ -7,6 +7,8 @@ use mahjuro::core::talisman::TalismanKind;
 use mahjuro::core::tile::{Suit, Tile};
 use mahjuro::core::zodiac::ZodiacKind;
 use mahjuro::game::run::RunState;
+use mahjuro::main_render_settings::RenderSettings;
+use mahjuro::persistence::AppSettings;
 
 pub fn setup_shop_state(run: &mut RunState) {
     run.yen = 42;
@@ -103,4 +105,24 @@ pub fn setup_gameplay_bake_state(run: &mut RunState) {
     let _ = run
         .consumables
         .try_push(Consumable::Zodiac(ZodiacKind::Dragon));
+}
+
+/// Deterministic render settings for offline bakes (fresh-install defaults, not local `app_settings.json`).
+pub fn bake_render_settings() -> RenderSettings {
+    let settings = AppSettings::default();
+    RenderSettings {
+        effects_quality: settings.effects_quality,
+        tile_preset: settings.tile_preset,
+        tile_material: settings.tile_material,
+        tileset_name: settings.tileset_name.clone(),
+        gamma: settings.gamma,
+        graphics_mode: settings.graphics_mode,
+        hdr_enabled: settings.hdr_enabled,
+        vhs_enabled: false,
+    }
+}
+
+/// Deterministic profile for offline bakes (empty profile, not local save data).
+pub fn bake_player_progress() -> mahjuro::core::progression::PlayerProgress {
+    mahjuro::core::progression::PlayerProgress::default()
 }

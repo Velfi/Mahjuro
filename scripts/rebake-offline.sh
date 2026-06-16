@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
 # Rebake committed offline outputs and refresh their stamp files.
+# To take a teammate's bakes instead of rebaking: scripts/accept-offline-bakes.sh --lfs
 # Run from repo root after changing bake inputs (room GLBs, shaders, tile sets, relics, …).
 #
 # Usage:

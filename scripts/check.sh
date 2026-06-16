@@ -7,6 +7,7 @@
 # Does NOT run fmt, clippy, or Python tests (use --extras). CI does not run those either.
 #
 # Prerequisites: repo assets present (git lfs pull if tests fail on missing files).
+# After a teammate pushes new bakes: scripts/accept-offline-bakes.sh --lfs
 # Committed bake outputs must match their stamps; see docs/agents/room-shadows-and-baking.md to rebake.
 #
 # Usage:
