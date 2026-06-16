@@ -34,6 +34,13 @@ Melds contribute **only through their tile values** — there is no separate per
 
 You can play **one meld or many** in a single play, as long as every selected tile fits into melds.
 
+**Ambiguous grouping** — when a selection validates as multiple meld splits, the game picks a default before commit:
+
+- **≤6 tiles** — largest chunks first (kongs before triplets/sequences before pairs; flowers wildcard into numbered melds rather than flower-only groups when tied).
+- **7+ tiles** — highest projected cash-in score / yaku, with hand-shape affinity as tie-breaker.
+
+Implementation: [`pick_best_decomposition`](../../src/game/run/scoring_flow.rs) in the run layer; chunk rank in [`hand_intent.rs`](../../crates/mahjuro-core/src/core/hand_intent.rs).
+
 ---
 
 ## Structure
@@ -56,17 +63,16 @@ There is **no** universal rule like "yaku = 2+ melds." Each yaku has its own req
 - **Yakuhai** — honor triplet/kong (can trigger on a single meld)
 - **Toitoi** — 2+ triplets/kongs, no sequences
 - **Tanyao** — all tiles 2–8, no terminals/honors (≥3 tiles, one meld)
-- **Full Hand** — 4 melds + 1 pair
+- **Shousangen / Daisangen** — two dragon triplets + dragon pair, or all three dragon triplets; full hand (4 melds + pair); supersedes dragon Yakuhai
 - **Chiitoitsu** — 7 pairs
 - **Honitsu / Chinitsu** — one-suit hands (mutually exclusive: Chinitsu wins when both qualify)
 - **Junchan / Honroutou / Chanta** — terminal-family patterns (tiered exclusive: Junchan > Honroutou > Chanta; only the strictest match scores). Riichi-style: Junchan has no honors and needs a sequence; Chanta needs every group (including pair) to touch a terminal/honor, plus at least one honor, one simple, and one sequence
-- **Chanta** — every meld and pair has a terminal/honor; requires honor + simple + sequence
 - **Iipeikou / Ryanpeikou** — duplicate sequence(s); Iipeikou works on partial structure, Ryanpeikou needs a full hand
 - **Sanshoku Doujun / Sanshoku Doukou** — same sequence or same triplet rank in all three suits
 - **Pinfu** — four sequences + 2–8 number pair on a full hand
 - etc.
 
-If you Cash In with **no yaku** on a complete hand, you get **Chicken Hand** (+0 Fu, +0 Han).
+A **full hand** (4 melds + 1 pair) is a winning shape, not its own yaku. If you Cash In with **no other yaku** on a complete hand, you get **Chicken Hand** (+0 Fu, +0 Han).
 
 Sample base yaku payouts (level 1):
 
@@ -75,13 +81,15 @@ Sample base yaku payouts (level 1):
 | Tanyao | 2.5 | 90 |
 | Toitoi | 2.0 | 70 |
 | Yakuhai | 2.0 | 75 |
+| Shousangen | 4.0 | 90 |
 | Pinfu / Iipeikou | 5.0 | 105 |
-| Full Hand | 5.0 | 60 |
-| Chiitoitsu | 6.5 | 85 |
-| Kokushi | 10.0 | 130 |
-| Chanta / Pinfu | 4.0 | 50 |
-| Ryanpeikou | 5.5 | 72 |
-| Sanshoku Doukou | 6.0 | 80 |
+| Chiitoitsu | 6.5 | 127 |
+| Ryanpeikou | 7.0 | 135 |
+| Sanshoku Doujun | 7.0 | 142 |
+| Sanshoku Doukou / Ittsu | 7.5 | 150 |
+| Daisangen | 10.0 | 200 |
+| Kokushi Musō | 13.0 | 225 |
+| Chicken Hand | 0.0 | 0 |
 
 ---
 
