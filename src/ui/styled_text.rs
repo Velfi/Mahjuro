@@ -384,16 +384,18 @@ struct Cell {
     color: [f32; 4],
 }
 
-fn push_glossary_word_cells(
+fn push_glossary_token_chars(
     cells: &mut Vec<Cell>,
-    word: &str,
     words: &[&str],
     word_idx: usize,
+    _token: &str,
+    char_start: usize,
+    char_end: usize,
     run: &StyledRun,
     mode: GlossaryMode,
     default_color: [f32; 4],
 ) {
-    if word.is_empty() {
+    if char_start >= char_end {
         return;
     }
     let segments = if run.force_glossary {
@@ -401,20 +403,24 @@ fn push_glossary_word_cells(
     } else {
         glossary_word_segments(words, word_idx, mode, default_color)
     };
+    let mut char_idx = 0usize;
     for (segment, col) in segments {
         let effect = match text_effect_for_glossary_tint(col) {
             TextEffectId::Flat => run.effect,
             fx => fx,
         };
         for ch in segment.chars() {
-            cells.push(Cell {
-                ch,
-                bold: run.bold,
-                italic: run.italic,
-                underline: run.underline,
-                effect,
-                color: col,
-            });
+            if char_idx >= char_start && char_idx < char_end {
+                cells.push(Cell {
+                    ch,
+                    bold: run.bold,
+                    italic: run.italic,
+                    underline: run.underline,
+                    effect,
+                    color: col,
+                });
+            }
+            char_idx += 1;
         }
     }
 }
@@ -444,17 +450,50 @@ fn runs_to_cells_with_glossary(
     let joined: String = runs.iter().map(|r| r.text.as_str()).collect();
     let all_words: Vec<&str> = joined.split_whitespace().collect();
     let mut word_idx = 0usize;
+    let mut token_offset = 0usize;
 
     let flush_word = |cells: &mut Vec<Cell>,
                       word: &mut String,
                       run: &StyledRun,
-                      word_idx: &mut usize| {
+                      word_idx: &mut usize,
+                      token_offset: &mut usize| {
         if word.is_empty() {
             return;
         }
         if *word_idx < all_words.len() {
-            push_glossary_word_cells(cells, word, &all_words, *word_idx, run, mode, default_color);
-            *word_idx += 1;
+            let token = all_words[*word_idx];
+            let suffix: String = token.chars().skip(*token_offset).collect();
+            if suffix.starts_with(word.as_str()) {
+                let start = *token_offset;
+                let end = start + word.chars().count();
+                push_glossary_token_chars(
+                    cells,
+                    &all_words,
+                    *word_idx,
+                    token,
+                    start,
+                    end,
+                    run,
+                    mode,
+                    default_color,
+                );
+                *token_offset = end;
+                if *token_offset >= token.chars().count() {
+                    *word_idx += 1;
+                    *token_offset = 0;
+                }
+            } else {
+                for ch in word.chars() {
+                    cells.push(Cell {
+                        ch,
+                        bold: run.bold,
+                        italic: run.italic,
+                        underline: run.underline,
+                        effect: run.effect,
+                        color: default_color,
+                    });
+                }
+            }
         } else {
             for ch in word.chars() {
                 cells.push(Cell {
@@ -474,7 +513,13 @@ fn runs_to_cells_with_glossary(
         let mut word = String::new();
         for ch in run.text.chars() {
             if ch == '\n' {
-                flush_word(&mut cells, &mut word, run, &mut word_idx);
+                flush_word(
+                    &mut cells,
+                    &mut word,
+                    run,
+                    &mut word_idx,
+                    &mut token_offset,
+                );
                 cells.push(Cell {
                     ch: '\n',
                     bold: run.bold,
@@ -486,7 +531,13 @@ fn runs_to_cells_with_glossary(
                 continue;
             }
             if ch.is_whitespace() {
-                flush_word(&mut cells, &mut word, run, &mut word_idx);
+                flush_word(
+                    &mut cells,
+                    &mut word,
+                    run,
+                    &mut word_idx,
+                    &mut token_offset,
+                );
                 cells.push(Cell {
                     ch,
                     bold: run.bold,
@@ -499,7 +550,13 @@ fn runs_to_cells_with_glossary(
                 word.push(ch);
             }
         }
-        flush_word(&mut cells, &mut word, run, &mut word_idx);
+        flush_word(
+            &mut cells,
+            &mut word,
+            run,
+            &mut word_idx,
+            &mut token_offset,
+        );
     }
     cells
 }
@@ -1538,6 +1595,22 @@ mod tests {
         for c in house_cells {
             assert_eq!(c.effect, TextEffectId::Polychrome);
         }
+    }
+
+    #[test]
+    fn try_it_subtitle_renders_without_duplicate_cash_in() {
+        let text = "Tap each prop below to preview **Discard**, **Play**, and **Cash In**.";
+        let runs = parse_styled_text(text).unwrap();
+        let cells = runs_to_cells_with_glossary(
+            &runs,
+            crate::render::theme::color::PARCHMENT,
+            GlossaryMode::Prose,
+        );
+        let rendered: String = cells.iter().map(|c| c.ch).collect();
+        assert_eq!(
+            rendered,
+            "Tap each prop below to preview Discard, Play, and Cash In."
+        );
     }
 
     #[test]

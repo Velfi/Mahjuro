@@ -3,9 +3,9 @@
 // ── Part 1 — The Tiles ──────────────────────────────────────────────────────
 
 pub mod tiles {
-    pub const INTRO: &str = "Your hand of tiles is drawn from the \"wall\". All tiles have a suit. Some tiles have ranks.\nTiles ranked 1 and 9 are called \"terminals\". Tiles ranked 2–8 are called \"simples\".";
+    pub const INTRO: &str = "Three suits — characters, bamboos, and dots — each ranked 1 through 9.\n\nTiles ranked 1 and 9 are \"terminals\".\n\nRanks 2 through 8 are \"simples\".\n\nIn Mahjong and Mahjuro, suits don't mix.";
 
-    pub const HONOR_SUITS_HEADING: &str = "HONOR SUITS (high-scoring, but rarer)";
+    pub const HONOR_SUITS_HEADING: &str = "HONOR SUITS";
     pub const FLOWERS_HEADING: &str = "SPECIAL TILES";
 
     pub const HONOR_LINES: &[&str] = &[
@@ -14,6 +14,9 @@ pub mod tiles {
     ];
 
     pub const FLOWER_LINES: &[&str] = &["Flowers — wildcards when playing combinations of tiles."];
+
+    pub const FLOWERS_GRID_CALLOUT: &str =
+        "Any flower can stand in for another tile when you Play.";
 }
 
 // ── Melds (Part 2 intro and demo labels) ────────────────────────────────────
@@ -21,10 +24,27 @@ pub mod tiles {
 pub mod melds {
     pub const PAGE_TITLE: &str = "Melds";
 
-    pub const PAGE_SUBTITLE: &str = "Melds are small tile groups — pairs, sequences, triplets, and kongs. Valid melds can be played into your structure.";
+    pub const PAGE_SUBTITLE: &str =
+        "Tile groups you Play into your structure — pairs, sequences, triplets, and kongs.";
+
+    pub const INTRO: &str =
+        "A meld is a combination of tiles. Excluding flowers, melds may contain only one suit.";
+
+    pub const SECTION_MELD_SHAPES: &str = "Meld shapes";
 
     pub const VALID_SEQUENCE: &str = "Valid sequence";
     pub const INVALID_SEQUENCE: &str = "Invalid sequence";
+
+    pub const SECTION_FLOWER_WILDCARDS: &str = "Flower wildcards";
+
+    pub const VALID_FLOWER_MELD: &str = "Valid flower meld";
+    pub const INVALID_FLOWER_MELD: &str = "Invalid flower meld";
+
+    pub const VALID_FLOWER_CAPTION: &str = "7 · 7 · Flower";
+    pub const INVALID_FLOWER_CAPTION: &str = "4 Manzu / Flower / Flower";
+
+    pub const STRUCTURE_BRIDGE: &str =
+        "Played melds sit in your structure until you Cash In.";
 }
 
 // ── Scoring (Part 2 subtitle and cross-refs) ────────────────────────────────
@@ -38,45 +58,72 @@ pub mod scoring {
 // ── Campaign pages ────────────────────────────────────────────────────────────
 
 pub mod campaign {
-    use super::scoring;
+    use crate::ui::input::InputMode;
 
     pub const PAGE_TILES_INTRO_TITLE: &str = "The Tiles";
     pub const PAGE_TILES_HONORS_TITLE: &str = "Honors & Flowers";
-    pub const PAGE_MELDS_TITLE: &str = "Melds";
+    pub const PAGE_MELDS_TITLE: &str = super::melds::PAGE_TITLE;
     pub const PAGE_SCORING_TITLE: &str = "Scoring";
     pub const PAGE_TRY_IT_TITLE: &str = "Try It";
 
-    pub const PAGE_NAV_CALLOUT: &str = "Press **Next** below when you're ready to continue.";
-    pub const PAGE_START_CALLOUT: &str = "Press **Start** below to begin your first lesson.";
+    const PAGE_NAV_CALLOUT_CURSOR: &str =
+        "When you're ready to continue, click **Next** in the upper right.";
+    const PAGE_NAV_CALLOUT_PRESS: &str =
+        "When you're ready to continue, press **Next** in the upper right.";
+    const PAGE_START_CALLOUT_CURSOR: &str =
+        "When you're ready, click **Start** in the upper right to begin your first lesson.";
+    const PAGE_START_CALLOUT_PRESS: &str =
+        "When you're ready, press **Start** in the upper right to begin your first lesson.";
+
+    pub fn page_nav_callout(input_mode: InputMode) -> &'static str {
+        match input_mode {
+            InputMode::Cursor => PAGE_NAV_CALLOUT_CURSOR,
+            InputMode::Keyboard | InputMode::Controller => PAGE_NAV_CALLOUT_PRESS,
+        }
+    }
+
+    pub fn page_start_callout(input_mode: InputMode) -> &'static str {
+        match input_mode {
+            InputMode::Cursor => PAGE_START_CALLOUT_CURSOR,
+            InputMode::Keyboard | InputMode::Controller => PAGE_START_CALLOUT_PRESS,
+        }
+    }
 
     pub const GLOSSARY_DISCARD: &str =
-        "Discard — remove unwanted tiles from your hand. Discards are a limited resource.";
+        "{{term:Discard}} — remove unwanted tiles from your hand. Discards are a limited resource.";
     pub const GLOSSARY_PLAY: &str =
-        "Play — send melds to your structure. Plays are a limited resource.";
-    pub const GLOSSARY_STRUCTURE: &str = "Structure — played melds that will score when you cash in. The structure has a fluid, but limited number of slots for melds.";
+        "{{term:Play}} — send melds to your structure. Plays are a limited resource.";
+    pub const GLOSSARY_STRUCTURE: &str =
+        "{{term:Structure}} — played melds waiting to score. Slots are limited but rearrangeable.";
     pub const GLOSSARY_CASH_IN: &str =
-        "Cash In — scores tiles in your structure and then resets it.";
+        "{{term:Cash In}} — scores everything in your structure, then resets it.";
 
     pub const SCORING_GLOSSARY: &[&str] = &[
         GLOSSARY_DISCARD,
         GLOSSARY_PLAY,
         GLOSSARY_STRUCTURE,
         GLOSSARY_CASH_IN,
-        scoring::FLOW_REMINDER,
     ];
 }
 
 // ── Try-it demo (Part 2 interactive flash lines) ────────────────────────────
 
 pub mod try_it {
-    pub const PROMPT: &str =
-        "These are the **Discard**, **Play**, and **Cash In** buttons. Try them.";
+    pub const SUBTITLE: &str =
+        "Tap each prop below to preview **Discard**, **Play**, and **Cash In**.";
+
+    pub const HEADING: &str = "The three actions";
+
+    pub const LABEL_DISCARD: &str = "Discard";
+    pub const LABEL_PLAY: &str = "Play";
+    pub const LABEL_CASH_IN: &str = "Cash In";
+
     pub const PLAY: &str = "You **Play**ed a meld to your structure.";
     pub const DISCARD: &str = "Discarded tiles are removed to the river.";
     pub const CASH_IN: &str = "Demo: 4 **chips** × 3 **mult** = 12";
 
     /// Every flash line; used to reserve callout height for the tallest variant.
-    pub const FLASH_LINES: &[&str] = &[PROMPT, CASH_IN, PLAY, DISCARD];
+    pub const FLASH_LINES: &[&str] = &[CASH_IN, PLAY, DISCARD];
 }
 
 // ── Onboarding lessons (gameplay blind banners) ───────────────────────────────

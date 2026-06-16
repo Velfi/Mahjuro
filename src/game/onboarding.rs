@@ -123,7 +123,6 @@ impl OnboardingState {
 pub const TUTORIAL_ORDEAL: OrdealKind = OrdealKind::Relic;
 
 pub const LESSONS_TARGET: u32 = 100;
-pub const LESSONS_HAND_SIZE: usize = 10;
 pub const LESSONS_PLAYS: u32 = 3;
 pub const LESSONS_DISCARDS: u32 = 2;
 pub const HOLD_TOOLTIP_SUCCESS_TARGET: u8 = 3;

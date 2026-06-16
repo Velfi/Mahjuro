@@ -926,14 +926,13 @@ pub(crate) fn guide_nav_header(
     );
     let subtitle_w = w * 0.72;
     let divider_y = if let Some(sub) = subtitle {
-        let subtitle_line_h = styled_text::ColoredLineBlock::measure(
+        let subtitle_line_h = styled_text::styled_line_block_height_at_font_px(
             sub,
             subtitle_w,
             body_font,
-            color::PARCHMENT,
             GlossaryMode::Prose,
-        )
-        .height();
+            color::PARCHMENT,
+        );
         title.subtitle_y + subtitle_line_h
     } else {
         HeaderChromeMetrics::from_window(w, h).chrome_bottom()
@@ -3931,6 +3930,72 @@ fn push_scoring_flow_panel(
         font_px: Some(micro_font),
         ..Default::default()
     });
+}
+
+fn tutorial_scoring_flow_meld_group() -> TileGroup {
+    tile_group_with_subtitle(
+        "5-6-7 Pinzu",
+        "Selected meld",
+        vec![
+            t(Suit::Pinzu, 5, 900),
+            t(Suit::Pinzu, 6, 901),
+            t(Suit::Pinzu, 7, 902),
+        ],
+        Suit::Pinzu.keyword_color(),
+    )
+}
+
+/// Compact scoring-flow diagram for the tutorial campaign (page 4).
+pub(crate) fn draw_tutorial_scoring_diagram(
+    frame: &mut UiFrame,
+    ctx: &DrawCtx<'_>,
+    flow_outer: [f32; 4],
+    w: f32,
+    h: f32,
+) {
+    let _gap = 10.0;
+    let pad = 10.0;
+    let (flow_tile_max, _) = scoring_guide_tile_caps(w, h);
+    let body_font = typography::size(typography::H36, h);
+    let section_font = typography::size(typography::H28, h);
+    let small_font = typography::size(typography::H42, h);
+    let micro_font = typography::size(typography::H45, h);
+    let cash_in_visual = scoring_flow_cash_in_visual_rect(
+        flow_outer,
+        section_font,
+        body_font,
+        small_font,
+        micro_font,
+        pad,
+        flow_tile_max,
+    );
+    let glb_cash_in = push_gameplay_cash_in_overlay(
+        frame,
+        ctx,
+        w,
+        h,
+        cash_in_visual,
+        scene_keys::GAMEPLAY,
+    );
+    let flow_content = scoring_panel_open(
+        frame,
+        flow_outer,
+        scoring_intro_copy::SECTION_FLOW,
+        section_font,
+        ScoringPanelStyle::Diagram,
+    );
+    push_scoring_flow_panel(
+        frame,
+        std::slice::from_ref(&tutorial_scoring_flow_meld_group()),
+        flow_content,
+        h,
+        flow_tile_max,
+        body_font,
+        small_font,
+        micro_font,
+        pad,
+        glb_cash_in,
+    );
 }
 
 fn push_scoring_structure_slots(
