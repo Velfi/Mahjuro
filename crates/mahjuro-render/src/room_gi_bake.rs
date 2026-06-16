@@ -42,6 +42,9 @@ const ROOM_GI_LIGHTMAP_DENOISE_PASSES: usize = 1;
 const ROOM_GI_LIGHTMAP_DILATE_PASSES: usize = 8;
 const ROOM_GI_LIGHTMAP_MAX_CHANNEL: f32 = 1.0e5;
 const ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION: f32 = 0.01;
+/// Shadow & AO lab: mostly shadow receivers; a few directly lit texels are enough.
+const ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION_SHADOW_TEST: f32 = 5.0e-5;
+const ROOM_GI_LIGHTMAP_MIN_AVG_LUMA_SHADOW_TEST: f64 = 1.0e-5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RoomGiRoom {
@@ -1128,6 +1131,12 @@ fn validate_lightmap_mapping(room: RoomGiRoom, lightmap: &GpuBakeLightmap) -> an
     Ok(())
 }
 
+fn shadow_test_room_lightmap_has_radiance(lit_fraction: f32, avg_luma: f64, max_channel: f32) -> bool {
+    max_channel > 0.0
+        && (lit_fraction >= ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION_SHADOW_TEST
+            || avg_luma > ROOM_GI_LIGHTMAP_MIN_AVG_LUMA_SHADOW_TEST)
+}
+
 fn validate_lightmap_radiance(
     room: RoomGiRoom,
     lightmap: &GpuBakeLightmap,
@@ -1182,8 +1191,16 @@ fn validate_lightmap_radiance(
     );
     let lit_fraction = lit as f32 / visible as f32;
     let avg_luma = luma_sum / visible as f64;
+    let effectively_black = match room {
+        RoomGiRoom::ShadowTestRoom => {
+            !shadow_test_room_lightmap_has_radiance(lit_fraction, avg_luma, max_channel)
+        }
+        _ => {
+            lit_fraction < ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION || avg_luma <= 1.0e-7
+        }
+    };
     anyhow::ensure!(
-        lit_fraction >= ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION && avg_luma > 1.0e-7,
+        !effectively_black,
         "{room:?}: {stage} GI lightmap is effectively black (lit_fraction={lit_fraction:.4}, avg_luma={avg_luma:.6})"
     );
     anyhow::ensure!(
@@ -2181,6 +2198,18 @@ mod tests {
 
         validate_lightmap_radiance(RoomGiRoom::Shop, &lightmap, &pixels, "raw")
             .expect("alpha-cutout hole should not count as black visible radiance");
+    }
+
+    #[test]
+    fn shadow_test_room_lightmap_validation_accepts_sparse_direct_light() {
+        assert!(shadow_test_room_lightmap_has_radiance(0.0053, 0.045718, 1.0));
+        assert!(shadow_test_room_lightmap_has_radiance(0.0003, 0.002626, 1.0));
+        assert!(shadow_test_room_lightmap_has_radiance(0.0001, 0.000544, 1.0));
+        assert!(!shadow_test_room_lightmap_has_radiance(0.0, 0.0, 0.0));
+        assert!(
+            ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION_SHADOW_TEST
+                < ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION
+        );
     }
 
     #[test]
