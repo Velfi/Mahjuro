@@ -2,7 +2,7 @@
 //!
 //! Inputs: `assets/data/relics.json`, every PNG under `assets/textures/relics/`,
 //! and the three runtime-side relic codec files (`relic_pipeline.rs`, `relic_bake.rs`,
-//! `relic_dish.rs`). Bumping `relic-rlc1-vN` invalidates every committed bake.
+//! `relic_dish.rs`). Bumping `relic-rlc2-vN` invalidates every committed bake.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,6 +18,7 @@ impl BakeKind for Relic {
     const STAMP_PATH: &'static str = "assets/data/relic_baked/.inputs_stamp";
     const OUT_DIR: &'static str = "assets/data/relic_baked";
     const SKIP_ENV: &'static str = "MAHJURO_SKIP_RELIC_BAKE";
+    const SCRIPT_REBAKE_CMD: &'static str = "scripts/rebake-offline.sh relic";
     const BUILD_TOOL_CMD: &'static str =
         "cargo build -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake";
     const REBAKE_CMD: &'static str =

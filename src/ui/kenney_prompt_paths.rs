@@ -8,8 +8,7 @@ use crate::render::draw_cmd::ImageQuadSource;
 
 const KEYBOARD_SHEET: &str =
     "textures/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.png";
-const KEYBOARD_WASD: &str =
-    "textures/kenney_input-prompts/Keyboard & Mouse/keyboard_wasd.png";
+const KEYBOARD_WASD: &str = "textures/kenney_input-prompts/Keyboard & Mouse/keyboard_wasd.png";
 
 const fn key(name: &'static str) -> ImageQuadSource {
     ImageQuadSource::AtlasSprite {
@@ -21,7 +20,9 @@ const fn key(name: &'static str) -> ImageQuadSource {
 /// Single keyboard / mouse atlas sprite (see `keyboard-&-mouse_sheet_double.xml`).
 pub fn keyboard_key(name: &'static str) -> ImageQuadSource {
     if name == "keyboard_wasd" {
-        ImageQuadSource::Asset { path: KEYBOARD_WASD }
+        ImageQuadSource::Asset {
+            path: KEYBOARD_WASD,
+        }
     } else {
         key(name)
     }

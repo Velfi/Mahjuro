@@ -12,6 +12,7 @@ impl BakeKind for ShowcaseDecal {
     const STAMP_PATH: &'static str = "assets/textures/tile_sets/.decal_bake_stamp";
     const OUT_DIR: &'static str = "assets/textures/tile_sets";
     const SKIP_ENV: &'static str = "MAHJURO_SKIP_SHOWCASE_DECAL_BAKE";
+    const SCRIPT_REBAKE_CMD: &'static str = "scripts/rebake-offline.sh decal";
     const BUILD_TOOL_CMD: &'static str =
         "cargo build -p mahjuro-render --bin mahjuro-bake-decal-atlases";
     const REBAKE_CMD: &'static str = "cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases";

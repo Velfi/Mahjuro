@@ -12,9 +12,7 @@ use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, UiFrame};
 use crate::render::lit_mesh::{MaterialKind, MaterialParams};
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
-use crate::ui::controller_hints::{
-    HintStyle, back_scroll_footer_row, push_screen_footer_hint,
-};
+use crate::ui::controller_hints::{HintStyle, back_scroll_footer_row, push_screen_footer_hint};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
 
@@ -78,8 +76,7 @@ impl SceneBehavior for MaterialViewerScene {
         if ctx.scroll_lines.abs() > 0.001
             && (ctx.input_mode != InputMode::Cursor || wheel_over_grid)
         {
-            self.scroll
-                .scroll_by(ctx.scroll_lines * SCROLL_WHEEL_PX);
+            self.scroll.scroll_by(ctx.scroll_lines * SCROLL_WHEEL_PX);
         }
 
         for action in ctx.actions {
@@ -299,12 +296,7 @@ fn cursor_in_rect(px: f32, py: f32, rect: [f32; 4]) -> bool {
 fn push_scrollbar(frame: &mut UiFrame, layout: &MaterialGridLayout, scroll_y: f32) {
     let track_w = 6.0f32;
     let track_x = layout.viewport[0] + layout.viewport[2] + 8.0;
-    let track = [
-        track_x,
-        layout.viewport[1],
-        track_w,
-        layout.viewport[3],
-    ];
+    let track = [track_x, layout.viewport[1], track_w, layout.viewport[3]];
     frame.quad(GpuInstance {
         rect: track,
         color: color::alpha(color::WALNUT_INK, 0.85),
@@ -388,9 +380,7 @@ fn bottom_aligned_material_orb(
         let cy = cy_for_d(d);
         let (min_x, min_y, max_x, max_y) = material_orb_screen_bounds(cam, w, h, cx, cy, d);
         let proj = (max_x - min_x).min(max_y - min_y);
-        proj <= target_px
-            && min_y >= band_top + BAND_MARGIN
-            && max_y <= target_bottom + 0.75
+        proj <= target_px && min_y >= band_top + BAND_MARGIN && max_y <= target_bottom + 0.75
     };
 
     let mut lo = 8.0f32;

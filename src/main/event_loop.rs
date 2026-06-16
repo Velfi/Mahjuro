@@ -696,9 +696,11 @@ impl App {
             .overlay_stack
             .last()
             .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
-        let wall_ledger_active = self.overlay_stack.last().is_some_and(|top| {
-            matches!(top, Scene::WallLedger(_))
-        }) || matches!(self.scene, Scene::WallLedger(_));
+        let wall_ledger_active = self
+            .overlay_stack
+            .last()
+            .is_some_and(|top| matches!(top, Scene::WallLedger(_)))
+            || matches!(self.scene, Scene::WallLedger(_));
         if (wall_ledger_active
             || (!orbit_overlay_active
                 && matches!(&self.scene, Scene::Archive(a) if a.is_chronicle_tab())

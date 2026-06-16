@@ -185,12 +185,10 @@ impl StrategicWallScene {
         for &a in ctx.actions {
             match a {
                 UiAction::ScrollDown if scrollable => {
-                    self.sidebar_scroll
-                        .scroll_by(scroll_layout.wheel_step_px);
+                    self.sidebar_scroll.scroll_by(scroll_layout.wheel_step_px);
                 }
                 UiAction::ScrollUp if scrollable => {
-                    self.sidebar_scroll
-                        .scroll_by(-scroll_layout.wheel_step_px);
+                    self.sidebar_scroll.scroll_by(-scroll_layout.wheel_step_px);
                 }
                 UiAction::ScrollUp | UiAction::ScrollDown => {}
                 _ => nav_actions.push(a),

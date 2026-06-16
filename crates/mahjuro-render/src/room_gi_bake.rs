@@ -476,6 +476,21 @@ struct GpuBakeLightmapChart {
     h: u32,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct PrimitiveLightmapHint {
+    target_min_side: u32,
+    area_scale: f64,
+}
+
+impl Default for PrimitiveLightmapHint {
+    fn default() -> Self {
+        Self {
+            target_min_side: 0,
+            area_scale: 1.0,
+        }
+    }
+}
+
 struct RoomGiLightmapBakeGpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -485,6 +500,7 @@ struct RoomGiLightmapBakeGpu {
 struct GpuBakeScene {
     triangles: Vec<GpuBakeTriangle>,
     lightmap_uvs: Vec<[[f32; 2]; 3]>,
+    primitive_lightmap_hints: Vec<PrimitiveLightmapHint>,
     materials: Vec<GpuBakeMaterial>,
     lights: Vec<GpuBakeLight>,
     bvh_nodes: Vec<GpuBakeBvhNode>,
@@ -516,7 +532,12 @@ impl GpuBakeScene {
         let mut materials = Vec::with_capacity(cpu.environment_primitives.len());
         let mut triangles = Vec::new();
         let mut lightmap_uvs = Vec::new();
+        let mut primitive_lightmap_hints = Vec::with_capacity(cpu.environment_primitives.len());
         for prim in &cpu.environment_primitives {
+            primitive_lightmap_hints.push(primitive_lightmap_hint(
+                params.room,
+                prim.gltf_node_name.as_deref(),
+            ));
             let material = GpuBakeMaterial::from_loaded(
                 &prim.mesh,
                 &mut atlases,
@@ -562,6 +583,7 @@ impl GpuBakeScene {
         Ok(Self {
             triangles,
             lightmap_uvs,
+            primitive_lightmap_hints,
             materials,
             lights,
             bvh_nodes: bvh.nodes,
@@ -578,6 +600,65 @@ impl GpuBakeScene {
             ambient_scale: params.lighting.ambient_scale.max(0.0),
             linear_exposure: params.lighting.room_glb_linear_hdr_gain().max(0.0),
         })
+    }
+}
+
+fn primitive_lightmap_hint(room: RoomGiRoom, node_name: Option<&str>) -> PrimitiveLightmapHint {
+    if room != RoomGiRoom::Archive {
+        return PrimitiveLightmapHint::default();
+    }
+
+    let node = node_name.unwrap_or("").to_ascii_lowercase();
+    match node.as_str() {
+        "sign_description_left" | "sign_description_right" => PrimitiveLightmapHint {
+            target_min_side: 160,
+            area_scale: 7.0,
+        },
+        "plaque_scene_title" => PrimitiveLightmapHint {
+            target_min_side: 160,
+            area_scale: 10.0,
+        },
+        "text_scene_title" => PrimitiveLightmapHint {
+            target_min_side: 192,
+            area_scale: 8.0,
+        },
+        "btn_main_menu" | "btn_switch_save" => PrimitiveLightmapHint {
+            target_min_side: 112,
+            area_scale: 6.0,
+        },
+        "text_main_menu" | "text_switch_save" => PrimitiveLightmapHint {
+            target_min_side: 128,
+            area_scale: 4.0,
+        },
+        "text_flavor_quad" => PrimitiveLightmapHint {
+            target_min_side: 144,
+            area_scale: 5.0,
+        },
+        "btn_relics_tab" | "btn_zodiacs_tab" | "btn_bosses_tab" | "btn_talismans_tab" => {
+            PrimitiveLightmapHint {
+                target_min_side: 64,
+                area_scale: 5.0,
+            }
+        }
+        "text_relics_tab" | "text_zodiacs_tab" | "text_bosses_tab" | "text_talismans_tab" => {
+            PrimitiveLightmapHint {
+                target_min_side: 112,
+                area_scale: 4.0,
+            }
+        }
+        "btn_chronicle_tab" | "text_chronicle_cover" => PrimitiveLightmapHint {
+            target_min_side: 64,
+            area_scale: 3.0,
+        },
+        "btn_page_left" | "btn_page_right" => PrimitiveLightmapHint {
+            target_min_side: 24,
+            area_scale: 2.0,
+        },
+        _ if node.starts_with("cubby") => PrimitiveLightmapHint {
+            target_min_side: 128,
+            area_scale: 5.0,
+        },
+        _ => PrimitiveLightmapHint::default(),
     }
 }
 
@@ -852,7 +933,15 @@ fn build_area_weighted_lightmap_charts(
     }
     let total_area = stats
         .iter()
-        .map(|stat| stat.area.max(0.0))
+        .enumerate()
+        .map(|(primitive_idx, stat)| {
+            let hint = scene
+                .primitive_lightmap_hints
+                .get(primitive_idx)
+                .copied()
+                .unwrap_or_default();
+            stat.area.max(0.0) * hint.area_scale.max(0.0)
+        })
         .sum::<f64>()
         .max(0.0);
     let max_chart_side = max_dim.saturating_sub(2).max(1);
@@ -861,8 +950,14 @@ fn build_area_weighted_lightmap_charts(
         .max(primitive_count as f64 * hard_min_side as f64 * hard_min_side as f64);
     let mut desired = Vec::with_capacity(primitive_count);
     for (primitive_idx, stat) in stats.iter().enumerate() {
+        let hint = scene
+            .primitive_lightmap_hints
+            .get(primitive_idx)
+            .copied()
+            .unwrap_or_default();
+        let weighted_area = stat.area.max(0.0) * hint.area_scale.max(0.0);
         let area_share = if total_area > 0.0 {
-            stat.area.max(0.0) / total_area
+            weighted_area / total_area
         } else {
             1.0 / primitive_count.max(1) as f64
         };
@@ -878,6 +973,7 @@ fn build_area_weighted_lightmap_charts(
         let base_side = area_side
             .max(triangle_side)
             .max(min_side)
+            .max(hint.target_min_side.min(max_chart_side))
             .clamp(hard_min_side, max_chart_side);
         let side = next_chart_side_with_primitive_lightmap_coverage(
             scene,
@@ -1131,7 +1227,11 @@ fn validate_lightmap_mapping(room: RoomGiRoom, lightmap: &GpuBakeLightmap) -> an
     Ok(())
 }
 
-fn shadow_test_room_lightmap_has_radiance(lit_fraction: f32, avg_luma: f64, max_channel: f32) -> bool {
+fn shadow_test_room_lightmap_has_radiance(
+    lit_fraction: f32,
+    avg_luma: f64,
+    max_channel: f32,
+) -> bool {
     max_channel > 0.0
         && (lit_fraction >= ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION_SHADOW_TEST
             || avg_luma > ROOM_GI_LIGHTMAP_MIN_AVG_LUMA_SHADOW_TEST)
@@ -1195,9 +1295,7 @@ fn validate_lightmap_radiance(
         RoomGiRoom::ShadowTestRoom => {
             !shadow_test_room_lightmap_has_radiance(lit_fraction, avg_luma, max_channel)
         }
-        _ => {
-            lit_fraction < ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION || avg_luma <= 1.0e-7
-        }
+        _ => lit_fraction < ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION || avg_luma <= 1.0e-7,
     };
     anyhow::ensure!(
         !effectively_black,
@@ -2202,14 +2300,17 @@ mod tests {
 
     #[test]
     fn shadow_test_room_lightmap_validation_accepts_sparse_direct_light() {
-        assert!(shadow_test_room_lightmap_has_radiance(0.0053, 0.045718, 1.0));
-        assert!(shadow_test_room_lightmap_has_radiance(0.0003, 0.002626, 1.0));
-        assert!(shadow_test_room_lightmap_has_radiance(0.0001, 0.000544, 1.0));
+        assert!(shadow_test_room_lightmap_has_radiance(
+            0.0053, 0.045718, 1.0
+        ));
+        assert!(shadow_test_room_lightmap_has_radiance(
+            0.0003, 0.002626, 1.0
+        ));
+        assert!(shadow_test_room_lightmap_has_radiance(
+            0.0001, 0.000544, 1.0
+        ));
         assert!(!shadow_test_room_lightmap_has_radiance(0.0, 0.0, 0.0));
-        assert!(
-            ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION_SHADOW_TEST
-                < ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION
-        );
+        assert!(ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION_SHADOW_TEST < ROOM_GI_LIGHTMAP_MIN_LIT_FRACTION);
     }
 
     #[test]
@@ -2220,6 +2321,21 @@ mod tests {
             err.to_string().contains("no mapped texels"),
             "unexpected error: {err:#}"
         );
+    }
+
+    #[test]
+    fn archive_lightmap_hints_prioritize_large_visible_surfaces() {
+        let title = primitive_lightmap_hint(RoomGiRoom::Archive, Some("text_scene_title"));
+        assert!(title.target_min_side >= 192);
+        assert!(title.area_scale > 1.0);
+
+        let cubby = primitive_lightmap_hint(RoomGiRoom::Archive, Some("Cubby.001"));
+        assert!(cubby.target_min_side >= 128);
+        assert!(cubby.area_scale > 1.0);
+
+        let shop = primitive_lightmap_hint(RoomGiRoom::Shop, Some("text_scene_title"));
+        assert_eq!(shop.target_min_side, 0);
+        assert_eq!(shop.area_scale, 1.0);
     }
 
     #[test]

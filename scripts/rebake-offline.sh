@@ -74,7 +74,7 @@ fi
 
 if [[ "$want_relic" -eq 1 ]]; then
     echo "==> relic RLC2 bakes"
-    cargo run -p mahjuro-render --bin mahjuro-bake-relics
+    cargo run -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake
 fi
 
 echo "==> verifying stamps (cargo build --locked)"

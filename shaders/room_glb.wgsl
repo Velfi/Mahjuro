@@ -18,6 +18,8 @@
 // - `room_height_fog_color.w` = distance-tint gradient start in world units
 // - `room_height_fog_far_color.xyz` = distance tint color approached as distance grows
 // - `room_height_fog_far_color.w` = distance-tint exponential scale in world units
+// - `GLTF_PBR_FLAG_ROOM_READABLE_SURFACE` = GLB text/decal/UI surface: lit by material +
+//   punctual lights, but not by the coarse room lightmap / baked contact AO.
 //
 // Point `pos.w` = smooth radius or glTF inverse-square range depending on `params.x`.
 // Spot `pos.w` = smooth radius. Both are in world units after upload.
@@ -30,6 +32,7 @@ const GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME: u32 = 1u << 4u;
 const GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO: u32 = 1u << 5u;
 const GLTF_PBR_FLAG_ROOM_CANDLE_WAX: u32 = 1u << 6u;
 const GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER: u32 = 1u << 7u;
+const GLTF_PBR_FLAG_ROOM_READABLE_SURFACE: u32 = 1u << 8u;
 const CANDLE_WARMTH_RGB: vec3<f32> = vec3<f32>(1.0, 0.58, 0.20);
 // UI polychrome (The House) — coarser bands than 3D score pops at label sizes.
 const POLYCHROME_COORD_X: f32 = 2.0;
@@ -425,6 +428,8 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let is_candle_wax = (pbr.flags & GLTF_PBR_FLAG_ROOM_CANDLE_WAX) != 0u;
     let receives_dynamic_room_shadow =
         (pbr.flags & GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER) != 0u;
+    let is_readable_room_surface =
+        (pbr.flags & GLTF_PBR_FLAG_ROOM_READABLE_SURFACE) != 0u;
 
     // Animation-lab false shading: albedo × simple N·L (skips punctual PBR / shadows).
     if (cam.room_debug_params.y > 0.5) {
@@ -677,12 +682,14 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         Lo = Lo + direct.total;
     }
 
-    let room_indirect_shadow_vis = select(
-        1.0,
-        dynamic_receiver_shadow_vis(in.world_pos),
-        receives_dynamic_room_shadow,
-    );
-    Lo = Lo + sample_room_lightmap_indirect(in.lightmap_uv) * room_indirect_shadow_vis;
+    if (!is_readable_room_surface) {
+        let room_indirect_shadow_vis = select(
+            1.0,
+            dynamic_receiver_shadow_vis(in.world_pos),
+            receives_dynamic_room_shadow,
+        );
+        Lo = Lo + sample_room_lightmap_indirect(in.lightmap_uv) * room_indirect_shadow_vis;
+    }
 
     Lo = Lo
         + gold_reflected_fill
@@ -695,7 +702,9 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     // glTF light energy). Indirect/environment terms are supplied by the room lightmap,
     // which is baked through the shared scene PBR helpers using the same exposure convention.
     var lit_hdr = Lo * cam.room_linear_exposure;
-    if ((pbr.flags & GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO) == 0u) {
+    let skips_baked_contact_ao = ((pbr.flags & GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO) != 0u)
+        || is_readable_room_surface;
+    if (!skips_baked_contact_ao) {
         lit_hdr = lit_hdr * sample_contact_ao(in.world_pos);
     }
     // Per-light projected shadows are applied in the punctual / spot loops above.

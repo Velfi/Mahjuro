@@ -794,10 +794,7 @@ pub fn chronicle_ledger_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
     let select_run = match input_mode {
         InputMode::Controller => HintBind::grouped(
             "select run",
-            vec![
-                vec![HintKey::Dpad],
-                vec![HintKey::Stick(StickSide::Left)],
-            ],
+            vec![vec![HintKey::Dpad], vec![HintKey::Stick(StickSide::Left)]],
             HintKeyJoin::Slash,
         )
         .into(),
@@ -835,10 +832,7 @@ pub fn wall_ledger_footer_row(input_mode: InputMode) -> Vec<HintSegment> {
     let select_tile = match input_mode {
         InputMode::Controller => HintBind::grouped(
             "select tile",
-            vec![
-                vec![HintKey::Dpad],
-                vec![HintKey::Stick(StickSide::Left)],
-            ],
+            vec![vec![HintKey::Dpad], vec![HintKey::Stick(StickSide::Left)]],
             HintKeyJoin::Slash,
         )
         .into(),

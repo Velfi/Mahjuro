@@ -13,9 +13,9 @@
 //! - `bake_status(repo)` — `(hash, stamp_ok, outputs_ok)` for the build-time check
 //! - `write_stamp(repo)` — recompute the digest and persist it (called by the bake binary)
 //! - `skip_bake_env()` — `MAHJURO_SKIP_OFFLINE_BAKES` or per-bake `MAHJURO_SKIP_*_BAKE`
-//! - `STAMP_PATH` / `OUT_DIR` / `SKIP_ENV` / `LABEL` / `BUILD_TOOL_CMD` / `REBAKE_CMD` /
-//!   `COMMIT_PATHS` — used by the `build.rs` panic message so the fix instructions stay
-//!   in sync with the actual paths.
+//! - `STAMP_PATH` / `OUT_DIR` / `SKIP_ENV` / `LABEL` / `SCRIPT_REBAKE_CMD` /
+//!   `BUILD_TOOL_CMD` / `REBAKE_CMD` / `COMMIT_PATHS` — used by the `build.rs` panic
+//!   message so the fix instructions stay in sync with the actual paths.
 
 use std::fs;
 use std::io;
@@ -233,6 +233,8 @@ pub trait BakeKind {
     const STAMP_PATH: &'static str;
     const OUT_DIR: &'static str;
     const SKIP_ENV: &'static str;
+    /// Canonical one-liner for local developers.
+    const SCRIPT_REBAKE_CMD: &'static str;
     /// Suggested `cargo build` command for the offline baker.
     const BUILD_TOOL_CMD: &'static str;
     /// Suggested `cargo run` command to refresh the stamp.
@@ -273,14 +275,9 @@ pub trait BakeKind {
     }
 }
 
-/// One-liner build + rebake command for stale-bake panic messages.
-pub fn rebake_fix_cmd<K: BakeKind>() -> String {
-    let build_cmd = if K::REBAKE_CMD.starts_with(SKIP_COMMITTED_BAKE_CHECKS_ENV) {
-        format!("{SKIP_COMMITTED_BAKE_CHECKS_ENV}=1 {}", K::BUILD_TOOL_CMD)
-    } else {
-        K::BUILD_TOOL_CMD.to_string()
-    };
-    format!("{build_cmd} && {}", K::REBAKE_CMD)
+/// One-liner rebake command for stale-bake panic messages.
+pub fn rebake_fix_cmd<K: BakeKind>() -> &'static str {
+    K::SCRIPT_REBAKE_CMD
 }
 
 /// Format the panic message the build script uses when committed bakes are stale.
@@ -302,7 +299,7 @@ pub fn out_of_date_message<K: BakeKind>(status: &BakeStatus) -> String {
             "{label} is out of date.\n\n",
             "{detail}\n\n",
             "To fix (needs a GPU; refreshes the stamp on success):\n\n",
-            "{fix_cmd}\n\n",
+            "   {fix_cmd}\n\n",
             "Commit the baked files + stamp:\n",
             "   git add {commit_paths}",
         ),
@@ -364,25 +361,31 @@ mod tests {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let hash = K::compute_inputs_hash(&repo);
         let stamp = std::fs::read_to_string(repo.join(K::STAMP_PATH)).expect("stamp file");
-        assert_eq!(stamp.trim(), hash, "{}", K::REBAKE_CMD);
+        assert_eq!(stamp.trim(), hash, "{}", K::SCRIPT_REBAKE_CMD);
     }
 
     #[test]
-    fn rebake_fix_cmd_chains_build_and_run() {
+    fn rebake_fix_cmd_uses_rebake_script() {
         assert_eq!(
             rebake_fix_cmd::<RoomShadow>(),
-            concat!(
-                "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo build -p mahjuro-headless --bin mahjuro-bake --features bake && ",
-                "MAHJURO_SKIP_COMMITTED_BAKE_CHECKS=1 cargo run -p mahjuro-headless --bin mahjuro-bake --features bake -- --kinds shadow"
-            )
+            "scripts/rebake-offline.sh shadow"
         );
         assert_eq!(
             rebake_fix_cmd::<ShowcaseDecal>(),
-            concat!(
-                "cargo build -p mahjuro-render --bin mahjuro-bake-decal-atlases && ",
-                "cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases"
-            )
+            "scripts/rebake-offline.sh decal"
         );
+    }
+
+    #[test]
+    fn out_of_date_message_prefers_rebake_script() {
+        let status = BakeStatus {
+            hash: "abc123".into(),
+            stamp_ok: false,
+            outputs_ok: true,
+        };
+        let msg = out_of_date_message::<RoomShadow>(&status);
+        assert!(msg.contains("scripts/rebake-offline.sh shadow"));
+        assert!(!msg.contains("cargo build -p mahjuro-headless"));
     }
 
     #[test]

@@ -19,7 +19,7 @@ Outputs `pack_manifest.json`, `mahjuro-pack-shared.zip`, `mahjuro-pack-rooms.zip
 - **`music` (lazy):** background music + win/loss jingles under `audio/music/` (decoded on first play, not at `AudioManager::new`). Listed first so the `audio/music/` prefix wins over the `shared` pack's broader `audio/` prefix.
 - **`shared` (eager):** `fonts/`, `textures/tile_sets/` (tile atlases), and the rest of `audio/` (sound effects) — needed across scenes.
 - **`rooms` (lazy, splash-mounted):** `3d/` GLBs and offline `data/room_shadow/` + `data/room_gi/` bakes.
-- **`gameplay_bulk` (lazy, chain-mounted):** remaining `data/` (relic RLC1, JSON, …), `textures/` (non-tileset), and `steam_assets/`.
+- **`gameplay_bulk` (lazy, chain-mounted):** remaining `data/` (relic RLC2, JSON, …), `textures/` (non-tileset), and `steam_assets/`.
 
 ### Bake options
 

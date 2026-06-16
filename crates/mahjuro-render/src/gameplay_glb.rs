@@ -1345,7 +1345,8 @@ pub fn gameplay_cash_in_camera_for_screen_rect(
     fill_fraction: f32,
     btn_bounds_only: bool,
 ) -> Option<CameraParams> {
-    let corners_world = cash_in_bounds_corners_world(cpu, win_h, env_height_scale, btn_bounds_only)?;
+    let corners_world =
+        cash_in_bounds_corners_world(cpu, win_h, env_height_scale, btn_bounds_only)?;
     let bounds_doc = if btn_bounds_only {
         *cpu.marker_mesh_bounds_doc.get(BTN_CASH_IN)?
     } else {
@@ -1494,8 +1495,9 @@ mod tests {
         let win_h = 1080.0_f32;
         let env_h = 1.0_f32;
         let target = [820.0, 318.0, 168.0, 52.0];
-        let cam = gameplay_cash_in_camera_for_screen_rect(win_w, win_h, env_h, &cpu, target, 0.90, false)
-            .expect("cam");
+        let cam =
+            gameplay_cash_in_camera_for_screen_rect(win_w, win_h, env_h, &cpu, target, 0.90, false)
+                .expect("cam");
         let corners = cash_in_bounds_corners_world(&cpu, win_h, env_h, false).expect("corners");
         let projected = project_world_corners_screen(&cam, win_w, win_h, &corners);
         let px = projected[0].max(target[0]);

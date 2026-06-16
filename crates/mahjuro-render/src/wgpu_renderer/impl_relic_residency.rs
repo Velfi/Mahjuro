@@ -7,7 +7,7 @@ use mahjuro_core::core::relic::RelicId;
 
 use crate::gpu_types::{DecodedRelicImage, RelicGpuMeta, RelicTextureGpu};
 use crate::lit_mesh::LitMeshGpu;
-use crate::relic_gpu_residency::{touch_relic_lru, trim_relic_lru, total_relic_gpu_bytes};
+use crate::relic_gpu_residency::{total_relic_gpu_bytes, touch_relic_lru, trim_relic_lru};
 use crate::wgpu_renderer::WgpuRenderer;
 
 impl WgpuRenderer {

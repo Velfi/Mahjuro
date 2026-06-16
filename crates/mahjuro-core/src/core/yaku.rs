@@ -290,7 +290,11 @@ impl YakuKind {
         Self::sort_for_tablets(&mut sorted);
         Self::consolidate_for_tablets(&sorted)
             .into_iter()
-            .map(|e| e.kind.gameplay_tablet_label_with_count(e.count, true).into_owned())
+            .map(|e| {
+                e.kind
+                    .gameplay_tablet_label_with_count(e.count, true)
+                    .into_owned()
+            })
             .collect::<Vec<_>>()
             .join(" + ")
     }

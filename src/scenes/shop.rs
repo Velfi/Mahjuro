@@ -43,6 +43,8 @@ use rand::seq::SliceRandom;
 
 use std::time::{Duration, Instant};
 
+use super::pause_menu::PauseMenu;
+pub(crate) use super::{Scene, SceneIntent, SceneTransition, UpdateCtx};
 use crate::core::consumable::Consumable;
 use crate::core::relic::{
     Rarity, RelicId, RelicState, all_relic_defs, apply_merchants_eye_discount, relic_shop_price,
@@ -56,8 +58,6 @@ use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, ShopHit, TextAlign, TextLabel};
 use crate::ui::focus_nav::{FocusDir, FocusNavState, RectFocusSession};
 use crate::ui::input::{InputMode, UiAction};
-use super::pause_menu::PauseMenu;
-pub(crate) use super::{Scene, SceneIntent, SceneTransition, UpdateCtx};
 
 pub struct ShopScene {
     mode: ShopMode,
@@ -454,8 +454,7 @@ mod tests {
         run.finished_zodiac_celebration = Some(("Riichi", 2));
         run.pending_shop_focus_snap_after_celebration = true;
 
-        let _shop =
-            ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
+        let _shop = ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
 
         assert!(run.finished_zodiac_celebration.is_none());
         assert!(!run.pending_shop_focus_snap_after_celebration);

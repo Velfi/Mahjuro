@@ -192,19 +192,10 @@ mod collision_mesh_tests {
         // grid must not false-positive the inspect-plaque u↔Y heuristic.
         let positions: Vec<[f32; 3]> = (0..20)
             .flat_map(|iy| {
-                (0..20).map(move |ix| {
-                    [
-                        ix as f32 / 19.0 - 0.5,
-                        iy as f32 / 19.0 - 0.5,
-                        0.0,
-                    ]
-                })
+                (0..20).map(move |ix| [ix as f32 / 19.0 - 0.5, iy as f32 / 19.0 - 0.5, 0.0])
             })
             .collect();
-        let uvs: Vec<[f32; 2]> = positions
-            .iter()
-            .map(|p| [p[0] + 0.5, p[1] + 0.5])
-            .collect();
+        let uvs: Vec<[f32; 2]> = positions.iter().map(|p| [p[0] + 0.5, p[1] + 0.5]).collect();
         assert!(
             !decal_texel_u_runs_along_local_y(&positions, &uvs),
             "u along local X should not select inspect-plaque axis swap"

@@ -200,8 +200,8 @@ fn upload_bc7_mip_chain(
         && !chain.bc7_bytes.is_empty()
         && bc7_upload_chain_valid(chain.base_width, chain.base_height, chain.mip_count)
     {
-        let upload_mip_count = bc7_mip_level_count(chain.base_width, chain.base_height)
-            .min(chain.mip_count.max(1));
+        let upload_mip_count =
+            bc7_mip_level_count(chain.base_width, chain.base_height).min(chain.mip_count.max(1));
         let tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d {
