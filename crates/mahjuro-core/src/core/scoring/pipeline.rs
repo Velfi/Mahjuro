@@ -98,6 +98,7 @@ fn score_sets_inner(
         super::layer_input::PreYakuLayerOpts {
             has_triplet_boost,
             flower_yen: &mut flower_yen,
+            original_tiles,
         },
     );
 

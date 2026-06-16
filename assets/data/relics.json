@@ -546,6 +546,19 @@
     ]
   },
   {
+    "id": "easter_egg",
+    "name": "Easter Egg",
+    "description": "Cashing in a structure with Chicken Hand: retrigger all melds",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Painted shell, hidden prize — the hand that finds nothing still hatches something.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
     "id": "lucky_seven",
     "name": "Lucky Seven",
     "description": "Rank-7 tiles in scored sets: +1.5 Han each (max +9 Han)",
