@@ -1026,7 +1026,7 @@ fn fu_han_stat_segments(fu: i32, han: f64) -> Vec<(String, [f32; 4])> {
             format_payout_value_col(&format_yaku_han_plus(han)),
             HAN_COLOR,
         ),
-        (" Ha".into(), HAN_COLOR),
+        (" Han".into(), HAN_COLOR),
     ]
 }
 

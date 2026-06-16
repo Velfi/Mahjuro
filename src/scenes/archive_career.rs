@@ -617,7 +617,7 @@ pub struct RunDetailModel {
     pub tiles: Vec<Tile>,
     pub tiles_representative: bool,
     pub yaku_rows: Vec<(YakuKind, u32)>,
-    /// Bar value suffix for [`Self::yaku_rows`] (`" han"` or `"×"`).
+    /// Bar value suffix for [`Self::yaku_rows`] (`" Han"` or `"×"`).
     pub yaku_value_suffix: &'static str,
     pub score_lines: Vec<String>,
     pub wing_scores: Vec<(u32, u64)>,
@@ -656,7 +656,7 @@ pub fn run_detail_model(
                     .iter()
                     .map(|(k, v)| (*k, v.han))
                     .collect(),
-                " han",
+                " Han",
             )
         } else {
             (
@@ -906,7 +906,7 @@ pub fn format_wing(wing: u32) -> String {
 
 /// Han count with unit (`206 Han`).
 pub fn format_han(han: u32) -> String {
-    format!("{han} han")
+    format!("{han} Han")
 }
 
 #[cfg(test)]
