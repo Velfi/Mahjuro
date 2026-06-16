@@ -637,10 +637,7 @@ impl WgpuRenderer {
             };
             let mut u = uniform;
             u.model = prim_model.to_cols_array();
-            u.room_lightmap_uv = *gpu
-                .lightmap_uv_rects
-                .get(pi)
-                .expect("room lightmap UV rect count matches room primitives");
+            u.room_lightmap_uv = gpu.lightmap_uv_rects.get(pi).copied().unwrap_or([0.0; 4]);
             self.queue.write_buffer(buf, 0, bytemuck::bytes_of(&u));
         }
         if let Some((lvp, changed)) = shadow_upload {

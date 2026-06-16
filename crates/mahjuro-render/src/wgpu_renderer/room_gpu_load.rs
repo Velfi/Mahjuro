@@ -484,6 +484,27 @@ struct RoomLightmapGpu {
     uv_rects: Vec<[f32; 4]>,
 }
 
+/// Room GLB mesh counts can drift from committed lightmaps between rebakes; keep GPU upload alive
+/// by truncating or padding per-primitive atlas rects to the live primitive count.
+fn align_room_lightmap_uv_rects(
+    room: RoomGiRoom,
+    uv_rects: Vec<[f32; 4]>,
+    prim_count: usize,
+) -> Vec<[f32; 4]> {
+    if uv_rects.len() == prim_count {
+        return uv_rects;
+    }
+    log::warn!(
+        "{room:?} room lightmap primitive UV rect count ({}) does not match room GPU upload ({prim_count}); \
+         aligning to GPU primitive count — rebake room lightmap after GLB changes",
+        uv_rects.len(),
+    );
+    let mut aligned = uv_rects;
+    aligned.truncate(prim_count);
+    aligned.resize(prim_count, [0.0; 4]);
+    aligned
+}
+
 fn upload_room_lightmap_gpu(
     ctx: &RoomGpuUploadCtx<'_>,
     room: RoomGiRoom,
@@ -495,12 +516,7 @@ fn upload_room_lightmap_gpu(
         .unwrap_or_else(|| {
             panic!("{room:?} room lightmap bake is missing; run `cargo build` to rebake room GI")
         });
-    assert_eq!(
-        bake.primitive_uv_rects.len(),
-        prim_count,
-        "{:?} room lightmap primitive count does not match room GPU upload",
-        bake.room
-    );
+    let uv_rects = align_room_lightmap_uv_rects(room, bake.primitive_uv_rects, prim_count);
     let expected_values = bake.width as usize * bake.height as usize * 4;
     assert_eq!(
         bake.pixels_rgba_f32.len(),
@@ -531,7 +547,7 @@ fn upload_room_lightmap_gpu(
     );
     RoomLightmapGpu {
         view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
-        uv_rects: bake.primitive_uv_rects,
+        uv_rects,
     }
 }
 
@@ -4147,6 +4163,19 @@ impl WgpuRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn align_room_lightmap_uv_rects_truncates_and_pads() {
+        let rects = vec![[0.1; 4], [0.2; 4], [0.3; 4]];
+        assert_eq!(
+            align_room_lightmap_uv_rects(RoomGiRoom::MainMenu, rects.clone(), 2),
+            vec![[0.1; 4], [0.2; 4]]
+        );
+        assert_eq!(
+            align_room_lightmap_uv_rects(RoomGiRoom::MainMenu, rects, 4),
+            vec![[0.1; 4], [0.2; 4], [0.3; 4], [0.0; 4]]
+        );
+    }
 
     #[test]
     fn splash_eager_room_gpu_mask_low_memory_is_main_menu_only() {
