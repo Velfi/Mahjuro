@@ -2,8 +2,7 @@
 //! to the wall for the rest of the run.
 //!
 //! Shop copy, prices, box-art filenames, and tile roll rules live in
-//! `assets/data/tile_packs.json`. Foil / seal colors (see [`crate::pack_palette`])
-//! stay in Rust for rendering parity with cover-art bakes.
+//! `assets/data/tile_packs.json`.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -95,7 +94,9 @@ fn tile_pack_def(kind: TilePackKind) -> &'static TilePackDef {
         .unwrap_or_else(|| panic!("tile pack data missing for {kind:?}"))
 }
 
-/// Canonical aspect ratio (width / height) of booster pack cover art.
+/// Neutral multiplier for authored pack box-art on [`Object3dKind::Pack`].
+pub const PACK_TEXTURE_TINT: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+
 /// All pack textures are authored at 256×384 (2:3 portrait).
 pub const PACK_ASPECT_W_OVER_H: f32 = 2.0 / 3.0;
 
@@ -168,28 +169,20 @@ impl TilePackKind {
         tile_pack_def(self).roll.tile_count()
     }
 
-    /// Plastic sleeve tint on pack edges — multiplied under the cover
-    /// decal's transparent regions. Sourced from the canonical
-    /// per-pack table in [`crate::pack_palette`].
-    pub fn foil_tint(self) -> [f32; 4] {
-        crate::pack_palette::for_kind(self).foil
+    /// Neutral tint for authored box-art on [`Object3dKind::Pack`].
+    pub fn pack_texture_tint(self) -> [f32; 4] {
+        PACK_TEXTURE_TINT
     }
 
-    /// Asset filename (without directory) for this pack's box art texture.
-    /// Must match the slug baked into [`crate::pack_palette`] and
-    /// the files under `assets/textures/tile_packs/`.
+    /// Celebration backdrop / glow colors for this pack kind.
+    pub fn celebration_palette(self) -> crate::pack_palette::PackCelebrationPalette {
+        crate::pack_palette::for_kind(self)
+    }
+
+    /// Asset filename (without directory) for this pack's box art texture
+    /// under `assets/textures/tile_packs/`.
     pub fn asset_filename(self) -> &'static str {
         tile_pack_def(self).texture_file
-    }
-
-    /// Wax-seal color for the merchant-envelope detail centered on the pack
-    /// face. Matches cover art and the runtime hover halo on the shop
-    /// counter — canonical value in [`crate::pack_palette`].
-    ///
-    /// Each pack nudges off canonical `RUBY` so the seals read as a
-    /// *family* of ceremonial reds rather than six unrelated splotches.
-    pub fn seal_color(self) -> [f32; 4] {
-        crate::pack_palette::for_kind(self).seal
     }
 
     pub fn shop_price(self) -> u32 {
@@ -211,7 +204,6 @@ impl TilePackKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pack_palette;
 
     #[test]
     fn every_tile_pack_variant_has_one_data_entry() {
@@ -233,18 +225,6 @@ mod tests {
             let _ = tile_pack_def(k);
         }
         assert_eq!(catalog.order.len(), ALL.len());
-    }
-
-    #[test]
-    fn pack_display_names_match_pack_palette() {
-        for &k in TilePackKind::all() {
-            assert_eq!(
-                k.name(),
-                pack_palette::for_kind(k).display_name,
-                "tile_packs.json name must match pack_palette for {:?}",
-                k
-            );
-        }
     }
 
     #[test]

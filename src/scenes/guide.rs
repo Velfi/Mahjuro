@@ -2478,7 +2478,7 @@ fn push_economy_item_example(
                     icon_cy,
                     Vec3::NEG_Y,
                 ),
-                color: kind.foil_tint(),
+                color: kind.pack_texture_tint(),
                 kind: Object3dKind::Pack {
                     kind,
                     pick_id: None,

@@ -1,3 +1,3 @@
-//! Per-pack visual palette — canonical definitions live in [`mahjuro_core::pack_palette`].
+//! Per-pack celebration palette — canonical definitions in [`mahjuro_core::pack_palette`].
 
 pub use mahjuro_core::pack_palette::*;

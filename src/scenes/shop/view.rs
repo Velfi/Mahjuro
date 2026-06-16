@@ -2027,7 +2027,7 @@ fn push_stock_meshes(
                     pos: pack_pos,
                     extents: ext,
                     rotation: [0.0, 0.0, 0.0],
-                    color: pack.kind.foil_tint(),
+                    color: pack.kind.pack_texture_tint(),
                     kind: Object3dKind::Pack {
                         kind: pack.kind,
                         pick_id: None,
@@ -2433,7 +2433,7 @@ fn push_departing_stock_meshes(
                         pos: anchor(cz),
                         extents: ext,
                         rotation: [0.0, 0.0, 0.0],
-                        color: kind.foil_tint(),
+                        color: kind.pack_texture_tint(),
                         kind: Object3dKind::Pack {
                             kind: *kind,
                             pick_id: None,

@@ -964,11 +964,6 @@ impl WgpuRenderer {
                                 let [rx, ry, rw, rh] = projected_rect;
                                 let pad_x = rw * 0.55;
                                 let pad_y = rh * 0.65;
-                                let seal = kind.seal_color();
-                                let mix_t = 0.35;
-                                let halo_r = 1.00 + (seal[0] - 1.00) * mix_t;
-                                let halo_g = 0.86 + (seal[1] - 0.86) * mix_t;
-                                let halo_b = 0.46 + (seal[2] - 0.46) * mix_t;
                                 relic_glows.push(GpuInstance {
                                     rect: [
                                         rx - pad_x,
@@ -976,7 +971,7 @@ impl WgpuRenderer {
                                         rw + pad_x * 2.0,
                                         rh + pad_y * 2.0,
                                     ],
-                                    color: [halo_r, halo_g, halo_b, 0.85 * hover_g],
+                                    color: [1.00, 0.86, 0.46, 0.85 * hover_g],
                                     user: 0,
                                 });
                             }
