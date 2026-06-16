@@ -12,7 +12,9 @@ const IDLE_MIN_SECS: f32 = 240.0;
 const IDLE_MAX_SECS: f32 = 420.0;
 
 /// Between events while Debug → Runtime → Brownout Mode is enabled.
+#[cfg(debug_menu_enabled)]
 const DEBUG_IDLE_MIN_SECS: f32 = 5.0;
+#[cfg(debug_menu_enabled)]
 const DEBUG_IDLE_MAX_SECS: f32 = 10.0;
 
 /// Between random floor creaks while an eligible room scene is on-screen.
@@ -37,10 +39,12 @@ pub struct RoomGltfBrownout {
 pub enum BrownoutMode {
     #[default]
     Normal,
+    #[cfg(debug_menu_enabled)]
     Frequent,
 }
 
 impl BrownoutMode {
+    #[cfg(debug_menu_enabled)]
     pub fn label(self) -> &'static str {
         match self {
             Self::Normal => "Normal",
@@ -78,6 +82,7 @@ impl RoomGltfBrownout {
         let mut rng = rand::rng();
         match mode {
             BrownoutMode::Normal => rng.random_range(IDLE_MIN_SECS..IDLE_MAX_SECS),
+            #[cfg(debug_menu_enabled)]
             BrownoutMode::Frequent => rng.random_range(DEBUG_IDLE_MIN_SECS..DEBUG_IDLE_MAX_SECS),
         }
     }
@@ -104,6 +109,7 @@ impl RoomGltfBrownout {
         self.secs_to_next = 0.0;
     }
 
+    #[cfg(debug_menu_enabled)]
     pub fn toggle_mode(&mut self) -> BrownoutMode {
         self.mode = match self.mode {
             BrownoutMode::Normal => BrownoutMode::Frequent,

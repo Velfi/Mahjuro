@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use glam::{Mat4, Vec3};
 
-use crate::core::tile_pack::{PACK_TILE_ID_BASE, TilePackInstance, TilePackKind};
+use crate::core::tile_pack::{PACK_TILE_ID_BASE, TilePackInstance, TilePackKind, PACK_TEXTURE_TINT};
 use crate::persistence::TilePreset;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseRenderHints, ShowcaseTilePlacement,
@@ -41,6 +41,11 @@ const ARRIVAL_BG_FLASH_END: f32 = 0.46;
 pub(crate) const PACK_CELEB_BOX_H_FRAC: f32 = 0.62;
 /// Center Y for the hero pack — clears the title band at ~0.18h without sitting too low.
 const PACK_CELEB_ANCHOR_Y_FRAC: f32 = 0.57;
+
+fn pack_object_color(alpha: f32, brighten: f32) -> [f32; 4] {
+    let v = (1.0 + brighten).min(1.6);
+    [v, v, v, alpha.clamp(0.0, 1.0)]
+}
 
 pub struct TilePackPresenter {
     pub celebration: PackCelebration,
@@ -225,8 +230,6 @@ impl TilePackPresenter {
                 );
                 flush_backdrop_quads(frame, gradients, squircles);
 
-                let mut foil = celeb.pack_kind.foil_tint();
-                foil[3] *= content_alpha;
                 push_pack_object3d_at(
                     frame,
                     w,
@@ -236,7 +239,7 @@ impl TilePackPresenter {
                     hero,
                     box_h * drift.scale,
                     celeb.pack_kind,
-                    foil,
+                    pack_object_color(content_alpha, 0.0),
                 );
                 push_pack_title(frame);
             }
@@ -273,7 +276,6 @@ impl TilePackPresenter {
                 );
                 flush_backdrop_quads(frame, gradients, squircles);
 
-                let foil = celeb.pack_kind.foil_tint();
                 push_pack_object3d_at(
                     frame,
                     w,
@@ -283,7 +285,7 @@ impl TilePackPresenter {
                     hero,
                     box_h,
                     celeb.pack_kind,
-                    foil,
+                    PACK_TEXTURE_TINT,
                 );
                 push_pack_title(frame);
                 push_confirm_unseal_footer(frame, ctx, content_alpha, t);
@@ -297,15 +299,6 @@ impl TilePackPresenter {
                 let anchor = pack_closeup_anchor(screen, &self.positions, box_h, bob_rot);
 
                 let flash = smoothstep(0.25, 0.4, u) * (1.0 - smoothstep(0.45, 0.55, u));
-                let mut foil = celeb.pack_kind.foil_tint();
-                if flash > 0.0 {
-                    foil = [
-                        foil[0] + (1.4 - foil[0]) * flash,
-                        foil[1] + (1.4 - foil[1]) * flash,
-                        foil[2] + (1.4 - foil[2]) * flash,
-                        foil[3],
-                    ];
-                }
                 let pack_alpha = content_alpha * (1.0 - smoothstep(0.4, 0.55, u));
                 let ghost_scale = 1.0 - 0.15 * smoothstep(0.4, 0.55, u);
                 if pack_alpha > 0.02 {
@@ -317,7 +310,7 @@ impl TilePackPresenter {
                         &anchor,
                         screen_h * ghost_scale,
                         celeb.pack_kind,
-                        foil,
+                        pack_object_color(pack_alpha, flash * 0.35),
                         None,
                     );
                 }
@@ -831,7 +824,7 @@ fn push_pack_aura(
     cx: f32,
     cy: f32,
     box_h: f32,
-    palette: pack_palette::PackPalette,
+    palette: pack_palette::PackCelebrationPalette,
     content_alpha: f32,
     seal_pulse: f32,
 ) {
@@ -861,7 +854,7 @@ fn push_unseal_burst(
     cx: f32,
     cy: f32,
     min_axis: f32,
-    palette: pack_palette::PackPalette,
+    palette: pack_palette::PackCelebrationPalette,
     content_alpha: f32,
     u: f32,
 ) {
