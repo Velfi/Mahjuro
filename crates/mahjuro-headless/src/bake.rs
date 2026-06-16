@@ -12,6 +12,7 @@ use mahjuro_bake_stamp::room_shadow::RoomShadow;
 
 use crate::bake_cli::{BakeRoomCli, RoomBakeKind};
 use crate::room_bake::scene_for_room;
+use crate::room_bake::{bake_player_progress, bake_render_settings};
 use crate::room_bake_app::RoomBakeApp;
 use crate::slug::{resolve_lightmap_bake_rooms, resolve_shadow_bake_rooms};
 
@@ -43,9 +44,7 @@ pub fn run(cli: BakeRoomCli) -> anyhow::Result<()> {
         "no room shadow bake targets selected"
     );
 
-    let settings = mahjuro::persistence::load_settings();
-    let profile_index = settings.active_profile;
-    let progress = mahjuro::persistence::load_profile(profile_index);
+    let progress = bake_player_progress();
     let width = cli.width.max(1);
     let height = cli.height.max(1);
     let scene_look = bake_lightmap.then(mahjuro::game::scene_look_tuning::SceneLookTuningSet::load);
@@ -77,14 +76,16 @@ pub fn run(cli: BakeRoomCli) -> anyhow::Result<()> {
 
     for room in &shadow_rooms {
         let (scene, run, game_in_progress) = scene_for_room(*room, &progress);
+        let gfx = bake_render_settings();
         let mut app = RoomBakeApp::new(
             scene,
             run,
             width,
             height,
             game_in_progress,
-            profile_index,
+            0,
             progress.clone(),
+            gfx,
         )?;
         let bake = app.bake_room_shadow(*room, cli.warmup_frames)?;
         write_room_shadow_bake(*room, &cli.shadow_dir, bake)?;

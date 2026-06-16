@@ -5,4 +5,5 @@ mod scenes;
 
 #[cfg(feature = "screenshot")]
 pub(crate) use fixtures::{setup_gameplay_bake_state, setup_shop_state};
+pub(crate) use fixtures::{bake_player_progress, bake_render_settings};
 pub use scenes::scene_for_room;

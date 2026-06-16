@@ -20,6 +20,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Instant;
 
 pub mod relic;
@@ -145,7 +146,56 @@ pub(crate) fn repo_relative(repo: &Path, path: &Path) -> String {
     path_s
 }
 
-/// Sorted file list under `root`, honoring `.gitignore` (matches committed tree on CI).
+/// Sorted absolute paths for files under `prefix` that are **tracked in git**
+/// (`git ls-files`). Repo-relative keys use `/` separators.
+///
+/// Untracked local files (WIP art, etc.) are excluded so stamp hashes match
+/// across developers with the same commit. Falls back to [`hashable_git_files`]
+/// when `git` is missing or the repo root is not a git work tree.
+pub fn git_tracked_files_under(repo: &Path, prefix: &str) -> Vec<PathBuf> {
+    let prefix = prefix.trim_matches(['/', '\\']);
+    let output = Command::new("git")
+        .args(["ls-files", "-z", "--", prefix])
+        .current_dir(repo)
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let mut files = parse_git_ls_files_z(&out.stdout, repo);
+            files.sort();
+            files
+        }
+        Ok(_) | Err(_) => git_tracked_files_fallback(repo, prefix),
+    }
+}
+
+fn git_tracked_files_fallback(repo: &Path, prefix: &str) -> Vec<PathBuf> {
+    let root = repo.join(prefix);
+    if root.is_file() {
+        return vec![root];
+    }
+    hashable_git_files(&root)
+}
+
+fn parse_git_ls_files_z(bytes: &[u8], repo: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for chunk in bytes.split(|&b| b == 0) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let rel = match std::str::from_utf8(chunk) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let path = repo.join(rel);
+        if path.is_file() {
+            files.push(path);
+        }
+    }
+    files
+}
+
+/// Sorted file list under `root`, honoring `.gitignore` (local working tree).
 pub fn hashable_git_files(root: &Path) -> Vec<PathBuf> {
     let mut walk = ignore::WalkBuilder::new(root);
     walk.hidden(false);
@@ -500,5 +550,25 @@ mod tests {
         let mut h_png_raw = Fnv64::new();
         h_png_raw.write(png);
         assert_eq!(h_png.finish_hex(), h_png_raw.finish_hex());
+    }
+
+    #[test]
+    fn git_tracked_files_under_matches_ls_files_for_relics() {
+        let repo = repo_root();
+        let tracked = git_tracked_files_under(&repo, "assets/textures/relics");
+        assert!(
+            tracked.iter().any(|p| {
+                p.extension().is_some_and(|ext| ext == "png")
+                    && p.components().any(|c| c.as_os_str() == "relics")
+            }),
+            "expected tracked relic PNGs under assets/textures/relics"
+        );
+        for path in tracked {
+            let rel = repo_relative(&repo, &path);
+            assert!(
+                !rel.contains(".."),
+                "tracked path must be repo-relative: {rel}"
+            );
+        }
     }
 }

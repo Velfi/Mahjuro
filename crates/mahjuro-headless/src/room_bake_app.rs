@@ -1,10 +1,10 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use mahjuro::game::cascade::CascadeTuning;
 use mahjuro::game::event_bus::EventBus;
 use mahjuro::game::run::RunState;
 use mahjuro::main_render_settings::RenderSettings;
-use mahjuro::persistence;
+use mahjuro::persistence::{AppSettings, GlyphPromptSetting, ResumeScene};
 use mahjuro::render::animation::AnimationController;
 use mahjuro::render::draw_cmd::UiFrame;
 use mahjuro::render::wgpu_renderer::WgpuRenderer;
@@ -13,7 +13,10 @@ use mahjuro::ui::input::InputMode;
 use mahjuro::ui::layout::UiLayout;
 
 const LOAD_WAIT_MAX_EXTRA: u32 = 600;
-const LOAD_WAIT_SLEEP_MS: u64 = 16;
+/// Idle ticks after warmup/asset drain before shadow GPU capture.
+const SHADOW_CAPTURE_SETTLE_FRAMES: u32 = 8;
+/// Fixed 60 Hz step for deterministic scene animation during offline captures.
+const BAKE_ANIM_FRAME_NS: u64 = 16_666_667;
 
 /// Scratch out-parameters for a room-bake tick (no overlays / profile / modals).
 struct BakeTickScratch {
@@ -58,6 +61,9 @@ pub(crate) struct RoomBakeApp {
     height: u32,
     game_in_progress: bool,
     shop_env_lighting: mahjuro::render::room_glb::RoomEnvLightingTune,
+    glyph_prompt: GlyphPromptSetting,
+    bake_anim_epoch: Instant,
+    bake_tick: u64,
 }
 
 impl RoomBakeApp {
@@ -69,8 +75,9 @@ impl RoomBakeApp {
         game_in_progress: bool,
         active_profile: usize,
         progress: mahjuro::core::progression::PlayerProgress,
+        gfx: RenderSettings,
     ) -> anyhow::Result<Self> {
-        let settings = persistence::load_settings();
+        let glyph_prompt = AppSettings::default().glyph_prompt;
         let renderer = WgpuRenderer::new(mahjuro::render::wgpu_renderer::TargetInit::Headless {
             width,
             height,
@@ -84,22 +91,16 @@ impl RoomBakeApp {
             anim: AnimationController::new(),
             progress,
             active_profile,
-            gfx: RenderSettings {
-                effects_quality: settings.effects_quality,
-                tile_preset: settings.tile_preset,
-                tile_material: settings.tile_material,
-                tileset_name: settings.tileset_name.clone(),
-                gamma: settings.gamma,
-                graphics_mode: settings.graphics_mode,
-                hdr_enabled: settings.hdr_enabled,
-                vhs_enabled: false,
-            },
+            gfx,
             effect_layers: mahjuro::effect_layers::EffectLayers::BASELINE,
             scene_look: mahjuro::game::scene_look_tuning::SceneLookTuningSet::load(),
             width,
             height,
             game_in_progress,
             shop_env_lighting: mahjuro::render::room_glb::RoomEnvLightingTune::SOURCE_DEFAULTS,
+            glyph_prompt,
+            bake_anim_epoch: Instant::now(),
+            bake_tick: 0,
         })
     }
 
@@ -113,7 +114,6 @@ impl RoomBakeApp {
         let mut extra = 0u32;
         while self.renderer.is_loading() && extra < LOAD_WAIT_MAX_EXTRA {
             self.tick();
-            std::thread::sleep(std::time::Duration::from_millis(LOAD_WAIT_SLEEP_MS));
             extra += 1;
         }
         extra
@@ -128,7 +128,8 @@ impl RoomBakeApp {
     }
 
     fn tick(&mut self) {
-        let now = Instant::now();
+        self.bake_tick += 1;
+        let now = self.bake_anim_epoch + Duration::from_nanos(self.bake_tick * BAKE_ANIM_FRAME_NS);
         self.anim.update(now);
         let layout = self
             .layout_engine
@@ -164,7 +165,7 @@ impl RoomBakeApp {
             scroll_lines: 0.0,
             tutorial_eligible: false,
             multiple_materials: self.progress.plastic_unlocked(),
-            resume_scene: persistence::ResumeScene::default(),
+            resume_scene: ResumeScene::default(),
             transitioning: false,
             overlay_request: &mut scratch.overlay_request,
             headless: true,
@@ -185,9 +186,8 @@ impl RoomBakeApp {
             audio: None,
         });
 
-        let settings = persistence::load_settings();
         let detected = mahjuro::ui::button_prompts::GamepadStyle::default();
-        let prompt_style = settings.glyph_prompt.resolve(detected);
+        let prompt_style = self.glyph_prompt.resolve(detected);
         let glyphs = mahjuro::ui::glyph_source::GlyphResolver::new(prompt_style, false, false);
         let mut env_per_scene = rustc_hash::FxHashMap::default();
         let mut env_frame_tunes = Vec::new();
@@ -270,8 +270,9 @@ impl RoomBakeApp {
         room: mahjuro::render::room_gi_bake::RoomGiRoom,
         warmup_frames: u32,
     ) -> anyhow::Result<mahjuro::render::room_shadow_bake::RoomShadowBake> {
-        self.renderer.request_room_shadow_capture(room);
         self.run_warmup(warmup_frames);
+        self.tick_warmup(SHADOW_CAPTURE_SETTLE_FRAMES);
+        self.renderer.request_room_shadow_capture(room);
         self.tick();
         self.renderer
             .take_room_shadow_capture()
