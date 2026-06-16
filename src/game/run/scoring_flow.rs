@@ -889,10 +889,10 @@ impl RunState {
     }
 
     /// Enumerate every valid meld decomposition of the selection and pick the
-    /// best split. Plays of ≤6 tiles use largest-chunk grouping; 7+ tiles score
-    /// the merged structure at cash-in (full hand scores the selection alone).
-    /// Ties on large plays fall back to hand-shape affinity, yaku weight, then
-    /// a canonical decomposition key.
+    /// best split. Plays of 6 or fewer tiles use largest-chunk grouping; larger
+    /// plays score the merged structure at cash-in. Full hand submissions score
+    /// the selection alone. Four-of-a-kind selections stay grouped as kongs
+    /// before scoring tie-breaks are considered.
     pub(crate) fn pick_best_decomposition(
         &self,
         default_sets: Vec<DetectedMeld>,
@@ -908,6 +908,14 @@ impl RunState {
         let rules = self.validation_rules_for_structure_commits();
         let mut alternatives = enumerate_decompositions(scoring_tiles, &rules);
         alternatives.retain(|sets| self.selection_commit_capacity_ok(sets, scoring_tiles.len()));
+        let max_kong_coverage = alternatives
+            .iter()
+            .map(|sets| kong_tile_coverage(sets))
+            .max()
+            .unwrap_or(0);
+        if max_kong_coverage > 0 {
+            alternatives.retain(|sets| kong_tile_coverage(sets) == max_kong_coverage);
+        }
         if alternatives.is_empty() {
             return default_sets;
         }
@@ -1154,5 +1162,12 @@ impl RunState {
 fn preview_yaku_bundle_weight(yaku: &[YakuKind]) -> i64 {
     yaku.iter()
         .map(|y| y.fu_bonus() as i64 + (y.han_bonus() * 100.0).round() as i64)
+        .sum()
+}
+
+fn kong_tile_coverage(sets: &[DetectedMeld]) -> usize {
+    sets.iter()
+        .filter(|set| set.kind == MeldKind::Kong)
+        .map(|set| set.tile_ids.len())
         .sum()
 }
