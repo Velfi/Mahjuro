@@ -57,7 +57,7 @@ pub(super) fn build_cascade_hud_placements(
     // siblings: sky blue for Chips (Polychrome), red for Mult (Polychrome),
     // cream for the Metal total / ×.
     use crate::render::theme::color::score_cascade::{
-        FU as FU_COLOR, FINAL as FINAL_COLOR, HAN as HAN_COLOR,
+        FINAL as FINAL_COLOR, FU as FU_COLOR, HAN as HAN_COLOR,
     };
 
     // Lateral spacing for the three labels (Fu × Han). Sized off the

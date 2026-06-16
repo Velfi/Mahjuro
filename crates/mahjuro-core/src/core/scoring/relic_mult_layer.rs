@@ -10,9 +10,7 @@ use crate::core::tile::{Suit, Tile};
 
 use super::layer_input::{PostYakuRelicLayerOpts, ScoringLayerInput, ScoringLayerOut};
 use super::push_steps::{push_fu, push_han};
-use super::tea_bonus::{
-    tea_harmony_fu, tea_purity_han, tea_respect_fu, tea_tranquility_fu,
-};
+use super::tea_bonus::{tea_harmony_fu, tea_purity_han, tea_respect_fu, tea_tranquility_fu};
 use super::{tile_by_id, tile_is_debuffed};
 
 pub const TRIPLET_BOOST_HAN_PER_TRIPLET: f64 = 0.5;
@@ -94,13 +92,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     if has(RelicId::SequenceSurge) {
         let seq_count = sets.iter().filter(|s| s.kind == MeldKind::Sequence).count() as i32;
         if seq_count > 0 {
-            push_han(
-                steps,
-                *fu,
-                han,
-                "Sequence Surge",
-                1.25 * seq_count as f64,
-            );
+            push_han(steps, *fu, han, "Sequence Surge", 1.25 * seq_count as f64);
         }
     }
 
@@ -121,13 +113,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     if has(RelicId::KongsBlessing) {
         let kong_count = sets.iter().filter(|s| s.kind == MeldKind::Kong).count() as i32;
         if kong_count > 0 {
-            push_han(
-                steps,
-                *fu,
-                han,
-                "Kong's Blessing",
-                3.0 * kong_count as f64,
-            );
+            push_han(steps, *fu, han, "Kong's Blessing", 3.0 * kong_count as f64);
         }
     }
 
@@ -465,13 +451,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .map(|id| crate::core::relic::relic_sell_price_live(id, &ctx.relic.counters))
             .sum();
         if bonus > 0 {
-            push_han(
-                steps,
-                *fu,
-                han,
-                "Curio Cabinet",
-                (bonus as f64).min(15.0),
-            );
+            push_han(steps, *fu, han, "Curio Cabinet", (bonus as f64).min(15.0));
         }
     }
 

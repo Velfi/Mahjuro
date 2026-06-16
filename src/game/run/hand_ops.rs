@@ -312,7 +312,9 @@ impl RunState {
         let lotus = self.relics.has(RelicId::LotusBloom);
         let mut drawn: Vec<Tile> = Vec::new();
         while self.hand.len() + drawn.len() < target {
-            let Some(t) = self.draw_wall_tile() else { break };
+            let Some(t) = self.draw_wall_tile() else {
+                break;
+            };
             if lotus && t.suit == Suit::Flower {
                 *self.relic_counters.entry(RelicId::LotusBloom).or_insert(0) += 1;
                 self.push_relic_activation(RelicId::LotusBloom);

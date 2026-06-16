@@ -43,8 +43,7 @@ pub mod melds {
     pub const VALID_FLOWER_CAPTION: &str = "7 · 7 · Flower";
     pub const INVALID_FLOWER_CAPTION: &str = "4 Manzu / Flower / Flower";
 
-    pub const STRUCTURE_BRIDGE: &str =
-        "Played melds sit in your structure until you Cash In.";
+    pub const STRUCTURE_BRIDGE: &str = "Played melds sit in your structure until you Cash In.";
 }
 
 // ── Scoring (Part 2 subtitle and cross-refs) ────────────────────────────────

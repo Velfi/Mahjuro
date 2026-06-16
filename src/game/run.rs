@@ -1081,9 +1081,7 @@ impl RunState {
     }
 
     pub(crate) fn draw_wall_tile(&mut self) -> Option<Tile> {
-        self.wall
-            .draw()
-            .map(|tile| self.bake_persisted_tile(tile))
+        self.wall.draw().map(|tile| self.bake_persisted_tile(tile))
     }
 
     pub(crate) fn draw_wall_tile_matching(&mut self, suit: Suit, rank: u8) -> Option<Tile> {

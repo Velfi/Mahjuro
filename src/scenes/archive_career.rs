@@ -671,23 +671,11 @@ pub fn run_detail_model(
 
     let mut score_lines = Vec::new();
     if let Some(snap) = rec.chronicle.terminal_score.as_ref() {
-        score_lines.push(format!(
-            "Base {} Fu",
-            format_score(snap.base_fu as u64)
-        ));
-        score_lines.push(format!(
-            "Yaku +{} Fu",
-            format_score(snap.yaku_fu as u64)
-        ));
-        score_lines.push(format!(
-            "Dora +{} Fu",
-            format_score(snap.dora_fu as u64)
-        ));
+        score_lines.push(format!("Base {} Fu", format_score(snap.base_fu as u64)));
+        score_lines.push(format!("Yaku +{} Fu", format_score(snap.yaku_fu as u64)));
+        score_lines.push(format!("Dora +{} Fu", format_score(snap.dora_fu as u64)));
         if snap.relic_fu > 0 {
-            score_lines.push(format!(
-                "Relics +{} Fu",
-                format_score(snap.relic_fu as u64)
-            ));
+            score_lines.push(format!("Relics +{} Fu", format_score(snap.relic_fu as u64)));
         }
         score_lines.push(format!(
             "Boss Han ×{:.2} · Season base {}",

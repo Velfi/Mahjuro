@@ -123,9 +123,7 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
             let fu = ctx.counter(RelicId::Taotie, 0).max(0);
             Some((fu / TAOTIE_FU_PER_DEVOURED).to_string())
         }
-        (RelicId::Taotie, "taotie_fu") => {
-            Some(ctx.counter(RelicId::Taotie, 0).max(0).to_string())
-        }
+        (RelicId::Taotie, "taotie_fu") => Some(ctx.counter(RelicId::Taotie, 0).max(0).to_string()),
         (RelicId::SilkThread, "silk_han_left") => {
             let thread = ctx.counter(RelicId::SilkThread, 40);
             Some(format!("{:.1}", thread as f64 / 10.0))

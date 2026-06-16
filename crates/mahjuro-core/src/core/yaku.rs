@@ -715,7 +715,13 @@ fn count_yakuhai(
     sets.iter()
         .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
         .filter(|s| {
-            is_yakuhai_meld(s, tiles, round_wind, bonus_round_wind, suppress_dragon_yakuhai)
+            is_yakuhai_meld(
+                s,
+                tiles,
+                round_wind,
+                bonus_round_wind,
+                suppress_dragon_yakuhai,
+            )
         })
         .count() as u32
 }

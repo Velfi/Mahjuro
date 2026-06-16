@@ -127,9 +127,7 @@ pub(super) fn tick_active_cascade(
                 };
                 let popup_label = match step.kind {
                     StepKind::Fu if fu_delta != 0 => Some(format!("{fu_delta:+}")),
-                    StepKind::Han if han_delta.abs() > 0.001 => {
-                        Some(format!("{han_delta:+.1}x"))
-                    }
+                    StepKind::Han if han_delta.abs() > 0.001 => Some(format!("{han_delta:+.1}x")),
                     StepKind::Yen => Some(format!("+{}", step.source.clone())),
                     StepKind::Final => Some(format!("={}", step.running_total)),
                     _ => None,

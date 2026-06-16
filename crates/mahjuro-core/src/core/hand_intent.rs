@@ -90,7 +90,10 @@ pub fn pick_best_decomposition_by_affinity(
 pub fn is_flower_only_meld(meld: &DetectedMeld, tiles: &[Tile]) -> bool {
     !meld.tile_ids.is_empty()
         && meld.tile_ids.iter().all(|&id| {
-            tiles.iter().find(|t| t.id == id).is_some_and(|t| t.is_flower())
+            tiles
+                .iter()
+                .find(|t| t.id == id)
+                .is_some_and(|t| t.is_flower())
         })
 }
 
@@ -104,7 +107,10 @@ pub fn meld_sizes_desc(sets: &[DetectedMeld]) -> Vec<usize> {
 /// Rank tuple for largest-chunk decomposition picking (≤6 tile plays).
 /// Primary: lexicographically largest descending meld sizes; then fewer
 /// flower-only melds; then fewer total melds.
-pub fn decomposition_chunk_rank(tiles: &[Tile], sets: &[DetectedMeld]) -> (Vec<usize>, usize, usize) {
+pub fn decomposition_chunk_rank(
+    tiles: &[Tile],
+    sets: &[DetectedMeld],
+) -> (Vec<usize>, usize, usize) {
     let sizes = meld_sizes_desc(sets);
     let flower_only = sets
         .iter()
@@ -332,7 +338,9 @@ mod tests {
     mod chunk_rank {
         use super::*;
         use crate::core::hand::enumerate_decompositions;
-        use crate::core::structure_notation::{format_structure_notation, parse_structure_notation};
+        use crate::core::structure_notation::{
+            format_structure_notation, parse_structure_notation,
+        };
 
         fn best_chunk_decomposition(notation: &str) -> (Vec<Tile>, Vec<DetectedMeld>) {
             let (tiles, _) = parse_structure_notation(notation).expect("notation");
@@ -404,7 +412,10 @@ mod tests {
             };
             let best = pick_best_decomposition_by_chunks(&tiles, &alts);
             assert_eq!(best.len(), 2);
-            assert!(best.iter().any(|s| s.kind == MeldKind::Triplet && !is_flower_only_meld(s, &tiles)));
+            assert!(
+                best.iter()
+                    .any(|s| s.kind == MeldKind::Triplet && !is_flower_only_meld(s, &tiles))
+            );
             assert!(
                 compare_decompositions_by_chunks(&tiles, &best, &alts[0]).is_ge(),
                 "numbered triplet + flower triplet beats flower-only alternatives when sizes tie"
@@ -415,9 +426,7 @@ mod tests {
         fn kong_beats_two_triplets_lexicographically() {
             let two_triplets = vec![triplet(0, 1, 2), triplet(3, 4, 5)];
             let kong_pair = vec![kong(0, 1, 2, 3), pair(4, 5)];
-            let tiles: Vec<Tile> = (0..6)
-                .map(|i| Tile::new(Suit::Manzu, 2, i))
-                .collect();
+            let tiles: Vec<Tile> = (0..6).map(|i| Tile::new(Suit::Manzu, 2, i)).collect();
             assert_eq!(
                 compare_decompositions_by_chunks(&tiles, &kong_pair, &two_triplets),
                 std::cmp::Ordering::Greater

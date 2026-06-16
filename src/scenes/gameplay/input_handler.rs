@@ -807,7 +807,8 @@ pub(super) fn process_focus_and_actions(
                         let d = played_chips_after.saturating_sub(played_chips_before);
                         if d > 0 {
                             let gameplay_after = GameEngine::read(ctx.run);
-                            let commit_rules_after = ctx.run.validation_rules_for_structure_commits();
+                            let commit_rules_after =
+                                ctx.run.validation_rules_for_structure_commits();
                             let remaining = structure_callout_remaining_slots(
                                 &gameplay_after.structure_tiles,
                                 &gameplay_after.structure_sets,

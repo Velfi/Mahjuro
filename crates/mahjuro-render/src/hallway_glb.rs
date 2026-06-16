@@ -944,7 +944,8 @@ mod tests {
     #[test]
     fn hallway_wallpaper_is_always_zero() {
         for run_number in 1..=32 {
-            let d = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 0xCAFE_BABE, run_number, 1);
+            let d =
+                HallwayDistortion::from_pick_chamber(ChamberKind::Big, 0xCAFE_BABE, run_number, 1);
             assert_eq!(d.wallpaper, [0.0, 0.0, 0.0, 0.0]);
         }
     }

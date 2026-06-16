@@ -35,8 +35,7 @@ mod presentation;
 mod push_steps;
 mod relic_mult_layer;
 pub use relic_mult_layer::{
-    CHAIN_REACTION_HAN, MINIMALIST_FU, MINIMALIST_HAN, OPEN_GATE_HAN,
-    TRIPLET_BOOST_HAN_PER_TRIPLET,
+    CHAIN_REACTION_HAN, MINIMALIST_FU, MINIMALIST_HAN, OPEN_GATE_HAN, TRIPLET_BOOST_HAN_PER_TRIPLET,
 };
 mod tea_bonus;
 #[cfg(test)]

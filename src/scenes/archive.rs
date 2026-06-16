@@ -1446,12 +1446,15 @@ impl SceneBehavior for ArchiveScene {
             match a {
                 UiAction::Cancel | UiAction::Pause | UiAction::CommitDiscard => {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                    maybe_bump_chronicle_on_exit(
+                    if let Some(intent) = archive_back_or_exit(
                         self,
                         ctx.progress,
+                        chronicle_last_seen,
+                        ctx.bus,
                         ctx.bump_archive_chronicle_seen,
-                    );
-                    return Some(SceneIntent::MainMenu);
+                    ) {
+                        return Some(intent);
+                    }
                 }
                 UiAction::TabNext => {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -1666,12 +1669,15 @@ impl SceneBehavior for ArchiveScene {
                         match chrome {
                             CollectionAction::Back => {
                                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                                maybe_bump_chronicle_on_exit(
+                                if let Some(intent) = archive_back_or_exit(
                                     self,
                                     ctx.progress,
+                                    chronicle_last_seen,
+                                    ctx.bus,
                                     ctx.bump_archive_chronicle_seen,
-                                );
-                                return Some(SceneIntent::MainMenu);
+                                ) {
+                                    return Some(intent);
+                                }
                             }
                             CollectionAction::SwitchSave => {
                                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -1756,8 +1762,15 @@ impl SceneBehavior for ArchiveScene {
         match action {
             Some(CollectionAction::Back) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                maybe_bump_chronicle_on_exit(self, ctx.progress, ctx.bump_archive_chronicle_seen);
-                return Some(SceneIntent::MainMenu);
+                if let Some(intent) = archive_back_or_exit(
+                    self,
+                    ctx.progress,
+                    chronicle_last_seen,
+                    ctx.bus,
+                    ctx.bump_archive_chronicle_seen,
+                ) {
+                    return Some(intent);
+                }
             }
             Some(CollectionAction::SwitchSave) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -2149,6 +2162,22 @@ fn maybe_bump_chronicle_on_exit(
 ) {
     if scene.visited_chronicle {
         *bump = Some(progress.run_history.len() as u32);
+    }
+}
+
+fn archive_back_or_exit(
+    scene: &mut ArchiveScene,
+    progress: &crate::core::progression::PlayerProgress,
+    chronicle_last_seen: u32,
+    bus: &mut crate::game::event_bus::EventBus,
+    bump: &mut Option<u32>,
+) -> Option<SceneIntent> {
+    if matches!(scene.active_tab, Tab::Chronicle) {
+        enter_tab(scene, Tab::Relics, progress, chronicle_last_seen, bus);
+        None
+    } else {
+        maybe_bump_chronicle_on_exit(scene, progress, bump);
+        Some(SceneIntent::MainMenu)
     }
 }
 
@@ -3512,6 +3541,33 @@ mod tests {
         assert!(
             collection_chrome_nav_pick(&items, &chrome, chronicle_action, FocusDir::Left).is_some(),
             "Left from Chronicle should reach some chrome neighbour"
+        );
+    }
+
+    #[test]
+    fn archive_back_from_chronicle_returns_to_relics() {
+        use crate::core::progression::PlayerProgress;
+
+        let progress = PlayerProgress::default();
+        let mut bus = crate::game::event_bus::EventBus::default();
+        let mut bump = None;
+        let mut scene = ArchiveScene::with_active_tab(Tab::Chronicle);
+        scene.visited_chronicle = true;
+
+        assert_eq!(
+            archive_back_or_exit(&mut scene, &progress, 0, &mut bus, &mut bump),
+            None
+        );
+        assert_eq!(scene.active_tab, Tab::Relics);
+        assert!(
+            scene.visited_chronicle,
+            "Chronicle visit should still persist when Archive is exited later"
+        );
+        assert_eq!(bump, None);
+
+        assert_eq!(
+            archive_back_or_exit(&mut scene, &progress, 0, &mut bus, &mut bump),
+            Some(SceneIntent::MainMenu)
         );
     }
 }

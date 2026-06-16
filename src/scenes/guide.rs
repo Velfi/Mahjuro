@@ -4001,14 +4001,8 @@ pub(crate) fn draw_tutorial_scoring_diagram(
         pad,
         flow_tile_max,
     );
-    let glb_cash_in = push_gameplay_cash_in_overlay(
-        frame,
-        ctx,
-        w,
-        h,
-        cash_in_visual,
-        scene_keys::GAMEPLAY,
-    );
+    let glb_cash_in =
+        push_gameplay_cash_in_overlay(frame, ctx, w, h, cash_in_visual, scene_keys::GAMEPLAY);
     let flow_content = scoring_panel_open(
         frame,
         flow_outer,
