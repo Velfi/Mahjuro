@@ -1306,6 +1306,7 @@ impl StairwayScene {
         frame.clear_scene_depth();
         frame.camera_override_after_depth_clear = Some(camera_params(h));
         frame.scene_lighting_after_depth_clear = Some(SceneLighting::showcase_tile_picker(w, h));
+        frame.showcase_render_hints.doc_tile_no_shadow = true;
 
         let title_font = typography::size(typography::H20, h);
         let body_font = typography::size(typography::H42, h);
@@ -1528,6 +1529,7 @@ impl StairwayScene {
         frame.clear_scene_depth();
         frame.camera_override_after_depth_clear = Some(camera_params(h));
         frame.scene_lighting_after_depth_clear = Some(SceneLighting::showcase_tile_picker(w, h));
+        frame.showcase_render_hints.doc_tile_no_shadow = true;
 
         let tiles_bottom = layout
             .placements
