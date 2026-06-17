@@ -445,12 +445,12 @@ impl WgpuRenderer {
                         DrawKind::Orb => (&self.orb_mesh, self.orb_instances.get(slot_i)),
                         DrawKind::Bowl => (&self.bowl_mesh, self.bowl_instances.get(slot_i)),
                         DrawKind::Mirror => (&self.mirror_mesh, self.mirror_instances.get(slot_i)),
-                        DrawKind::TallyStickBase => (
-                            &self.tally_stick_base_mesh,
+                        DrawKind::TallyStickPlay => (
+                            &self.tally_stick_play_mesh,
                             self.tally_stick_instances.get(slot_i),
                         ),
-                        DrawKind::TallyStickTip => (
-                            &self.tally_stick_tip_mesh,
+                        DrawKind::TallyStickDiscard => (
+                            &self.tally_stick_discard_mesh,
                             self.tally_stick_instances.get(slot_i),
                         ),
                         DrawKind::Primitive(mid) => {

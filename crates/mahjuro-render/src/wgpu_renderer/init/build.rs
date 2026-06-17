@@ -836,10 +836,32 @@ pub(super) fn build_renderer_new(
     // this swap to a single mesh substitution; renaming is a follow-up.
     let bowl_mesh = LitMeshGpu::new(&device, &build_river_mesh(), "river");
     let mirror_mesh = LitMeshGpu::new(&device, &build_mirror_mesh(), "mirror");
-    let tally_stick_base_mesh =
-        LitMeshGpu::new(&device, &build_tally_stick_base_mesh(), "tally-stick-base");
-    let tally_stick_tip_mesh =
-        LitMeshGpu::new(&device, &build_tally_stick_tip_mesh(), "tally-stick-tip");
+    let tally_stick_play_mesh = LitMeshGpu::new(
+        &device,
+        &load_tally_stick_glb_mesh(
+            PLAY_TALLY_STICK_GLB_PATH,
+            MaterialParams {
+                kind: MaterialKind::Plain,
+                base_color: [1.0, 1.0, 1.0, 1.0],
+                specular_strength: 0.30,
+                specular_power: 32.0,
+            },
+        ),
+        "tally-stick-play",
+    );
+    let tally_stick_discard_mesh = LitMeshGpu::new(
+        &device,
+        &load_tally_stick_glb_mesh(
+            DISCARD_TALLY_STICK_GLB_PATH,
+            MaterialParams {
+                kind: MaterialKind::Plain,
+                base_color: [1.0, 1.0, 1.0, 1.0],
+                specular_strength: 0.30,
+                specular_power: 32.0,
+            },
+        ),
+        "tally-stick-discard",
+    );
     // Shared 1×1 white texture for procedural meshes that don't sample.
     let (_lit_mesh_white_tex, lit_mesh_white_view) = white_albedo(&device, &queue);
     let coin_glb_primitives = {
@@ -1281,8 +1303,8 @@ pub(super) fn build_renderer_new(
         book_cover_mesh,
         bowl_mesh,
         mirror_mesh,
-        tally_stick_base_mesh,
-        tally_stick_tip_mesh,
+        tally_stick_play_mesh,
+        tally_stick_discard_mesh,
         yaku_tablet_instances,
         wood_tablet_instances,
         book_instances,

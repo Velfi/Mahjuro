@@ -355,7 +355,7 @@ impl WgpuRenderer {
             super::DrawKind::Orb => rewrite!(self.orb_instances),
             super::DrawKind::Bowl => rewrite!(self.bowl_instances),
             super::DrawKind::Mirror => rewrite!(self.mirror_instances),
-            super::DrawKind::TallyStickBase | super::DrawKind::TallyStickTip => {
+            super::DrawKind::TallyStickPlay | super::DrawKind::TallyStickDiscard => {
                 rewrite!(self.tally_stick_instances)
             }
             super::DrawKind::ExtrudedGlyph => rewrite!(self.extruded_glyph_instances),

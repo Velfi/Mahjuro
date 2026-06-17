@@ -396,17 +396,17 @@ impl WgpuRenderer {
                 };
                 self.draw_lit_mesh_shadow(pass, &self.mirror_mesh, inst);
             }
-            DrawKind::TallyStickBase => {
+            DrawKind::TallyStickPlay => {
                 let Some(inst) = self.tally_stick_instances.get(slot_i) else {
                     return;
                 };
-                self.draw_lit_mesh_shadow(pass, &self.tally_stick_base_mesh, inst);
+                self.draw_lit_mesh_shadow(pass, &self.tally_stick_play_mesh, inst);
             }
-            DrawKind::TallyStickTip => {
+            DrawKind::TallyStickDiscard => {
                 let Some(inst) = self.tally_stick_instances.get(slot_i) else {
                     return;
                 };
-                self.draw_lit_mesh_shadow(pass, &self.tally_stick_tip_mesh, inst);
+                self.draw_lit_mesh_shadow(pass, &self.tally_stick_discard_mesh, inst);
             }
             DrawKind::ExtrudedGlyph => {
                 let label: Option<&str> = frame

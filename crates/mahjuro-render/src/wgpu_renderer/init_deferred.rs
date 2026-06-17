@@ -80,7 +80,7 @@ impl WgpuRenderer {
                 )
             })
             .collect();
-        self.tally_stick_instances = self.make_lit_instance_pool(MAX_TALLY_STICK_SLOTS * 2);
+        self.tally_stick_instances = self.make_lit_instance_pool(MAX_TALLY_STICK_SLOTS);
         self.wall_tile_instances = self.make_lit_instance_pool(MAX_WALL_TILE_SLOTS);
         self.extruded_glyph_instances = self.make_lit_instance_pool(MAX_EXTRUDED_GLYPH_SLOTS);
         self.gameplay_hud_pools_ready = true;

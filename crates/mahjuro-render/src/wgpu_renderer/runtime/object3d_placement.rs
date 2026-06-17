@@ -1393,8 +1393,8 @@ impl WgpuRenderer {
                             count,
                             max_count,
                             spread_deg,
-                            base_color,
-                            tip_color,
+                            base_color: _base_color,
+                            tip_color: _tip_color,
                             rotation_y_deg,
                             placement_rot_deg,
                             kind: fan_kind,
@@ -1421,19 +1421,14 @@ impl WgpuRenderer {
                             let fan_yaw = Mat4::from_rotation_z(rotation_y_deg.to_radians());
                             let base_scale =
                                 glam::Vec3::new(*stick_wide, *stick_len, *stick_thickness);
-                            let base_material = MaterialParams {
-                                kind: MaterialKind::Plain,
-                                base_color: *base_color,
-                                specular_strength: 0.30,
-                                specular_power: 32.0,
-                            };
-                            let tip_material = MaterialParams {
-                                kind: MaterialKind::Polychrome,
-                                base_color: *tip_color,
-                                specular_strength: 0.85,
-                                // Talisman profile (~32): scene-lit rainbow, no score-glyph
-                                // emissive floor that blows out under table candles.
-                                specular_power: 32.0,
+                            let (draw_kind, material) = match fan_kind {
+                                TallyFanKind::Draws => {
+                                    (DrawKind::TallyStickPlay, self.tally_stick_play_mesh.default_material)
+                                }
+                                TallyFanKind::Discards => (
+                                    DrawKind::TallyStickDiscard,
+                                    self.tally_stick_discard_mesh.default_material,
+                                ),
                             };
                             let missing = (max_c as usize).saturating_sub(count_usize);
                             let mut visible_slots: Vec<u32> = (0..max_c).collect();
@@ -1445,7 +1440,7 @@ impl WgpuRenderer {
                                 }
                             }
                             for &k in visible_slots.iter() {
-                                if obj3d_tally_stick_cursor + 1 >= MAX_TALLY_STICK_SLOTS * 2 {
+                                if obj3d_tally_stick_cursor >= MAX_TALLY_STICK_SLOTS {
                                     break;
                                 }
                                 let angle = slot_angle(k);
@@ -1458,35 +1453,21 @@ impl WgpuRenderer {
                                     &self.queue,
                                     view_proj_arr,
                                     model,
-                                    base_material,
+                                    material,
                                 );
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.tally_stick_instances[obj3d_tally_stick_cursor],
                                     model,
-                                    base_material.kind,
-                                );
-                                self.tally_stick_instances[obj3d_tally_stick_cursor + 1]
-                                    .write_uniform(&self.queue, view_proj_arr, model, tip_material);
-                                self.write_lit_mesh_shadow(
-                                    &mut shadow,
-                                    &self.tally_stick_instances[obj3d_tally_stick_cursor + 1],
-                                    model,
-                                    tip_material.kind,
+                                    material.kind,
                                 );
                                 self.push_object3d_draw(
                                     object3d_draw_list,
                                     object3d_shadow_draw_list,
-                                    DrawKind::TallyStickBase,
+                                    draw_kind,
                                     obj3d_tally_stick_cursor,
                                 );
-                                self.push_object3d_draw(
-                                    object3d_draw_list,
-                                    object3d_shadow_draw_list,
-                                    DrawKind::TallyStickTip,
-                                    obj3d_tally_stick_cursor + 1,
-                                );
-                                obj3d_tally_stick_cursor += 2;
+                                obj3d_tally_stick_cursor += 1;
                             }
                             let fan_width =
                                 *stick_len * (spread_rad * 0.5).sin() * 2.0 + *stick_wide;
