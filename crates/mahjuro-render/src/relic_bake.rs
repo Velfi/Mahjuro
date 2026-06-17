@@ -59,113 +59,27 @@ pub fn all_relic_bakes_available() -> bool {
     all_relic_defs().iter().all(|d| baked_relic_available(d.id))
 }
 
-pub fn mip_chain_count(mut w: u32, mut h: u32) -> u32 {
-    let mut count = 0u32;
-    while w > 0 && h > 0 {
-        count += 1;
-        if w == 1 && h == 1 {
-            break;
-        }
-        w = (w / 2).max(1);
-        h = (h / 2).max(1);
-    }
-    count.max(1)
-}
-
-/// Pad RGBA to BC7 block dimensions (transparent pixels on the right/bottom).
-#[cfg(feature = "relic_bc7_bake")]
-fn pad_rgba_to_bc7_blocks(rgba: &[u8], width: u32, height: u32) -> (Vec<u8>, u32, u32) {
-    use crate::relic_gpu_residency::{align_bc7_base_dim, bc7_upload_chain_valid};
-
-    let aligned_w = align_bc7_base_dim(width);
-    let aligned_h = align_bc7_base_dim(height);
-    if aligned_w == width
-        && aligned_h == height
-        && bc7_upload_chain_valid(width, height, mip_chain_count(width, height))
-    {
-        return (rgba.to_vec(), width, height);
-    }
-    let mut out = vec![0u8; (aligned_w as usize) * (aligned_h as usize) * 4];
-    for y in 0..height.min(aligned_h) {
-        let src = (y * width * 4) as usize;
-        let dst = (y * aligned_w * 4) as usize;
-        let row = (width * 4) as usize;
-        out[dst..dst + row].copy_from_slice(&rgba[src..src + row]);
-    }
-    (out, aligned_w, aligned_h)
-}
-
-#[cfg(feature = "relic_bc7_bake")]
-fn rgba_mip_chain_bc7(rgba: &[u8], width: u32, height: u32) -> Vec<(Vec<u8>, u32, u32)> {
-    let mut chain = Vec::new();
-    let mut w = width.max(1);
-    let mut h = height.max(1);
-    let mut level = rgba.to_vec();
-    loop {
-        chain.push((level.clone(), w, h));
-        if w <= 4 && h <= 4 {
-            break;
-        }
-        let img = image::RgbaImage::from_raw(w, h, level).expect("relic mip rgba");
-        w = (w / 2).max(4);
-        h = (h / 2).max(4);
-        level =
-            image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle).into_raw();
-    }
-    chain
-}
-
-#[cfg(feature = "relic_bc7_bake")]
 fn encode_bc7_mip_chain(
     rgba: &[u8],
     width: u32,
     height: u32,
     srgb: bool,
 ) -> anyhow::Result<(Vec<u8>, u32, u32, u32, Vec<u8>, u32, u32)> {
-    use intel_tex_2::{RgbaSurface, bc7};
-
-    let (bc7_rgba, bc7_w, bc7_h) = pad_rgba_to_bc7_blocks(rgba, width, height);
-    let chain = rgba_mip_chain_bc7(&bc7_rgba, bc7_w, bc7_h);
-    let mip_count = chain.len() as u32;
-    let (base_w, base_h) = (bc7_w, bc7_h);
-    let settings = if srgb {
-        bc7::opaque_fast_settings()
+    let color = if srgb {
+        crate::baked_texture::BakedTextureColor::Srgb
     } else {
-        bc7::alpha_fast_settings()
+        crate::baked_texture::BakedTextureColor::Linear
     };
-
-    let mut bc7_out = Vec::new();
-    for (level_rgba, lw, lh) in &chain {
-        let stride = lw * 4;
-        let surface = RgbaSurface {
-            data: level_rgba,
-            width: *lw,
-            height: *lh,
-            stride,
-        };
-        let level_bytes = bc7::compress_blocks(&settings, &surface);
-        bc7_out.extend_from_slice(&level_bytes);
-    }
-
+    let payload = crate::baked_texture::encode_rgba_bc7_mip_chain(rgba, width, height, color)?;
     Ok((
-        bc7_out,
-        base_w,
-        base_h,
-        mip_count,
+        payload.bc7_bytes,
+        payload.base_width,
+        payload.base_height,
+        payload.mip_count,
         rgba.to_vec(),
         width,
         height,
     ))
-}
-
-#[cfg(not(feature = "relic_bc7_bake"))]
-fn encode_bc7_mip_chain(
-    rgba: &[u8],
-    width: u32,
-    height: u32,
-    _srgb: bool,
-) -> anyhow::Result<(Vec<u8>, u32, u32, u32, Vec<u8>, u32, u32)> {
-    Ok((Vec::new(), width, height, 1, rgba.to_vec(), width, height))
 }
 
 /// Validate the structure of a baked relic blob without materializing pixel/mesh Vecs.

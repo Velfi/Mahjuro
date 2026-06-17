@@ -52,6 +52,8 @@ mod room_gpu_bake;
 mod room_shadow_bake;
 #[path = "build/showcase_decal_bake.rs"]
 mod showcase_decal_bake;
+#[path = "build/texture_bake.rs"]
+mod texture_bake;
 
 use std::env;
 use std::fs;
@@ -87,6 +89,7 @@ fn main() {
     room_gpu_bake::emit_rerun_if_changed();
     showcase_decal_bake::emit_rerun_if_changed();
     relic_bake::emit_rerun_if_changed();
+    texture_bake::emit_rerun_if_changed();
 
     if let Some(out_dir) = env::var_os("OUT_DIR").map(PathBuf::from)
         && let Some(profile_dir) = profile_dir(&out_dir)

@@ -14,7 +14,8 @@
 #   room         lightmap GI + shadow
 #   decal        showcase atlases
 #   relic        relic RLC2
-#   all          room + decal + relic
+#   texture      generic BTX1 static texture bakes
+#   all          room + decal + relic + texture
 #
 # Examples:
 #   scripts/rebake-offline.sh
@@ -39,6 +40,7 @@ want_gi=0
 want_shadow=0
 want_decal=0
 want_relic=0
+want_texture=0
 
 for kind in "${kinds[@]}"; do
     case "$kind" in
@@ -47,6 +49,7 @@ for kind in "${kinds[@]}"; do
             want_shadow=1
             want_decal=1
             want_relic=1
+            want_texture=1
             ;;
         room)
             want_gi=1
@@ -56,8 +59,9 @@ for kind in "${kinds[@]}"; do
         shadow) want_shadow=1 ;;
         decal) want_decal=1 ;;
         relic) want_relic=1 ;;
+        texture|textures) want_texture=1 ;;
         *)
-            echo "unknown kind: $kind (use lightmap, shadow, room, decal, relic, or all)" >&2
+            echo "unknown kind: $kind (use lightmap, shadow, room, decal, relic, texture, or all)" >&2
             exit 1
             ;;
     esac
@@ -82,6 +86,11 @@ fi
 if [[ "$want_relic" -eq 1 ]]; then
     echo "==> relic RLC2 bakes"
     cargo run --release -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake
+fi
+
+if [[ "$want_texture" -eq 1 ]]; then
+    echo "==> generic BTX1 texture bakes"
+    cargo run --release -p mahjuro-render --bin mahjuro-bake-textures --features texture_bc7_bake
 fi
 
 echo "==> verifying stamps (cargo build --release --locked)"

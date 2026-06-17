@@ -123,6 +123,15 @@ fn should_skip_pack_input(rel: &str) -> bool {
     if rel.starts_with("textures/relics/") {
         return true;
     }
+    // Source texture PNGs — runtime loads BTX1 under data/texture_baked/.
+    if rel.starts_with("textures/")
+        && Path::new(&rel)
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+    {
+        return true;
+    }
     false
 }
 

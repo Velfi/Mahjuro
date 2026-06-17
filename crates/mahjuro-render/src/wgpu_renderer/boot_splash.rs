@@ -35,70 +35,19 @@ fn boot_meta() -> &'static BootLoadingMeta {
     })
 }
 
-fn boot_png_bytes() -> &'static [u8] {
-    static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
-    BYTES
-        .get_or_init(|| {
-            mahjuro_assets::asset_path::get("textures/boot_loading_msdf.png")
-                .expect("boot_loading_msdf.png missing; run scripts/bake_boot_loading_msdf.py")
-                .data
-                .to_vec()
-        })
-        .as_slice()
-}
-
-fn logo_png_bytes() -> &'static [u8] {
-    static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
-    BYTES
-        .get_or_init(|| {
-            mahjuro_assets::asset_path::get(loading_screen::LOADING_LOGO_ASSET)
-                .expect("zelda_built_this.png missing")
-                .data
-                .to_vec()
-        })
-        .as_slice()
-}
-
-fn upload_rgba_texture(
+fn upload_boot_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     label: &str,
-    png: &[u8],
+    asset_path: &str,
 ) -> anyhow::Result<wgpu::Texture> {
-    let img = image::load_from_memory(png)?.to_rgba8();
-    let (tw, th) = img.dimensions();
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
-        size: wgpu::Extent3d {
-            width: tw.max(1),
-            height: th.max(1),
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &img,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(4 * tw),
-            rows_per_image: Some(th),
-        },
-        wgpu::Extent3d {
-            width: tw,
-            height: th,
-            depth_or_array_layers: 1,
-        },
+    let payload = crate::baked_texture::load_baked_texture(asset_path)?;
+    let (texture, _view, _bytes) = crate::baked_texture::upload_payload(
+        device,
+        queue,
+        label,
+        &payload,
+        crate::baked_texture::bc7_supported(device),
     );
     Ok(texture)
 }
@@ -111,6 +60,8 @@ pub struct BootSplash<'a> {
     pipeline: wgpu::RenderPipeline,
     globals_bind_group: wgpu::BindGroup,
     atlas_bind_group: wgpu::BindGroup,
+    _msdf_texture: wgpu::Texture,
+    _logo_texture: wgpu::Texture,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     instance_buffer: wgpu::Buffer,
@@ -128,10 +79,18 @@ impl<'a> BootSplash<'a> {
         screen_h: u32,
     ) -> anyhow::Result<Self> {
         let meta = boot_meta();
-        let msdf_texture =
-            upload_rgba_texture(device, queue, "boot-loading-msdf", boot_png_bytes())?;
-        let logo_texture =
-            upload_rgba_texture(device, queue, "boot-loading-logo", logo_png_bytes())?;
+        let msdf_texture = upload_boot_texture(
+            device,
+            queue,
+            "boot-loading-msdf",
+            "textures/boot_loading_msdf.png",
+        )?;
+        let logo_texture = upload_boot_texture(
+            device,
+            queue,
+            "boot-loading-logo",
+            loading_screen::LOADING_LOGO_ASSET,
+        )?;
         let msdf_view = msdf_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let logo_view = logo_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let globals_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -299,6 +258,8 @@ impl<'a> BootSplash<'a> {
             pipeline,
             globals_bind_group,
             atlas_bind_group,
+            _msdf_texture: msdf_texture,
+            _logo_texture: logo_texture,
             vertex_buffer,
             index_buffer,
             instance_buffer,

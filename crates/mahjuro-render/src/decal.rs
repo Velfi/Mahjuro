@@ -157,6 +157,15 @@ struct AtlasCacheState {
     negative: FxHashSet<String>,
 }
 
+enum AtlasImageSource {
+    EncodedPng(Vec<u8>),
+    Rgba {
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+}
+
 fn atlas_cache_state() -> &'static Mutex<AtlasCacheState> {
     static CACHE: OnceLock<Mutex<AtlasCacheState>> = OnceLock::new();
     CACHE.get_or_init(|| {
@@ -197,31 +206,47 @@ fn load_atlas(tile_set: &str) -> Option<std::sync::Arc<Atlas>> {
     result
 }
 
-fn atlas_source_bytes(tile_set: &str) -> Option<(Vec<u8>, Vec<u8>)> {
+fn atlas_source(tile_set: &str) -> Option<(Vec<u8>, AtlasImageSource)> {
     if mahjuro_assets::tileset_mod::is_player_tileset(tile_set) {
         let toml = mahjuro_assets::tileset_mod::read_player_tileset_file(tile_set, "atlas.toml")?;
         let png = mahjuro_assets::tileset_mod::read_player_tileset_file(tile_set, "atlas.png")?;
-        return Some((toml, png));
+        return Some((toml, AtlasImageSource::EncodedPng(png)));
     }
     let toml_path = format!("textures/tile_sets/{tile_set}/atlas.toml");
     let png_path = format!("textures/tile_sets/{tile_set}/atlas.png");
     let toml_file = mahjuro_assets::asset_path::get(&toml_path)?;
-    let png_file = mahjuro_assets::asset_path::get(&png_path)?;
-    Some((toml_file.data, png_file.data))
+    let (rgba, width, height) = crate::baked_texture::load_rgba_for_cpu(&png_path).ok()?;
+    Some((
+        toml_file.data,
+        AtlasImageSource::Rgba {
+            rgba,
+            width,
+            height,
+        },
+    ))
 }
 
 fn decode_atlas(tile_set: &str) -> Option<Atlas> {
-    let (toml_bytes, png_bytes) = atlas_source_bytes(tile_set)?;
+    let (toml_bytes, image_source) = atlas_source(tile_set)?;
     let toml_src = std::str::from_utf8(&toml_bytes).ok()?;
     let (tile_w, tile_h, columns, layout) = mahjuro_assets::atlas_toml::parse_atlas_toml(toml_src)?;
     if tile_w == 0 || tile_h == 0 || columns == 0 {
         return None;
     }
 
-    let decoder = image::ImageReader::new(std::io::Cursor::new(png_bytes.as_slice()))
-        .with_guessed_format()
-        .ok()?;
-    let mut img = decoder.decode().ok()?.to_rgba8();
+    let mut img = match image_source {
+        AtlasImageSource::EncodedPng(png_bytes) => {
+            let decoder = image::ImageReader::new(std::io::Cursor::new(png_bytes.as_slice()))
+                .with_guessed_format()
+                .ok()?;
+            decoder.decode().ok()?.to_rgba8()
+        }
+        AtlasImageSource::Rgba {
+            rgba,
+            width,
+            height,
+        } => image::RgbaImage::from_raw(width, height, rgba)?,
+    };
     let mode = active_decal_graphics_mode();
     let max_side = mode.decal_atlas_max_decode_side();
     let (orig_w, orig_h) = img.dimensions();
@@ -507,26 +532,17 @@ fn blit_flower_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, rank: u8) {
         _ => return,
     };
     let path = format!("textures/flower_{rank}_{name}.png");
-    let Some(file) = mahjuro_assets::asset_path::get(&path) else {
+    let Ok((rgba, width, height)) = crate::baked_texture::load_rgba_for_cpu(&path) else {
         // Asset not generated yet — fall back to a tinted placeholder.
         log::debug!("flower decal not found: {path}; using fallback");
         blit_flower_fallback(dst, dst_w, dst_h, rank);
         return;
     };
-
-    // Decode PNG and alpha-blend onto the destination buffer.
-    let Ok(decoder) =
-        image::ImageReader::new(std::io::Cursor::new(file.data.as_slice())).with_guessed_format()
-    else {
+    let Some(img) = image::RgbaImage::from_raw(width, height, rgba) else {
         blit_flower_fallback(dst, dst_w, dst_h, rank);
         return;
     };
-    let Ok(img) = decoder.decode() else {
-        blit_flower_fallback(dst, dst_w, dst_h, rank);
-        return;
-    };
-    let img = img.resize_exact(dst_w, dst_h, image::imageops::FilterType::Lanczos3);
-    let img = img.to_rgba8();
+    let img = image::imageops::resize(&img, dst_w, dst_h, image::imageops::FilterType::Lanczos3);
 
     for (i, src_px) in img.pixels().enumerate() {
         let di = i * 4;

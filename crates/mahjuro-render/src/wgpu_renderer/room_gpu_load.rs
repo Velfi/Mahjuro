@@ -466,10 +466,19 @@ fn upload_room_texture_slot(
     fallback: &wgpu::TextureView,
 ) -> wgpu::TextureView {
     let hint = room_texture_dedupe_hint(env_prim, usage, mips);
+    let baked_source_path = match usage {
+        RoomTextureUsageClass::BaseColorSrgb => env_prim.mesh.albedo_btx_source_path.as_deref(),
+        RoomTextureUsageClass::NormalLinear => env_prim.mesh.normal_btx_source_path.as_deref(),
+        RoomTextureUsageClass::MetallicRoughnessLinear => {
+            env_prim.mesh.metallic_roughness_btx_source_path.as_deref()
+        }
+        RoomTextureUsageClass::EmissiveSrgb => env_prim.mesh.emissive_btx_source_path.as_deref(),
+    };
     room_tex_cache.upload_slot_with_hint(
         ctx.device,
         ctx.queue,
         label,
+        baked_source_path,
         rgba,
         mip_chain,
         format,

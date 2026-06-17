@@ -85,6 +85,35 @@ pub(super) fn make_image_quad_overlay_gpu(
     sampler: &wgpu::Sampler,
     source: &crate::draw_cmd::ImageQuadSource,
 ) -> Option<TileFaceOverlayGpu> {
+    if let crate::draw_cmd::ImageQuadSource::Asset { path } = source {
+        let payload = crate::baked_texture::load_baked_texture(path).ok()?;
+        let (texture, view, _) = crate::baked_texture::upload_payload(
+            device,
+            queue,
+            "image-quad",
+            &payload,
+            crate::baked_texture::bc7_supported(device),
+        );
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("image-quad-bg"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+        return Some(TileFaceOverlayGpu {
+            _texture: texture,
+            bind_group,
+        });
+    }
+
     let (rgba, w, h) = match source {
         crate::draw_cmd::ImageQuadSource::AtlasSprite { sheet, name } => {
             crate::kenney_atlas::extract_sprite_rgba(sheet, name)?
@@ -92,14 +121,7 @@ pub(super) fn make_image_quad_overlay_gpu(
         crate::draw_cmd::ImageQuadSource::PackedAtlas { sheet, name } => {
             crate::temptation_atlas::extract_sprite_rgba(sheet, name)?
         }
-        crate::draw_cmd::ImageQuadSource::Asset { path } => {
-            let file = mahjuro_assets::asset_path::get(path)?;
-            let img = image::load_from_memory(&file.data).ok()?;
-            let rgba = img.to_rgba8();
-            let w = rgba.width();
-            let h = rgba.height();
-            (rgba.into_raw(), w, h)
-        }
+        crate::draw_cmd::ImageQuadSource::Asset { .. } => return None,
         crate::draw_cmd::ImageQuadSource::Relic(id) => {
             crate::relic_pipeline::decode_relic_icon_rgba(*id)?
         }
