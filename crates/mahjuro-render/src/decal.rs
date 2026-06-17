@@ -3135,8 +3135,8 @@ mod atlas_parser_tests {
         // of 9, and the atlas crop would pull the wrong cell.
         let src = r#"
 image = "atlas.png"
-tile_width = 256
-tile_height = 384
+tile_width = 512
+tile_height = 768
 columns = 9
 
 layout = [
@@ -3145,7 +3145,7 @@ layout = [
 ]
 "#;
         let (tw, th, cols, layout) = parse_atlas_toml(src).unwrap();
-        assert_eq!((tw, th, cols), (256, 384, 9));
+        assert_eq!((tw, th, cols), (512, 768, 9));
         assert_eq!(layout.len(), 11);
         assert_eq!(layout[6], "DWhite");
         assert_eq!(layout[7], "");

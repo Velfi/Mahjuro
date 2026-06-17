@@ -60,8 +60,8 @@ except ImportError:
 # Atlas geometry — matches scripts/pack_atlas.py and the loader in decal.rs
 # ---------------------------------------------------------------------------
 
-TILE_W = 256
-TILE_H = 384
+TILE_W = 512
+TILE_H = 768
 COLUMNS = 9
 
 # One suit per row — the model's grid reasoning is much better when it can
@@ -75,8 +75,8 @@ LAYOUT = [
     "Season1", "Season2", "Season3", "Season4", "",
 ]
 
-ATLAS_W = TILE_W * COLUMNS                            # 2304
-ATLAS_H = TILE_H * ((len(LAYOUT) + COLUMNS - 1) // COLUMNS)  # 1920
+ATLAS_W = TILE_W * COLUMNS                            # 4608
+ATLAS_H = TILE_H * ((len(LAYOUT) + COLUMNS - 1) // COLUMNS)  # 3840
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SETS_DIR = REPO_ROOT / "assets" / "textures" / "tile_sets"
