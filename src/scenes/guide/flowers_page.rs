@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+
 use crate::core::hand::{MeldKind, validate_selection};
 use crate::core::memorial_talisman::MemorialTalismanKind;
 use crate::core::progression::PlayerProgress;
@@ -27,9 +28,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -60,8 +59,8 @@ use super::example_grid::{
     layout_guide_example_grid, push_tile_group_labels, push_tiles_example_labels,
     push_tiles_example_panels,
 };
-use super::page_panels::{push_guide_left_panels, GuideExampleCellLayout};
 use super::layout::GuideLayout;
+use super::page_panels::{GuideExampleCellLayout, push_guide_left_panels};
 use super::yaku_intro_page::{FLOWERS_EXAMPLE_ROWS, FLOWERS_ROW_WEIGHTS};
 use super::{PAGE_FLOWERS, TileGroup};
 pub(super) fn draw_flowers_page(
@@ -294,4 +293,3 @@ pub(super) fn push_melds_left_cards(
         &sections,
     );
 }
-

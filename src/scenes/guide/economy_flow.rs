@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -55,13 +53,13 @@ use crate::scenes::{BackgroundId, DrawCtx};
 
 use glam::{Mat4, Quat, Vec3};
 
+use super::GuideLayout;
 use super::economy::{
-    draw_dot_leader_row, draw_earning_note_row, draw_economy_panel_header, economy_card_body_font,
-    economy_measure_text_width, push_economy_item_example, ECONOMY_ICON_COL_FRAC,
-    ECONOMY_ITEM_COLS, ECONOMY_ITEM_EXAMPLES, ECONOMY_ITEM_ROWS, EconomyItemExample,
+    ECONOMY_ICON_COL_FRAC, ECONOMY_ITEM_COLS, ECONOMY_ITEM_EXAMPLES, ECONOMY_ITEM_ROWS,
+    EconomyItemExample, draw_dot_leader_row, draw_earning_note_row, draw_economy_panel_header,
+    economy_card_body_font, economy_measure_text_width, push_economy_item_example,
 };
 use super::layout::push_guide_panel_stroke;
-use super::GuideLayout;
 
 pub(super) fn economy_flow_block_inner_pad(pad: f32) -> f32 {
     pad * 0.85
@@ -298,7 +296,12 @@ pub(super) fn economy_flow_panel_width(full_w: f32, panel_gap: f32, ring_w: f32)
     (ring_w + chrome_w).clamp(min_w, max_w)
 }
 
-pub(super) fn push_economy_flow_ring_arrow(frame: &mut UiFrame, rect: [f32; 4], glyph: &str, font: f32) {
+pub(super) fn push_economy_flow_ring_arrow(
+    frame: &mut UiFrame,
+    rect: [f32; 4],
+    glyph: &str,
+    font: f32,
+) {
     let [x, y, w, h] = rect;
     let side = font * 1.05;
     let cx = x + w * 0.5;
@@ -427,4 +430,3 @@ pub(super) fn draw_skip_steps_column(
         });
     }
 }
-

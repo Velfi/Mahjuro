@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -55,15 +53,14 @@ use crate::scenes::{BackgroundId, DrawCtx};
 
 use glam::{Mat4, Quat, Vec3};
 
+use super::GuideLayout;
 use super::economy::{
-    draw_dot_leader_row, draw_earning_note_row, draw_economy_panel_header, economy_card_body_font,
-    economy_measure_text_width, push_economy_item_example, ECONOMY_ICON_COL_FRAC,
-    ECONOMY_ITEM_COLS, ECONOMY_ITEM_EXAMPLES, ECONOMY_ITEM_ROWS, EconomyItemExample,
+    ECONOMY_ICON_COL_FRAC, ECONOMY_ITEM_COLS, ECONOMY_ITEM_EXAMPLES, ECONOMY_ITEM_ROWS,
+    EconomyItemExample, draw_dot_leader_row, draw_earning_note_row, draw_economy_panel_header,
+    economy_card_body_font, economy_measure_text_width, push_economy_item_example,
 };
 use super::economy_flow::draw_skip_steps_column;
 use super::layout::push_guide_panel_stroke;
-use super::GuideLayout;
-
 
 pub(super) fn draw_economy_rules_band(
     frame: &mut UiFrame,

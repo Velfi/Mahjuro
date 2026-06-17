@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -55,21 +53,20 @@ use crate::scenes::{BackgroundId, DrawCtx};
 
 use glam::{Mat4, Quat, Vec3};
 
-use crate::ui::input::UiAction;
+use super::TileGroup;
 use super::content::{t, tile_group_with_subtitle};
 use super::layout::push_guide_panel_stroke;
-use super::yaku_detail::push_dense_text;
 use super::scoring_diagram::{
-    push_gameplay_cash_in_overlay, push_scoring_flow_panel, scoring_flow_cash_in_visual_rect,
-    scoring_guide_tile_caps, scoring_panel_open, scoring_tile_size_for_cell,
-    ScoringFlowDiagramLayout, ScoringPanelStyle, SCORING_FLOW_ARROW_ASPECT,
-    SCORING_FLOW_CASH_IN_STAGE, SCORING_FLOW_STAGES,
+    SCORING_FLOW_ARROW_ASPECT, SCORING_FLOW_CASH_IN_STAGE, SCORING_FLOW_STAGES,
+    ScoringFlowDiagramLayout, ScoringPanelStyle, push_gameplay_cash_in_overlay,
+    push_scoring_flow_panel, scoring_flow_cash_in_visual_rect, scoring_guide_tile_caps,
+    scoring_panel_open, scoring_tile_size_for_cell,
 };
 use super::scoring_page::{
     SCORING_CHIP_GROUPS, SCORING_STRUCTURE_FILLED, SCORING_STRUCTURE_SLOT_COUNT,
 };
-use super::TileGroup;
-
+use super::yaku_detail::push_dense_text;
+use crate::ui::input::UiAction;
 
 pub(super) fn tutorial_scoring_flow_meld_group() -> TileGroup {
     tile_group_with_subtitle(
@@ -213,7 +210,12 @@ pub(super) fn push_scoring_cash_in_plaque(frame: &mut UiFrame, rect: [f32; 4], b
     }
 }
 
-pub(super) fn push_scoring_formula_colored(frame: &mut UiFrame, rect: [f32; 4], text: &str, font_px: f32) {
+pub(super) fn push_scoring_formula_colored(
+    frame: &mut UiFrame,
+    rect: [f32; 4],
+    text: &str,
+    font_px: f32,
+) {
     let mut labels = Vec::new();
     let line_h = font_px;
     let drawn_h = styled_text::push_colored_line_left(
@@ -555,4 +557,3 @@ pub(super) fn push_scoring_panel_background(
     });
     push_guide_panel_stroke(frame, rect, stroke);
 }
-

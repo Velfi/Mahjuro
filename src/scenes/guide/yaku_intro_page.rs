@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -55,19 +53,19 @@ use crate::scenes::{BackgroundId, DrawCtx};
 
 use glam::{Mat4, Quat, Vec3};
 
+use super::TileGroup;
 use super::example_grid::{
     layout_guide_example_grid, push_tile_group_labels, push_tiles_example_labels,
 };
 use super::flowers_page::push_guide_column_footer_prose;
 use super::layout::GuideLayout;
 use super::melds_page::{
-    guide_yaku_shared_tile_px, guide_yaku_tablet_reserve, YAKU_EXAMPLE_ROWS, YAKU_INTRO_LEFT_COL_FRAC,
-    YAKU_ROW_WEIGHTS,
+    YAKU_EXAMPLE_ROWS, YAKU_INTRO_LEFT_COL_FRAC, YAKU_ROW_WEIGHTS, guide_yaku_shared_tile_px,
+    guide_yaku_tablet_reserve,
 };
 use super::page_panels::{
-    example_structure_yaku, push_guide_left_panels, push_guide_yaku_tablets, GuideExampleCellLayout,
+    GuideExampleCellLayout, example_structure_yaku, push_guide_left_panels, push_guide_yaku_tablets,
 };
-use super::TileGroup;
 pub(super) fn draw_yaku_intro_page(
     frame: &mut UiFrame,
     layout: &GuideLayout,
@@ -187,4 +185,3 @@ pub(super) fn push_yaku_left_cards(
 
 pub(super) const FLOWERS_EXAMPLE_ROWS: &[&[usize]] = &[&[0, 1], &[3, 2], &[5, 4]];
 pub(super) const FLOWERS_ROW_WEIGHTS: [f32; 3] = [0.36, 0.36, 0.28];
-

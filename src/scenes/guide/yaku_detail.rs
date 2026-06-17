@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -55,9 +53,9 @@ use crate::scenes::{BackgroundId, DrawCtx};
 
 use glam::{Mat4, Quat, Vec3};
 
+use super::TileGroup;
 use super::example_grid::push_tile_group_labels;
 use super::tile_layout::layout_tile_groups_with_max;
-use super::TileGroup;
 use super::yaku_page::yaku_page;
 /// Long-form copy for the in-game guide. Journal and shop use [`yaku_shape_text`].
 pub(crate) struct YakuGuideDetail {

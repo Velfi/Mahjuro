@@ -16,9 +16,7 @@ use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::PointLight;
 use crate::sfx_id::SfxId;
-use crate::ui::controller_hints::{
-    HintStyle, guide_footer_row, push_screen_footer_hint,
-};
+use crate::ui::controller_hints::{HintStyle, guide_footer_row, push_screen_footer_hint};
 use crate::ui::input::UiAction;
 use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -457,13 +455,11 @@ pub(crate) use layout::{
 };
 #[allow(unused_imports)]
 pub(crate) use page_panels::example_structure_yaku;
-pub(crate) use tile_layout::yaku_shape_text;
-pub(crate) use yaku_detail::{
-    dense_text_block_height, push_dense_text, yaku_guide_detail,
-};
-pub(crate) use yaku_page::yaku_page;
 pub use scoring_diagram::push_gameplay_cash_in_overlay;
 pub(crate) use scoring_panels::draw_tutorial_scoring_diagram;
+pub(crate) use tile_layout::yaku_shape_text;
+pub(crate) use yaku_detail::{dense_text_block_height, push_dense_text, yaku_guide_detail};
+pub(crate) use yaku_page::yaku_page;
 
 use economy::draw_economy_page;
 use flowers_page::draw_flowers_page;
