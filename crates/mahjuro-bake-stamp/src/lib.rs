@@ -580,7 +580,7 @@ mod tests {
 
     #[test]
     fn relic_entry_hash_separates_codec_and_slug_assets() {
-        use crate::relic::{compute_codec_hash, compute_entry_hash, relic_asset_paths, Relic};
+        use crate::relic::{Relic, compute_codec_hash, compute_entry_hash, relic_asset_paths};
 
         let repo = repo_root();
         let codec = compute_codec_hash(&repo);
@@ -592,10 +592,7 @@ mod tests {
         assert_ne!(entry, codec);
 
         let paths = relic_asset_paths(&repo, slug);
-        assert!(
-            !paths.is_empty(),
-            "expected tracked relic PNGs for {slug}"
-        );
+        assert!(!paths.is_empty(), "expected tracked relic PNGs for {slug}");
         assert!(
             paths.iter().any(|p| {
                 p.file_name()
@@ -627,10 +624,8 @@ mod tests {
     fn relic_sidecar_round_trip() {
         use crate::relic::{read_relic_sidecar, relic_sidecar_path, write_relic_sidecar};
 
-        let dir = std::env::temp_dir().join(format!(
-            "mahjuro_relic_sidecar_test_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("mahjuro_relic_sidecar_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = relic_sidecar_path(&dir, "example_relic");

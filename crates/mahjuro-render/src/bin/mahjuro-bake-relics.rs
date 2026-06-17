@@ -73,7 +73,8 @@ fn main() -> anyhow::Result<()> {
         let sidecar_path = relic_sidecar_path(&out_dir, slug);
         let out = assets.join(mahjuro_render::relic_bake::baked_relic_asset_path(d.id));
         let sidecar = read_relic_sidecar(&sidecar_path);
-        let rlc_ok = out.is_file() && mahjuro_render::relic_bake::validate_baked_relic(d.id).is_ok();
+        let rlc_ok =
+            out.is_file() && mahjuro_render::relic_bake::validate_baked_relic(d.id).is_ok();
 
         if !force && sidecar.as_deref() == Some(entry_hash.as_str()) && rlc_ok {
             log::info!("unchanged relic: {}", out.display());
