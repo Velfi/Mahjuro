@@ -166,8 +166,6 @@ pub const MAX_MIRROR_SLOTS: usize = 2;
 /// Maximum number of tally fans per frame (gameplay uses 2: draws + discards).
 pub const MAX_TALLY_FAN_SLOTS: usize = 2;
 /// Maximum total number of tally sticks rendered per frame across all fans.
-/// Each fan emits `count` base sticks plus `count` tip-cap overlays, so this
-/// bound is on the sum of both.
 pub const MAX_TALLY_STICK_SLOTS: usize = 32;
 /// Maximum number of facedown wall tiles drawn at the back of the table.
 pub const MAX_WALL_TILE_SLOTS: usize = 80;

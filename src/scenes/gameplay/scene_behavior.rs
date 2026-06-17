@@ -1148,8 +1148,9 @@ impl SceneBehavior for GameplayScene {
                         count: gameplay.plays_remaining,
                         max_count: gameplay.plays_max,
                         spread_deg,
-                        base_color: crate::render::theme::color::tally_stick::PLAY,
-                        tip_color: crate::render::theme::color::tally_stick::PLAY_TIP,
+                        // Tally-stick GLBs own their authored look; avoid per-fan tint overlays.
+                        base_color: [1.0, 1.0, 1.0, 1.0],
+                        tip_color: [1.0, 1.0, 1.0, 1.0],
                         rotation_y_deg: play_rot[1],
                         placement_rot_deg: play_rot,
                         kind: crate::render::draw_cmd::TallyFanKind::Draws,
@@ -1173,8 +1174,9 @@ impl SceneBehavior for GameplayScene {
                         count: gameplay.discards_remaining,
                         max_count: gameplay.discards_max,
                         spread_deg,
-                        base_color: crate::render::theme::color::tally_stick::DISCARD,
-                        tip_color: crate::render::theme::color::tally_stick::DISCARD_TIP,
+                        // Tally-stick GLBs own their authored look; avoid per-fan tint overlays.
+                        base_color: [1.0, 1.0, 1.0, 1.0],
+                        tip_color: [1.0, 1.0, 1.0, 1.0],
                         rotation_y_deg: discard_rot[1],
                         placement_rot_deg: discard_rot,
                         kind: crate::render::draw_cmd::TallyFanKind::Discards,

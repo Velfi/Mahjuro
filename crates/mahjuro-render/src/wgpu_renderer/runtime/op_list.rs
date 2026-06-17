@@ -116,8 +116,8 @@ pub enum DrawKind {
     Orb,
     Bowl,
     Mirror,
-    TallyStickBase,
-    TallyStickTip,
+    TallyStickPlay,
+    TallyStickDiscard,
     ExtrudedGlyph,
     /// Standalone GLB prop drawn via the glTF PBR tile pipeline (yen coins).
     GltfCoin,

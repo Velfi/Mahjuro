@@ -88,7 +88,9 @@ use crate::table_transform::{
     ribbon_submesh, rot_fixed_axes_deg_matrix, tile_mesh_local_to_world, translate_rot_scale,
 };
 use crate::talisman_mesh::TALISMAN_LOCAL_HALF;
-use crate::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip_mesh};
+use crate::tally_stick_mesh::{
+    DISCARD_TALLY_STICK_GLB_PATH, PLAY_TALLY_STICK_GLB_PATH, load_tally_stick_glb_mesh,
+};
 use crate::tile_glb::Vertex3dTex;
 use crate::wood_tablet_mesh::build_wood_tablet_mesh;
 use crate::world_space::pixel_to_world;
@@ -727,8 +729,8 @@ pub struct WgpuRenderer {
     book_cover_mesh: LitMeshGpu,
     bowl_mesh: LitMeshGpu,
     mirror_mesh: LitMeshGpu,
-    tally_stick_base_mesh: LitMeshGpu,
-    tally_stick_tip_mesh: LitMeshGpu,
+    tally_stick_play_mesh: LitMeshGpu,
+    tally_stick_discard_mesh: LitMeshGpu,
     yaku_tablet_instances: Vec<LitMeshInstance>,
     wood_tablet_instances: Vec<LitMeshInstance>,
     book_instances: Vec<LitMeshInstance>,
@@ -738,9 +740,7 @@ pub struct WgpuRenderer {
     book_cover_instances: Vec<LitMeshInstance>,
     bowl_instances: Vec<LitMeshInstance>,
     mirror_instances: Vec<LitMeshInstance>,
-    /// Per-stick instances for the tally-counter fans. Each visible stick
-    /// consumes two slots: one for the bone-colored base and one for the
-    /// colored tip cap that rides the top fraction of the stick.
+    /// Per-stick instances for the tally-counter fans.
     tally_stick_instances: Vec<LitMeshInstance>,
     /// Per-wall-tile instances for the back-of-table facedown stack. Reuses
     /// `bone_tablet_mesh` for phase 1 (a plain box) — phase 7 may swap to the
