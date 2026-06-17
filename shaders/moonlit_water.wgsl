@@ -106,13 +106,28 @@ fn fbm2(p: vec2<f32>) -> f32 {
     return v;
 }
 
+fn rotate2(p: vec2<f32>, angle: f32) -> vec2<f32> {
+    let s = sin(angle);
+    let c = cos(angle);
+    return vec2<f32>(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+fn sky_star_uv(uv: vec2<f32>, angle: f32, seed: vec2<f32>, warp_strength: f32) -> vec2<f32> {
+    let warp = vec2<f32>(
+        value_noise(uv * 3.2 + seed) - 0.5,
+        value_noise(uv * 3.2 + seed + vec2<f32>(19.7, 7.3)) - 0.5,
+    ) * warp_strength;
+    return rotate2(uv + warp + seed * 0.031, angle) + vec2<f32>(1.7, 1.3);
+}
+
 fn star_layer(uv: vec2<f32>, scale: f32, density: f32, size: f32, time: f32) -> f32 {
     let grid_uv = uv * scale;
     let cell = vec2<i32>(floor(grid_uv));
     let frac_uv = fract(grid_uv);
 
     let rng = hash22_i(cell);
-    if (rng.x > density) { return 0.0; }
+    let presence = hash21_i(cell + vec2<i32>(113, 271));
+    if (presence > density) { return 0.0; }
 
     let star_pos = vec2<f32>(0.18 + rng.x * 0.64, 0.18 + rng.y * 0.64);
     let d = length(frac_uv - star_pos);
@@ -287,9 +302,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     color   += vec3<f32>(0.04, 0.06, 0.09) * haze * 0.38;
     color   += aurora_haze(uv, aspect, t) * 0.55;
 
-    let stars0 = star_layer(uv, 42.0, 0.34, 0.030, t);
-    let stars1 = star_layer(uv, 85.0, 0.46, 0.020, t);
-    let stars2 = star_layer(uv, 160.0, 0.54, 0.012, t);
+    let stars0 = star_layer(sky_star_uv(uv,  0.17, vec2<f32>(2.3, 5.1), 0.020), 41.0, 0.31, 0.030, t);
+    let stars1 = star_layer(sky_star_uv(uv, -0.29, vec2<f32>(7.7, 1.9), 0.014), 83.0, 0.42, 0.020, t);
+    let stars2 = star_layer(sky_star_uv(uv,  0.41, vec2<f32>(4.4, 8.6), 0.010), 157.0, 0.49, 0.012, t);
     let water_start = 0.56;
     let star_mask = smoothstep(water_start + 0.02, 0.02, uv.y);
     let star_tint = vec3<f32>(0.85, 0.93, 1.18);

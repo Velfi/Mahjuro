@@ -7,7 +7,7 @@ glyphs for characters/winds/dragons, and simple floral motifs for flowers. Corne
 same upper-area placement and styling family.
 
 Outputs:
-  <set_dir>/<code>.png        individual 256x384 RGBA tiles (game-loadable)
+  <set_dir>/<code>.png        individual 512x768 RGBA tiles (game-loadable)
   <set_dir>/atlas.png         packed 9-column preview atlas
   <set_dir>/atlas.toml        atlas descriptor
 
@@ -30,9 +30,20 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-TILE_W = 256
-TILE_H = 384
+TILE_W = 512
+TILE_H = 768
 COLUMNS = 9
+REFERENCE_TILE_W = 256
+ART_SCALE = TILE_W / REFERENCE_TILE_W
+
+
+def sp(value: float) -> int:
+    """Scale fixed art pixels from the original 256x384 tile coordinate system."""
+    return max(1, int(round(value * ART_SCALE)))
+
+
+def sf(value: float) -> float:
+    return value * ART_SCALE
 
 INK_BLACK = (30, 28, 24, 255)
 INK_RED = (180, 30, 30, 255)
@@ -62,7 +73,7 @@ DOT_CLUSTER_CX = TILE_W / 2
 DOT_CLUSTER_CY = TILE_H / 2
 DOT_SX = TILE_W * 0.30
 DOT_SY = TILE_H * 0.32
-DOT_PIP_R = 24
+DOT_PIP_R = sp(24)
 
 WIND_GLYPHS = {"EWind": "東", "SWind": "南", "WWind": "西", "NWind": "北"}
 WIND_LATIN = {"EWind": "E", "SWind": "S", "WWind": "W", "NWind": "N"}
@@ -293,7 +304,7 @@ def draw_dots(img: Image.Image, n: int, font_rank_corner: ImageFont.FreeTypeFont
         cy += TILE_H * 0.045
         sx *= 0.90
         sy *= 0.90
-        r = max(20, DOT_PIP_R - 2)
+        r = max(sp(20), DOT_PIP_R - sp(2))
     for xr, yr, color in _dot_layout(n):
         _pip(img, cx + xr * sx, cy + yr * sy, r, color)
     draw_corner_rank_marker(img, str(n), font_rank_corner, INK_BLUE)
@@ -594,11 +605,11 @@ def draw_bamboo(img: Image.Image, n: int, font_rank_corner: ImageFont.FreeTypeFo
     sy = TILE_H * 0.38
     # slender stalks: longer + thinner than before. Shrink for dense counts.
     if n <= 4:
-        length, width = 120, 15
+        length, width = sp(120), sp(15)
     elif n <= 6:
-        length, width = 100, 13
+        length, width = sp(100), sp(13)
     else:
-        length, width = 82, 11
+        length, width = sp(82), sp(11)
     for xr, yr, color, tilt in _bamboo_layout(n):
         _bamboo_stalk(img, cx + xr * sx, cy + yr * sy,
                       length=length, width=width, color=color, tilt_deg=tilt)
@@ -637,19 +648,19 @@ def draw_dragon(img: Image.Image, code: str, font: ImageFont.FreeTypeFont,
         # White dragon: blue double frame on the tile face (same inset as the
         # inner rounded recess from new_tile), not a tight box around the 白.
         draw = ImageDraw.Draw(img)
-        pad_face = 14
+        pad_face = sp(14)
         draw.rounded_rectangle(
             (pad_face, pad_face, TILE_W - pad_face, TILE_H - pad_face),
-            radius=18,
+            radius=sp(18),
             outline=INK_BLUE,
-            width=3,
+            width=sp(3),
         )
-        pad_inner = 22
+        pad_inner = sp(22)
         draw.rounded_rectangle(
             (pad_inner, pad_inner, TILE_W - pad_inner, TILE_H - pad_inner),
-            radius=14,
+            radius=sp(14),
             outline=INK_BLUE,
-            width=1,
+            width=sp(1),
         )
         # faint 白 watermark
         if font_watermark is not None:
@@ -695,18 +706,23 @@ def _plum_motif(img: Image.Image, color) -> None:
     draw = ImageDraw.Draw(img)
     # twig
     draw.line((TILE_W * 0.25, TILE_H * 0.55, TILE_W * 0.75, TILE_H * 0.30),
-              fill=BROWN, width=5)
+              fill=BROWN, width=sp(5))
     draw.line((TILE_W * 0.50, TILE_H * 0.42, TILE_W * 0.60, TILE_H * 0.55),
-              fill=BROWN, width=4)
+              fill=BROWN, width=sp(4))
     draw.line((TILE_W * 0.38, TILE_H * 0.47, TILE_W * 0.30, TILE_H * 0.40),
-              fill=BROWN, width=3)
+              fill=BROWN, width=sp(3))
     # three blossoms at branch tips
-    _small_blossom(draw, TILE_W * 0.28, TILE_H * 0.38, 24, color)
-    _small_blossom(draw, TILE_W * 0.72, TILE_H * 0.30, 28, color)
-    _small_blossom(draw, TILE_W * 0.60, TILE_H * 0.55, 22, color)
+    _small_blossom(draw, TILE_W * 0.28, TILE_H * 0.38, sf(24), color)
+    _small_blossom(draw, TILE_W * 0.72, TILE_H * 0.30, sf(28), color)
+    _small_blossom(draw, TILE_W * 0.60, TILE_H * 0.55, sf(22), color)
     # a bud
     draw.ellipse(
-        (TILE_W * 0.48 - 8, TILE_H * 0.40 - 8, TILE_W * 0.48 + 8, TILE_H * 0.40 + 8),
+        (
+            TILE_W * 0.48 - sf(8),
+            TILE_H * 0.40 - sf(8),
+            TILE_W * 0.48 + sf(8),
+            TILE_H * 0.40 + sf(8),
+        ),
         fill=color,
     )
 
@@ -720,29 +736,29 @@ def _orchid_motif(img: Image.Image, color) -> None:
     # each leaf: list of (x, y) points from base tapering outward
     leaves = [
         # long left arch
-        [(cx - 4, base_y), (cx - 30, base_y - 30), (cx - 60, base_y - 65),
-         (cx - 85, base_y - 85), (cx - 95, base_y - 75)],
+        [(cx - sf(4), base_y), (cx - sf(30), base_y - sf(30)), (cx - sf(60), base_y - sf(65)),
+         (cx - sf(85), base_y - sf(85)), (cx - sf(95), base_y - sf(75))],
         # long right arch
-        [(cx + 4, base_y), (cx + 30, base_y - 30), (cx + 60, base_y - 65),
-         (cx + 85, base_y - 85), (cx + 95, base_y - 75)],
+        [(cx + sf(4), base_y), (cx + sf(30), base_y - sf(30)), (cx + sf(60), base_y - sf(65)),
+         (cx + sf(85), base_y - sf(85)), (cx + sf(95), base_y - sf(75))],
         # medium upward curl left
-        [(cx - 2, base_y), (cx - 15, base_y - 40), (cx - 25, base_y - 80),
-         (cx - 20, base_y - 115)],
+        [(cx - sf(2), base_y), (cx - sf(15), base_y - sf(40)), (cx - sf(25), base_y - sf(80)),
+         (cx - sf(20), base_y - sf(115))],
         # medium upward curl right
-        [(cx + 2, base_y), (cx + 15, base_y - 40), (cx + 25, base_y - 80),
-         (cx + 20, base_y - 115)],
+        [(cx + sf(2), base_y), (cx + sf(15), base_y - sf(40)), (cx + sf(25), base_y - sf(80)),
+         (cx + sf(20), base_y - sf(115))],
         # tall center
-        [(cx, base_y), (cx, base_y - 60), (cx + 5, base_y - 110), (cx + 15, base_y - 140)],
+        [(cx, base_y), (cx, base_y - sf(60)), (cx + sf(5), base_y - sf(110)), (cx + sf(15), base_y - sf(140))],
     ]
     for pts in leaves:
         for i in range(len(pts) - 1):
-            w = max(2, 7 - i * 2)
+            w = max(sp(2), sp(7 - i * 2))
             draw.line((pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]),
-                      fill=LEAF_GREEN_DARK, width=w + 2)
+                      fill=LEAF_GREEN_DARK, width=w + sp(2))
             draw.line((pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]),
                       fill=LEAF_GREEN, width=w)
     # a small orchid bloom in the accent color
-    _small_blossom(draw, cx - 8, base_y - 125, 20, color)
+    _small_blossom(draw, cx - sf(8), base_y - sf(125), sf(20), color)
 
 
 def _chrysanthemum_motif(img: Image.Image, color) -> None:
@@ -756,9 +772,9 @@ def _chrysanthemum_motif(img: Image.Image, color) -> None:
     light = _shade(color, 1.22)
 
     golden_angle = math.pi * (3 - math.sqrt(5))  # ~2.39996 rad ≈ 137.5°
-    c = 6.8            # radial scale
+    c = sf(6.8)        # radial scale
     n_petals = 75      # density of the bloom
-    max_r = 68         # outer clip
+    max_r = sf(68)     # outer clip
 
     petals: list[tuple[float, float, float, float]] = []
     for n in range(n_petals):
@@ -774,8 +790,8 @@ def _chrysanthemum_motif(img: Image.Image, color) -> None:
     for px, py, theta, r in petals:
         # petal grows with distance from center, then shrinks at the rim
         t = r / max_r
-        length = 18 + 22 * (1 - abs(t - 0.65) * 1.3)
-        length = max(10, length)
+        length = sf(18) + sf(22) * (1 - abs(t - 0.65) * 1.3)
+        length = max(sf(10), length)
         petal_w = length * 0.45
 
         # shade ring: inner paler, middle saturated, outer darker
@@ -802,8 +818,8 @@ def _chrysanthemum_motif(img: Image.Image, color) -> None:
             fill=outer,
         )
         ld.ellipse(
-            (ex - length / 2 + 2, ey - petal_w / 2 + 1,
-             ex + length / 2 - 4, ey + petal_w / 2 - 1),
+            (ex - length / 2 + sf(2), ey - petal_w / 2 + sf(1),
+             ex + length / 2 - sf(4), ey + petal_w / 2 - sf(1)),
             fill=inner,
         )
         rotated = layer.rotate(
@@ -813,31 +829,31 @@ def _chrysanthemum_motif(img: Image.Image, color) -> None:
 
     # tight yellow disc florets at center
     draw = ImageDraw.Draw(img)
-    draw.ellipse((cx - 10, cy - 10, cx + 10, cy + 10), fill=(235, 190, 70, 255))
-    draw.ellipse((cx - 5, cy - 5, cx + 5, cy + 5), fill=(250, 225, 120, 255))
+    draw.ellipse((cx - sf(10), cy - sf(10), cx + sf(10), cy + sf(10)), fill=(235, 190, 70, 255))
+    draw.ellipse((cx - sf(5), cy - sf(5), cx + sf(5), cy + sf(5)), fill=(250, 225, 120, 255))
 
 
 def _bamboo_plant_motif(img: Image.Image, color) -> None:
     """Bamboo flower tile: three slender stalks with leaf clusters (no blossom)."""
     # draw three thin stalks at different heights
     stalks = [
-        (TILE_W * 0.30, TILE_H * 0.70, 140),
-        (TILE_W * 0.50, TILE_H * 0.68, 170),
-        (TILE_W * 0.70, TILE_H * 0.72, 130),
+        (TILE_W * 0.30, TILE_H * 0.70, sf(140)),
+        (TILE_W * 0.50, TILE_H * 0.68, sf(170)),
+        (TILE_W * 0.70, TILE_H * 0.72, sf(130)),
     ]
     draw = ImageDraw.Draw(img)
     for sx, sy, slen in stalks:
         # stalk itself (thin + shaded)
-        draw.line((sx, sy, sx, sy - slen), fill=LEAF_GREEN_DARK, width=5)
-        draw.line((sx - 1, sy, sx - 1, sy - slen), fill=LEAF_GREEN, width=2)
+        draw.line((sx, sy, sx, sy - slen), fill=LEAF_GREEN_DARK, width=sp(5))
+        draw.line((sx - sf(1), sy, sx - sf(1), sy - slen), fill=LEAF_GREEN, width=sp(2))
         # node marks
         for frac in (0.3, 0.6, 0.85):
             ny = sy - slen * frac
-            draw.line((sx - 5, ny, sx + 5, ny), fill=LEAF_GREEN_DARK, width=2)
+            draw.line((sx - sf(5), ny, sx + sf(5), ny), fill=LEAF_GREEN_DARK, width=sp(2))
         # leaves — a few narrow triangles angled up-and-out near the top
         leaf_tip = sy - slen
         for dx_sign in (-1, 1):
-            for leaf_y_off, leaf_len, leaf_angle in [(0, 30, 0.5), (18, 24, 0.8)]:
+            for leaf_y_off, leaf_len, leaf_angle in [(0, sf(30), 0.5), (sf(18), sf(24), 0.8)]:
                 lx = sx
                 ly = leaf_tip + leaf_y_off
                 ex = lx + dx_sign * leaf_len * math.cos(leaf_angle)
@@ -845,12 +861,12 @@ def _bamboo_plant_motif(img: Image.Image, color) -> None:
                 # leaf as an elongated triangle
                 draw.polygon(
                     [(lx, ly),
-                     (ex + dx_sign * 3, ey + 2),
-                     (ex - dx_sign * 2, ey + 8)],
+                     (ex + dx_sign * sf(3), ey + sf(2)),
+                     (ex - dx_sign * sf(2), ey + sf(8))],
                     fill=LEAF_GREEN,
                 )
                 # leaf vein
-                draw.line((lx, ly, ex, ey), fill=LEAF_GREEN_DARK, width=1)
+                draw.line((lx, ly, ex, ey), fill=LEAF_GREEN_DARK, width=sp(1))
 
 
 FLOWER_MOTIFS = {
@@ -1111,6 +1127,31 @@ def stroke_thick_line(
         draw.ellipse([x - hw, y - hw, x + hw, y + hw], fill=fill)
 
 
+def scale_nontransparent_layer(layer: Image.Image, scale: float) -> Image.Image:
+    """Scale drawn motif content about its own center, preserving canvas size."""
+    if abs(scale - 1.0) < 1e-6:
+        return layer
+    bbox = layer.getbbox()
+    if bbox is None:
+        return layer
+
+    crop = layer.crop(bbox)
+    new_w = min(layer.width, max(1, int(round(crop.width * scale))))
+    new_h = min(layer.height, max(1, int(round(crop.height * scale))))
+    crop = crop.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+    old_cx = (bbox[0] + bbox[2]) / 2
+    old_cy = (bbox[1] + bbox[3]) / 2
+    x = int(round(old_cx - new_w / 2))
+    y = int(round(old_cy - new_h / 2))
+    x = max(0, min(layer.width - new_w, x))
+    y = max(0, min(layer.height - new_h, y))
+
+    out = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+    out.alpha_composite(crop, (x, y))
+    return out
+
+
 def draw_motif_layer(size: tuple[int, int], kind: str, rgb: tuple[int, int, int], rank: int) -> Image.Image:
     """Bold vector-style motifs (no blur); 2× canvas + LANCZOS downscale only."""
     w, h = size
@@ -1338,7 +1379,7 @@ def draw_motif_layer(size: tuple[int, int], kind: str, rgb: tuple[int, int, int]
             sr = random.uniform(1.5, 3.0)
             d.ellipse([sx - sr, sy - sr, sx + sr, sy + sr], fill=(255, 255, 255, 230))
 
-    return layer
+    return scale_nontransparent_layer(layer, ART_SCALE)
 
 
 def build_tile(
@@ -1378,8 +1419,8 @@ def build_tile(
 
 def paint_season_row(atlas_png: Path, profile: TileSetProfile = DEFAULT_PROFILE) -> None:
     im = Image.open(atlas_png).convert("RGBA")
-    corner_rank_font_2x = load_cjk_font(62 * SEASON_RENDER_SCALE)
-    bottom_glyph_font_2x = load_cjk_font(74 * SEASON_RENDER_SCALE)
+    corner_rank_font_2x = load_cjk_font(sp(62) * SEASON_RENDER_SCALE)
+    bottom_glyph_font_2x = load_cjk_font(sp(74) * SEASON_RENDER_SCALE)
 
     for col_offset, (rank, glyph, accent, motif) in enumerate(profile.season_specs):
         col = 4 + col_offset
@@ -1452,14 +1493,14 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     fonts = {
-        "num_cjk": load_cjk_font(186),      # C7–C9 numeral
-        "num_cjk_lo": load_cjk_font(156),    # C1–C6 (clear corner rank)
-        "wan": load_cjk_font(88),           # 萬, more delicate
-        "big_cjk": load_cjk_font(210),      # winds + red/green dragons
-        "rank_corner_cjk": load_cjk_font(62),  # flowers, seasons, suit Arabic ranks
-        "wind_corner_latin": load_latin_font(34),  # E S W N (same corner as rank)
-        "flower_glyph": load_cjk_font(74),  # 梅蘭菊竹
-        "watermark": load_cjk_font(170),    # DWhite 白 watermark
+        "num_cjk": load_cjk_font(sp(186)),      # C7–C9 numeral
+        "num_cjk_lo": load_cjk_font(sp(156)),    # C1–C6 (clear corner rank)
+        "wan": load_cjk_font(sp(88)),           # 萬, more delicate
+        "big_cjk": load_cjk_font(sp(210)),      # winds + red/green dragons
+        "rank_corner_cjk": load_cjk_font(sp(62)),  # flowers, seasons, suit Arabic ranks
+        "wind_corner_latin": load_latin_font(sp(34)),  # E S W N (same corner as rank)
+        "flower_glyph": load_cjk_font(sp(74)),  # 梅蘭菊竹
+        "watermark": load_cjk_font(sp(170)),    # DWhite 白 watermark
     }
 
     tiles: dict[str, Image.Image] = {}

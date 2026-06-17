@@ -1,6 +1,6 @@
 image = "atlas.png"
-tile_width = 256
-tile_height = 384
+tile_width = 512
+tile_height = 768
 columns = 9
 
 layout = [

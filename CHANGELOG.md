@@ -7,6 +7,17 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.8.0 — 2026-06-16
+
+### Changed
+- Stairway decimation now lets you mark six tiles for destruction while the House claims four — ten tiles still leave the wall, but you control more of the cut.
+- Tutorial onboarding rounds now use the full yaku list when scoring instead of a restricted subset. Tutorial cash-ins should now match normal run yaku behavior.
+
+### Fixed
+- Conformity Talisman (and other transform talismans) now keep their tile changes for the rest of the run — transformed copies no longer revert when you draw again later in the round or enter the next chamber.
+- Fixed a yaku level-up celebration sometimes playing when entering the shop after defeating a boss, even though nothing had just leveled up.
+- Structure tiles now spread correctly across the strip when you play multiple melds at once, instead of cramming into the space of a single meld.
+
 ## 0.7.0 — 2026-06-13
 
 ### Added
