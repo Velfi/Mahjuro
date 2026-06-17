@@ -154,6 +154,12 @@ pub enum SfxId {
     YakuRyanpeikou,
     YakuSanshokuDoukou,
     YakuPinfu,
+    /// Voice suffix for stacked yaku announcements: "times two".
+    Times2,
+    /// Voice suffix for stacked yaku announcements: "times three".
+    Times3,
+    /// Voice suffix for stacked yaku announcements: "times four".
+    Times4,
     /// Played ~1 second after the victory screen appears.
     Victory,
     /// Alternate victory stinger; `Victory` / `Victory2` are picked at random.
@@ -258,6 +264,9 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::YakuRyanpeikou,
         SfxId::YakuSanshokuDoukou,
         SfxId::YakuPinfu,
+        SfxId::Times2,
+        SfxId::Times3,
+        SfxId::Times4,
         SfxId::Victory,
         SfxId::Victory2,
         SfxId::Defeat,
@@ -300,6 +309,15 @@ impl SfxId {
             YakuKind::Ryanpeikou => SfxId::YakuRyanpeikou,
             YakuKind::SanshokuDoukou => SfxId::YakuSanshokuDoukou,
             YakuKind::Pinfu => SfxId::YakuPinfu,
+        }
+    }
+
+    pub fn for_times(count: usize) -> Option<SfxId> {
+        match count {
+            2 => Some(SfxId::Times2),
+            3 => Some(SfxId::Times3),
+            4 => Some(SfxId::Times4),
+            _ => None,
         }
     }
 }

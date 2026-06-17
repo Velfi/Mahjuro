@@ -1,7 +1,9 @@
 //! CPU-only bake: generic BTX1 textures under `data/texture_baked/`.
 
-use mahjuro_bake_stamp::texture::Texture;
 use mahjuro_bake_stamp::BakeKind;
+use mahjuro_bake_stamp::texture::{
+    Texture, compute_entry_hash, read_texture_sidecar, texture_sidecar_path, write_texture_sidecar,
+};
 
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -19,7 +21,11 @@ fn main() -> anyhow::Result<()> {
 
     let manifest = mahjuro_render::static_texture_bakes::static_texture_bake_manifest();
     let mut baked = 0usize;
+    let mut unchanged = 0usize;
+    let mut bootstrapped = 0usize;
     let mut missing = 0usize;
+    let global_status = Texture::bake_status(&repo);
+    let global_stamp_ok = global_status.stamp_ok && global_status.outputs_ok;
 
     for entry in manifest {
         let Some(file) = mahjuro_assets::asset_path::get(&entry.path) else {
@@ -32,23 +38,36 @@ fn main() -> anyhow::Result<()> {
             .into_rgba8();
         let (w, h) = img.dimensions();
         let rgba = img.into_raw();
-        let payload =
-            mahjuro_render::baked_texture::encode_rgba_bc7_mip_chain(&rgba, w, h, entry.color)?;
-        let bytes = mahjuro_render::baked_texture::encode_btx(&payload)?;
         let rel = mahjuro_render::baked_texture::baked_texture_asset_path(&entry.path);
-        let out = assets.join(&rel);
-        if let Some(parent) = out.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&out, &bytes)?;
-        log::info!("baked texture: {} ({} bytes)", out.display(), bytes.len());
-        baked += 1;
+        bake_texture_slot(
+            &assets,
+            &rel,
+            &rgba,
+            w,
+            h,
+            entry.color,
+            "static texture",
+            global_stamp_ok,
+            &mut baked,
+            &mut unchanged,
+            &mut bootstrapped,
+        )?;
     }
 
-    bake_gltf_material_textures(&assets, &mut baked, &mut missing)?;
+    bake_gltf_material_textures(
+        &assets,
+        global_stamp_ok,
+        &mut baked,
+        &mut unchanged,
+        &mut bootstrapped,
+        &mut missing,
+    )?;
     bake_talisman_meshes(&assets, &mut baked, &mut missing)?;
 
-    log::info!("static texture bake finished ({baked} baked, {missing} missing)");
+    log::info!(
+        "static texture bake finished ({baked} baked, {unchanged} unchanged, \
+         {bootstrapped} bootstrapped, {missing} missing)"
+    );
     if missing == 0 {
         let stamped = Texture::write_stamp(&repo)?;
         log::info!(
@@ -122,7 +141,10 @@ fn talisman_mask_paths() -> Vec<&'static str> {
 
 fn bake_gltf_material_textures(
     assets: &std::path::Path,
+    global_stamp_ok: bool,
     baked: &mut usize,
+    unchanged: &mut usize,
+    bootstrapped: &mut usize,
     missing: &mut usize,
 ) -> anyhow::Result<()> {
     for (asset_path, label, loader) in room_glb_bake_loaders() {
@@ -139,7 +161,10 @@ fn bake_gltf_material_textures(
                 prim.mesh.albedo_btx_source_path.as_deref(),
                 prim.mesh.albedo_rgba.as_deref(),
                 mahjuro_render::baked_texture::BakedTextureColor::Srgb,
+                global_stamp_ok,
                 baked,
+                unchanged,
+                bootstrapped,
             )?;
             bake_primitive_slot(
                 assets,
@@ -147,7 +172,10 @@ fn bake_gltf_material_textures(
                 prim.mesh.normal_btx_source_path.as_deref(),
                 prim.mesh.normal_rgba.as_deref(),
                 mahjuro_render::baked_texture::BakedTextureColor::NormalLinear,
+                global_stamp_ok,
                 baked,
+                unchanged,
+                bootstrapped,
             )?;
             bake_primitive_slot(
                 assets,
@@ -155,7 +183,10 @@ fn bake_gltf_material_textures(
                 prim.mesh.metallic_roughness_btx_source_path.as_deref(),
                 prim.mesh.metallic_roughness_rgba.as_deref(),
                 mahjuro_render::baked_texture::BakedTextureColor::Linear,
+                global_stamp_ok,
                 baked,
+                unchanged,
+                bootstrapped,
             )?;
             bake_primitive_slot(
                 assets,
@@ -163,7 +194,10 @@ fn bake_gltf_material_textures(
                 prim.mesh.emissive_btx_source_path.as_deref(),
                 prim.mesh.emissive_rgba.as_deref(),
                 mahjuro_render::baked_texture::BakedTextureColor::Srgb,
+                global_stamp_ok,
                 baked,
+                unchanged,
+                bootstrapped,
             )?;
         }
     }
@@ -198,7 +232,10 @@ fn bake_gltf_material_textures(
                 prim.albedo_btx_source_path.as_deref(),
                 prim.albedo_rgba.as_deref(),
                 mahjuro_render::baked_texture::BakedTextureColor::Srgb,
+                global_stamp_ok,
                 baked,
+                unchanged,
+                bootstrapped,
             )?;
             bake_primitive_slot(
                 assets,
@@ -206,7 +243,10 @@ fn bake_gltf_material_textures(
                 prim.normal_btx_source_path.as_deref(),
                 prim.normal_rgba.as_deref(),
                 mahjuro_render::baked_texture::BakedTextureColor::NormalLinear,
+                global_stamp_ok,
                 baked,
+                unchanged,
+                bootstrapped,
             )?;
             bake_primitive_slot(
                 assets,
@@ -214,7 +254,10 @@ fn bake_gltf_material_textures(
                 prim.metallic_roughness_btx_source_path.as_deref(),
                 prim.metallic_roughness_rgba.as_deref(),
                 mahjuro_render::baked_texture::BakedTextureColor::Linear,
+                global_stamp_ok,
                 baked,
+                unchanged,
+                bootstrapped,
             )?;
             bake_primitive_slot(
                 assets,
@@ -222,7 +265,10 @@ fn bake_gltf_material_textures(
                 prim.emissive_btx_source_path.as_deref(),
                 prim.emissive_rgba.as_deref(),
                 mahjuro_render::baked_texture::BakedTextureColor::Srgb,
+                global_stamp_ok,
                 baked,
+                unchanged,
+                bootstrapped,
             )?;
         }
     }
@@ -277,26 +323,84 @@ fn bake_primitive_slot(
     source_path: Option<&str>,
     rgba: Option<&(Vec<u8>, u32, u32)>,
     color: mahjuro_render::baked_texture::BakedTextureColor,
+    global_stamp_ok: bool,
     baked: &mut usize,
+    unchanged: &mut usize,
+    bootstrapped: &mut usize,
 ) -> anyhow::Result<()> {
     let (Some(source_path), Some((rgba, w, h))) = (source_path, rgba) else {
         return Ok(());
     };
-    let payload = mahjuro_render::baked_texture::encode_rgba_bc7_mip_chain(rgba, *w, *h, color)?;
-    let bytes = mahjuro_render::baked_texture::encode_btx(&payload)?;
     let rel = mahjuro_render::baked_texture::baked_texture_asset_path(source_path);
-    let out = assets.join(&rel);
+    bake_texture_slot(
+        assets,
+        &rel,
+        rgba,
+        *w,
+        *h,
+        color,
+        label,
+        global_stamp_ok,
+        baked,
+        unchanged,
+        bootstrapped,
+    )
+}
+
+fn bake_texture_slot(
+    assets: &std::path::Path,
+    rel: &str,
+    rgba: &[u8],
+    w: u32,
+    h: u32,
+    color: mahjuro_render::baked_texture::BakedTextureColor,
+    label: &str,
+    global_stamp_ok: bool,
+    baked: &mut usize,
+    unchanged: &mut usize,
+    bootstrapped: &mut usize,
+) -> anyhow::Result<()> {
+    let out = assets.join(rel);
+    let sidecar_path = texture_sidecar_path(&out);
+    let entry_hash = compute_entry_hash(texture_color_tag(color), w, h, rgba);
+    let sidecar = read_texture_sidecar(&sidecar_path);
+    let out_ok = out.is_file();
+
+    if sidecar.as_deref() == Some(entry_hash.as_str()) && out_ok {
+        log::info!("unchanged texture: {}", out.display());
+        *unchanged += 1;
+        return Ok(());
+    }
+
+    if sidecar.is_none() && out_ok && global_stamp_ok {
+        write_texture_sidecar(&sidecar_path, &entry_hash)?;
+        log::info!("bootstrapped texture sidecar: {}", sidecar_path.display());
+        *bootstrapped += 1;
+        return Ok(());
+    }
+
+    let payload = mahjuro_render::baked_texture::encode_rgba_bc7_mip_chain(rgba, w, h, color)?;
+    let bytes = mahjuro_render::baked_texture::encode_btx(&payload)?;
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&out, &bytes)?;
+    write_texture_sidecar(&sidecar_path, &entry_hash)?;
     log::info!(
-        "baked GLB texture: {} ({label}, {} bytes)",
+        "baked texture: {} ({label}, {} bytes)",
         out.display(),
         bytes.len()
     );
     *baked += 1;
     Ok(())
+}
+
+fn texture_color_tag(color: mahjuro_render::baked_texture::BakedTextureColor) -> &'static str {
+    match color {
+        mahjuro_render::baked_texture::BakedTextureColor::Srgb => "srgb",
+        mahjuro_render::baked_texture::BakedTextureColor::Linear => "linear",
+        mahjuro_render::baked_texture::BakedTextureColor::NormalLinear => "normal-linear",
+    }
 }
 
 fn repo_root() -> anyhow::Result<std::path::PathBuf> {
