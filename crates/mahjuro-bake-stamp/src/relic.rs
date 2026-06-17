@@ -12,7 +12,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::{BakeKind, Fnv64, git_tracked_files_under, hash_paths, read_stamp_line, write_stamp_line};
+use crate::{
+    BakeKind, Fnv64, git_tracked_files_under, hash_paths, read_stamp_line, write_stamp_line,
+};
 
 pub struct Relic;
 
@@ -37,8 +39,7 @@ impl BakeKind for Relic {
         "cargo build -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake";
     const REBAKE_CMD: &'static str =
         "cargo run -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake";
-    const COMMIT_PATHS: &'static str =
-        "assets/data/relic_baked/*.rlc assets/data/relic_baked/*.rlc.stamp assets/data/relic_baked/.inputs_stamp";
+    const COMMIT_PATHS: &'static str = "assets/data/relic_baked/*.rlc assets/data/relic_baked/*.rlc.stamp assets/data/relic_baked/.inputs_stamp";
 
     fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
         [
@@ -111,7 +112,11 @@ pub fn relic_asset_rel_paths(slug: &str) -> Vec<String> {
 pub fn relic_asset_paths(repo: &Path, slug: &str) -> Vec<PathBuf> {
     let tracked: HashSet<String> = git_tracked_files_under(repo, "assets/textures/relics")
         .into_iter()
-        .filter_map(|p| p.strip_prefix(repo).ok().map(|r| r.to_string_lossy().replace('\\', "/")))
+        .filter_map(|p| {
+            p.strip_prefix(repo)
+                .ok()
+                .map(|r| r.to_string_lossy().replace('\\', "/"))
+        })
         .collect();
     relic_asset_rel_paths(slug)
         .into_iter()
@@ -144,7 +149,11 @@ pub fn write_relic_sidecar(path: &Path, hash: &str) -> io::Result<()> {
 }
 
 /// Write missing per-relic sidecars without re-encoding RLC2 payloads.
-pub fn bootstrap_missing_sidecars(repo: &Path, out_dir: &Path, slugs: &[&str]) -> io::Result<usize> {
+pub fn bootstrap_missing_sidecars(
+    repo: &Path,
+    out_dir: &Path,
+    slugs: &[&str],
+) -> io::Result<usize> {
     let mut bootstrapped = 0usize;
     for slug in slugs {
         let sidecar_path = relic_sidecar_path(out_dir, slug);

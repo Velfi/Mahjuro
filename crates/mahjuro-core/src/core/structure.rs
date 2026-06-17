@@ -68,8 +68,8 @@ pub fn structure_remaining_meld_slots(sets: &[DetectedMeld]) -> usize {
     STRUCTURE_MELD_CAPACITY.saturating_sub(sets.len())
 }
 
-/// Remaining meld slots for player callouts — drops to zero when tile capacity
-/// or commit rules block another play even if the meld budget is not exhausted.
+/// Remaining play slots for player callouts, based on the same tile-space budget
+/// that blocks growth when there is no room for another legal commit.
 pub fn structure_callout_remaining_slots(
     tiles: &[Tile],
     sets: &[DetectedMeld],
@@ -79,7 +79,7 @@ pub fn structure_callout_remaining_slots(
     if structure_cannot_grow_further(tiles, sets, hand_size, rules) {
         0
     } else {
-        structure_remaining_meld_slots(sets)
+        structure_remaining_tile_slots(tiles, sets, hand_size) / structure_min_commit_tiles(rules)
     }
 }
 
@@ -188,6 +188,13 @@ mod tests {
 
     fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
         Tile::new(suit, rank, id)
+    }
+
+    fn pair_set(a: u32, b: u32) -> DetectedMeld {
+        DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: vec![a, b],
+        }
     }
 
     #[test]
@@ -344,6 +351,34 @@ mod tests {
             },
         ];
         assert_eq!(structure_remaining_meld_slots(&sets), 1);
+        assert_eq!(structure_callout_remaining_slots(&tiles, &sets, 14, &[]), 0);
+    }
+
+    #[test]
+    fn structure_callout_counts_remaining_pair_slots() {
+        let tiles: Vec<Tile> = (0..12)
+            .map(|i| tile(Suit::Manzu, (i / 2 + 1) as u8, i))
+            .collect();
+        let sets = (0..6)
+            .map(|i| pair_set(i * 2, i * 2 + 1))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            structure_callout_remaining_slots(&tiles[..10], &sets[..5], 14, &[]),
+            2
+        );
+        assert_eq!(structure_callout_remaining_slots(&tiles, &sets, 14, &[]), 1);
+    }
+
+    #[test]
+    fn structure_callout_reaches_cash_in_time_at_seven_pairs() {
+        let tiles: Vec<Tile> = (0..14)
+            .map(|i| tile(Suit::Manzu, (i / 2 + 1) as u8, i))
+            .collect();
+        let sets = (0..7)
+            .map(|i| pair_set(i * 2, i * 2 + 1))
+            .collect::<Vec<_>>();
+
         assert_eq!(structure_callout_remaining_slots(&tiles, &sets, 14, &[]), 0);
     }
 

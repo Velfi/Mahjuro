@@ -1769,6 +1769,15 @@ pub(super) fn build_yaku_panel_and_tablets(
         }
     });
     if let Some(showcase) = showcase_data {
+        let preview_layout_sets = if cascade_showcase_ref.is_none()
+            && crate::persistence::load_settings().structure_meld_preview
+            && scene.staging_layout.is_valid_meld
+            && !scene.staging_layout.meld_index_groups.is_empty()
+        {
+            Some(yaku_preview_sets.as_slice())
+        } else {
+            None
+        };
         let a_l = structure_marker_poses[0].anchor;
         let a_r = structure_marker_poses[1].anchor;
         let rot_l = structure_marker_poses[0].rotation_rad;
@@ -1776,7 +1785,11 @@ pub(super) fn build_yaku_panel_and_tablets(
         let structure_scale = structure_marker_poses[0]
             .uniform_author_scale(layout.window_h, ctx.room_gltf_height_scale);
         let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
-        let strip = compute_structure_strip_layout(span, layout_scale, &showcase.sets);
+        let strip = compute_structure_strip_layout(
+            span,
+            layout_scale,
+            preview_layout_sets.unwrap_or(&showcase.sets),
+        );
         let mut cursor = 0.0f32;
         let active_tile_ids = cascade_frame
             .as_ref()
