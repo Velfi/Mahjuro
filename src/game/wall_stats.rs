@@ -186,8 +186,8 @@ pub fn face_short_name(suit: Suit, rank: u8) -> String {
         Suit::Flower => match rank {
             1 => "Plum".into(),
             2 => "Orchid".into(),
-            3 => "Bamboo".into(),
-            4 => "Chrysanthemum".into(),
+            3 => "Chrysanthemum".into(),
+            4 => "Bamboo".into(),
             _ => format!("Flower {rank}"),
         },
         Suit::Season => format!("Season {rank}"),
@@ -697,6 +697,14 @@ mod tests {
     use super::*;
     use crate::core::deck::{Wall, build_wall};
     use crate::game::wall_ledger::{WallLedgerMode, read_wall_ledger};
+
+    #[test]
+    fn flower_short_names_follow_canonical_order() {
+        assert_eq!(face_short_name(Suit::Flower, 1), "Plum");
+        assert_eq!(face_short_name(Suit::Flower, 2), "Orchid");
+        assert_eq!(face_short_name(Suit::Flower, 3), "Chrysanthemum");
+        assert_eq!(face_short_name(Suit::Flower, 4), "Bamboo");
+    }
 
     #[test]
     fn stats_remaining_counts_match_ledger() {

@@ -1756,20 +1756,10 @@ pub(super) fn build_yaku_panel_and_tablets(
         .and_then(|frame| frame.active_yaku.as_deref());
 
     // Structure strip / scored-hand showcase: while idle it shows committed
-    // structure (plus a valid pending selection when meld preview is on), and
-    // while a cascade is active it keeps the just-scored tiles visible.
-    let meld_preview = crate::persistence::load_settings().structure_meld_preview;
-    let selection_on_structure_strip =
-        meld_preview && scene.staging_layout.is_valid_meld && !yaku_preview_sets.is_empty();
-    let committed_tile_ids: rustc_hash::FxHashSet<u32> =
-        gameplay.structure_tiles.iter().map(|t| t.id).collect();
+    // structure. Valid pending selections are rendered by the animated
+    // hand-tile staging preview so we do not draw a second solid copy here.
     let showcase_data = cascade_showcase_ref.cloned().or_else(|| {
-        if selection_on_structure_strip {
-            Some(CascadeShowcase {
-                tiles: yaku_preview_effective_tiles.clone(),
-                sets: yaku_preview_sets.clone(),
-            })
-        } else if has_structure {
+        if has_structure {
             Some(CascadeShowcase {
                 tiles: GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run),
                 sets: gameplay.structure_sets.clone(),
@@ -1779,6 +1769,15 @@ pub(super) fn build_yaku_panel_and_tablets(
         }
     });
     if let Some(showcase) = showcase_data {
+        let preview_layout_sets = if cascade_showcase_ref.is_none()
+            && crate::persistence::load_settings().structure_meld_preview
+            && scene.staging_layout.is_valid_meld
+            && !scene.staging_layout.meld_index_groups.is_empty()
+        {
+            Some(yaku_preview_sets.as_slice())
+        } else {
+            None
+        };
         let a_l = structure_marker_poses[0].anchor;
         let a_r = structure_marker_poses[1].anchor;
         let rot_l = structure_marker_poses[0].rotation_rad;
@@ -1786,7 +1785,11 @@ pub(super) fn build_yaku_panel_and_tablets(
         let structure_scale = structure_marker_poses[0]
             .uniform_author_scale(layout.window_h, ctx.room_gltf_height_scale);
         let span = crate::render::gameplay_glb::marker_pair_span_px(a_l, a_r);
-        let strip = compute_structure_strip_layout(span, layout_scale, &showcase.sets);
+        let strip = compute_structure_strip_layout(
+            span,
+            layout_scale,
+            preview_layout_sets.unwrap_or(&showcase.sets),
+        );
         let mut cursor = 0.0f32;
         let active_tile_ids = cascade_frame
             .as_ref()
@@ -1815,8 +1818,7 @@ pub(super) fn build_yaku_panel_and_tablets(
                     })
                     .unwrap_or(0.0);
                 let scale = 1.0 + 0.14 * pulse;
-                let is_pending = selection_on_structure_strip && !committed_tile_ids.contains(&tid);
-                let brightness = if is_pending { 0.85 } else { 1.0 + 0.45 * pulse };
+                let brightness = 1.0 + 0.45 * pulse;
                 lift_mm += SCORE_WAVE_STRUCTURE_TILE_MM * wave_t * pulse;
                 anchor[2] += layout.mm(lift_mm);
                 structure_showcase.push(ShowcaseTilePlacement {

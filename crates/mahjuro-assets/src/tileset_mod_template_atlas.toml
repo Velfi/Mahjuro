@@ -1,7 +1,7 @@
 # Mahjuro tileset mod template — copy this folder, rename it, replace atlas.png.
 image = "atlas.png"
-tile_width = 128
-tile_height = 192
+tile_width = 512
+tile_height = 768
 columns = 9
 
 layout = [
