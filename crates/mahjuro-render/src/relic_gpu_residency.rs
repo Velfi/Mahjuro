@@ -10,17 +10,21 @@ pub(crate) fn bc7_mip_bytes(width: u32, height: u32) -> usize {
     ((width + 3) / 4) as usize * ((height + 3) / 4) as usize * 16
 }
 
+pub(crate) fn bc7_next_mip_dim(v: u32) -> u32 {
+    (v / 2).max(4)
+}
+
 /// BC7 block compression requires width and height to be multiples of 4.
 pub(crate) fn bc7_block_aligned(width: u32, height: u32) -> bool {
     width % 4 == 0 && height % 4 == 0
 }
 
-#[cfg(feature = "relic_bc7_bake")]
+#[cfg(feature = "texture_bc7_bake")]
 pub(crate) fn align_bc7_dim(v: u32) -> u32 {
     v.next_multiple_of(4).max(4)
 }
 
-#[cfg(feature = "relic_bc7_bake")]
+#[cfg(feature = "texture_bc7_bake")]
 /// Base size for BC7 mip halving: 4-aligned and power-of-two so every mip stays block-aligned.
 pub(crate) fn align_bc7_base_dim(v: u32) -> u32 {
     let aligned = align_bc7_dim(v.max(1));
@@ -43,8 +47,8 @@ pub(crate) fn bc7_upload_chain_valid(base_w: u32, base_h: u32, mip_count: u32) -
         if !bc7_block_aligned(w, h) {
             return false;
         }
-        w = (w / 2).max(1);
-        h = (h / 2).max(1);
+        w = bc7_next_mip_dim(w);
+        h = bc7_next_mip_dim(h);
     }
     true
 }
@@ -71,8 +75,8 @@ pub(crate) fn bc7_chain_bytes(base_w: u32, base_h: u32, mip_count: u32) -> usize
     let mut h = base_h.max(1);
     for _ in 0..mip_count.max(1) {
         total += bc7_mip_bytes(w, h);
-        w = (w / 2).max(1);
-        h = (h / 2).max(1);
+        w = bc7_next_mip_dim(w);
+        h = bc7_next_mip_dim(h);
     }
     total
 }
@@ -157,7 +161,7 @@ mod tests {
         assert!(!bc7_block_aligned(1254, 1254));
     }
 
-    #[cfg(feature = "relic_bc7_bake")]
+    #[cfg(feature = "texture_bc7_bake")]
     #[test]
     fn bc7_base_dim_is_power_of_two() {
         assert_eq!(align_bc7_dim(1254), 1256);

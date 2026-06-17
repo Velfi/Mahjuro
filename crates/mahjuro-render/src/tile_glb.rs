@@ -191,16 +191,20 @@ pub struct LoadedPrimitive {
     pub indices: Vec<u32>,
     /// Decoded RGBA8, row-major (shared across primitives via [`RgbaTextureCpu`]).
     pub albedo_rgba: Option<RgbaTextureCpu>,
+    pub albedo_btx_source_path: Option<String>,
     /// Precomputed mips for [`Self::albedo_rgba`] when sourced from a shared glTF image.
     pub albedo_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     /// Optional tangent-space normal map (linear RGBA8, +X +Y +Z in tangent frame).
     pub normal_rgba: Option<RgbaTextureCpu>,
+    pub normal_btx_source_path: Option<String>,
     pub normal_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     /// Metallic (B) + roughness (G) in linear RGBA8.
     pub metallic_roughness_rgba: Option<RgbaTextureCpu>,
+    pub metallic_roughness_btx_source_path: Option<String>,
     pub metallic_roughness_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     /// sRGB emissive texture (matches base-color encoding for candle-lit output).
     pub emissive_rgba: Option<RgbaTextureCpu>,
+    pub emissive_btx_source_path: Option<String>,
     pub emissive_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     pub metallic_factor: f32,
     pub roughness_factor: f32,
@@ -216,12 +220,16 @@ pub(crate) fn release_loaded_primitive_gpu_source_buffers(prim: &mut LoadedPrimi
     prim.vertices = Vec::new();
     prim.indices = Vec::new();
     prim.albedo_rgba = None;
+    prim.albedo_btx_source_path = None;
     prim.albedo_mip_chain = None;
     prim.normal_rgba = None;
+    prim.normal_btx_source_path = None;
     prim.normal_mip_chain = None;
     prim.metallic_roughness_rgba = None;
+    prim.metallic_roughness_btx_source_path = None;
     prim.metallic_roughness_mip_chain = None;
     prim.emissive_rgba = None;
+    prim.emissive_btx_source_path = None;
     prim.emissive_mip_chain = None;
 }
 
@@ -752,6 +760,8 @@ pub fn mesh_local_half_extents(tile: &LoadedTile) -> [f32; 3] {
 
 fn decode_tile_primitive(
     primitive: gltf::Primitive<'_>,
+    glb_asset_label: Option<&str>,
+    btx_primitive_ordinal: usize,
     node_world: Mat4,
     buffers: &[gltf::buffer::Data],
     capped_images: &[Option<CappedGltfImage>],
@@ -968,12 +978,44 @@ fn decode_tile_primitive(
         vertices,
         indices,
         albedo_rgba,
+        albedo_btx_source_path: albedo_src.and_then(|_| {
+            glb_asset_label.map(|label| {
+                crate::baked_texture::gltf_slot_source_path(
+                    label,
+                    btx_primitive_ordinal,
+                    "base_color",
+                )
+            })
+        }),
         albedo_mip_chain,
         normal_rgba,
+        normal_btx_source_path: normal_src.and_then(|_| {
+            glb_asset_label.map(|label| {
+                crate::baked_texture::gltf_slot_source_path(label, btx_primitive_ordinal, "normal")
+            })
+        }),
         normal_mip_chain,
         metallic_roughness_rgba,
+        metallic_roughness_btx_source_path: mr_src.and_then(|_| {
+            glb_asset_label.map(|label| {
+                crate::baked_texture::gltf_slot_source_path(
+                    label,
+                    btx_primitive_ordinal,
+                    "metallic_roughness",
+                )
+            })
+        }),
         metallic_roughness_mip_chain,
         emissive_rgba,
+        emissive_btx_source_path: emissive_src.and_then(|_| {
+            glb_asset_label.map(|label| {
+                crate::baked_texture::gltf_slot_source_path(
+                    label,
+                    btx_primitive_ordinal,
+                    "emissive",
+                )
+            })
+        }),
         emissive_mip_chain,
         metallic_factor: pbr.metallic_factor(),
         roughness_factor: pbr.roughness_factor(),
@@ -989,6 +1031,7 @@ fn walk_tile_scene_nodes_filtered(
     node: gltf::Node<'_>,
     parent: Mat4,
     node_name: Option<&str>,
+    glb_asset_label: Option<&str>,
     out: &mut Vec<LoadedPrimitive>,
     buffers: &[gltf::buffer::Data],
     capped_images: &[Option<CappedGltfImage>],
@@ -999,13 +1042,17 @@ fn walk_tile_scene_nodes_filtered(
     let include_mesh = node_name.is_none_or(|name| node.name() == Some(name));
     if include_mesh && let Some(mesh) = node.mesh() {
         for prim in mesh.primitives() {
-            out.push(decode_tile_primitive(
+            let btx_primitive_ordinal = out.len();
+            let decoded = decode_tile_primitive(
                 prim,
+                glb_asset_label,
+                btx_primitive_ordinal,
                 world,
                 buffers,
                 capped_images,
                 bake_cache,
-            )?);
+            )?;
+            out.push(decoded);
         }
     }
     for child in node.children() {
@@ -1013,6 +1060,7 @@ fn walk_tile_scene_nodes_filtered(
             child,
             world,
             node_name,
+            glb_asset_label,
             out,
             buffers,
             capped_images,
@@ -1026,11 +1074,26 @@ pub fn load_glb_tile_from_bytes(data: &[u8]) -> anyhow::Result<LoadedTile> {
     load_glb_tile_from_node_name(data, None)
 }
 
+pub fn load_glb_tile_from_bytes_with_label(
+    data: &[u8],
+    glb_asset_label: &str,
+) -> anyhow::Result<LoadedTile> {
+    load_glb_tile_from_node_name_with_label(data, None, Some(glb_asset_label))
+}
+
 /// Decode mesh primitives from the default scene, optionally keeping only
 /// nodes whose glTF name matches `node_name`.
 pub fn load_glb_tile_from_node_name(
     data: &[u8],
     node_name: Option<&str>,
+) -> anyhow::Result<LoadedTile> {
+    load_glb_tile_from_node_name_with_label(data, node_name, None)
+}
+
+pub fn load_glb_tile_from_node_name_with_label(
+    data: &[u8],
+    node_name: Option<&str>,
+    glb_asset_label: Option<&str>,
 ) -> anyhow::Result<LoadedTile> {
     let (document, buffers, images) =
         gltf::import_slice(data).context("gltf::import_slice(tile mesh glb)")?;
@@ -1048,6 +1111,7 @@ pub fn load_glb_tile_from_node_name(
             node,
             Mat4::IDENTITY,
             node_name,
+            glb_asset_label,
             &mut primitives,
             &buffers,
             &capped_images,

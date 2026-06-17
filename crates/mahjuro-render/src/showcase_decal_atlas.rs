@@ -71,6 +71,13 @@ fn cell_uv_rect(col: u32, row: u32, atlas_w: u32, atlas_h: u32) -> [f32; 4] {
 /// Deterministic UV lookup for a baked atlas grid (no raster required).
 pub fn build_showcase_decal_lookup() -> FxHashMap<ShowcaseDecalKey, [f32; 4]> {
     let (atlas_w, atlas_h) = atlas_dimensions();
+    build_showcase_decal_lookup_for_texture(atlas_w, atlas_h)
+}
+
+fn build_showcase_decal_lookup_for_texture(
+    texture_w: u32,
+    texture_h: u32,
+) -> FxHashMap<ShowcaseDecalKey, [f32; 4]> {
     let mut lookup = FxHashMap::default();
     let bases = all_base_faces();
     let enh = enhancements();
@@ -82,7 +89,7 @@ pub fn build_showcase_decal_lookup() -> FxHashMap<ShowcaseDecalKey, [f32; 4]> {
                 let row = idx / ATLAS_COLS;
                 debug_assert!(row < ATLAS_ROWS);
                 let key: ShowcaseDecalKey = (suit, rank, e, debuffed);
-                lookup.insert(key, cell_uv_rect(col, row, atlas_w, atlas_h));
+                lookup.insert(key, cell_uv_rect(col, row, texture_w, texture_h));
                 idx += 1;
             }
         }
@@ -197,12 +204,33 @@ pub fn upload_showcase_decal_atlas_rgba(
     }
 }
 
+pub fn upload_showcase_decal_atlas_baked(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    payload: &crate::baked_texture::BakedTexturePayload,
+) -> ShowcaseDecalAtlasGpu {
+    let (texture, view, _bytes) = crate::baked_texture::upload_payload(
+        device,
+        queue,
+        label,
+        payload,
+        crate::baked_texture::bc7_supported(device),
+    );
+    ShowcaseDecalAtlasGpu {
+        _texture: texture,
+        view,
+        lookup: build_showcase_decal_lookup_for_texture(payload.base_width, payload.base_height),
+    }
+}
+
 /// Returns true when a pre-baked showcase decal atlas is available for `tileset`.
 pub fn baked_showcase_decal_atlas_available(tileset: &str) -> bool {
     if mahjuro_assets::tileset_mod::is_player_tileset(tileset) {
         return mahjuro_assets::tileset_mod::mod_showcase_cache_exists(tileset);
     }
-    mahjuro_assets::asset_path::get(&baked_atlas_asset_path(tileset)).is_some()
+    let path = crate::baked_texture::baked_texture_asset_path(&baked_atlas_asset_path(tileset));
+    mahjuro_assets::asset_path::get(&path).is_some()
 }
 
 fn decode_showcase_decal_png(png_bytes: &[u8], path_label: &str) -> anyhow::Result<Vec<u8>> {
@@ -218,18 +246,6 @@ fn decode_showcase_decal_png(png_bytes: &[u8], path_label: &str) -> anyhow::Resu
         );
     }
     Ok(img.into_raw())
-}
-
-fn load_builtin_showcase_decal_rgba(tileset: &str) -> anyhow::Result<Vec<u8>> {
-    let path = baked_atlas_asset_path(tileset);
-    let file = mahjuro_assets::asset_path::get(&path).ok_or_else(|| {
-        anyhow::anyhow!(
-            "missing baked showcase decal atlas at {path}; run `cargo build` (needs \
-             mahjuro-bake-decal-atlases in target/<profile>/) or \
-             `cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases`"
-        )
-    })?;
-    decode_showcase_decal_png(&file.data, &path)
 }
 
 fn bake_mod_showcase_decal_rgba(tileset: &str) -> anyhow::Result<Vec<u8>> {
@@ -265,7 +281,14 @@ pub fn load_or_bake_showcase_decal_atlas(
             bake_mod_showcase_decal_rgba(tileset)?
         }
     } else {
-        load_builtin_showcase_decal_rgba(tileset)?
+        let path = baked_atlas_asset_path(tileset);
+        let payload = crate::baked_texture::load_baked_texture(&path)?;
+        return Ok(upload_showcase_decal_atlas_baked(
+            device,
+            queue,
+            &format!("showcase-decal-atlas-{tileset}"),
+            &payload,
+        ));
     };
     Ok(upload_showcase_decal_atlas_rgba(
         device,

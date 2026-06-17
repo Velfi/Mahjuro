@@ -29,6 +29,7 @@ pub mod room_shadow;
 pub mod room_slugs;
 pub mod shader_program;
 pub mod showcase_decal;
+pub mod texture;
 
 /// FNV-1a 64-bit (stable across toolchains for build stamps).
 pub struct Fnv64 {

@@ -32,9 +32,20 @@ fn vs_main(@builtin(vertex_index) vid: u32) -> VsOut {
     return out;
 }
 
+// Finite ceiling for the bloom source. Bright enough to preserve legitimate
+// emissive HDR, low enough that a stray Inf can't bloom the whole screen.
+const BLOOM_SRC_MAX: f32 = 256.0;
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let scene = textureSample(scene_tex, src_smp, in.uv).rgb;
+    let raw = textureSample(scene_tex, src_smp, in.uv).rgb;
+    // Guard the bloom chain against non-finite HDR. A single NaN texel would
+    // propagate across the separable blur passes into bright white *square*
+    // blocks (the blur kernel turns one bad sample into an expanding block);
+    // an Inf would bloom unbounded. `x != x` is true only for NaN, so replace
+    // NaN with 0, then clamp magnitude to a finite ceiling before thresholding.
+    let no_nan = select(raw, vec3<f32>(0.0), raw != raw);
+    let scene = clamp(no_nan, vec3<f32>(0.0), vec3<f32>(BLOOM_SRC_MAX));
     let th = params.data0.x;
     let lum = dot(scene, vec3<f32>(0.2126, 0.7152, 0.0722));
     // Tight knee: only strong HDR peaks bloom; small sources stay sharp. In dim

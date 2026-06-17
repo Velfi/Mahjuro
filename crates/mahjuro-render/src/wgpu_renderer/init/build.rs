@@ -23,7 +23,8 @@ fn load_startup_tile_meshes(
     tile_glb_default_emissive_view: &wgpu::TextureView,
 ) -> [TileMeshGpuSet; crate::tile_glb::TILE_MATERIAL_MESH_COUNT] {
     use crate::tile_glb::{
-        load_glb_tile_from_bytes, normalize_mesh, tile_glb_asset_path, tile_material_index,
+        load_glb_tile_from_bytes_with_label, normalize_mesh, tile_glb_asset_path,
+        tile_material_index,
     };
     use mahjuro_gfx_types::TileMaterial;
 
@@ -58,7 +59,7 @@ fn load_startup_tile_meshes(
         let file = mahjuro_assets::asset_path::get(path).unwrap_or_else(|| {
             panic!("required tile mesh GLB missing at {path} (packs or assets/)")
         });
-        let mut mesh = load_glb_tile_from_bytes(&file.data)
+        let mut mesh = load_glb_tile_from_bytes_with_label(&file.data, path)
             .unwrap_or_else(|e| panic!("could not load required tile mesh GLB {path}: {e:#}"));
         assert!(
             !mesh.primitives.is_empty(),
@@ -796,9 +797,10 @@ pub(super) fn build_renderer_new(
         let _scope = crate::startup_profile::scope("wgpu.lit_meshes.coin_glb_decode");
         let coin_glb_file = mahjuro_assets::asset_path::get("3d/coin.glb")
             .expect("3d/coin.glb not embedded (packs or assets/)");
-        let mut coin_tile = crate::tile_glb::load_glb_tile_from_node_name(
+        let mut coin_tile = crate::tile_glb::load_glb_tile_from_node_name_with_label(
             &coin_glb_file.data,
             Some(crate::coin_glb::COIN_GLB_NODE),
+            Some("3d/coin.glb"),
         )
         .expect("coin.glb node decode");
         crate::tile_glb::reorient_mesh_to_engine_axes(&mut coin_tile);

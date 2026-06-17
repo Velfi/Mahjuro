@@ -45,22 +45,15 @@ pub fn extract_sprite_rgba(sheet_png: &str, sprite_name: &str) -> Option<(Vec<u8
 }
 
 fn load_atlas(sheet_png: &str) -> Option<DecodedAtlas> {
-    let Some(png) = mahjuro_assets::asset_path::get(sheet_png) else {
-        warn_once(format!("{sheet_png}|png-missing"), || {
-            format!("temptation_atlas: PNG '{sheet_png}' not found")
-        });
-        return None;
-    };
-    let img = match image::load_from_memory(&png.data) {
-        Ok(img) => img.to_rgba8(),
+    let (rgba, width, _height) = match crate::baked_texture::load_rgba_for_cpu(sheet_png) {
+        Ok(decoded) => decoded,
         Err(e) => {
             warn_once(format!("{sheet_png}|png-decode"), || {
-                format!("temptation_atlas: PNG '{sheet_png}' decode failed: {e}")
+                format!("temptation_atlas: atlas '{sheet_png}' decode failed: {e:#}")
             });
             return None;
         }
     };
-    let (width, _height) = img.dimensions();
 
     let toml_asset = atlas_toml_path(sheet_png)?;
     let Some(toml) = mahjuro_assets::asset_path::get(&toml_asset) else {
@@ -87,7 +80,7 @@ fn load_atlas(sheet_png: &str) -> Option<DecodedAtlas> {
     }
 
     Some(DecodedAtlas {
-        rgba: img.into_raw(),
+        rgba,
         width,
         tile_w,
         tile_h,

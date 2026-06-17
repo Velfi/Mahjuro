@@ -654,15 +654,14 @@ pub fn log_all_assets() {
     }
 }
 
-/// Enumerate tileset names (`textures/tile_sets/*/atlas.toml` + `atlas.png`). With packs,
-/// `textures/tile_sets/` lives in the eager **shared** pack, so this does not mount lazy packs
-/// in normal layouts.
+/// Enumerate tileset names. With packs, `textures/tile_sets/*/atlas.toml` lives in the eager
+/// **shared** pack, so this does not mount lazy packs just to list names.
 pub fn list_tilesets() -> Vec<String> {
     init();
     let Some(state) = STATE.get() else {
         return Vec::new();
     };
-    let names_src: Vec<String> = match state {
+    let mut names: Vec<String> = match state {
         AssetsState::Loose(root) => {
             let sets = root.join("textures").join("tile_sets");
             let Ok(rd) = std::fs::read_dir(&sets) else {
@@ -670,14 +669,18 @@ pub fn list_tilesets() -> Vec<String> {
             };
             rd.filter_map(|e| e.ok())
                 .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|name| {
+                    get(&format!("textures/tile_sets/{name}/atlas.toml")).is_some()
+                        && (get(&format!(
+                            "data/texture_baked/textures/tile_sets/{name}/atlas.png.btx"
+                        ))
+                        .is_some()
+                            || get(&format!("textures/tile_sets/{name}/atlas.png")).is_some())
+                })
                 .collect()
         }
         AssetsState::Packs(p) => p.tileset_names_from_index(),
     };
-    let mut names: Vec<String> = names_src
-        .into_iter()
-        .filter(|name| get(&format!("textures/tile_sets/{name}/atlas.png")).is_some())
-        .collect();
     names.sort();
     names.dedup();
     if let Some(pos) = names.iter().position(|n| n == "original") {

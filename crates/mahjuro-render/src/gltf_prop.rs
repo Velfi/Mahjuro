@@ -10,6 +10,24 @@ use crate::wgpu_renderer::{
     resources::{TextureUploadParams, upload_rgba_texture_with_mips, white_albedo},
 };
 
+fn upload_baked_gltf_slot(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    source_path: Option<&str>,
+) -> Option<wgpu::TextureView> {
+    let source_path = source_path?;
+    let payload = crate::baked_texture::load_baked_texture(source_path).ok()?;
+    let (_texture, view, _bytes) = crate::baked_texture::upload_payload(
+        device,
+        queue,
+        label,
+        &payload,
+        crate::baked_texture::bc7_supported(device),
+    );
+    Some(view)
+}
+
 /// `tile_visual_params.w` — selects the imported glTF PBR branch
 /// in `tile_3d.wgsl` (albedo + normal + metallic-roughness, no mahjong decal).
 pub const GLTF_PROP_BODY_KIND: f32 = 4.0;
@@ -99,21 +117,36 @@ pub(crate) fn upload_gltf_tile_primitives(
             usage: wgpu::BufferUsages::INDEX,
         });
         let mips = crate::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-        let (_albedo_texture, albedo_view) = match prim.albedo_rgba.as_deref() {
-            Some((rgba, w, h)) => upload_rgba_texture_with_mips(&TextureUploadParams {
-                device,
-                queue,
-                label: format!("{label_prefix}-albedo-{i}"),
-                rgba,
-                width: *w,
-                height: *h,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                mips,
-            }),
-            None => white_albedo(device, queue),
+        let (_albedo_texture, albedo_view) = if let Some(view) = upload_baked_gltf_slot(
+            device,
+            queue,
+            &format!("{label_prefix}-albedo-{i}"),
+            prim.albedo_btx_source_path.as_deref(),
+        ) {
+            (white_albedo(device, queue).0, view)
+        } else {
+            match prim.albedo_rgba.as_deref() {
+                Some((rgba, w, h)) => upload_rgba_texture_with_mips(&TextureUploadParams {
+                    device,
+                    queue,
+                    label: format!("{label_prefix}-albedo-{i}"),
+                    rgba,
+                    width: *w,
+                    height: *h,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    mips,
+                }),
+                None => white_albedo(device, queue),
+            }
         };
         let normal_view = match prim.normal_rgba.as_deref() {
-            Some((rgba, w, h)) => {
+            Some((rgba, w, h)) => upload_baked_gltf_slot(
+                device,
+                queue,
+                &format!("{label_prefix}-normal-{i}"),
+                prim.normal_btx_source_path.as_deref(),
+            )
+            .unwrap_or_else(|| {
                 upload_rgba_texture_with_mips(&TextureUploadParams {
                     device,
                     queue,
@@ -125,11 +158,17 @@ pub(crate) fn upload_gltf_tile_primitives(
                     mips,
                 })
                 .1
-            }
+            }),
             None => default_normal_view.clone(),
         };
         let metallic_roughness_view = match prim.metallic_roughness_rgba.as_deref() {
-            Some((rgba, w, h)) => {
+            Some((rgba, w, h)) => upload_baked_gltf_slot(
+                device,
+                queue,
+                &format!("{label_prefix}-mr-{i}"),
+                prim.metallic_roughness_btx_source_path.as_deref(),
+            )
+            .unwrap_or_else(|| {
                 upload_rgba_texture_with_mips(&TextureUploadParams {
                     device,
                     queue,
@@ -141,11 +180,17 @@ pub(crate) fn upload_gltf_tile_primitives(
                     mips,
                 })
                 .1
-            }
+            }),
             None => default_mr_view.clone(),
         };
         let emissive_view = match prim.emissive_rgba.as_deref() {
-            Some((rgba, w, h)) => {
+            Some((rgba, w, h)) => upload_baked_gltf_slot(
+                device,
+                queue,
+                &format!("{label_prefix}-emissive-{i}"),
+                prim.emissive_btx_source_path.as_deref(),
+            )
+            .unwrap_or_else(|| {
                 upload_rgba_texture_with_mips(&TextureUploadParams {
                     device,
                     queue,
@@ -157,7 +202,7 @@ pub(crate) fn upload_gltf_tile_primitives(
                     mips,
                 })
                 .1
-            }
+            }),
             None => default_emissive_view.clone(),
         };
         let pbr_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
