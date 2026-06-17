@@ -113,6 +113,28 @@ pub(super) fn make_image_quad_overlay_gpu(
             bind_group,
         });
     }
+    if let crate::draw_cmd::ImageQuadSource::RawAsset { path } = source {
+        let (rgba, w, h) = crate::baked_texture::load_rgba_for_cpu(path).ok()?;
+        let (texture, view) = upload_rgba_texture(device, queue, "image-quad", &rgba, w, h);
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("image-quad-bg"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+        return Some(TileFaceOverlayGpu {
+            _texture: texture,
+            bind_group,
+        });
+    }
 
     let (rgba, w, h) = match source {
         crate::draw_cmd::ImageQuadSource::AtlasSprite { sheet, name } => {
@@ -122,6 +144,7 @@ pub(super) fn make_image_quad_overlay_gpu(
             crate::temptation_atlas::extract_sprite_rgba(sheet, name)?
         }
         crate::draw_cmd::ImageQuadSource::Asset { .. } => return None,
+        crate::draw_cmd::ImageQuadSource::RawAsset { .. } => return None,
         crate::draw_cmd::ImageQuadSource::Relic(id) => {
             crate::relic_pipeline::decode_relic_icon_rgba(*id)?
         }

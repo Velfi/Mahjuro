@@ -546,7 +546,7 @@ pub struct TileFaceQuad {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ImageQuadSource {
-    /// Sub-rectangle of a baked Kenney Input Prompts sheet PNG. `sheet` is the
+    /// Sub-rectangle of a raw Kenney Input Prompts sheet PNG. `sheet` is the
     /// asset-relative path (under `assets/`) to the `_sheet_double.png`; `name`
     /// is the matching `SubTexture name="…"` from the sibling XML index. The
     /// renderer decodes each sheet once on first use, then crops the named
@@ -561,8 +561,10 @@ pub enum ImageQuadSource {
         sheet: &'static str,
         name: &'static str,
     },
-    /// Full embedded PNG under `assets/` (via [`mahjuro_assets::asset_path::get`]).
+    /// Full static texture asset loaded from its BTX bake.
     Asset { path: &'static str },
+    /// Full embedded PNG that intentionally stays out of the static BTX1 bake.
+    RawAsset { path: &'static str },
     /// Relic icon: albedo + mask cut via [`crate::relic_pipeline`].
     Relic(mahjuro_core::core::relic::RelicId),
     /// Procedural debuff X ([`crate::decal::rasterize_debuff_marker_overlay`]) — same mark as on tiles.
@@ -575,6 +577,7 @@ impl ImageQuadSource {
             Self::AtlasSprite { sheet, name } => format!("atlas:{sheet}:{name}"),
             Self::PackedAtlas { sheet, name } => format!("packed-atlas:{sheet}:{name}"),
             Self::Asset { path } => format!("asset:{path}"),
+            Self::RawAsset { path } => format!("raw-asset:{path}"),
             Self::Relic(id) => format!("relic:{id:?}"),
             Self::DebuffMarker => "debuff-marker".to_string(),
         }
@@ -763,10 +766,6 @@ pub enum Object3dKind {
         max_count: u32,
         /// Total arc the fan spreads across (degrees, symmetric about vertical).
         spread_deg: f32,
-        /// RGBA tint for the stick body (lower ~80% of each stick).
-        base_color: [f32; 4],
-        /// RGBA tint for the tip cap (upper ~20%).
-        tip_color: [f32; 4],
         /// Yaw of the fan plane about world up (degrees).
         rotation_y_deg: f32,
         /// Pitch / roll from scene layout (degrees, `Rz * Ry * Rx`).

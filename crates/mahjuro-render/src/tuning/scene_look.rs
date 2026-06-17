@@ -28,6 +28,16 @@ impl Default for SceneLookTuning {
     }
 }
 
+/// Current shipped table-room look shared by gameplay and shop.
+pub const TABLE_ROOM_SCENE_LOOK: SceneLookTuning = SceneLookTuning {
+    tonemap: TonemapTuning::shipping_default(),
+    room: RoomEnvLightingTune {
+        lantern_light_color_mul: [0.38152942, 0.6996502, 1.5142848],
+        ..RoomEnvLightingTune::SOURCE_DEFAULTS
+    },
+    room_gltf_height_scale: SHOP_ENV_HEIGHT_SCALE,
+};
+
 /// Slider rows for [`SceneLookDebugOverlay`](crate::debug_overlays::SceneLookDebugOverlay).
 /// Order: tonemap (5) then room / height (12). Must match [`scene_look_row_value`] /
 /// [`scene_look_row_set`].
@@ -123,6 +133,11 @@ impl SceneLookTuningSet {
                     per_scene.insert(key.to_string(), load_scene_look(key));
                     break;
                 }
+            }
+            if !per_scene.contains_key(key)
+                && let Some(look) = shipped_scene_look(key)
+            {
+                per_scene.insert(key.to_string(), look);
             }
         }
         Self {
@@ -266,9 +281,15 @@ fn load_scene_look(scene_key: &str) -> SceneLookTuning {
             return mahjuro_gfx_types::load_tuning_override(&legacy_unified);
         }
     }
-    SceneLookTuning {
-        tonemap: load_tonemap_with_legacy(scene_key),
-        ..SceneLookTuning::default()
+    let mut look = shipped_scene_look(scene_key).unwrap_or_default();
+    look.tonemap = load_tonemap_with_legacy(scene_key);
+    look
+}
+
+fn shipped_scene_look(scene_key: &str) -> Option<SceneLookTuning> {
+    match scene_key {
+        scene_keys::GAMEPLAY | scene_keys::SHOP => Some(TABLE_ROOM_SCENE_LOOK),
+        _ => None,
     }
 }
 
@@ -343,8 +364,8 @@ pub fn punctual_tint_preview_linear(rgb_mul: [f32; 3]) -> [f32; 3] {
 
 pub fn scene_look_tint_swatch_rgb(look: &SceneLookTuning, row: usize) -> Option<[f32; 3]> {
     let rgb = match row {
-        13..=15 => look.room.candle_light_color_mul,
-        16..=18 => look.room.lantern_light_color_mul,
+        11..=13 => look.room.candle_light_color_mul,
+        14..=16 => look.room.lantern_light_color_mul,
         _ => return None,
     };
     Some(punctual_tint_preview_linear(rgb))

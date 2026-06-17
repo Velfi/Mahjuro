@@ -1065,8 +1065,8 @@ mod tests {
             "archive decal feature flag missing from room_glb.wgsl"
         );
         assert!(
-            ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_ROOM_CANDLE_WAX"),
-            "candle wax feature flag missing from room_glb.wgsl"
+            ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_ROOM_WAX_SUBSURFACE"),
+            "wax subsurface feature flag missing from room_glb.wgsl"
         );
         assert!(
             ROOM_GLB_WGSL.contains("GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER"),
@@ -1097,24 +1097,14 @@ mod tests {
             "focused room shadow sampling must be gated by a receiver material flag"
         );
         assert!(
-            ROOM_GLB_WGSL.contains("candle_flame_capsule_closest_pos"),
-            "candle point lights should use a soft capsule emitter approximation"
+            ROOM_GLB_WGSL.contains("wax_subsurface"),
+            "wax SSS should be a material response in the shared light loop"
         );
         assert!(
-            ROOM_GLB_WGSL.contains("wax_translucent_glow"),
-            "candle wax translucency path missing from room_glb.wgsl"
-        );
-        assert!(
-            ROOM_GLB_WGSL.contains("candle_indirect_bounce"),
-            "cheap candle GI / indirect bounce term missing from room_glb.wgsl"
-        );
-        assert!(
-            ROOM_GLB_WGSL.contains("candle_reflection_streaks"),
-            "polished candle reflection streak term missing from room_glb.wgsl"
-        );
-        assert!(
-            ROOM_GLB_WGSL.contains("candle_streak_tangent"),
-            "candle reflection streaks should use a stable surface tangent"
+            !ROOM_GLB_WGSL.contains("candle_flame_capsule_closest_pos")
+                && !ROOM_GLB_WGSL.contains("candle_indirect_bounce")
+                && !ROOM_GLB_WGSL.contains("candle_reflection_streaks"),
+            "room shader should not have candle-specific receiver lighting paths"
         );
         assert!(
             ROOM_GLB_WGSL.contains("exponential_height_fog_alpha"),

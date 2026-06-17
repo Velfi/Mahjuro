@@ -9,10 +9,9 @@ use crate::cascade_tuning_timeline::{
 use crate::core::rules::ChamberKind;
 use crate::game::cascade::CascadeTuning;
 use crate::game::scene_look_tuning::{
-    self, SCENE_LOOK_SLIDER_COUNT, SCENE_LOOK_SLIDER_META, SceneLookTuning, SceneLookTuningSet,
+    self, SCENE_LOOK_SLIDER_COUNT, SCENE_LOOK_SLIDER_META, SceneLookTuning,
     hue_wheel_preview_linear,
 };
-use crate::game::tonemap_tuning::FALLBACK_SCENE_KEY;
 use crate::render::debug_overlay_ui::{self, DebugPointerState, DebugRowVisual};
 use crate::render::draw_cmd::CameraParams;
 use crate::render::hallway_glb::{
@@ -1335,9 +1334,7 @@ impl CameraDebugOverlay {
 
 const SCENE_LOOK_SAVE_ROW: usize = SCENE_LOOK_SLIDER_COUNT;
 const SCENE_LOOK_RESET_ROW: usize = SCENE_LOOK_SLIDER_COUNT + 1;
-const SCENE_LOOK_SCENE_PREV_ROW: usize = SCENE_LOOK_SLIDER_COUNT + 2;
-const SCENE_LOOK_SCENE_NEXT_ROW: usize = SCENE_LOOK_SLIDER_COUNT + 3;
-const SCENE_LOOK_ROW_COUNT: usize = SCENE_LOOK_SLIDER_COUNT + 4;
+const SCENE_LOOK_ROW_COUNT: usize = SCENE_LOOK_SLIDER_COUNT + 2;
 
 #[derive(Clone, Copy)]
 struct SceneLookDebugLayout {
@@ -1400,7 +1397,7 @@ impl SceneLookDebugLayout {
     }
 
     fn action_row_rect(&self, row: usize) -> Option<(f32, f32, f32, f32)> {
-        if !(SCENE_LOOK_SAVE_ROW..=SCENE_LOOK_SCENE_NEXT_ROW).contains(&row) {
+        if !(SCENE_LOOK_SAVE_ROW..=SCENE_LOOK_RESET_ROW).contains(&row) {
             return None;
         }
         let row_y = self.rows_y0 + row as f32 * (self.row_h + self.row_gap);
@@ -1426,7 +1423,7 @@ fn scene_look_point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
 
 pub struct SceneLookDebugOverlay {
     cursor: usize,
-    scene_index: usize,
+    scene_key: &'static str,
     pub look: SceneLookTuning,
     editing: bool,
     edit_buffer: String,
@@ -1443,10 +1440,10 @@ pub enum SceneLookDebugResult {
 
 impl SceneLookDebugOverlay {
     #[cfg(debug_menu_enabled)]
-    pub fn new(scene_index: usize, look: SceneLookTuning) -> Self {
+    pub fn new(scene_key: &'static str, look: SceneLookTuning) -> Self {
         Self {
             cursor: 0,
-            scene_index,
+            scene_key,
             look,
             editing: false,
             edit_buffer: String::new(),
@@ -1456,16 +1453,11 @@ impl SceneLookDebugOverlay {
     }
 
     pub fn scene_key(&self) -> Option<&str> {
-        let key = scene_look_tuning::overlay_scene_keys()[self.scene_index];
-        if key == FALLBACK_SCENE_KEY {
-            None
-        } else {
-            Some(key)
-        }
+        Some(self.scene_key)
     }
 
     pub fn scene_key_persist(&self) -> &str {
-        scene_look_tuning::overlay_scene_keys()[self.scene_index]
+        self.scene_key
     }
 
     fn row_count(&self) -> usize {
@@ -1478,14 +1470,6 @@ impl SceneLookDebugOverlay {
 
     fn set_row_value(&mut self, row: usize, v: f32) {
         scene_look_tuning::scene_look_row_set(&mut self.look, row, v);
-    }
-
-    fn step_scene(&mut self, delta: i32, set: &SceneLookTuningSet) {
-        let keys = scene_look_tuning::overlay_scene_keys();
-        let n = keys.len() as i32;
-        self.scene_index = ((self.scene_index as i32 + delta).rem_euclid(n)) as usize;
-        self.look = set.resolve(self.scene_key());
-        self.clear_edit();
     }
 
     fn apply_slider_mx(&mut self, row: usize, mx: f32, layout: &SceneLookDebugLayout) {
@@ -1713,7 +1697,6 @@ impl SceneLookDebugOverlay {
         mouse: Option<(f32, f32, bool, bool)>,
         window_w: f32,
         window_h: f32,
-        set: &SceneLookTuningSet,
     ) -> SceneLookDebugResult {
         let layout = SceneLookDebugLayout::compute(window_w, window_h, self.row_count());
         let slider_rows = SCENE_LOOK_SLIDER_COUNT;
@@ -1764,7 +1747,7 @@ impl SceneLookDebugOverlay {
                         break;
                     }
                 }
-                for row in SCENE_LOOK_SAVE_ROW..=SCENE_LOOK_SCENE_NEXT_ROW {
+                for row in SCENE_LOOK_SAVE_ROW..=SCENE_LOOK_RESET_ROW {
                     let Some(rect) = layout.action_row_rect(row) else {
                         continue;
                     };
@@ -1774,14 +1757,7 @@ impl SceneLookDebugOverlay {
                         return match row {
                             SCENE_LOOK_SAVE_ROW => SceneLookDebugResult::Save,
                             SCENE_LOOK_RESET_ROW => SceneLookDebugResult::Reset,
-                            SCENE_LOOK_SCENE_PREV_ROW => {
-                                self.step_scene(-1, set);
-                                SceneLookDebugResult::Stay
-                            }
-                            _ => {
-                                self.step_scene(1, set);
-                                SceneLookDebugResult::Stay
-                            }
+                            _ => SceneLookDebugResult::Stay,
                         };
                     }
                 }
@@ -1817,13 +1793,7 @@ impl SceneLookDebugOverlay {
                         UiAction::FocusPrev | UiAction::NavigateHudPrev => -1.0,
                         _ => 1.0,
                     };
-                    if self.cursor == SCENE_LOOK_SCENE_PREV_ROW {
-                        self.step_scene(-1, set);
-                    } else if self.cursor == SCENE_LOOK_SCENE_NEXT_ROW {
-                        self.step_scene(1, set);
-                    } else {
-                        self.adjust_row(dir);
-                    }
+                    self.adjust_row(dir);
                 }
                 UiAction::Confirm | UiAction::CommitDiscard => {
                     if self.editing {
@@ -1832,10 +1802,6 @@ impl SceneLookDebugOverlay {
                         return SceneLookDebugResult::Save;
                     } else if self.cursor == SCENE_LOOK_RESET_ROW {
                         return SceneLookDebugResult::Reset;
-                    } else if self.cursor == SCENE_LOOK_SCENE_PREV_ROW {
-                        self.step_scene(-1, set);
-                    } else if self.cursor == SCENE_LOOK_SCENE_NEXT_ROW {
-                        self.step_scene(1, set);
                     } else if self.cursor < SCENE_LOOK_SLIDER_COUNT {
                         self.begin_editing();
                     }
@@ -1967,11 +1933,7 @@ impl SceneLookDebugOverlay {
             ..Default::default()
         });
 
-        let scene_label = if self.scene_key_persist() == FALLBACK_SCENE_KEY {
-            "scene: (default / no key)".to_string()
-        } else {
-            format!("scene: {}", self.scene_key_persist())
-        };
+        let scene_label = format!("scene: {}", self.scene_key_persist());
         labels.push(TextLabel {
             rect: [
                 layout.panel_x,
@@ -2124,22 +2086,6 @@ impl SceneLookDebugOverlay {
             &mut instances,
             &mut labels,
             ButtonVariant::Danger,
-        );
-        self.draw_action_row(
-            &layout,
-            SCENE_LOOK_SCENE_PREV_ROW,
-            "\u{2190} Previous scene",
-            &mut instances,
-            &mut labels,
-            ButtonVariant::Default,
-        );
-        self.draw_action_row(
-            &layout,
-            SCENE_LOOK_SCENE_NEXT_ROW,
-            "Next scene \u{2192}",
-            &mut instances,
-            &mut labels,
-            ButtonVariant::Default,
         );
 
         let hint_y =

@@ -2129,7 +2129,7 @@ pub(super) fn init_shaders_and_pipelines(
             cull_mode: Some(wgpu::Face::Front),
             ..Default::default()
         },
-        depth_stencil: Some(depth_3d.clone()),
+        depth_stencil: Some(depth_3d_blend.clone()),
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,

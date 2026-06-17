@@ -1,8 +1,8 @@
 //! Generic BTX1 static texture bake stamp.
 //!
-//! Inputs: every shipped texture under `assets/textures/` except relic/source/raw
-//! authoring files, the GLB files whose material textures are extracted, and the
-//! render-side BTX bake/runtime source files. Bumping `texture-btx1-vN`
+//! Inputs: every BTX-shipped texture under `assets/textures/`, the GLB files whose
+//! material textures are extracted, and the render-side BTX bake/runtime source
+//! files. Bumping `texture-btx1-vN`
 //! invalidates every committed generic texture bake.
 
 use std::path::{Path, PathBuf};
@@ -128,6 +128,9 @@ fn hashable_texture_input_files(root: &Path) -> Vec<PathBuf> {
             let rel = path.to_string_lossy().replace('\\', "/");
             rel.contains("/assets/textures/")
                 && !rel.contains("/assets/textures/relics/")
+                && !rel.contains("/assets/textures/kenney_input-prompts/")
+                && !rel.contains("/assets/textures/temptations/")
+                && !rel.ends_with("/assets/textures/main_menu_logo.png")
                 && !rel.contains("/source/")
                 && !rel.ends_with("_raw.png")
         })

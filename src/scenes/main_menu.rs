@@ -771,7 +771,7 @@ impl SceneBehavior for MainMenuScene {
                         color: [1.0, 1.0, 1.0, 1.0],
                         user: 0,
                     },
-                    source: ImageQuadSource::Asset {
+                    source: ImageQuadSource::RawAsset {
                         path: MAIN_MENU_LOGO_ASSET,
                     },
                     clip_rect: None,

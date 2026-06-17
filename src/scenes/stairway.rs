@@ -1597,7 +1597,7 @@ impl StairwayScene {
                 layout.group_w,
                 label_font * 1.2,
             ],
-            text: "Your five".into(),
+            text: format!("Your {PLAYER_PICKS}"),
             color: color::alpha([0.86, 0.18, 0.14, 1.0], 0.95),
             align: TextAlign::Left,
             font_px: Some(label_font),
@@ -1610,7 +1610,7 @@ impl StairwayScene {
             layout.house_label_y - label_font,
             layout.group_w,
             label_font,
-            "The House's five",
+            &format!("The House's {HOUSE_PICKS}"),
             color::CHAMPAGNE,
             GlossaryMode::Prose,
         );

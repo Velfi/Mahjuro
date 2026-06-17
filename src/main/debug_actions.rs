@@ -206,16 +206,17 @@ impl App {
                 if self.debug.scene_look_debug_overlay.is_none() {
                     let keys = crate::game::scene_look_tuning::overlay_scene_keys();
                     let active = self.active_scene_key_for_renderer();
-                    let scene_index = active
-                        .and_then(|k| keys.iter().position(|&x| x == k))
-                        .unwrap_or(0);
+                    let Some(scene_key) = active.filter(|k| keys.contains(k)) else {
+                        panic!(
+                            "Scene look debug overlay opened on unsupported scene key {active:?}. \
+                             Add the scene to scene_look_tuning::OVERLAY_SCENE_KEYS or do not expose \
+                             the Scene Look debug action for this scene. Supported keys: {keys:?}"
+                        );
+                    };
                     let look = self.scene_look.resolve(active);
                     self.debug.scene_look_debug_overlay =
-                        Some(SceneLookDebugOverlay::new(scene_index, look));
-                    log::debug!(
-                        "Opened scene look debug overlay (scene: {})",
-                        keys[scene_index]
-                    );
+                        Some(SceneLookDebugOverlay::new(scene_key, look));
+                    log::debug!("Opened scene look debug overlay (scene: {scene_key})");
                 }
             }
             DebugAction::OpenHallwayHallFxDebug => {

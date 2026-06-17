@@ -6,9 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
-use mahjuro_bake_stamp::BakeKind;
 use mahjuro_bake_stamp::room_gi::RoomGi;
 use mahjuro_bake_stamp::room_shadow::RoomShadow;
+use mahjuro_bake_stamp::BakeKind;
 
 use crate::bake_cli::{BakeRoomCli, RoomBakeKind};
 use crate::room_bake::scene_for_room;
@@ -74,19 +74,25 @@ pub fn run(cli: BakeRoomCli) -> anyhow::Result<()> {
         write_room_gi_lightmap_bake(*room, &cli.lightmap_dir, bake)?;
     }
 
+    let mut shadow_app: Option<RoomBakeApp> = None;
     for room in &shadow_rooms {
         let (scene, run, game_in_progress) = scene_for_room(*room, &progress);
-        let gfx = bake_render_settings();
-        let mut app = RoomBakeApp::new(
-            scene,
-            run,
-            width,
-            height,
-            game_in_progress,
-            0,
-            progress.clone(),
-            gfx,
-        )?;
+        let app = match shadow_app.as_mut() {
+            Some(app) => {
+                app.reset_scene(scene, run, game_in_progress);
+                app
+            }
+            None => shadow_app.insert(RoomBakeApp::new(
+                scene,
+                run,
+                width,
+                height,
+                game_in_progress,
+                0,
+                progress.clone(),
+                bake_render_settings(),
+            )?),
+        };
         let bake = app.bake_room_shadow(*room, cli.warmup_frames)?;
         write_room_shadow_bake(*room, &cli.shadow_dir, bake)?;
     }

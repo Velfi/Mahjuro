@@ -14,8 +14,8 @@ use crate::{
         GpuInstance, MAX_BOOK_SLOTS, MAX_BOWL_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS,
         MAX_ORB_SLOTS, MAX_ORDEAL_ICON_SLOTS, MAX_RELIC_SLOTS, MAX_TALISMAN_SLOTS,
         MAX_TALLY_FAN_SLOTS, MAX_TALLY_STICK_SLOTS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
-        MAX_YAKU_TABLET_SLOTS, MEMORIAL_TALISMAN_TEXTURE_BASE, WgpuRenderer,
-        ordeal_icon_material_params, relic_material_params,
+        MAX_YAKU_TABLET_SLOTS, MEMORIAL_TALISMAN_TEXTURE_BASE, TallyStick3dDrawState,
+        Tile3dInstance, WgpuRenderer, ordeal_icon_material_params, relic_material_params,
         runtime::{CameraFrame, DrawKind, RenderOp},
         tablet_label_hash,
     },
@@ -164,6 +164,7 @@ impl WgpuRenderer {
         mut shadow: Option<&mut super::shadow_setup::Object3dShadowCtx<'_>>,
     ) {
         self.coin_3d_draw_state.clear();
+        self.tally_stick_3d_draw_state.clear();
         self.talisman_slot_kind.fill(None);
         let cam_pos = camera.cam_pos;
         let look_target = camera.look_target;
@@ -1393,8 +1394,6 @@ impl WgpuRenderer {
                             count,
                             max_count,
                             spread_deg,
-                            base_color: _base_color,
-                            tip_color: _tip_color,
                             rotation_y_deg,
                             placement_rot_deg,
                             kind: fan_kind,
@@ -1422,9 +1421,10 @@ impl WgpuRenderer {
                             let base_scale =
                                 glam::Vec3::new(*stick_wide, *stick_len, *stick_thickness);
                             let (draw_kind, material) = match fan_kind {
-                                TallyFanKind::Draws => {
-                                    (DrawKind::TallyStickPlay, self.tally_stick_play_mesh.default_material)
-                                }
+                                TallyFanKind::Draws => (
+                                    DrawKind::TallyStickPlay,
+                                    self.tally_stick_play_mesh.default_material,
+                                ),
                                 TallyFanKind::Discards => (
                                     DrawKind::TallyStickDiscard,
                                     self.tally_stick_discard_mesh.default_material,
@@ -1455,6 +1455,27 @@ impl WgpuRenderer {
                                     model,
                                     material,
                                 );
+                                self.tally_stick_3d_draw_state.push(TallyStick3dDrawState {
+                                    instance: Tile3dInstance {
+                                        model: model.to_cols_array(),
+                                        normal_model:
+                                            crate::table_transform::normal_matrix_cols3_from_model(
+                                                model,
+                                            ),
+                                        // Neutral tile_3d visual flags: brightness=1,
+                                        // selected=0, enhancement=0, glTF prop body.
+                                        tile_visual_params: [
+                                            1.0,
+                                            0.0,
+                                            0.0,
+                                            crate::gltf_prop::GLTF_PROP_BODY_KIND,
+                                        ],
+                                        tile_decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+                                        tile_material_seed: 0.0,
+                                        tile_opacity: 1.0,
+                                        _pad: [0.0; 2],
+                                    },
+                                });
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.tally_stick_instances[obj3d_tally_stick_cursor],

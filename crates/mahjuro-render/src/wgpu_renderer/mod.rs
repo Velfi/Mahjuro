@@ -308,7 +308,7 @@ pub struct WgpuRenderer {
     /// Active tileset directory name (e.g. `"original"`). When `Some`, tile
     /// decals are loaded from `assets/textures/tile_sets/<name>/` instead of rasterized.
     tile_set: Option<String>,
-    /// Per-frame tile 3D instancing (showcase tiles + coins).
+    /// Per-frame tile 3D instancing (showcase tiles + GLB props).
     tile_frame_uniform_buffer: wgpu::Buffer,
     tile_3d_instance_buffer: wgpu::Buffer,
     tile_3d_instances_staging: Vec<Tile3dInstance>,
@@ -322,9 +322,13 @@ pub struct WgpuRenderer {
     /// Subrange in the shared tile instance buffers for all coins this frame.
     coin_3d_batch_range: Option<(u32, u32)>,
     coin_shadow_batch_range: Option<(u32, u32)>,
+    /// Subrange in the shared tile instance buffer for all tally sticks this frame.
+    tally_stick_3d_batch_range: Option<(u32, u32)>,
     /// Per-frame coin transforms staged during object3d placement, merged into
     /// the tile instance buffers before upload.
     coin_3d_draw_state: Vec<Coin3dDrawState>,
+    /// Per-frame tally-stick transforms staged during object3d placement.
+    tally_stick_3d_draw_state: Vec<TallyStick3dDrawState>,
     /// When the active decal tileset changes, per-primitive material bind groups refresh.
     tile_material_bind_groups_tileset: Option<String>,
     /// Cached 2D tile-face overlays keyed by tile identity.
@@ -774,6 +778,10 @@ pub struct WgpuRenderer {
     primitive_textures: FxHashMap<crate::primitive::MeshId, (wgpu::TextureView, wgpu::TextureView)>,
     /// Authored mesh + material slots from [`coin.glb`](../../../assets/3d/coin.glb).
     coin_glb_primitives: Vec<TilePrimitiveGpu>,
+    /// Authored mesh + material slots from the play tally-stick GLB.
+    tally_stick_play_primitives: Vec<TilePrimitiveGpu>,
+    /// Authored mesh + material slots from the discard tally-stick GLB.
+    tally_stick_discard_primitives: Vec<TilePrimitiveGpu>,
     /// Per-pick-id model matrix snapshot for primitive hit-testing.
     pub(super) last_primitive_pick_models: FxHashMap<u32, Mat4>,
     /// Three reusable lit-mesh instances for the debug world-axes overlay
@@ -907,5 +915,6 @@ pub(super) use constants::{
 pub(crate) use projection::PickCamera;
 
 pub(crate) use internal_slots::{
-    CachedTextLabel, Coin3dDrawState, ShopEnvironmentGpu, TextLabelShapeKey, TileFaceOverlayGpu,
+    CachedTextLabel, Coin3dDrawState, ShopEnvironmentGpu, TallyStick3dDrawState, TextLabelShapeKey,
+    TileFaceOverlayGpu,
 };

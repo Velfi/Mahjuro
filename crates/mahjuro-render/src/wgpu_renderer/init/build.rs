@@ -878,6 +878,35 @@ pub(super) fn build_renderer_new(
             &coin_tile.primitives,
         )
     };
+    let tally_stick_play_primitives = {
+        let tally = crate::tally_stick_mesh::load_tally_stick_glb_tile(PLAY_TALLY_STICK_GLB_PATH);
+        crate::gltf_prop::upload_gltf_tile_primitives(
+            &crate::gltf_prop::GltfTileGpuDefaults {
+                device: &device,
+                queue: &queue,
+                default_normal_view: &tile_default_normal_view,
+                default_mr_view: &tile_glb_default_mr_view,
+                default_emissive_view: &tile_glb_default_emissive_view,
+            },
+            "tally-stick-play-glb",
+            &tally.primitives,
+        )
+    };
+    let tally_stick_discard_primitives = {
+        let tally =
+            crate::tally_stick_mesh::load_tally_stick_glb_tile(DISCARD_TALLY_STICK_GLB_PATH);
+        crate::gltf_prop::upload_gltf_tile_primitives(
+            &crate::gltf_prop::GltfTileGpuDefaults {
+                device: &device,
+                queue: &queue,
+                default_normal_view: &tile_default_normal_view,
+                default_mr_view: &tile_glb_default_mr_view,
+                default_emissive_view: &tile_glb_default_emissive_view,
+            },
+            "tally-stick-discard-glb",
+            &tally.primitives,
+        )
+    };
     let (main_menu_rain_hit_debug_mesh, main_menu_rain_hit_debug_instance) =
         super::super::resources::init_main_menu_rain_hit_debug(
             &device,
@@ -1164,7 +1193,9 @@ pub(super) fn build_renderer_new(
         tile_shadow_batch_ranges: Vec::new(),
         coin_3d_batch_range: None,
         coin_shadow_batch_range: None,
+        tally_stick_3d_batch_range: None,
         coin_3d_draw_state: Vec::new(),
+        tally_stick_3d_draw_state: Vec::new(),
         tile_material_bind_groups_tileset: None,
         tile_outline_instances_staging: Vec::new(),
         tile_outline_batch_ranges: Vec::new(),
@@ -1320,6 +1351,8 @@ pub(super) fn build_renderer_new(
         primitive_instances: rustc_hash::FxHashMap::default(),
         primitive_textures,
         coin_glb_primitives,
+        tally_stick_play_primitives,
+        tally_stick_discard_primitives,
         last_primitive_pick_models: rustc_hash::FxHashMap::default(),
         debug_axes_instances,
         last_yaku_tablet_models: Vec::new(),
