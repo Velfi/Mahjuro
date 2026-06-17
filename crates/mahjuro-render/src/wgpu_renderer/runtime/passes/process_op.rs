@@ -389,6 +389,26 @@ impl WgpuRenderer {
                         pass.set_bind_group(3, &self.lit_mesh_spot_frame_bind_group, &[]);
                         continue;
                     }
+                    if matches!(kind, DrawKind::TallyStickPlay | DrawKind::TallyStickDiscard) {
+                        let Some((tally_base, tally_count)) = self.tally_stick_3d_batch_range
+                        else {
+                            continue;
+                        };
+                        if slot_i as u32 >= tally_count {
+                            continue;
+                        }
+                        let prims = match kind {
+                            DrawKind::TallyStickPlay => &self.tally_stick_play_primitives,
+                            DrawKind::TallyStickDiscard => &self.tally_stick_discard_primitives,
+                            _ => unreachable!(),
+                        };
+                        pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                        pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
+                        pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
+                        self.draw_tile_gltf_instanced(pass, prims, tally_base + slot_i as u32, 1);
+                        pass.set_bind_group(3, &self.lit_mesh_spot_frame_bind_group, &[]);
+                        continue;
+                    }
                     if matches!(kind, DrawKind::Talisman) {
                         let Some(mesh) = self
                             .talisman_slot_kind
@@ -445,14 +465,6 @@ impl WgpuRenderer {
                         DrawKind::Orb => (&self.orb_mesh, self.orb_instances.get(slot_i)),
                         DrawKind::Bowl => (&self.bowl_mesh, self.bowl_instances.get(slot_i)),
                         DrawKind::Mirror => (&self.mirror_mesh, self.mirror_instances.get(slot_i)),
-                        DrawKind::TallyStickPlay => (
-                            &self.tally_stick_play_mesh,
-                            self.tally_stick_instances.get(slot_i),
-                        ),
-                        DrawKind::TallyStickDiscard => (
-                            &self.tally_stick_discard_mesh,
-                            self.tally_stick_instances.get(slot_i),
-                        ),
                         DrawKind::Primitive(mid) => {
                             let mesh = self
                                 .primitive_meshes
@@ -469,7 +481,9 @@ impl WgpuRenderer {
                         DrawKind::Relic
                         | DrawKind::ExtrudedGlyph
                         | DrawKind::BossIcon
-                        | DrawKind::GltfCoin => {
+                        | DrawKind::GltfCoin
+                        | DrawKind::TallyStickPlay
+                        | DrawKind::TallyStickDiscard => {
                             unreachable!()
                         }
                     };

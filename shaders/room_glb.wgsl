@@ -32,11 +32,10 @@ const GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE: u32 = 1u << 2u;
 const GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW: u32 = 1u << 3u;
 const GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME: u32 = 1u << 4u;
 const GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO: u32 = 1u << 5u;
-const GLTF_PBR_FLAG_ROOM_CANDLE_WAX: u32 = 1u << 6u;
+const GLTF_PBR_FLAG_ROOM_WAX_SUBSURFACE: u32 = 1u << 6u;
 const GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER: u32 = 1u << 7u;
 const GLTF_PBR_FLAG_ROOM_READABLE_SURFACE: u32 = 1u << 8u;
 const GLTF_PBR_FLAG_ROOM_SKIP_LIGHTMAP: u32 = 1u << 9u;
-const CANDLE_WARMTH_RGB: vec3<f32> = vec3<f32>(1.0, 0.58, 0.20);
 // UI polychrome (The House) — coarser bands than 3D score pops at label sizes.
 const POLYCHROME_COORD_X: f32 = 2.0;
 const POLYCHROME_COORD_Y: f32 = 1.25;
@@ -328,28 +327,6 @@ fn score_glyph_band_albedo_uv(base: vec3<f32>, band_coord: vec2<f32>, uv: vec2<f
     return saturate_rgb(albedo, 1.12);
 }
 
-fn candle_flame_capsule_closest_pos(frag_pos: vec3<f32>, light_pos: vec3<f32>, flame_height_world: f32) -> vec3<f32> {
-    let h = max(flame_height_world, 0.001);
-    let base = light_pos - vec3<f32>(0.0, 0.0, h * 0.55);
-    let tip = light_pos + vec3<f32>(0.0, 0.0, h * 0.45);
-    let seg = tip - base;
-    let t = clamp(dot(frag_pos - base, seg) / max(dot(seg, seg), 1e-6), 0.0, 1.0);
-    return base + seg * t;
-}
-
-fn candle_streak_tangent(n_world: vec3<f32>, tangent_world: vec3<f32>) -> vec3<f32> {
-    let t = tangent_world - n_world * dot(tangent_world, n_world);
-    if (dot(t, t) > 1e-5) {
-        return normalize(t);
-    }
-    let world_up = vec3<f32>(0.0, 0.0, 1.0);
-    let fallback = cross(n_world, world_up);
-    if (dot(fallback, fallback) > 1e-5) {
-        return normalize(fallback);
-    }
-    return normalize(cross(n_world, vec3<f32>(1.0, 0.0, 0.0)));
-}
-
 fn room_lightmap_wrap_coord(v: f32, mode: u32) -> f32 {
     if (mode == 0u) {
         return clamp(v, 0.0, 1.0);
@@ -428,7 +405,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     }
     let is_house_polychrome = (pbr.flags & GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME) != 0u
         && cam.room_post_params.w > 0.0;
-    let is_candle_wax = (pbr.flags & GLTF_PBR_FLAG_ROOM_CANDLE_WAX) != 0u;
+    let is_wax_subsurface = (pbr.flags & GLTF_PBR_FLAG_ROOM_WAX_SUBSURFACE) != 0u;
     let receives_dynamic_room_shadow =
         (pbr.flags & GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER) != 0u;
     let is_readable_room_surface =
@@ -515,10 +492,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
 
     var Lo = vec3<f32>(0.0);
     var gold_reflected_fill = vec3<f32>(0.0);
-    var candle_area_fill = vec3<f32>(0.0);
-    var wax_translucent_glow = vec3<f32>(0.0);
-    var candle_indirect_bounce = vec3<f32>(0.0);
-    var candle_reflection_streaks = vec3<f32>(0.0);
+    var wax_subsurface = vec3<f32>(0.0);
     // Boss blind (`hd.flags.y` ≈ 1): wash punctual, spots, and lamp emissive toward red.
     let boss_press = clamp(hd.flags.y, 0.0, 1.0);
     let boss_light_rgb_mul = mix(
@@ -558,101 +532,12 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let gold_soft_ndl = smoothstep(-0.12, 0.62, dot(n_world, L));
         gold_reflected_fill = gold_reflected_fill
             + gold_sign_ramp * albedo * radiance * gold_soft_ndl * gold_face_view * 0.018 * punc_vis;
-        if (pl.params.y > 0.5) {
-            let area_pos = candle_flame_capsule_closest_pos(
-                in.world_pos,
-                light_pos,
-                lights.extras.z,
-            );
-            let area_sample = scene_pbr_sample_point_light(
-                in.world_pos,
-                area_pos,
-                range_w,
-                vec4<f32>(pl.color.rgb * boss_light_rgb_mul, pl.color.a),
-                kind,
-                cam.room_env_params.y,
-            );
-            let area_L = area_sample.direction;
-            let area_radiance = area_sample.radiance;
-            let area_dot = dot(n_world, area_L);
-            let R = reflect(-area_L, n_world);
-            let reflected_view = max(dot(R, V), 0.0);
-            let sheen_power = mix(3.0, 18.0, 1.0 - roughness);
-            let broad_sheen = pow(reflected_view, sheen_power);
-            let grazing_sheen = 0.45 + 0.55 * pow(1.0 - NdotV, 2.0);
-            let gloss_ramp = 1.0 - smoothstep(0.72, 0.98, roughness);
-            let reflection_surface = smoothstep(0.02, 0.24, albedo_lum) * mix(1.0, 1.25, metallic);
-            let diffuse_wrap_surface = (1.0 - metallic) * smoothstep(0.02, 0.24, albedo_lum);
-            let albedo_ramp = smoothstep(0.02, 0.24, albedo_lum);
-            let wrap = smoothstep(-0.35, 0.58, area_dot);
-            let flame_h = max(lights.extras.z, 0.001);
-            candle_area_fill = candle_area_fill
-                + area_radiance
-                * CANDLE_WARMTH_RGB
-                * punc_vis
-                * (
-                    broad_sheen * grazing_sheen * gloss_ramp * reflection_surface * 0.075
-                    + wrap * diffuse_wrap_surface * 0.009
-                );
-            let bounce_dist = length(light_pos - in.world_pos);
-            let bounce_radius = flame_h * 8.5;
-            let bounce_falloff = 1.0 / (1.0 + (bounce_dist / max(bounce_radius, 1e-3)) * (bounce_dist / max(bounce_radius, 1e-3)));
-            let bounce_receiver = (1.0 - metallic)
-                * smoothstep(0.015, 0.22, albedo_lum)
-                * select(1.0, 0.25, is_candle_wax)
-                * mix(1.08, 0.72, clamp(roughness, 0.0, 1.0));
-            let bounce_surface_open = 0.46 + 0.34 * abs(n_world.z) + 0.20 * smoothstep(-0.25, 0.75, area_dot);
-            let bounce_tint = mix(vec3<f32>(1.0), max(albedo, vec3<f32>(0.035)), 0.68);
-            candle_indirect_bounce = candle_indirect_bounce
-                + area_radiance
-                * CANDLE_WARMTH_RGB
-                * bounce_tint
-                * bounce_receiver
-                * bounce_surface_open
-                * bounce_falloff
-                * punc_vis
-                * 0.030;
-            let polished_streak_receiver = (1.0 - metallic)
-                * smoothstep(0.02, 0.18, albedo_lum)
-                * (1.0 - smoothstep(0.62, 0.96, roughness));
-            let streak_t = candle_streak_tangent(n_world, T);
-            let streak_b = normalize(cross(n_world, streak_t));
-            let rel_area = in.world_pos - area_pos;
-            let across = abs(dot(rel_area, streak_b));
-            let along = abs(dot(rel_area, streak_t));
-            let stripe = exp(-across / max(flame_h * 3.0, 1e-3))
-                * exp(-along / max(flame_h * 22.0, 1e-3));
-            let streak_reflection = pow(max(dot(reflect(-area_L, n_world), V), 0.0), mix(3.0, 18.0, 1.0 - roughness));
-            let grazing_polish = 0.55 + 0.45 * pow(1.0 - NdotV, 1.2);
-            candle_reflection_streaks = candle_reflection_streaks
-                + area_radiance
-                * CANDLE_WARMTH_RGB
-                * polished_streak_receiver
-                * punc_vis
-                * grazing_polish
-                * (stripe * 0.030 + streak_reflection * 0.090);
-            if (is_candle_wax) {
-                let rel = light_pos - in.world_pos;
-                let wax_radial = length(rel.xy) / max(flame_h * 1.9, 1e-3);
-                let radial_falloff = 1.0 / (1.0 + wax_radial * wax_radial * 1.5);
-                let below_flame = smoothstep(-flame_h * 0.4, flame_h * 2.4, rel.z);
-                let not_too_low = 1.0 - smoothstep(flame_h * 4.2, flame_h * 8.0, rel.z);
-                let top_band = below_flame * not_too_low;
-                let rim = 0.45 + 0.55 * pow(1.0 - NdotV, 1.7);
-                let backlit = 0.55 + 0.45 * smoothstep(-0.3, 0.8, dot(-V, area_L));
-                let wax_tint = mix(vec3<f32>(1.0), max(albedo, vec3<f32>(0.04)), 0.35);
-                wax_translucent_glow = wax_translucent_glow
-                    + area_radiance
-                    * CANDLE_WARMTH_RGB
-                    * wax_tint
-                    * radial_falloff
-                    * top_band
-                    * rim
-                    * backlit
-                    * albedo_ramp
-                    * punc_vis
-                    * 0.028;
-            }
+        if (is_wax_subsurface) {
+            let backlit = smoothstep(-0.16, 0.86, dot(-n_world, L));
+            let view_rim = 0.34 + 0.66 * pow(1.0 - NdotV, 1.45);
+            let wax_tint = mix(vec3<f32>(1.0), max(albedo, vec3<f32>(0.04)), 0.42);
+            wax_subsurface = wax_subsurface
+                + radiance * wax_tint * backlit * view_rim * punc_vis * 0.048;
         }
 
         let direct = scene_pbr_direct_sampled_light(pbr_surface, point_sample, punc_vis);
@@ -682,6 +567,13 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let gold_soft_ndl = smoothstep(-0.12, 0.62, dot(n_world, L));
         gold_reflected_fill = gold_reflected_fill
             + gold_sign_ramp * albedo * radiance * gold_soft_ndl * gold_face_view * 0.018 * punc_vis;
+        if (is_wax_subsurface) {
+            let backlit = smoothstep(-0.16, 0.86, dot(-n_world, L));
+            let view_rim = 0.34 + 0.66 * pow(1.0 - NdotV, 1.45);
+            let wax_tint = mix(vec3<f32>(1.0), max(albedo, vec3<f32>(0.04)), 0.42);
+            wax_subsurface = wax_subsurface
+                + radiance * wax_tint * backlit * view_rim * punc_vis * 0.048;
+        }
 
         let direct = scene_pbr_direct_sampled_light(pbr_surface, spot_sample, punc_vis);
         Lo = Lo + direct.total;
@@ -696,12 +588,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         Lo = Lo + sample_room_lightmap_indirect(in.lightmap_uv) * room_indirect_shadow_vis;
     }
 
-    Lo = Lo
-        + gold_reflected_fill
-        + candle_area_fill
-        + wax_translucent_glow
-        + candle_indirect_bounce
-        + candle_reflection_streaks;
+    Lo = Lo + gold_reflected_fill + wax_subsurface;
 
     // `room_linear_exposure` is scene exposure for punctual PBR (often ≪ 1 to tame imported
     // glTF light energy). Indirect/environment terms are supplied by the room lightmap,

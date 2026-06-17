@@ -170,8 +170,21 @@ def should_skip(rel: str) -> bool:
         return True
     # Source texture PNGs — runtime loads BTX1 under data/texture_baked/.
     if rel.startswith("textures/") and Path(rel).suffix.lower() == ".png":
+        if is_raw_runtime_texture(rel):
+            return False
         return True
     return False
+
+
+def is_raw_runtime_texture(rel: str) -> bool:
+    return (
+        rel == "textures/main_menu_logo.png"
+        or rel == "textures/temptations/atlas.png"
+        or (
+            rel.startswith("textures/kenney_input-prompts/")
+            and Path(rel).suffix.lower() == ".png"
+        )
+    )
 
 
 def zip_write_params(rel: str) -> tuple[int, int | None]:

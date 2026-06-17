@@ -51,17 +51,7 @@ pub fn static_texture_bake_manifest() -> Vec<StaticTextureBake> {
     );
     add(
         &mut out,
-        "textures/main_menu_logo.png",
-        BakedTextureColor::Srgb,
-    );
-    add(
-        &mut out,
         "textures/arrow_right.png",
-        BakedTextureColor::Srgb,
-    );
-    add(
-        &mut out,
-        "textures/temptations/atlas.png",
         BakedTextureColor::Srgb,
     );
     add(
@@ -120,22 +110,6 @@ pub fn static_texture_bake_manifest() -> Vec<StaticTextureBake> {
     }
     for &(path, _) in mahjuro_core::core::memorial_talisman::MemorialTalismanKind::mask_paths() {
         add(&mut out, path, BakedTextureColor::Linear);
-    }
-
-    for path in [
-        "textures/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.png",
-        "textures/kenney_input-prompts/Keyboard & Mouse/keyboard_wasd.png",
-        "textures/kenney_input-prompts/Xbox Series/xbox-series_sheet_double.png",
-        "textures/kenney_input-prompts/PlayStation Series/playstation-series_sheet_double.png",
-        "textures/kenney_input-prompts/Nintendo Switch/nintendo-switch_sheet_double.png",
-        "textures/kenney_input-prompts/Nintendo Switch 2/nintendo-switch-2_sheet_double.png",
-        "textures/kenney_input-prompts/Steam Deck/steam-deck_sheet_double.png",
-        "textures/kenney_input-prompts/Steam Controller/steam-controller_sheet_double.png",
-        "textures/kenney_input-prompts/Steam Frame/steam-frame_sheet_double.png",
-        "textures/kenney_input-prompts/Generic/generic_sheet_double.png",
-        "textures/kenney_input-prompts/Flairs/flairs_sheet_double.png",
-    ] {
-        add(&mut out, path, BakedTextureColor::Srgb);
     }
 
     out.into_iter()
@@ -208,6 +182,9 @@ fn is_image_file(path: &std::path::Path) -> bool {
 fn is_runtime_texture_asset(path: &str) -> bool {
     path.starts_with("textures/")
         && !path.starts_with("textures/relics/")
+        && !path.starts_with("textures/kenney_input-prompts/")
+        && !path.starts_with("textures/temptations/")
+        && path != "textures/main_menu_logo.png"
         && !path.contains("/source/")
         && !path.ends_with("_raw.png")
 }

@@ -20,7 +20,7 @@ const fn key(name: &'static str) -> ImageQuadSource {
 /// Single keyboard / mouse atlas sprite (see `keyboard-&-mouse_sheet_double.xml`).
 pub fn keyboard_key(name: &'static str) -> ImageQuadSource {
     if name == "keyboard_wasd" {
-        ImageQuadSource::Asset {
+        ImageQuadSource::RawAsset {
             path: KEYBOARD_WASD,
         }
     } else {
@@ -77,7 +77,7 @@ mod tests {
         let icon = keyboard_key("keyboard_wasd");
         assert_eq!(
             icon,
-            ImageQuadSource::Asset {
+            ImageQuadSource::RawAsset {
                 path: KEYBOARD_WASD,
             }
         );

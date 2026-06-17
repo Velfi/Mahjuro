@@ -18,9 +18,10 @@ use std::time::{Duration, Instant};
 use crate::gltf_helpers::{
     GLTF_PBR_FLAG_GAMEPLAY_CASH_IN_POLYCHROME, GLTF_PBR_FLAG_MAIN_MENU_MOON_PHASE,
     GLTF_PBR_FLAG_MAIN_MENU_STAR_RAINBOW, GLTF_PBR_FLAG_ROOM_ARCHIVE_DECAL,
-    GLTF_PBR_FLAG_ROOM_CANDLE_WAX, GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER,
+    GLTF_PBR_FLAG_ROOM_DYNAMIC_SHADOW_RECEIVER,
     GLTF_PBR_FLAG_ROOM_HALLWAY_WALL_TINT, GLTF_PBR_FLAG_ROOM_READABLE_SURFACE,
-    GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO, GltfPbrUniform, build_sampler_descriptor,
+    GLTF_PBR_FLAG_ROOM_WAX_SUBSURFACE, GLTF_PBR_FLAG_SKIP_BAKED_CONTACT_AO, GltfPbrUniform,
+    build_sampler_descriptor,
 };
 use crate::room_env_gltf::{RoomEnvPrimitiveCpu, RoomTextureUsageClass};
 use crate::room_gi_bake::RoomGiRoom;
@@ -222,12 +223,12 @@ fn main_menu_env_shader_flags(node_name: Option<&str>) -> u32 {
 }
 
 #[inline]
-fn room_env_candle_wax_flags(
+fn room_env_wax_subsurface_flags(
     scene_key: &str,
     node_name: Option<&str>,
     material_name: Option<&str>,
 ) -> u32 {
-    let is_candle_wax = match scene_key {
+    let is_wax = match scene_key {
         scene_keys::SHOP => {
             material_name.is_some_and(|name| name.to_ascii_lowercase().starts_with("candle wax"))
         }
@@ -237,8 +238,8 @@ fn room_env_candle_wax_flags(
         }
         _ => false,
     };
-    if is_candle_wax {
-        GLTF_PBR_FLAG_ROOM_CANDLE_WAX
+    if is_wax {
+        GLTF_PBR_FLAG_ROOM_WAX_SUBSURFACE
     } else {
         0
     }
@@ -295,7 +296,7 @@ fn room_env_shader_flags(
     };
     scene_flags
         | room_env_surface_role_flags(scene_key, node_name, material_name)
-        | room_env_candle_wax_flags(scene_key, node_name, material_name)
+        | room_env_wax_subsurface_flags(scene_key, node_name, material_name)
         | shop_dynamic_shadow_receiver_flags(scene_key, node_name, material_name)
 }
 
@@ -4356,10 +4357,10 @@ mod tests {
     }
 
     #[test]
-    fn room_env_shader_flags_candle_wax_primitives_only() {
+    fn room_env_shader_flags_wax_subsurface_primitives_only() {
         let shop_wax =
             room_env_shader_flags(scene_keys::SHOP, Some("Candle.006"), Some("Candle wax.002"));
-        assert_eq!(shop_wax, GLTF_PBR_FLAG_ROOM_CANDLE_WAX);
+        assert_eq!(shop_wax, GLTF_PBR_FLAG_ROOM_WAX_SUBSURFACE);
         assert_eq!(
             room_env_shader_flags(
                 scene_keys::SHOP,
@@ -4374,7 +4375,7 @@ mod tests {
                 Some("candles.003"),
                 Some("Cream Scratched Porcelain"),
             ),
-            GLTF_PBR_FLAG_ROOM_CANDLE_WAX
+            GLTF_PBR_FLAG_ROOM_WAX_SUBSURFACE
         );
         assert_eq!(
             room_env_shader_flags(

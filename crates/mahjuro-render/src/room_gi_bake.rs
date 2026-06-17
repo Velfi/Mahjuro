@@ -2790,7 +2790,7 @@ mod tests {
             (
                 "room_glb",
                 include_str!("../../../shaders/room_glb.wgsl"),
-                2usize,
+                1usize,
                 1usize,
             ),
             (

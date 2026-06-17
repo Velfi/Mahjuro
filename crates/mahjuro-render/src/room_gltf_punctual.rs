@@ -30,9 +30,38 @@ pub fn room_glb_has_embedded_lights(cpu: &RoomGlbCpu) -> bool {
     !cpu.embedded_point_lights.is_empty()
 }
 
-/// Linear RGB for embedded glTF punctuals. `light_candle*` / `light_lantern*` nodes multiply glTF
-/// color by [`RoomEnvLightingTune::candle_light_color_mul`] /
-/// [`RoomEnvLightingTune::lantern_light_color_mul`].
+#[inline]
+fn punctual_tint_mul(
+    is_candle: bool,
+    is_lantern: bool,
+    tune: &RoomEnvLightingTune,
+) -> Option<[f32; 3]> {
+    if is_candle {
+        Some(tune.candle_light_color_mul)
+    } else if is_lantern {
+        Some(tune.lantern_light_color_mul)
+    } else {
+        None
+    }
+}
+
+#[inline]
+fn punctual_tint_intensity_mul(
+    is_candle: bool,
+    is_lantern: bool,
+    tune: &RoomEnvLightingTune,
+) -> f32 {
+    let Some(mul) = punctual_tint_mul(is_candle, is_lantern, tune) else {
+        return 1.0;
+    };
+    mul[0].max(mul[1]).max(mul[2]).max(0.0)
+}
+
+/// Linear RGB tint for embedded glTF punctuals. `light_candle*` / `light_lantern*` nodes
+/// use [`RoomEnvLightingTune::candle_light_color_mul`] / [`RoomEnvLightingTune::lantern_light_color_mul`]
+/// as the tunable chroma while preserving the authored light's peak channel.
+/// The multiplier's magnitude is routed through [`point_intensity`] so Scene Look's
+/// candle/lantern intensity sliders can exceed unit RGB without being clamped away.
 #[inline]
 pub fn gltf_punctual_linear_rgb(
     raw: [f32; 3],
@@ -40,17 +69,19 @@ pub fn gltf_punctual_linear_rgb(
     is_lantern: bool,
     tune: &RoomEnvLightingTune,
 ) -> [f32; 3] {
-    let mul = if is_candle {
-        tune.candle_light_color_mul
-    } else if is_lantern {
-        tune.lantern_light_color_mul
-    } else {
+    let Some(mul) = punctual_tint_mul(is_candle, is_lantern, tune) else {
         return raw;
     };
+    let peak = mul[0].max(mul[1]).max(mul[2]).max(0.0);
+    if peak <= 1e-8 {
+        return [0.0; 3];
+    }
+    let tint = [mul[0] / peak, mul[1] / peak, mul[2] / peak];
+    let raw_peak = raw[0].max(raw[1]).max(raw[2]).clamp(0.0, 1.0);
     [
-        (raw[0] * mul[0]).clamp(0.0, 1.0),
-        (raw[1] * mul[1]).clamp(0.0, 1.0),
-        (raw[2] * mul[2]).clamp(0.0, 1.0),
+        (raw_peak * tint[0]).clamp(0.0, 1.0),
+        (raw_peak * tint[1]).clamp(0.0, 1.0),
+        (raw_peak * tint[2]).clamp(0.0, 1.0),
     ]
 }
 
@@ -142,6 +173,7 @@ fn point_intensity(
     candle_index: &mut u32,
 ) -> f32 {
     let mut intensity = (l.intensity * tune.gltf_light_intensity_scale).max(0.0);
+    intensity *= punctual_tint_intensity_mul(l.is_candle, l.is_lantern, tune);
     match profile {
         RoomPunctualProfile::Candles {
             flame_time_s,
@@ -302,6 +334,19 @@ mod tests {
         let intensity = point_intensity(profile, &candle, &tune, &mut candle_index);
         assert!((intensity - 10.0 * CANDLE_INTENSITY_MUL).abs() < 1e-4);
         assert_eq!(candle_index, 1);
+    }
+
+    #[test]
+    fn candle_tuning_hue_owns_chroma_over_authored_light_color() {
+        let mut tune = RoomEnvLightingTune::SOURCE_DEFAULTS;
+        tune.candle_light_color_mul = [0.0, 0.0, 2.0];
+
+        let blue = gltf_punctual_linear_rgb([1.0, 0.55, 0.18], true, false, &tune);
+
+        assert!(blue[2] > 0.98, "{blue:?}");
+        assert!(blue[0] < 0.01, "{blue:?}");
+        assert!(blue[1] < 0.01, "{blue:?}");
+        assert_eq!(punctual_tint_intensity_mul(true, false, &tune), 2.0);
     }
 
     #[test]

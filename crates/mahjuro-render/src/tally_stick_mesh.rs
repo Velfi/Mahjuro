@@ -32,16 +32,23 @@ fn remap_normal(
     mapped.normalize_or_zero().to_array()
 }
 
-fn canonicalize_tally_stick_mesh(mesh: &mut MeshCpu) {
+fn tally_stick_bounds<'a>(vertices: impl Iterator<Item = &'a Vertex3dTex>) -> ([f32; 3], [f32; 3]) {
     let mut min = [f32::MAX; 3];
     let mut max = [f32::MIN; 3];
-    for v in &mesh.vertices {
+    for v in vertices {
         for axis in 0..3 {
             min[axis] = min[axis].min(v.position[axis]);
             max[axis] = max[axis].max(v.position[axis]);
         }
     }
+    (min, max)
+}
 
+fn canonicalize_tally_stick_vertices<'a>(
+    vertices: impl Iterator<Item = &'a mut Vertex3dTex>,
+    min: [f32; 3],
+    max: [f32; 3],
+) {
     let extents = [
         (max[0] - min[0]).max(1.0e-6),
         (max[1] - min[1]).max(1.0e-6),
@@ -51,7 +58,7 @@ fn canonicalize_tally_stick_mesh(mesh: &mut MeshCpu) {
     let center_width = (min[width_axis] + max[width_axis]) * 0.5;
     let center_thickness = (min[thickness_axis] + max[thickness_axis]) * 0.5;
 
-    for v in &mut mesh.vertices {
+    for v in vertices {
         let p = v.position;
         v.position = [
             (p[width_axis] - center_width) / extents[width_axis],
@@ -60,6 +67,18 @@ fn canonicalize_tally_stick_mesh(mesh: &mut MeshCpu) {
         ];
         v.normal = remap_normal(v.normal, width_axis, length_axis, thickness_axis);
         v.tangent = Vertex3dTex::DEFAULT_TANGENT;
+    }
+}
+
+fn canonicalize_tally_stick_mesh(mesh: &mut MeshCpu) {
+    let (min, max) = tally_stick_bounds(mesh.vertices.iter());
+    canonicalize_tally_stick_vertices(mesh.vertices.iter_mut(), min, max);
+}
+
+fn canonicalize_tally_stick_tile(tile: &mut crate::tile_glb::LoadedTile) {
+    let (min, max) = tally_stick_bounds(tile.primitives.iter().flat_map(|p| p.vertices.iter()));
+    for prim in &mut tile.primitives {
+        canonicalize_tally_stick_vertices(prim.vertices.iter_mut(), min, max);
     }
 }
 
@@ -85,10 +104,16 @@ fn flatten_loaded_tally_stick_mesh(
     mesh
 }
 
-pub fn load_tally_stick_glb_mesh(path: &str, default_material: MaterialParams) -> MeshCpu {
+pub fn load_tally_stick_glb_tile(path: &str) -> crate::tile_glb::LoadedTile {
     let file = mahjuro_assets::asset_path::get(path)
         .unwrap_or_else(|| panic!("required tally stick GLB missing at {path}"));
-    let loaded = crate::tile_glb::load_glb_tile_from_bytes(&file.data)
+    let mut loaded = crate::tile_glb::load_glb_tile_from_bytes_with_label(&file.data, path)
         .unwrap_or_else(|e| panic!("could not load required tally stick GLB {path}: {e:#}"));
+    canonicalize_tally_stick_tile(&mut loaded);
+    loaded
+}
+
+pub fn load_tally_stick_glb_mesh(path: &str, default_material: MaterialParams) -> MeshCpu {
+    let loaded = load_tally_stick_glb_tile(path);
     flatten_loaded_tally_stick_mesh(loaded, default_material)
 }

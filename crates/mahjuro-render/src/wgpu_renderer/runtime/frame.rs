@@ -96,6 +96,8 @@ impl WgpuRenderer {
             refresh_primitives(&mut mesh.primitives);
         }
         refresh_primitives(&mut self.coin_glb_primitives);
+        refresh_primitives(&mut self.tally_stick_play_primitives);
+        refresh_primitives(&mut self.tally_stick_discard_primitives);
         self.tile_material_bind_groups_tileset = Some(tileset);
     }
 

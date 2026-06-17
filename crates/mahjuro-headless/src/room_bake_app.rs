@@ -104,6 +104,15 @@ impl RoomBakeApp {
         })
     }
 
+    pub(crate) fn reset_scene(&mut self, scene: Scene, run: RunState, game_in_progress: bool) {
+        self.scene = scene;
+        self.run = run;
+        self.game_in_progress = game_in_progress;
+        self.anim = AnimationController::new();
+        self.bake_anim_epoch = Instant::now();
+        self.bake_tick = 0;
+    }
+
     fn tick_warmup(&mut self, frames: u32) {
         for _ in 0..frames {
             self.tick();

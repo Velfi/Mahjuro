@@ -121,7 +121,7 @@ pub fn run(app: &mut App, locals: &mut FrameLocals) {
         let scene_key_lookup = overlay.scene_key().map(str::to_string);
         let persist_key = overlay.scene_key_persist().to_string();
         let mut close = false;
-        match overlay.update(&locals.actions, mouse, ww, wh, &app.scene_look) {
+        match overlay.update(&locals.actions, mouse, ww, wh) {
             SceneLookDebugResult::Stay => {
                 app.scene_look
                     .set(scene_key_lookup.as_deref(), overlay.look);

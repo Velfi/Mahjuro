@@ -64,6 +64,7 @@ impl WgpuRenderer {
         self.tile_outline_batch_ranges.clear();
         self.coin_3d_batch_range = None;
         self.coin_shadow_batch_range = None;
+        self.tally_stick_3d_batch_range = None;
 
         let total_showcase: usize = showcase_tile_batches
             .iter()
@@ -71,7 +72,10 @@ impl WgpuRenderer {
             .sum::<usize>()
             .min(MAX_SHOWCASE_TILE_SLOTS);
 
-        if total_showcase > 0 || !self.coin_3d_draw_state.is_empty() {
+        if total_showcase > 0
+            || !self.coin_3d_draw_state.is_empty()
+            || !self.tally_stick_3d_draw_state.is_empty()
+        {
             let tileset_owned = self.tile_set.clone().expect(
                 "tile_set must be set by apply_render_settings before drawing showcase tiles",
             );
@@ -302,6 +306,17 @@ impl WgpuRenderer {
             let coin_shadow_n = self.tile_shadow_instances_staging.len() as u32 - coin_shadow_start;
             self.coin_3d_batch_range = Some((coin_3d_start, coin_3d_n));
             self.coin_shadow_batch_range = Some((coin_shadow_start, coin_shadow_n));
+        }
+
+        // Append authored tally-stick instances after coins. Their shadows still use
+        // the existing lit-mesh shadow casters written during object placement.
+        if !self.tally_stick_3d_draw_state.is_empty() {
+            let tally_3d_start = self.tile_3d_instances_staging.len() as u32;
+            for tally in &self.tally_stick_3d_draw_state {
+                self.tile_3d_instances_staging.push(tally.instance);
+            }
+            let tally_3d_n = self.tile_3d_instances_staging.len() as u32 - tally_3d_start;
+            self.tally_stick_3d_batch_range = Some((tally_3d_start, tally_3d_n));
         }
 
         if !self.tile_3d_instances_staging.is_empty() {

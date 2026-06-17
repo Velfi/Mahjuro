@@ -1,12 +1,10 @@
-// Gold-metal "shell" outline for selected tiles.
+// UI outline shell for focused/selected tiles.
 //
 // The renderer draws this pipeline BEFORE the normal tile mesh, with the
 // model matrix scaled up ~7% around the tile center and front-face culling
 // enabled. Only the back side of the inflated shell survives, so when the
-// real tile is drawn on top it overwrites the interior of the shell —
-// leaving a thin gold rim around the tile silhouette. The fragment shader
-// uses the same candle point-light buffer the tile shader uses, so the
-// outline visibly catches candlelight as candles flicker around the table.
+// real tile is drawn on top it overwrites the interior of the shell,
+// leaving a thin UI rim around the tile silhouette.
 
 struct OutlineFrame {
     view_proj: mat4x4<f32>,
@@ -107,113 +105,9 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         base_color = mix(hovered_color, selected_color, stripe);
     }
 
-    // Local-space directional ambient + diffuse so the rim has shape even
-    // when no candles are lit. Mirrors tile_3d.wgsl's key-light direction.
-    let n_local = select(-normalize(in.local_n), normalize(in.local_n), front_facing);
-    let key = normalize(vec3<f32>(0.25, 1.0, 0.35));
-    let ndl = max(dot(n_local, key), 0.0);
-    var base_shade = 0.45 + 0.55 * ndl;
-    if (is_decimation) {
-        base_shade = 0.50 + 0.30 * ndl;
-    } else if (is_selected) {
-        base_shade = 0.72 + 0.33 * ndl;
-    } else if (is_house_claim) {
-        base_shade = 0.55 + 0.38 * ndl;
-    } else if (is_hovered) {
-        base_shade = 0.58 + 0.48 * ndl;
-    } else if (is_combo) {
-        base_shade = 0.70 + 0.40 * ndl;
-    }
-
-    // Point-light pass: same falloff/Lambert model the tile shader uses,
-    // but with a sharper exponent so the gold reads as polished metal —
-    // candle facets near a flame light up much more than the diffuse body.
-    var n_world = normalize(in.wn);
-    if (!front_facing) {
-        n_world = -n_world;
-    }
-    var contrib = vec3<f32>(0.0);
-    let light_count = lights.count.x;
-    for (var i: u32 = 0u; i < light_count; i = i + 1u) {
-        let lp = lights.lights[i].pos.xyz;
-        let radius = lights.lights[i].pos.w;
-        let lc = lights.lights[i].color.rgb;
-        let intensity = lights.lights[i].color.a;
-        let to_light = lp - in.world_pos;
-        let dist = length(to_light);
-        let t = clamp(1.0 - dist / max(radius, 1.0), 0.0, 1.0);
-        let atten = t * t;
-        let l_dir = to_light / max(dist, 0.0001);
-        let nl = max(dot(n_world, l_dir), 0.0);
-        // Diffuse floor + sharper specular-ish term for the metallic look.
-        var metal = 0.30 + 1.60 * pow(nl, 1.8);
-        if (is_decimation) {
-            // Keep the candle wash low so the crimson rim stays saturated
-            // rather than blowing the red channel into ACES white-out.
-            metal = 0.28 + 0.70 * pow(nl, 1.9);
-        } else if (is_selected) {
-            metal = 0.35 + 2.05 * pow(nl, 1.65);
-        } else if (is_house_claim) {
-            metal = 0.32 + 1.55 * pow(nl, 1.72);
-        } else if (is_hovered) {
-            metal = 0.32 + 1.85 * pow(nl, 1.72);
-        } else if (is_combo) {
-            metal = 0.34 + 1.95 * pow(nl, 1.68);
-        }
-        contrib = contrib + lc * intensity * atten * metal;
-    }
-
-    var lit = base_color * base_shade + base_color * contrib;
-    // Emissive + chroma punch so ACES/HDR does not wash rims to grey/white.
-    lit = lit + select(vec3<f32>(0.0), base_color * 0.16, is_hovered);
-    lit = lit + select(vec3<f32>(0.0), base_color * 0.26, is_selected);
-    lit = lit + select(vec3<f32>(0.0), base_color * 0.20, is_decimation);
-    lit = lit + select(vec3<f32>(0.0), base_color * 0.18, is_house_claim);
-    lit = lit + select(vec3<f32>(0.0), base_color * 0.23, is_combo);
-    if (is_decimation) {
-        let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
-        let sat = 2.10;
-        lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
-        lit = max(lit, vec3<f32>(0.0));
-    } else if (is_selected) {
-        let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
-        let sat = 1.75;
-        lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
-        lit = max(lit, vec3<f32>(0.0));
-    } else if (is_house_claim) {
-        let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
-        let sat = 1.35;
-        lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
-        lit = max(lit, vec3<f32>(0.0));
-    } else if (is_hovered) {
-        let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
-        let sat = 1.58;
-        lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
-        lit = max(lit, vec3<f32>(0.0));
-    } else if (is_combo) {
-        let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
-        let sat = 1.66;
-        lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
-        lit = max(lit, vec3<f32>(0.0));
-    }
-    var gain = 1.0;
-    if (is_selected) {
-        gain = 5.52;
-    } else if (is_decimation) {
-        gain = 1.38;
-    } else if (is_house_claim) {
-        gain = 1.12;
-    } else if (is_hovered) {
-        gain = 4.80;
-    } else if (is_combo) {
-        gain = 5.28;
-    }
-    lit = lit * gain;
-    let linear_exposure = outline_frame.hdr_tonemap.y;
-    let ambient_scale = outline_frame.hdr_tonemap.z;
-    // Linear HDR: write un-tonemapped scene color; `tonemap_composite.wgsl` applies ACES + sRGB.
-    var hdr = lit + ambient_scale * base_color * vec3<f32>(0.08);
-    hdr = hdr * linear_exposure;
+    // Linear HDR: write the selected shell color directly; `tonemap_composite.wgsl`
+    // applies ACES + sRGB once for the whole scene.
+    let hdr = base_color;
     // Clamp to prevent Rgba16Float overflow (Infinity) which causes NaN during bloom bilinear filtering on Metal
     let out_rgb = min(hdr, vec3<f32>(65000.0));
     return vec4<f32>(out_rgb, 1.0);

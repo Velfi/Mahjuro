@@ -146,6 +146,11 @@ pub(crate) struct Coin3dDrawState {
     pub casts_shadow: bool,
 }
 
+/// Per-frame tally-stick payload merged into the shared tile/glTF instance buffer.
+pub(crate) struct TallyStick3dDrawState {
+    pub instance: Tile3dInstance,
+}
+
 /// GPU uniforms + bind groups for imported room GLB environment meshes.
 /// Uses the same tile textured pipeline as hand tiles; vertices are already in world space (`model = I`).
 pub(crate) struct ShopEnvironmentGpu {

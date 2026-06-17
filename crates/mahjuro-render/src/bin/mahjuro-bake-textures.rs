@@ -210,6 +210,14 @@ fn bake_gltf_material_textures(
         ("3d/tile_plastic.glb", "3d/tile_plastic.glb"),
         ("3d/tile_tortoise_shell.glb", "3d/tile_tortoise_shell.glb"),
         ("3d/coin.glb", "3d/coin.glb"),
+        (
+            mahjuro_render::tally_stick_mesh::PLAY_TALLY_STICK_GLB_PATH,
+            mahjuro_render::tally_stick_mesh::PLAY_TALLY_STICK_GLB_PATH,
+        ),
+        (
+            mahjuro_render::tally_stick_mesh::DISCARD_TALLY_STICK_GLB_PATH,
+            mahjuro_render::tally_stick_mesh::DISCARD_TALLY_STICK_GLB_PATH,
+        ),
     ] {
         let Some(file) = mahjuro_assets::asset_path::get(asset_path) else {
             log::warn!("skip missing GLB texture source: {asset_path}");
@@ -222,6 +230,12 @@ fn bake_gltf_material_textures(
                 Some(mahjuro_render::coin_glb::COIN_GLB_NODE),
                 Some(label),
             )?
+        } else if matches!(
+            asset_path,
+            mahjuro_render::tally_stick_mesh::PLAY_TALLY_STICK_GLB_PATH
+                | mahjuro_render::tally_stick_mesh::DISCARD_TALLY_STICK_GLB_PATH
+        ) {
+            mahjuro_render::tally_stick_mesh::load_tally_stick_glb_tile(asset_path)
         } else {
             mahjuro_render::tile_glb::load_glb_tile_from_bytes_with_label(&file.data, label)?
         };

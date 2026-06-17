@@ -130,9 +130,18 @@ fn should_skip_pack_input(rel: &str) -> bool {
             .and_then(|s| s.to_str())
             .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
     {
+        if is_raw_runtime_texture(&rel) {
+            return false;
+        }
         return true;
     }
     false
+}
+
+fn is_raw_runtime_texture(rel: &str) -> bool {
+    rel == "textures/main_menu_logo.png"
+        || rel == "textures/temptations/atlas.png"
+        || rel.starts_with("textures/kenney_input-prompts/")
 }
 
 fn pack_input_paths(repo: &Path) -> Vec<PathBuf> {
