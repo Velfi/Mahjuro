@@ -42,7 +42,7 @@ The **folder name** (parent directory name) is shown in Options as `<folder_name
 
 ## Getting started from `_template`
 
-Copy the sibling `_template` folder, rename it, then edit `atlas.png`. The template `atlas.toml` already uses the standard 9-column mahjong layout with 128×192 pixel cells (1152×960 PNG).
+Copy the sibling `_template` folder, rename it, then edit `atlas.png`. The template `atlas.toml` already uses the standard 9-column mahjong layout with 512×768 pixel cells (4608×3840 PNG).
 
 ## After editing
 

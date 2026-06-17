@@ -209,9 +209,9 @@ fn write_if_missing(path: &Path, contents: &str) -> std::io::Result<()> {
 }
 
 fn template_atlas_png_bytes() -> std::io::Result<Vec<u8>> {
-    // Keep in sync with tileset_mod_template_atlas.toml (9 cols × 5 rows, 128×192 cells).
-    const TILE_W: u32 = 128;
-    const TILE_H: u32 = 192;
+    // Keep in sync with tileset_mod_template_atlas.toml (9 cols × 5 rows, 512×768 cells).
+    const TILE_W: u32 = 512;
+    const TILE_H: u32 = 768;
     const COLS: u32 = 9;
     const ROWS: u32 = 5;
     let img = image::RgbaImage::new(COLS * TILE_W, ROWS * TILE_H);

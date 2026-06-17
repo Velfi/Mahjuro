@@ -61,6 +61,22 @@ pub(crate) struct StagingZoneLayout {
     pub meld_index_groups: Vec<Vec<usize>>,
 }
 
+impl StagingZoneLayout {
+    fn reset_in_flight_selected_previews(&mut self, selected: &[bool]) {
+        for (i, &is_selected) in selected.iter().enumerate() {
+            if !is_selected {
+                continue;
+            }
+            if let Some(lift) = self.staging_lift_z.get_mut(i) {
+                *lift = 0.0;
+            }
+            if let Some(offset) = self.staging_offset_slots.get_mut(i) {
+                *offset = 0.0;
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct YakuPreviewCacheKey {
     selected: Vec<bool>,
@@ -1191,6 +1207,8 @@ impl GameplayScene {
 
         if selection_changed {
             self.staging_layout.prev_selected = current_selected.clone();
+            self.staging_layout
+                .reset_in_flight_selected_previews(&current_selected);
             self.staging_layout.valid_meld_tiles.resize(hand_len, false);
             self.staging_layout.valid_meld_tiles.fill(false);
 
@@ -1419,3 +1437,36 @@ fn insert_structure_before_hand(
 /// are no longer used (tiles are rendered via `ShowcaseTileBatch`).
 #[inline]
 fn debug_assert_marker_uniqueness(_frame: &UiFrame) {}
+
+#[cfg(test)]
+mod tests {
+    use super::StagingZoneLayout;
+
+    #[test]
+    fn staging_preview_reset_reconciles_selected_tiles_to_hand_slots() {
+        let mut layout = StagingZoneLayout {
+            staging_lift_z: vec![0.0, 0.7, 0.8, 0.0],
+            staging_offset_slots: vec![0.0, -0.4, 0.5, 0.0],
+            ..Default::default()
+        };
+
+        layout.reset_in_flight_selected_previews(&[false, true, true, false]);
+
+        assert_eq!(layout.staging_lift_z, vec![0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(layout.staging_offset_slots, vec![0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn staging_preview_reset_leaves_unselected_exit_animation_state_alone() {
+        let mut layout = StagingZoneLayout {
+            staging_lift_z: vec![0.2, 0.7],
+            staging_offset_slots: vec![0.3, -0.4],
+            ..Default::default()
+        };
+
+        layout.reset_in_flight_selected_previews(&[false, true]);
+
+        assert_eq!(layout.staging_lift_z, vec![0.2, 0.0]);
+        assert_eq!(layout.staging_offset_slots, vec![0.3, 0.0]);
+    }
+}

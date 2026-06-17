@@ -15,7 +15,7 @@ Drop a folder here (created automatically on first launch):
 On each mod scan the game checks shipped scaffold files (FNV-1a hash) and writes only when content changed:
 
 - `README.md` — overview in the tilesets root
-- `_template/` — copyable starter with `README.md`, `atlas.toml`, and a transparent placeholder `atlas.png` (128×192 cells, 9×5 grid)
+- `_template/` — copyable starter with `README.md`, `atlas.toml`, and a transparent placeholder `atlas.png` (512×768 cells, 9×5 grid)
 
 Copy `_template` to a new folder name before editing — in-place edits to `_template` are replaced on the next game update that changes the embedded files.
 
