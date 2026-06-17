@@ -193,7 +193,8 @@ fn upload_bc7_mip_chain(
     bc7_supported: bool,
 ) -> (wgpu::Texture, wgpu::TextureView, usize) {
     use crate::relic_gpu_residency::{
-        bc7_mip_level_count, bc7_upload_chain_bytes, bc7_upload_chain_valid, rgba_mip_bytes,
+        bc7_mip_level_count, bc7_next_mip_dim, bc7_upload_chain_bytes, bc7_upload_chain_valid,
+        rgba_mip_bytes,
     };
 
     if bc7_supported
@@ -244,24 +245,63 @@ fn upload_bc7_mip_chain(
                 );
             }
             off += level_bytes;
-            w = (w / 2).max(1);
-            h = (h / 2).max(1);
+            w = bc7_next_mip_dim(w);
+            h = bc7_next_mip_dim(h);
         }
         let bytes = bc7_upload_chain_bytes(chain.base_width, chain.base_height);
         let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
         return (tex, view, bytes);
     }
 
-    let (tex, view) = upload_rgba_texture_linear(
-        device,
-        queue,
-        label,
-        &chain.fallback_rgba,
-        chain.fallback_width.max(1),
-        chain.fallback_height.max(1),
-    );
+    let (tex, view) = if chain.srgb {
+        upload_rgba_texture(
+            device,
+            queue,
+            label,
+            &chain.fallback_rgba,
+            chain.fallback_width.max(1),
+            chain.fallback_height.max(1),
+        )
+    } else {
+        upload_rgba_texture_linear(
+            device,
+            queue,
+            label,
+            &chain.fallback_rgba,
+            chain.fallback_width.max(1),
+            chain.fallback_height.max(1),
+        )
+    };
     let bytes = rgba_mip_bytes(chain.fallback_width, chain.fallback_height, 1);
     (tex, view, bytes)
+}
+
+pub(super) fn upload_baked_texture_payload(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    payload: &crate::baked_texture::BakedTexturePayload,
+    bc7_supported: bool,
+) -> (wgpu::Texture, wgpu::TextureView, usize) {
+    crate::baked_texture::upload_payload(device, queue, label, payload, bc7_supported)
+}
+
+fn bc7_supported(device: &wgpu::Device) -> bool {
+    crate::baked_texture::bc7_supported(device)
+}
+
+fn load_static_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    path: &str,
+    label: &str,
+    _format: wgpu::TextureFormat,
+    _mips: bool,
+) -> anyhow::Result<(wgpu::Texture, wgpu::TextureView)> {
+    let payload = crate::baked_texture::load_baked_texture(path)?;
+    let (tex, view, _bytes) =
+        upload_baked_texture_payload(device, queue, label, &payload, bc7_supported(device));
+    Ok((tex, view))
 }
 
 /// Upload relic albedo (sRGB) — BC7 mip chain when supported, else RGBA fallback.
@@ -563,6 +603,41 @@ fn room_env_texture_cache_key(
     }
 }
 
+fn room_env_baked_texture_cache_key(
+    source_path: &str,
+    payload: &crate::baked_texture::BakedTexturePayload,
+    format: wgpu::TextureFormat,
+    mips: bool,
+    dedupe_hint: Option<&RoomEnvTextureDedupeHint>,
+) -> RoomEnvTextureCacheKey {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = rustc_hash::FxHasher::default();
+    source_path.hash(&mut hasher);
+    payload.base_width.hash(&mut hasher);
+    payload.base_height.hash(&mut hasher);
+    payload.mip_count.hash(&mut hasher);
+    let format_tag = match format {
+        wgpu::TextureFormat::Rgba8UnormSrgb => 0,
+        wgpu::TextureFormat::Rgba8Unorm => 1,
+        _ => 2,
+    };
+    let dedupe_hint_hash = if let Some(hint) = dedupe_hint {
+        let mut hh = rustc_hash::FxHasher::default();
+        hint.hash(&mut hh);
+        hh.finish()
+    } else {
+        0
+    };
+    RoomEnvTextureCacheKey {
+        content_hash: hasher.finish(),
+        width: payload.base_width,
+        height: payload.base_height,
+        format_tag,
+        mips,
+        dedupe_hint_hash,
+    }
+}
+
 /// Dedupes identical room-env texture uploads during renderer init (shared glTF images).
 pub(super) struct RoomEnvTextureCache {
     views: rustc_hash::FxHashMap<RoomEnvTextureCacheKey, wgpu::TextureView>,
@@ -617,6 +692,7 @@ impl RoomEnvTextureCache {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         label: String,
+        baked_source_path: Option<&str>,
         rgba: Option<&(Vec<u8>, u32, u32)>,
         mip_chain: Option<&[(Vec<u8>, u32, u32)]>,
         format: wgpu::TextureFormat,
@@ -624,6 +700,25 @@ impl RoomEnvTextureCache {
         fallback: &wgpu::TextureView,
         dedupe_hint: Option<&RoomEnvTextureDedupeHint>,
     ) -> wgpu::TextureView {
+        if let Some(source_path) = baked_source_path
+            && let Ok(payload) = crate::baked_texture::load_baked_texture(source_path)
+        {
+            let key =
+                room_env_baked_texture_cache_key(source_path, &payload, format, mips, dedupe_hint);
+            if let Some(view) = self.views.get(&key) {
+                return view.clone();
+            }
+            let (texture, view, _bytes) = crate::baked_texture::upload_payload(
+                device,
+                queue,
+                &label,
+                &payload,
+                crate::baked_texture::bc7_supported(device),
+            );
+            self.textures.push(texture);
+            self.views.insert(key, view.clone());
+            return view;
+        }
         match rgba {
             Some((rgba, w, h)) => self.upload(
                 device,
@@ -692,19 +787,15 @@ pub(super) fn load_metal_heightmap(
     path: &str,
     label: &str,
 ) -> (wgpu::Texture, wgpu::TextureView) {
-    let bytes_opt = mahjuro_assets::asset_path::get(path);
-    let bytes = match &bytes_opt {
-        Some(file) => file.data.as_ref(),
-        None => panic!("{label} asset missing at {path}"),
-    };
-    match image::load_from_memory(bytes) {
-        Ok(img) => {
-            let rgba = img.into_rgba8();
-            let (w, h) = rgba.dimensions();
-            upload_rgba_texture_linear(device, queue, label, &rgba.into_raw(), w, h)
-        }
-        Err(e) => panic!("failed to decode {label} at {path}: {e}"),
-    }
+    load_static_texture(
+        device,
+        queue,
+        path,
+        label,
+        wgpu::TextureFormat::Rgba8Unorm,
+        false,
+    )
+    .unwrap_or_else(|e| panic!("{e:#}"))
 }
 
 /// Decoded full-ribbon zodiac textures — one tall portrait image per zodiac.
@@ -739,48 +830,24 @@ pub(super) fn load_zodiac_ribbon_textures(
         let material_path = format!("textures/zodiacs/zodiac_{}_material.png", slug);
         let label = format!("zodiac-ribbon-{}", slug);
         let material_label = format!("zodiac-ribbon-material-{}", slug);
-        let (tex, view) = match mahjuro_assets::asset_path::get(&path) {
-            Some(file) => {
-                let img = image::load_from_memory(&file.data)
-                    .unwrap_or_else(|e| panic!("failed to decode {label} at {path}: {e}"))
-                    .into_rgba8();
-                let (w, h) = img.dimensions();
-                let rgba = img.into_raw();
-                upload_rgba_texture_with_mips(&TextureUploadParams {
-                    device,
-                    queue,
-                    label,
-                    rgba: &rgba,
-                    width: w,
-                    height: h,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    mips: true,
-                })
-            }
-            None => panic!("zodiac ribbon texture missing at {path}"),
-        };
-        let (material_tex, material_view) = match mahjuro_assets::asset_path::get(&material_path) {
-            Some(file) => {
-                let img = image::load_from_memory(&file.data)
-                    .unwrap_or_else(|e| {
-                        panic!("failed to decode {material_label} at {material_path}: {e}")
-                    })
-                    .into_rgba8();
-                let (w, h) = img.dimensions();
-                let rgba = img.into_raw();
-                upload_rgba_texture_with_mips(&TextureUploadParams {
-                    device,
-                    queue,
-                    label: material_label,
-                    rgba: &rgba,
-                    width: w,
-                    height: h,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    mips: true,
-                })
-            }
-            None => panic!("zodiac ribbon material map missing at {material_path}"),
-        };
+        let (tex, view) = load_static_texture(
+            device,
+            queue,
+            &path,
+            &label,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            true,
+        )
+        .unwrap_or_else(|e| panic!("{e:#}"));
+        let (material_tex, material_view) = load_static_texture(
+            device,
+            queue,
+            &material_path,
+            &material_label,
+            wgpu::TextureFormat::Rgba8Unorm,
+            true,
+        )
+        .unwrap_or_else(|e| panic!("{e:#}"));
         textures.push(tex);
         material_textures.push(material_tex);
         views.push(view);
@@ -804,22 +871,24 @@ pub(super) fn load_pack_textures(
     let mut map = FxHashMap::default();
     for &kind in TilePackKind::all() {
         let asset_path = format!("textures/tile_packs/{}", kind.asset_filename());
-        let bytes = match mahjuro_assets::asset_path::get(&asset_path) {
-            Some(file) => file.data.to_vec(),
-            None => {
-                log::debug!("pack texture not found (optional): {asset_path}");
-                continue;
-            }
-        };
-        let img = match image::load_from_memory(&bytes) {
-            Ok(img) => img.into_rgba8(),
+        let (_tex, view) = match load_static_texture(
+            device,
+            queue,
+            &asset_path,
+            kind.name(),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            false,
+        ) {
+            Ok(texture) => texture,
             Err(e) => {
-                log::warn!("failed to decode pack texture {asset_path}: {e}");
+                if mahjuro_assets::asset_path::get(&asset_path).is_some() {
+                    log::warn!("failed to load pack texture {asset_path}: {e:#}");
+                } else {
+                    log::debug!("pack texture not found (optional): {asset_path}");
+                }
                 continue;
             }
         };
-        let (w, h) = img.dimensions();
-        let (_tex, view) = upload_rgba_texture(device, queue, kind.name(), img.as_raw(), w, h);
         map.insert(
             kind,
             RelicTextureGpu {
@@ -832,7 +901,7 @@ pub(super) fn load_pack_textures(
     map
 }
 
-/// Spawn a background thread that decodes all background PNGs and sends the RGBA
+/// Spawn a background thread that decodes all background images and sends the RGBA
 /// data back over a channel.
 pub(super) fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage> {
     let (tx, rx) = mpsc::channel();
@@ -849,16 +918,9 @@ pub(super) fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage
             let mut decoded = 0usize;
             let mut decode_time = std::time::Duration::ZERO;
             for (id, asset_path) in backgrounds {
-                let bytes = match mahjuro_assets::asset_path::get(asset_path) {
-                    Some(file) => file.data.to_vec(),
-                    None => {
-                        log::warn!("background image not found: {asset_path}");
-                        continue;
-                    }
-                };
                 let t_decode = Instant::now();
-                let img = match image::load_from_memory(&bytes) {
-                    Ok(img) => img.into_rgba8(),
+                let (rgba, w, h) = match crate::baked_texture::load_rgba_for_cpu(asset_path) {
+                    Ok(img) => img,
                     Err(e) => {
                         log::warn!("failed to decode background {asset_path}: {e}");
                         continue;
@@ -866,10 +928,9 @@ pub(super) fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage
                 };
                 decode_time += t_decode.elapsed();
                 decoded += 1;
-                let (w, h) = img.dimensions();
                 let msg = DecodedBackgroundImage {
                     id,
-                    rgba: img.into_raw(),
+                    rgba,
                     width: w,
                     height: h,
                 };

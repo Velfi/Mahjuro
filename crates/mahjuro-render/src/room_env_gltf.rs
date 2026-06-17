@@ -904,6 +904,7 @@ fn texture_source_meta(
 
 pub fn decode_env_primitive(
     primitive: gltf::Primitive<'_>,
+    btx_primitive_ordinal: usize,
     node_world: Mat4,
     buffers: &[Vec<u8>],
     capped_images: &[Option<CappedGltfImage>],
@@ -1187,6 +1188,35 @@ pub fn decode_env_primitive(
         (pbr.metallic_factor(), pbr.roughness_factor())
     };
     let emissive_factor = crate::gltf_helpers::effective_gltf_emissive_rgb(&material);
+    let albedo_btx_source_path = texture_sources.base_color.as_ref().map(|_| {
+        crate::baked_texture::gltf_slot_source_path(
+            log_asset_label,
+            btx_primitive_ordinal,
+            RoomTextureUsageClass::BaseColorSrgb.label(),
+        )
+    });
+    let normal_btx_source_path = texture_sources.normal.as_ref().map(|_| {
+        crate::baked_texture::gltf_slot_source_path(
+            log_asset_label,
+            btx_primitive_ordinal,
+            RoomTextureUsageClass::NormalLinear.label(),
+        )
+    });
+    let metallic_roughness_btx_source_path =
+        texture_sources.metallic_roughness.as_ref().map(|_| {
+            crate::baked_texture::gltf_slot_source_path(
+                log_asset_label,
+                btx_primitive_ordinal,
+                RoomTextureUsageClass::MetallicRoughnessLinear.label(),
+            )
+        });
+    let emissive_btx_source_path = texture_sources.emissive.as_ref().map(|_| {
+        crate::baked_texture::gltf_slot_source_path(
+            log_asset_label,
+            btx_primitive_ordinal,
+            RoomTextureUsageClass::EmissiveSrgb.label(),
+        )
+    });
 
     Ok(RoomEnvPrimitiveCpu {
         gltf_node_name: if gltf_node_name.is_empty() {
@@ -1201,12 +1231,16 @@ pub fn decode_env_primitive(
             vertices,
             indices,
             albedo_rgba,
+            albedo_btx_source_path,
             albedo_mip_chain,
             normal_rgba,
+            normal_btx_source_path,
             normal_mip_chain,
             metallic_roughness_rgba,
+            metallic_roughness_btx_source_path,
             metallic_roughness_mip_chain,
             emissive_rgba,
+            emissive_btx_source_path,
             emissive_mip_chain,
             metallic_factor,
             roughness_factor,
@@ -1426,6 +1460,7 @@ pub fn walk_room_env_node(
                     }
                     let decoded = decode_env_primitive(
                         prim,
+                        state.env_primitives.len(),
                         world,
                         state.buffers,
                         state.capped_images,
@@ -1446,6 +1481,7 @@ pub fn walk_room_env_node(
                 for prim in mesh.primitives() {
                     let decoded = decode_env_primitive(
                         prim,
+                        state.env_primitives.len(),
                         world,
                         state.buffers,
                         state.capped_images,

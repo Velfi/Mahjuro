@@ -75,22 +75,15 @@ pub fn extract_sprite_rgba(sheet_asset: &str, sprite_name: &str) -> Option<(Vec<
 }
 
 fn load_sheet(sheet_asset: &str) -> Option<DecodedSheet> {
-    let Some(png) = mahjuro_assets::asset_path::get(sheet_asset) else {
-        warn_once(format!("{sheet_asset}|png-missing"), || {
-            format!("kenney_atlas: PNG '{sheet_asset}' not found in asset packs / loose tree")
-        });
-        return None;
-    };
-    let img = match image::load_from_memory(&png.data) {
-        Ok(img) => img.to_rgba8(),
+    let (rgba, width, height) = match crate::baked_texture::load_rgba_for_cpu(sheet_asset) {
+        Ok(decoded) => decoded,
         Err(e) => {
             warn_once(format!("{sheet_asset}|png-decode"), || {
-                format!("kenney_atlas: PNG '{sheet_asset}' decode failed: {e}")
+                format!("kenney_atlas: sheet '{sheet_asset}' decode failed: {e:#}")
             });
             return None;
         }
     };
-    let (width, height) = img.dimensions();
 
     let Some(stripped) = sheet_asset.strip_suffix(".png") else {
         warn_once(format!("{sheet_asset}|extension"), || {
@@ -120,7 +113,7 @@ fn load_sheet(sheet_asset: &str) -> Option<DecodedSheet> {
     }
 
     Some(DecodedSheet {
-        rgba: img.into_raw(),
+        rgba,
         width,
         sub_textures,
     })
