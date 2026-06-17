@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -55,6 +53,7 @@ use crate::scenes::{BackgroundId, DrawCtx};
 
 use glam::{Mat4, Quat, Vec3};
 
+use super::TileGroup;
 use super::example_grid::{
     layout_tiles_page_grid, push_tile_group_labels, push_tiles_example_labels,
     push_tiles_example_panels,
@@ -62,7 +61,6 @@ use super::example_grid::{
 use super::flowers_page::{guide_column_footer_height, push_guide_column_footer_prose};
 use super::layout::GuideLayout;
 use super::page_panels::push_tiles_left_cards;
-use super::TileGroup;
 
 // ── Tiles intro page (page 0) ─────────────────────────────────────────────
 
@@ -130,4 +128,3 @@ pub(super) fn draw_tiles_page(
 
 pub(super) const MELDS_EXAMPLE_ROWS: &[&[usize]] = &[&[0, 1], &[2, 3, 4], &[5, 6]];
 pub(super) const MELDS_ROW_WEIGHTS: [f32; 3] = [0.28, 0.38, 0.34];
-

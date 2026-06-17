@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -55,17 +53,15 @@ use crate::scenes::{BackgroundId, DrawCtx};
 
 use glam::{Mat4, Quat, Vec3};
 
-use super::content::{
-    guide_example_is_invalid, guide_invalid_tile_rotation, MeldLabel, TileGroup,
-};
+use super::content::{MeldLabel, TileGroup, guide_example_is_invalid, guide_invalid_tile_rotation};
 use super::layout::push_guide_panel_stroke;
 use super::melds_page::{
     guide_example_meld_breaks_after, guide_example_meld_gap_px, guide_example_row_width,
     guide_yaku_tablet_metrics,
 };
 use super::page_panels::{
-    push_guide_tile_placements, push_guide_yaku_tablets, GuideExampleCell,
-    GuideExampleCellLayout, TilesExampleLabel,
+    GuideExampleCell, GuideExampleCellLayout, TilesExampleLabel, push_guide_tile_placements,
+    push_guide_yaku_tablets,
 };
 use super::tile_layout::layout_tile_groups_with_max;
 

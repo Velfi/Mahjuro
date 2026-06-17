@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -55,14 +53,14 @@ use crate::scenes::{BackgroundId, DrawCtx};
 
 use glam::{Mat4, Quat, Vec3};
 
+use super::GuideLayout;
 use super::economy_flow::{
     draw_between_chambers_band, draw_skip_steps_column, economy_flow_panel_width,
     economy_flow_ring_layout,
 };
 use super::economy_rules::{draw_economy_rules_band, push_economy_item_cards};
 use super::layout::push_guide_panel_stroke;
-use super::scoring_diagram::{scoring_panel_open, ScoringPanelStyle};
-use super::GuideLayout;
+use super::scoring_diagram::{ScoringPanelStyle, scoring_panel_open};
 
 // ── Economy page (page 5) ─────────────────────────────────────────────────
 
@@ -544,4 +542,3 @@ pub(super) fn draw_earning_note_row(
     });
     row_h * 1.85
 }
-

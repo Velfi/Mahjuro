@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -55,10 +53,10 @@ use crate::scenes::{BackgroundId, DrawCtx};
 
 use glam::{Mat4, Quat, Vec3};
 
-use super::layout::push_guide_panel_stroke;
-use super::melds_page::{guide_yaku_tablet_metrics, GUIDE_YAKU_TABLET_SCALE};
-use super::yaku_detail::push_dense_text_lines;
 use super::TileGroup;
+use super::layout::push_guide_panel_stroke;
+use super::melds_page::{GUIDE_YAKU_TABLET_SCALE, guide_yaku_tablet_metrics};
+use super::yaku_detail::push_dense_text_lines;
 pub(super) fn tiles_section_panel_height(
     heading: &str,
     lines: &[&str],

@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -56,8 +54,9 @@ use crate::scenes::{BackgroundId, DrawCtx};
 use glam::{Mat4, Quat, Vec3};
 
 use super::scoring_diagram::{
-    push_gameplay_cash_in_overlay, push_scoring_flow_panel, scoring_flow_cash_in_visual_rect,
-    scoring_guide_tile_caps, scoring_panel_open, scoring_section_title, ScoringPanelStyle,
+    ScoringPanelStyle, push_gameplay_cash_in_overlay, push_scoring_flow_panel,
+    scoring_flow_cash_in_visual_rect, scoring_guide_tile_caps, scoring_panel_open,
+    scoring_section_title,
 };
 use super::scoring_panels::{
     push_scoring_final_score_panel, push_scoring_tile_values_panel, push_scoring_yaku_relics_panel,

@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -55,12 +53,12 @@ use crate::scenes::{BackgroundId, DrawCtx};
 
 use glam::{Mat4, Quat, Vec3};
 
+use super::yaku_chunk_for_page;
+use super::yaku_page::meld_groups;
 use super::{
     PAGE_ECONOMY, PAGE_FLOWERS, PAGE_MELDS, PAGE_SCORING, PAGE_TANUKI_TIPS, PAGE_TILES, PAGE_YAKU,
     YAKU_PAGE_START,
 };
-use super::yaku_page::meld_groups;
-use super::yaku_chunk_for_page;
 
 // ── Page content ──────────────────────────────────────────────────────────
 
@@ -168,7 +166,10 @@ pub(super) fn page_graffiti(page: usize) -> Option<&'static str> {
 }
 
 /// Returns `(title, tile groups)` for the given page index.
-pub(crate) fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, Vec<TileGroup>) {
+pub(crate) fn page_content(
+    page: usize,
+    progress: &PlayerProgress,
+) -> (&'static str, Vec<TileGroup>) {
     match page {
         PAGE_TILES => (
             tiles_intro_copy::PAGE_TITLE,

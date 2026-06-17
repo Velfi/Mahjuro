@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -55,13 +53,13 @@ use crate::scenes::{BackgroundId, DrawCtx};
 
 use glam::{Mat4, Quat, Vec3};
 
+use super::TileGroup;
 use super::layout::push_guide_panel_stroke;
 use super::scoring_page::{SCORING_FLOW_MELD, SCORING_STRUCTURE_SLOT_COUNT};
 use super::scoring_panels::{
     layout_scoring_group_tiles, push_scoring_cash_in_plaque, push_scoring_formula_colored,
     push_scoring_structure_slots,
 };
-use super::TileGroup;
 
 pub(super) fn scoring_section_title(index: u8, title: &str) -> String {
     format!("{index}. {title}")

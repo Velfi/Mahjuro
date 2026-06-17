@@ -27,9 +27,7 @@ use crate::render::table_transform::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::vocabulary_colors::{GlossaryMode, text_effect_for_glossary_tint};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextBlockVerticalAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_triple_for_world_center, world_on_camera_ray_plane_z,
 };
@@ -56,7 +54,7 @@ use crate::scenes::{BackgroundId, DrawCtx};
 use glam::{Mat4, Quat, Vec3};
 
 use super::layout::push_guide_panel_stroke;
-use super::layout::{guide_nav_header, GuideLayout};
+use super::layout::{GuideLayout, guide_nav_header};
 
 // ── Tanuki's Tips page (page 6) ───────────────────────────────────────────
 
@@ -72,7 +70,12 @@ pub(super) struct TanukiTipsScrollLayout {
 }
 
 /// Content band top/bottom for a guide page (matches [`push_guide_chrome`] without drawing).
-pub(super) fn guide_content_band(w: f32, h: f32, back: [f32; 4], subtitle: Option<&str>) -> (f32, f32) {
+pub(super) fn guide_content_band(
+    w: f32,
+    h: f32,
+    back: [f32; 4],
+    subtitle: Option<&str>,
+) -> (f32, f32) {
     let layout = GuideLayout::new(w, h);
     let nav_header = guide_nav_header(w, h, back, subtitle);
     let jr = (w.min(h) / 720.0).clamp(1.0, 1.38);
@@ -226,4 +229,3 @@ pub(super) fn draw_tanuki_tips_page(
         });
     }
 }
-
