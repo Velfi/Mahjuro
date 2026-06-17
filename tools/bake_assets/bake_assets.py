@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -25,20 +26,17 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RULES_PATH = Path(__file__).resolve().parent / "pack_rules.json"
 
-# Room environment GLBs: runtime caps textures to 1024px and builds mips on load.
-# Resize at bake when `gltf-transform` is on PATH (npm i -g @gltf-transform/cli).
-ROOM_ENV_GLB_NAMES = frozenset(
-    {
-        "shop.glb",
-        "hallway.glb",
-        "archive.glb",
-        "main_menu.glb",
-        "staircase.glb",
-        "gameplay.glb",
-        "shadow_test_room.glb",
-    }
+GLB_MAGIC = 0x46546C67
+GLB_VERSION = 2
+GLB_JSON = 0x4E4F534A
+GLB_BIN = 0x004E4942
+
+# 1x1 opaque white PNG. Packed GLBs keep valid texture slots, but shipped image
+# payloads live in BTX1 under data/texture_baked/.
+GLB_PLACEHOLDER_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000d49444154789c63f8ffffff7f0009fb03fd2a86e38a0000000049454e44ae426082"
 )
-ROOM_ENV_TEXTURE_MAX = 1024
 
 
 @dataclass
@@ -170,6 +168,9 @@ def should_skip(rel: str) -> bool:
     # Source relic art — runtime loads pre-baked RLC2 under data/relic_baked/.
     if rel.startswith("textures/relics/"):
         return True
+    # Source texture PNGs — runtime loads BTX1 under data/texture_baked/.
+    if rel.startswith("textures/") and Path(rel).suffix.lower() == ".png":
+        return True
     return False
 
 
@@ -181,53 +182,159 @@ def zip_write_params(rel: str) -> tuple[int, int | None]:
     return zipfile.ZIP_DEFLATED, 6
 
 
-def maybe_resize_room_env_glb(src: Path, tmp_out: Path) -> bool:
-    """Resize embedded textures in room GLBs. Returns True if handled."""
-    if src.name.lower() not in ROOM_ENV_GLB_NAMES:
-        return False
-    transform = shutil.which("gltf-transform")
-    if transform is None:
-        size_mb = src.stat().st_size / (1024 * 1024)
-        if size_mb > 32:
-            print(
-                f"bake_assets: warning: {src.name} is {size_mb:.0f} MB — "
-                f"install @gltf-transform/cli and re-bake to resize textures to "
-                f"{ROOM_ENV_TEXTURE_MAX}px (faster startup)",
-                file=sys.stderr,
-            )
-        return False
-    # gltf-transform writes JSON when the output path lacks a .glb/.gltf suffix.
-    out_glb = tmp_out if tmp_out.suffix.lower() == ".glb" else tmp_out.with_suffix(".glb")
-    r = subprocess.run(
-        [
-            transform,
-            "resize",
-            str(src),
-            str(out_glb),
-            "--width",
-            str(ROOM_ENV_TEXTURE_MAX),
-            "--height",
-            str(ROOM_ENV_TEXTURE_MAX),
-        ],
-        capture_output=True,
-        text=True,
+def parse_glb(data: bytes, *, label: str) -> tuple[dict, bytes]:
+    if len(data) < 20:
+        raise ValueError(f"{label}: too small for GLB")
+    magic, version, total_len = struct.unpack_from("<III", data, 0)
+    if magic != GLB_MAGIC or version != GLB_VERSION or total_len != len(data):
+        raise ValueError(f"{label}: expected GLB v2")
+
+    pos = 12
+    json_obj: dict | None = None
+    bin_chunk = b""
+    while pos + 8 <= len(data):
+        chunk_len, chunk_type = struct.unpack_from("<II", data, pos)
+        pos += 8
+        chunk = data[pos : pos + chunk_len]
+        pos += chunk_len
+        if chunk_type == GLB_JSON:
+            json_obj = json.loads(chunk.rstrip(b" \t\r\n\0").decode("utf-8"))
+        elif chunk_type == GLB_BIN:
+            bin_chunk = chunk
+    if json_obj is None:
+        raise ValueError(f"{label}: missing JSON chunk")
+    return json_obj, bin_chunk
+
+
+def pad4(data: bytes, pad_byte: bytes) -> bytes:
+    extra = (-len(data)) % 4
+    if extra:
+        return data + pad_byte * extra
+    return data
+
+
+def write_glb(json_obj: dict, bin_chunk: bytes, out: Path) -> None:
+    json_bytes = json.dumps(json_obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    json_padded = pad4(json_bytes, b" ")
+    bin_padded = pad4(bin_chunk, b"\0")
+    total_len = 12 + 8 + len(json_padded) + 8 + len(bin_padded)
+    out.write_bytes(
+        struct.pack("<III", GLB_MAGIC, GLB_VERSION, total_len)
+        + struct.pack("<II", len(json_padded), GLB_JSON)
+        + json_padded
+        + struct.pack("<II", len(bin_padded), GLB_BIN)
+        + bin_padded
     )
-    if r.returncode == 0 and out_glb.is_file() and out_glb.stat().st_size > 1024:
-        if out_glb != tmp_out:
-            shutil.copy2(out_glb, tmp_out)
-            out_glb.unlink(missing_ok=True)
-        return True
-    print(
-        f"bake_assets: gltf-transform resize failed for {src.name}: {r.stderr or r.stdout}",
-        file=sys.stderr,
-    )
-    return False
+
+
+def collect_protected_buffer_views(gltf: dict, image_views: set[int]) -> set[int]:
+    protected: set[int] = set()
+    for accessor in gltf.get("accessors", []):
+        if isinstance(accessor, dict):
+            view = accessor.get("bufferView")
+            if isinstance(view, int):
+                protected.add(view)
+            sparse = accessor.get("sparse")
+            if isinstance(sparse, dict):
+                for key in ("indices", "values"):
+                    part = sparse.get(key)
+                    if isinstance(part, dict) and isinstance(part.get("bufferView"), int):
+                        protected.add(part["bufferView"])
+    for skin in gltf.get("skins", []):
+        if isinstance(skin, dict):
+            inverse_bind_matrices = skin.get("inverseBindMatrices")
+            if isinstance(inverse_bind_matrices, int):
+                accessor = gltf.get("accessors", [])[inverse_bind_matrices]
+                if isinstance(accessor, dict) and isinstance(accessor.get("bufferView"), int):
+                    protected.add(accessor["bufferView"])
+    return protected & image_views
+
+
+def maybe_strip_glb_images(src: Path, tmp_out: Path) -> bool:
+    """Replace embedded image payloads with one tiny PNG while preserving texture slots."""
+    try:
+        gltf, bin_chunk = parse_glb(src.read_bytes(), label=src.name)
+    except (OSError, ValueError, json.JSONDecodeError) as err:
+        print(f"bake_assets: warning: could not inspect {src.name}: {err}", file=sys.stderr)
+        return False
+
+    images = gltf.get("images")
+    buffer_views = gltf.get("bufferViews")
+    buffers = gltf.get("buffers")
+    if not isinstance(images, list) or not isinstance(buffer_views, list) or not isinstance(buffers, list):
+        return False
+
+    image_views: set[int] = set()
+    for image in images:
+        if isinstance(image, dict) and isinstance(image.get("bufferView"), int):
+            image_views.add(image["bufferView"])
+    if not image_views:
+        return False
+
+    protected_image_views = collect_protected_buffer_views(gltf, image_views)
+    new_bin = bytearray()
+
+    def append_aligned(payload: bytes) -> int:
+        while len(new_bin) % 4:
+            new_bin.append(0)
+        offset = len(new_bin)
+        new_bin.extend(payload)
+        return offset
+
+    placeholder_offset: int | None = None
+    for index, view in enumerate(buffer_views):
+        if not isinstance(view, dict):
+            continue
+        buffer_index = view.get("buffer", 0)
+        if buffer_index != 0:
+            continue
+        old_offset = int(view.get("byteOffset", 0))
+        old_len = int(view.get("byteLength", 0))
+        if old_len < 0 or old_offset < 0 or old_offset + old_len > len(bin_chunk):
+            raise SystemExit(f"error: {src.name}: bufferView {index} is outside the BIN chunk")
+        if index in image_views and index not in protected_image_views:
+            if placeholder_offset is None:
+                placeholder_offset = append_aligned(GLB_PLACEHOLDER_PNG)
+            view["byteOffset"] = placeholder_offset
+            view["byteLength"] = len(GLB_PLACEHOLDER_PNG)
+            view.pop("byteStride", None)
+            view.pop("target", None)
+            continue
+        payload = bin_chunk[old_offset : old_offset + old_len]
+        view["byteOffset"] = append_aligned(payload)
+
+    if placeholder_offset is None:
+        placeholder_offset = append_aligned(GLB_PLACEHOLDER_PNG)
+
+    shared_placeholder_view: int | None = None
+    for image in images:
+        if not isinstance(image, dict):
+            continue
+        image["mimeType"] = "image/png"
+        image.pop("uri", None)
+        view = image.get("bufferView")
+        if isinstance(view, int) and view in protected_image_views:
+            if shared_placeholder_view is None:
+                shared_placeholder_view = len(buffer_views)
+                buffer_views.append(
+                    {
+                        "buffer": 0,
+                        "byteOffset": placeholder_offset,
+                        "byteLength": len(GLB_PLACEHOLDER_PNG),
+                    }
+                )
+            image["bufferView"] = shared_placeholder_view
+
+    buffers[0]["byteLength"] = len(new_bin)
+    buffers[0].pop("uri", None)
+    write_glb(gltf, bytes(new_bin), tmp_out)
+    return True
 
 
 def process_file(src: Path, rel: str, tmp_out: Path, lossy: bool) -> None:
     """Write processed bytes to tmp_out (single file)."""
     suf = src.suffix.lower()
-    if suf == ".glb" and maybe_resize_room_env_glb(src, tmp_out):
+    if suf == ".glb" and maybe_strip_glb_images(src, tmp_out):
         return
     if suf == ".json":
         data = parse_json_file(src, label=rel)

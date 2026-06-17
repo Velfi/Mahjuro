@@ -1638,6 +1638,70 @@ mod cases {
         assert!(!run.is_selection_valid(), "triplet + leftover is invalid");
     }
 
+    fn pair_heavy_hand_with_kong_selection() -> Vec<Tile> {
+        vec![
+            Tile::new(Suit::Pinzu, 5, 100),
+            Tile::new(Suit::Pinzu, 5, 101),
+            Tile::new(Suit::Pinzu, 5, 102),
+            Tile::new(Suit::Pinzu, 5, 103),
+            Tile::new(Suit::Manzu, 1, 200),
+            Tile::new(Suit::Manzu, 1, 201),
+            Tile::new(Suit::Manzu, 2, 202),
+            Tile::new(Suit::Manzu, 2, 203),
+            Tile::new(Suit::Manzu, 3, 204),
+            Tile::new(Suit::Manzu, 3, 205),
+            Tile::new(Suit::Souzu, 7, 206),
+            Tile::new(Suit::Souzu, 7, 207),
+            Tile::new(Suit::Wind, 1, 208),
+            Tile::new(Suit::Wind, 1, 209),
+        ]
+    }
+
+    #[test]
+    fn pick_best_decomposition_keeps_selected_four_of_a_kind_as_kong() {
+        let hand = pair_heavy_hand_with_kong_selection();
+        let selected: Vec<Tile> = hand.iter().take(4).copied().collect();
+        let mut run = test_run();
+        run.hand = hand;
+        run.selected = (0..run.hand.len()).map(|i| i < 4).collect();
+
+        let (sets, scoring_tiles) = run
+            .try_validate_with_wildcards(&selected)
+            .expect("four of a kind validates");
+        let best = run.pick_best_decomposition(sets, &scoring_tiles, &selected);
+
+        assert_eq!(best.len(), 1);
+        assert_eq!(best[0].kind, MeldKind::Kong);
+        assert_eq!(best[0].tile_ids.len(), 4);
+
+        let (preview, bad, valid) = run.preview_selection_melds(&selected);
+        assert!(valid);
+        assert!(bad.is_empty());
+        assert_eq!(preview.len(), 1);
+        assert_eq!(preview[0].kind, MeldKind::Kong);
+    }
+
+    #[test]
+    fn commit_selection_records_four_of_a_kind_as_kong() {
+        let mut run = test_run();
+        run.hand = pair_heavy_hand_with_kong_selection();
+        run.selected = (0..run.hand.len()).map(|i| i < 4).collect();
+        run.relics.active.push(RelicId::KongCollector);
+        let mut bus = bus();
+
+        assert_eq!(run.commit_selection_to_structure(&mut bus), 1);
+
+        assert_eq!(run.structure_sets.len(), 1);
+        assert_eq!(run.structure_sets[0].kind, MeldKind::Kong);
+        assert_eq!(run.structure_sets[0].tile_ids.len(), 4);
+        assert_eq!(run.relic_counters.get(&RelicId::KongCollector), Some(&1));
+        assert!(
+            bus.queue
+                .iter()
+                .any(|event| matches!(event, GameEvent::StructureCommitted))
+        );
+    }
+
     #[test]
     fn sixteen_identical_tiles_play_validity_matches_capacity_fitting_pick() {
         use crate::core::hand::decomposition_canonical_key;

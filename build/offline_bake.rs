@@ -9,6 +9,7 @@ use mahjuro_bake_stamp::relic::Relic;
 use mahjuro_bake_stamp::room_gi::RoomGi;
 use mahjuro_bake_stamp::room_shadow::RoomShadow;
 use mahjuro_bake_stamp::showcase_decal::ShowcaseDecal;
+use mahjuro_bake_stamp::texture::Texture;
 use mahjuro_bake_stamp::{assert_bake_current, skip_committed_bake_checks};
 
 pub fn emit_rerun_if_changed() {
@@ -27,6 +28,7 @@ pub fn ensure_committed_offline_bakes_current(repo: &Path, _profile_dir: &Path) 
     assert_bake_current::<RoomShadow>(repo);
     assert_bake_current::<ShowcaseDecal>(repo);
     assert_bake_current::<Relic>(repo);
+    assert_bake_current::<Texture>(repo);
 }
 
 fn skip_committed_bake_freshness() -> bool {

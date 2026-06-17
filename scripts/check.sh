@@ -85,7 +85,8 @@ build_bake_tools() {
 
     "${bake[@]}" -p mahjuro-headless --bin mahjuro-bake --features bake
     "${bake[@]}" -p mahjuro-render --bin mahjuro-bake-decal-atlases
-    "${bake[@]}" -p mahjuro-render --bin mahjuro-bake-relics
+    "${bake[@]}" -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake
+    "${bake[@]}" -p mahjuro-render --bin mahjuro-bake-textures --features texture_bc7_bake
 }
 
 run_tests() {

@@ -7,6 +7,7 @@
 use crate::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::relic_dish::build_talisman_mesh_from_rgba;
 use crate::table_transform::euler_xyz_rad_from_deg;
+use crate::tile_glb::Vertex3dTex;
 
 /// Normalized cap half-extent after footprint scaling (see `CAP_REFERENCE_AREA`).
 const CAP_HALF_EXTENT: f32 = 0.50;
@@ -107,9 +108,122 @@ mod tests {
 
 /// Build an extruded pendant mesh from an embedded mask asset path.
 pub fn build_talisman_mesh_from_mask_asset(path: &str) -> Option<MeshCpu> {
-    let file = mahjuro_assets::asset_path::get(path)?;
-    let img = image::load_from_memory(&file.data).ok()?.into_rgba8();
-    build_talisman_mesh_from_rgba(img.as_raw(), img.width(), img.height(), path)
+    if let Some(cpu) = load_baked_talisman_mesh(path) {
+        return Some(cpu);
+    }
+    let (rgba, w, h) = crate::baked_texture::load_rgba_for_cpu(path).ok()?;
+    build_talisman_mesh_from_rgba(&rgba, w, h, path)
+}
+
+pub fn baked_talisman_mesh_asset_path(mask_asset_path: &str) -> String {
+    let mut path = String::from("data/talisman_mesh_baked/");
+    for ch in mask_asset_path.chars() {
+        match ch {
+            '/' | '\\' => path.push('/'),
+            ':' => path.push('_'),
+            _ => path.push(ch),
+        }
+    }
+    path.push_str(".tmesh");
+    path
+}
+
+pub fn load_baked_talisman_mesh(mask_asset_path: &str) -> Option<MeshCpu> {
+    let path = baked_talisman_mesh_asset_path(mask_asset_path);
+    let bytes = mahjuro_assets::asset_path::get_shared(&path)?;
+    decode_baked_talisman_mesh(bytes.as_ref()).ok()
+}
+
+pub fn encode_baked_talisman_mesh(mesh: &MeshCpu) -> anyhow::Result<Vec<u8>> {
+    let header = TalismanMeshHeader {
+        magic: *TALISMAN_MESH_MAGIC,
+        version: TALISMAN_MESH_VERSION,
+        vertex_count: mesh.vertices.len() as u32,
+        index_count: mesh.indices.len() as u32,
+        material_kind: mesh.default_material.kind as u32,
+        base_color: mesh.default_material.base_color,
+        specular_strength: mesh.default_material.specular_strength,
+        specular_power: mesh.default_material.specular_power,
+    };
+    let mut out = Vec::with_capacity(
+        std::mem::size_of::<TalismanMeshHeader>()
+            + std::mem::size_of_val(mesh.vertices.as_slice())
+            + std::mem::size_of_val(mesh.indices.as_slice()),
+    );
+    out.extend_from_slice(bytemuck::bytes_of(&header));
+    out.extend_from_slice(bytemuck::cast_slice(&mesh.vertices));
+    out.extend_from_slice(bytemuck::cast_slice(&mesh.indices));
+    Ok(out)
+}
+
+pub fn decode_baked_talisman_mesh(bytes: &[u8]) -> anyhow::Result<MeshCpu> {
+    let header_size = std::mem::size_of::<TalismanMeshHeader>();
+    anyhow::ensure!(
+        bytes.len() >= header_size,
+        "talisman mesh bake: file too small"
+    );
+    let header: &TalismanMeshHeader = bytemuck::try_from_bytes(&bytes[..header_size])
+        .map_err(|e| anyhow::anyhow!("talisman mesh bake header: {e}"))?;
+    anyhow::ensure!(
+        header.magic == *TALISMAN_MESH_MAGIC,
+        "talisman mesh bake: bad magic"
+    );
+    anyhow::ensure!(
+        header.version == TALISMAN_MESH_VERSION,
+        "talisman mesh bake: unsupported version {}",
+        header.version
+    );
+
+    let vertex_bytes = (header.vertex_count as usize)
+        .checked_mul(std::mem::size_of::<Vertex3dTex>())
+        .ok_or_else(|| anyhow::anyhow!("talisman mesh bake: vertex length overflow"))?;
+    let index_bytes = (header.index_count as usize)
+        .checked_mul(std::mem::size_of::<u32>())
+        .ok_or_else(|| anyhow::anyhow!("talisman mesh bake: index length overflow"))?;
+    let vertex_end = header_size
+        .checked_add(vertex_bytes)
+        .ok_or_else(|| anyhow::anyhow!("talisman mesh bake: vertex end overflow"))?;
+    let index_end = vertex_end
+        .checked_add(index_bytes)
+        .ok_or_else(|| anyhow::anyhow!("talisman mesh bake: index end overflow"))?;
+    anyhow::ensure!(
+        bytes.len() >= index_end,
+        "talisman mesh bake: truncated payload"
+    );
+
+    Ok(MeshCpu {
+        vertices: bytemuck::cast_slice(&bytes[header_size..vertex_end]).to_vec(),
+        indices: bytemuck::cast_slice(&bytes[vertex_end..index_end]).to_vec(),
+        default_material: MaterialParams {
+            kind: material_kind_from_u32(header.material_kind),
+            base_color: header.base_color,
+            specular_strength: header.specular_strength,
+            specular_power: header.specular_power,
+        },
+    })
+}
+
+const TALISMAN_MESH_MAGIC: &[u8; 4] = b"TMSH";
+const TALISMAN_MESH_VERSION: u32 = 1;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct TalismanMeshHeader {
+    magic: [u8; 4],
+    version: u32,
+    vertex_count: u32,
+    index_count: u32,
+    material_kind: u32,
+    base_color: [f32; 4],
+    specular_strength: f32,
+    specular_power: f32,
+}
+
+fn material_kind_from_u32(kind: u32) -> MaterialKind {
+    match kind {
+        21 => MaterialKind::Chitin,
+        _ => MaterialKind::Plain,
+    }
 }
 
 /// Local AABB half-extents for picking / projection (normalized cap × slab thickness).
