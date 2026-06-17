@@ -908,14 +908,6 @@ impl RunState {
         let rules = self.validation_rules_for_structure_commits();
         let mut alternatives = enumerate_decompositions(scoring_tiles, &rules);
         alternatives.retain(|sets| self.selection_commit_capacity_ok(sets, scoring_tiles.len()));
-        let max_kong_coverage = alternatives
-            .iter()
-            .map(|sets| kong_tile_coverage(sets))
-            .max()
-            .unwrap_or(0);
-        if max_kong_coverage > 0 {
-            alternatives.retain(|sets| kong_tile_coverage(sets) == max_kong_coverage);
-        }
         if alternatives.is_empty() {
             return default_sets;
         }
@@ -924,6 +916,14 @@ impl RunState {
         }
 
         if scoring_tiles.len() <= CHUNK_PICK_TILE_LIMIT {
+            let max_kong_coverage = alternatives
+                .iter()
+                .map(|sets| kong_tile_coverage(sets))
+                .max()
+                .unwrap_or(0);
+            if max_kong_coverage > 0 {
+                alternatives.retain(|sets| kong_tile_coverage(sets) == max_kong_coverage);
+            }
             let mut best = alternatives[0].clone();
             let mut best_key = decomposition_canonical_key(scoring_tiles, &best);
             for candidate in alternatives.into_iter().skip(1) {
