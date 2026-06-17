@@ -15,6 +15,37 @@ use crate::scenes::{SceneTransition, UpdateCtx};
 use crate::sfx_id::SfxId;
 use crate::ui::input::UiAction;
 
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
+fn play_yaku_voice(
+    audio: Option<&mut crate::audio::AudioManager>,
+    yk: crate::core::yaku::YakuKind,
+    stack_count: usize,
+    now: Instant,
+) -> std::time::Duration {
+    let sfx = SfxId::for_yaku(yk);
+    let Some(audio) = audio else {
+        return std::time::Duration::from_millis(700);
+    };
+    let voice_dur = audio
+        .play_sfx(sfx)
+        .or_else(|| audio.sfx_duration(sfx))
+        .unwrap_or_else(|| std::time::Duration::from_millis(700));
+    if yk == crate::core::yaku::YakuKind::Yakuhai && stack_count > 1 {
+        debug_assert!(
+            stack_count <= 4,
+            "Yakuhai only has times_2 through times_4 clips"
+        );
+        if let Some(times_sfx) = SfxId::for_times(stack_count) {
+            audio.schedule_sfx(times_sfx, now + voice_dur);
+            return voice_dur
+                + audio
+                    .sfx_duration(times_sfx)
+                    .unwrap_or_else(|| std::time::Duration::from_millis(500));
+        }
+    }
+    voice_dur
+}
+
 /// Advance the active scoring cascade. Returns `Some(transition)` when
 /// the caller should early-return from `update()` (cascade still
 /// blocking input or skipped/finished with another queued).
@@ -52,16 +83,14 @@ pub(super) fn tick_active_cascade(
                 if let Some(yk) = first_yaku_step(&cascade.breakdown, step_index)
                     && cascade.mark_yaku_voiced(yk)
                 {
+                    let stack_count = cascade
+                        .breakdown
+                        .detected_yaku
+                        .iter()
+                        .filter(|&&detected| detected == yk)
+                        .count();
                     #[cfg(any(feature = "game", feature = "headless-screenshot"))]
-                    let voice_dur = {
-                        let sfx = SfxId::for_yaku(yk);
-                        ctx.audio
-                            .as_mut()
-                            .and_then(|audio| {
-                                audio.play_sfx(sfx).or_else(|| audio.sfx_duration(sfx))
-                            })
-                            .unwrap_or_else(|| std::time::Duration::from_millis(700))
-                    };
+                    let voice_dur = play_yaku_voice(ctx.audio.as_deref_mut(), yk, stack_count, now);
                     #[cfg(not(any(feature = "game", feature = "headless-screenshot")))]
                     let voice_dur = std::time::Duration::from_millis(700);
                     cascade.extend_yaku_hold(

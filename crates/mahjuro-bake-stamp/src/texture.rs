@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
 
-use crate::{hash_paths, BakeKind, Fnv64};
+use std::io;
+
+use crate::{BakeKind, Fnv64, hash_paths, read_stamp_line, write_stamp_line};
 
 pub struct Texture;
 
@@ -23,8 +25,7 @@ impl BakeKind for Texture {
         "cargo build -p mahjuro-render --bin mahjuro-bake-textures --features texture_bc7_bake";
     const REBAKE_CMD: &'static str =
         "cargo run -p mahjuro-render --bin mahjuro-bake-textures --features texture_bc7_bake";
-    const COMMIT_PATHS: &'static str =
-        "assets/data/texture_baked/**/*.btx assets/data/texture_baked/.inputs_stamp";
+    const COMMIT_PATHS: &'static str = "assets/data/texture_baked/**/*.btx assets/data/texture_baked/**/*.btx.stamp assets/data/texture_baked/.inputs_stamp";
 
     fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
         [
@@ -79,6 +80,34 @@ impl BakeKind for Texture {
         let baked_gltf = count_btx_under(&dir.join("3d_gltf"));
         baked_static >= expected_static && baked_gltf > 0
     }
+}
+
+/// Per-texture bake fingerprint: codec hash + color mode + dimensions + RGBA bytes.
+pub fn compute_entry_hash(color: &str, width: u32, height: u32, rgba: &[u8]) -> String {
+    let mut h = Fnv64::new();
+    h.write(b"texture-btx1-v6-entry\n");
+    h.write(color.as_bytes());
+    h.write(b"\n");
+    h.write(&width.to_le_bytes());
+    h.write(&height.to_le_bytes());
+    h.write(rgba);
+    h.finish_hex()
+}
+
+/// Sidecar next to the baked BTX payload (`<texture>.btx.stamp`).
+pub fn texture_sidecar_path(out: &Path) -> PathBuf {
+    out.with_extension(format!(
+        "{}.stamp",
+        out.extension().and_then(|x| x.to_str()).unwrap_or_default()
+    ))
+}
+
+pub fn read_texture_sidecar(path: &Path) -> Option<String> {
+    read_stamp_line(path)
+}
+
+pub fn write_texture_sidecar(path: &Path, hash: &str) -> io::Result<()> {
+    write_stamp_line(path, hash)
 }
 
 fn hashable_texture_input_files(root: &Path) -> Vec<PathBuf> {

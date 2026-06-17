@@ -208,7 +208,7 @@ pub fn encode_rgba_bc7_mip_chain(
     height: u32,
     color: BakedTextureColor,
 ) -> anyhow::Result<BakedTexturePayload> {
-    use intel_tex_2::{bc7, RgbaSurface};
+    use intel_tex_2::{RgbaSurface, bc7};
 
     anyhow::ensure!(
         rgba.len() == (width as usize) * (height as usize) * 4,
