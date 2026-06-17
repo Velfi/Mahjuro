@@ -889,10 +889,10 @@ impl RunState {
     }
 
     /// Enumerate every valid meld decomposition of the selection and pick the
-    /// best split. Plays of 6 or fewer tiles use largest-chunk grouping; larger
-    /// plays score the merged structure at cash-in. Full hand submissions score
-    /// the selection alone. Four-of-a-kind selections stay grouped as kongs
-    /// before scoring tie-breaks are considered.
+    /// best split. Plays of ≤6 tiles use largest-chunk grouping; 7+ tiles score
+    /// the merged structure at cash-in (full hand scores the selection alone).
+    /// Ties on large plays fall back to yaku weight, hand-shape affinity, then
+    /// a canonical decomposition key.
     pub(crate) fn pick_best_decomposition(
         &self,
         default_sets: Vec<DetectedMeld>,
@@ -1033,29 +1033,32 @@ impl RunState {
             .total
         };
 
-        let mut best = default_sets;
+        let mut alternatives = alternatives.into_iter();
+        let mut best = alternatives
+            .next()
+            .expect("alternatives is non-empty after early return");
         let mut best_total = score_decomp(&best);
-        let mut best_affinity = decomposition_affinity(&best, bias);
         let mut best_yaku_weight = preview_yaku_weight(&best);
+        let mut best_affinity = decomposition_affinity(&best, bias);
         let mut best_key = decomposition_canonical_key(scoring_tiles, &best);
         for candidate in alternatives {
             let total = score_decomp(&candidate);
-            let affinity = decomposition_affinity(&candidate, bias);
             let yaku_weight = preview_yaku_weight(&candidate);
+            let affinity = decomposition_affinity(&candidate, bias);
             let key = decomposition_canonical_key(scoring_tiles, &candidate);
             let take = total > best_total
-                || (total == best_total && affinity > best_affinity)
+                || (total == best_total && yaku_weight > best_yaku_weight)
                 || (total == best_total
-                    && affinity == best_affinity
-                    && yaku_weight > best_yaku_weight)
-                || (total == best_total
-                    && affinity == best_affinity
                     && yaku_weight == best_yaku_weight
+                    && affinity > best_affinity)
+                || (total == best_total
+                    && yaku_weight == best_yaku_weight
+                    && affinity == best_affinity
                     && key < best_key);
             if take {
                 best_total = total;
-                best_affinity = affinity;
                 best_yaku_weight = yaku_weight;
+                best_affinity = affinity;
                 best_key = key;
                 best = candidate;
             }
