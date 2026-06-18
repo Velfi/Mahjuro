@@ -179,7 +179,7 @@ mod tests {
         assert!(t.rain.speed_mul > 0.0);
         assert!(t.fog.density > 0.0);
         assert!(t.fog.height > 0.0);
-        assert!(t.fog.floor_lift_heights > 0.0);
+        assert!(t.fog.floor_lift_heights.is_finite());
         assert!(t.fog.brightness > 0.0);
         assert_eq!(t.moon.emission_color, [1.0, 1.0, 1.0]);
         assert_eq!(t.moths.flap_hz, 25.0);

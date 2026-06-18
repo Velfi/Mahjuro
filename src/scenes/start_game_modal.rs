@@ -7,6 +7,7 @@ use crate::core::tile::{Suit, Tile};
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::TileMaterial;
+use crate::render::doc_tile_camera::doc_tile_camera;
 use crate::render::theme::{ButtonState, ButtonVariant, button_colors, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::sfx_id::SfxId;
@@ -641,44 +642,94 @@ fn preview_tiles() -> Vec<Tile> {
     tiles
 }
 
-/// Row definitions: (start_index, count) for each row.
-const GRID_ROWS: [(usize, usize); 5] = [
-    (0, 9),  // Manzu 1–9
-    (9, 9),  // Souzu 1–9
-    (18, 9), // Pinzu 1–9
-    (27, 7), // Winds 1–4 + Dragons 1–3
-    (34, 4), // Flowers 1–4
+/// Row definitions: tile count for each display row.
+const TILE_DISPLAY_ROWS: [usize; 5] = [
+    9, // Manzu 1–9
+    9, // Souzu 1–9
+    9, // Pinzu 1–9
+    7, // Winds 1–4 + Dragons 1–3
+    4, // Flowers 1–4
 ];
 
 /// Key light height above the felt uses a fixed fraction of window height (screen-space cue).
 const TILE_PREVIEW_KEY_LIGHT_LIFT_FRAC_OF_H: f32 = 0.80;
+/// Lean the display tiles backward while leaving their faces angled up toward the room.
+const TILE_PREVIEW_BASE_ROTATION: [f32; 3] = [
+    -std::f32::consts::FRAC_PI_4,
+    0.0,
+    std::f32::consts::PI,
+];
 
-/// Compute 38 top-down pixel `(x, y, w, h)` slot rects (`y` increases downward; fed to
-/// [`crate::render::world_space::layout_anchor_to_world`] via showcase draws).
-fn grid_slots(grid_x: f32, grid_y: f32, grid_w: f32, grid_h: f32) -> Vec<(f32, f32, f32, f32)> {
-    let cols = 9.0_f32;
-    let rows = GRID_ROWS.len() as f32;
-    let slot_w = grid_w / cols;
-    // Face aspect ~1.36 (long axis / short axis from the tile mesh).
-    let slot_h = slot_w * 1.36;
-    let total_h = rows * slot_h;
-    // Vertical gap between rows, distributed evenly.
-    let row_gap = if rows > 1.0 {
-        ((grid_h - total_h) / (rows - 1.0)).max(0.0)
-    } else {
-        0.0
-    };
+#[derive(Clone, Copy)]
+struct TileDisplaySlot {
+    cx: f32,
+    cy: f32,
+    lift_z: f32,
+    size_px: f32,
+    scale: f32,
+    rotation: [f32; 3],
+    brightness: f32,
+}
+
+/// Arrange the full tile set like a counter display: straight stepped rows
+/// and featured lower rows instead of a rigid catalog grid.
+fn display_slots(grid_x: f32, grid_y: f32, grid_w: f32, grid_h: f32) -> Vec<TileDisplaySlot> {
+    let max_cols = 9.0_f32;
+    let row_count = TILE_DISPLAY_ROWS.len() as f32;
+    let base_size = (grid_w / (max_cols + 1.35)).min(grid_h / (row_count * 1.48));
+    let row_step = (grid_h - base_size * 1.08) / (row_count - 1.0).max(1.0);
+    let center_x = grid_x + grid_w * 0.5;
+    let top_y = grid_y + base_size * 0.58;
 
     let mut slots = Vec::with_capacity(38);
-    for (row_idx, &(_start, count)) in GRID_ROWS.iter().enumerate() {
-        let row_y = grid_y + row_idx as f32 * (slot_h + row_gap);
-        // Center shorter rows within the 9-column width.
-        let row_offset = (cols - count as f32) * slot_w * 0.5;
+    for (row_idx, &count) in TILE_DISPLAY_ROWS.iter().enumerate() {
+        let count_f = count as f32;
+        let shelf_depth = row_count - 1.0 - row_idx as f32;
+        let row_center_y = top_y + row_idx as f32 * row_step + row_idx as f32 * base_size * 0.025;
+        let row_lift_z = shelf_depth * base_size * 0.12;
+        let row_size = base_size
+            * match row_idx {
+                3 => 1.04,
+                4 => 1.12,
+                _ => 1.0,
+            };
+        let step_x = row_size
+            * match row_idx {
+                3 => 1.16,
+                4 => 1.46,
+                _ => 1.10,
+            };
+        let row_w = step_x * (count_f - 1.0).max(0.0);
+        let fan_max = match row_idx {
+            4 => std::f32::consts::PI / 15.0,
+            3 => std::f32::consts::PI / 18.0,
+            _ => std::f32::consts::PI / 21.0,
+        };
+
         for col in 0..count {
-            let x = grid_x + row_offset + col as f32 * slot_w;
-            slots.push((x, row_y, slot_w, slot_h));
+            let t = if count > 1 {
+                (col as f32 / (count_f - 1.0)) * 2.0 - 1.0
+            } else {
+                0.0
+            };
+            let cx = center_x + t * row_w * 0.5;
+            let cy = row_center_y;
+            slots.push(TileDisplaySlot {
+                cx,
+                cy,
+                lift_z: row_lift_z,
+                size_px: row_size,
+                scale: 1.0,
+                rotation: [
+                    TILE_PREVIEW_BASE_ROTATION[0],
+                    TILE_PREVIEW_BASE_ROTATION[1],
+                    TILE_PREVIEW_BASE_ROTATION[2] + t * fan_max,
+                ],
+                brightness: 1.03,
+            });
         }
     }
+
     slots
 }
 
@@ -885,7 +936,7 @@ impl SceneBehavior for TileSelectScene {
         // ── Tile preview grid on the right ─────────────────────────
         let (grid_x, grid_y, grid_w, grid_h) = self.preview_grid_rect(w, h);
         let hand_tiles = preview_tiles();
-        let hand_slots = grid_slots(grid_x, grid_y, grid_w, grid_h);
+        let hand_slots = display_slots(grid_x, grid_y, grid_w, grid_h);
 
         // Build tile preview placements for the showcase pipeline.
         let preview_placements: Vec<crate::render::draw_cmd::ShowcaseTilePlacement> = {
@@ -897,7 +948,7 @@ impl SceneBehavior for TileSelectScene {
             } else {
                 hand_tiles
             };
-            let slots: Vec<(f32, f32, f32, f32)> = if self.tutorial_mode {
+            let slots: Vec<TileDisplaySlot> = if self.tutorial_mode {
                 hand_slots.into_iter().take(34).collect()
             } else {
                 hand_slots
@@ -905,16 +956,14 @@ impl SceneBehavior for TileSelectScene {
             tiles
                 .into_iter()
                 .zip(slots)
-                .map(|(tile, (sx, sy, sw, sh))| {
-                    let cx = sx + sw * 0.5;
-                    let cy = sy + sh * 0.5;
+                .map(|(tile, slot)| {
                     crate::render::draw_cmd::ShowcaseTilePlacement {
                         tile,
-                        center_pos: [cx, cy, 0.0],
-                        rotation: [0.0, 0.0, std::f32::consts::PI],
-                        scale: 1.0,
-                        size_px: sw,
-                        brightness: 1.0,
+                        center_pos: [slot.cx, slot.cy, slot.lift_z],
+                        rotation: slot.rotation,
+                        scale: slot.scale,
+                        size_px: slot.size_px,
+                        brightness: slot.brightness,
                         opacity: 1.0,
                         selected: false,
                         hovered: false,
@@ -931,6 +980,8 @@ impl SceneBehavior for TileSelectScene {
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
+        frame.camera_override = Some(doc_tile_camera(h));
+        frame.showcase_render_hints.layout_use_ray_plane_z = true;
         if !preview_placements.is_empty() {
             frame.showcase_tile_batch(preview_placements);
         }

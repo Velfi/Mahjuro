@@ -36,27 +36,27 @@ fn default_density() -> f32 {
 }
 
 fn default_height() -> f32 {
-    0.055
+    0.067330465
 }
 
 fn default_floor_lift_heights() -> f32 {
-    2.0
+    -0.039218307
 }
 
 fn default_color() -> [f32; 3] {
-    [0.46, 0.52, 0.58]
+    [0.0541319, 0.38230848, 0.58]
 }
 
 fn default_brightness() -> f32 {
-    1.0
+    1.9720843
 }
 
 fn default_far_color() -> [f32; 3] {
-    [0.42, 0.52, 0.72]
+    [0.67395025, 0.7178114, 0.72000003]
 }
 
 fn default_far_brightness() -> f32 {
-    1.0
+    3.0
 }
 
 fn default_gradient_near_heights() -> f32 {
@@ -64,7 +64,7 @@ fn default_gradient_near_heights() -> f32 {
 }
 
 fn default_gradient_far_heights() -> f32 {
-    3.5
+    0.92087615
 }
 
 impl Default for MainMenuFogTuning {
