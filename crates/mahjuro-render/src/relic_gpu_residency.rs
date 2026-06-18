@@ -24,17 +24,6 @@ pub(crate) fn align_bc7_dim(v: u32) -> u32 {
     v.next_multiple_of(4).max(4)
 }
 
-#[cfg(feature = "texture_bc7_bake")]
-/// Base size for BC7 mip halving: 4-aligned and power-of-two so every mip stays block-aligned.
-pub(crate) fn align_bc7_base_dim(v: u32) -> u32 {
-    let aligned = align_bc7_dim(v.max(1));
-    if aligned.is_power_of_two() {
-        aligned
-    } else {
-        aligned.next_power_of_two()
-    }
-}
-
 /// True when every mip we would upload via `Queue::write_texture` is BC7 block-aligned.
 pub(crate) fn bc7_upload_chain_valid(base_w: u32, base_h: u32, mip_count: u32) -> bool {
     if !bc7_block_aligned(base_w, base_h) {
@@ -163,16 +152,15 @@ mod tests {
 
     #[cfg(feature = "texture_bc7_bake")]
     #[test]
-    fn bc7_base_dim_is_power_of_two() {
+    fn bc7_dim_is_block_aligned() {
         assert_eq!(align_bc7_dim(1254), 1256);
         assert_eq!(align_bc7_dim(1), 4);
-        assert_eq!(align_bc7_base_dim(1254), 2048);
-        assert_eq!(align_bc7_base_dim(1024), 1024);
     }
 
     #[test]
-    fn bc7_upload_chain_valid_requires_power_of_two_base() {
+    fn bc7_upload_chain_valid_requires_block_aligned_mips() {
         assert!(bc7_upload_chain_valid(1024, 1024, 9));
-        assert!(!bc7_upload_chain_valid(1256, 1256, 9));
+        assert!(!bc7_upload_chain_valid(921, 1341, 9));
+        assert!(!bc7_upload_chain_valid(0, 1341, 9));
     }
 }

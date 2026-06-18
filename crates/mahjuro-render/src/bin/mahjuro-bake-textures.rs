@@ -376,7 +376,7 @@ fn bake_texture_slot(
 ) -> anyhow::Result<()> {
     let out = assets.join(rel);
     let sidecar_path = texture_sidecar_path(&out);
-    let entry_hash = compute_entry_hash(texture_color_tag(color), w, h, rgba);
+    let entry_hash = compute_entry_hash(&texture_color_tag(color), w, h, rgba);
     let sidecar = read_texture_sidecar(&sidecar_path);
     let out_ok = out.is_file();
 
@@ -409,12 +409,13 @@ fn bake_texture_slot(
     Ok(())
 }
 
-fn texture_color_tag(color: mahjuro_render::baked_texture::BakedTextureColor) -> &'static str {
-    match color {
+fn texture_color_tag(color: mahjuro_render::baked_texture::BakedTextureColor) -> String {
+    let color = match color {
         mahjuro_render::baked_texture::BakedTextureColor::Srgb => "srgb",
         mahjuro_render::baked_texture::BakedTextureColor::Linear => "linear",
         mahjuro_render::baked_texture::BakedTextureColor::NormalLinear => "normal-linear",
-    }
+    };
+    format!("btx{}:{color}", mahjuro_render::baked_texture::VERSION)
 }
 
 fn repo_root() -> anyhow::Result<std::path::PathBuf> {

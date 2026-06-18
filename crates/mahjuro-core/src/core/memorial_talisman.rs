@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
 use crate::core::json_asset::load_json_asset;
@@ -446,54 +447,69 @@ pub fn is_first_two_chambers(run_number: u32) -> bool {
     run_number <= 2
 }
 
-/// Pick which remnant the player becomes / receives next run.
-///
-/// Priority: boss death, early-chamber death, then dominant habits, then loss reason fallback.
-pub fn select_memorial(snapshot: &MemorialJournalSnapshot) -> MemorialTalismanKind {
+/// All remnants the player qualifies for from the frozen defeat snapshot.
+pub fn qualified_memorials(snapshot: &MemorialJournalSnapshot) -> Vec<MemorialTalismanKind> {
     let j = &snapshot.journal;
+    let mut qualified = Vec::new();
     if snapshot.final_chamber == ChamberKind::Ordeal {
-        return MemorialTalismanKind::BossMark;
+        qualified.push(MemorialTalismanKind::BossMark);
     }
     if snapshot
         .run_number
         .is_some_and(|n| is_first_two_chambers(n))
     {
-        return MemorialTalismanKind::DeadOnArrival;
+        qualified.push(MemorialTalismanKind::DeadOnArrival);
     }
     if j.chambers_skipped >= 2 {
-        return MemorialTalismanKind::Skipper;
+        qualified.push(MemorialTalismanKind::Skipper);
     }
     if snapshot.final_yen >= 20 && j.shop_talisman_buys + j.shop_relic_buys + j.shop_pack_buys >= 3
     {
-        return MemorialTalismanKind::Hoarder;
+        qualified.push(MemorialTalismanKind::Hoarder);
     }
     if snapshot.consumables_unused > 0 && j.talisman_uses == 0 && j.zodiac_uses == 0 {
-        return MemorialTalismanKind::FullDish;
+        qualified.push(MemorialTalismanKind::FullDish);
     }
     if snapshot.tiles_discarded > snapshot.tiles_played.saturating_mul(3) / 2
         && snapshot.tiles_discarded >= 8
     {
-        return MemorialTalismanKind::Discarded;
+        qualified.push(MemorialTalismanKind::Discarded);
     }
     if j.dominant_buff_talisman().is_some() {
-        return MemorialTalismanKind::BuffSaint;
+        qualified.push(MemorialTalismanKind::BuffSaint);
     }
     if j.dominant_transform_talisman().is_some() {
-        return MemorialTalismanKind::Transformer;
+        qualified.push(MemorialTalismanKind::Transformer);
     }
     if j.tags_taken >= 1 {
-        return MemorialTalismanKind::TagBearer;
+        qualified.push(MemorialTalismanKind::TagBearer);
     }
     if snapshot.dominant_yaku.is_some() {
-        return MemorialTalismanKind::MeldMason;
+        qualified.push(MemorialTalismanKind::MeldMason);
     }
     if snapshot.final_wing >= 4 {
-        return MemorialTalismanKind::DeepWalker;
+        qualified.push(MemorialTalismanKind::DeepWalker);
     }
-    match snapshot.loss_reason {
+    qualified.push(match snapshot.loss_reason {
         GameOverReason::OutOfPlays => MemorialTalismanKind::Exhausted,
         GameOverReason::NoActionsRemaining => MemorialTalismanKind::FrozenHand,
-    }
+    });
+    qualified
+}
+
+/// Pick which remnant the player becomes / receives next run.
+pub fn select_memorial(snapshot: &MemorialJournalSnapshot) -> MemorialTalismanKind {
+    select_memorial_with_rng(snapshot, &mut rand::rng())
+}
+
+/// Pick one qualified remnant with the provided RNG.
+pub fn select_memorial_with_rng(
+    snapshot: &MemorialJournalSnapshot,
+    rng: &mut impl rand::Rng,
+) -> MemorialTalismanKind {
+    let qualified = qualified_memorials(snapshot);
+    let idx = rng.random_range(0..qualified.len());
+    qualified[idx]
 }
 
 /// Dominant yaku from run counters.
@@ -550,18 +566,39 @@ mod tests {
     fn dead_on_arrival_when_first_two_chambers() {
         let mut s = snapshot_with(RunDefeatJournal::default(), GameOverReason::OutOfPlays);
         s.run_number = Some(1);
-        assert_eq!(select_memorial(&s), MemorialTalismanKind::DeadOnArrival);
+        assert_eq!(
+            qualified_memorials(&s),
+            vec![
+                MemorialTalismanKind::DeadOnArrival,
+                MemorialTalismanKind::Exhausted
+            ]
+        );
         s.run_number = Some(2);
-        assert_eq!(select_memorial(&s), MemorialTalismanKind::DeadOnArrival);
+        assert_eq!(
+            qualified_memorials(&s),
+            vec![
+                MemorialTalismanKind::DeadOnArrival,
+                MemorialTalismanKind::Exhausted
+            ]
+        );
         s.run_number = Some(3);
-        assert_eq!(select_memorial(&s), MemorialTalismanKind::Exhausted);
+        assert_eq!(
+            qualified_memorials(&s),
+            vec![MemorialTalismanKind::Exhausted]
+        );
     }
 
     #[test]
-    fn boss_death_selects_boss_mark() {
+    fn boss_death_qualifies_boss_mark() {
         let mut s = snapshot_with(RunDefeatJournal::default(), GameOverReason::OutOfPlays);
         s.final_chamber = ChamberKind::Ordeal;
-        assert_eq!(select_memorial(&s), MemorialTalismanKind::BossMark);
+        assert_eq!(
+            qualified_memorials(&s),
+            vec![
+                MemorialTalismanKind::BossMark,
+                MemorialTalismanKind::Exhausted
+            ]
+        );
     }
 
     #[test]
@@ -584,7 +621,61 @@ mod tests {
         let mut j = RunDefeatJournal::default();
         j.chambers_skipped = 3;
         let s = snapshot_with(j, GameOverReason::NoActionsRemaining);
-        assert_eq!(select_memorial(&s), MemorialTalismanKind::Skipper);
+        assert_eq!(
+            qualified_memorials(&s),
+            vec![
+                MemorialTalismanKind::Skipper,
+                MemorialTalismanKind::FrozenHand
+            ]
+        );
+    }
+
+    #[test]
+    fn multiple_actions_all_qualify() {
+        let mut j = RunDefeatJournal {
+            chambers_skipped: 2,
+            tags_taken: 1,
+            ..Default::default()
+        };
+        j.record_talisman_use(TalismanKind::Pearl);
+        let mut s = snapshot_with(j, GameOverReason::OutOfPlays);
+        s.final_chamber = ChamberKind::Ordeal;
+        s.run_number = Some(2);
+        s.final_wing = 4;
+        s.tiles_played = 8;
+        s.tiles_discarded = 13;
+        s.dominant_yaku = Some(YakuKind::Tanyao);
+        assert_eq!(
+            qualified_memorials(&s),
+            vec![
+                MemorialTalismanKind::BossMark,
+                MemorialTalismanKind::DeadOnArrival,
+                MemorialTalismanKind::Skipper,
+                MemorialTalismanKind::Discarded,
+                MemorialTalismanKind::BuffSaint,
+                MemorialTalismanKind::TagBearer,
+                MemorialTalismanKind::MeldMason,
+                MemorialTalismanKind::DeepWalker,
+                MemorialTalismanKind::Exhausted,
+            ]
+        );
+    }
+
+    #[test]
+    fn rng_selects_from_qualified_set() {
+        use rand::SeedableRng;
+
+        let mut j = RunDefeatJournal {
+            chambers_skipped: 2,
+            ..Default::default()
+        };
+        j.record_talisman_use(TalismanKind::Souzu);
+        let s = snapshot_with(j, GameOverReason::NoActionsRemaining);
+        let qualified = qualified_memorials(&s);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        for _ in 0..32 {
+            assert!(qualified.contains(&select_memorial_with_rng(&s, &mut rng)));
+        }
     }
 
     #[test]
