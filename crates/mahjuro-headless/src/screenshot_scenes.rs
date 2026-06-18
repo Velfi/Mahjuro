@@ -243,6 +243,7 @@ pub(crate) struct ScreenshotSceneSetup {
     pub unlock_collection: bool,
     pub force_relic_modal: bool,
     pub force_round_win_modal: bool,
+    pub force_game_over_modal: bool,
 }
 
 pub(crate) fn resolve_screenshot_scene(
@@ -255,6 +256,7 @@ pub(crate) fn resolve_screenshot_scene(
     let mut unlock_collection = false;
     let mut force_relic_modal = false;
     let mut force_round_win_modal = false;
+    let mut force_game_over_modal = false;
 
     if let Some(tab) = collection_screenshot_tab(&s.scene) {
         unlock_collection = true;
@@ -266,6 +268,7 @@ pub(crate) fn resolve_screenshot_scene(
             unlock_collection,
             force_relic_modal,
             force_round_win_modal,
+            force_game_over_modal,
         });
     }
 
@@ -297,6 +300,11 @@ pub(crate) fn resolve_screenshot_scene(
         "round_win" | "winner" | "winner_modal" => {
             crate::fixtures::setup_round_win_screenshot_state(run);
             force_round_win_modal = true;
+            (Scene::Gameplay(Box::new(GameplayScene::new())), true)
+        }
+        "round_loss" | "loser" | "loser_modal" => {
+            crate::fixtures::setup_game_over_screenshot_state(run);
+            force_game_over_modal = true;
             (Scene::Gameplay(Box::new(GameplayScene::new())), true)
         }
         "hallway" | "pick_chamber" | "pick_blind" => {
@@ -448,5 +456,6 @@ pub(crate) fn resolve_screenshot_scene(
         unlock_collection,
         force_relic_modal,
         force_round_win_modal,
+        force_game_over_modal,
     })
 }

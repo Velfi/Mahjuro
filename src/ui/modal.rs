@@ -306,10 +306,18 @@ pub struct ModalPayoutBreakdown {
     pub payout: RoundPayout,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModalResultStyle {
+    Winner,
+    Loser,
+}
+
 /// A single modal to display.
 pub struct Modal {
     pub title: String,
     pub body: String,
+    pub title_scale: f32,
+    pub result_style: Option<ModalResultStyle>,
     /// When set, the body is drawn as a centered score line plus a right-aligned
     /// addition-style yen ledger (rule above total) instead of plain wrapped text.
     pub payout_breakdown: Option<ModalPayoutBreakdown>,
@@ -331,6 +339,8 @@ impl Modal {
         Self {
             title: title.into(),
             body: body.into(),
+            title_scale: 1.0,
+            result_style: None,
             payout_breakdown: None,
             theme,
             shown_at: Instant::now(),
@@ -339,6 +349,16 @@ impl Modal {
             pages: Vec::new(),
             current_page: 0,
         }
+    }
+
+    pub fn with_title_scale(mut self, scale: f32) -> Self {
+        self.title_scale = scale.max(0.1);
+        self
+    }
+
+    pub fn with_result_style(mut self, style: ModalResultStyle) -> Self {
+        self.result_style = Some(style);
+        self
     }
 
     /// Centered score + addition-style yen lines (see [`ModalPayoutBreakdown`]).
@@ -631,23 +651,31 @@ impl ModalQueue {
         labels: &mut Vec<TextLabel>,
     ) {
         let (window_w, window_h) = window;
-        use crate::render::theme::typography;
-        let card_w = (360.0 * scale).min(window_w * 0.8);
-        let title_px = typography::size(typography::H20, window_h);
+        use crate::render::theme::{color, typography};
+        let result_modal = modal.result_style.is_some();
+        let card_w = ((if result_modal { 430.0 } else { 360.0 }) * scale).min(window_w * 0.8);
+        let title_px = typography::size(typography::H20, window_h) * modal.title_scale;
         let title_h = title_px * 1.35;
         let padding = (20.0 * scale).max(10.0);
         let body_font = typography::size(typography::H36, window_h);
+        let result_subhead_font = typography::size(typography::H28, window_h);
+        let result_subhead_step = result_subhead_font * 1.16;
         let body_inner_w = card_w - padding * 2.0;
         let [dr, dg, db, da] = modal.theme.body_color();
         let body_color = [dr, dg, db, da * alpha];
         let body_line_step = crate::ui::styled_text::colored_row_line_step(body_font);
-        let chrome_h = padding + title_h + padding * 0.5 + padding;
+        let title_body_gap = if result_modal {
+            padding * 0.18
+        } else {
+            padding * 0.5
+        };
+        let chrome_h = padding + title_h + title_body_gap + padding;
         let max_body_h = window_h * 0.85 - chrome_h;
 
         let payout_layout = modal
             .payout_breakdown
             .map(|b| measure_payout_ledger_layout(b, body_font, scale));
-        let body_block = if payout_layout.is_none() {
+        let body_block = if payout_layout.is_none() && modal.result_style.is_none() {
             Some(StyledTextBlock::measure_at_font_px(
                 &modal.body,
                 body_inner_w,
@@ -660,7 +688,11 @@ impl ModalQueue {
         };
         let body_h = if let Some(ref layout) = payout_layout {
             layout
-                .block_height(body_line_step, scale)
+                .block_height(result_subhead_step, body_line_step, scale)
+                .max(20.0)
+                .min(max_body_h.max(20.0))
+        } else if modal.result_style == Some(ModalResultStyle::Loser) {
+            loser_result_body_height(result_subhead_step, body_line_step, scale)
                 .max(20.0)
                 .min(max_body_h.max(20.0))
         } else {
@@ -675,8 +707,13 @@ impl ModalQueue {
         let card_y = ((window_h - card_h) * 0.5).max(8.0);
 
         // Border.
-        let border = 3.0 * scale;
-        let [br, bg, bb, ba] = modal.theme.border_color();
+        let border = (if result_modal { 4.0 } else { 3.0 }) * scale;
+        let border_color = match modal.result_style {
+            Some(ModalResultStyle::Winner) => color::keyword::GOLD,
+            Some(ModalResultStyle::Loser) => color::RUBY,
+            None => modal.theme.border_color(),
+        };
+        let [br, bg, bb, ba] = border_color;
         instances.push(GpuInstance {
             rect: [
                 card_x - border,
@@ -698,7 +735,12 @@ impl ModalQueue {
 
         // Title.
         let title_y = card_y + padding;
-        let [tr, tg, tb, ta] = modal.theme.title_color();
+        let title_color = match modal.result_style {
+            Some(ModalResultStyle::Winner) => color::keyword::GOLD,
+            Some(ModalResultStyle::Loser) => color::lighten(color::RUBY, 0.20),
+            None => modal.theme.title_color(),
+        };
+        let [tr, tg, tb, ta] = title_color;
         labels.push(TextLabel {
             rect: [card_x + padding, title_y, card_w - padding * 2.0, title_h],
             text: modal.title.clone(),
@@ -708,7 +750,7 @@ impl ModalQueue {
         });
 
         // Body.
-        let body_y = title_y + title_h + padding * 0.5;
+        let body_y = title_y + title_h + title_body_gap;
         if let (Some(breakdown), Some(layout)) = (modal.payout_breakdown, payout_layout.as_ref()) {
             push_payout_ledger_labels(
                 labels,
@@ -718,6 +760,23 @@ impl ModalQueue {
                 card_x,
                 card_w,
                 body_y,
+                result_subhead_font,
+                result_subhead_step,
+                body_font,
+                body_line_step,
+                scale,
+                body_color,
+                alpha,
+            );
+        } else if modal.result_style == Some(ModalResultStyle::Loser) {
+            push_loser_result_labels(
+                labels,
+                &modal.body,
+                card_x + padding,
+                body_y,
+                body_inner_w,
+                result_subhead_font,
+                result_subhead_step,
                 body_font,
                 body_line_step,
                 scale,
@@ -757,12 +816,17 @@ struct PayoutLedgerLayout {
 }
 
 impl PayoutLedgerLayout {
-    fn block_height(&self, line_step: f32, scale: f32) -> f32 {
-        let score_gap = 10.0 * scale;
+    fn block_height(&self, score_line_step: f32, ledger_line_step: f32, scale: f32) -> f32 {
+        let score_gap = 14.0 * scale;
         let rule_gap = 6.0 * scale;
         let rule_h = (2.0 * scale).max(1.0);
         let row_count = self.rows.len() as f32 + 1.0;
-        line_step + score_gap + row_count * line_step + rule_gap + rule_h + line_step
+        score_line_step
+            + score_gap
+            + row_count * ledger_line_step
+            + rule_gap
+            + rule_h
+            + ledger_line_step
     }
 }
 
@@ -840,6 +904,8 @@ fn push_payout_ledger_labels(
     card_x: f32,
     card_w: f32,
     body_y: f32,
+    score_font_px: f32,
+    score_line_step: f32,
     font_px: f32,
     line_step: f32,
     scale: f32,
@@ -854,14 +920,14 @@ fn push_payout_ledger_labels(
     let mut y = body_y;
 
     labels.push(TextLabel {
-        rect: [card_x, y, card_w, line_step],
+        rect: [card_x, y, card_w, score_line_step],
         text: layout.score_line.clone(),
         color,
-        font_px: Some(font_px),
+        font_px: Some(score_font_px),
         align: TextAlign::Center,
         ..Default::default()
     });
-    y += line_step + 10.0 * scale;
+    y += score_line_step + 14.0 * scale;
 
     for row in &layout.rows {
         labels.push(TextLabel {
@@ -912,6 +978,75 @@ fn push_payout_ledger_labels(
         align: TextAlign::Right,
         mono: true,
         bold: true,
+        ..Default::default()
+    });
+}
+
+fn loser_result_body_height(subhead_step: f32, body_line_step: f32, scale: f32) -> f32 {
+    subhead_step + 18.0 * scale + body_line_step * 3.1
+}
+
+fn push_loser_result_labels(
+    labels: &mut Vec<TextLabel>,
+    body: &str,
+    x: f32,
+    y: f32,
+    w: f32,
+    subhead_font_px: f32,
+    subhead_line_step: f32,
+    body_font_px: f32,
+    body_line_step: f32,
+    scale: f32,
+    color: [f32; 4],
+    alpha: f32,
+) {
+    use crate::render::theme::color as theme_color;
+
+    let mut lines = body.lines();
+    let points = lines.next().unwrap_or_default();
+    let cause = lines
+        .next()
+        .and_then(|line| line.strip_prefix("Cause: "))
+        .unwrap_or_default();
+    let score = lines.next().unwrap_or_default();
+
+    labels.push(TextLabel {
+        rect: [x, y, w, subhead_line_step],
+        text: points.to_string(),
+        color,
+        font_px: Some(subhead_font_px),
+        align: TextAlign::Center,
+        ..Default::default()
+    });
+
+    let mut cy = y + subhead_line_step + 18.0 * scale;
+    labels.push(TextLabel {
+        rect: [x, cy, w, body_line_step],
+        text: "CAUSE".to_string(),
+        color: theme_color::alpha(theme_color::RUBY, 0.92 * alpha),
+        font_px: Some(body_font_px * 0.82),
+        align: TextAlign::Center,
+        mono: true,
+        ..Default::default()
+    });
+    cy += body_line_step * 0.82;
+
+    labels.push(TextLabel {
+        rect: [x, cy, w, body_line_step],
+        text: cause.to_string(),
+        color,
+        font_px: Some(body_font_px),
+        align: TextAlign::Center,
+        ..Default::default()
+    });
+    cy += body_line_step * 1.1;
+
+    labels.push(TextLabel {
+        rect: [x, cy, w, body_line_step],
+        text: score.to_string(),
+        color: theme_color::alpha(theme_color::PARCHMENT, 0.82 * alpha),
+        font_px: Some(body_font_px * 0.9),
+        align: TextAlign::Center,
         ..Default::default()
     });
 }

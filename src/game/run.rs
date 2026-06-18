@@ -179,13 +179,7 @@ pub(crate) fn relic_eligible_for_shop_stock(
 }
 
 pub(crate) fn structure_label_from_yaku(yaku: &[YakuKind]) -> String {
-    if yaku.is_empty() {
-        return "No Yaku".to_string();
-    }
-    yaku.iter()
-        .map(|y| y.name())
-        .collect::<Vec<_>>()
-        .join(" + ")
+    YakuKind::record_label_from_detected(yaku)
 }
 
 #[derive(Debug, Serialize, Deserialize)]

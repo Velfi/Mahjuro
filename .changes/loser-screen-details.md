@@ -2,4 +2,4 @@
 category: changed
 ---
 
-Defeat screens now say how many points short you were and name the exact reason the run ended.
+Losing a run now shows a "Loser!" popup with how many points short you were and the exact reason the run ended.

@@ -64,7 +64,7 @@ pub fn static_texture_bake_manifest() -> Vec<StaticTextureBake> {
         add(
             &mut out,
             format!("textures/depth_well/depth_well_{i}.png"),
-            BakedTextureColor::Srgb,
+            BakedTextureColor::SrgbAlpha,
         );
     }
 

@@ -76,7 +76,7 @@ pub(crate) fn setup_defeat_game_over_screenshot_state(run: &mut RunState) {
     run.tiles_discarded = 97;
     run.times_restocked = 44;
     run.best_structure_score = 6577;
-    run.best_structure_name = ".tsu".into();
+    run.best_structure_name = "Ittsu".into();
     run.yaku_times_played.insert(YakuKind::Shousangen, 6);
 }
 
@@ -150,6 +150,21 @@ pub(crate) fn setup_round_win_screenshot_state(run: &mut RunState) {
     run.yen = 18;
     run.plays_remaining = 0;
     run.discards_remaining = 4;
+}
+
+/// Gameplay backdrop for the game-over loss modal capture.
+#[cfg(feature = "screenshot")]
+pub(crate) fn setup_game_over_screenshot_state(run: &mut RunState) {
+    use mahjuro::core::rules::ChamberKind;
+
+    setup_gameplay_screenshot_state(run);
+    run.wing = 2;
+    run.chamber = ChamberKind::Small;
+    run.round_score = 840;
+    run.target_score = 1000;
+    run.yen = 18;
+    run.plays_remaining = 0;
+    run.discards_remaining = 0;
 }
 
 #[cfg(feature = "screenshot")]

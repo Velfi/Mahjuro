@@ -7,6 +7,13 @@ pub enum GameOverReason {
 impl GameOverReason {
     pub fn loss_summary(self) -> &'static str {
         match self {
+            Self::OutOfPlays => "No plays remaining",
+            Self::NoActionsRemaining => "No legal actions remained",
+        }
+    }
+
+    pub fn death_cause(self) -> &'static str {
+        match self {
             Self::OutOfPlays => "no more plays and missed target",
             Self::NoActionsRemaining => "plays left but no valid melds and no discards left",
         }
@@ -18,13 +25,13 @@ mod tests {
     use super::GameOverReason;
 
     #[test]
-    fn loss_summaries_name_exact_failure_cause() {
+    fn death_causes_name_exact_failure_cause() {
         assert_eq!(
-            GameOverReason::OutOfPlays.loss_summary(),
+            GameOverReason::OutOfPlays.death_cause(),
             "no more plays and missed target"
         );
         assert_eq!(
-            GameOverReason::NoActionsRemaining.loss_summary(),
+            GameOverReason::NoActionsRemaining.death_cause(),
             "plays left but no valid melds and no discards left"
         );
     }

@@ -51,7 +51,7 @@ pub fn ordeal_icon_rgba(kind: OrdealKind) -> anyhow::Result<(Vec<u8>, u32, u32)>
 
 /// Icon source for 2D HUD quads (pick-chamber, etc.).
 pub fn ordeal_icon_source(kind: OrdealKind) -> ImageQuadSource {
-    ImageQuadSource::Asset {
+    ImageQuadSource::RawAsset {
         path: ordeal_icon_processed_asset_static(kind),
     }
 }

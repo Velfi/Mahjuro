@@ -189,11 +189,13 @@ impl HeadlessApp {
     #[cfg(feature = "screenshot")]
     pub(crate) fn force_round_win_modal(&mut self) {
         use mahjuro::game::event_bus::RoundPayout;
-        use mahjuro::ui::modal::{Modal, ModalQueue, ModalTheme};
+        use mahjuro::ui::modal::{Modal, ModalQueue, ModalResultStyle, ModalTheme};
 
         let w = self.width as f32;
         let h = self.height as f32;
         let modal = Modal::new("Winner!", "", ModalTheme::Success)
+            .with_title_scale(3.0)
+            .with_result_style(ModalResultStyle::Winner)
             .with_payout_breakdown(
                 self.run.round_score,
                 u64::from(self.run.target_score),
@@ -206,6 +208,37 @@ impl HeadlessApp {
                 },
             )
             .with_fireworks(w * 0.5, h * 0.8, w * 0.6, 5);
+        let mut queue = ModalQueue::default();
+        queue.push(modal);
+        self.modal_overlay = Some(queue);
+    }
+
+    #[cfg(feature = "screenshot")]
+    pub(crate) fn force_game_over_modal(&mut self) {
+        use mahjuro::game::event_bus::GameOverReason;
+        use mahjuro::ui::modal::{Modal, ModalQueue, ModalResultStyle, ModalTheme};
+        use mahjuro::ui::score_format::format_score;
+
+        let reason = GameOverReason::OutOfPlays;
+        let points_short = (self.run.target_score as u64).saturating_sub(self.run.round_score);
+        let points_short_line = if points_short == 1 {
+            "1 point short".to_string()
+        } else {
+            format!("{} points short", format_score(points_short))
+        };
+        let modal = Modal::new(
+            "Loser!",
+            format!(
+                "{}\nCause: {}\nScore: {} / {}",
+                points_short_line,
+                reason.death_cause(),
+                format_score(self.run.round_score),
+                format_score(self.run.target_score as u64)
+            ),
+            ModalTheme::Info,
+        )
+        .with_title_scale(3.0)
+        .with_result_style(ModalResultStyle::Loser);
         let mut queue = ModalQueue::default();
         queue.push(modal);
         self.modal_overlay = Some(queue);

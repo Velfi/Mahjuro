@@ -204,25 +204,22 @@ impl App {
                 self.run
                     .apply_yen_reward(payout.total as i32, Some(&mut self.bus));
                 self.audio.play_sfx(audio::SfxId::RoundWin);
-                // Win jingle owns the music sink for the celebration; the
-                // pending scene transition will queue Shop/Gameplay BGM
-                // behind it via `set_music_track`, and `AudioManager::tick`
-                // resumes that loop once the jingle finishes.
-                let won_jingle = if self.run.chamber == crate::core::rules::ChamberKind::Ordeal {
-                    audio::MusicId::OrdealWin
-                } else {
-                    audio::MusicId::ChamberWin
-                };
-                self.audio.play_music_jingle(won_jingle);
                 // Capture round_score / target_score before advance_round
                 // clobbers target_score with base_target for the next blind.
                 let cleared_round_score = self.run.round_score;
                 let cleared_target_score = self.run.target_score;
                 let cleared_ordeal = self.run.chamber == crate::core::rules::ChamberKind::Ordeal;
+                let win_jingle = if cleared_ordeal {
+                    audio::MusicId::OrdealWin
+                } else {
+                    audio::MusicId::ChamberWin
+                };
                 self.run.advance_round(&mut self.bus);
 
                 {
                     let modal = Modal::new("Winner!", "", ModalTheme::Success)
+                        .with_title_scale(3.0)
+                        .with_result_style(crate::ui::modal::ModalResultStyle::Winner)
                         .with_payout_breakdown(
                             cleared_round_score,
                             u64::from(cleared_target_score),
@@ -230,6 +227,10 @@ impl App {
                         )
                         .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
                     self.modals.push(modal);
+                    // Result music starts with the Winner popup. The pending
+                    // scene transition can queue the next loop behind it; the
+                    // audio manager resumes that loop once the sting finishes.
+                    self.audio.play_music_jingle(win_jingle);
                 }
 
                 if self.run.is_run_complete() {
@@ -336,6 +337,13 @@ impl App {
                     );
                     return;
                 }
+                let points_short =
+                    (self.run.target_score as u64).saturating_sub(self.run.round_score);
+                let points_short_line = if points_short == 1 {
+                    "1 point short".to_string()
+                } else {
+                    format!("{} points short", format_score(points_short))
+                };
                 self.progress.runs_completed += 1;
                 self.sync_runs_completed_achievements();
                 self.progress.award_level_points_for_outcome(
@@ -375,15 +383,28 @@ impl App {
                 }
 
                 self.audio.play_sfx(audio::SfxId::GameOver);
-                // Loss jingle takes over the music sink while the GameOver
-                // scene fades in; `sync_music_for_scene` will call
-                // `stop_background_music`, which defers until the jingle
-                // empties so the stinger isn't truncated mid-fade.
                 let loss_jingle = if self.run.chamber == crate::core::rules::ChamberKind::Ordeal {
                     audio::MusicId::OrdealLoss
                 } else {
                     audio::MusicId::ChamberLoss
                 };
+                self.modals.push(
+                    Modal::new(
+                        "Loser!",
+                        format!(
+                            "{}\nCause: {}\nScore: {} / {}",
+                            points_short_line,
+                            reason.death_cause(),
+                            format_score(self.run.round_score),
+                            format_score(self.run.target_score as u64)
+                        ),
+                        ModalTheme::Info,
+                    )
+                    .with_title_scale(3.0)
+                    .with_result_style(crate::ui::modal::ModalResultStyle::Loser),
+                );
+                // Result music starts with the Loser popup and is allowed to
+                // finish across the transition into the Defeat screen.
                 self.audio.play_music_jingle(loss_jingle);
                 self.begin_scene_replace(
                     SceneIntent::Defeat(reason),

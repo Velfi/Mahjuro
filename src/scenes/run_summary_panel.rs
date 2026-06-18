@@ -3,6 +3,7 @@
 use std::time::Instant;
 
 use crate::core::progression::{POINTS_PER_LEVEL, meta_depth_roman};
+use crate::render::decal::load_ui_font;
 use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
 use crate::render::theme::{color, typography};
 use crate::render::vocabulary_colors::GlossaryMode;
@@ -385,6 +386,27 @@ const DEPTH_WELL_OPAQUE_UV: [f32; 4] = [0.017, 0.155, 0.982, 0.819];
 
 const DEPTH_WELL_MAX_HEIGHT_MUL: f32 = 6.0;
 
+fn text_width(text: &str, font_px: f32) -> f32 {
+    let Some(font) = load_ui_font() else {
+        return text.chars().count() as f32 * font_px * 0.52;
+    };
+    text.chars()
+        .map(|ch| font.metrics(ch, font_px).advance_width)
+        .sum()
+}
+
+fn stats_column_widths(rows: &[(String, String)], inner_w: f32, font_px: f32) -> (f32, f32, f32) {
+    let gap = (font_px * 0.30).max(8.0);
+    let widest_label = rows
+        .iter()
+        .map(|(label, _)| text_width(label, font_px))
+        .fold(0.0_f32, f32::max);
+    let label_w = (widest_label + font_px * 0.25).min(inner_w * 0.45);
+    let value_w = (inner_w - label_w - gap).max(inner_w * 0.35);
+    let value_x = label_w + gap;
+    (label_w, value_x, value_w)
+}
+
 fn wrapped_row_height(text: &str, col_w: f32, font_px: f32, line_h: f32) -> f32 {
     let lines = wrap_text(text, col_w, font_px / 0.99);
     line_h * lines.len().max(1) as f32
@@ -436,8 +458,6 @@ impl RunSummaryPanelLayout {
         let scroll_bottom_pad = row_font_px * 0.45;
         let panel_w = w * PANEL_WIDTH_FRAC;
         let content_w = panel_w;
-        let label_col_frac = 0.48;
-        let value_col_frac = 0.50;
         let level_well_inset = row_font_px * 0.32;
         let level_inner_w_est = panel_w - 12.0;
         let (_, well_height_px) = depth_well_size(level_inner_w_est, level_well_inset, row_line_h);
@@ -458,8 +478,8 @@ impl RunSummaryPanelLayout {
         let scrollbar_track_w = (row_font_px * 0.22).max(4.0);
         let scrollbar_gutter_est = scrollbar_track_w + row_font_px * 0.36;
         let scroll_inner_w = (panel_w - pad_h * 2.0 - scrollbar_gutter_est).max(0.0);
-        let label_col_w = scroll_inner_w * label_col_frac;
-        let value_col_w = scroll_inner_w * value_col_frac;
+        let (label_col_w, _, value_col_w) =
+            stats_column_widths(&content.stats_rows, scroll_inner_w, row_font_px);
         let stats_h = content
             .stats_rows
             .iter()
@@ -592,8 +612,8 @@ impl RunSummaryPanelLayout {
             0.0
         };
         let scroll_inner_w = (panel_w - pad_h * 2.0 - scrollbar_gutter).max(0.0);
-        let label_col_w = scroll_inner_w * label_col_frac;
-        let value_col_w = scroll_inner_w * value_col_frac;
+        let (label_col_w, _, value_col_w) =
+            stats_column_widths(&content.stats_rows, scroll_inner_w, row_font_px);
         let scroll_content_x = panel_x + pad_h;
         let scroll_clip_rect = [
             scroll_content_x,
@@ -801,8 +821,8 @@ pub fn push_run_summary_panel(
     let clip = layout.scroll_clip_rect;
     let inner_w = clip[2];
     let inner_x = clip[0];
-    let label_col_w = inner_w * 0.48;
-    let value_col_w = inner_w * 0.50;
+    let (label_col_w, value_col_x, value_col_w) =
+        stats_column_widths(&content.stats_rows, inner_w, row_font_px);
     let scroll = scroll_offset_px;
 
     let border_rect = [
@@ -1049,7 +1069,7 @@ pub fn push_run_summary_panel(
             ..Default::default()
         });
         frame.text(TextLabel {
-            rect: [inner_x + inner_w * 0.50, row_rect[1], value_col_w, row_h],
+            rect: [inner_x + value_col_x, row_rect[1], value_col_w, row_h],
             text: value_lines.join("\n"),
             color: color::PARCHMENT,
             font_px: Some(row_font_px),

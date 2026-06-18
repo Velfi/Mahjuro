@@ -12,6 +12,7 @@ const FLAG_SRGB: u32 = 1;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BakedTextureColor {
     Srgb,
+    SrgbAlpha,
     Linear,
     NormalLinear,
 }
@@ -19,12 +20,17 @@ pub enum BakedTextureColor {
 impl BakedTextureColor {
     #[inline]
     pub fn is_srgb(self) -> bool {
-        matches!(self, Self::Srgb)
+        matches!(self, Self::Srgb | Self::SrgbAlpha)
     }
 
     #[inline]
     pub fn is_normal(self) -> bool {
         matches!(self, Self::NormalLinear)
+    }
+
+    #[inline]
+    pub fn preserves_alpha(self) -> bool {
+        matches!(self, Self::SrgbAlpha | Self::Linear)
     }
 }
 
@@ -234,12 +240,12 @@ pub fn encode_rgba_bc7_mip_chain(
         rgba_mip_chain_bc7(&bc7_rgba, bc7_w, bc7_h)
     };
     let mip_count = chain.len() as u32;
-    let settings = if color.is_srgb() {
-        bc7::opaque_fast_settings()
-    } else if color.is_normal() {
+    let settings = if color.is_normal() {
         bc7::opaque_basic_settings()
-    } else {
+    } else if color.preserves_alpha() {
         bc7::alpha_fast_settings()
+    } else {
+        bc7::opaque_fast_settings()
     };
 
     let mut bc7_out = Vec::new();

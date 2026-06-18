@@ -600,6 +600,7 @@ fn format_bytes(bytes: usize) -> String {
 fn texture_color_tag(color: mahjuro_render::baked_texture::BakedTextureColor) -> String {
     let color = match color {
         mahjuro_render::baked_texture::BakedTextureColor::Srgb => "srgb",
+        mahjuro_render::baked_texture::BakedTextureColor::SrgbAlpha => "srgb-alpha",
         mahjuro_render::baked_texture::BakedTextureColor::Linear => "linear",
         mahjuro_render::baked_texture::BakedTextureColor::NormalLinear => "normal-linear",
     };

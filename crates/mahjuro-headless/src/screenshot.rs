@@ -73,6 +73,9 @@ pub fn run(cli: ScreenshotCli) -> anyhow::Result<()> {
     if setup.force_round_win_modal {
         app.force_round_win_modal();
     }
+    if setup.force_game_over_modal {
+        app.force_game_over_modal();
+    }
     if let Some(mul) = cli.gltf_emissive_scale {
         app.shop_env_lighting.gltf_emissive_scale = mul;
     }

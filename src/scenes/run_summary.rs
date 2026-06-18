@@ -161,32 +161,27 @@ impl RunSummaryScene {
     }
 
     fn panel_content(&self, progress: &PlayerProgress) -> RunSummaryPanelContent {
-        let points_short = (self.target_score as u64).saturating_sub(self.final_score);
         let defeat_loss_line = if self.won {
             None
+        } else if let Some(ref line) = self.memorial_subtitle {
+            Some(line.clone())
         } else {
-            let cause = self
-                .loss_reason
-                .map(GameOverReason::loss_summary)
-                .unwrap_or("unknown cause");
-            let mut line = format!("Cause: {cause}");
-            if let Some(ref memorial) = self.memorial_subtitle {
-                line.push('\n');
-                line.push_str(memorial);
-            }
-            Some(line)
+            self.loss_reason
+                .map(|reason| reason.loss_summary().to_string())
         };
         let pre_depth_text = if self.won {
             Some("The House's hold is broken — for now.".to_string())
         } else {
             defeat_loss_line
         };
-        let subtitle = if self.won {
+        let subtitle = if self.won || pre_depth_text.is_some() {
             String::new()
-        } else if points_short == 1 {
-            "1 point short".to_string()
         } else {
-            format!("{} points short", format_score(points_short))
+            format!(
+                "{} / {}",
+                format_score(self.final_score),
+                format_score(self.target_score as u64)
+            )
         };
         let points_earned = if self.won {
             LEVEL_UP_POINTS_FOR_WIN
@@ -236,7 +231,7 @@ impl RunSummaryScene {
             headline: if self.won {
                 "The Moon's light welcomes you into the cool night.".to_string()
             } else {
-                "Loser!".to_string()
+                "The House embraces you, wholly and eternally.".to_string()
             },
             subtitle,
             pre_depth_text,
