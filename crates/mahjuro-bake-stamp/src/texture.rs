@@ -2,8 +2,8 @@
 //!
 //! Inputs: every BTX-shipped texture under `assets/textures/`, the GLB files whose
 //! material textures are extracted, and the render-side BTX bake/runtime source
-//! files. Bumping `texture-btx1-vN`
-//! invalidates every committed generic texture bake.
+//! files. Source hashing invalidates committed generic texture bakes when the
+//! bake/runtime code changes.
 
 use std::path::{Path, PathBuf};
 
@@ -55,7 +55,7 @@ impl BakeKind for Texture {
 
     fn compute_inputs_hash(repo: &Path) -> String {
         let mut h = Fnv64::new();
-        h.write(b"texture-btx1-v6\n");
+        h.write(b"texture-btx1\n");
         for path in Self::stamp_input_paths(repo) {
             if path.is_file() {
                 hash_paths(&mut h, repo, std::slice::from_ref(&path));
@@ -85,7 +85,7 @@ impl BakeKind for Texture {
 /// Per-texture bake fingerprint: codec hash + color mode + dimensions + RGBA bytes.
 pub fn compute_entry_hash(color: &str, width: u32, height: u32, rgba: &[u8]) -> String {
     let mut h = Fnv64::new();
-    h.write(b"texture-btx1-v6-entry\n");
+    h.write(b"texture-btx1-entry\n");
     h.write(color.as_bytes());
     h.write(b"\n");
     h.write(&width.to_le_bytes());

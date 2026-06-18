@@ -2,10 +2,10 @@
 
 use std::time::Instant;
 
-use crate::core::memorial_talisman::{select_memorial, MemorialTalismanKind};
+use crate::core::memorial_talisman::{MemorialTalismanKind, select_memorial};
 use crate::core::progression::{
-    meta_depth_roman, PlayerProgress, LEVEL_UP_POINTS_FOR_LOSS, LEVEL_UP_POINTS_FOR_WIN,
-    MAX_PROGRESS_LEVEL, POINTS_PER_LEVEL,
+    LEVEL_UP_POINTS_FOR_LOSS, LEVEL_UP_POINTS_FOR_WIN, MAX_PROGRESS_LEVEL, POINTS_PER_LEVEL,
+    PlayerProgress, meta_depth_roman,
 };
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::{GameEvent, GameOverReason};
@@ -21,8 +21,8 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::archive_career::format_score;
 use super::run_summary_panel::{
-    push_run_summary_panel, RunSummaryPanelContent, RunSummaryPanelLayout, RunSummaryPanelLevel,
-    RunSummaryPanelScroll, RunSummaryPanelTheme, RunSummaryStats,
+    RunSummaryPanelContent, RunSummaryPanelLayout, RunSummaryPanelLevel, RunSummaryPanelScroll,
+    RunSummaryPanelTheme, RunSummaryStats, push_run_summary_panel,
 };
 use super::{DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
