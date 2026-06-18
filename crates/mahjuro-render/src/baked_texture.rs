@@ -6,7 +6,7 @@
 use anyhow::Context;
 
 pub const MAGIC: &[u8; 4] = b"BTX1";
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 9;
 
 const FLAG_SRGB: u32 = 1;
 
@@ -79,25 +79,30 @@ pub fn mip_chain_count(mut w: u32, mut h: u32) -> u32 {
     count.max(1)
 }
 
-/// Pad RGBA to BC7 block dimensions (transparent pixels on the right/bottom).
+/// Pad RGBA to BC7 block dimensions by extending edge pixels.
+///
+/// BC7 upload dimensions must be multiples of 4, but transparent/black padding
+/// becomes visible when authored UVs sample the full texture. Extending the
+/// final source row/column keeps the padded texels visually equivalent to
+/// clamp-to-edge sampling.
 #[cfg(feature = "texture_bc7_bake")]
 fn pad_rgba_to_bc7_blocks(rgba: &[u8], width: u32, height: u32) -> (Vec<u8>, u32, u32) {
-    use crate::relic_gpu_residency::{align_bc7_base_dim, bc7_upload_chain_valid};
+    use crate::relic_gpu_residency::align_bc7_dim;
 
-    let aligned_w = align_bc7_base_dim(width);
-    let aligned_h = align_bc7_base_dim(height);
-    if aligned_w == width
-        && aligned_h == height
-        && bc7_upload_chain_valid(width, height, mip_chain_count(width, height))
-    {
+    let aligned_w = align_bc7_dim(width);
+    let aligned_h = align_bc7_dim(height);
+    if aligned_w == width && aligned_h == height {
         return (rgba.to_vec(), width, height);
     }
     let mut out = vec![0u8; (aligned_w as usize) * (aligned_h as usize) * 4];
-    for y in 0..height.min(aligned_h) {
-        let src = (y * width * 4) as usize;
-        let dst = (y * aligned_w * 4) as usize;
-        let row = (width * 4) as usize;
-        out[dst..dst + row].copy_from_slice(&rgba[src..src + row]);
+    for y in 0..aligned_h {
+        let sy = y.min(height - 1);
+        for x in 0..aligned_w {
+            let sx = x.min(width - 1);
+            let src = ((sy * width + sx) * 4) as usize;
+            let dst = ((y * aligned_w + x) * 4) as usize;
+            out[dst..dst + 4].copy_from_slice(&rgba[src..src + 4]);
+        }
     }
     (out, aligned_w, aligned_h)
 }
@@ -113,9 +118,14 @@ fn rgba_mip_chain_bc7(rgba: &[u8], width: u32, height: u32) -> Vec<(Vec<u8>, u32
         if w <= 4 && h <= 4 {
             break;
         }
+        let nw = (w / 2).max(4);
+        let nh = (h / 2).max(4);
+        if !crate::relic_gpu_residency::bc7_block_aligned(nw, nh) {
+            break;
+        }
         let img = image::RgbaImage::from_raw(w, h, level).expect("baked texture mip rgba");
-        w = (w / 2).max(4);
-        h = (h / 2).max(4);
+        w = nw;
+        h = nh;
         level =
             image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle).into_raw();
     }
@@ -194,6 +204,9 @@ fn normal_mip_chain_bc7(rgba: &[u8], width: u32, height: u32) -> Vec<(Vec<u8>, u
         }
         let nw = (w / 2).max(4);
         let nh = (h / 2).max(4);
+        if !crate::relic_gpu_residency::bc7_block_aligned(nw, nh) {
+            break;
+        }
         level = downsample_normal_rgba8(&level, w, h, nw, nh);
         w = nw;
         h = nh;
@@ -469,5 +482,45 @@ mod tests {
         assert_eq!(decoded.base_width, 4);
         assert_eq!(decoded.base_height, 4);
         assert_eq!(decoded.mip_count, 1);
+    }
+
+    #[test]
+    fn bc7_padding_extends_edge_pixels() {
+        let rgba = vec![
+            1, 2, 3, 4, 5, 6, 7, 8, //
+            9, 10, 11, 12, 13, 14, 15, 16,
+        ];
+        let (padded, w, h) = pad_rgba_to_bc7_blocks(&rgba, 2, 2);
+
+        assert_eq!((w, h), (4, 4));
+        assert_eq!(&padded[((0 * w + 2) * 4) as usize..((0 * w + 3) * 4) as usize], &[5, 6, 7, 8]);
+        assert_eq!(
+            &padded[((3 * w + 3) * 4) as usize..((3 * w + 4) * 4) as usize],
+            &[13, 14, 15, 16]
+        );
+    }
+
+    #[test]
+    fn non_block_aligned_payload_uses_minimal_bc7_padding() {
+        let w = 5;
+        let h = 7;
+        let rgba = vec![255; (w * h * 4) as usize];
+        let payload = encode_rgba_bc7_mip_chain(&rgba, w, h, BakedTextureColor::Srgb).unwrap();
+
+        assert_eq!(payload.base_width, 8);
+        assert_eq!(payload.base_height, 8);
+        assert_eq!(payload.mip_count, 2);
+        assert_eq!(
+            payload.bc7_bytes.len(),
+            crate::relic_gpu_residency::bc7_chain_bytes(
+                payload.base_width,
+                payload.base_height,
+                payload.mip_count,
+            )
+        );
+
+        let decoded = decode_btx(&encode_btx(&payload).unwrap()).unwrap();
+        assert_eq!(decoded.base_width, 8);
+        assert_eq!(decoded.base_height, 8);
     }
 }

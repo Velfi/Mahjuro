@@ -2,10 +2,10 @@
 
 use std::time::Instant;
 
-use crate::core::memorial_talisman::{MemorialTalismanKind, select_memorial};
+use crate::core::memorial_talisman::{select_memorial, MemorialTalismanKind};
 use crate::core::progression::{
-    LEVEL_UP_POINTS_FOR_LOSS, LEVEL_UP_POINTS_FOR_WIN, MAX_PROGRESS_LEVEL, POINTS_PER_LEVEL,
-    PlayerProgress, meta_depth_roman,
+    meta_depth_roman, PlayerProgress, LEVEL_UP_POINTS_FOR_LOSS, LEVEL_UP_POINTS_FOR_WIN,
+    MAX_PROGRESS_LEVEL, POINTS_PER_LEVEL,
 };
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::{GameEvent, GameOverReason};
@@ -21,8 +21,8 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::archive_career::format_score;
 use super::run_summary_panel::{
-    RunSummaryPanelContent, RunSummaryPanelLayout, RunSummaryPanelLevel, RunSummaryPanelScroll,
-    RunSummaryPanelTheme, RunSummaryStats, push_run_summary_panel,
+    push_run_summary_panel, RunSummaryPanelContent, RunSummaryPanelLayout, RunSummaryPanelLevel,
+    RunSummaryPanelScroll, RunSummaryPanelTheme, RunSummaryStats,
 };
 use super::{DrawCtx, SceneBehavior, SceneIntent, SceneTransition, UpdateCtx};
 
@@ -161,27 +161,32 @@ impl RunSummaryScene {
     }
 
     fn panel_content(&self, progress: &PlayerProgress) -> RunSummaryPanelContent {
+        let points_short = (self.target_score as u64).saturating_sub(self.final_score);
         let defeat_loss_line = if self.won {
             None
-        } else if let Some(ref line) = self.memorial_subtitle {
-            Some(line.clone())
         } else {
-            self.loss_reason
-                .map(|reason| reason.loss_summary().to_string())
+            let cause = self
+                .loss_reason
+                .map(GameOverReason::loss_summary)
+                .unwrap_or("unknown cause");
+            let mut line = format!("Cause: {cause}");
+            if let Some(ref memorial) = self.memorial_subtitle {
+                line.push('\n');
+                line.push_str(memorial);
+            }
+            Some(line)
         };
         let pre_depth_text = if self.won {
             Some("The House's hold is broken — for now.".to_string())
         } else {
             defeat_loss_line
         };
-        let subtitle = if self.won || pre_depth_text.is_some() {
+        let subtitle = if self.won {
             String::new()
+        } else if points_short == 1 {
+            "1 point short".to_string()
         } else {
-            format!(
-                "{} / {}",
-                format_score(self.final_score),
-                format_score(self.target_score as u64)
-            )
+            format!("{} points short", format_score(points_short))
         };
         let points_earned = if self.won {
             LEVEL_UP_POINTS_FOR_WIN
@@ -231,7 +236,7 @@ impl RunSummaryScene {
             headline: if self.won {
                 "The Moon's light welcomes you into the cool night.".to_string()
             } else {
-                "The House embraces you, wholly and eternally.".to_string()
+                "Loser!".to_string()
             },
             subtitle,
             pre_depth_text,

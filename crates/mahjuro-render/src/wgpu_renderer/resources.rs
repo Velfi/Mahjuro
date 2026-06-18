@@ -139,7 +139,7 @@ pub(super) fn relic_material_params(
     }
 }
 
-pub(super) fn upload_rgba_texture(
+pub(crate) fn upload_rgba_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     label: &str,
@@ -405,7 +405,7 @@ pub(super) fn flat_relief_height(
 /// Same as `upload_rgba_texture` but allocates the texture in **linear**
 /// (non-sRGB) format. Used for data textures like heightmaps where the
 /// stored byte value is a raw scalar, not a perceptual color.
-pub(super) fn upload_rgba_texture_linear(
+pub(crate) fn upload_rgba_texture_linear(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     label: &str,

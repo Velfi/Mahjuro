@@ -125,7 +125,7 @@ Other boss effects use **tile debuffs**, relic taxes, yen-per-play hooks, etc.�
 
 Talismans and zodiacs share one **consumable inventory** (default **2 slots**). **Brocade Pouch** adds **+1 slot** and changes how buff talismans apply to drawn tiles. Shop talismans are bought in the storeroom and used manually from the gameplay dish.
 
-**Memorial talismans (remnants)** — After a defeat, the House selects one **remnant** from your last run’s habits (blinds skipped, how you lost, discards, boss death, etc.). The next run grants exactly **one** memorial into a consumable slot (not bought in the shop; sellable for **4** yen). Using it applies an **in-round** benefit for the current blind only (extra plays/discards, hand stamp, yen on clear, next cash-in bonus, etc.).
+**Memorial talismans (remnants)** — After a defeat, your last run’s habits (blinds skipped, how you lost, discards, boss death, etc.) qualify you for one or more **remnants**. The House randomly awards one qualified memorial. The next run grants exactly **one** memorial into a consumable slot (not bought in the shop; sellable for **4** yen). Using it applies an **in-round** benefit for the current blind only (extra plays/discards, hand stamp, yen on clear, next cash-in bonus, etc.).
 
 ---
 
