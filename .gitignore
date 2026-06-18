@@ -20,3 +20,6 @@
 /assets/3d/*.jpeg
 /assets/3d/*.png
 /assets/3d/*.bin
+*.app
+*.pkg
+*.zip
