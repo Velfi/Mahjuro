@@ -314,10 +314,13 @@ impl WgpuRenderer {
                 self.draw_lit_mesh_shadow(pass, mesh, inst);
             }
             DrawKind::BossIcon => {
-                let mesh = match self.ordeal_icon_slot_texture.get(slot_i).copied().flatten() {
-                    Some(bk) => self.ordeal_icon_mesh_for(bk),
-                    None => &self.relic_box_mesh,
-                };
+                let bk = self
+                    .ordeal_icon_slot_texture
+                    .get(slot_i)
+                    .copied()
+                    .flatten()
+                    .expect("required ordeal icon slot texture missing");
+                let mesh = self.ordeal_icon_mesh_for(bk);
                 let Some(inst) = self.ordeal_icon_instances.get(slot_i) else {
                     return;
                 };

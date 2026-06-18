@@ -12,6 +12,7 @@
       "file": "mahjuro-pack-shared.zip",
       "load_tier": "eager",
       "path_prefixes": [
+        "textures/ordeal_icons/",
         "textures/tile_sets/",
         "audio/",
         "fonts/"

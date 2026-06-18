@@ -13,7 +13,7 @@ impl WgpuRenderer {
     ) -> &LitMeshGpu {
         self.ordeal_icon_meshes
             .get(&kind)
-            .unwrap_or(&self.relic_box_mesh)
+            .unwrap_or_else(|| panic!("required ordeal icon mesh missing for {kind:?}"))
     }
 
     pub(crate) fn talisman_mesh_for_kind_idx(&self, kind_idx: u8) -> Option<&LitMeshGpu> {
@@ -30,7 +30,7 @@ impl WgpuRenderer {
         }
     }
 
-    /// Lazy-upload one boss atlas cell into [`Self::ordeal_icon_meshes`] /
+    /// Lazy-upload one processed ordeal icon into [`Self::ordeal_icon_meshes`] /
     /// [`Self::ordeal_icon_textures`] (silhouette mesh via [`build_ordeal_icon_mesh_from_rgba`]).
     pub(crate) fn ensure_ordeal_icon_gpu(
         &mut self,
@@ -44,13 +44,12 @@ impl WgpuRenderer {
         {
             return;
         }
-        let Some((rgba, w, h)) = ordeal_icon_rgba(kind) else {
-            return;
-        };
+        let (rgba, w, h) = ordeal_icon_rgba(kind)
+            .unwrap_or_else(|e| panic!("required ordeal icon texture missing for {kind:?}: {e:#}"));
         let label = kind.atlas_slug();
-        if !self.ordeal_icon_meshes.contains_key(&kind)
-            && let Some(cpu) = build_ordeal_icon_mesh_from_rgba(&rgba, w, h, label)
-        {
+        if !self.ordeal_icon_meshes.contains_key(&kind) {
+            let cpu = build_ordeal_icon_mesh_from_rgba(&rgba, w, h, label)
+                .unwrap_or_else(|| panic!("required ordeal icon mesh empty for {kind:?}"));
             self.ordeal_icon_meshes.insert(
                 kind,
                 LitMeshGpu::new(&self.device, &cpu, &format!("boss-icon-mesh-{label}")),

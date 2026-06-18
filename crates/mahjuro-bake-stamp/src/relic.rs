@@ -2,7 +2,7 @@
 //!
 //! Inputs: `assets/data/relics.json`, every PNG under `assets/textures/relics/`,
 //! and the three runtime-side relic codec files (`relic_pipeline.rs`, `relic_bake.rs`,
-//! `relic_dish.rs`). Bumping `relic-rlc2-vN` invalidates every committed bake.
+//! `relic_dish.rs`). Codec source changes invalidate every committed bake.
 //!
 //! Per-relic sidecars (`<slug>.rlc.stamp`) let `mahjuro-bake-relics` skip unchanged relics
 //! when only a subset of inputs is stale.
@@ -20,8 +20,6 @@ pub struct Relic;
 
 /// Rebake every relic even when sidecars match (also `MAHJURO_FORCE_RELIC_BAKE=1`).
 pub const FORCE_RELIC_BAKE_ENV: &str = "MAHJURO_FORCE_RELIC_BAKE";
-
-const CODEC_VERSION: &[u8] = b"relic-rlc2-v2\n";
 
 const CODEC_PATHS: &[&str] = &[
     "crates/mahjuro-render/src/relic_pipeline.rs",
@@ -56,7 +54,6 @@ impl BakeKind for Relic {
 
     fn compute_inputs_hash(repo: &Path) -> String {
         let mut h = Fnv64::new();
-        h.write(CODEC_VERSION);
         for path in Self::stamp_input_paths(repo) {
             if path.is_file() {
                 hash_paths(&mut h, repo, std::slice::from_ref(&path));
@@ -85,10 +82,9 @@ impl BakeKind for Relic {
     }
 }
 
-/// FNV-1a digest of the relic RLC2 codec (version prefix + pipeline/bake/dish sources).
+/// FNV-1a digest of the relic RLC2 codec sources.
 pub fn compute_codec_hash(repo: &Path) -> String {
     let mut h = Fnv64::new();
-    h.write(CODEC_VERSION);
     let paths: Vec<PathBuf> = CODEC_PATHS.iter().map(|rel| repo.join(rel)).collect();
     hash_paths(&mut h, repo, &paths);
     h.finish_hex()

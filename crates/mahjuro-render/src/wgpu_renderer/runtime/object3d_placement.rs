@@ -791,19 +791,13 @@ impl WgpuRenderer {
                                 model,
                                 material.kind,
                             );
-                            let want_tex = self
-                                .ordeal_icon_textures
-                                .contains_key(kind)
-                                .then_some(*kind);
-                            if self.ordeal_icon_slot_texture[slot_i] != want_tex {
-                                let view = match want_tex {
-                                    Some(bk) => &self.ordeal_icon_textures[&bk].view,
-                                    None => &self.lit_mesh_white_view,
-                                };
-                                let relief_view = match want_tex {
-                                    Some(bk) => &self.ordeal_icon_textures[&bk].relief_view,
-                                    None => &self.lit_mesh_relief_default_view,
-                                };
+                            if self.ordeal_icon_slot_texture[slot_i] != Some(*kind) {
+                                let texture =
+                                    self.ordeal_icon_textures.get(kind).unwrap_or_else(|| {
+                                        panic!("required ordeal icon texture missing for {kind:?}")
+                                    });
+                                let view = &texture.view;
+                                let relief_view = &texture.relief_view;
                                 let inst = &mut self.ordeal_icon_instances[slot_i];
                                 inst.bind_group =
                                     self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -832,7 +826,7 @@ impl WgpuRenderer {
                                             },
                                         ],
                                     });
-                                self.ordeal_icon_slot_texture[slot_i] = want_tex;
+                                self.ordeal_icon_slot_texture[slot_i] = Some(*kind);
                             }
                             if g > 0.0 {
                                 let projected_rect = project_unit_cube_rect(model);
