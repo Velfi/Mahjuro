@@ -42,6 +42,7 @@ gltf.workspace = true
 image = { workspace = true, features = ["png", "jpeg", "bmp", "gif", "webp"] }
 log.workspace = true
 env_logger.workspace = true
+indicatif.workspace = true
 parking_lot.workspace = true
 pollster.workspace = true
 rand.workspace = true

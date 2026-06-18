@@ -2374,6 +2374,7 @@ dependencies = [
  "glam 0.30.10",
  "gltf",
  "image",
+ "indicatif",
  "intel_tex_2",
  "log",
  "lru",

@@ -67,6 +67,11 @@ for kind in "${kinds[@]}"; do
     esac
 done
 
+if [[ "$want_texture" -eq 1 ]]; then
+    echo "==> generic BTX1 texture bakes"
+    cargo run --release -p mahjuro-render --bin mahjuro-bake-textures --features texture_bc7_bake
+fi
+
 if [[ "$want_gi" -eq 1 || "$want_shadow" -eq 1 ]]; then
     bake_kinds=()
     [[ "$want_gi" -eq 1 ]] && bake_kinds+=(lightmap)
@@ -86,11 +91,6 @@ fi
 if [[ "$want_relic" -eq 1 ]]; then
     echo "==> relic RLC2 bakes"
     cargo run --release -p mahjuro-render --bin mahjuro-bake-relics --features relic_bc7_bake
-fi
-
-if [[ "$want_texture" -eq 1 ]]; then
-    echo "==> generic BTX1 texture bakes"
-    cargo run --release -p mahjuro-render --bin mahjuro-bake-textures --features texture_bc7_bake
 fi
 
 echo "==> verifying stamps (cargo build --release --locked)"

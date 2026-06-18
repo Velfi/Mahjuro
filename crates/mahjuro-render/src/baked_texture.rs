@@ -6,7 +6,6 @@
 use anyhow::Context;
 
 pub const MAGIC: &[u8; 4] = b"BTX1";
-pub const VERSION: u32 = 9;
 
 const FLAG_SRGB: u32 = 1;
 
@@ -29,7 +28,7 @@ impl BakedTextureColor {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BakedTexturePayload {
     pub base_width: u32,
     pub base_height: u32,
@@ -279,7 +278,6 @@ pub fn encode_btx(payload: &BakedTexturePayload) -> anyhow::Result<Vec<u8>> {
     let mut out = Vec::with_capacity(header_size + payload.bc7_bytes.len());
     let header = BtxHeader {
         magic: *MAGIC,
-        version: VERSION,
         flags: if payload.srgb { FLAG_SRGB } else { 0 },
         base_w: payload.base_width,
         base_h: payload.base_height,
@@ -298,10 +296,11 @@ pub fn decode_btx(bytes: &[u8]) -> anyhow::Result<BakedTexturePayload> {
         .map_err(|e| anyhow::anyhow!("BTX1 texture header: {e}"))?;
     anyhow::ensure!(header.magic == *MAGIC, "BTX1 texture: bad magic");
     anyhow::ensure!(
-        header.version == VERSION,
-        "BTX1 texture: unsupported version {}",
-        header.version
+        header.flags & !FLAG_SRGB == 0,
+        "BTX1 texture: unsupported flags {:#x}",
+        header.flags
     );
+    anyhow::ensure!(header.mip_count > 0, "BTX1 texture: missing mip levels");
 
     let bc7_end = header_size
         .checked_add(header.bc7_len as usize)
@@ -332,6 +331,7 @@ pub fn load_baked_texture(source_asset_path: &str) -> anyhow::Result<BakedTextur
     let data = mahjuro_assets::asset_path::get_shared(&path)
         .with_context(|| format!("missing baked texture at {path}"))?;
     decode_btx(data.as_ref())
+        .with_context(|| format!("{path}: decode baked texture for {source_asset_path}"))
 }
 
 pub fn load_rgba_for_cpu(source_asset_path: &str) -> anyhow::Result<(Vec<u8>, u32, u32)> {
@@ -431,7 +431,6 @@ pub fn upload_payload(
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct BtxHeader {
     magic: [u8; 4],
-    version: u32,
     flags: u32,
     base_w: u32,
     base_h: u32,
@@ -442,6 +441,25 @@ struct BtxHeader {
 #[cfg(all(test, feature = "texture_bc7_bake"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn btx_rejects_unknown_flags() {
+        let payload = BakedTexturePayload {
+            base_width: 4,
+            base_height: 4,
+            mip_count: 1,
+            bc7_bytes: vec![0x7a; 16],
+            srgb: true,
+        };
+        let mut bytes = encode_btx(&payload).expect("encode btx");
+        bytes[4..8].copy_from_slice(&6u32.to_le_bytes());
+
+        let err = decode_btx(&bytes).expect_err("unknown flags should fail");
+        assert!(
+            err.to_string().contains("unsupported flags"),
+            "unexpected error: {err:#}"
+        );
+    }
 
     fn normal_len(px: &[u8]) -> f32 {
         let n = decode_normal_u8(px);
@@ -493,7 +511,10 @@ mod tests {
         let (padded, w, h) = pad_rgba_to_bc7_blocks(&rgba, 2, 2);
 
         assert_eq!((w, h), (4, 4));
-        assert_eq!(&padded[((0 * w + 2) * 4) as usize..((0 * w + 3) * 4) as usize], &[5, 6, 7, 8]);
+        assert_eq!(
+            &padded[((0 * w + 2) * 4) as usize..((0 * w + 3) * 4) as usize],
+            &[5, 6, 7, 8]
+        );
         assert_eq!(
             &padded[((3 * w + 3) * 4) as usize..((3 * w + 4) * 4) as usize],
             &[13, 14, 15, 16]

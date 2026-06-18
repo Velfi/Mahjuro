@@ -6,9 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
+use mahjuro_bake_stamp::BakeKind;
 use mahjuro_bake_stamp::room_gi::RoomGi;
 use mahjuro_bake_stamp::room_shadow::RoomShadow;
-use mahjuro_bake_stamp::BakeKind;
 
 use crate::bake_cli::{BakeRoomCli, RoomBakeKind};
 use crate::room_bake::scene_for_room;
