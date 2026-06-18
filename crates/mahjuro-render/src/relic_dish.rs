@@ -2458,6 +2458,25 @@ mod silhouette_tests {
     }
 
     #[test]
+    fn every_ordeal_icon_builds_mesh_from_processed_art() {
+        for &kind in mahjuro_core::core::ordeal_kind::OrdealKind::ALL {
+            let (rgba, w, h) = crate::ordeal_icons::ordeal_icon_rgba(kind)
+                .unwrap_or_else(|e| panic!("{kind:?} processed icon should load: {e:#}"));
+            let mesh = build_ordeal_icon_mesh_from_rgba(&rgba, w, h, kind.atlas_slug())
+                .unwrap_or_else(|| panic!("{kind:?} processed icon should build a mesh"));
+            assert!(
+                !mesh.vertices.is_empty(),
+                "{kind:?} processed icon mesh must have vertices"
+            );
+            assert!(
+                mesh.indices.len() >= 6 * 3,
+                "{kind:?} processed icon mesh should have multiple triangles (got {})",
+                mesh.indices.len()
+            );
+        }
+    }
+
+    #[test]
     fn end_to_end_mesh_has_geometry() {
         // 16×16 mask with a solid 10×10 block centered. Build the full mesh
         // and check we actually got triangles — this catches winding bugs

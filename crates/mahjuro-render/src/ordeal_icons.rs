@@ -39,15 +39,14 @@ pub fn ordeal_icon_processed_asset_static(kind: OrdealKind) -> &'static str {
     }
 }
 
-pub fn ordeal_icon_rgba(kind: OrdealKind) -> Option<(Vec<u8>, u32, u32)> {
+pub fn ordeal_icon_rgba(kind: OrdealKind) -> anyhow::Result<(Vec<u8>, u32, u32)> {
     let slug = kind.atlas_slug();
     let path = ordeal_icon_processed_asset(slug);
-    if let Ok((rgba, w, h)) = crate::baked_texture::load_rgba_for_cpu(&path) {
-        if w > 0 && h > 0 {
-            return Some((rgba, w, h));
-        }
+    let (rgba, w, h) = crate::baked_texture::load_rgba_for_cpu(&path)?;
+    if w == 0 || h == 0 {
+        anyhow::bail!("ordeal icon {path} decoded with empty dimensions {w}x{h}");
     }
-    crate::temptation_atlas::extract_sprite_rgba(ORDEAL_ICON_ATLAS_PNG, slug)
+    Ok((rgba, w, h))
 }
 
 /// Icon source for 2D HUD quads (pick-chamber, etc.).

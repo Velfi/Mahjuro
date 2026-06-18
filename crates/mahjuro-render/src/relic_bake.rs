@@ -10,7 +10,6 @@ use crate::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::tile_glb::Vertex3dTex;
 
 pub const MAGIC: &[u8; 4] = b"RLC2";
-pub const VERSION: u32 = 2;
 pub const SLUG_BYTES: usize = 64;
 
 const FLAG_HAS_MESH: u32 = 1;
@@ -98,11 +97,6 @@ fn validate_baked_relic_bytes(expected_id: RelicId, bytes: &[u8]) -> anyhow::Res
     anyhow::ensure!(
         header.magic == *MAGIC,
         "relic bake: bad magic (expected RLC2)"
-    );
-    anyhow::ensure!(
-        header.version == VERSION,
-        "relic bake: unsupported version {}",
-        header.version
     );
     let slug = read_slug(&header.slug)?;
     let slug_id =
@@ -227,7 +221,6 @@ pub fn encode_baked_relic(msg: &DecodedRelicImage) -> anyhow::Result<Vec<u8>> {
 
     let header = RelicBakeHeader {
         magic: *MAGIC,
-        version: VERSION,
         slug: slug_buf,
         flags,
         albedo_base_w: albedo_base_w,
@@ -273,12 +266,6 @@ pub fn decode_baked_relic(bytes: &[u8]) -> anyhow::Result<DecodedRelicImage> {
         header.magic == *MAGIC,
         "relic bake: bad magic (expected RLC2)"
     );
-    anyhow::ensure!(
-        header.version == VERSION,
-        "relic bake: unsupported version {}",
-        header.version
-    );
-
     let slug = read_slug(&header.slug)?;
     let id =
         relic_id_from_slug(slug).with_context(|| format!("relic bake: unknown slug {slug:?}"))?;
@@ -369,7 +356,7 @@ fn decode_mesh_from_header(
         vertices,
         indices,
         default_material: MaterialParams {
-            kind: material_kind_from_u32(material_kind),
+            kind: material_kind_from_u32(material_kind)?,
             base_color,
             specular_strength,
             specular_power,
@@ -396,7 +383,6 @@ pub fn load_baked_relic_uncached(id: RelicId) -> anyhow::Result<DecodedRelicImag
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct RelicBakeHeader {
     magic: [u8; 4],
-    version: u32,
     slug: [u8; SLUG_BYTES],
     flags: u32,
     albedo_base_w: u32,
@@ -432,15 +418,8 @@ fn material_kind_to_u32(kind: MaterialKind) -> u32 {
     kind as u32
 }
 
-fn material_kind_from_u32(v: u32) -> MaterialKind {
-    // Map removed legacy discriminants from older RLC1 bakes.
-    let v = match v {
-        8 => MaterialKind::PackWrap as u32,               // Foil
-        11 | 12 | 13 | 14 => MaterialKind::Chitin as u32, // Jade / Moonstone / Pearl / GoldNugget
-        19 => MaterialKind::Plain as u32,                 // FeltGreen
-        other => other,
-    };
-    match v {
+fn material_kind_from_u32(v: u32) -> anyhow::Result<MaterialKind> {
+    let kind = match v {
         k if k == MaterialKind::Plain as u32 => MaterialKind::Plain,
         k if k == MaterialKind::Wax as u32 => MaterialKind::Wax,
         k if k == MaterialKind::Wick as u32 => MaterialKind::Wick,
@@ -460,6 +439,7 @@ fn material_kind_from_u32(v: u32) -> MaterialKind {
         k if k == MaterialKind::Unshaded as u32 => MaterialKind::Unshaded,
         k if k == MaterialKind::BronzeMirror as u32 => MaterialKind::BronzeMirror,
         k if k == MaterialKind::CatalogPaper as u32 => MaterialKind::CatalogPaper,
-        _ => MaterialKind::Plain,
-    }
+        other => anyhow::bail!("relic bake: unknown material kind {other}"),
+    };
+    Ok(kind)
 }

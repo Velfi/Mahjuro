@@ -180,6 +180,7 @@ def is_raw_runtime_texture(rel: str) -> bool:
     return (
         rel == "textures/main_menu_logo.png"
         or rel == "textures/temptations/atlas.png"
+        or rel.startswith("textures/ordeal_icons/")
         or (
             rel.startswith("textures/kenney_input-prompts/")
             and Path(rel).suffix.lower() == ".png"

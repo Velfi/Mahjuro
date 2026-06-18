@@ -16,6 +16,7 @@ use mahjuro_bake_stamp::{Fnv64, log_bake_timing, read_stamp_line, write_stamp_li
 
 const RULES_PATH: &str = "tools/bake_assets/pack_rules.json";
 const BAKE_SCRIPT_PATH: &str = "tools/bake_assets/bake_assets.py";
+const MODULE_PATH: &str = "build/asset_pack_bake.rs";
 const STAMP_NAME: &str = ".pack_inputs_stamp";
 
 const PACK_OUTPUTS: &[&str] = &[
@@ -31,6 +32,7 @@ pub fn emit_rerun_if_changed(_repo: &Path, profile_dir: &Path) {
     println!("cargo:rerun-if-changed=.gitignore");
     println!("cargo:rerun-if-changed={RULES_PATH}");
     println!("cargo:rerun-if-changed={BAKE_SCRIPT_PATH}");
+    println!("cargo:rerun-if-changed={MODULE_PATH}");
     println!("cargo:rerun-if-changed=assets");
     println!(
         "cargo:rerun-if-changed={}",
@@ -141,6 +143,7 @@ fn should_skip_pack_input(rel: &str) -> bool {
 fn is_raw_runtime_texture(rel: &str) -> bool {
     rel == "textures/main_menu_logo.png"
         || rel == "textures/temptations/atlas.png"
+        || rel.starts_with("textures/ordeal_icons/")
         || rel.starts_with("textures/kenney_input-prompts/")
 }
 
@@ -181,7 +184,7 @@ fn compute_inputs_hash(repo: &Path, release: bool) -> String {
     } else {
         b"profile:debug\n"
     });
-    for path in [RULES_PATH, BAKE_SCRIPT_PATH] {
+    for path in [RULES_PATH, BAKE_SCRIPT_PATH, MODULE_PATH] {
         let p = repo.join(path);
         h.write_path_key(&p);
         if p.is_file()
