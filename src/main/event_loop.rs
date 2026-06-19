@@ -169,7 +169,7 @@ impl App {
         };
         let (w0, h0) = shell.drawable_size();
         self.last_drawable_px = PhysicalSize::new(w0.max(1), h0.max(1));
-        #[cfg(debug_menu_enabled)]
+        #[cfg(feature = "debug-menu")]
         {
             self.debug.menu = Some(DebugMenuBar::new(&shell.window));
         }
@@ -636,7 +636,7 @@ impl App {
         repeat: bool,
     ) -> anyhow::Result<()> {
         self.modifiers = keymod;
-        #[cfg(debug_menu_enabled)]
+        #[cfg(feature = "debug-menu")]
         if let Some(action) =
             crate::debug_menu::debug_action_for_keyboard_shortcut(scancode, keymod, repeat)
         {

@@ -106,7 +106,7 @@ pub enum DebugVisResult {
 }
 
 impl DebugVisibilityOverlay {
-    #[cfg(debug_menu_enabled)]
+    #[cfg(feature = "debug-menu")]
     pub fn new(vis: DebugVisibility) -> Self {
         Self {
             cursor: 0,
@@ -478,7 +478,7 @@ pub enum TuningResult {
 }
 
 impl TuningOverlay {
-    #[cfg(debug_menu_enabled)]
+    #[cfg(feature = "debug-menu")]
     pub fn new(tuning: &CascadeTuning) -> Self {
         Self {
             cursor: 0,
@@ -916,7 +916,7 @@ pub struct SfxTestOverlay {
 }
 
 impl SfxTestOverlay {
-    #[cfg(debug_menu_enabled)]
+    #[cfg(feature = "debug-menu")]
     pub fn new() -> Self {
         Self {
             cursor: 0,
@@ -1092,7 +1092,7 @@ pub struct CameraDebugOverlay {
 }
 
 impl CameraDebugOverlay {
-    #[cfg(debug_menu_enabled)]
+    #[cfg(feature = "debug-menu")]
     pub fn new(cam: &CameraParams) -> Self {
         Self {
             cursor: 0,
@@ -1439,7 +1439,7 @@ pub enum SceneLookDebugResult {
 }
 
 impl SceneLookDebugOverlay {
-    #[cfg(debug_menu_enabled)]
+    #[cfg(feature = "debug-menu")]
     pub fn new(scene_key: &'static str, look: SceneLookTuning) -> Self {
         Self {
             cursor: 0,
@@ -2226,7 +2226,7 @@ pub struct HallwayDistortionDebugOverlay {
 }
 
 impl HallwayDistortionDebugOverlay {
-    #[cfg(debug_menu_enabled)]
+    #[cfg(feature = "debug-menu")]
     pub fn from_run(run_seed: u64, run_number: u32, wing: u32) -> Self {
         Self {
             cursor: 0,

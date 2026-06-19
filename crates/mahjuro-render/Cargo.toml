@@ -19,6 +19,7 @@ path = "src/bin/mahjuro-bake-textures.rs"
 [features]
 default = []
 clipboard = ["dep:arboard"]
+debug-menu = []
 texture_bc7_bake = ["dep:intel_tex_2"]
 relic_bc7_bake = ["texture_bc7_bake"]
 # SDL window/surface path for the interactive game; off for CPU-only bake binaries.

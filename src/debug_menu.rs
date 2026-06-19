@@ -1,5 +1,5 @@
-// When the debug menu is gated out (release builds without
-// `MAHJURO_DEBUG_MENU=1`), debug actions and keyboard routing are omitted.
+// When the debug menu feature is gated out, debug actions and keyboard routing
+// are omitted.
 
 //! Native OS menubar "Debug" menu using muda.
 //!
@@ -15,38 +15,38 @@
 //!   pull in. The menu is built (so `poll()` continues to work for any
 //!   programmatically-injected events) but is *not* attached to the window —
 //!   Linux users reach debug actions via the Debug menu (or Ctrl/Cmd+Shift+H /
-//!   Ctrl/Cmd+Shift+T when `debug_menu_enabled`).
+//!   Ctrl/Cmd+Shift+T when `debug-menu` feature).
 
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use muda::accelerator::{Accelerator, CMD_OR_CTRL, Code, Modifiers};
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use muda::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
-#[cfg(all(debug_menu_enabled, target_os = "windows"))]
+#[cfg(all(feature = "debug-menu", target_os = "windows"))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use sdl3::keyboard::{Mod, Scancode};
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use sdl3::video::Window;
 
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use crate::core::ordeal::OrdealKind;
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use crate::core::ordeal::{all_ordeals, final_ordeals};
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use crate::core::relic::RelicId;
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use crate::core::relic::all_relic_defs;
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use crate::core::talisman::TalismanKind;
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use crate::core::tile::Suit;
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use crate::core::tile::Tile;
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use crate::core::zodiac::ZodiacKind;
 
 /// Identifies which debug action was triggered.
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 #[derive(Clone, Debug)]
 pub enum DebugAction {
     SetLevel(u32),
@@ -152,14 +152,14 @@ pub enum DebugAction {
     FillRandomInventory,
 }
 
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 fn accel_cmd_shift(key: Code) -> Accelerator {
     Accelerator::new(Some(CMD_OR_CTRL | Modifiers::SHIFT), key)
 }
 
 /// SDL fallback when the native menubar does not receive the chord (Linux).
 /// macOS/Windows also register these on the matching [`MenuItem`] accelerators.
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 pub fn debug_action_for_keyboard_shortcut(
     scancode: Option<Scancode>,
     keymod: Mod,
@@ -181,7 +181,7 @@ pub fn debug_action_for_keyboard_shortcut(
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 pub struct DebugMenuBar {
     // Must be retained for the lifetime of the installed native menubar.
     // On macOS, AppKit can invoke menu item actions long after
@@ -191,7 +191,7 @@ pub struct DebugMenuBar {
     mappings: Vec<(MenuId, DebugAction)>,
 }
 
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 impl DebugMenuBar {
     /// Build and install the debug menu bar. Must be called on the main thread,
     /// after the window is created (Windows needs the HWND).
@@ -613,12 +613,12 @@ impl DebugMenuBar {
 }
 
 /// Per-OS dispatch for attaching the menu to the active app/window.
-#[cfg(all(debug_menu_enabled, target_os = "macos"))]
+#[cfg(all(feature = "debug-menu", target_os = "macos"))]
 fn install_menu(menu: &Menu, _window: &Window) {
     menu.init_for_nsapp();
 }
 
-#[cfg(all(debug_menu_enabled, target_os = "windows"))]
+#[cfg(all(feature = "debug-menu", target_os = "windows"))]
 fn install_menu(menu: &Menu, window: &Window) {
     let handle = match window.window_handle() {
         Ok(h) => h,
@@ -638,12 +638,12 @@ fn install_menu(menu: &Menu, window: &Window) {
 }
 
 #[cfg(all(
-    debug_menu_enabled,
+    feature = "debug-menu",
     not(any(target_os = "macos", target_os = "windows"))
 ))]
 fn install_menu(_menu: &Menu, _window: &Window) {
     // Linux/other: muda requires GTK on Linux. The menu object exists so
     // `poll()` stays valid, but it isn't attached to a window. Use the
     // in-app keyboard shortcuts instead (Ctrl/Cmd+Shift+H and +T when
-    // `debug_menu_enabled`).
+    // `debug-menu` feature).
 }

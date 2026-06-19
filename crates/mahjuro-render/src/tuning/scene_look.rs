@@ -119,6 +119,33 @@ pub struct SceneLookTuningSet {
 
 impl SceneLookTuningSet {
     pub fn load() -> Self {
+        #[cfg(feature = "debug-menu")]
+        {
+            Self::load_with_overrides()
+        }
+        #[cfg(not(feature = "debug-menu"))]
+        {
+            Self::load_code_values()
+        }
+    }
+
+    #[cfg(not(feature = "debug-menu"))]
+    fn load_code_values() -> Self {
+        let default_look = shipped_scene_look(FALLBACK_SCENE_KEY).unwrap_or_default();
+        let mut per_scene = FxHashMap::default();
+        for &key in KNOWN_SCENE_KEYS {
+            if let Some(look) = shipped_scene_look(key) {
+                per_scene.insert(key.to_string(), look);
+            }
+        }
+        Self {
+            default_look,
+            per_scene,
+        }
+    }
+
+    #[cfg(feature = "debug-menu")]
+    fn load_with_overrides() -> Self {
         let default_look = load_scene_look(FALLBACK_SCENE_KEY);
         let mut per_scene = FxHashMap::default();
         for &key in KNOWN_SCENE_KEYS {
@@ -270,6 +297,7 @@ pub fn storage_key(scene_key: &str) -> String {
     format!("SceneLookTuning:{scene_key}")
 }
 
+#[cfg(feature = "debug-menu")]
 fn load_scene_look(scene_key: &str) -> SceneLookTuning {
     let unified = storage_key(scene_key);
     if mahjuro_gfx_types::has_tuning_override(&unified) {
@@ -293,6 +321,7 @@ fn shipped_scene_look(scene_key: &str) -> Option<SceneLookTuning> {
     }
 }
 
+#[cfg(feature = "debug-menu")]
 fn load_tonemap_with_legacy(scene_key: &str) -> TonemapTuning {
     let key = crate::tuning::tonemap::storage_key(scene_key);
     if mahjuro_gfx_types::has_tuning_override(&key) {

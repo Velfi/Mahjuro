@@ -2,13 +2,13 @@
 
 use std::time::Instant;
 
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use crate::game::run::RunState;
 use crate::render::draw_cmd::CameraParams;
 use crate::render::hallway_glb::HallwayDistortionDebugSnapshot;
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use crate::render::main_menu_glb::{self, main_menu_env_height_scale};
-#[cfg(debug_menu_enabled)]
+#[cfg(feature = "debug-menu")]
 use crate::scenes::Scene;
 use crate::scenes::object3d_inspect::lerp_camera;
 
@@ -33,7 +33,7 @@ pub enum TrailerMode {
 
 impl TrailerMode {
     /// Start trailer mode when the active scene supports it.
-    #[cfg(debug_menu_enabled)]
+    #[cfg(feature = "debug-menu")]
     pub fn try_start(
         scene: &Scene,
         run: &RunState,
@@ -84,7 +84,7 @@ pub(crate) struct HallwayTrailer {
 }
 
 impl HallwayTrailer {
-    #[cfg(debug_menu_enabled)]
+    #[cfg(feature = "debug-menu")]
     fn start(base_run_seed: u64, run_number: u32) -> Self {
         Self {
             started_at: Instant::now(),
@@ -121,7 +121,7 @@ pub(crate) struct MainMenuTrailer {
 }
 
 impl MainMenuTrailer {
-    #[cfg(debug_menu_enabled)]
+    #[cfg(feature = "debug-menu")]
     fn start(window_w: f32, window_h: f32, env_h: f32) -> Option<Self> {
         if !main_menu_glb::main_menu_room_draw_ready() {
             return None;

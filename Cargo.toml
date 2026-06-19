@@ -82,6 +82,7 @@ default-run = "mahjuro"
 
 [features]
 default = ["game", "dist-steam"]
+debug-menu = ["mahjuro-render/debug-menu"]
 game = [
     "dep:rodio",
     "dep:muda",

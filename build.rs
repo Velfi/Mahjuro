@@ -60,8 +60,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    emit_debug_menu_cfg();
-
     // Windows: link steam_api64 normally; `steam::steamworks_dll_ready` loads the DLL
     // with LoadLibraryW before Client::init so we can skip Steam when it is missing.
     let target = env::var("TARGET").unwrap_or_default();
@@ -198,26 +196,6 @@ fn steamworks_sys_out_redist(mahjuro_out_dir: &Path, file: &str) -> Option<PathB
         }
     }
     None
-}
-
-/// Enable the `debug_menu_enabled` cfg whenever the debug menubar should be
-/// compiled in. Always on in debug builds; in release builds, opt in by
-/// setting `MAHJURO_DEBUG_MENU=1` — useful for collecting accurate perf
-/// metrics with the debug overlays available.
-fn emit_debug_menu_cfg() {
-    println!("cargo:rustc-check-cfg=cfg(debug_menu_enabled)");
-    println!("cargo:rerun-if-env-changed=MAHJURO_DEBUG_MENU");
-
-    let debug_profile = env::var("DEBUG")
-        .map(|v| v != "false" && v != "0")
-        .unwrap_or(false);
-    let env_opt_in = env::var("MAHJURO_DEBUG_MENU")
-        .map(|v| !v.is_empty() && v != "0")
-        .unwrap_or(false);
-
-    if debug_profile || env_opt_in {
-        println!("cargo:rustc-cfg=debug_menu_enabled");
-    }
 }
 
 /// Walk up from `OUT_DIR` past `build/<crate>-<hash>/out/` to the profile

@@ -34,7 +34,7 @@ mod main_cli;
 #[cfg(feature = "game")]
 #[path = "main/commands.rs"]
 mod main_commands;
-#[cfg(all(feature = "game", debug_menu_enabled))]
+#[cfg(all(feature = "game", feature = "debug-menu"))]
 #[path = "main/debug_actions.rs"]
 mod main_debug_actions;
 #[cfg(feature = "game")]
@@ -117,7 +117,7 @@ use crate::ui::modal::{Modal, ModalQueue};
 #[cfg(feature = "game")]
 use sdl3::keyboard::Mod;
 
-#[cfg(all(feature = "game", debug_menu_enabled))]
+#[cfg(all(feature = "game", feature = "debug-menu"))]
 use crate::debug_menu::DebugMenuBar;
 #[cfg(feature = "game")]
 use crate::render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
