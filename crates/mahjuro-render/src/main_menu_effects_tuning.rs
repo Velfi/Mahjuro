@@ -37,6 +37,18 @@ impl MainMenuEffectsTuning {
     }
 
     pub fn load() -> Self {
+        #[cfg(feature = "debug-menu")]
+        {
+            Self::load_with_overrides()
+        }
+        #[cfg(not(feature = "debug-menu"))]
+        {
+            Self::shipping_default()
+        }
+    }
+
+    #[cfg(feature = "debug-menu")]
+    fn load_with_overrides() -> Self {
         if mahjuro_gfx_types::has_tuning_override(&Self::storage_key()) {
             return mahjuro_gfx_types::load_tuning_override(&Self::storage_key());
         }
@@ -146,6 +158,7 @@ impl MainMenuEffectsTuning {
     }
 }
 
+#[cfg(feature = "debug-menu")]
 #[derive(serde::Deserialize)]
 struct LegacyRainTuningFile {
     speed_mul: f32,
@@ -154,6 +167,7 @@ struct LegacyRainTuningFile {
     moon_emission_color: [f32; 3],
 }
 
+#[cfg(feature = "debug-menu")]
 impl Default for LegacyRainTuningFile {
     fn default() -> Self {
         let rain = RainTuning::shipping_default();
@@ -165,6 +179,7 @@ impl Default for LegacyRainTuningFile {
     }
 }
 
+#[cfg(feature = "debug-menu")]
 fn default_moon_emission_color() -> [f32; 3] {
     [1.0, 1.0, 1.0]
 }

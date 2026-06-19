@@ -92,9 +92,15 @@ impl RainTuning {
     }
 
     pub fn load() -> Self {
-        if mahjuro_gfx_types::has_tuning_override(&Self::storage_key()) {
-            mahjuro_gfx_types::load_tuning_override(&Self::storage_key())
-        } else {
+        #[cfg(feature = "debug-menu")]
+        {
+            if mahjuro_gfx_types::has_tuning_override(&Self::storage_key()) {
+                return mahjuro_gfx_types::load_tuning_override(&Self::storage_key());
+            }
+            Self::shipping_default()
+        }
+        #[cfg(not(feature = "debug-menu"))]
+        {
             Self::shipping_default()
         }
     }

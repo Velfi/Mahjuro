@@ -137,6 +137,26 @@ impl TonemapTuningSet {
     /// back to [`TonemapTuning::default`] so a brand-new install has a
     /// neutral baseline before the overlay touches anything.
     pub fn load() -> Self {
+        #[cfg(feature = "debug-menu")]
+        {
+            Self::load_with_overrides()
+        }
+        #[cfg(not(feature = "debug-menu"))]
+        {
+            Self::load_code_values()
+        }
+    }
+
+    #[cfg(not(feature = "debug-menu"))]
+    fn load_code_values() -> Self {
+        Self {
+            default_tuning: TonemapTuning::shipping_default(),
+            per_scene: FxHashMap::default(),
+        }
+    }
+
+    #[cfg(feature = "debug-menu")]
+    fn load_with_overrides() -> Self {
         let default_tuning = mahjuro_gfx_types::load_tuning_override::<TonemapTuning>(
             &storage_key(FALLBACK_SCENE_KEY),
         );
