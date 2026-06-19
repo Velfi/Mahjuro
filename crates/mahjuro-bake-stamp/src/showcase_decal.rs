@@ -26,7 +26,6 @@ impl BakeKind for ShowcaseDecal {
 
     fn compute_inputs_hash(repo: &Path) -> String {
         let mut h = Fnv64::new();
-        h.write(b"showcase-decal-v2\n");
         for rel in rerun_if_changed_paths() {
             let path = repo.join(rel);
             if path.is_file() {
@@ -34,7 +33,7 @@ impl BakeKind for ShowcaseDecal {
             } else if path.is_dir() {
                 for file in git_tracked_files_under(repo, rel) {
                     let file_rel = repo_relative(repo, &file);
-                    if skip_decal_input(&file_rel) {
+                    if !include_decal_tileset_input(&file_rel) {
                         continue;
                     }
                     hash_file_at_rel(&mut h, &file_rel, &file);
@@ -67,20 +66,20 @@ pub fn rerun_if_changed_paths() -> &'static [&'static str] {
     ]
 }
 
-fn skip_decal_input(rel: &str) -> bool {
-    let base = Path::new(rel)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
-    base == ".decal_bake_stamp"
-        || base == "showcase_decal_atlas.png"
-        || base == ".DS_Store"
-        || base == "Thumbs.db"
-        || base.eq_ignore_ascii_case("desktop.ini")
+/// Bake inputs under `assets/textures/tile_sets`: shipped `atlas.png` + `atlas.toml` only.
+/// Authoring art (`source/`, `.af`, layer PNGs, credits, baked outputs) is excluded.
+fn include_decal_tileset_input(rel: &str) -> bool {
+    let norm = rel.replace('\\', "/");
+    if norm.contains("/source/") {
+        return false;
+    }
+    matches!(
+        Path::new(rel).file_name().and_then(|s| s.to_str()),
+        Some("atlas.png") | Some("atlas.toml")
+    )
 }
 
 /// Same rule as `mahjuro_assets::list_tilesets`: a shipped tileset has `atlas.png`.
-/// Source-only folders (e.g. work-in-progress art under `source/`) are ignored.
 fn list_tileset_names(repo: &Path) -> Vec<String> {
     let mut names: Vec<String> = git_tracked_files_under(repo, ShowcaseDecal::OUT_DIR)
         .into_iter()
@@ -95,4 +94,31 @@ fn list_tileset_names(repo: &Path) -> Vec<String> {
     names.sort();
     names.dedup();
     names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tileset_input_allowlist_excludes_source_and_outputs() {
+        assert!(include_decal_tileset_input(
+            "assets/textures/tile_sets/classic/atlas.png"
+        ));
+        assert!(include_decal_tileset_input(
+            "assets/textures/tile_sets/classic/atlas.toml"
+        ));
+        assert!(!include_decal_tileset_input(
+            "assets/textures/tile_sets/original/source/tileset.svg"
+        ));
+        assert!(!include_decal_tileset_input(
+            "assets/textures/tile_sets/antique/source/atlas.af"
+        ));
+        assert!(!include_decal_tileset_input(
+            "assets/textures/tile_sets/painted_from_scratch/CREDIT.txt"
+        ));
+        assert!(!include_decal_tileset_input(
+            "assets/textures/tile_sets/classic/showcase_decal_atlas.png"
+        ));
+    }
 }
