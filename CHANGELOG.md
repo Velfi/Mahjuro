@@ -3,10 +3,6 @@
 All notable changes to Mahjuro are listed here. Entries are grouped by
 release; the most recent release is on top.
 
-Fragment-based changelog authoring (see `.changes/README.md`) starts with
-the next release after v0.3.2. Earlier releases are summarized below from
-commit history.
-
 ## 0.8.1 — 2026-06-19
 
 ### Changed
