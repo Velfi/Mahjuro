@@ -28,7 +28,7 @@ impl Default for SceneLookTuning {
     }
 }
 
-/// Current shipped table-room look shared by gameplay and shop.
+/// Current shipped table-room look for shop.
 pub const TABLE_ROOM_SCENE_LOOK: SceneLookTuning = SceneLookTuning {
     tonemap: TonemapTuning {
         exposure: 0.7790626,
@@ -47,6 +47,27 @@ pub const TABLE_ROOM_SCENE_LOOK: SceneLookTuning = SceneLookTuning {
         lantern_light_color_mul: [0.9250752, 0.6045183, 0.45128056],
     },
     room_gltf_height_scale: SHOP_ENV_HEIGHT_SCALE,
+};
+
+/// Current shipped table-room look for gameplay.
+pub const GAMEPLAY_SCENE_LOOK: SceneLookTuning = SceneLookTuning {
+    tonemap: TonemapTuning {
+        exposure: 0.7790626,
+        vhs_chromatic: 0.00025,
+        vhs_scanline: 0.02579747,
+        vhs_grain: 0.0,
+        vhs_vignette: 0.4,
+    },
+    room: RoomEnvLightingTune {
+        gltf_light_intensity_scale: 1.0169914,
+        linear_exposure: 1.225086,
+        linear_exposure_base: 0.0013600638,
+        ambient_scale: 0.0,
+        gltf_emissive_scale: 0.3257179,
+        candle_light_color_mul: [1.973646, 1.7005756, 0.676652],
+        lantern_light_color_mul: [0.9250752, 0.6045183, 0.45128056],
+    },
+    room_gltf_height_scale: 1.0,
 };
 
 /// Main-menu scene look promoted from persisted scene-look tuning.
@@ -349,7 +370,8 @@ fn load_scene_look(scene_key: &str) -> SceneLookTuning {
 fn shipped_scene_look(scene_key: &str) -> Option<SceneLookTuning> {
     match scene_key {
         scene_keys::MAIN_MENU => Some(MAIN_MENU_SCENE_LOOK),
-        scene_keys::GAMEPLAY | scene_keys::SHOP => Some(TABLE_ROOM_SCENE_LOOK),
+        scene_keys::GAMEPLAY => Some(GAMEPLAY_SCENE_LOOK),
+        scene_keys::SHOP => Some(TABLE_ROOM_SCENE_LOOK),
         _ => None,
     }
 }
