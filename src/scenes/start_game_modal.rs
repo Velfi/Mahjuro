@@ -654,11 +654,8 @@ const TILE_DISPLAY_ROWS: [usize; 5] = [
 /// Key light height above the felt uses a fixed fraction of window height (screen-space cue).
 const TILE_PREVIEW_KEY_LIGHT_LIFT_FRAC_OF_H: f32 = 0.80;
 /// Lean the display tiles backward while leaving their faces angled up toward the room.
-const TILE_PREVIEW_BASE_ROTATION: [f32; 3] = [
-    -std::f32::consts::FRAC_PI_4,
-    0.0,
-    std::f32::consts::PI,
-];
+const TILE_PREVIEW_BASE_ROTATION: [f32; 3] =
+    [-std::f32::consts::FRAC_PI_4, 0.0, std::f32::consts::PI];
 
 #[derive(Clone, Copy)]
 struct TileDisplaySlot {
@@ -700,11 +697,6 @@ fn display_slots(grid_x: f32, grid_y: f32, grid_w: f32, grid_h: f32) -> Vec<Tile
                 _ => 1.10,
             };
         let row_w = step_x * (count_f - 1.0).max(0.0);
-        let fan_max = match row_idx {
-            4 => std::f32::consts::PI / 15.0,
-            3 => std::f32::consts::PI / 18.0,
-            _ => std::f32::consts::PI / 21.0,
-        };
 
         for col in 0..count {
             let t = if count > 1 {
@@ -720,11 +712,7 @@ fn display_slots(grid_x: f32, grid_y: f32, grid_w: f32, grid_h: f32) -> Vec<Tile
                 lift_z: row_lift_z,
                 size_px: row_size,
                 scale: 1.0,
-                rotation: [
-                    TILE_PREVIEW_BASE_ROTATION[0],
-                    TILE_PREVIEW_BASE_ROTATION[1],
-                    TILE_PREVIEW_BASE_ROTATION[2] + t * fan_max,
-                ],
+                rotation: TILE_PREVIEW_BASE_ROTATION,
                 brightness: 1.03,
             });
         }
@@ -956,8 +944,8 @@ impl SceneBehavior for TileSelectScene {
             tiles
                 .into_iter()
                 .zip(slots)
-                .map(|(tile, slot)| {
-                    crate::render::draw_cmd::ShowcaseTilePlacement {
+                .map(
+                    |(tile, slot)| crate::render::draw_cmd::ShowcaseTilePlacement {
                         tile,
                         center_pos: [slot.cx, slot.cy, slot.lift_z],
                         rotation: slot.rotation,
@@ -973,8 +961,8 @@ impl SceneBehavior for TileSelectScene {
                         outline_sel: None,
                         pick_id: None,
                         overlay_rect_group: None,
-                    }
-                })
+                    },
+                )
                 .collect()
         };
 

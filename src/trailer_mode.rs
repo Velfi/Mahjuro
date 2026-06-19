@@ -6,8 +6,7 @@ use std::time::Instant;
 use crate::game::run::RunState;
 use crate::render::draw_cmd::CameraParams;
 use crate::render::hallway_glb::HallwayDistortionDebugSnapshot;
-#[cfg(feature = "debug-menu")]
-use crate::render::main_menu_glb::{self, main_menu_env_height_scale};
+use crate::render::main_menu_glb;
 #[cfg(feature = "debug-menu")]
 use crate::scenes::Scene;
 use crate::scenes::object3d_inspect::lerp_camera;
@@ -47,7 +46,7 @@ impl TrailerMode {
                 run.run_number,
             ))),
             Scene::MainMenu(_) => {
-                let env_h = main_menu_env_height_scale(room_gltf_height_scale);
+                let env_h = main_menu_glb::main_menu_env_height_scale(room_gltf_height_scale);
                 MainMenuTrailer::start(window_w, window_h, env_h).map(Self::MainMenu)
             }
             _ => None,
@@ -121,8 +120,7 @@ pub(crate) struct MainMenuTrailer {
 }
 
 impl MainMenuTrailer {
-    #[cfg(feature = "debug-menu")]
-    fn start(window_w: f32, window_h: f32, env_h: f32) -> Option<Self> {
+    pub(crate) fn start(window_w: f32, window_h: f32, env_h: f32) -> Option<Self> {
         if !main_menu_glb::main_menu_room_draw_ready() {
             return None;
         }
@@ -137,7 +135,7 @@ impl MainMenuTrailer {
         })
     }
 
-    fn camera_at(&self, now: Instant, window_h: f32) -> Option<CameraParams> {
+    pub(crate) fn camera_at(&self, now: Instant, window_h: f32) -> Option<CameraParams> {
         let elapsed = now.saturating_duration_since(self.started_at).as_secs_f32();
         if elapsed >= MAIN_MENU_DURATION_SECS {
             return None;
@@ -147,7 +145,7 @@ impl MainMenuTrailer {
         Some(lerp_camera(&self.start_cam, &self.end_cam, t, window_h))
     }
 
-    fn finished_at(&self, now: Instant) -> bool {
+    pub(crate) fn finished_at(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.started_at).as_secs_f32() >= MAIN_MENU_DURATION_SECS
     }
 }
