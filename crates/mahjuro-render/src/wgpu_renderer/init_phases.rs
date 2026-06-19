@@ -265,6 +265,12 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     }
     #[cfg(target_os = "windows")]
     win32_tune_dx12_instance(&mut instance_desc);
+    #[cfg(all(target_os = "windows", feature = "windowed"))]
+    let dx12_default_backend =
+        std::env::var_os("WGPU_BACKEND").is_none() && instance_desc.backends == wgpu::Backends::DX12;
+    #[cfg(all(target_os = "windows", feature = "windowed"))]
+    let mut instance = wgpu::Instance::new(instance_desc);
+    #[cfg(not(all(target_os = "windows", feature = "windowed")))]
     let instance = wgpu::Instance::new(instance_desc);
     log::debug!("wgpu: instance created");
 
@@ -289,12 +295,44 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
                 .display_handle()
                 .map_err(|e| anyhow::anyhow!("display_handle: {e}"))?
                 .as_raw();
-            let surface = unsafe {
+            let mut surface_result = unsafe {
                 instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
                     raw_display_handle: Some(raw_display_handle),
                     raw_window_handle,
-                })?
+                })
             };
+            #[cfg(target_os = "windows")]
+            if dx12_default_backend && surface_result.is_err() {
+                // Some Windows stacks fail to create a DX12 swapchain surface even though a
+                // compatible Vulkan WSI path exists. Retry Vulkan when backend was not forced.
+                if let Err(dx12_err) = surface_result {
+                    log::warn!(
+                        "DX12 surface creation failed ({dx12_err:?}); retrying with Vulkan backend"
+                    );
+                    let mut vk_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+                    vk_desc.backends = wgpu::Backends::VULKAN;
+                    let vk_instance = wgpu::Instance::new(vk_desc);
+                    match unsafe {
+                        vk_instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                            raw_display_handle: Some(raw_display_handle),
+                            raw_window_handle,
+                        })
+                    } {
+                        Ok(surface) => {
+                            log::info!("wgpu: Vulkan surface fallback succeeded");
+                            instance = vk_instance;
+                            surface_result = Ok(surface);
+                        }
+                        Err(vk_err) => {
+                            return Err(anyhow::anyhow!(
+                                "surface creation failed for DX12 and Vulkan fallback \
+                                 (dx12={dx12_err:?}, vulkan={vk_err:?})"
+                            ));
+                        }
+                    }
+                }
+            }
+            let surface = surface_result?;
             log::debug!("wgpu: window surface created");
             (Some(surface), size, *hdr_enabled)
         }
