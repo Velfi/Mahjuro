@@ -7,6 +7,19 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.8.1 — 2026-06-19
+
+### Changed
+- Memorial remnants now randomly choose from every memorial your defeated run qualified for, instead of always awarding the first matching habit.
+- Losing a run now shows a "Loser!" popup with how many points short you were and the exact reason the run ended.
+- Victory screen stars now scatter more naturally instead of lining up in visible grid patterns.
+
+### Fixed
+- Decimation reveal labels now correctly call out your six chosen tiles and the House's four claimed tiles.
+- Large repeated-tile plays now choose the scoring meld split when Toitoi is available, instead of favoring bigger chunks that miss the yaku.
+- Playing six pairs no longer says "Cash In Time!" early; the structure prompt now waits until the seventh pair.
+- Structure meld previews now resize the existing structure strip too, so committed tiles and incoming preview tiles stay aligned when a play would make the structure shrink to fit.
+
 ## 0.8.0 — 2026-06-16
 
 ### Changed
