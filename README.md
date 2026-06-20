@@ -1,4 +1,4 @@
-# Mahjuro
+# Mahjuro - [Buy it Now on Steam and the Apple App Store](mahjuro.com)
 
 **A mahjong roguelite where you break the rules, build impossible hands, and chase absurd combos.**
 
