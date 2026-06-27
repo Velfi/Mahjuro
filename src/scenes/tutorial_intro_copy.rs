@@ -11,6 +11,7 @@ pub mod tiles {
     pub const HONOR_LINES: &[&str] = &[
         "Winds — East, South, West, North.",
         "Dragons — Red, Green, White.",
+        "Each honor is its own tile — match identical copies, not mixes.",
     ];
 
     pub const FLOWER_LINES: &[&str] = &["Flowers — wildcards when playing combinations of tiles."];

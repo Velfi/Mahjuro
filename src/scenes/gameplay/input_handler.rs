@@ -790,8 +790,12 @@ pub(super) fn process_focus_and_actions(
                     ctx.run.onboarding_notify_invalid_play();
                     ctx.anim
                         .shake(crate::render::animation::ENTITY_HAND_STRIP, 8.0, 200);
-                    if let Some(msg) = ctx.run.play_rejection_callout() {
-                        spawn_structure_status_callout(scene, ctx.layout, ctx.run, msg, false);
+                    if let Some(msg) = ctx
+                        .run
+                        .rejected_play_hint()
+                        .or_else(|| ctx.run.play_rejection_callout().map(str::to_string))
+                    {
+                        spawn_structure_status_callout(scene, ctx.layout, ctx.run, &msg, false);
                     }
                 } else {
                     scene.invalid_meld_flash_at = None;

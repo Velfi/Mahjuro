@@ -299,6 +299,9 @@ pub fn selection_rejection_hint(tiles: &[Tile], rules: &[RuleModifier]) -> Strin
     if tiles.len() == 1 {
         return "A meld needs at least two matching tiles, or three for a run.".to_string();
     }
+    if let Some(hint) = honor_meld_rejection_hint(tiles) {
+        return hint;
+    }
 
     let bad_ids = non_contributing_tile_ids(tiles, rules);
     if bad_ids.len() == tiles.len() {
@@ -316,6 +319,60 @@ pub fn selection_rejection_hint(tiles: &[Tile], rules: &[RuleModifier]) -> Strin
         return "Some selected tiles don't fit this meld — deselect the extras.".to_string();
     }
     "These tiles don't form a valid meld.".to_string()
+}
+
+fn honor_meld_rejection_hint(tiles: &[Tile]) -> Option<String> {
+    let regular: Vec<&Tile> = tiles.iter().filter(|t| !t.is_flower()).collect();
+    if regular.is_empty() {
+        return None;
+    }
+    let honor_count = regular
+        .iter()
+        .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
+        .count();
+    if honor_count == 0 {
+        return None;
+    }
+
+    let distinct_honor_faces: FxHashSet<(Suit, u8)> = regular
+        .iter()
+        .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
+        .map(|t| (t.suit, t.rank))
+        .collect();
+
+    if honor_count == regular.len() && distinct_honor_faces.len() > 1 {
+        if regular.len() == 2 {
+            return Some(
+                "These two honors aren't a pair — select two of the same tile.".to_string(),
+            );
+        }
+        let all_wind = regular.iter().all(|t| t.suit == Suit::Wind);
+        let all_dragon = regular.iter().all(|t| t.suit == Suit::Dragon);
+        return Some(if all_wind {
+            "Each wind matches only itself — East with East, not East with South. \
+             Honors cannot form sequences."
+                .to_string()
+        } else if all_dragon {
+            "Each dragon matches only itself — Red with Red, not Red with Green. \
+             Honors cannot form sequences."
+                .to_string()
+        } else {
+            "Winds and dragons must match exactly — honors cannot form sequences.".to_string()
+        });
+    }
+
+    if honor_count > 0
+        && regular.len() >= 3
+        && regular.iter().any(|t| t.is_number_tile())
+        && distinct_honor_faces.len() > 1
+    {
+        return Some(
+            "Honors cannot form sequences — pick three consecutive tiles in one numbered suit."
+                .to_string(),
+        );
+    }
+
+    None
 }
 
 fn same_numbered_suit(tiles: &[Tile]) -> bool {

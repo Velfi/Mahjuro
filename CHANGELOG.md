@@ -11,6 +11,7 @@ release; the most recent release is on top.
 - Victory screen stars now scatter more naturally instead of lining up in visible grid patterns.
 
 ### Fixed
+- Wall Weaver now grants Han from tile packs, joker extras, and other wall additions beyond the standard 140 tiles — the bonus counter was never being set, so only Strength in Numbers overflow counted.
 - Decimation reveal labels now correctly call out your six chosen tiles and the House's four claimed tiles.
 - Large repeated-tile plays now choose the scoring meld split when Toitoi is available, instead of favoring bigger chunks that miss the yaku.
 - Playing six pairs no longer says "Cash In Time!" early; the structure prompt now waits until the seventh pair.

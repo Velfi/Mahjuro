@@ -274,10 +274,16 @@ pub(super) fn push_melds_left_cards(
         push_guide_column_prose(frame, x, w, panels_top, body_font, text);
         panels_top += guide_column_prose_height(w, body_font, text) + h * 0.012;
     }
-    let sections: [(&str, &[&str]); 1] = [(
-        melds_intro_copy::SECTION_SEQUENCE_RULES,
-        melds_intro_copy::SEQUENCE_RULE_LINES,
-    )];
+    let sections: [(&str, &[&str]); 2] = [
+        (
+            melds_intro_copy::SECTION_HONOR_RULES,
+            melds_intro_copy::HONOR_RULE_LINES,
+        ),
+        (
+            melds_intro_copy::SECTION_SEQUENCE_RULES,
+            melds_intro_copy::SEQUENCE_RULE_LINES,
+        ),
+    ];
     push_guide_left_panels(
         frame,
         x,

@@ -801,6 +801,43 @@ fn selection_rejection_hint_bad_run() {
     );
 }
 
+#[test]
+fn selection_rejection_hint_mixed_winds() {
+    let tiles = vec![
+        t(Suit::Wind, 1, 0),
+        t(Suit::Wind, 2, 1),
+        t(Suit::Wind, 3, 2),
+    ];
+    assert_eq!(
+        selection_rejection_hint(&tiles, &[]),
+        "Each wind matches only itself — East with East, not East with South. \
+         Honors cannot form sequences."
+    );
+}
+
+#[test]
+fn selection_rejection_hint_mixed_dragons() {
+    let tiles = vec![
+        t(Suit::Dragon, 1, 0),
+        t(Suit::Dragon, 2, 1),
+        t(Suit::Dragon, 3, 2),
+    ];
+    assert_eq!(
+        selection_rejection_hint(&tiles, &[]),
+        "Each dragon matches only itself — Red with Red, not Red with Green. \
+         Honors cannot form sequences."
+    );
+}
+
+#[test]
+fn selection_rejection_hint_mismatched_honor_pair() {
+    let tiles = vec![t(Suit::Wind, 1, 0), t(Suit::Wind, 2, 1)];
+    assert_eq!(
+        selection_rejection_hint(&tiles, &[]),
+        "These two honors aren't a pair — select two of the same tile."
+    );
+}
+
 /// 1-1-1-2-3: triplet(1) leaves orphans, but pair(1,1) + sequence(1,2,3) works.
 #[test]
 fn tricky_shared_rank_ambiguity_11123() {
