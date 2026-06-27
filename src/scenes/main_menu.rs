@@ -24,6 +24,7 @@ use crate::render::wgpu_renderer::{
     GpuInstance, MAIN_MENU_PICK_MOON, PointLight, TextAlign, TextLabel,
 };
 use crate::sfx_id::SfxId;
+#[cfg(feature = "game")]
 use crate::trailer_mode::MainMenuTrailer;
 use crate::ui::controller_hints::{HintStyle, menu_footer_row, push_screen_footer_hint};
 use crate::ui::focus_nav;
@@ -354,7 +355,9 @@ pub struct MainMenuScene {
     moon_quip_message: String,
     /// Line indices not yet shown this hub visit (weighted pick, no repeat until exhausted).
     moon_quip_remaining: Vec<usize>,
+    #[cfg(feature = "game")]
     intro_trailer: Option<MainMenuTrailer>,
+    #[cfg(feature = "game")]
     intro_trailer_started: bool,
 }
 
@@ -380,7 +383,9 @@ impl MainMenuScene {
                 moon_quips::refill_moon_quip_bag(&mut bag);
                 bag
             },
+            #[cfg(feature = "game")]
             intro_trailer: None,
+            #[cfg(feature = "game")]
             intro_trailer_started: false,
         }
     }
@@ -536,25 +541,36 @@ impl SceneBehavior for MainMenuScene {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
-        if !self.intro_trailer_started && main_menu_glb::main_menu_room_draw_ready() {
-            self.intro_trailer_started = true;
-            if !ctx.headless {
-                self.intro_trailer = MainMenuTrailer::start(w, h, env_scale);
-            }
-        }
-        if self
-            .intro_trailer
-            .as_ref()
-            .is_some_and(|trailer| trailer.finished_at(now))
+        #[cfg(feature = "game")]
         {
-            self.intro_trailer = None;
-        }
-        if ctx.effect_layers.rain {
-            let cam = self
+            if !self.intro_trailer_started && main_menu_glb::main_menu_room_draw_ready() {
+                self.intro_trailer_started = true;
+                if !ctx.headless {
+                    self.intro_trailer = MainMenuTrailer::start(w, h, env_scale);
+                }
+            }
+            if self
                 .intro_trailer
                 .as_ref()
-                .and_then(|trailer| trailer.camera_at(now, h))
-                .unwrap_or_else(|| main_menu_glb::main_menu_camera_base(w, h, env_scale));
+                .is_some_and(|trailer| trailer.finished_at(now))
+            {
+                self.intro_trailer = None;
+            }
+        }
+        if ctx.effect_layers.rain {
+            let cam = {
+                #[cfg(feature = "game")]
+                {
+                    self.intro_trailer
+                        .as_ref()
+                        .and_then(|trailer| trailer.camera_at(now, h))
+                        .unwrap_or_else(|| main_menu_glb::main_menu_camera_base(w, h, env_scale))
+                }
+                #[cfg(not(feature = "game"))]
+                {
+                    main_menu_glb::main_menu_camera_base(w, h, env_scale)
+                }
+            };
             let tune = RoomEnvLightingTune::default();
             let bundle = build_main_menu_rain_lighting(w, h, env_scale, &tune);
             let lighting = main_menu_rain_light_sample_ctx(w, h, env_scale, &cam, &tune, &bundle);
@@ -570,6 +586,7 @@ impl SceneBehavior for MainMenuScene {
                 Some(&lighting),
             );
         }
+        #[cfg(feature = "game")]
         if self.intro_trailer.is_some() {
             return None;
         }
@@ -654,12 +671,21 @@ impl SceneBehavior for MainMenuScene {
         let w = layout.window_w;
         let h = layout.window_h;
         let scale = metrics::scene_scale(w, h);
-        let now = Instant::now();
-        let intro_trailer_camera = self
-            .intro_trailer
-            .as_ref()
-            .and_then(|trailer| trailer.camera_at(now, h));
-        let main_menu_trailer_camera = ctx.main_menu_trailer_camera.or(intro_trailer_camera);
+        let main_menu_trailer_camera = {
+            #[cfg(feature = "game")]
+            {
+                let now = Instant::now();
+                let intro_trailer_camera = self
+                    .intro_trailer
+                    .as_ref()
+                    .and_then(|trailer| trailer.camera_at(now, h));
+                ctx.main_menu_trailer_camera.or(intro_trailer_camera)
+            }
+            #[cfg(not(feature = "game"))]
+            {
+                None
+            }
+        };
 
         // App modals (level-up / relic unlock) append 3D hero staging after the
         // scene, but all `Text` cmds share one post-tonemap overlay pass. Hub
