@@ -747,6 +747,97 @@ fn kindling_adds_mult_from_prior_cashins_this_chamber() {
 }
 
 #[test]
+fn wall_weaver_adds_han_from_tiles_beyond_standard_wall() {
+    let hand = vec![
+        Tile::new(Suit::Manzu, 5, 0),
+        Tile::new(Suit::Manzu, 5, 1),
+        Tile::new(Suit::Manzu, 5, 2),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let r = relics(vec![RelicId::WallWeaver]);
+    let mut counters = std::collections::BTreeMap::new();
+    counters.insert(RelicId::WallWeaver, 8);
+    let ctx = ScoreContext {
+        relic: ScoreRelicBundle {
+            roster: &r,
+            counters,
+        },
+        tiles: ScoreTileBundle {
+            debuffs: &[],
+            hand_for_ghost: &[],
+        },
+        round: ScoreRoundBundle {
+            scored_last_turn: false,
+            plays_used: 0,
+            round_wind: None,
+            bonus_round_wind: None,
+            played_yaku_this_round: vec![],
+            is_final_play: false,
+        },
+        pattern: ScorePatternBundle {
+            dora_faces: vec![],
+            available_yaku: vec![],
+            yaku_levels: None,
+        },
+        economy: ScoreEconomyBundle {
+            yen: 0,
+            total_score: 0,
+        },
+        structure: None,
+    };
+    let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+    let bonus = (0.35_f64 * 8.0).min(8.0);
+    let han = SCORING_BASE_HAN + YakuKind::Tanyao.han_bonus() + bonus;
+    assert_eq!(breakdown.final_han, han);
+    assert!(breakdown.steps.iter().any(|s| s.source == "Wall Weaver"));
+}
+
+#[test]
+fn wall_weaver_stacks_overflow_with_pack_extras() {
+    let hand = vec![
+        Tile::new(Suit::Manzu, 5, 0),
+        Tile::new(Suit::Manzu, 5, 1),
+        Tile::new(Suit::Manzu, 5, 2),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let r = relics(vec![RelicId::WallWeaver, RelicId::StrengthInNumbers]);
+    let mut counters = std::collections::BTreeMap::new();
+    counters.insert(RelicId::WallWeaver, 8);
+    let ctx = ScoreContext {
+        relic: ScoreRelicBundle {
+            roster: &r,
+            counters,
+        },
+        tiles: ScoreTileBundle {
+            debuffs: &[],
+            hand_for_ghost: &[],
+        },
+        round: ScoreRoundBundle {
+            scored_last_turn: false,
+            plays_used: 0,
+            round_wind: None,
+            bonus_round_wind: None,
+            played_yaku_this_round: vec![],
+            is_final_play: false,
+        },
+        pattern: ScorePatternBundle {
+            dora_faces: vec![],
+            available_yaku: vec![],
+            yaku_levels: None,
+        },
+        economy: ScoreEconomyBundle {
+            yen: 0,
+            total_score: 0,
+        },
+        structure: None,
+    };
+    let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+    let bonus = (0.35 * (68 + 8) as f64).min(8.0);
+    let han = SCORING_BASE_HAN + YakuKind::Tanyao.han_bonus() + bonus;
+    assert_eq!(breakdown.final_han, han);
+}
+
+#[test]
 fn dora_fu_per_matching_tile() {
     let hand = vec![
         Tile::new(Suit::Manzu, 5, 0),

@@ -100,6 +100,7 @@ impl RunState {
         if self.relics.has(crate::core::relic::RelicId::DoraCrown) {
             self.wall.reveal_extra_dora_indicator();
         }
+        self.sync_wall_weaver_counter();
         self.hand.clear();
         let draw_count = ordeal::effective_hand_size(self);
         let lotus = self.relics.has(crate::core::relic::RelicId::LotusBloom);

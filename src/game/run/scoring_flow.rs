@@ -205,10 +205,11 @@ impl RunState {
         }) {
             self.honors_scored_this_round = true;
         }
+        self.sync_wall_weaver_counter();
         let ctx = ScoreContext {
             relic: ScoreRelicBundle {
                 roster: &self.relics,
-                counters: self.relic_counters.clone(),
+                counters: self.relic_counters_for_scoring(),
             },
             tiles: ScoreTileBundle {
                 debuffs: &scoring_tile_debuffs,
@@ -836,7 +837,7 @@ impl RunState {
         let ctx = ScoreContext {
             relic: ScoreRelicBundle {
                 roster: &self.relics,
-                counters: self.relic_counters.clone(),
+                counters: self.relic_counters_for_scoring(),
             },
             tiles: ScoreTileBundle {
                 debuffs: &scoring_tile_debuffs,
@@ -993,7 +994,7 @@ impl RunState {
             let ctx = ScoreContext {
                 relic: ScoreRelicBundle {
                     roster: &self.relics,
-                    counters: self.relic_counters.clone(),
+                    counters: self.relic_counters_for_scoring(),
                 },
                 tiles: ScoreTileBundle {
                     debuffs: &score_tile_debuffs,

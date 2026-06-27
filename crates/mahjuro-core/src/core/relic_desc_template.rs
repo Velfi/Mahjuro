@@ -249,7 +249,7 @@ fn replace_relic_token(key: &str, ctx: &RelicDescContext<'_>) -> Option<String> 
                     .relics
                     .is_some_and(|r| r.has(RelicId::StrengthInNumbers))
             {
-                68
+                crate::core::deck::OVERFLOW_RELIC_EXTRA_TILES as i32
             } else {
                 0
             };

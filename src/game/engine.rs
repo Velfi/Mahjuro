@@ -538,6 +538,15 @@ impl<'a> GameEngine<'a> {
                 Consumable::Talisman(_) | Consumable::Memorial(_) => owned_talismans.push(owned),
             }
         }
+        let mut relic_counters = run.relic_counters.clone();
+        if run.relics.has(crate::core::relic::RelicId::WallWeaver) {
+            let preview = crate::game::wall_ledger::shop_wall_hud_count(run);
+            let extra = crate::core::deck::wall_weaver_extra_beyond_standard(
+                preview,
+                run.relics.has(crate::core::relic::RelicId::StrengthInNumbers),
+            );
+            RunState::write_wall_weaver_counter(&mut relic_counters, extra);
+        }
         ShopReadModel {
             yen: run.yen,
             display_yen: run.yen.max(0) as u32,
@@ -548,7 +557,7 @@ impl<'a> GameEngine<'a> {
             available_relics: run.available_relics.clone(),
             owned_zodiacs,
             owned_talismans,
-            relic_counters: run.relic_counters.clone(),
+            relic_counters,
             total_score_earned: run.total_score_earned,
             wing: run.wing,
             next_chamber_target: run.chamber_score_target(run.upcoming_chamber),

@@ -475,7 +475,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
 
     if has(RelicId::WallWeaver) {
         let overflow_extras = if eff.has(ctx.relic.roster, RelicId::StrengthInNumbers) {
-            68
+            crate::core::deck::OVERFLOW_RELIC_EXTRA_TILES as i32
         } else {
             0
         };

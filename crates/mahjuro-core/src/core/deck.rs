@@ -101,6 +101,25 @@ pub fn build_overflow_extras() -> Vec<Tile> {
     tiles
 }
 
+/// Standard round wall size before overflow, packs, joker extras, or transforms.
+pub const STANDARD_WALL_TILE_COUNT: usize = 140;
+
+/// Extra tiles injected when [`crate::core::relic::RelicId::StrengthInNumbers`] is held
+/// (34 faces × 2 copies; flowers excluded).
+pub const OVERFLOW_RELIC_EXTRA_TILES: usize = 68;
+
+/// Tiles beyond the standard 140 that are not from Strength in Numbers — packs,
+/// joker extras, transforms, etc. Strength in Numbers is applied separately at score time.
+pub fn wall_weaver_extra_beyond_standard(wall_tile_count: usize, has_overflow_relic: bool) -> i32 {
+    let non_standard = wall_tile_count.saturating_sub(STANDARD_WALL_TILE_COUNT);
+    let overflow = if has_overflow_relic {
+        OVERFLOW_RELIC_EXTRA_TILES
+    } else {
+        0
+    };
+    non_standard.saturating_sub(overflow) as i32
+}
+
 pub fn shuffle_wall(wall: &mut [Tile]) {
     wall.shuffle(&mut rng());
 }
@@ -426,6 +445,14 @@ mod tests {
     fn wall_count() {
         let w = build_wall();
         assert_eq!(w.len(), 140); // 136 standard + 4 flowers
+    }
+
+    #[test]
+    fn wall_weaver_extra_splits_overflow_from_other_extras() {
+        assert_eq!(wall_weaver_extra_beyond_standard(140, false), 0);
+        assert_eq!(wall_weaver_extra_beyond_standard(148, false), 8);
+        assert_eq!(wall_weaver_extra_beyond_standard(208, true), 0);
+        assert_eq!(wall_weaver_extra_beyond_standard(216, true), 8);
     }
 
     #[test]

@@ -144,6 +144,7 @@ impl RunState {
             overflow,
             &self.joker_extra_faces,
         );
+        self.sync_wall_weaver_counter();
         self.hand.clear();
         let draw_count = crate::core::ordeal::effective_hand_size(self);
         for _ in 0..draw_count {

@@ -474,6 +474,43 @@ impl RunState {
             || self.i_got_a_guy_restock_charges() > 0
     }
 
+    /// Keep [`RelicId::WallWeaver`] counter aligned with the live round wall.
+    pub(crate) fn sync_wall_weaver_counter(&mut self) {
+        if !self.relics.has(RelicId::WallWeaver) {
+            self.relic_counters.remove(&RelicId::WallWeaver);
+            return;
+        }
+        let extra = crate::core::deck::wall_weaver_extra_beyond_standard(
+            self.wall.all_tiles().len(),
+            self.relics.has(RelicId::StrengthInNumbers),
+        );
+        Self::write_wall_weaver_counter(&mut self.relic_counters, extra);
+    }
+
+    /// Relic counters for scoring, with Wall Weaver derived from the live wall size.
+    pub(crate) fn relic_counters_for_scoring(&self) -> std::collections::BTreeMap<RelicId, i32> {
+        let mut counters = self.relic_counters.clone();
+        if self.relics.has(RelicId::WallWeaver) {
+            let extra = crate::core::deck::wall_weaver_extra_beyond_standard(
+                self.wall.all_tiles().len(),
+                self.relics.has(RelicId::StrengthInNumbers),
+            );
+            Self::write_wall_weaver_counter(&mut counters, extra);
+        }
+        counters
+    }
+
+    pub(crate) fn write_wall_weaver_counter(
+        counters: &mut std::collections::BTreeMap<RelicId, i32>,
+        extra: i32,
+    ) {
+        if extra > 0 {
+            counters.insert(RelicId::WallWeaver, extra);
+        } else {
+            counters.remove(&RelicId::WallWeaver);
+        }
+    }
+
     pub fn hand(&self) -> &[Tile] {
         &self.hand
     }
