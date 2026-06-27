@@ -82,6 +82,11 @@ pub(crate) fn validate_screenshot_cli(
     if s.page.is_some() && !screenshot_scene_accepts_page(&s.scene) {
         anyhow::bail!("--page is only valid with --scene guide or tutorial");
     }
+    if let Some(phase) = s.main_menu_moon_phase {
+        if !(0.0..=1.0).contains(&phase) {
+            anyhow::bail!("--main-menu-moon-phase must be in 0.0..=1.0; got {phase}");
+        }
+    }
     Ok(())
 }
 

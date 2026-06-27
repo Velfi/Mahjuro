@@ -24,6 +24,12 @@ pub struct ScreenshotCli {
     /// Hide 2D UI chrome and text, matching the in-game Debug → Overlays → Hide 2D UI toggle.
     #[arg(long, action = ArgAction::SetTrue)]
     pub hide_ui: bool,
+    /// Override the main-menu pride rainbow moon/star tint for this capture.
+    #[arg(long)]
+    pub main_menu_pride_rainbow: Option<bool>,
+    /// Force the main-menu moon synodic phase for this capture (`0.5` is full moon).
+    #[arg(long)]
+    pub main_menu_moon_phase: Option<f32>,
     /// Ordeal slug for runs where gameplay ordeals matter (`gameplay`, `hallway`, …).
     #[arg(long, alias = "boss")]
     pub ordeal: Option<String>,

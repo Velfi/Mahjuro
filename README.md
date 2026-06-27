@@ -76,6 +76,7 @@ assets/       Models, textures, fonts, audio, scene art
 | `PROGRESSION.md` | Unlock trees and meta-progression |
 | `BOT.md` | Headless AI player guide and tuning |
 | `docs/agents/scoring.md` | Play / cash-in loop and score math |
-| `docs/agents/launch-options.md` | CLI flags and `MAHJURO_*` env vars |
+| `docs/ENV.md` | `MAHJURO_*` and related environment variables |
+| `docs/agents/launch-options.md` | CLI flags and subcommands |
 | `docs/agents/windows-build.md` | Windows build, DXC redist, DX12 vs Vulkan |
 | `docs/steam-uploads.md` | Publishing builds to Steam |

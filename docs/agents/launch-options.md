@@ -1,6 +1,6 @@
 # Launch options
 
-Canonical reference for `mahjuro` CLI flags and `MAHJURO_*` environment variables. For offline bakes and screenshots, see [room shadows & baking](room-shadows-and-baking.md).
+CLI flags and subcommands for `mahjuro` and headless binaries. **Environment variables:** [ENV.md](../ENV.md). For offline bakes and screenshots, see [room shadows & baking](room-shadows-and-baking.md).
 
 Live help: `mahjuro --help`, `mahjuro bot --help`, `mahjuro-bake --help`, `mahjuro-screenshot --help`.
 
@@ -38,10 +38,13 @@ Headless tools (`mahjuro-bake`, `mahjuro-screenshot`) and bot/sweep always skip 
 | `MAHJURO_SKIP_VULKAN_WSI_PROBE` | Force Vulkan without parent WSI smoke test. |
 | `MAHJURO_VULKAN_WIN_SURFACE_COPY` | Opt-in Windows Vulkan swapchain `COPY_SRC` (screenshots). |
 | `MAHJURO_LIT_MESH_PROFILE` | Headless/dev only: comma-separated A/B toggles for `lit_mesh.wgsl` cost isolation (`no_per_light_shadow`, `no_combined_shadow`, `no_shadow`, `no_pcf`, `no_spec`, `one_light`, `diffuse_only`). See [lit mesh shader](lit-mesh-shader.md). |
+| `MAHJURO_SHADOW_PROBE` | Runtime punctual-shadow diagnostics (`1` = on). |
 
-`MAHJURO_DEBUG_MENU=1` at **compile** time enables the native debug menubar in release builds (always on in debug profile). See `build.rs`.
+Native debug menubar: Cargo feature `debug-menu` (always on in debug profile).
 
 ## Build-time environment
+
+Full list: [ENV.md](../ENV.md#build-time-cargo-build).
 
 | Variable | When set |
 | --- | --- |
@@ -52,7 +55,7 @@ Headless tools (`mahjuro-bake`, `mahjuro-screenshot`) and bot/sweep always skip 
 | `MAHJURO_SKIP_ROOM_SHADOW_BAKE` | Skip only room shadow stamp check. |
 | `MAHJURO_SKIP_SHOWCASE_DECAL_BAKE` | Skip only showcase decal atlas stamp check. |
 | `MAHJURO_SKIP_RELIC_BAKE` | Skip only relic RLC2 stamp check. |
-| `MAHJURO_DEBUG_MENU` | Compile release with debug menubar (`build.rs`). |
+| `MAHJURO_SKIP_TEXTURE_BAKE` | Skip only static texture bake stamp check. |
 | `MAHJURO_DXC_REDIST` | Directory containing `dxcompiler.dll` + `dxil.dll` for `build.rs` to copy on Windows (see [windows-build.md](windows-build.md)). |
 
 Stale committed bakes are not auto-rebaked by `build.rs`; it panics with the exact `scripts/rebake-offline.sh <kind>` command to run.

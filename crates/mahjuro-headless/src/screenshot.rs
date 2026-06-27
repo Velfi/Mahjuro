@@ -43,6 +43,16 @@ pub fn run(cli: ScreenshotCli) -> anyhow::Result<()> {
         screenshot_progress,
     )?;
     app.hide_ui = cli.hide_ui;
+    if let Some(enabled) = cli.main_menu_pride_rainbow {
+        app.renderer.main_menu_pride_rainbow_debug = enabled;
+    }
+    if let Some(phase) = cli.main_menu_moon_phase {
+        app.renderer.main_menu_moon_phase_debug =
+            mahjuro::render::main_menu_moon_tuning::MainMenuMoonPhaseDebug {
+                use_live_calendar: false,
+                forced_phase: phase,
+            };
+    }
 
     if (cli.shop_focus.is_some() && matches!(cli.scene.as_str(), "shop"))
         || (cli.item_inspect && collection_screenshot_tab_for_overlay(&cli.scene))
